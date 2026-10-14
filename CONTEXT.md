@@ -80,6 +80,7 @@ backend/
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
+docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md, AA-683.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
@@ -236,8 +237,10 @@ project `aa-booking-admin` exists since S236, root `frontend/`).
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.
-- Every route of UI spec §3 exists. Wave 1 pages read the real API; wave 2/3 pages render their layout frame with
-  "Coming in wave N". `SHIPPED_WAVE` in `frontend/ui/nav.tsx` decides which nav items show.
+- Every route of UI spec §3 exists. Wave 1 pages and `/audit-log` (S237, over `GET /booking/audit-logs`) read the
+  real API; the other wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
+  `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
+  time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
   API). Public: `NEXT_PUBLIC_CIS_ADMIN_URL`, `NEXT_PUBLIC_GOOGLE_SIGNIN_URL` (unset = no Google button, AA-703).
 

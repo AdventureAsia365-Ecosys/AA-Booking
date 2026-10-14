@@ -202,7 +202,17 @@ export const api = {
   reference: {
     settings: () => bkGet<SettingsResponse>("settings"),
     countries: () => bkGet<{ items: Country[] }>("countries"),
-    auditLogs: (q: { actor?: string; entity_type?: string; entity_id?: string; limit?: number; before?: string } = {}) =>
-      bkGet<CursorPage<AuditLogItem>>("audit-logs", q),
+    /** GET /booking/audit-logs (admin): newest first, keyset pages; `from` / `to` are ISO dates, `to` inclusive. */
+    auditLogs: (
+      q: {
+        actor?: string;
+        entity_type?: string;
+        entity_id?: string;
+        from?: string;
+        to?: string;
+        limit?: number;
+        before?: string;
+      } = {},
+    ) => bkGet<CursorPage<AuditLogItem>>("audit-logs", q),
   },
 };

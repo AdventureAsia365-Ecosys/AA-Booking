@@ -42,6 +42,7 @@ export * from "./booking/Code";
 export * from "./booking/NotificationPopover";
 export * from "./booking/notifications";
 export * from "./booking/NotificationItem";
+export * from "./booking/audit";
 
 // Kit loading placeholders under the spec names (UI spec §5 "Skeleton").
 export { SkeletonBar as Skeleton } from "./primitives";
