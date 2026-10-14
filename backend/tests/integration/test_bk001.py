@@ -12,11 +12,13 @@ import pytest
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.integration.conftest import apply_migrations
+from tests.integration.conftest import MIGRATIONS, apply_migrations
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-BOOKING_TABLES = {"customers", "customer_otps", "customer_sessions", "media_files", "audit_logs", "inbox_events"}
+BK001_TABLES = {"customers", "customer_otps", "customer_sessions", "media_files", "audit_logs", "inbox_events"}
+# Every bk-NNN in migrations/, in order (later migrations are applied too).
+VERSIONS = [f"bk-{p.name[:3]}" for p in MIGRATIONS]
 
 
 def _email() -> str:
@@ -27,8 +29,8 @@ async def test_registered_once_and_rerun_is_a_noop(migrated_admin_dsn: str) -> N
     conn = await asyncpg.connect(migrated_admin_dsn)
     try:
         await apply_migrations(conn)  # second full run must not fail
-        rows = await conn.fetch("SELECT version FROM shared.schema_versions WHERE version LIKE 'bk-%'")
-        assert [r["version"] for r in rows] == ["bk-001"]
+        rows = await conn.fetch("SELECT version FROM shared.schema_versions WHERE version LIKE 'bk-%' ORDER BY 1")
+        assert [r["version"] for r in rows] == VERSIONS
     finally:
         await conn.close()
 
@@ -37,7 +39,7 @@ async def test_tables_exist_and_are_owned_by_the_migration_role(migrated_admin_d
     conn = await asyncpg.connect(migrated_admin_dsn)
     try:
         rows = await conn.fetch("SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'booking'")
-        assert {r["tablename"] for r in rows} == BOOKING_TABLES
+        assert BK001_TABLES <= {r["tablename"] for r in rows}
         assert {r["tableowner"] for r in rows} == {"aa_cis_admin"}
         assert await conn.fetchval("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'booking'") is True  # set by test
     finally:
@@ -108,8 +110,8 @@ async def test_booking_role_is_least_privilege(migrated_booking_dsn: str, statem
 async def test_view_shows_only_booking_versions(migrated_booking_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_booking_dsn)
     try:
-        versions = [r["version"] for r in await conn.fetch("SELECT version FROM booking.v_schema_versions")]
-        assert versions == ["bk-001"]  # the stub CIS row '222' is not visible
+        versions = [r["version"] for r in await conn.fetch("SELECT version FROM booking.v_schema_versions ORDER BY 1")]
+        assert versions == VERSIONS  # the stub CIS row '222' is not visible
     finally:
         await conn.close()
 
@@ -120,10 +122,12 @@ async def test_customer_constraints(migrated_booking_dsn: str) -> None:
         with pytest.raises(asyncpg.CheckViolationError):
             await conn.execute("INSERT INTO booking.customers (name) VALUES ('no contact')")
 
+        # bk-002: email is unique among VERIFIED live customers (leads may repeat an email).
         email = _email()
-        first = await conn.fetchval("INSERT INTO booking.customers (email) VALUES ($1) RETURNING id", email)
+        insert_verified = "INSERT INTO booking.customers (email, verified) VALUES ($1, true) RETURNING id"
+        first = await conn.fetchval(insert_verified, email)
         with pytest.raises(asyncpg.UniqueViolationError):
-            await conn.execute("INSERT INTO booking.customers (email) VALUES ($1)", email.upper())
+            await conn.execute(insert_verified, email.upper())
 
         before = await conn.fetchval("SELECT updated_at FROM booking.customers WHERE id = $1", first)
         await conn.execute("UPDATE booking.customers SET deleted_at = now() WHERE id = $1", first)
@@ -131,7 +135,7 @@ async def test_customer_constraints(migrated_booking_dsn: str) -> None:
         assert after > before  # set_updated_at trigger
 
         # A soft-deleted customer does not block re-registration.
-        await conn.execute("INSERT INTO booking.customers (email) VALUES ($1)", email)
+        await conn.fetchval(insert_verified, email)
 
         with pytest.raises(asyncpg.CheckViolationError):
             await conn.execute(
@@ -165,4 +169,4 @@ async def test_ready_endpoint_as_booking_role(migrated_booking_dsn: str) -> None
         await db.close()
     assert live.status_code == 200
     assert ready.status_code == 200
-    assert ready.json() == {"status": "ok", "db": "ok", "schema_version": "bk-001"}
+    assert ready.json() == {"status": "ok", "db": "ok", "schema_version": VERSIONS[-1]}

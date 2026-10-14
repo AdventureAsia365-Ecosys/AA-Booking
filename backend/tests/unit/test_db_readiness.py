@@ -39,7 +39,7 @@ class FakePool:
         self.closed = True
 
 
-def _answers(version: Any = "bk-001", select_one: Any = 1) -> dict[str, Any]:
+def _answers(version: Any = REQUIRED_SCHEMA_VERSION, select_one: Any = 1) -> dict[str, Any]:
     return {"SELECT 1": select_one, "SELECT max(version) FROM booking.v_schema_versions": version}
 
 
@@ -62,10 +62,21 @@ def created(monkeypatch: pytest.MonkeyPatch, answers: dict[str, Any]) -> list[di
 
 
 @pytest.mark.asyncio
-async def test_ready_when_db_answers_and_bk001_registered(created: list[dict[str, Any]]) -> None:
+async def test_ready_when_db_answers_and_required_version_registered(created: list[dict[str, Any]]) -> None:
     result = await Database(SETTINGS).readiness()
     assert result.ok
-    assert result.body == {"status": "ok", "db": "ok", "schema_version": "bk-001"}
+    assert result.body == {"status": "ok", "db": "ok", "schema_version": REQUIRED_SCHEMA_VERSION}
+
+
+@pytest.mark.asyncio
+async def test_not_ready_when_only_an_older_version_is_registered(
+    created: list[dict[str, Any]], answers: dict[str, Any]
+) -> None:
+    answers.update(_answers(version="bk-001"))
+    result = await Database(SETTINGS).readiness()
+    assert not result.ok
+    assert result.body["schema_version"] == "bk-001"
+    assert result.body["required_schema_version"] == REQUIRED_SCHEMA_VERSION
 
 
 @pytest.mark.asyncio

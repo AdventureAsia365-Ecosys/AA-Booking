@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adventure.asia/contracts/inquiry.submitted.v1.json",
+  "title": "inquiry.submitted v1 (TripPlanner → AA-Booking)",
+  "description": "One row of tripplanner.outbox / tripplanner.v_inquiry_outbox (payload column). Written in the same transaction as the 'sent' trip event (ADR 0001 decision 6, AA-676). The consumer stores idempotency_key in its own inbox and processes each key once. Producer: AA-TripPlanner-Web backend/assembly/handoff.py.",
+  "type": "object",
+  "required": ["contract", "version", "idempotency_key", "source", "trip_id", "handoff_id", "submitted_at", "customer", "itinerary"],
+  "additionalProperties": false,
+  "properties": {
+    "contract": { "const": "inquiry.submitted" },
+    "version": { "const": 1 },
+    "idempotency_key": { "type": "string", "description": "<trip_id>:<handoff_id>. A re-send after a real edit is a new hand-off with a new key." },
+    "source": { "const": "tripplanner" },
+    "trip_id": { "type": "string", "format": "uuid" },
+    "handoff_id": { "type": "string", "description": "id of the 'sent' event in tripplanner.trip_events" },
+    "submitted_at": { "type": "string", "format": "date-time" },
+    "customer": {
+      "description": "null for a guest hand-off (registration not required on this deployment)",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["customer_id", "name", "phone", "email", "consent", "consent_at"],
+          "additionalProperties": false,
+          "properties": {
+            "customer_id": { "type": "string", "format": "uuid", "description": "tripplanner.customers.id (deduped by phone/email)" },
+            "name": { "type": "string" },
+            "phone": { "type": ["string", "null"] },
+            "email": { "type": ["string", "null"] },
+            "consent": { "type": "boolean", "description": "explicit contact consent from the registration form" },
+            "consent_at": { "type": ["string", "null"], "format": "date-time" }
+          }
+        }
+      ]
+    },
+    "itinerary": {
+      "type": "object",
+      "required": ["legs", "days", "custom_days"],
+      "additionalProperties": false,
+      "properties": {
+        "legs": {
+          "description": "Consecutive days taken from the same real AA tour (ADR 0001 decision 5). day_from/day_to are that tour's own day indexes.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["position", "source_tour_id", "day_from", "day_to"],
+            "additionalProperties": false,
+            "properties": {
+              "position": { "type": "integer", "minimum": 1 },
+              "source_tour_id": { "type": "string", "description": "CIS gold_aa_internal.published_tours.tour_id" },
+              "day_from": { "type": "integer" },
+              "day_to": { "type": "integer" }
+            }
+          }
+        },
+        "days": {
+          "description": "One entry per pinned component, in trip-day order (several components can share a day).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["day", "component_id", "name", "source_tour_id", "source_day_index", "destination_id", "lat", "lng"],
+            "additionalProperties": false,
+            "properties": {
+              "day": { "type": "integer", "minimum": 1 },
+              "component_id": { "type": "string" },
+              "name": { "type": ["string", "null"] },
+              "source_tour_id": { "type": ["string", "null"] },
+              "source_day_index": { "type": ["integer", "null"] },
+              "destination_id": { "type": ["string", "null"], "description": "CIS shared.destinations.id" },
+              "lat": { "type": ["number", "null"] },
+              "lng": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "custom_days": {
+          "description": "Days the traveller added on top of the AA legs (not part of any tour).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["day_id", "kind", "after_component_id", "note"],
+            "additionalProperties": false,
+            "properties": {
+              "day_id": { "type": "string" },
+              "kind": { "enum": ["extra_night", "free_day", "extend_end"] },
+              "after_component_id": { "type": ["string", "null"] },
+              "note": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

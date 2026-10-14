@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adventure.asia/contracts/inquiry.submitted.v1.1.json",
+  "title": "inquiry.submitted v1.1 (TripPlanner → AA-Booking)",
+  "description": "One row of tripplanner.outbox / tripplanner.v_inquiry_outbox (payload column). Written in the same transaction as the 'sent' trip event (ADR 0001 decision 6, AA-676). The consumer stores idempotency_key in its own inbox and processes each key once. Producer: AA-TripPlanner-Web backend/assembly/handoff.py. v1.1 (S235, 14/10/2026): additive over v1 — customer.verified added, customer.customer_id may be null (unverified contact snapshot, TripPlanner PR #69). Consumers must accept version 1 and 1.1. Target (ADR 0004 O6, Nghiệp 14/10): every hand-off carries a customer with name + email; null customer is deprecated.",
+  "type": "object",
+  "required": [
+    "contract",
+    "version",
+    "idempotency_key",
+    "source",
+    "trip_id",
+    "handoff_id",
+    "submitted_at",
+    "customer",
+    "itinerary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "inquiry.submitted"
+    },
+    "version": {
+      "enum": [
+        1,
+        1.1
+      ],
+      "description": "major.minor; 1.1 is additive over 1"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "<trip_id>:<handoff_id>. A re-send after a real edit is a new hand-off with a new key."
+    },
+    "source": {
+      "const": "tripplanner"
+    },
+    "trip_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "handoff_id": {
+      "type": "string",
+      "description": "id of the 'sent' event in tripplanner.trip_events"
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "customer": {
+      "description": "Who sent the inquiry. null = legacy guest hand-off (deprecated by O6: guests must give name + email). customer_id null = contact matched nobody verifiable or matched an existing customer without proof (TripPlanner never links on an unverified match); the fields then carry exactly what this request submitted.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer_id",
+            "name",
+            "phone",
+            "email",
+            "consent",
+            "consent_at",
+            "verified"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "customer_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid",
+              "description": "tripplanner.customers.id when this request created/claimed the customer; null for a contact snapshot"
+            },
+            "name": {
+              "type": "string"
+            },
+            "phone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "lower(trim()); required non-null by O6 once the TripPlanner guest form ships"
+            },
+            "consent": {
+              "type": "boolean",
+              "description": "explicit contact consent from the registration form"
+            },
+            "consent_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "verified": {
+              "type": "boolean",
+              "description": "true only when the contact was verified by OTP (AA-Booking owns OTP). Consumers must not merge an unverified customer into an existing booking.customers row automatically."
+            }
+          }
+        }
+      ]
+    },
+    "itinerary": {
+      "type": "object",
+      "required": [
+        "legs",
+        "days",
+        "custom_days"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "legs": {
+          "description": "Consecutive days taken from the same real AA tour (ADR 0001 decision 5). day_from/day_to are that tour's own day indexes.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "position",
+              "source_tour_id",
+              "day_from",
+              "day_to"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source_tour_id": {
+                "type": "string",
+                "description": "CIS gold_aa_internal.published_tours.tour_id"
+              },
+              "day_from": {
+                "type": "integer"
+              },
+              "day_to": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "days": {
+          "description": "One entry per pinned component, in trip-day order (several components can share a day).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "day",
+              "component_id",
+              "name",
+              "source_tour_id",
+              "source_day_index",
+              "destination_id",
+              "lat",
+              "lng"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "day": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "component_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_tour_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_day_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "destination_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "CIS shared.destinations.id"
+              },
+              "lat": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "lng": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "custom_days": {
+          "description": "Days the traveller added on top of the AA legs (not part of any tour).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "day_id",
+              "kind",
+              "after_component_id",
+              "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "day_id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "extra_night",
+                  "free_day",
+                  "extend_end"
+                ]
+              },
+              "after_component_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

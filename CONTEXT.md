@@ -3,8 +3,9 @@
 AA-Booking (AAA) is the booking back office of the Adventure Asia ecosystem: customers (OTP
 identity), trip cases opened from TripPlanner inquiries, proposals, suppliers, invoices and
 payments. It is built in-house from scratch (no vendor code was delivered). Today the repo holds
-only the **bootstrap health slice**: a FastAPI service with liveness/readiness endpoints, the 5-check
-CI, the Dev deploy workflow and migration `bk-001`.
+the **bootstrap health slice** (FastAPI service with liveness/readiness, the 5-check CI, the Dev deploy
+workflow, migration `bk-001`) and **slice 2 "inquiry intake"** (AA-681: migration `bk-002`, the
+`booking.job` worker, TripPlanner `inquiry.submitted` → lead customer + trip case + staff notification).
 
 > Read this file before designing or changing anything here (AA-Ecosys steering, "CONTEXT.md
 > first"). Change it in the same PR when a boundary, owner or the stack changes.
@@ -24,10 +25,10 @@ Design sources, in order:
 
 - **Owns** schema `booking.*` on the shared acc2 RDS (`aa-cis-dev-db`, PostgreSQL 15), migration key
   `bk-NNN`, and the **customer identity** (OTP) of the ecosystem (ADR 0001 decision 6).
-- **Consumes** (later, through owner grants on views): CIS catalog read model (`catalog.tour.*`,
-  AA-679), CIS golden records (`shared.destinations`, photo views), TripPlanner
-  `tripplanner.v_inquiry_outbox` (`inquiry.submitted` v1, contract in
-  `AA-Ecosys/docs/contracts/`).
+- **Consumes** through owner grants on views: TripPlanner `tripplanner.v_inquiry_outbox`
+  (`inquiry.submitted` v1 / v1.1, contract in `AA-Ecosys/docs/contracts/`, grant = TripPlanner `tp-009`) —
+  pattern outbox → pull job → `booking.inbox_events`. Later: CIS catalog read model (`catalog.tour.*`,
+  AA-679), CIS golden records (`shared.destinations`, photo views).
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -50,12 +51,15 @@ backend/
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
   app/db.py                lazy asyncpg pool + readiness probe (REQUIRED_SCHEMA_VERSION)
   app/settings.py          environment → Settings
+  app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
+  app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
+  app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
-docs/implementation-notes/ per-issue decisions (AA-678.md)
+docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md)
 .github/workflows/         ci.yml (5 required checks), deploy-dev.yml
 ```
 
@@ -74,13 +78,26 @@ owns code only ("App owns code, Infra owns resources"). The service starts with 
 scaling to 1 is an approved, billable step.
 
 Process environment (set by the task definition): `DATABASE_URL` (from the secret), `ENVIRONMENT`,
-`GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`).
+`GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
+(optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set).
+
+## Deferred work (`booking.job`, O3/O9)
+
+Booking owns its job table `booking.job` (same shape and semantics as CIS `shared.job`, ADR 0003), so
+Booking jobs never block the CIS deploy guard. Kinds are `bk_*`. On Dev the worker loop runs inside the
+API process as one lifespan background task (never in a request path), one job at a time; overlapping
+tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
+
+| Kind | What |
+|---|---|
+| `bk_inquiry_pull` | Recurring singleton (every ~60 s): reads `tripplanner.v_inquiry_outbox`, anti-joins `booking.inbox_events`, inserts new rows `ON CONFLICT DO NOTHING`, queues one process job each. `booking.inbox_cursor.safe_id` is only a scan bound, advanced behind a 600 s window (contract rule 4). |
+| `bk_inquiry_process` | Validates v1/v1.1; creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
 
 ## Health contract (ADR 0004 decision 9)
 
 - `GET /booking/health` → 200 `{"status":"ok","service":"aa-booking-api","git_sha":"<sha>"}`.
   No DB call. Used by the ALB target group, so a DB outage never trips the ECS circuit breaker.
-- `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-001"}` when the
+- `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-002"}` when the
   DB answers and the newest registered `bk-NNN` ≥ `REQUIRED_SCHEMA_VERSION`; otherwise 503 with
   `db` = `ok` | `error` | `not_configured`. Bodies never contain the DSN or error messages.
 
@@ -108,14 +125,23 @@ Schema + role + grants + default privileges; `customers`, `customer_otps`, `cust
 `media_files`, `audit_logs`, `inbox_events` (table only); `v_schema_versions` (Booking's rows of
 `shared.schema_versions`, for readiness). No enum types yet.
 
-Waiting for decisions: `staff_users` (O1 staff identity), `trip_cases*` + status enums (O6 guest
-inquiries, status vocabulary), `areas` / `country_profiles` (O7 content boundary, ISO mapping),
-catalog / `trip_plans` (AA-679), versions / operations / money (AA-681/682).
+### `bk-002` (AA-681 slice 2, inquiry intake)
+
+`booking.job` (+ singleton index for the recurring pull), `inbox_cursor`, `inbox_events.status`
+(`received|processed|parked|failed`), `contract_version`, `source_position`; customer lead columns
+(`verified`, `source`, `needs_merge_review`, `merge_candidate_id`, `external_ref`, consent) with
+email/phone unique among **verified** live customers only; `trip_cases` (ERD v2 first slice, no
+`trip_plan_id`, status `TEXT + CHECK` with ERD's 13 values), `trip_case_legs` (`source_tour_id TEXT`),
+`notifications` (staff queue, `recipient_id NULL` until O1).
+
+Waiting for decisions: `staff_users` (O1: staff use the CIS login), `trip_case_status_history` +
+transition trigger (status vocabulary), `trip_case_countries` / `areas` / `country_profiles` (O7, ISO
+mapping), catalog / `trip_plans` (AA-679), versions / operations / money (AA-681/682).
 
 ## Out of scope today
 
-Staff tables and staff endpoints, catalog sync, the inquiry intake consumer, any job (no
-`shared.job` use until the CIS deploy guard filters by kind — ADR 0004 decision 8), CIS/TripPlanner
+Staff tables and staff endpoints (no trip-case read endpoint until staff auth exists — O1), e-mail
+notifications, catalog sync, any use of `shared.job`, the `trip_case.status_changed` back-channel, CIS
 grant migrations, the frontend and its Vercel project, a custom domain.
 
 ## Working rules
@@ -126,3 +152,5 @@ grant migrations, the frontend and its Vercel project, a custom domain.
   `Closes`, never `[AA-xx]` in the subject).
 - Everything in Git is English. Done = merged + CI green + Dev rollout COMPLETED + live
   `/booking/health/ready` verified (`aa-ship`).
+- A new contract version: copy the root file byte-for-byte into `backend/app/contracts/`, pin its
+  SHA-256 in `tests/unit/test_inquiry_contract.py`, accept every minor of the major (contract rule 2).
