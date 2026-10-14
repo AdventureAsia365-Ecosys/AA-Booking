@@ -30,6 +30,7 @@ import {
   auditActionTone,
   auditChanges,
   auditEntityHref,
+  auditRecordLabel,
   auditEntityLabel,
   downloadCsv,
   toCsv,
@@ -66,7 +67,7 @@ export function AuditLogView() {
     retry: retryUnlessClientError,
   });
   const staff = useQuery({
-    queryKey: ["staff", "list", { active: undefined }],
+    queryKey: ["staff", "list"],
     queryFn: () => api.staff.list(),
     enabled: canRead,
     retry: retryUnlessClientError,
@@ -79,7 +80,8 @@ export function AuditLogView() {
     .map((s) => ({ value: s.cis_user_id, label: s.name ?? s.email ?? s.cis_user_id }))
     .sort((a, b) => a.label.localeCompare(b.label));
   // The label of the filtered record, from any loaded row of it (the API filters by id only).
-  const entityLabel = entityIdValid ? items.find((r) => r.entity_id === entityId)?.entity_label : undefined;
+  const entityRow = entityIdValid ? items.find((r) => r.entity_id === entityId) : undefined;
+  const entityLabel = entityRow ? auditRecordLabel(entityRow) : null;
 
   return (
     <PageFrame
@@ -186,7 +188,7 @@ function AuditRow({
   const [open, setOpen] = useState(false);
   const changes = auditChanges(row.before, row.after);
   const href = auditEntityHref(row);
-  const label = row.entity_label;
+  const label = auditRecordLabel(row);
   return (
     <li className="border-b border-line2 px-4 py-3 last:border-b-0 sm:px-5" data-testid="audit-row">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
@@ -265,18 +267,27 @@ function AuditRow({
   );
 }
 
+/** Spreadsheet formula guard (CSV injection): staff names, summaries and labels are free text, so a cell that
+ *  starts with = + - @ or a tab / CR is prefixed with an apostrophe before export. The kit csv.ts stays
+ *  byte-comparable with CIS, so the guard lives here. */
+function cell(value: unknown): string {
+  if (value == null) return "";
+  const s = String(value);
+  return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+}
+
 function exportCsv(rows: AuditLogItem[]) {
   const csv = toCsv(rows, [
     { header: "At", value: (r) => r.at },
-    { header: "Actor", value: (r) => actorText(r) },
-    { header: "Actor id", value: (r) => r.actor.id },
+    { header: "Actor", value: (r) => cell(actorText(r)) },
+    { header: "Actor id", value: (r) => cell(r.actor.id) },
     { header: "Action", value: (r) => r.action },
     { header: "Record type", value: (r) => r.entity_type },
-    { header: "Record", value: (r) => r.entity_label },
+    { header: "Record", value: (r) => cell(auditRecordLabel(r)) },
     { header: "Record id", value: (r) => r.entity_id },
-    { header: "Summary", value: (r) => r.summary },
-    { header: "Before", value: (r) => (r.before == null ? "" : JSON.stringify(r.before)) },
-    { header: "After", value: (r) => (r.after == null ? "" : JSON.stringify(r.after)) },
+    { header: "Summary", value: (r) => cell(r.summary) },
+    { header: "Before", value: (r) => (r.before == null ? "" : cell(JSON.stringify(r.before))) },
+    { header: "After", value: (r) => (r.after == null ? "" : cell(JSON.stringify(r.after))) },
   ]);
   downloadCsv(`booking-audit-log-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 }

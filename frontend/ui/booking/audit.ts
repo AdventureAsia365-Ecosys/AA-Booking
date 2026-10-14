@@ -33,11 +33,27 @@ export function auditActionLabel(action: string): string {
   return (action.split(".").pop() ?? action).replace(/_/g, " ");
 }
 
-/** The page of the row's entity, when the label or id is enough to build it; otherwise null. */
-export function auditEntityHref(row: Pick<AuditLogItem, "entity_type" | "entity_id" | "entity_label">): string | null {
-  const label = row.entity_label ?? "";
-  if (row.entity_type === "trip_case" && /^TC-\d+$/.test(label)) return `/cases/${encodeURIComponent(label)}`;
+type AuditRef = Pick<AuditLogItem, "action" | "entity_type" | "entity_id" | "entity_label" | "after">;
+
+/** The record's display label: the stored `entity_label`, else the `code` in `after` (inquiry intake rows,
+ *  written by the system without a label, carry `after.code = TC-…`). */
+export function auditRecordLabel(row: Pick<AuditLogItem, "entity_label" | "after">): string | null {
+  if (row.entity_label) return row.entity_label;
+  const code = isRecord(row.after) ? row.after.code : undefined;
+  return typeof code === "string" && code ? code : null;
+}
+
+/** The page of the row's entity, when the label or id is enough to build it; otherwise null. A deleted
+ *  version has no page left to open. */
+export function auditEntityHref(row: AuditRef): string | null {
+  const label = auditRecordLabel(row) ?? "";
+  if (row.entity_type === "trip_case") {
+    if (/^TC-\d+$/.test(label)) return `/cases/${encodeURIComponent(label)}`;
+    // The case page also resolves a case by its UUID (GET /booking/trip-cases/{uuid}).
+    return row.entity_id ? `/cases/${encodeURIComponent(row.entity_id)}` : null;
+  }
   if (row.entity_type === "trip_case_version") {
+    if (/\.deleted$/.test(row.action)) return null;
     const m = /^(TC-\d+) V(\d+)$/.exec(label);
     if (m) return `/cases/${encodeURIComponent(m[1])}/proposals/${m[2]}`;
   }
