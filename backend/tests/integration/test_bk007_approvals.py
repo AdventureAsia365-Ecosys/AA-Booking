@@ -75,6 +75,32 @@ async def test_seed_rules_are_approved_as_seed(app_conn: asyncpg.Connection) -> 
     ]
 
 
+async def test_first_apply_backfills_rows_already_in_force(admin: asyncpg.Connection) -> None:
+    """On Dev, bk-007 lands over rows that already price quotes: every one of them (not only the seed) must come out
+    approved, or applying the migration would silently change live quotes."""
+    rule_id = await admin.fetchval(
+        "INSERT INTO booking.pricing_rules (channel, target_margin, floor_margin, valid_from, note, created_by)"
+        " VALUES ('b2b', 0.16, 0.10, DATE '2026-11-01', 'entered by hand before bk-007', $1) RETURNING id",
+        MAKER,
+    )
+    fx_id = await _fx_row(admin, MAKER)
+    # Simulate the first apply: bk-007 not registered yet, so the cut-off is this run's now().
+    await admin.execute("DELETE FROM shared.schema_versions WHERE version = 'bk-007'")
+    await admin.execute(BK007.read_text(encoding="utf-8"))
+
+    approvals = await admin.fetch(
+        "SELECT entity_type, approved_by FROM booking.policy_approvals"
+        " WHERE pricing_rule_id = $1 OR fx_rate_id = $2 ORDER BY entity_type",
+        rule_id,
+        fx_id,
+    )
+    assert [(a["entity_type"], a["approved_by"]) for a in approvals] == [
+        ("fx_rate", "backfill:bk-007"),
+        ("pricing_rule", "backfill:bk-007"),
+    ]
+    assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-007'") == 1
+
+
 async def test_backfill_is_bounded_by_the_first_apply(admin: asyncpg.Connection) -> None:
     """Rows created after bk-007 was first applied stay pending even when the file runs again."""
     fx_id = await _fx_row(admin, None)
