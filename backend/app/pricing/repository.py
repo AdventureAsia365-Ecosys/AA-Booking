@@ -1,7 +1,8 @@
 """Reads of the pricing data tables (``bk-004``): the rule and FX rates in force on a date.
 
-Both tables are append-only (a change is a new row with a later ``valid_from`` / ``as_of``), so
-"in force" = the newest row dated on or before the day asked for.
+Both tables are append-only (a change is a new row with a later ``valid_from`` / ``as_of``) and a row counts only
+once a second person approved it (``bk-007`` ``policy_approvals``, maker-checker), so "in force" = the newest
+APPROVED row dated on or before the day asked for. A pending row never prices anything.
 """
 
 from __future__ import annotations
@@ -14,18 +15,20 @@ from typing import Any
 from app.pricing.engine import BASE_CURRENCY, Channel, FxRate, PricingRule
 
 RULE_SQL = """
-SELECT channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct, valid_from
-FROM booking.pricing_rules
-WHERE channel = $1 AND valid_from <= $2
-ORDER BY valid_from DESC
+SELECT r.channel, r.target_margin, r.floor_margin, r.peak_uplift_pts, r.card_fee_pct, r.valid_from
+FROM booking.pricing_rules r
+JOIN booking.policy_approvals a ON a.pricing_rule_id = r.id
+WHERE r.channel = $1 AND r.valid_from <= $2
+ORDER BY r.valid_from DESC
 LIMIT 1
 """
 
 FX_SQL = """
-SELECT DISTINCT ON (currency) currency, rate_per_usd, buffer_pct, as_of, source
-FROM booking.fx_rates
-WHERE currency = ANY($1::text[]) AND as_of <= $2
-ORDER BY currency, as_of DESC
+SELECT DISTINCT ON (f.currency) f.currency, f.rate_per_usd, f.buffer_pct, f.as_of, f.source
+FROM booking.fx_rates f
+JOIN booking.policy_approvals a ON a.fx_rate_id = f.id
+WHERE f.currency = ANY($1::text[]) AND f.as_of <= $2
+ORDER BY f.currency, f.as_of DESC
 """
 
 

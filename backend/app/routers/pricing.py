@@ -4,20 +4,26 @@
 currency with the pricing rule and FX rates in force today. It writes nothing: it is the calculator
 staff use while building a version. ``POST …/versions/{n}/price`` (routers/trip_cases.py) runs the same
 ``app.pricing.service.price`` on the version's stored cost lines and saves the total.
+
+``/booking/pricing/rules`` and ``/booking/pricing/fx-rates`` (GET list, POST new pending row, POST ``/{id}/approve``)
+manage the policy rows themselves with maker-checker (``app.pricing.policy``, bk-007): reads need ``pricing.read``,
+writes and approvals ``pricing.write`` (admin, contracting), and the creator of a row cannot approve it (403).
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth.staff import Staff, require
-from app.pricing import engine, service
+from app.auth.staff import Staff, get_pool, require
+from app.pricing import engine, policy, service
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +34,9 @@ MAX_ITEMS = 200
 # Margins and net costs are commercial data (ADR 0005 decision 8): permission ``pricing.read`` in the
 # staff role matrix (admin, sales, contracting; not content_creator).
 CanPrice = Annotated[Staff, Depends(require("pricing.read"))]
+# Entering and approving rules / FX rows: contracting owns rates, admin backs it up (ADR 0005 d8).
+CanWritePricing = Annotated[Staff, Depends(require("pricing.write"))]
+Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
@@ -146,3 +155,82 @@ async def quote_preview(
         quote.below_floor,
     )
     return QuotePreviewResponse(**service.body(priced))
+
+
+# ── Pricing rules and FX rates (maker-checker, bk-007) ───────────────────────
+
+Ratio = Annotated[Decimal, Field(ge=0, lt=1, max_digits=5, decimal_places=4, allow_inf_nan=False)]
+
+
+class RuleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channel: engine.Channel
+    target_margin: Ratio
+    floor_margin: Ratio
+    peak_uplift_pts: Ratio = Decimal("0")
+    card_fee_pct: Ratio = Decimal("0")
+    valid_from: date
+    note: str | None = Field(default=None, max_length=500)
+
+
+class FxRateCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currency: Currency
+    rate_per_usd: Annotated[Decimal, Field(gt=0, max_digits=18, decimal_places=8, allow_inf_nan=False)]
+    buffer_pct: Ratio = Decimal("0")
+    as_of: date
+    source: str = Field(min_length=1, max_length=200)
+
+
+@router.get("/rules")
+async def list_rules(
+    staff: CanPrice,
+    pool: Pool,
+    channel: engine.Channel | None = None,
+    limit: Annotated[int, Query(ge=1, le=policy.MAX_ROWS)] = policy.MAX_ROWS,
+) -> dict[str, Any]:
+    today = _today()
+    async with pool.acquire() as conn:
+        items = await policy.list_rules(
+            conn, staff, today=today, channel=channel.value if channel else None, limit=limit
+        )
+    return {"items": items, "today": today}
+
+
+@router.post("/rules", status_code=201)
+async def create_rule(body: RuleCreate, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.create_rule(conn, staff, body.model_dump(), today=_today())
+
+
+@router.post("/rules/{rule_id}/approve")
+async def approve_rule(rule_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.approve_rule(conn, staff, str(rule_id), today=_today())
+
+
+@router.get("/fx-rates")
+async def list_fx_rates(
+    staff: CanPrice,
+    pool: Pool,
+    currency: Annotated[str | None, Query(pattern=r"^[A-Z]{3}$")] = None,
+    limit: Annotated[int, Query(ge=1, le=policy.MAX_ROWS)] = policy.MAX_ROWS,
+) -> dict[str, Any]:
+    today = _today()
+    async with pool.acquire() as conn:
+        items = await policy.list_fx_rates(conn, staff, today=today, currency=currency, limit=limit)
+    return {"items": items, "today": today}
+
+
+@router.post("/fx-rates", status_code=201)
+async def create_fx_rate(body: FxRateCreate, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.create_fx_rate(conn, staff, body.model_dump(), today=_today())
+
+
+@router.post("/fx-rates/{fx_id}/approve")
+async def approve_fx_rate(fx_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.approve_fx_rate(conn, staff, str(fx_id), today=_today())

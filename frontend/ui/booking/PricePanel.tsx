@@ -19,6 +19,7 @@ import { costLineError, pct, type CostLine } from "@/lib/proposalDraft";
 import { EmptyState, Spinner } from "../primitives";
 import { formatMoney, Money } from "./Money";
 import { DateText } from "./DateText";
+import { useCan } from "../StaffContext";
 
 const inputCls =
   "h-9 w-full min-w-0 rounded-md border border-line bg-card px-3 text-[13px] text-ink outline-none focus:border-accent-border disabled:bg-panel disabled:text-muted";
@@ -224,13 +225,24 @@ export function PriceSettings({
   );
 }
 
-// ── FX notice (S236 review finding 5) ────────────────────────────────────────
-/** Booking stores no FX rates by default and has no screen to add them before wave 2. */
+// ── FX notice (S236 review finding 5; AA-810 S237: rates are entered on /pricing/rules) ──────────────
+/** Non-USD needs an approved, dated FX rate; admin / contracting get a link to the page that adds one. */
 export function FxNotice() {
+  const canManage = useCan("pricing.write");
   return (
     <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
-      Non-USD costs and selling currencies need a dated FX rate. Booking cannot enter rates yet (Pricing rules &amp; FX
-      ships in wave 2), so unless an admin has added rates for this environment, only USD costs priced in USD work.
+      Non-USD costs and selling currencies need a dated FX rate that a second person has approved.{" "}
+      {canManage ? (
+        <>
+          Add or approve rates in{" "}
+          <Link href="/pricing/rules?tab=fx" className="font-semibold text-accent-deep hover:underline">
+            Pricing rules &amp; FX
+          </Link>
+          .
+        </>
+      ) : (
+        "Ask an admin or contracting user to add one if a currency is missing."
+      )}
     </p>
   );
 }
@@ -248,13 +260,13 @@ function quoteErrorView(error: unknown, canManageRules: boolean) {
   if (e?.status === 503) return { title: "Pricing data unavailable", body: "The Booking API could not read the pricing rules or FX rates. Try again in a moment.", link: false };
   if (e?.status === 403) return { title: "No access to pricing", body: "Your Booking role cannot see margins and net costs.", link: false };
   if (e?.status === 422 && (e.code.startsWith("no FX rate") || e.code.startsWith("no pricing rule"))) {
-    // Pricing rules & FX is a wave 2 page: there is nowhere in Booking to add the row yet.
+    // AA-810: rows are entered and approved (maker-checker) on /pricing/rules; only approved rows price.
     return {
       title: e.code.startsWith("no FX rate") ? `Missing FX rate: ${e.code.replace("no FX rate for ", "")}` : "No pricing rule in force",
       body: canManageRules
-        ? "Booking cannot enter rates or rules yet (Pricing rules & FX ships in wave 2). Price in USD, or have the row added for this environment."
-        : "Price in USD for now, or ask an admin to add the missing rate for this environment.",
-      link: false,
+        ? "No approved row is in force for today. Add it in Pricing rules & FX and have a second person approve it, or price in USD."
+        : "Price in USD for now, or ask an admin or contracting user to add and approve the missing row.",
+      link: canManageRules,
     };
   }
   return { title: "Could not price this quote", body: (error as Error | null)?.message ?? "Unknown error.", link: false };
