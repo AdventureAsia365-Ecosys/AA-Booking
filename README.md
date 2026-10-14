@@ -4,7 +4,9 @@ Booking back office of the Adventure Asia ecosystem (AAA): customer identity (OT
 TripPlanner inquiries, proposals, suppliers, invoices and payments. Runs on the shared acc2
 infrastructure (ECS on `aa-cis-dev-cluster`, schema `booking` on the shared RDS).
 
-**Status:** bootstrap health slice (AA-678). Start with [CONTEXT.md](CONTEXT.md); the design is
+**Status:** bootstrap health slice (AA-678), inquiry intake (AA-681 slice 2, `bk-002`), staff
+authentication with the CIS staff JWT + trip case workflow and proposal versions (AA-680/AA-681 slice 3,
+`bk-003`). Start with [CONTEXT.md](CONTEXT.md); the design is
 root ADR 0004 (`AA-Ecosys/docs/adr/0004-aa-booking-stack-and-bootstrap.md`), implemented as described
 in [docs/adr/0001-implements-root-0004.md](docs/adr/0001-implements-root-0004.md).
 
@@ -14,6 +16,18 @@ in [docs/adr/0001-implements-root-0004.md](docs/adr/0001-implements-root-0004.md
 |---|---|
 | `GET /booking/health` | Liveness, no DB. ALB health check. `{status, service, git_sha}` |
 | `GET /booking/health/ready` | DB reachable + required `bk-NNN` registered. 200 or 503. `{status, db, schema_version}` |
+| `GET /booking/staff/me` | Staff profile + permissions (CIS staff JWT; first token provisions the profile) |
+| `GET /booking/staff`, `PATCH /booking/staff/{cis_user_id}` | Admin: list staff, activate / set Booking role |
+| `GET /booking/trip-cases` | List (`status`, `assignee` = id \| `me` \| `none`, `limit`, `offset`) |
+| `GET /booking/trip-cases/{id_or_code}` | Case + customer + legs + inquiry snapshot + versions + status history + assignments |
+| `PATCH /booking/trip-cases/{id_or_code}` | Edit `pax`, `start_date`, `currency`, `notes` |
+| `POST /booking/trip-cases/{id_or_code}/status` | Status transition `{to_status, reason}` (cancel needs a reason) |
+| `POST /booking/trip-cases/{id_or_code}/assign` | `{cis_user_id \| null, role}` |
+| `POST /booking/trip-cases/{id_or_code}/versions` | New version (V1 from the TripPlanner legs, Vn copies the latest) |
+| `GET`/`PUT /booking/trip-cases/{id_or_code}/versions/{n}/items` | Read / replace the free-text itinerary items |
+
+Staff routes need `Authorization: Bearer <CIS staff JWT>` (`aud=booking`); see
+[CONTEXT.md](CONTEXT.md#staff-authentication-and-permissions-aa-680-adr-0004-o1).
 
 ## Local development
 

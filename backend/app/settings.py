@@ -11,6 +11,10 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
 - ``WORKER_ENABLED``: ``true`` / ``false``. Runs the ``booking.job`` worker loop inside the API
   process (Dev, AA-681 slice 2). Default: on when ``ENVIRONMENT`` is ``dev`` and ``DATABASE_URL``
   is set, off otherwise (tests and local runs start it explicitly).
+- ``CIS_JWKS_URL``: JWKS of the CIS staff login (ADR 0004 O1, AA-680). Default: the Dev value
+  ``https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json``.
+- ``STAFF_JWT_ISSUER``: expected ``iss`` of staff JWTs. Default: ``https://api-cis.lumiguides.it.com``.
+  Both must be ``https://`` unless ``ENVIRONMENT`` is ``test`` or ``local``.
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ INSECURE_ENVIRONMENTS = frozenset({"test", "local"})
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
+DEFAULT_STAFF_JWT_ISSUER = "https://api-cis.lumiguides.it.com"
+DEFAULT_CIS_JWKS_URL = f"{DEFAULT_STAFF_JWT_ISSUER}/auth/.well-known/jwks.json"
+
 
 class SettingsError(ValueError):
     """The environment holds an invalid or unsafe value."""
@@ -38,6 +45,8 @@ class Settings:
     environment: str = "dev"
     git_sha: str = "unknown"
     worker_enabled: bool = False
+    cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
+    staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -46,6 +55,12 @@ class Settings:
             raise SettingsError(
                 f"DB_SSL=disable is only allowed when ENVIRONMENT is one of {sorted(INSECURE_ENVIRONMENTS)}"
             )
+        for name, value in (("CIS_JWKS_URL", self.cis_jwks_url), ("STAFF_JWT_ISSUER", self.staff_jwt_issuer)):
+            if value.startswith("https://"):
+                continue
+            if value.startswith("http://") and self.environment in INSECURE_ENVIRONMENTS:
+                continue
+            raise SettingsError(f"{name} must be an https:// URL, got {value!r}")
 
 
 def _flag(raw: str | None, default: bool, name: str) -> bool:
@@ -71,4 +86,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         worker_enabled=_flag(
             env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
         ),
+        cis_jwks_url=(env.get("CIS_JWKS_URL") or DEFAULT_CIS_JWKS_URL).strip(),
+        staff_jwt_issuer=(env.get("STAFF_JWT_ISSUER") or DEFAULT_STAFF_JWT_ISSUER).strip(),
     )

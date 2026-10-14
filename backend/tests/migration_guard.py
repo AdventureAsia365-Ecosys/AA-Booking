@@ -250,8 +250,10 @@ def check_sql(name: str, sql: str) -> list[Violation]:
         flags=re.IGNORECASE,
     ):
         verb, target = re.sub(r"\s+", " ", dml.group(1).upper()), _norm(dml.group(2))
-        if target in {"of", "on"}:
-            continue  # privilege lists ("REVOKE UPDATE, TRUNCATE ON"), triggers ("BEFORE UPDATE ON", "UPDATE OF col")
+        if target in {"of", "on", "or"}:
+            # privilege lists ("REVOKE UPDATE, TRUNCATE ON"), trigger events ("BEFORE UPDATE ON",
+            # "UPDATE OF col", "BEFORE UPDATE OR DELETE ON"); all three are reserved words, never tables.
+            continue
         if verb == "INSERT INTO" and target == "shared.schema_versions":
             continue
         if not target.startswith(f"{OWNER_SCHEMA}."):
