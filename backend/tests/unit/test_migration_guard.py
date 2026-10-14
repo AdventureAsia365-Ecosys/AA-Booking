@@ -36,7 +36,7 @@ def test_every_migration_passes_the_guard(path: Path) -> None:
 
 # Numbers taken by an open parallel branch: a gap is allowed only for these. Remove an entry once that
 # branch is merged (the file is then here and the gap is gone).
-RESERVED_ON_OTHER_BRANCHES = {4: "bk-004 pricing rules / FX / item costs (AA-810, feat/aa-810 branch)"}
+RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {}
 
 
 def test_migration_numbers_are_unique_and_contiguous() -> None:

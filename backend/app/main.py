@@ -25,7 +25,7 @@ from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
 from app.jobs.worker import Worker
-from app.routers import customers, health, notifications, reference, staff, trip_cases
+from app.routers import customers, health, notifications, pricing, reference, staff, trip_cases
 from app.settings import Settings, load_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -73,6 +73,7 @@ def create_app(
     app.include_router(customers.router)
     app.include_router(notifications.router)
     app.include_router(reference.router)
+    app.include_router(pricing.router)
     return app
 
 
