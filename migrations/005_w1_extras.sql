@@ -10,8 +10,9 @@
 -- append-only pricing tables. Every grant below names its table.
 --
 -- What it adds (docs/implementation-notes/AA-681-w1.md):
---   * D3: status edges proposal_sent -> confirmed (a version approved by the customer, recorded by staff)
---     and cancelled -> new_inquiry (reopen with a reason). Seed rows only; bk-003 is unchanged.
+--   * D3: status edges proposal_sent -> confirmed (a version approved by the customer, recorded by staff),
+--     confirmed -> cancelled (with a reason, until AA-682 adds the post-sale chain) and cancelled ->
+--     new_inquiry (reopen with a reason). Seed rows only; bk-003 is unchanged.
 --     trip_case_status_history.seq orders rows written in one transaction.
 --   * Trip cases: pax_adults / pax_children (Q13), trip_case_countries over a small ISO reference table
 --     booking.countries (codes + English short names only; country CONTENT stays in CIS, O7 / Q18).
@@ -20,7 +21,8 @@
 --     last activity).
 --   * Versions: title, valid_until, channel, FX lock columns (filled when the pricing engine is wired),
 --     sent_by / approved_by / approval_note, updated_by, deleted_at (soft delete of unsent drafts) and a
---     "sent = locked" trigger: once sent, a version's commercial fields and its items cannot change.
+--     "sent = locked" trigger: once sent, a version's commercial fields and its items cannot change and the
+--     version cannot be hard-deleted (role booking has no DELETE on versions; the app soft-deletes drafts).
 --   * Notifications: recipient_ref (CIS user id of a targeted staff recipient) and per-staff read state
 --     booking.notification_reads (the shared staff queue has one row per event, read state per person).
 --   * Staff: preferences JSONB (notification toggles).
@@ -35,11 +37,12 @@ BEGIN;
 
 INSERT INTO booking.trip_case_status_transitions (from_status, to_status) VALUES
     ('proposal_sent', 'confirmed'),
+    ('confirmed', 'cancelled'),
     ('cancelled', 'new_inquiry')
 ON CONFLICT DO NOTHING;
 
 COMMENT ON TABLE booking.trip_case_status_transitions IS
-    'bk-003 + bk-005: allowed trip case status edges (read-only for role booking). Pre-sale edges, proposal_sent -> confirmed (version approval) and cancelled -> new_inquiry (reopen). Post-sale edges ship with AA-682.';
+    'bk-003 + bk-005: allowed trip case status edges (read-only for role booking). Pre-sale edges, proposal_sent -> confirmed (version approval), confirmed -> cancelled and cancelled -> new_inquiry (reopen). Post-sale edges ship with AA-682.';
 
 -- Several status rows can be written in one transaction (send walks discovery -> building ->
 -- proposal_sent) and then share changed_at = now(); seq gives them a stable write order.
@@ -177,6 +180,15 @@ CREATE OR REPLACE FUNCTION booking.trip_case_version_sent_lock() RETURNS trigger
     SET search_path = pg_catalog
 AS $$
 BEGIN
+    -- A sent version is never removed, not even by a cascade from its trip case (the item lock below cannot
+    -- see the version once the cascade deleted it, so the version row itself must refuse).
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.is_sent_to_customer THEN
+            RAISE EXCEPTION 'trip case version % was sent to the customer and cannot be deleted', OLD.id
+                USING ERRCODE = 'object_not_in_prerequisite_state';
+        END IF;
+        RETURN OLD;
+    END IF;
     IF OLD.is_sent_to_customer AND (
         NOT NEW.is_sent_to_customer
         OR NEW.sent_at IS DISTINCT FROM OLD.sent_at
@@ -221,7 +233,7 @@ BEGIN
 END $$;
 
 CREATE OR REPLACE TRIGGER trip_case_versions_sent_lock
-    BEFORE UPDATE ON booking.trip_case_versions
+    BEFORE UPDATE OR DELETE ON booking.trip_case_versions
     FOR EACH ROW EXECUTE FUNCTION booking.trip_case_version_sent_lock();
 
 CREATE OR REPLACE TRIGGER trip_case_version_itinerary_sent_lock
@@ -344,9 +356,11 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON booking.settings FROM booking;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON booking.v_customer_summary FROM booking;
 REVOKE UPDATE, TRUNCATE ON booking.notification_reads FROM booking;
 REVOKE TRUNCATE ON booking.trip_case_countries FROM booking;
+-- Versions are soft-deleted (deleted_at) by the API; a hard DELETE would drop customer-visible history.
+REVOKE DELETE, TRUNCATE ON booking.trip_case_versions FROM booking;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-005', now(), 'AA-681 W1: transitions proposal_sent->confirmed + cancelled->new_inquiry, pax split, countries + trip_case_countries, customers.code (CUS-), v_customer_summary, version title/valid_until/channel/FX lock/sent+approved by/soft delete + sent lock, notifications.recipient_ref + notification_reads, staff preferences, settings, audit entity_label/summary')
+VALUES ('bk-005', now(), 'AA-681 W1: transitions proposal_sent->confirmed, confirmed->cancelled, cancelled->new_inquiry, pax split, countries + trip_case_countries, customers.code (CUS-), v_customer_summary, version title/valid_until/channel/FX lock/sent+approved by/soft delete + sent lock (no hard delete), notifications.recipient_ref + notification_reads, staff preferences, settings, audit entity_label/summary')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

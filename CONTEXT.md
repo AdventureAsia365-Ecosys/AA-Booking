@@ -67,7 +67,7 @@ backend/
   app/notifications/       staff feed + notify helpers (rows only, no e-mail)
   app/paging.py            keyset cursors (next_before) + ILIKE escaping; app/reference.py settings/countries
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
-  app/db.py                lazy asyncpg pool + readiness probe (REQUIRED_SCHEMA_VERSION)
+  app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
@@ -133,15 +133,16 @@ tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
 - `GET /booking/health` → 200 `{"status":"ok","service":"aa-booking-api","git_sha":"<sha>"}`.
   No DB call. Used by the ALB target group, so a DB outage never trips the ECS circuit breaker.
 - `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-005"}` when the
-  DB answers and the newest registered `bk-NNN` ≥ `REQUIRED_SCHEMA_VERSION`; otherwise 503 with
-  `db` = `ok` | `error` | `not_configured`. Bodies never contain the DSN or error messages.
+  DB answers and **every** `bk-NNN` in `REQUIRED_SCHEMA_VERSIONS` is registered (a gap, e.g. bk-005 in but
+  bk-004 missing, is not ready); otherwise 503 with `db` = `ok` | `error` | `not_configured` (plus
+  `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages.
 
 ## Database rules
 
 - Migrations live in `migrations/`, are reviewed here, then **byte-copied** to
   `AA-CIS-Infra/db/migrations/booking/` and applied by the **DB Migrate** workflow (check → apply).
-  Never applied from a laptop. Apply a migration before merging code that needs it, then bump
-  `REQUIRED_SCHEMA_VERSION`.
+  Never applied from a laptop. Apply a migration before merging code that needs it, then add it to
+  `REQUIRED_SCHEMA_VERSIONS`.
 - DB Migrate runs as the RDS master user `aa_cis_admin`, so every `booking.*` object is owned by it.
   Default privileges therefore say `FOR ROLE aa_cis_admin` (ADR 0004 decision 6).
 - The app connects as role `booking`: `USAGE` on schema `booking` only (no `CREATE`), DML on its
@@ -182,12 +183,12 @@ assignment per case and role), `trip_case_versions` (one approved per case; appr
 ### `bk-005` (Wave 1 staff admin, AA-681/AA-680/AA-810 W1)
 
 Independent of `bk-004` (applies before or after it; per-table grants only, so the append-only pricing tables stay
-append-only). Status edges `proposal_sent → confirmed` (only via version approval) and `cancelled → new_inquiry`
-(reopen, reason required); `trip_case_status_history.seq`; `trip_cases.pax_adults/pax_children` (+ split check);
+append-only). Status edges `proposal_sent → confirmed` (only via version approval), `confirmed → cancelled` and
+`cancelled → new_inquiry` (cancel and reopen need a reason); `trip_case_status_history.seq`; `trip_cases.pax_adults/pax_children` (+ split check);
 `countries` (ISO-2 reference, not content) + `trip_case_countries`; `customers.code` (`CUS-000123`) and the read-only
 view `v_customer_summary` (status lead / active / past); version `title`, `valid_until`, `channel`, FX lock columns,
 `sent_by` / `approved_by` / `approval_note`, `updated_by`, `deleted_at` (soft-deleted drafts) and a **sent = locked**
-trigger on versions and items; `notifications.recipient_ref` + `notification_reads` (per-staff read state);
+trigger on versions and items (a sent version cannot be hard-deleted; role `booking` has no DELETE on versions); `notifications.recipient_ref` + `notification_reads` (per-staff read state);
 `staff_users.preferences`; `settings` rows (`deposit_pct` 30, `quote_validity_days` 14; read-only for the app);
 `audit_logs.entity_label` / `summary` + a time index.
 

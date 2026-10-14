@@ -102,7 +102,6 @@ async def test_create_vn_copies_the_latest_version() -> None:
         "version_number": 2,
         "title": "Option B",
         "notes": "v2 notes",
-        "total_price": 1500,
         "currency": "EUR",
         "channel": "b2c_tailor_made",
     }
@@ -121,7 +120,7 @@ async def test_create_vn_copies_the_latest_version() -> None:
         3,
         "Option B",
         "v2 notes",
-        1500,
+        None,  # the total is never copied: V3 starts unpriced (review finding 2)
         "EUR",
         "b2c_tailor_made",
         "u-1",
@@ -157,23 +156,51 @@ ITEM_A = "33333333-3333-4333-8333-333333333333"
 ITEM_B = "44444444-4444-4444-8444-444444444444"
 
 
+def item_row(item_id: str, position: int, title: str, *, day_from: int = 1, day_to: int = 1) -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "position": position,
+        "title": title,
+        "day_from": day_from,
+        "day_to": day_to,
+        "source_tour_id": None,
+        "notes": None,
+    }
+
+
 @pytest.mark.asyncio
 async def test_replace_items_upserts_by_id_and_deletes_only_removed_items() -> None:
-    existing = [{"id": ITEM_A, "position": 1, "title": "A"}, {"id": ITEM_B, "position": 2, "title": "B"}]
+    existing = [item_row(ITEM_A, 1, "A"), item_row(ITEM_B, 2, "B")]
     conn = (
         ScriptedConn()
         .on("FROM booking.trip_cases tc", case_row())
-        .on("FROM booking.trip_case_versions v", version_row(1))
+        .on("FROM booking.trip_case_versions v", version_row(1, total_price="1500.00"))
         .on("SELECT id::text AS id, position, title", existing)
     )
     items = [Item("B first", 1, 2, None, "kept", id=ITEM_B), Item("New", 3, 5, "t-x")]
     await versions.replace_items(conn, STAFF, "TC-000001", 1, items)
+    # The item list changed, so the price set for the old list is cleared ($3 = true).
+    assert conn.sql("total_price = CASE WHEN $3") == [(VERSION_ID, "u-1", True)]
     assert conn.sql("DELETE FROM booking.trip_case_version_itinerary") == [([ITEM_A],)]
     assert conn.sql("SET position = position + $2") == [([ITEM_B], versions.POSITION_PARK)]
     assert conn.sql("SET position = $2, title = $3") == [(ITEM_B, 1, "B first", 1, 2, None, "kept")]
     assert conn.sql("INSERT INTO booking.trip_case_version_itinerary") == [(VERSION_ID, 2, "New", 3, 5, "t-x", None)]
     audit = conn.sql("INSERT INTO booking.audit_logs")[0]
     assert audit[3] == "trip_case_version.items_replaced" and json.loads(audit[7])["removed"] == [ITEM_A]
+    assert json.loads(audit[7])["price_cleared"] is True
+
+
+@pytest.mark.asyncio
+async def test_replace_items_with_the_same_list_keeps_the_price() -> None:
+    existing = [item_row(ITEM_A, 1, "A", day_from=1, day_to=2)]
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.trip_cases tc", case_row())
+        .on("FROM booking.trip_case_versions v", version_row(1, total_price="1500.00"))
+        .on("SELECT id::text AS id, position, title", existing)
+    )
+    await versions.replace_items(conn, STAFF, "TC-000001", 1, [Item("A", 1, 2, id=ITEM_A)])
+    assert conn.sql("total_price = CASE WHEN $3") == [(VERSION_ID, "u-1", False)]
 
 
 @pytest.mark.asyncio

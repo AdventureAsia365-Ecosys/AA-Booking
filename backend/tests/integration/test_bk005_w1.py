@@ -244,7 +244,10 @@ async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, 
     await priced_v1(pool, admin, boss, case)
     async with pool.acquire() as conn, conn.transaction():
         await versions.send_version(conn, boss, case["code"], 1, to=None, subject="s", message="m", valid_until=None)
-        await versions.create_version(conn, boss, case["code"], "second try")
+        v2 = await versions.create_version(conn, boss, case["code"], "second try")
+    # V2 starts unpriced (review finding 2); price it out of band like V1.
+    await admin.execute("UPDATE booking.trip_case_versions SET total_price = 2100 WHERE id = $1::uuid", v2["id"])
+    async with pool.acquire() as conn, conn.transaction():
         await versions.send_version(conn, boss, case["code"], 2, to=None, subject="s2", message="m2", valid_until=None)
     async with pool.acquire() as conn, conn.transaction():
         listed = await versions.list_versions(conn, q=case["code"])
@@ -265,6 +268,74 @@ async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, 
     async with pool.acquire() as conn, conn.transaction():
         reopened = await service.change_status(conn, boss, case["code"], "new_inquiry", "customer came back")
     assert reopened["status"] == "new_inquiry"
+
+
+async def test_new_version_and_item_changes_clear_the_price(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
+    """Review finding 2: a price belongs to one item list; V2+ and a changed list must be priced again."""
+    boss = await staff(pool, admin, "boss")
+    case = await inquiry_case(pool, [(1, "tour-a", 1, 2), (2, "tour-b", 3, 4)])
+    await move(pool, boss, case["code"], "discovery", "building")
+    v1 = await priced_v1(pool, admin, boss, case)
+    await admin.execute("UPDATE booking.trip_case_versions SET channel = 'b2b' WHERE id = $1::uuid", v1["id"])
+    async with pool.acquire() as conn, conn.transaction():
+        v2 = await versions.create_version(conn, boss, case["code"], None)
+    assert v2["total_price"] is None and v2["currency"] == "USD" and v2["channel"] == "b2b"
+    async with pool.acquire() as conn, conn.transaction():
+        with pytest.raises(Invalid) as unpriced:
+            await versions.send_version(
+                conn, boss, case["code"], 2, to=None, subject="s", message="m", valid_until=None
+            )
+    assert unpriced.value.code == "price_missing"
+    await admin.execute("UPDATE booking.trip_case_versions SET total_price = 2500 WHERE id = $1::uuid", v2["id"])
+    same = [
+        Item(i["title"], i["day_from"], i["day_to"], i["source_tour_id"], i["notes"], id=i["id"]) for i in v2["items"]
+    ]
+    async with pool.acquire() as conn, conn.transaction():
+        kept = await versions.replace_items(conn, boss, case["code"], 2, same)
+    assert kept["total_price"] == "2500.00"  # saving the identical list keeps the price
+    async with pool.acquire() as conn, conn.transaction():
+        cleared = await versions.replace_items(conn, boss, case["code"], 2, same[:1])
+    assert cleared["total_price"] is None
+    async with pool.acquire() as conn, conn.transaction():
+        with pytest.raises(Invalid) as stale:
+            await versions.send_version(
+                conn, boss, case["code"], 2, to=None, subject="s", message="m", valid_until=None
+            )
+    assert stale.value.code == "price_missing"
+    summary = await admin.fetchval(
+        "SELECT summary FROM booking.audit_logs WHERE action = 'trip_case_version.items_replaced'"
+        " ORDER BY created_at DESC LIMIT 1"
+    )
+    assert summary.endswith("price cleared")
+
+
+async def test_sent_version_cannot_be_hard_deleted_and_confirmed_can_cancel(
+    pool: asyncpg.Pool, admin: asyncpg.Connection
+) -> None:
+    """Review findings 6 and 13."""
+    boss = await staff(pool, admin, "boss")
+    case = await inquiry_case(pool, [(1, "tour-a", 1, 2)])
+    await move(pool, boss, case["code"], "discovery", "building")
+    v1 = await priced_v1(pool, admin, boss, case)
+    async with pool.acquire() as conn, conn.transaction():
+        await versions.send_version(conn, boss, case["code"], 1, to=None, subject="s", message="m", valid_until=None)
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):  # role booking only soft-deletes versions
+            await conn.execute("DELETE FROM booking.trip_case_versions WHERE id = $1::uuid", v1["id"])
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):  # not even the owner, not even by cascade
+        await admin.execute("DELETE FROM booking.trip_case_versions WHERE id = $1::uuid", v1["id"])
+    assert await admin.fetchval(
+        "SELECT count(*) FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid", v1["id"]
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        await versions.approve_version(conn, boss, case["code"], 1, None)
+    async with pool.acquire() as conn, conn.transaction():
+        with pytest.raises(Invalid) as no_reason:
+            await service.change_status(conn, boss, case["code"], "cancelled", None)
+        assert no_reason.value.code == "reason_required"
+    async with pool.acquire() as conn, conn.transaction():
+        cancelled = await service.change_status(conn, boss, case["code"], "cancelled", "customer withdrew")
+    assert cancelled["from_status"] == "confirmed" and cancelled["status"] == "cancelled"
 
 
 async def test_version_patch_delete_and_number_not_reused(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
@@ -514,9 +585,10 @@ async def test_bk005_privileges_and_settings(pool: asyncpg.Pool) -> None:
                 await conn.execute(sql)
         transitions = await conn.fetch(
             "SELECT from_status, to_status FROM booking.trip_case_status_transitions"
-            " WHERE (from_status, to_status) IN (('proposal_sent', 'confirmed'), ('cancelled', 'new_inquiry'))"
+            " WHERE (from_status, to_status) IN"
+            " (('proposal_sent', 'confirmed'), ('confirmed', 'cancelled'), ('cancelled', 'new_inquiry'))"
         )
-        assert len(transitions) == 2
+        assert len(transitions) == 3
         version = await conn.fetchval("SELECT max(version) FROM booking.v_schema_versions")
         assert version == "bk-005"
 

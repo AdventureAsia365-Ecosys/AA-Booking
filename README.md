@@ -29,7 +29,7 @@ in [docs/adr/0001-implements-root-0004.md](docs/adr/0001-implements-root-0004.md
 | `PATCH /booking/trip-cases/{id_or_code}` | Edit `pax`, `pax_adults`, `pax_children`, `start_date`, `currency`, `trip_style`, `notes`, `countries` |
 | `POST /booking/trip-cases/{id_or_code}/status` | Status transition `{to_status, reason}` (cancel and reopen need a reason; `confirmed` only via approve) |
 | `POST /booking/trip-cases/{id_or_code}/assign` | `{cis_user_id \| null, role}` |
-| `POST /booking/trip-cases/{id_or_code}/versions` | New version (V1 from the TripPlanner legs, Vn copies the latest) |
+| `POST /booking/trip-cases/{id_or_code}/versions` | New version (V1 from the TripPlanner legs, Vn copies the latest except its total: a new version starts unpriced) |
 | `GET`/`PATCH`/`DELETE /booking/trip-cases/{id_or_code}/versions/{n}` | Version header; edit `title`/`notes` (draft); soft-delete a draft |
 | `GET`/`PUT /booking/trip-cases/{id_or_code}/versions/{n}/items` | Read / save items (upsert by `id`, removed items deleted) |
 | `POST /booking/trip-cases/{id_or_code}/versions/{n}/send` | Mark sent `{to?, subject, message, valid_until?}`: locks the version, case → `proposal_sent`, customer notification row (no e-mail) |

@@ -3,7 +3,10 @@
 - **V1** is pre-filled from ``trip_case_legs`` (the TripPlanner leg chain) ordered by ``day_from``,
   then ``position``. The item title is the inquiry snapshot's first day name for that tour, else
   ``AA tour <source_tour_id>`` (catalog titles arrive with AA-679).
-- **Vn** (n > 1) copies the latest live version: title, notes, total, currency, channel and every item.
+- **Vn** (n > 1) copies the latest live version: title, notes, currency, channel and every item. The total
+  is NOT copied: a new version starts unpriced, so it can never be sent with a price set for other items.
+- **A price belongs to one item list**: saving items that differ from the stored list clears ``total_price``
+  (the version must be priced again before it can be sent).
 - **Items keep their ids** (D2): a PUT updates the items it names by ``id``, inserts the ones without an
   id and deletes only the ones left out, so rows that reference an item (bk-004 ``version_item_costs``,
   ``ON DELETE CASCADE``) survive a save.
@@ -78,6 +81,13 @@ async def _items(conn: asyncpg.Connection, version_id: str) -> list[dict[str, An
     return [dict(r) for r in rows]
 
 
+def _item_rows(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    """Stored items as comparable tuples (id + the saved fields, in position order)."""
+    return [
+        (i["id"], i["position"], i["title"], i["day_from"], i["day_to"], i["source_tour_id"], i["notes"]) for i in items
+    ]
+
+
 async def _insert_items(conn: asyncpg.Connection, version_id: str, items: list[tuple[int, Item]]) -> None:
     if not items:
         return
@@ -118,7 +128,7 @@ async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes
     if is_terminal(case["status"]):
         raise Conflict("trip_case_closed", f"trip case is {case['status']}")
     latest = await conn.fetchrow(
-        "SELECT id::text AS id, version_number, title, notes, total_price, currency, channel"
+        "SELECT id::text AS id, version_number, title, notes, currency, channel"
         " FROM booking.trip_case_versions WHERE trip_case_id = $1::uuid AND deleted_at IS NULL"
         " ORDER BY version_number DESC LIMIT 1",
         case["id"],
@@ -147,7 +157,7 @@ async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes
         values = (
             latest["title"],
             notes if notes is not None else latest["notes"],
-            latest["total_price"],
+            None,  # never copy the total: it was set for the previous version's items (review finding 2)
             latest["currency"],
             latest["channel"],
         )
@@ -278,6 +288,7 @@ async def replace_items(
     version = dict(await _version(conn, case["id"], number, lock=True))
     _editable(version)
     before = await _items(conn, version["id"])
+    price_before = version["total_price"]
     existing = {i["id"] for i in before}
     given = [it.id for it in items if it.id]
     if len(given) != len(set(given)):
@@ -287,6 +298,9 @@ async def replace_items(
         raise Invalid("unknown_item", f"item {foreign[0]} is not on this version", item_ids=foreign)
     removed = sorted(existing - set(given))
     positioned = list(enumerate(items, start=1))
+    changed = _item_rows(before) != [
+        (it.id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes) for pos, it in positioned
+    ]
     try:
         if removed:
             await conn.execute("DELETE FROM booking.trip_case_version_itinerary WHERE id = ANY($1::uuid[])", removed)
@@ -306,10 +320,13 @@ async def replace_items(
                 ],
             )
         await _insert_items(conn, version["id"], [(pos, it) for pos, it in positioned if not it.id])
+        # A price was set for the old item list; once the list changes it must be priced again.
         await conn.execute(
-            "UPDATE booking.trip_case_versions SET updated_at = now(), updated_by = $2 WHERE id = $1::uuid",
+            "UPDATE booking.trip_case_versions SET updated_at = now(), updated_by = $2,"
+            " total_price = CASE WHEN $3 THEN NULL ELSE total_price END WHERE id = $1::uuid",
             version["id"],
             staff.cis_user_id,
+            changed,
         )
     except asyncpg.ObjectNotInPrerequisiteStateError as exc:  # approved / sent meanwhile (DB lock triggers)
         raise Conflict("version_locked", "the version is locked") from exc
@@ -323,9 +340,10 @@ async def replace_items(
         entity_type="trip_case_version",
         entity_id=version["id"],
         before={"items": before},
-        after={"items": version["items"], "removed": removed},
+        after={"items": version["items"], "removed": removed, "price_cleared": changed and price_before is not None},
         entity_label=_label(case, number),
-        summary=f"Saved {len(items)} item(s), removed {len(removed)}",
+        summary=f"Saved {len(items)} item(s), removed {len(removed)}"
+        + ("; price cleared" if changed and price_before is not None else ""),
     )
     return version
 

@@ -17,8 +17,11 @@ from app.settings import Settings
 
 log = logging.getLogger(__name__)
 
-# The newest bk-NNN migration this code needs. Readiness fails until it is registered.
-REQUIRED_SCHEMA_VERSION = "bk-005"
+# Every bk-NNN migration this code needs. Readiness fails until ALL of them are registered: checking only the
+# newest one would pass with a gap (bk-005 applied, an older file missing) and the API would then fail per call.
+# bk-004 (AA-810 pricing) is not needed by this branch; the pricing branch adds it here.
+REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = ("bk-001", "bk-002", "bk-003", "bk-005")
+REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
 CONNECT_TIMEOUT_S = 5.0
 PROBE_TIMEOUT_S = 5.0
@@ -61,7 +64,7 @@ class Database:
             self._pool = None
 
     async def readiness(self) -> Readiness:
-        """DB answers ``SELECT 1`` and the required ``bk-NNN`` is registered."""
+        """DB answers ``SELECT 1`` and every required ``bk-NNN`` is registered."""
         if not self.configured:
             return Readiness(False, {"status": "not_ready", "db": "not_configured", "schema_version": None})
         try:
@@ -76,8 +79,11 @@ class Database:
             )
         try:
             async with pool.acquire() as conn:
-                version = await asyncio.wait_for(
-                    conn.fetchval("SELECT max(version) FROM booking.v_schema_versions"), PROBE_TIMEOUT_S
+                registered = await asyncio.wait_for(
+                    conn.fetchval(
+                        "SELECT coalesce(array_agg(version ORDER BY version), '{}') FROM booking.v_schema_versions"
+                    ),
+                    PROBE_TIMEOUT_S,
                 )
         except Exception as exc:  # noqa: BLE001
             log.warning("readiness: schema check failed (%s)", type(exc).__name__)
@@ -85,7 +91,10 @@ class Database:
                 False,
                 {"status": "not_ready", "db": "ok", "error": type(exc).__name__, "schema_version": None},
             )
-        if version is None or version < REQUIRED_SCHEMA_VERSION:
+        registered = list(registered or [])
+        version = max(registered) if registered else None
+        missing = [v for v in REQUIRED_SCHEMA_VERSIONS if v not in registered]
+        if missing:
             return Readiness(
                 False,
                 {
@@ -93,6 +102,7 @@ class Database:
                     "db": "ok",
                     "schema_version": version,
                     "required_schema_version": REQUIRED_SCHEMA_VERSION,
+                    "missing_schema_versions": missing,
                 },
             )
         return Readiness(True, {"status": "ok", "db": "ok", "schema_version": version})

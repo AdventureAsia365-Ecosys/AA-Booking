@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 import app.db as db_module
-from app.db import REQUIRED_SCHEMA_VERSION, Database
+from app.db import REQUIRED_SCHEMA_VERSION, REQUIRED_SCHEMA_VERSIONS, Database
 from app.settings import Settings
 
 DSN = "postgresql://booking:super-secret@db.internal:5432/aa_cis"
@@ -39,8 +39,13 @@ class FakePool:
         self.closed = True
 
 
-def _answers(version: Any = REQUIRED_SCHEMA_VERSION, select_one: Any = 1) -> dict[str, Any]:
-    return {"SELECT 1": select_one, "SELECT max(version) FROM booking.v_schema_versions": version}
+VERSIONS_SQL = "SELECT coalesce(array_agg(version ORDER BY version), '{}') FROM booking.v_schema_versions"
+
+
+def _answers(versions: Any = REQUIRED_SCHEMA_VERSIONS, select_one: Any = 1) -> dict[str, Any]:
+    if isinstance(versions, tuple):
+        versions = list(versions)
+    return {"SELECT 1": select_one, VERSIONS_SQL: versions}
 
 
 @pytest.fixture
@@ -72,11 +77,25 @@ async def test_ready_when_db_answers_and_required_version_registered(created: li
 async def test_not_ready_when_only_an_older_version_is_registered(
     created: list[dict[str, Any]], answers: dict[str, Any]
 ) -> None:
-    answers.update(_answers(version="bk-001"))
+    answers.update(_answers(versions=["bk-001"]))
     result = await Database(SETTINGS).readiness()
     assert not result.ok
     assert result.body["schema_version"] == "bk-001"
     assert result.body["required_schema_version"] == REQUIRED_SCHEMA_VERSION
+    assert result.body["missing_schema_versions"] == [v for v in REQUIRED_SCHEMA_VERSIONS if v != "bk-001"]
+
+
+@pytest.mark.asyncio
+async def test_not_ready_when_an_older_required_version_is_missing(
+    created: list[dict[str, Any]], answers: dict[str, Any]
+) -> None:
+    # The newest file is in but one before it is not (e.g. bk-005 applied, bk-003 never ran): not ready.
+    gap = [v for v in REQUIRED_SCHEMA_VERSIONS if v != "bk-003"]
+    answers.update(_answers(versions=gap))
+    result = await Database(SETTINGS).readiness()
+    assert not result.ok
+    assert result.body["schema_version"] == REQUIRED_SCHEMA_VERSION
+    assert result.body["missing_schema_versions"] == ["bk-003"]
 
 
 @pytest.mark.asyncio
@@ -93,14 +112,14 @@ async def test_pool_is_lazy_single_and_requires_ssl(created: list[dict[str, Any]
 
 @pytest.mark.asyncio
 async def test_newer_schema_is_ready(created: list[dict[str, Any]], answers: dict[str, Any]) -> None:
-    answers.update(_answers(version="bk-007"))
+    answers.update(_answers(versions=[*REQUIRED_SCHEMA_VERSIONS, "bk-007"]))
     result = await Database(SETTINGS).readiness()
     assert result.ok and result.body["schema_version"] == "bk-007"
 
 
 @pytest.mark.asyncio
 async def test_not_ready_when_no_booking_version(created: list[dict[str, Any]], answers: dict[str, Any]) -> None:
-    answers.update(_answers(version=None))
+    answers.update(_answers(versions=[]))
     result = await Database(SETTINGS).readiness()
     assert not result.ok
     assert result.body == {
@@ -108,6 +127,7 @@ async def test_not_ready_when_no_booking_version(created: list[dict[str, Any]], 
         "db": "ok",
         "schema_version": None,
         "required_schema_version": REQUIRED_SCHEMA_VERSION,
+        "missing_schema_versions": list(REQUIRED_SCHEMA_VERSIONS),
     }
 
 
@@ -116,7 +136,7 @@ async def test_not_ready_when_view_missing(created: list[dict[str, Any]], answer
     class UndefinedTableError(Exception):
         pass
 
-    answers.update(_answers(version=UndefinedTableError("relation does not exist")))
+    answers.update(_answers(versions=UndefinedTableError("relation does not exist")))
     result = await Database(SETTINGS).readiness()
     assert not result.ok
     assert result.body["db"] == "ok"
