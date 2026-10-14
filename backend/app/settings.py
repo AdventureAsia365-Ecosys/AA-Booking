@@ -8,6 +8,9 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
   ``ENVIRONMENT`` is ``test`` or ``local`` (CI's Postgres service has no TLS).
 - ``ENVIRONMENT``: ``dev`` (default), ``test`` or ``local``.
 - ``GIT_SHA``: commit the image was built from (Docker build arg), echoed by ``/booking/health``.
+- ``WORKER_ENABLED``: ``true`` / ``false``. Runs the ``booking.job`` worker loop inside the API
+  process (Dev, AA-681 slice 2). Default: on when ``ENVIRONMENT`` is ``dev`` and ``DATABASE_URL``
+  is set, off otherwise (tests and local runs start it explicitly).
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ SERVICE_NAME = "aa-booking-api"
 
 SSL_MODES = frozenset({"require", "disable"})
 INSECURE_ENVIRONMENTS = frozenset({"test", "local"})
+TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 class SettingsError(ValueError):
@@ -32,6 +37,7 @@ class Settings:
     db_ssl: str = "require"
     environment: str = "dev"
     git_sha: str = "unknown"
+    worker_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -42,11 +48,27 @@ class Settings:
             )
 
 
+def _flag(raw: str | None, default: bool, name: str) -> bool:
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in TRUE_VALUES:
+        return True
+    if value in FALSE_VALUES:
+        return False
+    raise SettingsError(f"{name} must be true or false, got {raw!r}")
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = os.environ if env is None else env
+    database_url = env.get("DATABASE_URL") or None
+    environment = (env.get("ENVIRONMENT") or "dev").strip().lower()
     return Settings(
-        database_url=env.get("DATABASE_URL") or None,
+        database_url=database_url,
         db_ssl=(env.get("DB_SSL") or "require").strip().lower(),
-        environment=(env.get("ENVIRONMENT") or "dev").strip().lower(),
+        environment=environment,
         git_sha=(env.get("GIT_SHA") or "unknown").strip(),
+        worker_enabled=_flag(
+            env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
+        ),
     )

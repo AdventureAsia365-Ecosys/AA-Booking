@@ -18,6 +18,7 @@ import pytest
 ADMIN_DSN = os.environ.get("BOOKING_TEST_ADMIN_DSN", "")
 MIGRATIONS = sorted((Path(__file__).resolve().parents[3] / "migrations").glob("*.sql"))
 STUB_SHARED = Path(__file__).with_name("stub_shared.sql")
+STUB_TRIPPLANNER = Path(__file__).with_name("stub_tripplanner.sql")
 # CI-only value for the step Nghiep does out-of-band on Dev (ALTER ROLE booking WITH LOGIN PASSWORD).
 BOOKING_TEST_PASSWORD = "ci-only-not-a-real-password"  # noqa: S105
 
@@ -51,6 +52,7 @@ async def _reset_and_migrate(admin_dsn: str) -> None:
     conn = await asyncpg.connect(admin_dsn)
     try:
         await conn.execute("DROP SCHEMA IF EXISTS booking CASCADE")
+        await conn.execute("DROP SCHEMA IF EXISTS tripplanner CASCADE")
         if await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = 'booking'"):
             await conn.execute("DROP OWNED BY booking")
             await conn.execute("DROP ROLE booking")
@@ -58,6 +60,7 @@ async def _reset_and_migrate(admin_dsn: str) -> None:
         await conn.execute("DELETE FROM shared.schema_versions WHERE version LIKE 'bk-%'")
         await apply_migrations(conn)
         await conn.execute(f"ALTER ROLE booking WITH LOGIN PASSWORD '{BOOKING_TEST_PASSWORD}'")
+        await conn.execute(STUB_TRIPPLANNER.read_text(encoding="utf-8"))
     finally:
         await conn.close()
 
