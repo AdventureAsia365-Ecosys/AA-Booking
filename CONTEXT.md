@@ -5,7 +5,9 @@ identity), trip cases opened from TripPlanner inquiries, proposals, suppliers, i
 payments. It is built in-house from scratch (no vendor code was delivered). Today the repo holds
 the **bootstrap health slice** (FastAPI service with liveness/readiness, the 5-check CI, the Dev deploy
 workflow, migration `bk-001`) and **slice 2 "inquiry intake"** (AA-681: migration `bk-002`, the
-`booking.job` worker, TripPlanner `inquiry.submitted` → lead customer + trip case + staff notification).
+`booking.job` worker, TripPlanner `inquiry.submitted` → lead customer + trip case + staff notification) and
+**slice 3 "staff workflow"** (AA-680 staff half + AA-681: migration `bk-003`, staff authentication with the CIS
+staff JWT, staff profiles, trip case list/detail/edit/status/assignment endpoints, proposal versions).
 
 > Read this file before designing or changing anything here (AA-Ecosys steering, "CONTEXT.md
 > first"). Change it in the same PR when a boundary, owner or the stack changes.
@@ -29,6 +31,8 @@ Design sources, in order:
   (`inquiry.submitted` v1 / v1.1, contract in `AA-Ecosys/docs/contracts/`, grant = TripPlanner `tp-009`) —
   pattern outbox → pull job → `booking.inbox_events`. Later: CIS catalog read model (`catalog.tour.*`,
   AA-679), CIS golden records (`shared.destinations`, photo views).
+- **Trusts** the CIS staff login (ADR 0004 O1): CIS issues an RS256 JWT with `aud=booking`; Booking
+  verifies it against the CIS JWKS and keeps only a thin staff profile (`booking.staff_users`).
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -49,6 +53,11 @@ Design sources, in order:
 backend/
   app/main.py              FastAPI app factory; every path is under /booking
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
+  app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff
+  app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*)
+  app/auth/                staff JWT + JWKS cache (tokens.py), profile/provisioning/permissions (staff.py), admin ops
+  app/trip_cases/          trip case service (list, detail, edit, status, assign) + versions/items
+  app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
   app/db.py                lazy asyncpg pool + readiness probe (REQUIRED_SCHEMA_VERSION)
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
@@ -59,7 +68,7 @@ backend/
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
-docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md)
+docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md, AA-681-slice3.md)
 .github/workflows/         ci.yml (5 required checks), deploy-dev.yml
 ```
 
@@ -79,7 +88,22 @@ scaling to 1 is an approved, billable step.
 
 Process environment (set by the task definition): `DATABASE_URL` (from the secret), `ENVIRONMENT`,
 `GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
-(optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set).
+(optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
+`STAFF_JWT_ISSUER` (optional; default to the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
+
+## Staff authentication and permissions (AA-680, ADR 0004 O1)
+
+- Every `/booking/staff*` and `/booking/trip-cases*` route needs `Authorization: Bearer <CIS staff JWT>`: RS256,
+  `kid` header, `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `exp`, `sub` = CIS `admin_users.id`, claims
+  `email`, `name`, `cis_role` (`admin|reviewer|content`). The JWKS is cached 10 min; an unknown `kid` refetches
+  (at most every 30 s); with no key set at all the answer is 503, a bad token is 401.
+- First valid token → `booking.staff_users` row: CIS `admin` → active Booking `admin`; `reviewer` → `sales`,
+  `content` → `content_creator`, **inactive** (403 `staff_inactive`) until a Booking admin activates them
+  (`PATCH /booking/staff/{cis_user_id}`). Role and `active` are owned by Booking admins; later tokens only refresh
+  email/name/cis_role/last_seen_at.
+- Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
+  read trip cases = admin, sales, contracting; write / assign / versions = admin, sales; staff admin = admin.
+- Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
 
 ## Deferred work (`booking.job`, O3/O9)
 
@@ -97,7 +121,7 @@ tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
 
 - `GET /booking/health` → 200 `{"status":"ok","service":"aa-booking-api","git_sha":"<sha>"}`.
   No DB call. Used by the ALB target group, so a DB outage never trips the ECS circuit breaker.
-- `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-002"}` when the
+- `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-003"}` when the
   DB answers and the newest registered `bk-NNN` ≥ `REQUIRED_SCHEMA_VERSION`; otherwise 503 with
   `db` = `ok` | `error` | `not_configured`. Bodies never contain the DSN or error messages.
 
@@ -134,14 +158,22 @@ email/phone unique among **verified** live customers only; `trip_cases` (ERD v2 
 `trip_plan_id`, status `TEXT + CHECK` with ERD's 13 values), `trip_case_legs` (`source_tour_id TEXT`),
 `notifications` (staff queue, `recipient_id NULL` until O1).
 
-Waiting for decisions: `staff_users` (O1: staff use the CIS login), `trip_case_status_history` +
-transition trigger (status vocabulary), `trip_case_countries` / `areas` / `country_profiles` (O7, ISO
-mapping), catalog / `trip_plans` (AA-679), versions / operations / money (AA-681/682).
+### `bk-003` (AA-680 staff half + AA-681 slice 3)
+
+`staff_users` (thin profile keyed by `cis_user_id` = JWT `sub`; role `admin|sales|contracting|content_creator`,
+`active`), `trip_case_status_transitions` (read-only for the app; pre-sale edges only: `new_inquiry → discovery →
+building → proposal_sent`, back-steps `building → discovery`, `proposal_sent → building`, `→ cancelled` from those
+four) + a trigger rejecting other edges + `trip_case_status_history` written by trigger (actor/reason from
+transaction-local `booking.actor` / `booking.status_note`; append-only for the app), `staff_assignments` (one open
+assignment per case and role), `trip_case_versions` (one approved per case; approved = locked by trigger) +
+`trip_case_version_itinerary` (free-text items until AA-679), `trip_cases.notes`, `audit_logs.actor_ref`.
+
+Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
+ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
 
 ## Out of scope today
 
-Staff tables and staff endpoints (no trip-case read endpoint until staff auth exists — O1), e-mail
-notifications, catalog sync, any use of `shared.job`, the `trip_case.status_changed` back-channel, CIS
+Version approval / send-to-customer endpoints, post-sale status edges, e-mail notifications, catalog sync, any use of `shared.job`, the `trip_case.status_changed` back-channel, CIS
 grant migrations, the frontend and its Vercel project, a custom domain.
 
 ## Working rules

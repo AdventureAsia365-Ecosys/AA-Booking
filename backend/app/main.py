@@ -3,6 +3,9 @@
 Every public path is under ``/booking``: the shared ALB forwards ``/booking/*`` to this service and
 the Booking REST API proxies ``/booking/{proxy+}`` (root ADR 0004 decision 5).
 
+Staff routes (``/booking/staff*``, ``/booking/trip-cases*``) verify a CIS staff JWT against the CIS
+JWKS (``app.auth``, ADR 0004 O1) and require an active ``booking.staff_users`` row.
+
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
 (``app.jobs.worker``) as one background task of this process — never from a request path.
 """
@@ -17,10 +20,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.auth.tokens import JwksCache, StaffTokenVerifier, http_fetcher
 from app.db import Database
+from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
 from app.jobs.worker import Worker
-from app.routers import health
+from app.routers import health, staff, trip_cases
 from app.settings import Settings, load_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -30,9 +35,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 WORKER_STOP_TIMEOUT_S = 20.0
 
 
-def create_app(settings: Settings | None = None, db: Database | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, db: Database | None = None, verifier: StaffTokenVerifier | None = None
+) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
+    verifier = verifier or StaffTokenVerifier(JwksCache(http_fetcher(settings.cis_jwks_url)), settings.staff_jwt_issuer)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -57,7 +65,11 @@ def create_app(settings: Settings | None = None, db: Database | None = None) -> 
     )
     app.state.settings = settings
     app.state.db = db
+    app.state.staff_verifier = verifier
+    app.add_exception_handler(ServiceError, service_error_handler)
     app.include_router(health.router)
+    app.include_router(staff.router)
+    app.include_router(trip_cases.router)
     return app
 
 

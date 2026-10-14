@@ -108,6 +108,19 @@ def test_function_grant_with_several_arguments() -> None:
     assert "grant" in _rules(bad)
 
 
+def test_trigger_event_lists_are_not_dml() -> None:
+    trigger = (
+        "CREATE OR REPLACE TRIGGER t_lock BEFORE INSERT OR UPDATE OR DELETE ON booking.t "
+        "FOR EACH ROW EXECUTE FUNCTION booking.f();\n"
+    )
+    assert _rules(GOOD.replace("COMMIT;", trigger + "COMMIT;")) == set()
+    elsewhere = (
+        "CREATE OR REPLACE TRIGGER t_lock BEFORE UPDATE OR DELETE ON shared.job "
+        "FOR EACH ROW EXECUTE FUNCTION booking.f();\n"
+    )
+    assert "create-target" in _rules(GOOD.replace("COMMIT;", elsewhere + "COMMIT;"))
+
+
 def test_views_must_be_read_only_for_the_app() -> None:
     view = "CREATE OR REPLACE VIEW booking.v AS SELECT 1 AS one;\n"
     assert "view-read-only" in _rules(GOOD.replace("COMMIT;", view + "COMMIT;"))

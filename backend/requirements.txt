@@ -5,3 +5,6 @@ uvicorn==0.53.0
 asyncpg==0.31.0
 pydantic==2.13.5
 jsonschema==4.23.0
+# Staff JWT verification (RS256 against the CIS JWKS, AA-680) — same library as AA-CIS-App (PyJWT[crypto]).
+PyJWT==2.15.1
+cryptography==50.0.2
