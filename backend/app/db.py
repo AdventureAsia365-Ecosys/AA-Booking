@@ -18,7 +18,7 @@ from app.settings import Settings
 log = logging.getLogger(__name__)
 
 # The newest bk-NNN migration this code needs. Readiness fails until it is registered.
-REQUIRED_SCHEMA_VERSION = "bk-003"
+REQUIRED_SCHEMA_VERSION = "bk-005"
 
 CONNECT_TIMEOUT_S = 5.0
 PROBE_TIMEOUT_S = 5.0

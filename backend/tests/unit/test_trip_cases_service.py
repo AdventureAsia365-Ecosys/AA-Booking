@@ -27,6 +27,9 @@ def case_row(status: str = "new_inquiry", **extra: Any) -> dict[str, Any]:
         "status": status,
         "currency": None,
         "pax": 2,
+        "pax_adults": None,
+        "pax_children": None,
+        "trip_style": None,
         "start_date": None,
         "notes": None,
         "inquiry_snapshot": None,
@@ -91,7 +94,8 @@ async def test_get_case_assembles_detail() -> None:
     case = await service.get_case(conn, "TC-000001")
     assert case["inquiry_snapshot"] == {"days": []}
     assert case["legs"][0]["source_tour_id"] == "t"
-    assert case["versions"] == [{"version_number": 1}]
+    assert case["versions"] == [{"version_number": 1, "fx_locked": None}]
+    assert case["trip_title"] == "AA tour t" and case["duration_days"] == 2
     assert case["allowed_transitions"] == ["cancelled", "discovery"]
 
 

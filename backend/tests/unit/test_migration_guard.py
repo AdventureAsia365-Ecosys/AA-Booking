@@ -34,9 +34,16 @@ def test_every_migration_passes_the_guard(path: Path) -> None:
     assert not violations, "\n".join(str(v) for v in violations)
 
 
+# Numbers taken by an open parallel branch: a gap is allowed only for these. Remove an entry once that
+# branch is merged (the file is then here and the gap is gone).
+RESERVED_ON_OTHER_BRANCHES = {4: "bk-004 pricing rules / FX / item costs (AA-810, feat/aa-810 branch)"}
+
+
 def test_migration_numbers_are_unique_and_contiguous() -> None:
-    numbers = sorted(int(p.name[:3]) for p in MIGRATIONS.glob("*.sql"))
-    assert numbers == list(range(1, len(numbers) + 1))
+    numbers = [int(p.name[:3]) for p in MIGRATIONS.glob("*.sql")]
+    assert len(numbers) == len(set(numbers)), "two migrations share a number"
+    gaps = set(range(1, max(numbers) + 1)) - set(numbers)
+    assert gaps <= set(RESERVED_ON_OTHER_BRANCHES), f"unexpected gap(s) {sorted(gaps)}"
 
 
 def test_good_example_passes() -> None:

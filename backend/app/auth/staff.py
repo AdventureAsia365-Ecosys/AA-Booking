@@ -34,7 +34,12 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "trip_case.write": frozenset({"admin", "sales"}),
     "trip_case.assign": frozenset({"admin", "sales"}),
     "version.write": frozenset({"admin", "sales"}),
+    "customer.read": frozenset({"admin", "sales", "contracting"}),
+    "customer.write": frozenset({"admin", "sales"}),
+    "customer.admin": frozenset({"admin"}),  # block / unblock, archive
+    "staff.directory": frozenset({"admin", "sales", "contracting"}),  # StaffPicker (D4)
     "staff.admin": frozenset({"admin"}),
+    "audit.read": frozenset({"admin"}),
 }
 
 # last_seen_at is refreshed at most this often (one write per staff user per 5 minutes, not per request).

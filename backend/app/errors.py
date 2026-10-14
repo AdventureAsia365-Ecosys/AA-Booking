@@ -21,6 +21,10 @@ class ServiceError(Exception):
         return {"detail": self.code, "message": self.message, **self.extra}
 
 
+class Forbidden(ServiceError):
+    status_code = 403
+
+
 class NotFound(ServiceError):
     status_code = 404
 
