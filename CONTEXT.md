@@ -47,7 +47,7 @@ Design sources, in order:
 | DB access | asyncpg with plain SQL, no ORM in request paths; `ssl="require"` |
 | Lint / tests | ruff, pytest + pytest-asyncio, migration guard, integration tests on Postgres 15 |
 | Runtime | ECS Fargate service `aa-booking-dev-api` on `aa-cis-dev-cluster` (acc2, us-west-1) |
-| Frontend | Next.js on Vercel — **not started** (waits for staff identity O1 and customer surface O8) |
+| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the copied CIS kit tokens, react-query, TanStack Table. Vercel project not created yet. Customer surface (O8) not started |
 
 ## Layout
 
@@ -80,8 +80,9 @@ backend/
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
-docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md)
-.github/workflows/         ci.yml (5 required checks), deploy-dev.yml
+docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md, AA-683.md)
+.github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
+frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
 
 ## Runtime and request path
@@ -219,8 +220,26 @@ ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), 
 Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), catalog
 sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), FX
 rate entry (no `/pricing/rules` or FX endpoint yet: rows go in by a reviewed migration or by hand on Dev), any use of
-`shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend and its Vercel
-project, a custom domain.
+`shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
+project `aa-booking-admin` exists since S236, root `frontend/`).
+
+## Staff admin frontend (AA-683)
+
+- `frontend/` is a Next.js app for Booking staff (UI spec S236). The browser only talks to its own BFF:
+  `POST /api/auth/login` (CIS `/auth/admin-login` → `/auth/booking-token`), `POST /api/auth/logout`, and
+  `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the Booking JWT as Bearer. Tokens live only in
+  httpOnly cookies (`bk_cis_session`, `bk_access`); `proxy.ts` and the BFF re-mint the 15-minute Booking token
+  from the CIS session.
+- `frontend/ui/` holds byte copies of the CIS kit (`app/_kit`, `_brand/tokens.ts`, the `--aa-*` blocks of
+  `globals.css`) with the source commit in each header. Brand values change in CIS first, then are copied again.
+  Booking-only components are in `frontend/ui/booking/` and use Tailwind utilities mapped to the same variables.
+- Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
+  logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
+  never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.
+- Every route of UI spec §3 exists. Wave 1 pages read the real API; wave 2/3 pages render their layout frame with
+  "Coming in wave N". `SHIPPED_WAVE` in `frontend/ui/nav.tsx` decides which nav items show.
+- Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
+  API). Public: `NEXT_PUBLIC_CIS_ADMIN_URL`, `NEXT_PUBLIC_GOOGLE_SIGNIN_URL` (unset = no Google button, AA-703).
 
 ## Working rules
 

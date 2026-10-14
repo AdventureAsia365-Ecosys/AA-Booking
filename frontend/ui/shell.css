@@ -1,0 +1,182 @@
+/* AA-683: copy of the theme-baseline and admin-shell rules of AA-CIS-App frontend/app/globals.css
+   (lines 292-318 and 334-483) at CIS commit 039bb250, so the copied kit shell classes behave the same.
+   Only change: the hamburger fallback colour reads --aa-side-bg instead of the legacy --brand-blackblue. */
+
+
+/* AA-601 part B (feedback 2) — tell the UA which colour scheme is active so native widgets
+   (dropdown popups, date pickers, scrollbars, form-control chrome) render for the right theme.
+   Scoped to the data-theme element: the portal + login pin data-theme="light", so they stay light. */
+[data-theme="light"] { color-scheme: light; }
+[data-theme="dark"]  { color-scheme: dark; }
+
+/* AA-601 part B (feedback 2) — themed baseline for admin form controls under the dark theme. Inline
+   styles still win where a component sets them (those were converted to tokens), but this catches
+   controls that rely on UA defaults so none render as a white box with invisible light text. Scoped
+   to [data-theme="dark"] (admin only — portal/login are pinned light). */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background-color: var(--aa-card);
+  color: var(--aa-ink);
+  border-color: var(--aa-line);
+}
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--aa-muted2);
+}
+[data-theme="dark"] option {
+  background-color: var(--aa-card);
+  color: var(--aa-ink);
+}
+
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   AA-601 — admin responsive (< 768px). Media queries cannot be inline styles,
+   so the minimal rules live here as plain CSS classes (no Tailwind classNames).
+   ≥ 768px nothing below applies: the admin sidebar + page layout stay exactly
+   as the inline styles define them.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* The hamburger that opens the drawer. Hidden ≥ 768px; shown only on small screens. */
+.aa-admin-hamburger { display: none; }
+.aa-admin-backdrop { display: none; }
+
+@media (max-width: 767px) {
+  /* Take the sidebar out of the flex row so it no longer eats ~60% of a 390px screen:
+     fixed + off-canvas by default, slid in when open. */
+  .aa-admin-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100% !important;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease, visibility 0.22s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+    /* Closed drawer must not be keyboard-focusable (its nav buttons would otherwise be in the tab
+       order while off-canvas). visibility:hidden takes it out of the tab order; it only applies
+       < 768px, so >= 768px is unaffected. */
+    visibility: hidden;
+  }
+  .aa-admin-sidebar.aa-admin-sidebar--open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  /* Fixed top-left hamburger, ≥ 40×40 touch target. */
+  .aa-admin-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 1001;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--aa-side-bg);
+    color: #F4F1EC;
+    cursor: pointer;
+  }
+
+  /* Backdrop behind the open drawer; click to close. */
+  .aa-admin-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  /* AA-752 — the shell's topbar is in-flow now (no fixed hamburger), so the old 56px top gap is
+     gone; the bottom padding clears the fixed BottomNav so page content is never hidden behind it. */
+  .aa-admin-main {
+    padding: 16px 16px 84px !important;
+  }
+
+  /* AA-752 — the drawer is always the full expanded width on phones, even when the desktop rail is
+     collapsed (the collapsed 68px inline width would make a useless drawer). */
+  .aa-admin-sidebar {
+    width: 264px !important;
+    padding: 22px 14px 24px !important;
+  }
+  /* The Social Content split (sub-nav + body) already stacks via its own rule at 980px. */
+
+  /* AA-601 (feedback 1) — the atom-curation inner split (tour list 280px + body) kept a fixed
+     280px first track, so its body column forced ~1136px of page-level horizontal scroll at 390px.
+     Stack it to a single column below 768px; the body's own tables keep their overflow-x wrapper. */
+  .aa-curation-split {
+    grid-template-columns: 1fr !important;
+  }
+  /* KPI / stat-card rows (5- and 6-up on desktop) wrap to 2-up on small screens so their fixed
+     label text does not force page-level overflow. */
+  .aa-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* AA-752 — the phone drawer always shows full labels + group titles, even when the desktop rail
+     is collapsed (its own CSS below hides them off `data-collapsed`). Reset that here, and center
+     nothing — the drawer is a full-width panel. */
+  .aa-shell-sidebar .aa-sidebar-label,
+  .aa-shell-sidebar .aa-sidebar-group-title {
+    display: block !important;
+  }
+  .aa-shell-sidebar .aa-sidebar-badge-pill { display: grid !important; }
+  .aa-shell-sidebar .aa-sidebar-badge-dot { display: none !important; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   AA-752 — admin shell: collapsible sidebar presentation, phone bottom nav,
+   and the topbar's mobile/desktop element swap. Media queries + attribute
+   selectors cannot be inline styles, so they live here (no Tailwind classes).
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Collapsed desktop rail: hide the text labels + group titles + the inline badge pill, show the
+   small on-icon badge dot instead, and center every row. The <aside> keeps its 68px inline width. */
+.aa-shell-sidebar[data-collapsed="true"] .aa-sidebar-label,
+.aa-shell-sidebar[data-collapsed="true"] .aa-sidebar-group-title,
+.aa-shell-sidebar[data-collapsed="true"] .aa-sidebar-badge-pill {
+  display: none;
+}
+.aa-shell-sidebar[data-collapsed="true"] .aa-sidebar-badge-dot {
+  display: grid;
+}
+.aa-shell-sidebar[data-collapsed="true"] nav button,
+.aa-shell-sidebar[data-collapsed="true"] > div:last-child button,
+.aa-shell-sidebar[data-collapsed="true"] > div:first-child button {
+  justify-content: center;
+}
+
+/* Phone bottom navigation — fixed, hidden ≥ 768px. */
+.aa-bottom-nav { display: none; }
+
+@media (max-width: 767px) {
+  .aa-bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    height: 60px;
+    background: var(--aa-card);
+    border-top: 1px solid var(--aa-line);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Topbar element swap: hide the full search pill + the "Admin /" crumb root, show the mobile
+     hamburger + search icon + the flex spacer that keeps the right cluster right-aligned. Tighten
+     the gap + padding and hide the account name so the fixed items fit within 390px (AA-752 fb1). */
+  .aa-topbar { gap: 6px !important; padding: 0 10px !important; }
+  .aa-topbar-search,
+  .aa-topbar-crumb-root,
+  .aa-topbar-account-name { display: none !important; }
+  .aa-topbar-menu,
+  .aa-topbar-search-icon { display: inline-flex !important; }
+  .aa-topbar-spacer { display: block !important; }
+}
+
