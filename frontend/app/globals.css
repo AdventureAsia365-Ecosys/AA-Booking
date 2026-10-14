@@ -1,0 +1,107 @@
+/* AA-683 — global styles for the Booking staff admin.
+   One colour source (the --aa-* variables copied from CIS), two ways to read it:
+     - copied kit components (ui/*.tsx) use inline styles on `K` (ui/tokens.ts);
+     - Booking components and page layout use the Tailwind utilities generated below (UI spec Q2).
+   Never a raw hex in page code (eslint rule in eslint.config.mjs). */
+
+@import "tailwindcss";
+@import "../ui/tokens.css";
+@import "../ui/booking-tokens.css";
+@import "../ui/shell.css";
+
+/* The theme is driven by <html data-theme> (restored before paint in app/layout.tsx), not by the
+   OS media query, so Tailwind's `dark:` variant follows the same attribute. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-accent: var(--aa-accent);
+  --color-accent-deep: var(--aa-accent-deep);
+  --color-accent-soft: var(--aa-accent-soft);
+  --color-accent-tint: var(--aa-accent-tint);
+  --color-accent-border: var(--aa-accent-border);
+  --color-accent-line: var(--bk-accent-line);
+  --color-slate: var(--aa-slate);
+  --color-danger: var(--aa-red);
+  --color-danger-soft: var(--aa-red-soft);
+  --color-danger-border: var(--aa-red-border);
+  --color-success: var(--aa-green);
+  --color-success-soft: var(--aa-green-soft);
+  --color-warning: var(--aa-kit-amber);
+  --color-warning-soft: var(--aa-kit-amber-soft);
+  --color-orange: var(--bk-orange);
+  --color-orange-soft: var(--bk-orange-soft);
+  --color-info: var(--aa-info);
+  --color-info-soft: var(--aa-info-soft);
+  --color-purple: var(--aa-purple);
+  --color-purple-soft: var(--aa-purple-soft);
+  --color-neutral-bg: var(--aa-neutral-bg);
+  --color-neutral-fg: var(--aa-neutral-fg);
+  --color-ink: var(--aa-ink);
+  --color-ink2: var(--aa-ink2);
+  --color-ink3: var(--aa-ink3);
+  --color-body: var(--aa-body);
+  --color-muted: var(--aa-muted);
+  --color-muted2: var(--aa-muted2);
+  --color-bg: var(--aa-bg);
+  --color-card: var(--aa-card);
+  --color-line: var(--aa-line);
+  --color-line2: var(--aa-line2);
+  --color-panel: var(--aa-panel-bg0);
+  --color-on-accent: var(--aa-on-accent);
+  --color-side-bg: var(--aa-side-bg);
+  --color-side-panel: var(--aa-side-panel);
+  --color-side-text: var(--aa-side-text);
+  --color-side-text2: var(--aa-side-text2);
+
+  --font-sans: var(--bk-font-sans);
+  --font-display: var(--bk-font-display);
+  --font-mono: var(--bk-font-mono);
+  --font-script: var(--bk-font-script);
+
+  /* Kit radii (ui/tokens.ts RADIUS): sm 6, md 8, lg 12. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+html,
+body {
+  background-color: var(--aa-bg);
+  color: var(--aa-body);
+  font-family: var(--bk-font-sans);
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures for money and counts (design system §6.2). */
+.bk-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--aa-bg); }
+::-webkit-scrollbar-thumb { background: var(--aa-line); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--aa-muted2); }
+
+:focus-visible {
+  outline: 2px solid var(--aa-accent-border);
+  outline-offset: 2px;
+}
+
+/* Login splash: the Figma "Group 1410084962" background (a cream wash with a warm gold corner),
+   rebuilt from tokens instead of shipping the 8784 px PNG. Light only, like the site. */
+.bk-login-bg {
+  background:
+    radial-gradient(1200px 700px at 100% 0%, color-mix(in srgb, var(--aa-accent) 28%, transparent), transparent 60%),
+    radial-gradient(900px 600px at 0% 100%, color-mix(in srgb, var(--bk-accent-line) 22%, transparent), transparent 60%),
+    var(--aa-bg);
+}

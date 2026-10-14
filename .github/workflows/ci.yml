@@ -2,6 +2,7 @@ name: CI
 
 # Five required checks, named like AA-CIS-App's so branch protection reads the same
 # (root ADR 0004 decision 3): Lint, Security Audit, Unit Tests, Integration Tests, Docker Build Check.
+# A sixth, non-required check builds the staff frontend (ADR 0004 decision 3, "Frontend Build").
 
 on:
   pull_request:
@@ -192,3 +193,36 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-${{ github.sha }}.cdx.json
           artifact-name: sbom-${{ github.sha }}.cdx.json
+
+  # Non-required (ADR 0004 decision 3): eslint, tsc and `next build` of the staff admin in frontend/.
+  # Mirrors the CIS frontend checks. Needs no secret: the app reads BOOKING_API_URL / CIS_API_URL at
+  # runtime and falls back to the Dev defaults in frontend/lib/config.ts.
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (eslint, no warnings allowed)
+        run: npm run lint
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Build (next build)
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build

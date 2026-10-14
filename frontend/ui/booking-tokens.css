@@ -1,0 +1,20 @@
+/* AA-683 — Booking-local tokens. Everything here is either a value the CIS kit does not have yet or a
+   Booking alias of a kit variable. Raw hex appears only where the kit has no equivalent:
+   --bk-accent-line is adventure.asia `gold-400` (design system §2.1 "divider gold", Nghiệp S236 light gold). */
+
+:root,
+[data-theme="light"] {
+  --bk-accent-line: #E3BD7F;
+  /* Orange tone for "Proposal sent" / "Sent" (UI spec §1.3): reads the kit's orange pair. */
+  --bk-orange: var(--aa-amber-orange);
+  --bk-orange-soft: var(--aa-amber-bg3);
+  /* Font families (loaded in app/layout.tsx). Satisfy: login splash only, >= 32 px (design system §2.2). */
+  --bk-font-sans: 'Poppins', system-ui, -apple-system, sans-serif;
+  --bk-font-display: 'Fahkwang', 'Poppins', Georgia, serif;
+  --bk-font-mono: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+  --bk-font-script: 'Satisfy', 'Fahkwang', cursive;
+}
+
+[data-theme="dark"] {
+  --bk-accent-line: #6B531F;
+}

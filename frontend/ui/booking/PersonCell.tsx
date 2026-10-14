@@ -1,0 +1,35 @@
+// ui/booking/PersonCell.tsx
+// AA-683 — initials avatar + name + sub-line + chips, for list cells and People cards (UI spec §5).
+
+export function initialsOf(name: string | null | undefined): string {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  return parts.map((p) => p[0]!.toUpperCase()).join("") || "?";
+}
+
+export function PersonCell({
+  name,
+  sub,
+  chips,
+}: {
+  name: string | null | undefined;
+  sub?: string | null;
+  chips?: React.ReactNode;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-2.5">
+      <span
+        aria-hidden="true"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent-tint text-[11px] font-bold text-accent-deep"
+      >
+        {initialsOf(name)}
+      </span>
+      <span className="min-w-0">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-[13px] font-medium text-ink">{name || "Unnamed"}</span>
+          {chips}
+        </span>
+        {sub && <span className="block truncate text-xs text-muted">{sub}</span>}
+      </span>
+    </span>
+  );
+}
