@@ -1,0 +1,6 @@
+# Runtime dependencies (pinned; same stack as AA-CIS-App: FastAPI + asyncpg, Python 3.12).
+fastapi==0.142.2
+starlette==1.7.0
+uvicorn==0.53.0
+asyncpg==0.31.0
+pydantic==2.13.5

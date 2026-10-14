@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+# AA-Booking API image. Runs as a Fargate task behind the shared ALB (target group port 8000,
+# health check /booking/health — AA-CIS-Infra accounts/aa365/booking.tf).
+FROM python:3.12-slim
+
+ARG GIT_SHA=unknown
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    GIT_SHA=${GIT_SHA}
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./app/
+
+RUN useradd --system --uid 10001 --no-create-home appuser
+USER appuser
+
+EXPOSE 8000
+
+# Liveness only (no DB). python:3.12-slim has no curl, so the probe uses the stdlib.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/booking/health', timeout=4).status == 200 else 1)"]
+
+# Keep-alive must outlive the ALB idle timeout (100 s, AA-CIS-Infra modules/alb); with uvicorn's
+# 5 s default the ALB reuses a closed connection and answers 502 (CIS lesson S231, AA-741).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "105"]

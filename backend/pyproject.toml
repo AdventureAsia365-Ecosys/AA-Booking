@@ -1,0 +1,29 @@
+[project]
+name = "aa-booking-api"
+version = "0.1.0"
+description = "AA-Booking (AAA) API — FastAPI + asyncpg on the shared acc2 RDS, schema booking"
+requires-python = ">=3.12,<3.13"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "BLE", "ASYNC", "S"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert and fixed CI-only credentials by design.
+"tests/**" = ["S101", "S105", "S106", "S608"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = ["integration: needs a real PostgreSQL (BOOKING_TEST_ADMIN_DSN); skipped otherwise"]
+
+[tool.coverage.run]
+source = ["app"]
