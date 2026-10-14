@@ -3,8 +3,9 @@
 // AA-683 — the Booking navigation model (replaces CIS adminNav.tsx), shared by the Sidebar, the Topbar
 // breadcrumb, the CommandPalette and the BottomNav. Order, groups, labels and icons are UI spec §2.2
 // (Figma regrouped per shell C-1/C-10). An item shows only when the role may open its page
-// (lib/rbac.ts) AND its wave has shipped (SHIPPED_WAVE): later-wave routes exist (spec §3) but stay
-// out of the nav until their wave ships.
+// (lib/rbac.ts) AND the entry itself is marked `shipped`: later-wave routes exist (spec §3) but stay
+// out of the nav until their page is built. The flag is per entry (S237), so one page of a wave can ship
+// without exposing the frames of the rest of its wave.
 
 import {
   Activity,
@@ -30,14 +31,14 @@ import { canSeePage } from "@/lib/rbac";
 
 export type Wave = 1 | 2 | 3;
 
-/** Raise when a wave ships: its nav items appear (Nghiệp S236 decision 3, all 3 waves are built). */
-export const SHIPPED_WAVE: Wave = 1;
-
 export interface NavEntry {
   href: string;
   label: string;
   icon: React.ReactNode;
+  /** The build wave of the page (UI spec §8); informational. */
   wave: Wave;
+  /** The page reads the real API: show it in the nav. Unshipped routes still render their WaveFrame. */
+  shipped: boolean;
   /** Other routes that belong to this entry (active-state matching). */
   also?: string[];
 }
@@ -52,46 +53,46 @@ const ICON = 16;
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Overview",
-    items: [{ href: "/", label: "Dashboard", icon: <LayoutGrid size={ICON} />, wave: 1 }],
+    items: [{ href: "/", label: "Dashboard", icon: <LayoutGrid size={ICON} />, wave: 1, shipped: true }],
   },
   {
     label: "Sales",
     items: [
-      { href: "/cases", label: "Trip Cases", icon: <Briefcase size={ICON} />, wave: 1 },
-      { href: "/proposals", label: "Proposals", icon: <MapIcon size={ICON} />, wave: 1 },
-      { href: "/customers", label: "Customers", icon: <Users size={ICON} />, wave: 1 },
-      { href: "/pricing/calculator", label: "Pricing calculator", icon: <Calculator size={ICON} />, wave: 1 },
+      { href: "/cases", label: "Trip Cases", icon: <Briefcase size={ICON} />, wave: 1, shipped: true },
+      { href: "/proposals", label: "Proposals", icon: <MapIcon size={ICON} />, wave: 1, shipped: true },
+      { href: "/customers", label: "Customers", icon: <Users size={ICON} />, wave: 1, shipped: true },
+      { href: "/pricing/calculator", label: "Pricing calculator", icon: <Calculator size={ICON} />, wave: 1, shipped: true },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/billing", label: "Payments & Invoices", icon: <CreditCard size={ICON} />, wave: 3 },
-      { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3 },
+      { href: "/billing", label: "Payments & Invoices", icon: <CreditCard size={ICON} />, wave: 3, shipped: false },
+      { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: false },
     ],
   },
   {
     label: "Supply",
     items: [
-      { href: "/suppliers", label: "Suppliers", icon: <Store size={ICON} />, wave: 2 },
-      { href: "/hotels", label: "Hotels", icon: <Building size={ICON} />, wave: 2 },
-      { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2 },
-      { href: "/pricing/rules", label: "Pricing rules & FX", icon: <Percent size={ICON} />, wave: 2 },
+      { href: "/suppliers", label: "Suppliers", icon: <Store size={ICON} />, wave: 2, shipped: false },
+      { href: "/hotels", label: "Hotels", icon: <Building size={ICON} />, wave: 2, shipped: false },
+      { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2, shipped: false },
+      { href: "/pricing/rules", label: "Pricing rules & FX", icon: <Percent size={ICON} />, wave: 2, shipped: false },
     ],
   },
   {
     label: "Catalog (from CIS)",
     items: [
-      { href: "/catalog/trip-plans", label: "Trip Plans", icon: <CalendarDays size={ICON} />, wave: 2 },
-      { href: "/catalog/destinations", label: "Destinations", icon: <MapPin size={ICON} />, wave: 2 },
-      { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2 },
+      { href: "/catalog/trip-plans", label: "Trip Plans", icon: <CalendarDays size={ICON} />, wave: 2, shipped: false },
+      { href: "/catalog/destinations", label: "Destinations", icon: <MapPin size={ICON} />, wave: 2, shipped: false },
+      { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2, shipped: false },
     ],
   },
   {
     label: "Admin",
     items: [
-      { href: "/staff", label: "Staff", icon: <Shield size={ICON} />, wave: 1 },
-      { href: "/audit-log", label: "Audit Log", icon: <ClipboardList size={ICON} />, wave: 2 },
+      { href: "/staff", label: "Staff", icon: <Shield size={ICON} />, wave: 1, shipped: true },
+      { href: "/audit-log", label: "Audit Log", icon: <ClipboardList size={ICON} />, wave: 2, shipped: true },
     ],
   },
 ];
@@ -102,6 +103,7 @@ export const SETTINGS_ENTRY: NavEntry = {
   label: "Settings",
   icon: <Settings size={ICON} />,
   wave: 1,
+  shipped: true,
 };
 
 /** Topbar bell target (all roles). */
@@ -110,6 +112,7 @@ export const NOTIFICATIONS_ENTRY: NavEntry = {
   label: "Notifications",
   icon: <Bell size={ICON} />,
   wave: 1,
+  shipped: true,
 };
 
 /** Every route (all waves), used for titles even when the nav hides the item. */
@@ -121,7 +124,7 @@ export function navActive(entry: Pick<NavEntry, "href" | "also">, pathname: stri
 }
 
 export function isVisible(entry: NavEntry, role: string | null | undefined): boolean {
-  return entry.wave <= SHIPPED_WAVE && canSeePage(role, entry.href);
+  return entry.shipped && canSeePage(role, entry.href);
 }
 
 /** Nav groups filtered for a role (empty groups dropped). */

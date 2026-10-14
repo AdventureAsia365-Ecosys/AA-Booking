@@ -325,6 +325,9 @@ export function QuoteResult({
         )}
         <dt className="text-muted">Margin applied</dt>
         <dd className="text-right text-ink">{pct(q.margin_applied)}</dd>
+        {/* ADR 0005: the card fee is built into the price (never a surcharge); the rate comes from the rule. */}
+        <dt className="text-muted">Card fee (included in the price)</dt>
+        <dd className="text-right text-ink">{pct(q.rule.card_fee_pct)}</dd>
         <dt className="text-muted">Effective margin</dt>
         <dd className={`text-right font-semibold ${q.below_floor ? "text-danger" : "text-success"}`}>
           {pct(q.effective_margin)} <span className="font-normal text-muted">(floor {pct(q.floor_margin)})</span>

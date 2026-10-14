@@ -11,6 +11,8 @@
 // "Awaiting activation" for admins and "My open cases" for sales / contracting. content_creator has no trip
 // case permission, so it gets the catalog card (CIS) instead. W2/W3 tiles (Active suppliers, Outstanding
 // balance, Rate sheets awaiting publish) are added when their endpoints exist, never as dummies.
+// Every tile's hint describes its own number. The open-case total and the month-over-month delta (spec §4.2 "Open
+// trip cases") sit on the Pipeline by phase card (S237: under "In progress" they read as a mismatch, 0 vs "1 open").
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -115,7 +117,6 @@ function SalesDashboard({ role }: { role: string }) {
   const s = summary.data;
   const v = (n: (x: TripCaseSummary) => number) => (s ? n(s) : summary.isError ? null : undefined);
   const inProgress = (x: TripCaseSummary) => IN_PROGRESS.reduce((t, k) => t + (x.by_status[k] ?? 0), 0);
-  const delta = s?.mom_delta.delta ?? 0;
   const pendingCount = pending.data?.items.length;
 
   return (
@@ -135,8 +136,7 @@ function SalesDashboard({ role }: { role: string }) {
             label="In progress"
             icon={<Hammer size={16} />}
             value={v(inProgress)}
-            hint={s ? `${s.open} open · ${delta > 0 ? "+" : ""}${delta} vs last month` : undefined}
-            hintTone={delta > 0 ? "success" : "neutral"}
+            hint={s ? "In discovery or building" : undefined}
           />
         </TileLink>
         <TileLink href={casesHref(["proposal_sent"])} label="Proposals sent: open the cases waiting for the customer">
@@ -339,6 +339,7 @@ function RecentCards({
 
 /** The 13 statuses grouped into the 4 phases of the case stepper (Nghiệp S236 decision 4), plus Cancelled. */
 function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary | undefined; loading: boolean; failed: boolean }) {
+  const delta = summary?.mom_delta.delta ?? 0;
   const phases = STATUS_PHASES.map((p) => ({
     ...p,
     count: summary ? p.statuses.reduce((t, k) => t + (summary.by_status[k] ?? 0), 0) : 0,
@@ -346,7 +347,22 @@ function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary |
   const cancelled = summary?.by_status.cancelled ?? 0;
   const max = Math.max(1, ...phases.map((p) => p.count), cancelled);
   return (
-    <Section title="Pipeline by phase" description="All trip cases, grouped like the case stepper.">
+    <Section
+      title="Pipeline by phase"
+      description="All trip cases, grouped like the case stepper."
+      actions={
+        summary ? (
+          <span className="text-right text-xs text-muted">
+            <span className="font-semibold text-ink">{summary.open}</span> open ·{" "}
+            <span className={delta > 0 ? "text-success" : delta < 0 ? "text-danger" : undefined}>
+              {delta > 0 ? "+" : ""}
+              {delta}
+            </span>{" "}
+            opened vs last month
+          </span>
+        ) : undefined
+      }
+    >
       {loading ? (
         <div className="flex flex-col gap-3" aria-busy="true">
           {[0, 1, 2, 3].map((i) => (
