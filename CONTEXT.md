@@ -7,7 +7,9 @@ the **bootstrap health slice** (FastAPI service with liveness/readiness, the 5-c
 workflow, migration `bk-001`) and **slice 2 "inquiry intake"** (AA-681: migration `bk-002`, the
 `booking.job` worker, TripPlanner `inquiry.submitted` → lead customer + trip case + staff notification) and
 **slice 3 "staff workflow"** (AA-680 staff half + AA-681: migration `bk-003`, staff authentication with the CIS
-staff JWT, staff profiles, trip case list/detail/edit/status/assignment endpoints, proposal versions).
+staff JWT, staff profiles, trip case list/detail/edit/status/assignment endpoints, proposal versions) and the
+**Wave 1 staff admin backend** (migration `bk-005`: case create, dashboard summary, activity, version send /
+approve / delete, cross-case version list, customers, notifications, staff directory, settings, audit log read).
 
 > Read this file before designing or changing anything here (AA-Ecosys steering, "CONTEXT.md
 > first"). Change it in the same PR when a boundary, owner or the stack changes.
@@ -54,11 +56,18 @@ backend/
   app/main.py              FastAPI app factory; every path is under /booking
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
   app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff
-  app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*)
+  app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
+  app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
+  app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
+  app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin)
   app/auth/                staff JWT + JWKS cache (tokens.py), profile/provisioning/permissions (staff.py), admin ops
-  app/trip_cases/          trip case service (list, detail, edit, status, assign) + versions/items
+  app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
+                           versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
+  app/customers/           customers over booking.v_customer_summary (status lead/active/past), leads, archive
+  app/notifications/       staff feed + notify helpers (rows only, no e-mail)
+  app/paging.py            keyset cursors (next_before) + ILIKE escaping; app/reference.py settings/countries
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
-  app/db.py                lazy asyncpg pool + readiness probe (REQUIRED_SCHEMA_VERSION)
+  app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
@@ -68,7 +77,7 @@ backend/
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
-docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md, AA-681-slice3.md)
+docs/implementation-notes/ per-issue decisions (AA-678.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md)
 .github/workflows/         ci.yml (5 required checks), deploy-dev.yml
 ```
 
@@ -93,7 +102,7 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
 
 ## Staff authentication and permissions (AA-680, ADR 0004 O1)
 
-- Every `/booking/staff*` and `/booking/trip-cases*` route needs `Authorization: Bearer <CIS staff JWT>`: RS256,
+- Every `/booking/*` route except `/booking/health*` needs `Authorization: Bearer <CIS staff JWT>`: RS256,
   `kid` header, `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `exp`, `sub` = CIS `admin_users.id`, claims
   `email`, `name`, `cis_role` (`admin|reviewer|content`). The JWKS is cached 10 min; an unknown `kid` refetches
   (at most every 30 s); with no key set at all the answer is 503, a bad token is 401.
@@ -102,7 +111,9 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
   (`PATCH /booking/staff/{cis_user_id}`). Role and `active` are owned by Booking admins; later tokens only refresh
   email/name/cis_role/last_seen_at.
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
-  read trip cases = admin, sales, contracting; write / assign / versions = admin, sales; staff admin = admin.
+  read trip cases / customers = admin, sales, contracting; write / assign / versions / customers write = admin,
+  sales; staff directory (pickers) = admin, sales, contracting; block / archive customers, staff admin, audit log
+  read = admin. Notifications, settings, countries, own preferences and own staff detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
 
 ## Deferred work (`booking.job`, O3/O9)
@@ -121,16 +132,17 @@ tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
 
 - `GET /booking/health` → 200 `{"status":"ok","service":"aa-booking-api","git_sha":"<sha>"}`.
   No DB call. Used by the ALB target group, so a DB outage never trips the ECS circuit breaker.
-- `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-003"}` when the
-  DB answers and the newest registered `bk-NNN` ≥ `REQUIRED_SCHEMA_VERSION`; otherwise 503 with
-  `db` = `ok` | `error` | `not_configured`. Bodies never contain the DSN or error messages.
+- `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-005"}` when the
+  DB answers and **every** `bk-NNN` in `REQUIRED_SCHEMA_VERSIONS` is registered (a gap, e.g. bk-005 in but
+  bk-004 missing, is not ready); otherwise 503 with `db` = `ok` | `error` | `not_configured` (plus
+  `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages.
 
 ## Database rules
 
 - Migrations live in `migrations/`, are reviewed here, then **byte-copied** to
   `AA-CIS-Infra/db/migrations/booking/` and applied by the **DB Migrate** workflow (check → apply).
-  Never applied from a laptop. Apply a migration before merging code that needs it, then bump
-  `REQUIRED_SCHEMA_VERSION`.
+  Never applied from a laptop. Apply a migration before merging code that needs it, then add it to
+  `REQUIRED_SCHEMA_VERSIONS`.
 - DB Migrate runs as the RDS master user `aa_cis_admin`, so every `booking.*` object is owned by it.
   Default privileges therefore say `FOR ROLE aa_cis_admin` (ADR 0004 decision 6).
 - The app connects as role `booking`: `USAGE` on schema `booking` only (no `CREATE`), DML on its
@@ -168,13 +180,28 @@ transaction-local `booking.actor` / `booking.status_note`; append-only for the a
 assignment per case and role), `trip_case_versions` (one approved per case; approved = locked by trigger) +
 `trip_case_version_itinerary` (free-text items until AA-679), `trip_cases.notes`, `audit_logs.actor_ref`.
 
+### `bk-005` (Wave 1 staff admin, AA-681/AA-680/AA-810 W1)
+
+Independent of `bk-004` (applies before or after it; per-table grants only, so the append-only pricing tables stay
+append-only). Status edges `proposal_sent → confirmed` (only via version approval), `confirmed → cancelled` and
+`cancelled → new_inquiry` (cancel and reopen need a reason); `trip_case_status_history.seq`; `trip_cases.pax_adults/pax_children` (+ split check);
+`countries` (ISO-2 reference, not content) + `trip_case_countries`; `customers.code` (`CUS-000123`) and the read-only
+view `v_customer_summary` (status lead / active / past); version `title`, `valid_until`, `channel`, FX lock columns,
+`sent_by` / `approved_by` / `approval_note`, `updated_by`, `deleted_at` (soft-deleted drafts) and a **sent = locked**
+trigger on versions and items (a sent version cannot be hard-deleted; role `booking` has no DELETE on versions); `notifications.recipient_ref` + `notification_reads` (per-staff read state);
+`staff_users.preferences`; `settings` rows (`deposit_pct` 30, `quote_validity_days` 14; read-only for the app);
+`audit_logs.entity_label` / `summary` + a time index.
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
 
 ## Out of scope today
 
-Version approval / send-to-customer endpoints, post-sale status edges, e-mail notifications, catalog sync, any use of `shared.job`, the `trip_case.status_changed` back-channel, CIS
-grant migrations, the frontend and its Vercel project, a custom domain.
+Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), catalog
+sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), the
+version price endpoint / cost lines / FX lock values (wait for bk-004 on the AA-810 branch), any use of
+`shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend and its Vercel
+project, a custom domain.
 
 ## Working rules
 

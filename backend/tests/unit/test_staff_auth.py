@@ -143,7 +143,15 @@ def test_returning_user_without_changes_is_read_back_and_not_audited() -> None:
         r = c.get("/booking/staff/me", headers=auth(cis.token(sub="u-1", cis_role="reviewer")))
     assert r.status_code == 200
     assert r.json()["role"] == "sales"
-    assert r.json()["permissions"] == ["trip_case.assign", "trip_case.read", "trip_case.write", "version.write"]
+    assert r.json()["permissions"] == [
+        "customer.read",
+        "customer.write",
+        "staff.directory",
+        "trip_case.assign",
+        "trip_case.read",
+        "trip_case.write",
+        "version.write",
+    ]
     assert conn.sql("INSERT INTO booking.audit_logs") == []
 
 

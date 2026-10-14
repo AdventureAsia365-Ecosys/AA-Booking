@@ -3,7 +3,7 @@
 Every public path is under ``/booking``: the shared ALB forwards ``/booking/*`` to this service and
 the Booking REST API proxies ``/booking/{proxy+}`` (root ADR 0004 decision 5).
 
-Staff routes (``/booking/staff*``, ``/booking/trip-cases*``) verify a CIS staff JWT against the CIS
+Staff routes (everything under ``/booking`` except ``/booking/health*``) verify a CIS staff JWT against the CIS
 JWKS (``app.auth``, ADR 0004 O1) and require an active ``booking.staff_users`` row.
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
@@ -25,7 +25,7 @@ from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
 from app.jobs.worker import Worker
-from app.routers import health, staff, trip_cases
+from app.routers import customers, health, notifications, reference, staff, trip_cases
 from app.settings import Settings, load_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -70,6 +70,9 @@ def create_app(
     app.include_router(health.router)
     app.include_router(staff.router)
     app.include_router(trip_cases.router)
+    app.include_router(customers.router)
+    app.include_router(notifications.router)
+    app.include_router(reference.router)
     return app
 
 

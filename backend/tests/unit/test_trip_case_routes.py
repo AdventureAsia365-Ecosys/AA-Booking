@@ -50,6 +50,12 @@ def test_list_passes_filters_and_resolves_me(make_client, monkeypatch: pytest.Mo
     assert rec.calls[0][1] == {
         "statuses": ["new_inquiry", "discovery", "building"],
         "assignee": "u-1",
+        "q": None,
+        "source": None,
+        "customer_id": None,
+        "created_from": None,
+        "created_to": None,
+        "sort": None,
         "limit": 5,
         "offset": 0,
     }
