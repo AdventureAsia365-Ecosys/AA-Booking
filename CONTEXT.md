@@ -71,8 +71,10 @@ backend/
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
-  app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py)
-  app/routers/pricing.py   POST /booking/pricing/quote-preview (permission pricing.read)
+  app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py, approved
+                           rows only) + rules/FX admin with maker-checker (policy.py, bk-007)
+  app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules and
+                           /booking/pricing/fx-rates, POST …/{id}/approve (reads pricing.read, writes pricing.write)
   app/pricing/service.py   rule + FX in force + engine, shared by quote-preview and POST …/versions/{n}/price
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
@@ -118,7 +120,8 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
   read trip cases / customers = admin, sales, contracting; write / assign / versions / customers write = admin,
   sales; staff directory (pickers) = admin, sales, contracting; pricing (margins, net costs, FX: `pricing.read`) =
-  admin, sales, contracting; block / archive customers, staff admin, audit log read = admin. Notifications, settings, countries, own preferences and own staff detail = any active staff.
+  admin, sales, contracting; new pricing rule / FX rows and their approval (`pricing.write`) = admin, contracting
+  (maker-checker: the creator of a row cannot approve it, 403 `own_row`); block / archive customers, staff admin, audit log read = admin. Notifications, settings, countries, own preferences and own staff detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
 
 ## Deferred work (`booking.job`, O3/O9)
@@ -220,7 +223,8 @@ Q19), **append-only** for role `booking` (SELECT, INSERT), one approval per row 
 `fx_rate_id`, `ON DELETE CASCADE` for the owner only). A trigger refuses an approval whose `approved_by` is the row's
 `created_by`. bk-004's policy tables keep SELECT, INSERT only (no approval column, no UPDATE grant). The three bk-004
 seed rules are approved as `seed:bk-004`; every other row that existed at the first apply as `backfill:bk-007`, so
-quotes do not change. Once the code reads it, only **approved** rows are in force.
+quotes do not change. The code reads only **approved** rows as in force (`app/pricing/repository.py`); staff enter and
+approve rows on `/pricing/rules` (`POST /booking/pricing/rules|fx-rates`, `POST …/{id}/approve`).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
@@ -228,8 +232,8 @@ ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), 
 ## Out of scope today
 
 Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), catalog
-sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), FX
-rate entry (no `/pricing/rules` or FX endpoint yet: rows go in by a reviewed migration or by hand on Dev), any use of
+sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant),
+editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).
 
@@ -246,8 +250,8 @@ project `aa-booking-admin` exists since S236, root `frontend/`).
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.
-- Every route of UI spec §3 exists. Wave 1 pages and `/audit-log` (S237, over `GET /booking/audit-logs`) read the
-  real API; the other wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
+- Every route of UI spec §3 exists. Wave 1 pages, `/audit-log` (S237, over `GET /booking/audit-logs`) and
+  `/pricing/rules` (S237, AA-810: rules + FX tabs, new-row drawers, Approve) read the real API; the other wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
