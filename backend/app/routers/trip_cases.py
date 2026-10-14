@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
@@ -14,6 +15,7 @@ from fastapi import APIRouter, Depends, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth.staff import Staff, get_pool, require
+from app.pricing import engine
 from app.trip_cases import service, versions
 
 router = APIRouter(prefix="/booking", tags=["trip-cases"])
@@ -25,8 +27,12 @@ CanRead = Annotated[Staff, Depends(require("trip_case.read"))]
 CanWrite = Annotated[Staff, Depends(require("trip_case.write"))]
 CanAssign = Annotated[Staff, Depends(require("trip_case.assign"))]
 CanWriteVersions = Annotated[Staff, Depends(require("version.write"))]
+# Applying a price writes the version (version.write: admin, sales); both roles also hold pricing.read.
+CanPriceVersions = CanWriteVersions
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 CountryCode = Annotated[str, Field(pattern=r"^[A-Za-z]{2}$")]
+Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
+PositiveMoney = Annotated[Decimal, Field(gt=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
 # A plain shape check (no email-validator dependency); deliverability is not Booking's to judge.
 Email = Annotated[str, Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
 
@@ -110,6 +116,14 @@ class VersionPatch(BaseModel):
     notes: str | None = Field(default=None, max_length=10_000)
 
 
+class CostIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    net_amount: Money = Field(description="supplier net cost in net_currency; 0 for an included item")
+    net_currency: Currency
+    supplier_note: str | None = Field(default=None, max_length=200)
+
+
 class ItemIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -119,6 +133,11 @@ class ItemIn(BaseModel):
     day_to: int = Field(ge=1, le=366)
     source_tour_id: str | None = Field(default=None, min_length=1, max_length=128)
     notes: str | None = Field(default=None, max_length=5_000)
+    costs: list[CostIn] | None = Field(
+        default=None,
+        max_length=versions.MAX_COSTS_PER_ITEM,
+        description="replaces the item's net cost lines; omit to keep them",
+    )
 
     @model_validator(mode="after")
     def _days_in_order(self) -> ItemIn:
@@ -131,6 +150,16 @@ class ItemsPut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[ItemIn] = Field(max_length=versions.MAX_ITEMS)
+
+
+class PriceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channel: engine.Channel
+    currency: Currency = engine.BASE_CURRENCY
+    peak: bool = False
+    override_total: PositiveMoney | None = None
+    override_reason: str | None = Field(default=None, max_length=500, description="required when below the floor")
 
 
 class SendBody(BaseModel):
@@ -283,9 +312,43 @@ async def get_version_items(case_ref: CaseRef, version_number: VersionNumber, _:
 async def put_version_items(
     body: ItemsPut, case_ref: CaseRef, version_number: VersionNumber, staff: CanWriteVersions, pool: Pool
 ) -> dict[str, Any]:
-    items = [versions.Item(**{**item.model_dump(), "id": str(item.id) if item.id else None}) for item in body.items]
+    items = [
+        versions.Item(
+            title=item.title,
+            day_from=item.day_from,
+            day_to=item.day_to,
+            source_tour_id=item.source_tour_id,
+            notes=item.notes,
+            id=str(item.id) if item.id else None,
+            costs=None
+            if item.costs is None
+            else tuple(
+                versions.Cost(c.net_amount, c.net_currency, (c.supplier_note or "").strip() or None) for c in item.costs
+            ),
+        )
+        for item in body.items
+    ]
     async with pool.acquire() as conn, conn.transaction():
         return await versions.replace_items(conn, staff, case_ref, version_number, items)
+
+
+@router.post("/trip-cases/{case_ref}/versions/{version_number}/price")
+async def price_version(
+    body: PriceBody, case_ref: CaseRef, version_number: VersionNumber, staff: CanPriceVersions, pool: Pool
+) -> dict[str, Any]:
+    """Price a draft from its stored net cost lines (same engine as quote-preview) and save the total."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await versions.price_version(
+            conn,
+            staff,
+            case_ref,
+            version_number,
+            channel=body.channel,
+            currency=body.currency,
+            peak=body.peak,
+            override_total=body.override_total,
+            override_reason=body.override_reason,
+        )
 
 
 @router.post("/trip-cases/{case_ref}/versions/{version_number}/send")

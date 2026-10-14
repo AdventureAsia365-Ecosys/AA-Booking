@@ -37,6 +37,10 @@ class Invalid(ServiceError):
     status_code = 422
 
 
+class Unavailable(ServiceError):
+    status_code = 503
+
+
 async def service_error_handler(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ServiceError)  # noqa: S101 — registered for ServiceError only
     return JSONResponse(status_code=exc.status_code, content=exc.body())

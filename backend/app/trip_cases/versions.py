@@ -16,6 +16,12 @@
 - **Approve** records the customer's approval of a sent version (staff action until the customer app,
   O8): the version is approved (bk-003 lock) and the case moves ``proposal_sent -> confirmed`` (D3).
 - **Delete** soft-deletes an unsent, unapproved draft.
+- **Net costs** (bk-004 ``version_item_costs``, AA-810): each item carries its supplier net cost lines. ``GET
+  …/items`` returns them per item; ``PUT …/items`` replaces an item's lines when the item has ``costs`` (omit it
+  to leave them alone). Vn copies the lines with the items. Changing a line clears the version's price.
+- **Price** (``POST …/versions/{n}/price``) runs the pricing engine (``app.pricing.service``, the same code as
+  quote-preview) on the stored cost lines and saves the total, selling currency, channel and the selling FX rate
+  on a draft. A total below the channel floor needs a reason (audited). Send then locks all of it (bk-005).
 """
 
 from __future__ import annotations
@@ -23,14 +29,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
 
 from app import audit, paging
 from app.auth.staff import Staff
-from app.errors import Conflict, Invalid, NotFound
+from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.notifications import service as notifications
+from app.pricing import engine
+from app.pricing import service as pricing
 from app.trip_cases import sql
 from app.trip_cases.service import is_terminal, resolve_case, set_status
 from app.trip_cases.sql import leg_title  # noqa: F401 — re-exported (tests, older imports)
@@ -47,6 +56,23 @@ SEND_CHAIN = ("discovery", "building", "proposal_sent")
 VERSION_SORTS = {"updated_at": "v.updated_at", "created_at": "v.created_at", "version_number": "v.version_number"}
 
 ITEM_COLUMNS = "position, title, day_from, day_to, source_tour_id, notes"
+MAX_COSTS_PER_ITEM = 20
+# trip_case_versions.total_price is NUMERIC(12, 2).
+MAX_TOTAL = Decimal("9999999999.99")
+# An item's cost lines as JSON text, in entry order (amounts as text: no float round trip).
+ITEM_COSTS_JSON = """
+    (SELECT coalesce(json_agg(json_build_object(
+                'id', c.id::text, 'net_amount', c.net_amount::text, 'net_currency', c.net_currency::text,
+                'supplier_note', c.supplier_note) ORDER BY c.created_at, c.id), '[]'::json)::text
+     FROM booking.version_item_costs c WHERE c.version_item_id = booking.trip_case_version_itinerary.id) AS costs
+"""
+
+
+@dataclass(frozen=True)
+class Cost:
+    net_amount: Decimal
+    net_currency: str
+    supplier_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +83,8 @@ class Item:
     source_tour_id: str | None = None
     notes: str | None = None
     id: str | None = None
+    # None = keep the item's stored cost lines; a tuple (even empty) replaces them.
+    costs: tuple[Cost, ...] | None = None
 
 
 def prefill_from_legs(legs: list[Any], snapshot: dict[str, Any] | None) -> list[Item]:
@@ -74,11 +102,36 @@ def prefill_from_legs(legs: list[Any], snapshot: dict[str, Any] | None) -> list[
 
 async def _items(conn: asyncpg.Connection, version_id: str) -> list[dict[str, Any]]:
     rows = await conn.fetch(
-        f"SELECT id::text AS id, {ITEM_COLUMNS} FROM booking.trip_case_version_itinerary"  # noqa: S608 — constant
-        " WHERE trip_case_version_id = $1::uuid ORDER BY position",
+        f"SELECT id::text AS id, {ITEM_COLUMNS}, {ITEM_COSTS_JSON}"  # noqa: S608 — constant
+        " FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid ORDER BY position",
         version_id,
     )
-    return [dict(r) for r in rows]
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["costs"] = sql.loads(item.get("costs"), [])
+        out.append(item)
+    return out
+
+
+def _cost_key(net_amount: Any, net_currency: str, supplier_note: str | None) -> tuple[Decimal, str, str | None]:
+    return (Decimal(str(net_amount)), net_currency.strip(), supplier_note or None)
+
+
+def _stored_costs(item: dict[str, Any]) -> list[tuple[Decimal, str, str | None]]:
+    return [_cost_key(c["net_amount"], c["net_currency"], c.get("supplier_note")) for c in item.get("costs") or []]
+
+
+async def _write_costs(conn: asyncpg.Connection, staff: Staff, item_id: str, costs: tuple[Cost, ...]) -> None:
+    await conn.execute("DELETE FROM booking.version_item_costs WHERE version_item_id = $1::uuid", item_id)
+    if costs:
+        # clock_timestamp() keeps the entry order (now() is the same for every row of the transaction).
+        await conn.executemany(
+            "INSERT INTO booking.version_item_costs"
+            " (version_item_id, net_amount, net_currency, supplier_note, entered_by, created_at)"
+            " VALUES ($1::uuid, $2, $3, $4, $5, clock_timestamp())",
+            [(item_id, c.net_amount, c.net_currency, c.supplier_note, staff.cis_user_id) for c in costs],
+        )
 
 
 def _item_rows(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
@@ -177,6 +230,19 @@ async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes
             f"INSERT INTO booking.trip_case_version_itinerary (trip_case_version_id, {ITEM_COLUMNS})"  # noqa: S608
             f" SELECT $1::uuid, {ITEM_COLUMNS} FROM booking.trip_case_version_itinerary"
             " WHERE trip_case_version_id = $2::uuid ORDER BY position",
+            version_id,
+            latest["id"],
+        )
+        # The net cost lines follow their item (matched by position, which the copy keeps).
+        await conn.execute(
+            "INSERT INTO booking.version_item_costs"
+            " (version_item_id, net_amount, net_currency, supplier_note, entered_by, created_at)"
+            " SELECT ni.id, c.net_amount, c.net_currency, c.supplier_note, c.entered_by, clock_timestamp()"
+            " FROM booking.trip_case_version_itinerary oi"
+            " JOIN booking.trip_case_version_itinerary ni"
+            "   ON ni.trip_case_version_id = $1::uuid AND ni.position = oi.position"
+            " JOIN booking.version_item_costs c ON c.version_item_id = oi.id"
+            " WHERE oi.trip_case_version_id = $2::uuid ORDER BY oi.position, c.created_at, c.id",
             version_id,
             latest["id"],
         )
@@ -298,7 +364,15 @@ async def replace_items(
         raise Invalid("unknown_item", f"item {foreign[0]} is not on this version", item_ids=foreign)
     removed = sorted(existing - set(given))
     positioned = list(enumerate(items, start=1))
-    changed = _item_rows(before) != [
+    stored_costs = {i["id"]: _stored_costs(i) for i in before}
+    new_costs = {
+        pos: [_cost_key(c.net_amount, c.net_currency, c.supplier_note) for c in it.costs]
+        for pos, it in positioned
+        if it.costs is not None
+    }
+    # Rewrite an item's lines only when they differ (or the item is new): unchanged lines keep their ids.
+    rewrite = {pos for pos, lines in new_costs.items() if lines != stored_costs.get(positioned[pos - 1][1].id, [])}
+    changed = bool(rewrite) or _item_rows(before) != [
         (it.id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes) for pos, it in positioned
     ]
     try:
@@ -320,10 +394,23 @@ async def replace_items(
                 ],
             )
         await _insert_items(conn, version["id"], [(pos, it) for pos, it in positioned if not it.id])
-        # A price was set for the old item list; once the list changes it must be priced again.
+        if rewrite:
+            ids_by_position = {
+                r["position"]: r["id"]
+                for r in await conn.fetch(
+                    "SELECT id::text AS id, position FROM booking.trip_case_version_itinerary"
+                    " WHERE trip_case_version_id = $1::uuid",
+                    version["id"],
+                )
+            }
+            for pos in sorted(rewrite):
+                await _write_costs(conn, staff, ids_by_position[pos], positioned[pos - 1][1].costs or ())
+        # A price was set for the old items and costs; once they change the version must be priced again.
         await conn.execute(
             "UPDATE booking.trip_case_versions SET updated_at = now(), updated_by = $2,"
-            " total_price = CASE WHEN $3 THEN NULL ELSE total_price END WHERE id = $1::uuid",
+            " total_price = CASE WHEN $3 THEN NULL ELSE total_price END,"
+            " fx_rate_locked = CASE WHEN $3 THEN NULL ELSE fx_rate_locked END,"
+            " fx_as_of = CASE WHEN $3 THEN NULL ELSE fx_as_of END WHERE id = $1::uuid",
             version["id"],
             staff.cis_user_id,
             changed,
@@ -340,12 +427,125 @@ async def replace_items(
         entity_type="trip_case_version",
         entity_id=version["id"],
         before={"items": before},
-        after={"items": version["items"], "removed": removed, "price_cleared": changed and price_before is not None},
+        after={
+            "items": version["items"],
+            "removed": removed,
+            "costs_replaced": len(rewrite),
+            "price_cleared": changed and price_before is not None,
+        },
         entity_label=_label(case, number),
         summary=f"Saved {len(items)} item(s), removed {len(removed)}"
         + ("; price cleared" if changed and price_before is not None else ""),
     )
     return version
+
+
+async def price_version(
+    conn: asyncpg.Connection,
+    staff: Staff,
+    ref: str,
+    number: int,
+    *,
+    channel: engine.Channel,
+    currency: str,
+    peak: bool,
+    override_total: Decimal | None,
+    override_reason: str | None,
+    today: date | None = None,
+) -> dict[str, Any]:
+    """Price a draft from its stored net cost lines and save the total (UI spec §6.2 "Apply price")."""
+    reason = (override_reason or "").strip() or None
+    case = await resolve_case(conn, ref, lock=True)
+    if is_terminal(case["status"]):
+        raise Conflict("trip_case_closed", f"trip case is {case['status']}")
+    version = dict(await _version(conn, case["id"], number, lock=True))
+    _editable(version)
+    items = await _items(conn, version["id"])
+    if not items:
+        raise Invalid("version_empty", "add at least one item before pricing")
+    bare = [i["id"] for i in items if not i["costs"]]
+    if bare:
+        raise Invalid(
+            "costs_missing",
+            "every item needs at least one net cost line (enter 0 for an included item)",
+            item_ids=bare,
+        )
+    lines = [engine.CostLine(Decimal(c["net_amount"]), c["net_currency"].strip()) for i in items for c in i["costs"]]
+    try:
+        priced = await pricing.price(
+            conn,
+            channel=channel,
+            currency=currency,
+            peak=peak,
+            lines=lines,
+            override_total=override_total,
+            on=today or date.today(),
+        )
+    except pricing.NoRuleInForce as exc:
+        raise Invalid("pricing_rule_missing", str(exc), channel=channel.value) from None
+    except pricing.MissingFxRates as exc:
+        raise Invalid("fx_rate_missing", str(exc), currencies=exc.currencies) from None
+    except engine.PricingError as exc:
+        raise Invalid("pricing_error", str(exc)) from None
+    except pricing.PricingDataUnavailable:
+        raise Unavailable("pricing_data_unavailable", "the pricing rules or FX rates could not be read") from None
+    quote = priced.quote
+    if quote.final_total > MAX_TOTAL:
+        raise Invalid("price_too_large", f"a version total is at most {MAX_TOTAL}")
+    if quote.below_floor and not reason:
+        raise Invalid(
+            "override_reason_required",
+            "the total is below the channel floor; give a reason",
+            effective_margin=str(quote.effective_margin),
+            floor_margin=str(quote.floor_margin),
+        )
+    selling_fx = priced.selling_fx
+    fx_rate = selling_fx.rate.rate_per_usd if selling_fx else Decimal(1)
+    fx_as_of = selling_fx.as_of if selling_fx else priced.priced_on
+    await conn.execute(
+        "UPDATE booking.trip_case_versions SET total_price = $2, currency = $3, channel = $4, fx_rate_locked = $5,"
+        " fx_as_of = $6, updated_by = $7 WHERE id = $1::uuid",
+        version["id"],
+        quote.final_total,
+        quote.currency,
+        quote.channel.value,
+        fx_rate,
+        fx_as_of,
+        staff.cis_user_id,
+    )
+    label = _label(case, number)
+    override = quote.override_total is not None
+    await audit.record(
+        conn,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        action="trip_case_version.priced",
+        entity_type="trip_case_version",
+        entity_id=version["id"],
+        before={k: version[k] for k in ("total_price", "currency", "channel")},
+        after={
+            "total_price": quote.final_total,
+            "currency": quote.currency,
+            "channel": quote.channel.value,
+            "peak": quote.peak,
+            "computed_total": quote.total,
+            "override_total": quote.override_total,
+            "override_reason": reason if override else None,
+            "net_total_usd": quote.net_total_usd,
+            "effective_margin": quote.effective_margin,
+            "floor_margin": quote.floor_margin,
+            "below_floor": quote.below_floor,
+            "rule_valid_from": priced.rule.valid_from,
+            "fx_rate_locked": fx_rate,
+            "fx_as_of": fx_as_of,
+            "cost_lines": len(lines),
+        },
+        entity_label=label,
+        summary=f"Priced V{number} at {quote.final_total} {quote.currency}"
+        + (f" (override below floor: {reason})" if quote.below_floor else " (override)" if override else ""),
+    )
+    out = sql.version_dict(await _version(conn, case["id"], number))
+    return {"quote": pricing.body(priced), "version": out}
 
 
 async def _validity_days(conn: asyncpg.Connection) -> int:

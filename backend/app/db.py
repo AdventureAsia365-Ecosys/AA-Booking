@@ -19,8 +19,7 @@ log = logging.getLogger(__name__)
 
 # Every bk-NNN migration this code needs. Readiness fails until ALL of them are registered: checking only the
 # newest one would pass with a gap (bk-005 applied, an older file missing) and the API would then fail per call.
-# bk-004 (AA-810 pricing) is not needed by this branch; the pricing branch adds it here.
-REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = ("bk-001", "bk-002", "bk-003", "bk-005")
+REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = ("bk-001", "bk-002", "bk-003", "bk-004", "bk-005", "bk-006")
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
 CONNECT_TIMEOUT_S = 5.0

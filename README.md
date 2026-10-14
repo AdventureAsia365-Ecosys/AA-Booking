@@ -31,7 +31,8 @@ in [docs/adr/0001-implements-root-0004.md](docs/adr/0001-implements-root-0004.md
 | `POST /booking/trip-cases/{id_or_code}/assign` | `{cis_user_id \| null, role}` |
 | `POST /booking/trip-cases/{id_or_code}/versions` | New version (V1 from the TripPlanner legs, Vn copies the latest except its total: a new version starts unpriced) |
 | `GET`/`PATCH`/`DELETE /booking/trip-cases/{id_or_code}/versions/{n}` | Version header; edit `title`/`notes` (draft); soft-delete a draft |
-| `GET`/`PUT /booking/trip-cases/{id_or_code}/versions/{n}/items` | Read / save items (upsert by `id`, removed items deleted) |
+| `GET`/`PUT /booking/trip-cases/{id_or_code}/versions/{n}/items` | Read / save items (upsert by `id`, removed items deleted) with their net cost lines (`costs[]` replaces an item's lines; omit to keep them). A change clears the version price |
+| `POST /booking/trip-cases/{id_or_code}/versions/{n}/price` | Price a draft from its stored cost lines `{channel, currency, peak, override_total?, override_reason?}` (same engine as quote-preview); saves total, currency, channel and the selling FX rate. Below the floor needs a reason |
 | `POST /booking/trip-cases/{id_or_code}/versions/{n}/send` | Mark sent `{to?, subject, message, valid_until?}`: locks the version, case → `proposal_sent`, customer notification row (no e-mail) |
 | `POST /booking/trip-cases/{id_or_code}/versions/{n}/approve` | Record the customer's approval `{note?}`: version approved, case → `confirmed` |
 | `GET /booking/versions` | Cross-case versions (`q`, `badge`, `assignee`, `updated_from/to`, `sort`) |

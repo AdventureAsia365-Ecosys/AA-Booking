@@ -71,6 +71,9 @@ backend/
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
+  app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py)
+  app/routers/pricing.py   POST /booking/pricing/quote-preview (permission pricing.read)
+  app/pricing/service.py   rule + FX in force + engine, shared by quote-preview and POST …/versions/{n}/price
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready
@@ -112,8 +115,8 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
   email/name/cis_role/last_seen_at.
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
   read trip cases / customers = admin, sales, contracting; write / assign / versions / customers write = admin,
-  sales; staff directory (pickers) = admin, sales, contracting; block / archive customers, staff admin, audit log
-  read = admin. Notifications, settings, countries, own preferences and own staff detail = any active staff.
+  sales; staff directory (pickers) = admin, sales, contracting; pricing (margins, net costs, FX: `pricing.read`) =
+  admin, sales, contracting; block / archive customers, staff admin, audit log read = admin. Notifications, settings, countries, own preferences and own staff detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
 
 ## Deferred work (`booking.job`, O3/O9)
@@ -180,6 +183,17 @@ transaction-local `booking.actor` / `booking.status_note`; append-only for the a
 assignment per case and role), `trip_case_versions` (one approved per case; approved = locked by trigger) +
 `trip_case_version_itinerary` (free-text items until AA-679), `trip_cases.notes`, `audit_logs.actor_ref`.
 
+### `bk-004` (AA-810, ADR 0005 first cut — needs `bk-003`)
+
+`pricing_rules` (channel `b2c_tailor_made|fixed_departure|b2b`, target/floor margin, peak uplift points,
+card fee, `valid_from`; seeded with the ADR 0005 table, to confirm with Ms. Thư), `fx_rates` (units per USD,
+selling buffer, `as_of`, `source`; no seed). Both are **append-only** for role `booking` (UPDATE/DELETE
+revoked): a change is a new row, the row in force is the newest one dated on or before the pricing day.
+`version_item_costs` (net cost lines of a bk-003 version item, supplier currency), locked with the version
+once it is approved (bk-006: or sent); they survive a version item save (D2 keeps item ids) and go with an item that is removed
+(`ON DELETE CASCADE`). Formula and rounding: `backend/app/pricing/engine.py` docstring and
+`docs/implementation-notes/AA-810.md`.
+
 ### `bk-005` (Wave 1 staff admin, AA-681/AA-680/AA-810 W1)
 
 Independent of `bk-004` (applies before or after it; per-table grants only, so the append-only pricing tables stay
@@ -192,14 +206,19 @@ trigger on versions and items (a sent version cannot be hard-deleted; role `book
 `staff_users.preferences`; `settings` rows (`deposit_pct` 30, `quote_validity_days` 14; read-only for the app);
 `audit_logs.entity_label` / `summary` + a time index.
 
+### `bk-006` (AA-810, needs `bk-004`)
+
+`version_item_cost_lock()` also refuses cost writes on a **sent** version (bk-004 locked approved only), so the
+costs behind a sent price cannot change (S236 review finding 7).
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
 
 ## Out of scope today
 
 Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), catalog
-sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), the
-version price endpoint / cost lines / FX lock values (wait for bk-004 on the AA-810 branch), any use of
+sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), FX
+rate entry (no `/pricing/rules` or FX endpoint yet: rows go in by a reviewed migration or by hand on Dev), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend and its Vercel
 project, a custom domain.
 
