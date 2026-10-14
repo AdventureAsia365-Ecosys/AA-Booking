@@ -213,6 +213,15 @@ trigger on versions and items (a sent version cannot be hard-deleted; role `book
 `version_item_cost_lock()` also refuses cost writes on a **sent** version (bk-004 locked approved only), so the
 costs behind a sent price cannot change (S236 review finding 7).
 
+### `bk-007` (AA-810 maker-checker, needs `bk-004`)
+
+`policy_approvals`: the second-person approval of a `pricing_rules` or `fx_rates` row (ADR 0005 decision 8, UI spec
+Q19), **append-only** for role `booking` (SELECT, INSERT), one approval per row (typed FKs `pricing_rule_id` /
+`fx_rate_id`, `ON DELETE CASCADE` for the owner only). A trigger refuses an approval whose `approved_by` is the row's
+`created_by`. bk-004's policy tables keep SELECT, INSERT only (no approval column, no UPDATE grant). The three bk-004
+seed rules are approved as `seed:bk-004`; every other row that existed at the first apply as `backfill:bk-007`, so
+quotes do not change. Once the code reads it, only **approved** rows are in force.
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
 
