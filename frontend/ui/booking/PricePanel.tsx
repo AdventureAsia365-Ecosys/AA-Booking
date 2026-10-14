@@ -248,28 +248,29 @@ export function FxNotice() {
 }
 
 // ── Result ───────────────────────────────────────────────────────────────────
-function quoteErrorView(error: unknown, canManageRules: boolean) {
+function quoteErrorView(error: unknown, canManageRules: boolean): { title: string; body: string; link: string | null } {
   const e = error instanceof ApiError ? error : null;
   if (e?.status === 404) {
     return {
       title: "The pricing engine is not on this Booking API yet",
       body: "Live quotes come from POST /booking/pricing/quote-preview, which ships with the pricing engine (bk-004, AA-810).",
-      link: false,
+      link: null,
     };
   }
-  if (e?.status === 503) return { title: "Pricing data unavailable", body: "The Booking API could not read the pricing rules or FX rates. Try again in a moment.", link: false };
-  if (e?.status === 403) return { title: "No access to pricing", body: "Your Booking role cannot see margins and net costs.", link: false };
+  if (e?.status === 503) return { title: "Pricing data unavailable", body: "The Booking API could not read the pricing rules or FX rates. Try again in a moment.", link: null };
+  if (e?.status === 403) return { title: "No access to pricing", body: "Your Booking role cannot see margins and net costs.", link: null };
   if (e?.status === 422 && (e.code.startsWith("no FX rate") || e.code.startsWith("no pricing rule"))) {
     // AA-810: rows are entered and approved (maker-checker) on /pricing/rules; only approved rows price.
+    const fx = e.code.startsWith("no FX rate");
     return {
-      title: e.code.startsWith("no FX rate") ? `Missing FX rate: ${e.code.replace("no FX rate for ", "")}` : "No pricing rule in force",
+      title: fx ? `Missing FX rate: ${e.code.replace("no FX rate for ", "")}` : "No pricing rule in force",
       body: canManageRules
         ? "No approved row is in force for today. Add it in Pricing rules & FX and have a second person approve it, or price in USD."
         : "Price in USD for now, or ask an admin or contracting user to add and approve the missing row.",
-      link: canManageRules,
+      link: canManageRules ? (fx ? "/pricing/rules?tab=fx" : "/pricing/rules") : null,
     };
   }
-  return { title: "Could not price this quote", body: (error as Error | null)?.message ?? "Unknown error.", link: false };
+  return { title: "Could not price this quote", body: (error as Error | null)?.message ?? "Unknown error.", link: null };
 }
 
 export function QuoteResult({
@@ -292,7 +293,7 @@ export function QuoteResult({
         <p className="font-semibold">{v.title}</p>
         <p className="mt-0.5 text-body">{v.body}</p>
         {v.link && (
-          <Link href="/pricing/rules" className="mt-1 inline-block font-semibold text-accent-deep hover:underline">
+          <Link href={v.link} className="mt-1 inline-block font-semibold text-accent-deep hover:underline">
             Open Pricing rules & FX
           </Link>
         )}
