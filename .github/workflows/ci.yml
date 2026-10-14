@@ -1,0 +1,194 @@
+name: CI
+
+# Five required checks, named like AA-CIS-App's so branch protection reads the same
+# (root ADR 0004 decision 3): Lint, Security Audit, Unit Tests, Integration Tests, Docker Build Check.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install ruff
+        run: pip install "$(grep '^ruff==' requirements-dev.txt)"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+  # Unlike CIS (report-only), pip-audit FAILS here. The same job runs a gitleaks scan of the full
+  # git history: this repo carries the DB role / password flow, so a committed secret is the most
+  # expensive mistake it can make (justification for this check over a type checker: AA-678 notes).
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: pip-audit (runtime + dev requirements, failing)
+        run: |
+          pip install pip-audit==2.10.1 --quiet
+          pip-audit -r requirements.txt
+          pip-audit -r requirements-dev.txt
+
+      - name: gitleaks (full history, failing)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
+          curl -sSfL -o /tmp/gitleaks_checksums.txt "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          (cd /tmp && grep " ${tarball}\$" gitleaks_checksums.txt | sha256sum -c -)
+          tar -xzf "/tmp/${tarball}" -C /tmp gitleaks
+          /tmp/gitleaks git --redact --verbose --exit-code 1 .
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Includes the static migration guard (tests/unit/test_migration_guard.py) over migrations/*.sql.
+      - name: Run unit tests
+        env:
+          ENVIRONMENT: test
+        run: pytest tests/unit -v --tb=short --cov=app --cov-report=term-missing --cov-fail-under=90
+
+  # Applies migrations/*.sql in order to a real PostgreSQL 15 (the RDS major version) logged in as
+  # aa_cis_admin (the DB Migrate identity), on a stub `shared` schema, exactly as
+  # AA-CIS-Infra db/run_migration.py does; re-applies them (idempotency); checks the role `booking`
+  # privileges; then calls /booking/health/ready as role `booking`.
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: aa_cis_admin
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: booking_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aa_cis_admin -d booking_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # -rs lists skips; a skipped integration test would make this check green without testing anything.
+      - name: Run integration tests (no skips allowed)
+        env:
+          ENVIRONMENT: test
+          BOOKING_TEST_ADMIN_DSN: postgresql://aa_cis_admin:ci-only@localhost:5432/booking_ci
+        run: |
+          set -o pipefail
+          pytest tests/integration -v --tb=short -rs -p no:cacheprovider | tee /tmp/integration.txt
+          if grep -qE "^SKIPPED|[0-9]+ skipped" /tmp/integration.txt; then
+            echo "::error::integration tests were skipped"; exit 1
+          fi
+
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            --tag aa-booking-api:ci-${{ github.sha }} \
+            .
+
+      # The image must start and answer liveness without a database (ALB health check contract).
+      - name: Container answers /booking/health without a database
+        run: |
+          set -euo pipefail
+          docker run -d --name booking-ci -p 8000:8000 aa-booking-api:ci-${{ github.sha }}
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8000/booking/health -o /tmp/health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/health.json
+          jq -e --arg sha "${{ github.sha }}" '.status == "ok" and .service == "aa-booking-api" and .git_sha == $sha' /tmp/health.json
+          code=$(curl -s -o /tmp/ready.json -w "%{http_code}" http://localhost:8000/booking/health/ready)
+          cat /tmp/ready.json
+          [ "$code" = "503" ] && jq -e '.db == "not_configured"' /tmp/ready.json
+          docker rm -f booking-ci
+
+      # Report-only, as in CIS (AA-177): flip to exit-code 1 once a real report has been reviewed.
+      - name: Scan image for vulnerabilities (Trivy, report-only)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: "aa-booking-api:ci-${{ github.sha }}"
+          format: "table"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Generate SBOM (syft, CycloneDX)
+        uses: anchore/sbom-action@v0.24.2
+        with:
+          image: "aa-booking-api:ci-${{ github.sha }}"
+          format: cyclonedx-json
+          output-file: sbom-${{ github.sha }}.cdx.json
+          artifact-name: sbom-${{ github.sha }}.cdx.json
