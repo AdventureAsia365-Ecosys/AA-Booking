@@ -147,7 +147,7 @@ async def test_get_items_and_missing_version() -> None:
         .on("SELECT id::text AS id, position, title", [{"position": 1, "title": "x"}])
     )
     out = await versions.get_items(conn, "TC-000001", 1)
-    assert out["items"] == [{"position": 1, "title": "x"}] and out["fx_locked"] is None
+    assert out["items"] == [{"position": 1, "title": "x", "costs": []}] and out["fx_locked"] is None
     with pytest.raises(NotFound):
         await versions.get_items(ScriptedConn().on("FROM booking.trip_cases tc", case_row()), "TC-000001", 9)
 

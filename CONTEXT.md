@@ -73,6 +73,7 @@ backend/
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
   app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py)
   app/routers/pricing.py   POST /booking/pricing/quote-preview (permission pricing.read)
+  app/pricing/service.py   rule + FX in force + engine, shared by quote-preview and POST …/versions/{n}/price
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready
@@ -189,7 +190,7 @@ card fee, `valid_from`; seeded with the ADR 0005 table, to confirm with Ms. Thư
 selling buffer, `as_of`, `source`; no seed). Both are **append-only** for role `booking` (UPDATE/DELETE
 revoked): a change is a new row, the row in force is the newest one dated on or before the pricing day.
 `version_item_costs` (net cost lines of a bk-003 version item, supplier currency), locked with the version
-once it is approved; they survive a version item save (D2 keeps item ids) and go with an item that is removed
+once it is approved (bk-006: or sent); they survive a version item save (D2 keeps item ids) and go with an item that is removed
 (`ON DELETE CASCADE`). Formula and rounding: `backend/app/pricing/engine.py` docstring and
 `docs/implementation-notes/AA-810.md`.
 
@@ -205,14 +206,19 @@ trigger on versions and items (a sent version cannot be hard-deleted; role `book
 `staff_users.preferences`; `settings` rows (`deposit_pct` 30, `quote_validity_days` 14; read-only for the app);
 `audit_logs.entity_label` / `summary` + a time index.
 
+### `bk-006` (AA-810, needs `bk-004`)
+
+`version_item_cost_lock()` also refuses cost writes on a **sent** version (bk-004 locked approved only), so the
+costs behind a sent price cannot change (S236 review finding 7).
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
 
 ## Out of scope today
 
 Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), catalog
-sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), the
-version price endpoint / cost line API / FX lock values (bk-004 tables exist; the API comes with the quote slice), any use of
+sync and catalog reads (`catalog.v_tour` titles, `/booking/catalog/*`: wait for the CIS migration 225 grant), FX
+rate entry (no `/pricing/rules` or FX endpoint yet: rows go in by a reviewed migration or by hand on Dev), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend and its Vercel
 project, a custom domain.
 

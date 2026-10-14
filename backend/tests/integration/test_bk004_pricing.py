@@ -22,6 +22,7 @@ from app.main import create_app
 from app.pricing import repository
 from app.pricing.engine import Channel
 from app.settings import Settings
+from app.trip_cases import service as cases
 from app.trip_cases import versions
 from app.trip_cases.versions import Item
 from tests.integration.conftest import MIGRATIONS
@@ -31,6 +32,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 SEED_DAY = date(2026, 10, 14)
 BK004 = next(p for p in MIGRATIONS if p.name.startswith("004_"))
+# bk-006 replaces bk-004's cost lock function; re-applied after bk-004 so the fixture keeps the newest one.
+BK006 = next(p for p in MIGRATIONS if p.name.startswith("006_"))
 STAFF_ID = "it-staff-810"
 
 
@@ -40,6 +43,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     # Other modules TRUNCATE booking.staff_users CASCADE, which empties pricing_rules (FK created_by). bk-004
     # is a no-op when re-run except for its ON CONFLICT DO NOTHING seed, so re-applying it restores the seed.
     await conn.execute(BK004.read_text(encoding="utf-8"))
+    await conn.execute(BK006.read_text(encoding="utf-8"))
     # Policy tables are append-only for role booking; the migration role (owner) cleans test rows.
     await conn.execute("DELETE FROM booking.pricing_rules WHERE valid_from <> $1", SEED_DAY)
     await conn.execute("DELETE FROM booking.fx_rates")
@@ -305,4 +309,109 @@ async def test_item_costs_survive_an_item_save(admin: asyncpg.Connection, migrat
     assert [(c["version_item_id"], c["net_amount"]) for c in costs] == [
         (kept_id, D("2540000")),
         (kept_id, D("17780000")),
+    ]
+
+
+async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migrated_booking_dsn: str) -> None:
+    """S236 review finding 3 (+ 2 and 7): costs saved with the items, POST …/price, send, sent cost lock, Vn copy."""
+    version_id, item_id = await _version_item(admin)
+    case_ref = await admin.fetchval(
+        "SELECT c.code FROM booking.trip_cases c JOIN booking.trip_case_versions v ON v.trip_case_id = c.id"
+        " WHERE v.id = $1",
+        version_id,
+    )
+    await admin.execute(
+        "INSERT INTO booking.fx_rates (currency, rate_per_usd, buffer_pct, as_of, source)"
+        " VALUES ('EUR', 0.92, 0.02, DATE '2026-10-01', 'test'), ('VND', 25400, 0, DATE '2026-10-01', 'test')"
+    )
+    await admin.execute("UPDATE booking.staff_users SET role = 'sales' WHERE cis_user_id = $1", STAFF_ID)
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    db, cis = Database(settings), LocalCis()
+    app = create_app(settings, db, cis.verifier())
+    sales = {"Authorization": f"Bearer {cis.token(sub=STAFF_ID, cis_role='reviewer')}"}
+    base = f"/booking/trip-cases/{case_ref}/versions"
+    items = {
+        "items": [
+            {
+                "id": str(item_id),
+                "title": "Hanoi hotel",
+                "day_from": 1,
+                "day_to": 2,
+                "costs": [
+                    {"net_amount": "17780000", "net_currency": "VND", "supplier_note": "2 nights"},
+                    {"net_amount": "0", "net_currency": "USD", "supplier_note": "breakfast incl."},
+                ],
+            },
+            {"title": "Free afternoon", "day_from": 2, "day_to": 2},
+        ]
+    }
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://booking") as client:
+            saved = await client.put(f"{base}/1/items", json=items, headers=sales)
+            unpriced_item = await client.post(f"{base}/1/price", json={"channel": "b2c_tailor_made"}, headers=sales)
+            items["items"][1]["costs"] = [{"net_amount": "0", "net_currency": "USD"}]
+            await client.put(f"{base}/1/items", json=items, headers=sales)
+            low = await client.post(
+                f"{base}/1/price",
+                json={"channel": "b2c_tailor_made", "currency": "EUR", "override_total": "600"},
+                headers=sales,
+            )
+            priced = await client.post(
+                f"{base}/1/price", json={"channel": "b2c_tailor_made", "currency": "EUR"}, headers=sales
+            )
+            got = await client.get(f"{base}/1/items", headers=sales)
+    finally:
+        await db.close()
+    assert saved.status_code == 200, saved.text
+    assert [len(i["costs"]) for i in saved.json()["items"]] == [2, 0]
+    assert saved.json()["items"][0]["costs"][0] == {
+        "id": saved.json()["items"][0]["costs"][0]["id"],
+        "net_amount": "17780000.00",
+        "net_currency": "VND",
+        "supplier_note": "2 nights",
+    }
+    assert unpriced_item.status_code == 422 and unpriced_item.json()["detail"] == "costs_missing"
+    assert low.status_code == 422 and low.json()["detail"] == "override_reason_required"
+    assert priced.status_code == 200, priced.text
+    quote, version = priced.json()["quote"], priced.json()["version"]
+    # 700 USD net / (1 - 0.30 - 0.03) x 0.92 x 1.02 = 983.03 EUR -> 985 (same as the quote-preview test).
+    assert D(quote["final_total"]) == D("985") and version["total_price"] == "985.00" and version["currency"] == "EUR"
+    assert version["channel"] == "b2c_tailor_made" and D(version["fx_locked"]["rate"]) == D("0.92")
+    assert [i["costs"][0]["net_currency"] for i in got.json()["items"]] == ["VND", "USD"]
+    action = await admin.fetchval(
+        "SELECT action FROM booking.audit_logs WHERE entity_id = $1 ORDER BY created_at DESC LIMIT 1", version_id
+    )
+    assert action == "trip_case_version.priced"
+
+    pool = await asyncpg.create_pool(migrated_booking_dsn, min_size=1, max_size=2)
+    staff = Staff(STAFF_ID, None, None, "sales", True, "reviewer")
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await cases.change_status(conn, staff, case_ref, "discovery", None)
+            async with conn.transaction():
+                await versions.send_version(
+                    conn, staff, case_ref, 1, to=None, subject="s", message="m", valid_until=None
+                )
+            # bk-006: the costs behind a sent price are locked, like its items (bk-005).
+            with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+                await conn.execute(
+                    "UPDATE booking.version_item_costs SET net_amount = 1 WHERE version_item_id = $1", item_id
+                )
+            with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+                await conn.execute(
+                    "INSERT INTO booking.version_item_costs (version_item_id, net_amount, net_currency)"
+                    " VALUES ($1, 1, 'USD')",
+                    item_id,
+                )
+            async with conn.transaction():
+                v2 = await versions.create_version(conn, staff, case_ref, None)
+    finally:
+        await pool.close()
+    # Vn copies the items with their cost lines but starts unpriced (finding 2).
+    assert v2["total_price"] is None and v2["currency"] == "EUR"
+    assert [[(c["net_amount"], c["net_currency"]) for c in i["costs"]] for i in v2["items"]] == [
+        [("17780000.00", "VND"), ("0.00", "USD")],
+        [("0.00", "USD")],
     ]

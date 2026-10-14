@@ -589,8 +589,8 @@ async def test_bk005_privileges_and_settings(pool: asyncpg.Pool) -> None:
             " (('proposal_sent', 'confirmed'), ('confirmed', 'cancelled'), ('cancelled', 'new_inquiry'))"
         )
         assert len(transitions) == 3
-        version = await conn.fetchval("SELECT max(version) FROM booking.v_schema_versions")
-        assert version == "bk-005"
+        registered = {r["version"] for r in await conn.fetch("SELECT version FROM booking.v_schema_versions")}
+        assert "bk-005" in registered
 
 
 async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
