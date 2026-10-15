@@ -88,6 +88,10 @@ backend/
   app/routers/suppliers.py /booking/suppliers* (list, summary, detail, create, edit, deactivate/activate, contracts)
                            and /booking/contracts/{id} (edit a draft, publish, expire) — supply.read / supply.write
   app/suppliers/           supplier + contract service (bk-008): place check, maker-checker publish, audit rows
+  app/routers/supply.py    /booking/hotels*, /booking/room-types/{id}, /booking/services*, /booking/contracts/{id}/rates,
+                           /booking/rates/{id}, /booking/supply/options, /booking/supply/rate-in-force (bk-010, AA-823)
+  app/supply/              hotels + room types + services (records.py, one implementation for both kinds) and supplier
+                           net rates + the default net of a version item (rates.py)
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready
@@ -96,7 +100,7 @@ migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Inf
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-810.md, AA-822.md)
+                           AA-683.md, AA-810.md, AA-822.md, AA-823.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -136,7 +140,8 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
   admin, sales, contracting; new pricing rule / FX rows and their approval (`pricing.write`) = admin, contracting
   (maker-checker: the creator of a row cannot approve it, 403 `own_row`); suppliers and supplier contracts read
   (`supply.read`) = admin, sales, contracting, write (`supply.write`) = admin, contracting (maker-checker on contract
-  publish: not the draft's last writer, 403 `maker_checker`); catalog reads (`catalog.read`) = every role,
+  publish: not the draft's last writer, 403 `maker_checker`; hotels, room types, services and supplier rates use the
+  same pair, and writing a rate makes you the contract's maker); catalog reads (`catalog.read`) = every role,
   content_creator included (without the price hint, channel and commercial notes, which need `pricing.read`); the
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read = admin. Notifications,
@@ -267,6 +272,23 @@ nothing; never a quote), `commercial_notes` (`conf:commercial`), who / when. No 
 API joins `catalog.v_tour` live, so a tour that leaves the catalog drops out of every list. Never deleted (role
 `booking` has no DELETE / TRUNCATE). No supplier link yet (later key).
 
+### `bk-010` (AA-823 wave 2b, needs `bk-001`, `bk-003`, `bk-004`, `bk-005`, `bk-008`)
+
+Supply **facts** Booking owns (root ADR 0004a decision 1); no customer-facing description, highlights or photo column
+anywhere (O7, Q17; a schema test asserts it). `hotels` (code `HTL-000123`, supplier, name, style, stars 1–5,
+address, `destination_id` = CIS place soft key checked by the API, country, geo point, check-in/out, amenities, staff
+links, internal notes, status `active|inactive`), `hotel_room_types` (name, max occupancy, bed types, notes, status),
+`services` (code `SVC-000123`, supplier, `service_type` activity / transfer / guide / entrance / meal, internal title,
+pricing `unit` person / group / vehicle / day, CIS place, optional CIS `source_system`/`source_id` reference, max
+group size, duration, inclusions, notes, status). Never deleted (role `booking` has no DELETE). `supplier_rates`: net
+rate rows of one room type (`room_night`, meal plan) or one service (its unit) under a supplier contract (season,
+validity inside the contract's, pax band, net amount in the contract currency); trigger `supplier_rate_guard`: rates
+are written under a **draft** contract only, of the same supplier, in its currency, inside its validity, and are fixed
+once the contract is published (maker-checker via the contract). Version items gain `hotel_room_type_id` /
+`service_id` (at most one); cost lines gain `supplier_rate_id` (provenance of a defaulted net). An item that books
+supply and is saved without cost lines takes the rate in force on its first day (trip start + day_from - 1) for the
+case pax. Known gap (ADR 0004a d4): CIS still connects as the owner role, so the DB does not hide these rates from CIS.
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
 operations / money (AA-682).
@@ -275,8 +297,9 @@ operations / money (AA-682).
 
 Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), a catalog
 sync / outbox consumer (D4: live reads instead), catalog titles on trip case legs (Q11), the trip plan price matrix
-and `v_from_prices`, destinations / countries pages, supplier rates and rate sheets (upload, validate, publish),
-contract document upload, supplier hard delete,
+and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
+contract), the supply outbox / `v_supply_*` views / `supply.hotel.v1`·`supply.service.v1` contracts (ADR 0004a, own
+issue), supplier media (`entity_media`), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).
@@ -296,10 +319,13 @@ project `aa-booking-admin` exists since S236, root `frontend/`).
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.
 - Every route of UI spec §3 exists. Wave 1 pages, `/audit-log` (S237, over `GET /booking/audit-logs`) and
   `/pricing/rules` (S237, AA-810: rules + FX tabs, new-row drawers, Approve), `/suppliers` (S237, AA-822: list with
-  KPIs, add / edit form with the CIS place typeahead, detail with Profile + Contracts tabs; Rates / Bookings / Bills
-  tabs are frames) and `/catalog/trip-plans` (S237, AA-679: list, detail with CIS days / photos tagged "From CIS",
-  commercial drawer, "Use for trip case" modal; CIS photos load from the CIS public API, `lib/config.ts`
-  `CIS_MEDIA_URL`) read the real API; the other wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
+  KPIs, add / edit form with the CIS place typeahead, detail with Profile + Contracts + Rates tabs (AA-823: rates per
+  contract, editable while the contract is a draft); Bookings / Bills tabs are frames), `/catalog/trip-plans` (S237,
+  AA-679: list, detail with CIS days / photos tagged "From CIS", commercial drawer, "Use for trip case" modal; CIS
+  photos load from the CIS public API, `lib/config.ts` `CIS_MEDIA_URL`), `/hotels` (S237, AA-823: grid + hotel drawer
+  with facts, room types, rates, activity; `?hotel=HTL-…`) and `/services` + `/services/{SVC-…}` (S237, AA-823) read
+  the real API; the proposal item drawer can book a room type or service (its net defaults from the rate); the other
+  wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS

@@ -398,6 +398,7 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
         "net_amount": "17780000.00",
         "net_currency": "VND",
         "supplier_note": "2 nights",
+        "supplier_rate_id": None,
     }
     assert unpriced_item.status_code == 422 and unpriced_item.json()["detail"] == "costs_missing"
     assert low.status_code == 422 and low.json()["detail"] == "override_reason_required"

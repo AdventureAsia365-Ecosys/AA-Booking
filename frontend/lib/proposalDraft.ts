@@ -8,8 +8,11 @@
 // Net cost lines live with the item they price and are saved with it: PUT …/items carries `costs[]` per
 // item (bk-004 version_item_costs, AA-810). They feed the live quote preview; "Apply price" (POST
 // …/versions/{n}/price) prices the SAVED lines on the server and stores the total.
+//
+// An item may book a hotel room type or a service (bk-010, AA-823). Saved with no cost line, such an item is sent
+// without `costs`, and the API fills its net from the supplier rate in force (the line keeps `supplier_rate_id`).
 
-import type { VersionItem } from "./api/types";
+import type { VersionItem, VersionItemSupply } from "./api/types";
 import type { CostInput, ItemInput, QuotePreviewInput } from "./api/proposals";
 
 export interface CostLine {
@@ -17,6 +20,8 @@ export interface CostLine {
   net_amount: string;
   net_currency: string;
   supplier_note: string;
+  /** Set on a line the API defaulted from a supplier rate; sent back as is. */
+  supplier_rate_id?: string | null;
 }
 
 export interface DraftItem {
@@ -29,6 +34,8 @@ export interface DraftItem {
   source_tour_id: string | null;
   notes: string;
   costs: CostLine[];
+  /** The hotel room type or service this item books, if any. */
+  supply?: VersionItemSupply | null;
 }
 
 export const MAX_ITEMS = 200;
@@ -61,7 +68,9 @@ export function fromApi(items: VersionItem[]): DraftItem[] {
         net_amount: c.net_amount,
         net_currency: c.net_currency.trim(),
         supplier_note: c.supplier_note ?? "",
+        supplier_rate_id: c.supplier_rate_id ?? null,
       })),
+      supply: it.supply ?? null,
     }));
 }
 
@@ -73,11 +82,12 @@ export function normalise(items: DraftItem[]): DraftItem[] {
     .map(({ it }) => it);
 }
 
-export function costInput(c: Pick<CostLine, "net_amount" | "net_currency" | "supplier_note">): CostInput {
+export function costInput(c: Pick<CostLine, "net_amount" | "net_currency" | "supplier_note" | "supplier_rate_id">): CostInput {
   return {
     net_amount: c.net_amount.trim(),
     net_currency: c.net_currency.trim().toUpperCase(),
     supplier_note: c.supplier_note.trim() ? c.supplier_note.trim() : null,
+    ...(c.supplier_rate_id ? { supplier_rate_id: c.supplier_rate_id } : {}),
   };
 }
 
@@ -89,7 +99,10 @@ export function toInput(items: DraftItem[]): ItemInput[] {
     day_to: it.day_to,
     source_tour_id: it.source_tour_id,
     notes: it.notes.trim() ? it.notes.trim() : null,
-    costs: it.costs.map(costInput),
+    hotel_room_type_id: it.supply?.kind === "room_type" ? it.supply.id : null,
+    service_id: it.supply?.kind === "service" ? it.supply.id : null,
+    // No line on an item that books supply: let the API take the rate in force.
+    ...(it.supply && it.costs.length === 0 ? {} : { costs: it.costs.map(costInput) }),
   }));
 }
 

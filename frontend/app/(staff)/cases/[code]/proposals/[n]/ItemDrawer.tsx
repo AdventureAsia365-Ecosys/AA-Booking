@@ -3,13 +3,16 @@
 // AA-683 — add / edit one proposal item (UI spec §4.8, C7 "slot edit form"): title, day range, staff note
 // and the attached CIS tour (read-only; detach only). The item is a commercial label written for this one
 // customer; CIS day text is never copied into it (ADR 0004 O7). Edits stay in the builder until Save.
+// AA-823: the item may book a hotel room type or a service (bk-010); saved without a net cost line, it takes the
+// supplier rate in force on its first day as its net.
 
 import { useState } from "react";
-import { Unlink } from "lucide-react";
+import { Unlink, X } from "lucide-react";
 import { FormDrawer, FromCisTag } from "@/ui";
 import { MAX_DAY, NOTES_MAX, TITLE_MAX, validateItem, type DraftItem } from "@/lib/proposalDraft";
+import { SupplyPicker } from "./SupplyPicker";
 
-export type ItemDraftFields = Pick<DraftItem, "title" | "day_from" | "day_to" | "notes" | "source_tour_id">;
+export type ItemDraftFields = Pick<DraftItem, "title" | "day_from" | "day_to" | "notes" | "source_tour_id" | "supply">;
 
 const inputCls = "h-10 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
 
@@ -46,12 +49,18 @@ function ItemForm({
   const [to, setTo] = useState(String(initial.day_to));
   const [notes, setNotes] = useState(initial.notes);
   const [tour, setTour] = useState(initial.source_tour_id);
+  const [supply, setSupply] = useState(initial.supply ?? null);
   const [touched, setTouched] = useState(false);
 
-  const fields: ItemDraftFields = { title, day_from: Number(from), day_to: Number(to), notes, source_tour_id: tour };
+  const fields: ItemDraftFields = { title, day_from: Number(from), day_to: Number(to), notes, source_tour_id: tour, supply };
   const errors = validateItem(fields);
   const dirty =
-    title !== initial.title || from !== String(initial.day_from) || to !== String(initial.day_to) || notes !== initial.notes || tour !== initial.source_tour_id;
+    title !== initial.title ||
+    from !== String(initial.day_from) ||
+    to !== String(initial.day_to) ||
+    notes !== initial.notes ||
+    tour !== initial.source_tour_id ||
+    (supply?.id ?? null) !== (initial.supply?.id ?? null);
 
   return (
     <FormDrawer
@@ -99,6 +108,26 @@ function ItemForm({
           {notes.length} / {NOTES_MAX}
         </span>
       </label>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[13px] font-medium text-ink">Hotel room or service</span>
+        {supply ? (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-line bg-panel px-3 py-2">
+            <span className="min-w-0 text-[13px] text-body">
+              <span className="font-medium text-ink">{supply.kind === "room_type" ? "Room" : "Service"}</span> · {supply.label}{" "}
+              <span className="font-mono text-xs text-muted">{supply.code}</span>
+              {!supply.active && <span className="ml-1 text-xs text-warning">(inactive)</span>}
+            </span>
+            <button type="button" onClick={() => setSupply(null)} aria-label="Remove the room or service" className="cursor-pointer text-muted hover:text-danger">
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <SupplyPicker onPick={(o) => setSupply({ kind: o.kind, id: o.id, code: o.code, label: o.label, active: true })} />
+        )}
+        <span className="text-xs text-muted">
+          Optional. With no net cost line, saving takes the supplier&apos;s rate in force on the item&apos;s first day.
+        </span>
+      </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">CIS tour</span>
         {tour ? (

@@ -1,22 +1,12 @@
-// app/(staff)/services/[id]/page.tsx: Service (wave 2, UI spec §3; Figma ACTIVITY DETAILS (07)).
-// Registered now (Nghiệp S236 decision 3); renders its layout frame and "Coming in wave 2" until built.
+// app/(staff)/services/[id]/page.tsx: Service (wave 2, AA-823; UI spec §3; Figma ACTIVITY DETAILS (07)).
+// `id` is the SVC- code (or the UUID). Server shell for the metadata; the page is the client view in _parts.
 
 import type { Metadata } from "next";
-import { WaveFrame } from "@/ui/booking/WaveFrame";
+import { ServiceDetailView } from "../_parts/ServiceDetailView";
 
 export const metadata: Metadata = { title: "Service" };
 
-export default function ServicesIdPage() {
-  return (
-    <WaveFrame
-      wave={2}
-      title="Service"
-      layout="detail"
-      description="One commercial service: its place, supplier and rates."
-      purpose="Service detail with its rates and where it is used."
-      tabs={["Overview", "Rates", "Used in"]}
-      sections={["Overview", "Supplier", "Rates"]}
-      breadcrumbs={[{"label": "Services", "href": "/services"}, {"label": "Service"}]}
-    />
-  );
+export default async function ServicePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <ServiceDetailView refParam={id} />;
 }

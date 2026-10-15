@@ -122,6 +122,7 @@ class CostIn(BaseModel):
     net_amount: Money = Field(description="supplier net cost in net_currency; 0 for an included item")
     net_currency: Currency
     supplier_note: str | None = Field(default=None, max_length=200)
+    supplier_rate_id: uuid.UUID | None = Field(default=None, description="the published rate this line comes from")
 
 
 class ItemIn(BaseModel):
@@ -136,13 +137,17 @@ class ItemIn(BaseModel):
     costs: list[CostIn] | None = Field(
         default=None,
         max_length=versions.MAX_COSTS_PER_ITEM,
-        description="replaces the item's net cost lines; omit to keep them",
+        description="replaces the item's net cost lines; omit to keep them (or to take the rate in force)",
     )
+    hotel_room_type_id: uuid.UUID | None = Field(default=None, description="the hotel room type this item books")
+    service_id: uuid.UUID | None = Field(default=None, description="the service this item books")
 
     @model_validator(mode="after")
     def _days_in_order(self) -> ItemIn:
         if self.day_to < self.day_from:
             raise ValueError("day_to must be >= day_from")
+        if self.hotel_room_type_id and self.service_id:
+            raise ValueError("an item books one room type or one service, not both")
         return self
 
 
@@ -323,8 +328,16 @@ async def put_version_items(
             costs=None
             if item.costs is None
             else tuple(
-                versions.Cost(c.net_amount, c.net_currency, (c.supplier_note or "").strip() or None) for c in item.costs
+                versions.Cost(
+                    c.net_amount,
+                    c.net_currency,
+                    (c.supplier_note or "").strip() or None,
+                    str(c.supplier_rate_id) if c.supplier_rate_id else None,
+                )
+                for c in item.costs
             ),
+            hotel_room_type_id=str(item.hotel_room_type_id) if item.hotel_room_type_id else None,
+            service_id=str(item.service_id) if item.service_id else None,
         )
         for item in body.items
     ]
