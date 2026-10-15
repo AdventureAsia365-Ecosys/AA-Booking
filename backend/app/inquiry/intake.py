@@ -10,10 +10,11 @@
 
 ``bk_inquiry_process`` (one per inbox row)
     Validates the payload (inquiry.submitted v1 / v1.1), then in ONE transaction, holding the inbox
-    row lock: creates a lead customer (O6), the trip case and its legs, a staff notification and an
-    audit row, and marks the inbox row ``processed``. Re-running it is a no-op. A legacy hand-off
-    with ``customer: null`` (or a contact with neither email nor phone) is ``parked``; an invalid
-    payload is ``failed`` with the reason. Neither becomes a trip case.
+    row lock: creates a lead customer (O6), the trip case and its legs, a staff notification (plus one
+    ``bk_notify_email`` job for it, AA-811) and an audit row, and marks the inbox row ``processed``.
+    Re-running it is a no-op. A legacy hand-off with ``customer: null`` (or a contact with neither
+    email nor phone) is ``parked``; an invalid payload is ``failed`` with the reason. Neither becomes
+    a trip case.
 
 Customer rule (contract v1.1, ``verified``): an unverified contact is never merged into an existing
 customer. It always becomes a new lead row (``verified = false``, ``source = 'tripplanner_lead'``);
@@ -35,6 +36,7 @@ from app.inquiry.contract import CONTRACT, SOURCE, Contact, ContractError, Inqui
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError, Recurring
+from app.notifications import staff_email
 
 log = logging.getLogger(__name__)
 
@@ -230,16 +232,24 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
     message = f"{contact.name or 'A traveller'} sent a trip with {len(inquiry.legs)} AA tour leg(s)."
     if review:
         message += " The contact matches an existing customer: review before merging."
-    await conn.execute(
+    notification_id = await conn.fetchval(
         """
         INSERT INTO booking.notifications
             (recipient_type, recipient_id, type, title, message, entity_type, entity_id, data)
         VALUES ('staff', NULL, 'trip_case.new_inquiry', $1, $2, 'trip_case', $3::uuid, $4::jsonb)
+        RETURNING id::text
         """,
         f"New inquiry {case['code']}",
         message,
         case["id"],
         json.dumps(summary),
+    )
+    # AA-811: the staff e-mail goes out from its own job (never blocks or fails the intake); one per notification.
+    await queue.enqueue(
+        conn,
+        staff_email.KIND,
+        staff_email.payload(notification_id),
+        idempotency_key=staff_email.idempotency_key(notification_id),
     )
     await conn.execute(
         """

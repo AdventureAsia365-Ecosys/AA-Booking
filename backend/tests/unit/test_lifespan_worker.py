@@ -43,7 +43,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         assert client.get("/booking/health").status_code == 200
     (worker,) = FakeWorker.instances
     assert worker.started and worker.stopped
-    assert set(worker.handlers) == {"bk_inquiry_pull", "bk_inquiry_process"}
+    assert set(worker.handlers) == {"bk_inquiry_pull", "bk_inquiry_process", "bk_notify_email"}
     assert [r.kind for r in worker.recurring] == ["bk_inquiry_pull"]
 
 

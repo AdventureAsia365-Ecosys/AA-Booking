@@ -8,3 +8,6 @@ jsonschema==4.23.0
 # Staff JWT verification (RS256 against the CIS JWKS, AA-680) — same library as AA-CIS-App (PyJWT[crypto]).
 PyJWT==2.15.1
 cryptography==50.0.2
+# Transactional e-mail through SES v2 (AA-811, app/mailer.py) — same pins as AA-CIS-App.
+boto3==1.43.49
+botocore==1.43.49

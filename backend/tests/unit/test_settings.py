@@ -71,3 +71,41 @@ def test_staff_auth_urls_must_be_https_outside_test(name: str) -> None:
     with pytest.raises(SettingsError, match=name):
         load_settings({name: "ftp://cis.example", "ENVIRONMENT": "test"})
     assert load_settings({name: "http://localhost:8000", "ENVIRONMENT": "local"})
+
+
+def test_email_settings_default_to_no_email() -> None:
+    s = load_settings({})
+    assert (s.staff_notify_email, s.ses_from_address, s.ses_configuration_set) == ("", "", "")
+    assert s.ses_region == "us-west-1"
+    assert s.staff_admin_url == "https://aa-booking-admin.vercel.app"
+
+
+def test_reads_email_settings() -> None:
+    s = load_settings(
+        {
+            "STAFF_NOTIFY_EMAIL": " staff@example.test ",
+            "SES_FROM_ADDRESS": "no-reply@lumiguides.it.com",
+            "SES_CONFIGURATION_SET": "aa-email-dev-transactional",
+            "SES_REGION": "us-east-1",
+            "STAFF_ADMIN_URL": "https://admin.example.test/",
+        }
+    )
+    assert s.staff_notify_email == "staff@example.test"
+    assert s.ses_from_address == "no-reply@lumiguides.it.com"
+    assert s.ses_configuration_set == "aa-email-dev-transactional"
+    assert s.ses_region == "us-east-1"
+    assert s.staff_admin_url == "https://admin.example.test"
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"STAFF_NOTIFY_EMAIL": "a@b.test, c@d.test"},
+        {"STAFF_NOTIFY_EMAIL": "not-an-address"},
+        {"SES_FROM_ADDRESS": "a@@b.test"},
+        {"STAFF_ADMIN_URL": "http://admin.example.test"},
+    ],
+)
+def test_email_settings_are_validated(env: dict) -> None:
+    with pytest.raises(SettingsError):
+        load_settings(env)

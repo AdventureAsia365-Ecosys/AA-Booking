@@ -25,6 +25,7 @@ from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
 from app.jobs.worker import Worker
+from app.notifications import staff_email
 from app.routers import (
     catalog,
     customers,
@@ -58,7 +59,8 @@ def create_app(
         stop = asyncio.Event()
         task: asyncio.Task[None] | None = None
         if settings.worker_enabled and db.configured:
-            worker = Worker(db.pool, intake.HANDLERS, recurring=intake.RECURRING)
+            handlers = {**intake.HANDLERS, staff_email.KIND: staff_email.build_handler(settings)}
+            worker = Worker(db.pool, handlers, recurring=intake.RECURRING)
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
         yield
         stop.set()
