@@ -17,7 +17,7 @@ import { CURRENCIES, Field, inputCls, paxErrors, toInt } from "../../../cases/_p
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "../../../cases/new/CustomerPicker";
 
 type Target = "new_case" | "existing_case";
-const CASE_CODE_RE = /^TC-\d{6}$/i;
+const CASE_CODE_RE = /^TC-\d{6,}$/i; // lpad 6, grows past TC-999999 (bk-002 trip_case_code_seq)
 
 export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; onClose: () => void }) {
   const router = useRouter();

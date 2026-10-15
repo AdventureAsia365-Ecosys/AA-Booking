@@ -86,6 +86,14 @@ def test_shape_hides_pricing_from_staff_without_pricing_read() -> None:
     assert untouched["has_commercial_row"] is False and untouched["price_hint"] is None
 
 
+def test_plan_writers_can_read_pricing() -> None:
+    # PUT …/commercial replaces every field. A writer without pricing.read would get price_hint / default_channel /
+    # commercial_notes as null and wipe them on the next save, so every trip_plan.write role must hold pricing.read.
+    from app.auth.staff import PERMISSIONS
+
+    assert PERMISSIONS["trip_plan.write"] <= PERMISSIONS["pricing.read"]
+
+
 @pytest.mark.parametrize(
     ("created", "new", "changed", "summary"),
     [
