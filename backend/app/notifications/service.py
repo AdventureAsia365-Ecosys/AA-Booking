@@ -6,7 +6,8 @@ addressed to them (``recipient_ref`` = their CIS user id, bk-005). Read state is
 ``read_at`` column is not used for staff rows. Customer rows (``recipient_type = 'customer'``) never show
 here: they are the customer's "My Trips" feed (O8).
 
-No e-mail is sent anywhere (CONTEXT: e-mail is out of scope): a notification is a row.
+A notification is a row. The only e-mail is the staff "new inquiry" e-mail, sent by the ``bk_notify_email`` job
+that intake queues next to its notification (``app/notifications/staff_email.py``, AA-811); these helpers send none.
 """
 
 from __future__ import annotations

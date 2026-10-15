@@ -11,6 +11,7 @@ name: Deploy Dev
 #   ECR_REPOSITORY        default aa-booking-dev-api
 #   ECS_CLUSTER           default aa-cis-dev-cluster
 #   ECS_SERVICE           default aa-booking-dev-api
+#   ECS_TASK_FAMILY       default aa-booking-dev-api (the Terraform task definition family)
 #   BOOKING_API_BASE_URL  e.g. the execute-api stage URL; the smoke test is skipped while unset
 #
 # No job guard: Booking has no jobs yet (ADR 0004 decision 8). This workflow never changes the
@@ -63,6 +64,7 @@ jobs:
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'aa-booking-dev-api' }}
       ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'aa-cis-dev-cluster' }}
       ECS_SERVICE: ${{ vars.ECS_SERVICE || 'aa-booking-dev-api' }}
+      ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'aa-booking-dev-api' }}
       BASE_URL: ${{ vars.BOOKING_API_BASE_URL }}
     steps:
       - uses: actions/checkout@v5
@@ -90,11 +92,15 @@ jobs:
       - name: Register task definition and update service
         run: |
           set -euo pipefail
-          CURRENT_TD=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
-            --query 'services[0].taskDefinition' --output text)
-          [ -n "$CURRENT_TD" ] && [ "$CURRENT_TD" != "None" ] || { echo "::error::service $ECS_SERVICE not found"; exit 1; }
-          echo "current task definition: $CURRENT_TD"
-          aws ecs describe-task-definition --task-definition "$CURRENT_TD" --query 'taskDefinition' --output json > /tmp/td.json
+          # Base = the LATEST ACTIVE revision of the family, not the revision the service runs: a Terraform change
+          # to the task definition (booking.tf: environment, secrets, roles, size) registers a new revision that
+          # the service ignores (ignore_changes), and only this copy carries it to the running task (AA-811,
+          # same rule as the CIS deploy).
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].serviceName' --output text | grep -qx "$ECS_SERVICE" \
+            || { echo "::error::service $ECS_SERVICE not found"; exit 1; }
+          aws ecs describe-task-definition --task-definition "$ECS_TASK_FAMILY" --query 'taskDefinition' --output json > /tmp/td.json
+          echo "base task definition: $(jq -r '.taskDefinitionArn' /tmp/td.json)"
           [ "$(jq '.containerDefinitions | length' /tmp/td.json)" = "1" ] || { echo "::error::expected exactly one container"; exit 1; }
           # Only the image changes; every other field stays as Terraform set it.
           jq --arg img "$DEPLOY_IMAGE" \

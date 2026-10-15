@@ -18,6 +18,8 @@ import pytest_asyncio
 from app.inquiry import intake
 from app.jobs import queue
 from app.jobs.worker import Recurring, Worker
+from app.notifications import staff_email
+from app.settings import Settings
 from tests import inquiry_samples as samples
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -34,6 +36,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await conn.execute(f"TRUNCATE {INTAKE_TABLES} CASCADE")
     await conn.execute("TRUNCATE tripplanner.outbox RESTART IDENTITY")
+    await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
     try:
         yield conn
     finally:
@@ -68,13 +71,35 @@ async def publish(
     )
 
 
-async def drain(pool: asyncpg.Pool, *, pull: bool = True) -> None:
-    """Queue one pull (if asked) and run due jobs until none is left."""
+class StubSes:
+    """Stands in for the boto3 sesv2 client (AA-811): records every send_email call."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+
+    def send_email(self, **kwargs: Any) -> dict[str, Any]:
+        self.sent.append(kwargs)
+        return {"MessageId": f"msg-{len(self.sent)}"}
+
+
+EMAIL_SETTINGS = Settings(
+    database_url=None,
+    environment="test",
+    staff_notify_email="staff@example.test",
+    ses_from_address="no-reply@lumiguides.it.com",
+    ses_configuration_set="aa-email-dev-transactional",
+)
+
+
+async def drain(pool: asyncpg.Pool, *, pull: bool = True, ses: StubSes | None = None) -> None:
+    """Queue one pull (if asked) and run due jobs until none is left (the staff e-mail job against a stub SES)."""
 
     async def provide() -> asyncpg.Pool:
         return pool
 
-    w = Worker(provide, intake.HANDLERS, maintenance_every=10_000)
+    stub = ses or StubSes()
+    handlers = {**intake.HANDLERS, staff_email.KIND: staff_email.build_handler(EMAIL_SETTINGS, lambda _r: stub)}
+    w = Worker(provide, handlers, maintenance_every=10_000)
     w._ticks = 1  # skip maintenance: tests schedule the pull explicitly
     if pull:
         await queue.enqueue(pool, intake.PULL_KIND, {})
@@ -136,9 +161,12 @@ async def test_v1_and_v1_1_payloads_open_one_trip_case_each(admin: asyncpg.Conne
     }
     assert await admin.fetchval("SELECT count(*) FROM booking.audit_logs WHERE entity_type = 'trip_case'") == 3
     jobs = await admin.fetch("SELECT kind, status FROM booking.job")
-    assert sorted((j["kind"], j["status"]) for j in jobs) == [("bk_inquiry_process", "succeeded")] * 3 + [
-        ("bk_inquiry_pull", "succeeded")
-    ]
+    assert (
+        sorted((j["kind"], j["status"]) for j in jobs)
+        == [("bk_inquiry_process", "succeeded")] * 3
+        + [("bk_inquiry_pull", "succeeded")]
+        + [("bk_notify_email", "succeeded")] * 3
+    )
 
 
 # ── Idempotency ──────────────────────────────────────────────────────────────
@@ -163,7 +191,42 @@ async def test_pull_and_process_are_idempotent(admin: asyncpg.Connection, pool: 
     assert await admin.fetchval("SELECT count(*) FROM booking.trip_case_legs") == 2
     assert await admin.fetchval("SELECT count(*) FROM booking.customers") == 1
     assert await admin.fetchval("SELECT count(*) FROM booking.notifications") == 1
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE kind = 'bk_notify_email'") == 1
     assert (await inbox(admin))[0]["status"] == "processed"
+
+
+# ── Staff e-mail (AA-811) ────────────────────────────────────────────────────
+
+
+async def test_new_inquiry_sends_one_staff_email(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    payload = samples.v1_1()
+    first_leg = next(leg for leg in payload["itinerary"]["legs"] if leg["position"] == 1)
+    second_leg = next(leg for leg in payload["itinerary"]["legs"] if leg["position"] == 2)
+    await admin.execute(
+        "INSERT INTO catalog.v_tour (source_id, tour_id, source_version, title, country)"
+        " VALUES ('src-1', $1::uuid, 1, 'Hanoi and Halong Bay', 'Vietnam')",
+        first_leg["source_tour_id"],
+    )
+    await publish(admin, payload)
+    ses = StubSes()
+    await drain(pool, ses=ses)
+    await drain(pool, ses=ses)  # nothing new: still one e-mail
+
+    (sent,) = ses.sent
+    code = (await trip_cases(admin))[0]["code"]
+    assert sent["FromEmailAddress"] == "no-reply@lumiguides.it.com"
+    assert sent["Destination"] == {"ToAddresses": ["staff@example.test"]}
+    assert sent["ConfigurationSetName"] == "aa-email-dev-transactional"
+    simple = sent["Content"]["Simple"]
+    assert simple["Subject"]["Data"] == f"[Test] New inquiry {code}: Minh Nguyen"
+    text = simple["Body"]["Text"]["Data"]
+    assert payload["customer"]["email"] in text
+    assert "Hanoi and Halong Bay (Vietnam), days 2-4" in text  # catalog title (live read)
+    # Not in the catalog and no named snapshot day: the generic title (legs in day order).
+    assert text.index(f"1. AA tour {second_leg['source_tour_id']}, days 1-3") < text.index("2. Hanoi and Halong Bay")
+    assert f"https://aa-booking-admin.vercel.app/cases/{code}" in text
+    result = await admin.fetchval("SELECT result::text FROM booking.job WHERE kind = 'bk_notify_email'")
+    assert json.loads(result)["message_id"] == "msg-1"
 
 
 async def test_pull_queues_one_process_job_per_new_event(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:

@@ -34,6 +34,7 @@ def conn_for(payload: Any, status: str = "received") -> ScriptedConn:
             ("FROM booking.trip_cases WHERE idempotency_key", None),
             ("INSERT INTO booking.customers", "lead-1"),
             ("INSERT INTO booking.trip_cases", {"id": "case-1", "code": "TC-000001"}),
+            ("INSERT INTO booking.notifications", "note-1"),
         ]
     )
 
@@ -109,6 +110,17 @@ async def test_process_opens_a_trip_case_for_a_new_lead() -> None:
     assert note[0] == "New inquiry TC-000001" and "review" not in note[1]
     assert len(conn.sql("INSERT INTO booking.audit_logs")) == 1
     assert inbox_status(conn)[1] == "processed"
+    # AA-811: one staff e-mail job per notification, deduplicated by its idempotency key.
+    (job,) = conn.sql("INSERT INTO booking.job")
+    assert job[0] == "bk_notify_email"
+    assert json.loads(job[1]) == {"notification_id": "note-1"}
+    assert job[2] == "bk_notify_email:note-1"
+
+
+async def test_process_queues_no_email_job_for_a_settled_event() -> None:
+    conn = conn_for(samples.v1_1(), "processed")
+    await intake.process(conn, process_job())
+    assert conn.sql("INSERT INTO booking.job") == []
 
 
 async def test_process_flags_a_lead_matching_an_existing_customer() -> None:

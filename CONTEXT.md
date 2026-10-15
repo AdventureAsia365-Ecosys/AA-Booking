@@ -67,7 +67,9 @@ backend/
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
                            versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
   app/customers/           customers over booking.v_customer_summary (status lead/active/past), leads, archive
-  app/notifications/       staff feed + notify helpers (rows only, no e-mail)
+  app/notifications/       staff feed + notify helpers (service.py, rows); staff_email.py = bk_notify_email, the
+                           "new inquiry" e-mail to the staff inbox (AA-811)
+  app/mailer.py            SES v2 send helper (boto3 sesv2 send_email, From + configuration set from settings, AA-811)
   app/paging.py            keyset cursors (next_before) + ILIKE escaping; app/reference.py settings/countries
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
   app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
@@ -100,7 +102,7 @@ migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Inf
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-810.md, AA-822.md, AA-823.md)
+                           AA-683.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -123,6 +125,21 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
 `GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
 (optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
 `STAFF_JWT_ISSUER` (optional; default to the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
+E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inquiry e-mail; empty = no e-mail),
+`SES_FROM_ADDRESS` (must equal the Infra `ses_from_address`, the only From the task role may use; empty = no e-mail),
+`SES_CONFIGURATION_SET` (Infra `aa-email-<env>-transactional`), `SES_REGION` (default `us-west-1`), `STAFF_ADMIN_URL`
+(links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
+
+## E-mail (AA-811)
+
+Booking sends transactional e-mail through **Amazon SES** on acc2 (identity `lumiguides.it.com`, Infra
+`accounts/aa365/ses.tf`; the task role may send only as `ses_from_address`, IAM `ses:FromAddress`). Today there is one
+message: the staff **"new inquiry"** e-mail. Booking sends it, not TripPlanner (S238 decision, ADR 0004 boundary:
+TripPlanner is the front door, Booking owns customers, trip cases and notifications); TripPlanner's `notify.py` only
+logs. Sending happens in a `booking.job` (`bk_notify_email`), never in a request path or inside the intake
+transaction. Templates are in code (`app/notifications/staff_email.py`). Bounce/complaint suppression in Booking
+tables is not built yet (the SES configuration set's account suppression list applies). Customer e-mail (proposal
+send, OTP) is not built: those still write rows only.
 
 ## Staff authentication and permissions (AA-680, ADR 0004 O1)
 
@@ -159,7 +176,8 @@ tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
 | Kind | What |
 |---|---|
 | `bk_inquiry_pull` | Recurring singleton (every ~60 s): reads `tripplanner.v_inquiry_outbox`, anti-joins `booking.inbox_events`, inserts new rows `ON CONFLICT DO NOTHING`, queues one process job each. `booking.inbox_cursor.safe_id` is only a scan bound, advanced behind a 600 s window (contract rule 4). |
-| `bk_inquiry_process` | Validates v1/v1.1; creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
+| `bk_inquiry_process` | Validates v1/v1.1; creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
+| `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
 ## Health contract (ADR 0004 decision 9)
 
@@ -295,7 +313,8 @@ operations / money (AA-682).
 
 ## Out of scope today
 
-Post-sale status edges, **e-mail** (proposal send writes a customer notification row only and says so), a catalog
+Post-sale status edges, **customer e-mail** (proposal send writes a customer notification row only and says so; the
+only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync / outbox consumer (D4: live reads instead), catalog titles on trip case legs (Q11), the trip plan price matrix
 and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
 contract), the supply outbox / `v_supply_*` views / `supply.hotel.v1`·`supply.service.v1` contracts (ADR 0004a, own

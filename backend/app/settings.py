@@ -15,6 +15,18 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
   ``https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json``.
 - ``STAFF_JWT_ISSUER``: expected ``iss`` of staff JWTs. Default: ``https://api-cis.lumiguides.it.com``.
   Both must be ``https://`` unless ``ENVIRONMENT`` is ``test`` or ``local``.
+
+Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` grants the task role
+``ses:SendEmail`` as ``SES_FROM_ADDRESS`` only):
+
+- ``STAFF_NOTIFY_EMAIL``: inbox that receives the "new inquiry" e-mail (``bk_notify_email``). Empty
+  (default) = no e-mail; the job succeeds as ``skipped`` with the reason.
+- ``SES_FROM_ADDRESS``: the From address. Empty (default) = no e-mail, same as above.
+- ``SES_CONFIGURATION_SET``: SES configuration set (events + metrics). Empty = omitted (the domain
+  identity's default set still applies).
+- ``SES_REGION``: default ``us-west-1`` (the SES identity's region).
+- ``STAFF_ADMIN_URL``: base URL of the staff admin, for links in staff e-mail. Default: the Dev
+  Vercel alias ``https://aa-booking-admin.vercel.app``. Must be ``https://`` outside ``test``/``local``.
 """
 
 from __future__ import annotations
@@ -32,6 +44,8 @@ FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 DEFAULT_STAFF_JWT_ISSUER = "https://api-cis.lumiguides.it.com"
 DEFAULT_CIS_JWKS_URL = f"{DEFAULT_STAFF_JWT_ISSUER}/auth/.well-known/jwks.json"
+DEFAULT_SES_REGION = "us-west-1"
+DEFAULT_STAFF_ADMIN_URL = "https://aa-booking-admin.vercel.app"
 
 
 class SettingsError(ValueError):
@@ -47,6 +61,11 @@ class Settings:
     worker_enabled: bool = False
     cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
     staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
+    staff_notify_email: str = ""
+    ses_from_address: str = ""
+    ses_configuration_set: str = ""
+    ses_region: str = DEFAULT_SES_REGION
+    staff_admin_url: str = DEFAULT_STAFF_ADMIN_URL
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -55,7 +74,17 @@ class Settings:
             raise SettingsError(
                 f"DB_SSL=disable is only allowed when ENVIRONMENT is one of {sorted(INSECURE_ENVIRONMENTS)}"
             )
-        for name, value in (("CIS_JWKS_URL", self.cis_jwks_url), ("STAFF_JWT_ISSUER", self.staff_jwt_issuer)):
+        for name, address in (
+            ("STAFF_NOTIFY_EMAIL", self.staff_notify_email),
+            ("SES_FROM_ADDRESS", self.ses_from_address),
+        ):
+            if address and (address.count("@") != 1 or any(c.isspace() for c in address)):
+                raise SettingsError(f"{name} must be a single e-mail address, got {address!r}")
+        for name, value in (
+            ("CIS_JWKS_URL", self.cis_jwks_url),
+            ("STAFF_JWT_ISSUER", self.staff_jwt_issuer),
+            ("STAFF_ADMIN_URL", self.staff_admin_url),
+        ):
             if value.startswith("https://"):
                 continue
             if value.startswith("http://") and self.environment in INSECURE_ENVIRONMENTS:
@@ -88,4 +117,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         cis_jwks_url=(env.get("CIS_JWKS_URL") or DEFAULT_CIS_JWKS_URL).strip(),
         staff_jwt_issuer=(env.get("STAFF_JWT_ISSUER") or DEFAULT_STAFF_JWT_ISSUER).strip(),
+        staff_notify_email=(env.get("STAFF_NOTIFY_EMAIL") or "").strip(),
+        ses_from_address=(env.get("SES_FROM_ADDRESS") or "").strip(),
+        ses_configuration_set=(env.get("SES_CONFIGURATION_SET") or "").strip(),
+        ses_region=(env.get("SES_REGION") or DEFAULT_SES_REGION).strip(),
+        staff_admin_url=(env.get("STAFF_ADMIN_URL") or DEFAULT_STAFF_ADMIN_URL).strip().rstrip("/"),
     )
