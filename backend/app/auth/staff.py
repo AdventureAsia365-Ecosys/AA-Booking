@@ -42,6 +42,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "pricing.read": frozenset({"admin", "sales", "contracting"}),
     # New pricing rule / FX rows and their approval (maker-checker, bk-007): contracting owns rates, admin backs up.
     "pricing.write": frozenset({"admin", "contracting"}),
+    # Supply (bk-008, ADR 0005 d8): contracting owns suppliers and contracts; sales reads them to quote.
+    "supply.read": frozenset({"admin", "sales", "contracting"}),
+    "supply.write": frozenset({"admin", "contracting"}),
     "staff.admin": frozenset({"admin"}),
     "audit.read": frozenset({"admin"}),
 }
