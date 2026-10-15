@@ -587,8 +587,11 @@ async def assign(
     return {"id": case["id"], "code": case["code"], "role": role, "staff_user_id": cis_user_id, "changed": True}
 
 
-async def create_case(conn: asyncpg.Connection, staff: Staff, data: dict[str, Any]) -> dict[str, Any]:
-    """A staff-created case (``source_system = 'manual'``) for an existing customer or a new manual lead.
+async def create_case(
+    conn: asyncpg.Connection, staff: Staff, data: dict[str, Any], *, source: tuple[str, str | None] = ("manual", None)
+) -> dict[str, Any]:
+    """A staff-created case for an existing customer or a new manual lead. ``source`` is ``('manual', None)``, or
+    ``('cis', <catalog source_id>)`` for a case started from a sellable trip plan (AA-679, ``app.catalog``).
 
     ``data``: ``customer_id`` xor ``new_customer`` ({name, email?, phone?, address?, contact_consent}),
     ``start_date``, ``pax`` / ``pax_adults`` / ``pax_children``, ``currency`` (default USD), ``trip_style``,
@@ -616,9 +619,9 @@ async def create_case(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
         case = await conn.fetchrow(
             """
             INSERT INTO booking.trip_cases
-                (customer_id, status, source_system, start_date, pax, pax_adults, pax_children, currency,
+                (customer_id, status, source_system, source_id, start_date, pax, pax_adults, pax_children, currency,
                  trip_style, notes, created_by)
-            VALUES ($1::uuid, $2, 'manual', $3, $4, $5, $6, $7, $8, $9, $10::uuid)
+            VALUES ($1::uuid, $2, $11, $12, $3, $4, $5, $6, $7, $8, $9, $10::uuid)
             RETURNING id::text AS id, code, status
             """,
             customer_id,
@@ -631,6 +634,8 @@ async def create_case(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
             data.get("trip_style"),
             data.get("notes"),
             audit.as_uuid(staff.cis_user_id),
+            source[0],
+            source[1],
         )
     except asyncpg.CheckViolationError as exc:
         raise Invalid("invalid_value", exc.constraint_name or "check violation") from exc
@@ -646,7 +651,8 @@ async def create_case(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
         after={
             "customer_id": customer_id,
             "status": case["status"],
-            "source_system": "manual",
+            "source_system": source[0],
+            **({"source_id": source[1]} if source[1] else {}),
             **{k: data.get(k) for k in ("start_date", "currency", "trip_style", "countries")},
             **pax_fields,
         },

@@ -124,6 +124,7 @@ export default function TripCasesPage() {
                     options: [
                       { value: "tripplanner", label: "TripPlanner" },
                       { value: "manual", label: "Manual" },
+                      { value: "cis", label: "CIS trip plan" },
                     ],
                   },
                 ]}

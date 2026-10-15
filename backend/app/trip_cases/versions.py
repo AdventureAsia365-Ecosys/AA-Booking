@@ -176,7 +176,21 @@ def _editable(version: dict[str, Any]) -> None:
         raise Conflict("version_sent", "this version was sent to the customer; create a new version")
 
 
-async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes: str | None) -> dict[str, Any]:
+@dataclass(frozen=True)
+class Seed:
+    """Items and defaults of a version started from somewhere other than the case itself (a CIS trip plan,
+    ``app.catalog.trip_plans``): the version gets these items instead of the legs (V1) or a copy (Vn)."""
+
+    title: str | None
+    channel: str | None
+    items: list[Item]
+    label: str
+    source_id: str | None = None
+
+
+async def create_version(
+    conn: asyncpg.Connection, staff: Staff, ref: str, notes: str | None, *, seed: Seed | None = None
+) -> dict[str, Any]:
     case = await resolve_case(conn, ref, lock=True)  # the lock serialises version numbering per case
     if is_terminal(case["status"]):
         raise Conflict("trip_case_closed", f"trip case is {case['status']}")
@@ -194,7 +208,11 @@ async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes
         )
         or 1
     )
-    if latest is None:
+    if seed is not None:
+        copied_from = None
+        items = seed.items
+        values = (seed.title, notes, None, case["currency"], seed.channel)
+    elif latest is None:
         copied_from = None
         legs = await conn.fetch(
             "SELECT position, source_tour_id, day_from, day_to FROM booking.trip_case_legs"
@@ -223,7 +241,7 @@ async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes
         *values,
         staff.cis_user_id,
     )
-    if latest is None:
+    if seed is not None or latest is None:
         await _insert_items(conn, version_id, list(enumerate(items, start=1)))
     else:
         await conn.execute(
@@ -260,9 +278,17 @@ async def create_version(conn: asyncpg.Connection, staff: Staff, ref: str, notes
             "version_number": number,
             "copied_from": copied_from,
             "item_count": len(version["items"]),
+            **({"trip_plan_source_id": seed.source_id} if seed is not None else {}),
         },
         entity_label=_label(case, number),
-        summary=f"Created V{number}" + (f" from V{copied_from}" if copied_from else " from the trip legs"),
+        summary=f"Created V{number}"
+        + (
+            f" from trip plan {seed.label}"
+            if seed is not None
+            else f" from V{copied_from}"
+            if copied_from
+            else " from the trip legs"
+        ),
     )
     return version
 

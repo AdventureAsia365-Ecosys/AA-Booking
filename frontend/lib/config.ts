@@ -26,6 +26,10 @@ export function cisApiUrl(): string {
 /** CIS admin web app, for "Managed in CIS" / "Open CIS admin" links. */
 export const CIS_ADMIN_URL = trimSlash(process.env.NEXT_PUBLIC_CIS_ADMIN_URL || DEV_CIS_ADMIN_URL);
 
+/** CIS public API base for catalog photos (contract catalog.tour.v1: GET {base}{path}?size=small|large, no auth).
+ *  A constant on Dev; it becomes configurable together with the production hostnames (AA-818). */
+export const CIS_MEDIA_URL = DEV_CIS_API_URL;
+
 /** Google sign-in start URL (AA-703). Empty = the "Continue with Google" button is not rendered. */
 export const GOOGLE_SIGNIN_URL = (process.env.NEXT_PUBLIC_GOOGLE_SIGNIN_URL || "").trim();
 

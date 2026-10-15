@@ -292,7 +292,19 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
             <dt className="text-muted">Countries</dt>
             <dd className="text-ink">{c.countries.length ? countryNames : "—"}</dd>
             <dt className="text-muted">Source</dt>
-            <dd className="text-ink">{c.source_system === "tripplanner" ? "TripPlanner" : c.source_system === "manual" ? "Manual" : "CIS"}</dd>
+            <dd className="text-ink">
+              {c.source_system === "tripplanner" ? (
+                "TripPlanner"
+              ) : c.source_system === "manual" ? (
+                "Manual"
+              ) : c.source_id ? (
+                <Link href={`/catalog/trip-plans/${encodeURIComponent(c.source_id)}`} className="text-accent-deep hover:underline">
+                  CIS trip plan
+                </Link>
+              ) : (
+                "CIS"
+              )}
+            </dd>
             <dt className="text-muted">Created</dt>
             <dd className="text-ink">
               <DateText value={c.created_at} />
