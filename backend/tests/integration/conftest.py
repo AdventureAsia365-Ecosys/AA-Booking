@@ -19,6 +19,7 @@ ADMIN_DSN = os.environ.get("BOOKING_TEST_ADMIN_DSN", "")
 MIGRATIONS = sorted((Path(__file__).resolve().parents[3] / "migrations").glob("*.sql"))
 STUB_SHARED = Path(__file__).with_name("stub_shared.sql")
 STUB_TRIPPLANNER = Path(__file__).with_name("stub_tripplanner.sql")
+STUB_CATALOG = Path(__file__).with_name("stub_catalog.sql")
 # CI-only value for the step Nghiep does out-of-band on Dev (ALTER ROLE booking WITH LOGIN PASSWORD).
 BOOKING_TEST_PASSWORD = "ci-only-not-a-real-password"  # noqa: S105
 
@@ -61,6 +62,7 @@ async def _reset_and_migrate(admin_dsn: str) -> None:
         await apply_migrations(conn)
         await conn.execute(f"ALTER ROLE booking WITH LOGIN PASSWORD '{BOOKING_TEST_PASSWORD}'")
         await conn.execute(STUB_TRIPPLANNER.read_text(encoding="utf-8"))
+        await conn.execute(STUB_CATALOG.read_text(encoding="utf-8"))
     finally:
         await conn.close()
 
