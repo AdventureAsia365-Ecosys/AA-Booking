@@ -40,6 +40,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "staff.directory": frozenset({"admin", "sales", "contracting"}),  # StaffPicker (D4)
     # Margins, net costs and FX are commercial data: sales quote, contracting owns rates (ADR 0005 d8).
     "pricing.read": frozenset({"admin", "sales", "contracting"}),
+    # New pricing rule / FX rows and their approval (maker-checker, bk-007): contracting owns rates, admin backs up.
+    "pricing.write": frozenset({"admin", "contracting"}),
     "staff.admin": frozenset({"admin"}),
     "audit.read": frozenset({"admin"}),
 }

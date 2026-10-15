@@ -112,9 +112,9 @@ async def test_pool_is_lazy_single_and_requires_ssl(created: list[dict[str, Any]
 
 @pytest.mark.asyncio
 async def test_newer_schema_is_ready(created: list[dict[str, Any]], answers: dict[str, Any]) -> None:
-    answers.update(_answers(versions=[*REQUIRED_SCHEMA_VERSIONS, "bk-007"]))
+    answers.update(_answers(versions=[*REQUIRED_SCHEMA_VERSIONS, "bk-999"]))
     result = await Database(SETTINGS).readiness()
-    assert result.ok and result.body["schema_version"] == "bk-007"
+    assert result.ok and result.body["schema_version"] == "bk-999"
 
 
 @pytest.mark.asyncio

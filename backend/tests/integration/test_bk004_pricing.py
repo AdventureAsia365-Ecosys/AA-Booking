@@ -34,7 +34,18 @@ SEED_DAY = date(2026, 10, 14)
 BK004 = next(p for p in MIGRATIONS if p.name.startswith("004_"))
 # bk-006 replaces bk-004's cost lock function; re-applied after bk-004 so the fixture keeps the newest one.
 BK006 = next(p for p in MIGRATIONS if p.name.startswith("006_"))
+# bk-007: only approved rows are in force; re-applying it approves the (re-)seeded bk-004 rules as seed:bk-004.
+BK007 = next(p for p in MIGRATIONS if p.name.startswith("007_"))
 STAFF_ID = "it-staff-810"
+
+APPROVE_ALL_FX = (
+    "INSERT INTO booking.policy_approvals (entity_type, fx_rate_id, approved_by)"
+    " SELECT 'fx_rate', id, 'it-checker' FROM booking.fx_rates ON CONFLICT (fx_rate_id) DO NOTHING"
+)
+APPROVE_ALL_RULES = (
+    "INSERT INTO booking.policy_approvals (entity_type, pricing_rule_id, approved_by)"
+    " SELECT 'pricing_rule', id, 'it-checker' FROM booking.pricing_rules ON CONFLICT (pricing_rule_id) DO NOTHING"
+)
 
 
 @pytest_asyncio.fixture
@@ -44,6 +55,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     # is a no-op when re-run except for its ON CONFLICT DO NOTHING seed, so re-applying it restores the seed.
     await conn.execute(BK004.read_text(encoding="utf-8"))
     await conn.execute(BK006.read_text(encoding="utf-8"))
+    await conn.execute(BK007.read_text(encoding="utf-8"))
     # Policy tables are append-only for role booking; the migration role (owner) cleans test rows.
     await conn.execute("DELETE FROM booking.pricing_rules WHERE valid_from <> $1", SEED_DAY)
     await conn.execute("DELETE FROM booking.fx_rates")
@@ -161,14 +173,28 @@ async def test_repository_picks_row_in_force(app_conn: asyncpg.Connection) -> No
             rate,
             as_of,
         )
+    await app_conn.execute(APPROVE_ALL_FX)
+    await app_conn.execute(APPROVE_ALL_RULES)
+    # bk-007: a pending (unapproved) row is never in force, even when it is the newest one.
+    await app_conn.execute(
+        "INSERT INTO booking.fx_rates (currency, rate_per_usd, buffer_pct, as_of, source)"
+        " VALUES ('EUR', 7, 0, $1, 'pending'), ('GBP', 0.8, 0, $2, 'pending')",
+        SEED_DAY - timedelta(days=1),
+        SEED_DAY,
+    )
+    await app_conn.execute(
+        "INSERT INTO booking.pricing_rules (channel, target_margin, floor_margin, valid_from)"
+        " VALUES ('b2b', 0.40, 0.10, $1)",
+        SEED_DAY + timedelta(days=31),
+    )
     dated = await repository.rule_in_force(app_conn, Channel.B2B, SEED_DAY)
     assert dated is not None and dated.rule.target_margin == D("0.15") and dated.valid_from == SEED_DAY
     later = await repository.rule_in_force(app_conn, Channel.B2B, SEED_DAY + timedelta(days=31))
-    assert later is not None and later.rule.target_margin == D("0.17")
+    assert later is not None and later.rule.target_margin == D("0.17")  # the 0.40 row of that day is pending
     assert await repository.rule_in_force(app_conn, Channel.B2B, SEED_DAY - timedelta(days=1)) is None
 
     rates = await repository.fx_rates_in_force(app_conn, ["EUR", "GBP", "USD"], SEED_DAY)
-    assert list(rates) == ["EUR"]
+    assert list(rates) == ["EUR"]  # GBP has only a pending row
     assert rates["EUR"].rate.rate_per_usd == D("0.92") and rates["EUR"].as_of == SEED_DAY
 
 
@@ -229,6 +255,7 @@ async def test_quote_preview_end_to_end(admin: asyncpg.Connection, migrated_book
         "INSERT INTO booking.fx_rates (currency, rate_per_usd, buffer_pct, as_of, source)"
         " VALUES ('EUR', 0.92, 0.02, DATE '2026-10-01', 'test'), ('VND', 25400, 0, DATE '2026-10-01', 'test')"
     )
+    await admin.execute(APPROVE_ALL_FX)
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
@@ -324,6 +351,7 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
         "INSERT INTO booking.fx_rates (currency, rate_per_usd, buffer_pct, as_of, source)"
         " VALUES ('EUR', 0.92, 0.02, DATE '2026-10-01', 'test'), ('VND', 25400, 0, DATE '2026-10-01', 'test')"
     )
+    await admin.execute(APPROVE_ALL_FX)
     await admin.execute("UPDATE booking.staff_users SET role = 'sales' WHERE cis_user_id = $1", STAFF_ID)
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
