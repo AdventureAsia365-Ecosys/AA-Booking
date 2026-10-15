@@ -144,6 +144,7 @@ def test_returning_user_without_changes_is_read_back_and_not_audited() -> None:
     assert r.status_code == 200
     assert r.json()["role"] == "sales"
     assert r.json()["permissions"] == [
+        "catalog.read",
         "customer.read",
         "customer.write",
         "pricing.read",

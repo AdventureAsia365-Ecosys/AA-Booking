@@ -28,6 +28,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-006",
     "bk-007",
     "bk-008",
+    "bk-009",
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

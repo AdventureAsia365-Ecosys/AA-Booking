@@ -45,6 +45,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # Supply (bk-008, ADR 0005 d8): contracting owns suppliers and contracts; sales reads them to quote.
     "supply.read": frozenset({"admin", "sales", "contracting"}),
     "supply.write": frozenset({"admin", "contracting"}),
+    # CIS catalog reads (content is read-only in Booking, O7): every staff role, content creators included.
+    "catalog.read": frozenset({"admin", "sales", "contracting", "content_creator"}),
+    # Commercial row of a catalog tour (sellable, trip style, price hint, notes; bk-009): contracting + admin.
+    "trip_plan.write": frozenset({"admin", "contracting"}),
     "staff.admin": frozenset({"admin"}),
     "audit.read": frozenset({"admin"}),
 }

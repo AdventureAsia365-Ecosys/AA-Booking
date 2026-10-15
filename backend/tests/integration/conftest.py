@@ -54,6 +54,7 @@ async def _reset_and_migrate(admin_dsn: str) -> None:
     try:
         await conn.execute("DROP SCHEMA IF EXISTS booking CASCADE")
         await conn.execute("DROP SCHEMA IF EXISTS tripplanner CASCADE")
+        await conn.execute("DROP SCHEMA IF EXISTS catalog CASCADE")
         if await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = 'booking'"):
             await conn.execute("DROP OWNED BY booking")
             await conn.execute("DROP ROLE booking")

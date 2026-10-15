@@ -37,6 +37,7 @@ export * from "./booking/WaveFrame";
 export * from "./booking/Money";
 export * from "./booking/DateText";
 export * from "./booking/FromCis";
+export * from "./booking/CisPhoto";
 export * from "./booking/PersonCell";
 export * from "./booking/Code";
 export * from "./booking/NotificationPopover";
