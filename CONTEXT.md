@@ -246,8 +246,18 @@ notes, status `draft → published → expired`; CHECK: the publisher is not the
 changes). Role `booking` has no DELETE on either table: suppliers deactivate (refused with 409 while a published
 contract is in force or upcoming), contracts expire. Adds country `MN`. Grants per table (never `ON ALL TABLES`).
 
+### `bk-009` (AA-679 Booking half, S237 decision D4 — needs `bk-003` only)
+
+`trip_plans`: the **commercial-only** row of one CIS catalog tour, unique on the catalog key
+`(source_system, source_id)` (`source_id` = contract catalog.tour.v1, stable across re-uploads; never `tour_id`).
+Columns: `sellable`, `trip_style` (free text, Q16), `default_channel`, a price hint (amount + currency + basis, all or
+nothing; never a quote), `commercial_notes` (`conf:commercial`), who / when. No catalog content is copied (O7): the
+API joins `catalog.v_tour` live, so a tour that leaves the catalog drops out of every list. Never deleted (role
+`booking` has no DELETE / TRUNCATE). No supplier link yet (later key).
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
-ISO mapping), catalog / `trip_plans` and catalog-backed version items (AA-679), operations / money (AA-682).
+ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
+operations / money (AA-682).
 
 ## Out of scope today
 
