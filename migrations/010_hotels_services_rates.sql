@@ -39,8 +39,15 @@
 -- Known gap (ADR 0004a decision 4): CIS connects as aa_cis_admin, the owner of every booking.* object, so the
 -- database does not stop CIS from reading these rates and notes; only the contract, the views and review do,
 -- until CIS runs as a non-owner role (AA-817 follow-ups).
+--
+-- Lock-sensitive existing tables (data standards MIG-9): ALTER TABLE booking.trip_case_version_itinerary and
+-- booking.version_item_costs (3 nullable FK columns, 1 CHECK, 3 partial indexes, all small tables), and new triggers on
+-- booking.supplier_contracts. Until the DB Migrate runner sets defaults (N5), the file sets its own timeouts.
 
 BEGIN;
+
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '15min';
 
 -- ── Hotels ───────────────────────────────────────────────────────────────────
 
