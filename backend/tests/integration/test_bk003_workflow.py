@@ -196,7 +196,9 @@ async def test_list_detail_update_and_assign(pool: asyncpg.Pool, admin: asyncpg.
         ("boss", "sales", False),
         ("rev", "sales", True),
     ]
-    assert detail["legs"] == [{"position": 1, "source_tour_id": "tour-a", "day_from": 1, "day_to": 3}]
+    # bk-011 (AA-830): the catalog tour key is null for a leg written without one.
+    leg = {"position": 1, "source_tour_id": "tour-a", "day_from": 1, "day_to": 3}
+    assert detail["legs"] == [leg | {"source_system": None, "source_id": None}]
     assert detail["inquiry_snapshot"]["days"][0]["name"] == "Sapa trek"
     assert (detail["pax"], detail["notes"], detail["currency"]) == (3, "VIP", "EUR")
     assert detail["allowed_transitions"] == ["cancelled", "discovery"]

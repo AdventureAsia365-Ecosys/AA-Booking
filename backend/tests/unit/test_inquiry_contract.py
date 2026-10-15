@@ -13,10 +13,11 @@ from app.inquiry.contract import ContractError, parse, validate, version_label
 from app.inquiry.intake import _ts
 from tests import inquiry_samples as samples
 
-# Byte copies of AA-Ecosys docs/contracts (root commit fdab1eb). Update both together.
+# Byte copies of AA-Ecosys docs/contracts (v1 / v1.1: root commit fdab1eb; v1.2: AA-830). Update both together.
 VENDORED_SHA256 = {
     "inquiry.submitted.v1.json": "22cbb36608398322b38da93dcf814f841da91f3a307ac9a9736df90d7f93e995",
     "inquiry.submitted.v1.1.json": "148ccaac54a13316f7f3ab7ce59458534a585968edf3cb5ed2e6b23bbb369f98",
+    "inquiry.submitted.v1.2.json": "4ab794659d59ad1f764f82405013c37f9a968511d1873ea8fd09d8fa4eb76a8e",
 }
 
 
@@ -36,8 +37,10 @@ def test_load_parses_the_schema() -> None:
         (samples.v1_1(), "1.1"),
         (samples.v1_1_as_tripplanner_sends(), "1"),
         (samples.legacy_guest(), "1"),
+        (samples.v1_2(), "1.2"),
+        (samples.v1_2(keys=[None, None]), "1.2"),
     ],
-    ids=["v1", "v1.1", "tripplanner-today", "legacy-guest"],
+    ids=["v1", "v1.1", "v1.1-labelled-1", "legacy-guest", "v1.2", "v1.2-unresolved"],
 )
 def test_accepted_samples(payload: dict, label: str) -> None:
     assert validate(payload) == label
@@ -120,3 +123,45 @@ def test_timestamp_parsing() -> None:
     assert _ts(None) is None
     assert _ts("not a date") is None
     assert _ts("2026-10-14T02:59:00Z") == datetime.fromisoformat("2026-10-14T02:59:00+00:00")
+
+
+def _v1_2_leg(**changes: object) -> dict:
+    payload = samples.v1_2()
+    payload["itinerary"]["legs"][0].update(changes)
+    return payload
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _v1_2_leg(source_id=None),
+        _v1_2_leg(source_system=None),
+        _v1_2_leg(source_system="manual"),
+        _v1_2_leg(source_id=""),
+        samples.with_changes(samples.v1_1(), version=1.2),
+    ],
+    ids=["half-null-id", "half-null-system", "other-system", "empty-id", "v1.1-shape-labelled-1.2"],
+)
+def test_rejected_v1_2_legs(payload: dict) -> None:
+    with pytest.raises(ContractError):
+        validate(payload)
+
+
+def test_version_label_1_2() -> None:
+    assert version_label({"version": 1.2}) == "1.2"
+    assert contract.SUPPORTED_VERSIONS == ("1", "1.1", "1.2")
+
+
+def test_parse_v1_2_carries_the_tour_key_per_leg() -> None:
+    payload = samples.v1_2(keys=["src-a", None])
+    by_tour = {leg["source_tour_id"]: leg for leg in payload["itinerary"]["legs"]}
+    inquiry = parse(payload)
+    assert inquiry.version == "1.2"
+    for leg in inquiry.legs:
+        sent = by_tour[leg.source_tour_id]
+        assert (leg.source_system, leg.source_id) == (sent["source_system"], sent["source_id"])
+    assert {(leg.source_system, leg.source_id) for leg in inquiry.legs} == {("cis", "src-a"), (None, None)}
+
+
+def test_parse_v1_1_legs_have_no_tour_key() -> None:
+    assert all(leg.source_id is None and leg.source_system is None for leg in parse(samples.v1_1()).legs)

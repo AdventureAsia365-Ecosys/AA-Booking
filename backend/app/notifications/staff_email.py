@@ -81,21 +81,32 @@ CASE_SQL = f"""
 """  # noqa: S608 — module constants only, the id is bound
 
 
-async def _catalog_tours(conn: asyncpg.Connection, tour_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Title and country per CIS tour id (contract: ``source_tour_id`` = CIS ``tour_id``). Soft: an unreadable
-    catalog (grant missing, view renamed) only drops the titles, the e-mail still goes out."""
-    if not tour_ids:
+def tour_key(leg: dict[str, Any]) -> str:
+    """The key a leg's tour is looked up by: its catalog ``source_id`` (bk-011, AA-830), else ``source_tour_id``."""
+    return leg.get("source_id") or leg["source_tour_id"]
+
+
+async def _catalog_tours(conn: asyncpg.Connection, keys: list[str]) -> dict[str, dict[str, Any]]:
+    """Title and country per tour key, matched as a catalog ``source_id`` or a version ``tour_id`` (a leg's
+    ``source_tour_id`` may be either). Soft: an unreadable catalog (grant missing, view renamed) only drops the
+    titles, the e-mail still goes out."""
+    if not keys:
         return {}
     try:
         rows = await conn.fetch(
-            "SELECT DISTINCT ON (tour_id) tour_id::text AS tour_id, title, country FROM catalog.v_tour"
-            " WHERE tour_id::text = ANY($1::text[]) ORDER BY tour_id, source_version DESC",
-            tour_ids,
+            "SELECT source_id, tour_id::text AS tour_id, title, country FROM catalog.v_tour"
+            " WHERE source_id = ANY($1::text[]) OR tour_id::text = ANY($1::text[])",
+            keys,
         )
     except CATALOG_ERRORS as exc:
         log.warning("catalog.v_tour unreadable, inquiry e-mail uses snapshot titles: %s", type(exc).__name__)
         return {}
-    return {r["tour_id"]: dict(r) for r in rows}
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        for key in (r.get("tour_id"), r.get("source_id")):
+            if key:
+                out[key] = dict(r)
+    return out
 
 
 async def load_inquiry(conn: asyncpg.Connection, notification_id: str) -> InquiryMail | None:
@@ -104,10 +115,10 @@ async def load_inquiry(conn: asyncpg.Connection, notification_id: str) -> Inquir
         return None
     snapshot = loads(row["inquiry_snapshot"], {})
     legs = sorted(loads(row["legs"], []), key=lambda leg: (leg["day_from"], leg["position"]))
-    catalog = await _catalog_tours(conn, sorted({leg["source_tour_id"] for leg in legs}))
+    catalog = await _catalog_tours(conn, sorted({tour_key(leg) for leg in legs}))
     tours = []
     for leg in legs:
-        hit = catalog.get(leg["source_tour_id"]) or {}
+        hit = catalog.get(tour_key(leg)) or {}
         title = (hit.get("title") or "").strip() or leg_title(snapshot, leg["source_tour_id"])
         tours.append(Tour(title, hit.get("country"), int(leg["day_from"]), int(leg["day_to"])))
     countries: list[str] = []

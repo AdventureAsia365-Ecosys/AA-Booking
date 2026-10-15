@@ -199,6 +199,19 @@ async def test_unreadable_catalog_falls_back_to_snapshot_titles() -> None:
     assert "Countries: -" in text
 
 
+async def test_keyed_leg_finds_its_tour_by_catalog_source_id() -> None:
+    """AA-830: a leg with a catalog key is looked up by source_id even when its source_tour_id is a stale tour_id."""
+    legs = [{"position": 1, "source_tour_id": "stale-tour-id", "source_system": "cis", "source_id": "src-a",
+             "day_from": 1, "day_to": 2}]  # fmt: skip
+    catalog = [{"source_id": "src-a", "tour_id": "t-new", "title": "Mekong Valley", "country": "Laos"}]
+    ses = StubSes()
+    conn = conn_for(case_row(legs=json.dumps(legs)), catalog=catalog)
+    await run(conn, ses)
+    assert "1. Mekong Valley (Laos), days 1-2" in ses.sent[0]["Content"]["Simple"]["Body"]["Text"]["Data"]
+    (asked,) = conn.sql("catalog.v_tour")
+    assert asked == (["src-a"],)
+
+
 async def test_permanent_ses_refusal_fails_the_job_at_once() -> None:
     with pytest.raises(PermanentError, match="MessageRejected"):
         await run(conn_for(), StubSes(ses_error("MessageRejected")))

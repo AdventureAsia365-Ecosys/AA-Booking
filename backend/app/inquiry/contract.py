@@ -1,12 +1,15 @@
 """``inquiry.submitted`` (TripPlanner → AA-Booking): validation and the normalised inquiry.
 
-Contract rule 2: a consumer accepts every minor of its major. Booking accepts version 1 and 1.1:
+Contract rule 2: a consumer accepts every minor of its major. Booking accepts version 1, 1.1 and 1.2:
 
+- ``version: 1.2`` must satisfy ``inquiry.submitted.v1.2`` (AA-830: each leg also carries the catalog tour key
+  ``source_system`` + ``source_id``, both null when TripPlanner could not resolve it);
 - ``version: 1.1`` must satisfy ``inquiry.submitted.v1.1``;
 - ``version: 1`` must satisfy ``inquiry.submitted.v1`` **or** ``v1.1``. TripPlanner (PR #69) already
   sends the v1.1 shape (``customer.verified``, nullable ``customer_id``) while still labelling it
   ``1``; v1.1 is additive, so that payload is accepted rather than lost. A v1 payload without
-  ``verified`` is read as unverified.
+  ``verified`` is read as unverified. Legs of a v1 / v1.1 payload carry no catalog key: intake resolves
+  ``source_tour_id`` against ``catalog.v_tour`` (``app.inquiry.leg_keys``).
 
 Anything else (unknown version, wrong shape) is a :class:`ContractError` — the inbox row is marked
 ``failed`` with the reason, never silently dropped.
@@ -23,7 +26,7 @@ from app.contracts import load
 
 CONTRACT = "inquiry.submitted"
 SOURCE = "tripplanner"
-SUPPORTED_VERSIONS = ("1", "1.1")
+SUPPORTED_VERSIONS = ("1", "1.1", "1.2")
 
 
 class ContractError(ValueError):
@@ -40,7 +43,7 @@ def _errors(validator: Draft202012Validator, payload: Any) -> list[str]:
 
 
 def version_label(payload: Any) -> str | None:
-    """'1' or '1.1' (the JSON number as a label), or None when absent / not a number."""
+    """'1', '1.1' or '1.2' (the JSON number as a label), or None when absent / not a number."""
     if not isinstance(payload, dict):
         return None
     v = payload.get("version")
@@ -56,8 +59,8 @@ def validate(payload: Any) -> str:
         raise ContractError(
             f"unsupported {CONTRACT} version {payload.get('version') if isinstance(payload, dict) else None!r}"
         )
-    if label == "1.1":
-        errors = _errors(_validator("inquiry.submitted.v1.1"), payload)
+    if label in ("1.1", "1.2"):
+        errors = _errors(_validator(f"inquiry.submitted.v{label}"), payload)
     else:
         errors = _errors(_validator("inquiry.submitted.v1"), payload)
         if errors and not _errors(_validator("inquiry.submitted.v1.1"), payload):
@@ -84,6 +87,10 @@ class Leg:
     source_tour_id: str
     day_from: int
     day_to: int
+    # Catalog tour key (contract catalog.tour.v1). Set from a v1.2 payload; None for v1 / v1.1 or when TripPlanner
+    # could not resolve it (intake then resolves source_tour_id itself).
+    source_system: str | None = None
+    source_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +130,14 @@ def parse(payload: dict[str, Any]) -> Inquiry:
         )
     itinerary = payload["itinerary"]
     legs = tuple(
-        Leg(int(leg["position"]), str(leg["source_tour_id"]), int(leg["day_from"]), int(leg["day_to"]))
+        Leg(
+            int(leg["position"]),
+            str(leg["source_tour_id"]),
+            int(leg["day_from"]),
+            int(leg["day_to"]),
+            _clean(leg.get("source_system")),
+            _clean(leg.get("source_id")),
+        )
         for leg in sorted(itinerary["legs"], key=lambda leg: leg["position"])
     )
     return Inquiry(

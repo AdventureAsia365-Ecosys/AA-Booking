@@ -38,7 +38,8 @@ VERSION_COLUMNS = f"""
 LEGS_JSON = """
     (SELECT coalesce(json_agg(json_build_object(
                 'position', l.position, 'source_tour_id', l.source_tour_id, 'day_from', l.day_from,
-                'day_to', l.day_to) ORDER BY l.day_from, l.position), '[]'::json)::text
+                'day_to', l.day_to, 'source_system', l.source_system, 'source_id', l.source_id)
+                ORDER BY l.day_from, l.position), '[]'::json)::text
      FROM booking.trip_case_legs l WHERE l.trip_case_id = tc.id) AS legs
 """
 COUNTRIES_ARRAY = """
