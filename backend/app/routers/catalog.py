@@ -1,10 +1,12 @@
-"""Staff catalog endpoints: sellable trip plans over the CIS catalog (AA-679, S237 decision D4, bk-009).
+"""Staff catalog endpoints over the CIS catalog read model (CIS migration 225 grants role ``booking`` SELECT).
 
-``GET /booking/catalog/trip-plans`` lists every ``catalog.v_tour`` row with its Booking commercial state
-(``catalog.read``: every staff role). ``GET …/facets`` gives the filter options and counts. ``GET …/{source_id}``
-is one tour with its CIS days and photos plus the commercial row. ``PUT …/{source_id}/commercial`` upserts the
-commercial row (``trip_plan.write``: admin, contracting). ``POST …/{source_id}/trip-cases`` starts a trip case, or a
-new version of an existing case, from a sellable plan (``trip_case.write`` + ``version.write``: admin, sales).
+- ``GET /booking/catalog/destinations``: the place picker of the supplier form (AA-822, bk-008; any staff).
+- Sellable trip plans (AA-679, S237 decision D4, bk-009): ``GET /booking/catalog/trip-plans`` lists every
+  ``catalog.v_tour`` row with its Booking commercial state (``catalog.read``: every staff role). ``GET …/facets`` gives
+  the filter options and counts. ``GET …/{source_id}`` is one tour with its CIS days and photos plus the commercial
+  row. ``PUT …/{source_id}/commercial`` upserts the commercial row (``trip_plan.write``: admin, contracting).
+  ``POST …/{source_id}/trip-cases`` starts a trip case, or a new version of an existing case, from a sellable plan
+  (``trip_case.write`` + ``version.write``: admin, sales).
 
 ``source_id`` is the stable CIS catalog key of contract catalog.tour.v1 (a uuid string), never the CIS ``tour_id``.
 """
@@ -20,7 +22,8 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.auth.staff import Staff, get_pool, require
+from app import catalog
+from app.auth.staff import Staff, current_staff, get_pool, require
 from app.catalog import trip_plans
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
@@ -29,6 +32,7 @@ from app.trip_cases import service
 router = APIRouter(prefix="/booking/catalog", tags=["catalog"])
 
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
+Me = Annotated[Staff, Depends(current_staff)]
 CanRead = Annotated[Staff, Depends(require("catalog.read"))]
 CanWritePlans = Annotated[Staff, Depends(require("trip_plan.write"))]
 CanStartCase = Annotated[Staff, Depends(require("trip_case.write"))]
@@ -148,3 +152,15 @@ async def use_trip_plan(body: UseForTripCase, source_id: SourceId, staff: CanSta
         data["customer_id"] = str(data["customer_id"])
     async with pool.acquire() as conn, conn.transaction():
         return await trip_plans.use_for_trip_case(conn, staff, source_id, data)
+
+
+@router.get("/destinations")
+async def search_destinations(
+    _: Me,
+    pool: Pool,
+    q: Annotated[str | None, Query(max_length=120, description="part of the place name")] = None,
+    country: Annotated[str | None, Query(min_length=2, max_length=2, description="ISO-2 country code")] = None,
+    limit: Annotated[int, Query(ge=1, le=catalog.MAX_SEARCH)] = 20,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await catalog.search_destinations(conn, q=q, country=country, limit=limit)

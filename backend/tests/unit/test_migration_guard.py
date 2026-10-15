@@ -36,7 +36,7 @@ def test_every_migration_passes_the_guard(path: Path) -> None:
 
 # Numbers taken by an open parallel branch: a gap is allowed only for these. Remove an entry once that
 # branch is merged (the file is then here and the gap is gone).
-RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {8: "feat/aa-822-bk-008 (AA-822 suppliers, bk-008)"}
+RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {}
 
 
 def test_migration_numbers_are_unique_and_contiguous() -> None:

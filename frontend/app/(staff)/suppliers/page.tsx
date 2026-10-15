@@ -1,22 +1,11 @@
-// app/(staff)/suppliers/page.tsx: Suppliers (wave 2, UI spec §3; Figma SUPPLIER MANAGEMENT (08)).
-// Registered now (Nghiệp S236 decision 3); renders its layout frame and "Coming in wave 2" until built.
+// app/(staff)/suppliers/page.tsx: Suppliers (wave 2, AA-822; UI spec §3 / §6.3; Figma SUPPLIER MANAGEMENT (08)).
+// Server shell for the metadata; the list itself is the client view in _parts (bk-008).
 
 import type { Metadata } from "next";
-import { WaveFrame } from "@/ui/booking/WaveFrame";
+import { SuppliersListView } from "./_parts/SuppliersListView";
 
 export const metadata: Metadata = { title: "Suppliers" };
 
 export default function SuppliersPage() {
-  return (
-    <WaveFrame
-      wave={2}
-      title="Suppliers"
-      layout="list"
-      description="Hotels, transport, guides and other partners Booking buys from."
-      purpose="The supplier directory with contracts and rates; contracting maintains it, sales reads it."
-      actions={["Add supplier"]}
-      filters={["Search name or contact", "Category", "Status", "Country"]}
-      columns={["Supplier", "Categories", "Contact", "Location", "Contracts", "Status"]}
-    />
-  );
+  return <SuppliersListView />;
 }
