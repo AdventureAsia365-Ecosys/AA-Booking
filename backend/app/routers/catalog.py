@@ -1,5 +1,9 @@
-"""Staff catalog endpoints: sellable trip plans over the CIS catalog (AA-679, S237 decision D4, bk-009).
+"""Staff catalog endpoints over the CIS catalog read model (CIS migration 225 grants role ``booking`` SELECT).
 
+``GET /booking/catalog/destinations`` is the place picker of the supplier form (``catalog.v_destination``, AA-822;
+any active staff).
+
+Sellable trip plans (AA-679, S237 decision D4, bk-009):
 ``GET /booking/catalog/trip-plans`` lists every ``catalog.v_tour`` row with its Booking commercial state
 (``catalog.read``: every staff role). ``GET …/facets`` gives the filter options and counts. ``GET …/{source_id}``
 is one tour with its CIS days and photos plus the commercial row. ``PUT …/{source_id}/commercial`` upserts the
@@ -20,7 +24,8 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.auth.staff import Staff, get_pool, require
+from app import catalog
+from app.auth.staff import Staff, current_staff, get_pool, require
 from app.catalog import trip_plans
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
@@ -29,6 +34,7 @@ from app.trip_cases import service
 router = APIRouter(prefix="/booking/catalog", tags=["catalog"])
 
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
+Me = Annotated[Staff, Depends(current_staff)]
 CanRead = Annotated[Staff, Depends(require("catalog.read"))]
 CanWritePlans = Annotated[Staff, Depends(require("trip_plan.write"))]
 CanStartCase = Annotated[Staff, Depends(require("trip_case.write"))]
@@ -91,6 +97,18 @@ class UseForTripCase(BaseModel):
         if (self.customer_id is None) == (self.new_customer is None):
             raise ValueError("send trip_case, or exactly one of customer_id or new_customer")
         return self
+
+
+@router.get("/destinations")
+async def search_destinations(
+    _: Me,
+    pool: Pool,
+    q: Annotated[str | None, Query(max_length=120, description="part of the place name")] = None,
+    country: Annotated[str | None, Query(min_length=2, max_length=2, description="ISO-2 country code")] = None,
+    limit: Annotated[int, Query(ge=1, le=catalog.MAX_SEARCH)] = 20,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await catalog.search_destinations(conn, q=q, country=country, limit=limit)
 
 
 @router.get("/trip-plans")

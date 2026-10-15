@@ -149,6 +149,7 @@ def test_returning_user_without_changes_is_read_back_and_not_audited() -> None:
         "customer.write",
         "pricing.read",
         "staff.directory",
+        "supply.read",
         "trip_case.assign",
         "trip_case.read",
         "trip_case.write",

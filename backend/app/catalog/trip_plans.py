@@ -27,6 +27,7 @@ import asyncpg
 
 from app import audit, paging
 from app.auth.staff import Staff
+from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.trip_cases import service as trip_cases
 from app.trip_cases import sql, versions
@@ -81,7 +82,7 @@ async def catalog_reads() -> AsyncIterator[None]:
     """A missing catalog view or grant (CIS 225 not applied, grant revoked) is a 503, not a 500."""
     try:
         yield
-    except (asyncpg.UndefinedTableError, asyncpg.InvalidSchemaNameError, asyncpg.InsufficientPrivilegeError) as exc:
+    except CATALOG_ERRORS as exc:
         raise Unavailable("catalog_unavailable", "the CIS catalog is not readable right now") from exc
 
 
