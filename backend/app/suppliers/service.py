@@ -357,8 +357,14 @@ async def update_supplier(conn: asyncpg.Connection, staff: Staff, ref: str, chan
         return {**current, "changed": []}
     merged = {**current, **changed}
     for key, value in (await _check_place(conn, merged, set(changed))).items():
+        # A derived value wins over the requested one (a cleared country is re-filled from the place); when it
+        # equals the stored value the column simply stays as it is.
         if current[key] != value:
             changed[key] = value
+        else:
+            changed.pop(key, None)
+    if not changed:
+        return {**current, "changed": []}
     sets = ", ".join(
         f"{column} = ${i + 2}" + ("::uuid" if column == "destination_id" else "") for i, column in enumerate(changed)
     )
@@ -526,7 +532,9 @@ async def update_contract(
     if status is not None and changes:
         raise Invalid("status_with_changes", "change the status on its own, not together with the terms")
     current = await get_contract(conn, contract_id, lock=True)
-    supplier = await resolve_supplier(conn, current["supplier_id"])
+    # Lock the supplier too: a deactivation running at the same time (which checks for live contracts under the
+    # same lock) then either sees this publish or makes it answer 409 supplier_inactive.
+    supplier = await resolve_supplier(conn, current["supplier_id"], lock=True)
     if status is not None:
         return await _move(conn, staff, current, supplier, status)
     if current["status"] != "draft":

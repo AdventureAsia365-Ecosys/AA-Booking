@@ -280,3 +280,25 @@ async def test_creator_publishes_after_a_checker_edit(client: tuple[httpx.AsyncC
     assert ok.status_code == 200 and ok.json()["phase"] == "upcoming" and ok.json()["published_by"] == MAKER
     blocked = await c.post(f"/suppliers/{sup['id']}/deactivate", headers=maker)  # an upcoming contract blocks too
     assert blocked.status_code == 409 and blocked.json()["detail"] == "supplier_has_contracts"
+
+
+async def test_clearing_the_country_keeps_the_place_country(
+    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    """With a CIS place set, the country follows the place: clearing it is a no-op, not a NULL next to the place."""
+    c, cis = client
+    maker = _auth(cis, MAKER)
+    body = {"company_name": "Old Quarter Guides", "categories": ["guide"], "destination_id": HANOI}
+    sup = (await c.post("/suppliers", json=body, headers=maker)).json()
+    assert sup["country_code"] == "VN"
+    cleared = await c.patch(f"/suppliers/{sup['code']}", json={"country_code": None}, headers=maker)
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["country_code"] == "VN" and cleared.json()["changed"] == []
+    assert await admin.fetchval("SELECT country_code FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "VN"
+    assert (
+        await admin.fetchval(
+            "SELECT count(*) FROM booking.audit_logs WHERE action = 'supplier.updated' AND entity_id = $1::uuid",
+            sup["id"],
+        )
+        == 0
+    )
