@@ -1,0 +1,378 @@
+"use client";
+// app/(staff)/suppliers/_parts/SupplierDetailView.tsx — Supplier detail (W2, AA-822; module spec 08 screen 4 + conflict
+// 7): header (name, status, code, categories, location), actions Edit profile / Deactivate | Activate (supply.write),
+// tabs Profile (basic information, contact, location, recent activity from the audit log) and Contracts (draft →
+// published by a second person → expired). Rates arrive with rate sheets (wave 2, later slice); Bookings and Bills
+// with wave 3: those tabs show their frame. Reads need supply.read (admin, contracting, sales).
+
+import { useState } from "react";
+import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ColumnDef } from "@tanstack/react-table";
+import { Ban, CalendarDays, CheckCircle2, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag, Timer } from "lucide-react";
+import { ApiError } from "@/lib/api/client";
+import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
+import { Button, Code, ConfirmDialog, DataTable, DateText, EmptyState, ErrorState, FromCisTag, Section, useStaff, useToast } from "@/ui";
+import { RowMenu, type RowMenuItem } from "@/ui/booking/RowMenu";
+import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
+import { ContractDrawer } from "./ContractDrawer";
+import { CATEGORY_LABEL, ContractPhaseBadge, SupplierStatusBadge, locationText, supplierError, supplierHref } from "./shared";
+import { useSupplierActions } from "./useSupplierActions";
+
+export function SupplierDetailView({ refParam }: { refParam: string }) {
+  const ref = decodeURIComponent(refParam);
+  const q = useQuery({ queryKey: ["supplier", ref], queryFn: () => suppliersApi.get(ref) });
+  const actions = useSupplierActions();
+  const tabs = [
+    { key: "profile", label: "Profile" },
+    { key: "contracts", label: "Contracts", count: q.data?.contract_counts.total },
+    { key: "rates", label: "Rates" },
+    { key: "bookings", label: "Bookings" },
+    { key: "bills", label: "Bills" },
+  ];
+  const [tab, setTab] = useDetailTab(tabs);
+
+  if (q.isLoading) return <DetailSkeleton label="Loading supplier" />;
+  if (q.isError || !q.data) {
+    const status = q.error instanceof ApiError ? q.error.status : 0;
+    return (
+      <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+        {status === 404 ? (
+          <EmptyState
+            icon={<Store size={30} />}
+            title="Supplier not found"
+            description="The link may be wrong, or the code was mistyped."
+            action={<Link href="/suppliers" className="text-[13px] font-semibold text-accent-deep hover:underline">Back to suppliers</Link>}
+          />
+        ) : status === 403 ? (
+          <EmptyState title="You do not have access to suppliers" description="Your Booking role cannot read supplier records." />
+        ) : (
+          <ErrorState message={(q.error as Error)?.message ?? "Could not load the supplier."} onRetry={() => q.refetch()} />
+        )}
+      </main>
+    );
+  }
+
+  const s = q.data;
+  const where = locationText(s);
+  return (
+    <main className="aa-admin-main flex-1 overflow-y-auto">
+      <DetailHeader
+        back={{ href: "/suppliers", label: "Suppliers" }}
+        name={s.company_name}
+        badges={<SupplierStatusBadge status={s.status} />}
+        meta={
+          <>
+            <MetaItem icon={<Hash size={14} />}>
+              <Code>{s.code}</Code>
+            </MetaItem>
+            <MetaItem icon={<Tag size={14} />}>{s.categories.map((c) => CATEGORY_LABEL[c] ?? c).join(", ")}</MetaItem>
+            {where && <MetaItem icon={<MapPin size={14} />}>{where}</MetaItem>}
+            <MetaItem icon={<CalendarDays size={14} />}>
+              Added on <DateText value={s.created_at} />
+            </MetaItem>
+          </>
+        }
+        actions={
+          actions.canWrite && (
+            <>
+              <Link
+                href={supplierHref(s, "/edit")}
+                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-4 py-2 text-[13px] font-semibold text-ink hover:border-accent-border"
+              >
+                <Pencil size={14} /> Edit profile
+              </Link>
+              {s.status === "active" ? (
+                <Button variant="secondary" onClick={() => actions.deactivate(s)}>
+                  <Ban size={14} /> Deactivate
+                </Button>
+              ) : (
+                <Button variant="secondary" onClick={() => actions.activate(s)}>
+                  <Power size={14} /> Activate
+                </Button>
+              )}
+            </>
+          )
+        }
+        tabs={tabs}
+        activeTab={tab}
+        onTab={setTab}
+      />
+      <div className="mx-auto max-w-[1440px] py-6 md:px-8">
+        {s.status === "inactive" && (
+          <div role="status" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
+            <Ban size={15} /> This supplier is inactive: it stays on record, but no new contract can be added or published.
+          </div>
+        )}
+        {tab === "profile" && <Profile s={s} />}
+        {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
+        {tab === "rates" && (
+          <Later title="Rates come with rate sheets" text="Net rates per service type are uploaded as rate sheets under a published contract (wave 2, next slice)." />
+        )}
+        {tab === "bookings" && <Later title="Supplier bookings arrive in wave 3" text="Bookings made with this supplier for confirmed trip cases will be listed here." />}
+        {tab === "bills" && <Later title="Supplier bills arrive in wave 3" text="Bills from this supplier and their payment state will be listed here." />}
+      </div>
+      {actions.dialogs}
+    </main>
+  );
+}
+
+function Later({ title, text }: { title: string; text: string }) {
+  return (
+    <Section>
+      <EmptyState icon={<Timer size={30} />} title={title} description={text} />
+    </Section>
+  );
+}
+
+function Profile({ s }: { s: SupplierDetail }) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="flex min-w-0 flex-col gap-5">
+        <Section title="Basic information">
+          <FactGrid>
+            <Fact label="Categories">{s.categories.map((c) => CATEGORY_LABEL[c] ?? c).join(", ")}</Fact>
+            <Fact label="Website">
+              {s.website ? (
+                <a href={s.website} target="_blank" rel="noopener noreferrer" className="break-all text-accent-deep hover:underline">
+                  {s.website}
+                </a>
+              ) : (
+                "—"
+              )}
+            </Fact>
+            <Fact label="Internal notes" wide>
+              {s.internal_notes ? <span className="whitespace-pre-line">{s.internal_notes}</span> : <span className="text-muted">None</span>}
+            </Fact>
+          </FactGrid>
+        </Section>
+        <Section title="Location">
+          <FactGrid>
+            <Fact label="Street address" wide>
+              {s.address ?? "—"}
+            </Fact>
+            <Fact label="City / place">
+              {s.destination ? (
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  {s.destination.name} <FromCisTag />
+                </span>
+              ) : s.destination_id ? (
+                <span className="text-muted">Set, but the CIS catalog cannot be read right now</span>
+              ) : (
+                "—"
+              )}
+            </Fact>
+            <Fact label="Country">{s.country_name ?? "—"}</Fact>
+            <Fact label="State / province">{s.region ?? "—"}</Fact>
+            <Fact label="Postal code">{s.postal_code ?? "—"}</Fact>
+          </FactGrid>
+        </Section>
+      </div>
+      <div className="flex min-w-0 flex-col gap-5">
+        <Section title="Contact details">
+          <FactGrid>
+            <Fact label="Primary contact">{s.contact_name ?? "—"}</Fact>
+            <Fact label="Job title">{s.contact_title ?? "—"}</Fact>
+            <Fact label="E-mail">
+              {s.contact_email ? (
+                <a href={`mailto:${s.contact_email}`} className="break-all text-accent-deep hover:underline">
+                  {s.contact_email}
+                </a>
+              ) : (
+                "—"
+              )}
+            </Fact>
+            <Fact label="Phone">{s.contact_phone ?? "—"}</Fact>
+          </FactGrid>
+        </Section>
+        <Section title="Recent activity">
+          {s.recent_activity.length === 0 ? (
+            <p className="text-[13px] text-muted">Nothing recorded yet.</p>
+          ) : (
+            <ol className="flex flex-col">
+              {s.recent_activity.map((a) => (
+                <li key={a.id} className="flex gap-3 border-b border-line2 py-3 first:pt-0 last:border-b-0 last:pb-0">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-muted">
+                    {a.entity_type === "supplier_contract" ? <FileText size={14} /> : <Store size={14} />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-medium text-ink">
+                      {a.summary ?? a.action}
+                      {a.entity_type === "supplier_contract" && a.entity_label && <span className="font-normal text-muted"> · {a.entity_label}</span>}
+                    </span>
+                    <span className="text-xs text-muted">
+                      {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+type Move = { kind: "publish" | "expire"; contract: SupplierContract } | null;
+
+function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
+  const me = useStaff();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const list = useQuery({ queryKey: ["supplier", s.code, "contracts"], queryFn: () => suppliersApi.contracts(s.code) });
+  const [drawer, setDrawer] = useState<{ contract?: SupplierContract } | null>(null);
+  const [move, setMove] = useState<Move>(null);
+
+  const run = useMutation({
+    mutationFn: (m: NonNullable<Move>) =>
+      suppliersApi.updateContract(m.contract.id, { status: m.kind === "publish" ? "published" : "expired" }),
+    onSuccess: (k, m) => {
+      qc.invalidateQueries({ queryKey: ["supplier"] });
+      qc.invalidateQueries({ queryKey: ["suppliers"] });
+      toast.success(m.kind === "publish" ? `${k.title} published.` : `${k.title} expired.`);
+      setMove(null);
+    },
+  });
+
+  function ask(m: NonNullable<Move>) {
+    run.reset();
+    setMove(m);
+  }
+
+  /** The maker of a draft is its last writer (bk-008): they cannot publish it. */
+  const isMaker = (k: SupplierContract) => (k.updated_by ?? k.created_by) === me.cis_user_id;
+
+  function menuFor(k: SupplierContract): RowMenuItem[] {
+    if (!canWrite) return [];
+    if (k.status === "draft") {
+      const own = isMaker(k);
+      return [
+        { label: "Edit draft", icon: <Pencil size={15} />, onSelect: () => setDrawer({ contract: k }) },
+        {
+          label: own ? "Publish (needs a second person)" : "Publish",
+          icon: <CheckCircle2 size={15} />,
+          onSelect: () => ask({ kind: "publish", contract: k }),
+          disabled: own || s.status !== "active",
+        },
+      ];
+    }
+    if (k.status === "published") {
+      return [{ label: "Expire", icon: <Ban size={15} />, onSelect: () => ask({ kind: "expire", contract: k }), danger: true }];
+    }
+    return [];
+  }
+
+  const columns: ColumnDef<SupplierContract, unknown>[] = [
+    {
+      id: "title",
+      header: "Contract",
+      accessorKey: "title",
+      cell: ({ row }) => (
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-[13.5px] font-medium text-ink">{row.original.title}</span>
+          {row.original.reference && <span className="truncate text-xs text-muted">{row.original.reference}</span>}
+        </span>
+      ),
+    },
+    {
+      id: "validity",
+      header: "Validity",
+      accessorKey: "valid_from",
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap text-[13px] text-body">
+          <DateText value={row.original.valid_from} /> – {row.original.valid_to ? <DateText value={row.original.valid_to} /> : "open-ended"}
+        </span>
+      ),
+    },
+    { id: "currency", header: "Currency", accessorKey: "currency", cell: ({ row }) => <Code>{row.original.currency}</Code> },
+    {
+      id: "terms",
+      header: "Payment terms",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="block max-w-[260px] truncate text-[13px] text-body" title={row.original.payment_terms ?? undefined}>
+          {row.original.payment_terms ?? "—"}
+        </span>
+      ),
+    },
+    { id: "phase", header: "Status", accessorKey: "phase", cell: ({ row }) => <ContractPhaseBadge phase={row.original.phase} /> },
+    {
+      id: "who",
+      header: "Entered / published by",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="text-xs text-muted">
+          {row.original.updated_by_name ?? row.original.created_by_name ?? "—"}
+          {row.original.published_by && <> · {row.original.published_by_name ?? "—"}</>}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const items = menuFor(row.original);
+        return items.length ? <RowMenu items={items} label={`Actions for ${row.original.title}`} /> : null;
+      },
+    },
+  ];
+
+  const k = move?.contract;
+  return (
+    <Section
+      padded={false}
+      className="p-4"
+      title="Contracts"
+      description="Terms per period in the supplier's currency. A draft is published by a second person; published terms never change."
+      actions={
+        canWrite &&
+        s.status === "active" && (
+          <Button variant="primary" onClick={() => setDrawer({})}>
+            <Plus size={15} /> New contract
+          </Button>
+        )
+      }
+    >
+      <DataTable<SupplierContract>
+        searchable={false}
+        tableId="supplier-contracts"
+        data={list.data?.items ?? []}
+        columns={columns}
+        getRowId={(r) => r.id}
+        loading={list.isLoading}
+        error={list.isError ? (list.error as Error).message : null}
+        onRetry={() => list.refetch()}
+        pageSizeOptions={[25, 50, 100]}
+        emptyTitle="No contracts yet"
+        emptyDescription={canWrite ? "Add the supplier's terms with New contract." : "Contracting adds the supplier's contracts here."}
+        tableMinWidth={900}
+      />
+      {drawer && <ContractDrawer supplierRef={s.code} contract={drawer.contract} onClose={() => setDrawer(null)} />}
+      <ConfirmDialog
+        open={move !== null}
+        onClose={() => setMove(null)}
+        onConfirm={() => move && run.mutate(move)}
+        busy={run.isPending}
+        error={supplierError(run.error)}
+        danger={move?.kind === "expire"}
+        title={move?.kind === "publish" ? "Publish contract" : "Expire contract"}
+        confirmLabel={move?.kind === "publish" ? "Publish" : "Expire"}
+        message={
+          move?.kind === "publish" ? (
+            <>
+              Publish <strong className="text-ink">{k?.title}</strong> ({k?.currency})? You confirm you checked the terms entered by{" "}
+              {k?.updated_by_name ?? k?.created_by_name ?? "another staff member"}. Once published the contract is fixed.
+            </>
+          ) : (
+            <>
+              Expire <strong className="text-ink">{k?.title}</strong>? It closes for good and stops counting as in force. New terms are a
+              new contract.
+            </>
+          )
+        }
+      />
+    </Section>
+  );
+}
