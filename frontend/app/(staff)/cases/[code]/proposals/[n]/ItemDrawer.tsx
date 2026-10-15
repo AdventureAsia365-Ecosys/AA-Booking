@@ -126,6 +126,7 @@ function ItemForm({
         )}
         <span className="text-xs text-muted">
           Optional. With no net cost line, saving takes the supplier&apos;s rate in force on the item&apos;s first day.
+          Picking another room or service drops the lines taken from the previous one&apos;s rate.
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
