@@ -122,7 +122,7 @@ def _row(row: Any) -> dict[str, Any]:
     return out
 
 
-def _clean_text(value: Any) -> str | None:
+def clean_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -146,17 +146,17 @@ def normalize(data: dict[str, Any]) -> dict[str, Any]:
         out["categories"] = [c for c in CATEGORIES if c in given]
     for key in TEXT_FIELDS:
         if key in out:
-            out[key] = _clean_text(out[key])
+            out[key] = clean_text(out[key])
     if out.get("contact_email"):
         out["contact_email"] = out["contact_email"].lower()
     if "country_code" in out:
-        out["country_code"] = (_clean_text(out["country_code"]) or "").upper() or None
+        out["country_code"] = (clean_text(out["country_code"]) or "").upper() or None
     if "destination_id" in out and out["destination_id"] is not None:
         out["destination_id"] = str(out["destination_id"])
     return out
 
 
-async def _check_place(conn: asyncpg.Connection, merged: dict[str, Any], changed: set[str]) -> dict[str, Any]:
+async def check_place(conn: asyncpg.Connection, merged: dict[str, Any], changed: set[str]) -> dict[str, Any]:
     """Validate the country and destination of the record as it will be saved; fill an empty country from the
     destination. Returns the extra columns to write (``country_code`` when derived)."""
     extra: dict[str, Any] = {}
@@ -179,7 +179,7 @@ async def _check_place(conn: asyncpg.Connection, merged: dict[str, Any], changed
     return extra
 
 
-async def _place_names(conn: asyncpg.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def place_names(conn: asyncpg.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     places = await catalog.destinations_by_id(conn, [r["destination_id"] for r in rows if r.get("destination_id")])
     for r in rows:
         place = places.get(r.get("destination_id") or "")
@@ -243,7 +243,7 @@ async def list_suppliers(
         limit,
         offset,
     )
-    items = await _place_names(conn, [_row(r) for r in rows])
+    items = await place_names(conn, [_row(r) for r in rows])
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -276,7 +276,7 @@ async def resolve_supplier(conn: asyncpg.Connection, ref: str, *, lock: bool = F
 
 
 async def get_supplier(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
-    supplier = (await _place_names(conn, [await resolve_supplier(conn, ref)]))[0]
+    supplier = (await place_names(conn, [await resolve_supplier(conn, ref)]))[0]
     counts = await conn.fetchrow(
         f"""
         SELECT count(*) AS total,
@@ -316,7 +316,7 @@ async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str
         raise Invalid("company_name_required", "a supplier needs a company name")
     if "categories" not in values:
         raise Invalid("category_required", "a supplier needs at least one category")
-    values.update(await _check_place(conn, values, set(values)))
+    values.update(await check_place(conn, values, set(values)))
     columns = [k for k in EDITABLE if k in values]
     marks = ", ".join(f"${i + 1}" + ("::uuid" if c == "destination_id" else "") for i, c in enumerate(columns))
     try:
@@ -356,7 +356,7 @@ async def update_supplier(conn: asyncpg.Connection, staff: Staff, ref: str, chan
     if not changed:
         return {**current, "changed": []}
     merged = {**current, **changed}
-    for key, value in (await _check_place(conn, merged, set(changed))).items():
+    for key, value in (await check_place(conn, merged, set(changed))).items():
         # A derived value wins over the requested one (a cleared country is re-filled from the place); when it
         # equals the stored value the column simply stays as it is.
         if current[key] != value:
@@ -466,7 +466,7 @@ def _normalize_contract(data: dict[str, Any]) -> dict[str, Any]:
     out = dict(data)
     for key in ("title", "reference", "payment_terms", "cancellation_policy", "notes"):
         if key in out:
-            out[key] = _clean_text(out[key])
+            out[key] = clean_text(out[key])
     if "currency" in out and out["currency"] is not None:
         out["currency"] = str(out["currency"]).strip().upper()
     for key in CONTRACT_REQUIRED:

@@ -23,6 +23,7 @@ export interface CostInput {
   net_amount: string;
   net_currency: string;
   supplier_note?: string | null;
+  supplier_rate_id?: string | null;
 }
 
 /** One item as PUT …/items takes it. `id` keeps an existing row; `costs` replaces its net cost lines. */
@@ -33,7 +34,10 @@ export interface ItemInput {
   day_to: number;
   source_tour_id?: string | null;
   notes?: string | null;
+  /** Omitted on an item that books a room type or service: the API then takes the rate in force (AA-823). */
   costs?: CostInput[];
+  hotel_room_type_id?: string | null;
+  service_id?: string | null;
 }
 
 export interface SendInput {

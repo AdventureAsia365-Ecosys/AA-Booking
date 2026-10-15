@@ -218,8 +218,8 @@ async def test_changed_costs_are_rewritten_and_clear_the_price() -> None:
     await versions.replace_items(conn, STAFF, "TC-000001", 1, items)
     assert conn.sql("DELETE FROM booking.version_item_costs") == [(ITEM_B,)]
     assert conn.sql("INSERT INTO booking.version_item_costs") == [
-        (ITEM_B, D("7"), "VND", None, "u-1"),
-        (ITEM_B, D("0"), "USD", "incl.", "u-1"),
+        (ITEM_B, D("7"), "VND", None, "u-1", None),
+        (ITEM_B, D("0"), "USD", "incl.", "u-1", None),
     ]
     assert conn.sql("total_price = CASE WHEN $3") == [(VERSION_ID, "u-1", True)]
     assert json.loads(conn.sql("INSERT INTO booking.audit_logs")[0][7])["costs_replaced"] == 1
@@ -244,7 +244,7 @@ async def test_new_item_costs_use_the_new_item_id() -> None:
     new_id = "66666666-6666-4666-8666-666666666666"
     conn = conn_for([]).on("SELECT id::text AS id, position FROM", [{"id": new_id, "position": 1}])
     await versions.replace_items(conn, STAFF, "TC-000001", 1, [Item("New", 1, 1, costs=(Cost(D("9"), "THB"),))])
-    assert conn.sql("INSERT INTO booking.version_item_costs") == [(new_id, D("9"), "THB", None, "u-1")]
+    assert conn.sql("INSERT INTO booking.version_item_costs") == [(new_id, D("9"), "THB", None, "u-1", None)]
 
 
 @pytest.mark.asyncio

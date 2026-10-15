@@ -247,12 +247,31 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const lastDay = groups.length;
   const editing = drawer?.mode === "edit" ? items.find((it) => it.key === drawer.key) : undefined;
   const drawerInitial: ItemDraftFields = editing
-    ? { title: editing.title, day_from: editing.day_from, day_to: editing.day_to, notes: editing.notes, source_tour_id: editing.source_tour_id }
-    : { title: "", day_from: drawer?.mode === "add" ? drawer.day : 1, day_to: drawer?.mode === "add" ? drawer.day : 1, notes: "", source_tour_id: null };
+    ? {
+        title: editing.title,
+        day_from: editing.day_from,
+        day_to: editing.day_to,
+        notes: editing.notes,
+        source_tour_id: editing.source_tour_id,
+        supply: editing.supply ?? null,
+      }
+    : {
+        title: "",
+        day_from: drawer?.mode === "add" ? drawer.day : 1,
+        day_to: drawer?.mode === "add" ? drawer.day : 1,
+        notes: "",
+        source_tour_id: null,
+        supply: null,
+      };
 
   const applyDrawer = (f: ItemDraftFields) => {
-    if (drawer?.mode === "edit") setItem(drawer.key, f);
-    else setItems((list) => normalise([...list, { key: newKey("item"), ...f, costs: [] }]));
+    if (drawer?.mode === "edit") {
+      // Another room type or service: lines defaulted from the previous one's rate no longer price this item, so drop
+      // them; with no line left the API takes the new rate in force on save. Lines typed by hand stay.
+      const prev = items.find((it) => it.key === drawer.key);
+      const switched = prev && f.supply && f.supply.id !== (prev.supply?.id ?? null);
+      setItem(drawer.key, prev && switched ? { ...f, costs: prev.costs.filter((c) => !c.supplier_rate_id) } : f);
+    } else setItems((list) => normalise([...list, { key: newKey("item"), ...f, costs: [] }]));
     setDrawer(null);
   };
 
@@ -691,6 +710,11 @@ function ItemCard({
             {item.day_to > item.day_from ? `Days ${item.day_from}–${item.day_to}` : `Day ${item.day_from}`}
           </span>
           {item.source_tour_id && <FromCisTag />}
+          {item.supply && (
+            <span className="rounded-full border border-line bg-panel px-2 py-0.5 text-[11px] font-medium text-body" title={item.supply.code}>
+              {item.supply.kind === "room_type" ? "Room" : "Service"} · {item.supply.label}
+            </span>
+          )}
           {!item.id && <span className="text-[11px] font-semibold text-warning">New</span>}
         </div>
         {item.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] text-muted">{item.notes}</p>}

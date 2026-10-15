@@ -75,8 +75,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Supply",
     items: [
       { href: "/suppliers", label: "Suppliers", icon: <Store size={ICON} />, wave: 2, shipped: true },
-      { href: "/hotels", label: "Hotels", icon: <Building size={ICON} />, wave: 2, shipped: false },
-      { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2, shipped: false },
+      { href: "/hotels", label: "Hotels", icon: <Building size={ICON} />, wave: 2, shipped: true },
+      { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2, shipped: true },
       { href: "/pricing/rules", label: "Pricing rules & FX", icon: <Percent size={ICON} />, wave: 2, shipped: true },
     ],
   },

@@ -88,8 +88,8 @@ async def test_create_v1_prefills_from_legs_in_day_order() -> None:
     assert insert_version == (CASE_ID, 1, None, "first draft", None, "USD", None, "u-1")
     items = conn.sql("INSERT INTO booking.trip_case_version_itinerary")
     assert items == [
-        (VERSION_ID, 1, "Sapa trek", 1, 2, "t-b", None),
-        (VERSION_ID, 2, "AA tour t-a", 3, 5, "t-a", None),
+        (VERSION_ID, 1, "Sapa trek", 1, 2, "t-b", None, None, None),
+        (VERSION_ID, 2, "AA tour t-a", 3, 5, "t-a", None, None, None),
     ]
     audit = json.loads(conn.sql("INSERT INTO booking.audit_logs")[0][7])
     assert audit["version_number"] == 1 and audit["copied_from"] is None and audit["item_count"] == 2
@@ -147,7 +147,7 @@ async def test_get_items_and_missing_version() -> None:
         .on("SELECT id::text AS id, position, title", [{"position": 1, "title": "x"}])
     )
     out = await versions.get_items(conn, "TC-000001", 1)
-    assert out["items"] == [{"position": 1, "title": "x", "costs": []}] and out["fx_locked"] is None
+    assert out["items"] == [{"position": 1, "title": "x", "costs": [], "supply": None}] and out["fx_locked"] is None
     with pytest.raises(NotFound):
         await versions.get_items(ScriptedConn().on("FROM booking.trip_cases tc", case_row()), "TC-000001", 9)
 
@@ -183,8 +183,10 @@ async def test_replace_items_upserts_by_id_and_deletes_only_removed_items() -> N
     assert conn.sql("total_price = CASE WHEN $3") == [(VERSION_ID, "u-1", True)]
     assert conn.sql("DELETE FROM booking.trip_case_version_itinerary") == [([ITEM_A],)]
     assert conn.sql("SET position = position + $2") == [([ITEM_B], versions.POSITION_PARK)]
-    assert conn.sql("SET position = $2, title = $3") == [(ITEM_B, 1, "B first", 1, 2, None, "kept")]
-    assert conn.sql("INSERT INTO booking.trip_case_version_itinerary") == [(VERSION_ID, 2, "New", 3, 5, "t-x", None)]
+    assert conn.sql("SET position = $2, title = $3") == [(ITEM_B, 1, "B first", 1, 2, None, "kept", None, None)]
+    assert conn.sql("INSERT INTO booking.trip_case_version_itinerary") == [
+        (VERSION_ID, 2, "New", 3, 5, "t-x", None, None, None)
+    ]
     audit = conn.sql("INSERT INTO booking.audit_logs")[0]
     assert audit[3] == "trip_case_version.items_replaced" and json.loads(audit[7])["removed"] == [ITEM_A]
     assert json.loads(audit[7])["price_cleared"] is True

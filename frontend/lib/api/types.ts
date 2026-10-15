@@ -221,6 +221,17 @@ export interface VersionItemCost {
   net_amount: DecimalString;
   net_currency: string;
   supplier_note: string | null;
+  /** The published supplier rate the line was defaulted from (bk-010, AA-823); provenance only. */
+  supplier_rate_id?: string | null;
+}
+
+/** The hotel room type or service a version item books (bk-010, AA-823). */
+export interface VersionItemSupply {
+  kind: "room_type" | "service";
+  id: string;
+  code: string;
+  label: string;
+  active: boolean;
 }
 
 export interface VersionItem {
@@ -233,6 +244,9 @@ export interface VersionItem {
   notes: string | null;
   /** Absent on an API without the pricing branch (bk-004 / AA-810). */
   costs?: VersionItemCost[];
+  hotel_room_type_id?: string | null;
+  service_id?: string | null;
+  supply?: VersionItemSupply | null;
 }
 
 export interface VersionWithItems extends Version {

@@ -19,6 +19,10 @@
 - **Net costs** (bk-004 ``version_item_costs``, AA-810): each item carries its supplier net cost lines. ``GET
   …/items`` returns them per item; ``PUT …/items`` replaces an item's lines when the item has ``costs`` (omit it
   to leave them alone). Vn copies the lines with the items. Changing a line clears the version's price.
+- **Supply** (bk-010, AA-823): an item may book one hotel room type or one service. When it starts referencing one
+  (or references one and has no cost lines) and the PUT gives no ``costs`` for it, the item takes the rate in force as
+  its default net cost line (``app.supply.rates.default_cost``; ``supplier_rate_id`` keeps the provenance). The
+  response's ``rate_defaults`` lists what was defaulted, or that no rate was in force.
 - **Price** (``POST …/versions/{n}/price``) runs the pricing engine (``app.pricing.service``, the same code as
   quote-preview) on the stored cost lines and saves the total, selling currency, channel and the selling FX rate
   on a draft. A total below the channel floor needs a reason (audited). Send then locks all of it (bk-005).
@@ -27,8 +31,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import date, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -40,6 +44,7 @@ from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.notifications import service as notifications
 from app.pricing import engine
 from app.pricing import service as pricing
+from app.supply import rates as supply_rates
 from app.trip_cases import sql
 from app.trip_cases.service import is_terminal, resolve_case, set_status
 from app.trip_cases.sql import leg_title  # noqa: F401 — re-exported (tests, older imports)
@@ -55,7 +60,11 @@ DEFAULT_VALIDITY_DAYS = 14
 SEND_CHAIN = ("discovery", "building", "proposal_sent")
 VERSION_SORTS = {"updated_at": "v.updated_at", "created_at": "v.created_at", "version_number": "v.version_number"}
 
-ITEM_COLUMNS = "position, title, day_from, day_to, source_tour_id, notes"
+ITEM_COLUMNS = "position, title, day_from, day_to, source_tour_id, notes, hotel_room_type_id, service_id"
+ITEM_SELECT = (
+    "position, title, day_from, day_to, source_tour_id, notes,"
+    " hotel_room_type_id::text AS hotel_room_type_id, service_id::text AS service_id"
+)
 MAX_COSTS_PER_ITEM = 20
 # trip_case_versions.total_price is NUMERIC(12, 2).
 MAX_TOTAL = Decimal("9999999999.99")
@@ -63,8 +72,20 @@ MAX_TOTAL = Decimal("9999999999.99")
 ITEM_COSTS_JSON = """
     (SELECT coalesce(json_agg(json_build_object(
                 'id', c.id::text, 'net_amount', c.net_amount::text, 'net_currency', c.net_currency::text,
-                'supplier_note', c.supplier_note) ORDER BY c.created_at, c.id), '[]'::json)::text
+                'supplier_note', c.supplier_note, 'supplier_rate_id', c.supplier_rate_id::text)
+                ORDER BY c.created_at, c.id), '[]'::json)::text
      FROM booking.version_item_costs c WHERE c.version_item_id = booking.trip_case_version_itinerary.id) AS costs
+"""
+# The hotel room type or service an item books, as JSON text (null when none).
+ITEM_SUPPLY_JSON = """
+    coalesce(
+        (SELECT json_build_object('kind', 'room_type', 'id', t.id::text, 'code', h.code,
+                    'label', h.name || ' · ' || t.name, 'active', t.status = 'active' AND h.status = 'active')::text
+         FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id
+         WHERE t.id = booking.trip_case_version_itinerary.hotel_room_type_id),
+        (SELECT json_build_object('kind', 'service', 'id', s.id::text, 'code', s.code, 'label', s.title,
+                    'active', s.status = 'active')::text
+         FROM booking.services s WHERE s.id = booking.trip_case_version_itinerary.service_id)) AS supply
 """
 
 
@@ -73,6 +94,7 @@ class Cost:
     net_amount: Decimal
     net_currency: str
     supplier_note: str | None = None
+    supplier_rate_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +107,12 @@ class Item:
     id: str | None = None
     # None = keep the item's stored cost lines; a tuple (even empty) replaces them.
     costs: tuple[Cost, ...] | None = None
+    hotel_room_type_id: str | None = None
+    service_id: str | None = None
+
+    @property
+    def supply(self) -> tuple[str | None, str | None]:
+        return (self.hotel_room_type_id, self.service_id)
 
 
 def prefill_from_legs(legs: list[Any], snapshot: dict[str, Any] | None) -> list[Item]:
@@ -102,7 +130,7 @@ def prefill_from_legs(legs: list[Any], snapshot: dict[str, Any] | None) -> list[
 
 async def _items(conn: asyncpg.Connection, version_id: str) -> list[dict[str, Any]]:
     rows = await conn.fetch(
-        f"SELECT id::text AS id, {ITEM_COLUMNS}, {ITEM_COSTS_JSON}"  # noqa: S608 — constant
+        f"SELECT id::text AS id, {ITEM_SELECT}, {ITEM_COSTS_JSON}, {ITEM_SUPPLY_JSON}"  # noqa: S608 — constant
         " FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid ORDER BY position",
         version_id,
     )
@@ -110,15 +138,21 @@ async def _items(conn: asyncpg.Connection, version_id: str) -> list[dict[str, An
     for row in rows:
         item = dict(row)
         item["costs"] = sql.loads(item.get("costs"), [])
+        item["supply"] = sql.loads(item.get("supply"), None)
         out.append(item)
     return out
 
 
-def _cost_key(net_amount: Any, net_currency: str, supplier_note: str | None) -> tuple[Decimal, str, str | None]:
+# A cost line is compared by value; ``supplier_rate_id`` is provenance only, so a client that sends the same lines
+# back without it keeps the stored lines (and their provenance) and the version keeps its price.
+CostKey = tuple[Decimal, str, str | None]
+
+
+def _cost_key(net_amount: Any, net_currency: str, supplier_note: str | None) -> CostKey:
     return (Decimal(str(net_amount)), net_currency.strip(), supplier_note or None)
 
 
-def _stored_costs(item: dict[str, Any]) -> list[tuple[Decimal, str, str | None]]:
+def _stored_costs(item: dict[str, Any]) -> list[CostKey]:
     return [_cost_key(c["net_amount"], c["net_currency"], c.get("supplier_note")) for c in item.get("costs") or []]
 
 
@@ -128,16 +162,37 @@ async def _write_costs(conn: asyncpg.Connection, staff: Staff, item_id: str, cos
         # clock_timestamp() keeps the entry order (now() is the same for every row of the transaction).
         await conn.executemany(
             "INSERT INTO booking.version_item_costs"
-            " (version_item_id, net_amount, net_currency, supplier_note, entered_by, created_at)"
-            " VALUES ($1::uuid, $2, $3, $4, $5, clock_timestamp())",
-            [(item_id, c.net_amount, c.net_currency, c.supplier_note, staff.cis_user_id) for c in costs],
+            " (version_item_id, net_amount, net_currency, supplier_note, entered_by, supplier_rate_id, created_at)"
+            " VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, clock_timestamp())",
+            [
+                (item_id, c.net_amount, c.net_currency, c.supplier_note, staff.cis_user_id, c.supplier_rate_id)
+                for c in costs
+            ],
         )
 
 
 def _item_rows(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
     """Stored items as comparable tuples (id + the saved fields, in position order)."""
     return [
-        (i["id"], i["position"], i["title"], i["day_from"], i["day_to"], i["source_tour_id"], i["notes"]) for i in items
+        (
+            i["id"],
+            i["position"],
+            i["title"],
+            i["day_from"],
+            i["day_to"],
+            i["source_tour_id"],
+            i["notes"],
+            i.get("hotel_room_type_id"),
+            i.get("service_id"),
+        )
+        for i in items
+    ]
+
+
+def _given_rows(positioned: list[tuple[int, Item]]) -> list[tuple[Any, ...]]:
+    return [
+        (it.id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes, *it.supply)
+        for pos, it in positioned
     ]
 
 
@@ -146,10 +201,95 @@ async def _insert_items(conn: asyncpg.Connection, version_id: str, items: list[t
         return
     await conn.executemany(
         "INSERT INTO booking.trip_case_version_itinerary"
-        " (trip_case_version_id, position, title, day_from, day_to, source_tour_id, notes)"
-        " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)",
-        [(version_id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes) for pos, it in items],
+        " (trip_case_version_id, position, title, day_from, day_to, source_tour_id, notes, hotel_room_type_id,"
+        " service_id) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9::uuid)",
+        [
+            (version_id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes, *it.supply)
+            for pos, it in items
+        ],
     )
+
+
+async def _check_supply(
+    conn: asyncpg.Connection, before: list[dict[str, Any]], positioned: list[tuple[int, Item]]
+) -> None:
+    """Referenced room types / services exist, a newly referenced one is active, and a cost line names only a rate of
+    a published (or expired) contract: draft rates are not prices yet."""
+    stored = {i["id"]: (i.get("hotel_room_type_id"), i.get("service_id")) for i in before}
+    rooms = sorted({it.hotel_room_type_id for _, it in positioned if it.hotel_room_type_id})
+    services = sorted({it.service_id for _, it in positioned if it.service_id})
+    active: dict[str, bool] = {}
+    if rooms:
+        for r in await conn.fetch(
+            "SELECT t.id::text AS id, t.status = 'active' AND h.status = 'active' AS active"
+            " FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id WHERE t.id = ANY($1::uuid[])",
+            rooms,
+        ):
+            active[r["id"]] = r["active"]
+    if services:
+        for r in await conn.fetch(
+            "SELECT s.id::text AS id, s.status = 'active' AS active FROM booking.services s"
+            " WHERE s.id = ANY($1::uuid[])",
+            services,
+        ):
+            active[r["id"]] = r["active"]
+    unknown = sorted((set(rooms) | set(services)) - set(active))
+    if unknown:
+        raise Invalid("unknown_supply", f"room type or service {unknown[0]} does not exist", supply_ids=unknown)
+    for pos, it in positioned:
+        ref = it.hotel_room_type_id or it.service_id
+        if ref and it.supply != stored.get(it.id or "", (None, None)) and not active[ref]:
+            raise Invalid("supply_inactive", f"item {pos} books an inactive room type or service", position=pos)
+    rate_ids = sorted({c.supplier_rate_id for _, it in positioned for c in it.costs or () if c.supplier_rate_id})
+    if rate_ids:
+        known = await conn.fetch(
+            "SELECT x.id::text AS id FROM booking.supplier_rates x"
+            " JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id"
+            " WHERE x.id = ANY($1::uuid[]) AND k.status <> 'draft'",
+            rate_ids,
+        )
+        bad = sorted(set(rate_ids) - {r["id"] for r in known})
+        if bad:
+            raise Invalid("unknown_rate", f"rate {bad[0]} is not a published supplier rate", rate_ids=bad)
+
+
+async def _supply_defaults(
+    conn: asyncpg.Connection, case: Any, before: list[dict[str, Any]], positioned: list[tuple[int, Item]]
+) -> tuple[list[tuple[int, Item]], list[dict[str, Any]]]:
+    """Give an item that books a room type or service, and sends no ``costs``, the net of the rate in force when it
+    starts booking it or has no cost line yet. Returns the items and a report per defaulted item."""
+    if not any(it.hotel_room_type_id or it.service_id or it.costs for _, it in positioned):
+        return positioned, []
+    await _check_supply(conn, before, positioned)
+    stored = {i["id"]: i for i in before}
+    start, pax = case.get("start_date"), case.get("pax")
+    out: list[tuple[int, Item]] = []
+    report: list[dict[str, Any]] = []
+    for pos, it in positioned:
+        old = stored.get(it.id or "")
+        old_ref = (old.get("hotel_room_type_id"), old.get("service_id")) if old else (None, None)
+        books = it.hotel_room_type_id or it.service_id
+        if books and it.costs is None and (it.supply != old_ref or not (old and old["costs"])):
+            day = start + timedelta(days=it.day_from - 1) if start else datetime.now(UTC).date()
+            rate = await supply_rates.rate_in_force(
+                conn, room_type_id=it.hotel_room_type_id, service_id=it.service_id, on=day, pax=pax
+            )
+            if rate is None:
+                report.append({"position": pos, "on": day, "rate_id": None})
+            else:
+                d = supply_rates.default_cost(rate, day_from=it.day_from, day_to=it.day_to, pax=pax)
+                it = replace(it, costs=(Cost(d.net_amount, d.net_currency, d.supplier_note, d.supplier_rate_id),))
+                report.append(
+                    {
+                        "position": pos,
+                        "on": day,
+                        "rate_id": d.supplier_rate_id,
+                        "net_amount": str(d.net_amount),
+                        "net_currency": d.net_currency,
+                    }
+                )
+        out.append((pos, it))
+    return out, report
 
 
 async def _version(conn: asyncpg.Connection, case_id: str, number: int, *, lock: bool = False) -> Any:
@@ -254,8 +394,9 @@ async def create_version(
         # The net cost lines follow their item (matched by position, which the copy keeps).
         await conn.execute(
             "INSERT INTO booking.version_item_costs"
-            " (version_item_id, net_amount, net_currency, supplier_note, entered_by, created_at)"
-            " SELECT ni.id, c.net_amount, c.net_currency, c.supplier_note, c.entered_by, clock_timestamp()"
+            " (version_item_id, net_amount, net_currency, supplier_note, entered_by, supplier_rate_id, created_at)"
+            " SELECT ni.id, c.net_amount, c.net_currency, c.supplier_note, c.entered_by, c.supplier_rate_id,"
+            " clock_timestamp()"
             " FROM booking.trip_case_version_itinerary oi"
             " JOIN booking.trip_case_version_itinerary ni"
             "   ON ni.trip_case_version_id = $1::uuid AND ni.position = oi.position"
@@ -389,7 +530,7 @@ async def replace_items(
     if foreign:
         raise Invalid("unknown_item", f"item {foreign[0]} is not on this version", item_ids=foreign)
     removed = sorted(existing - set(given))
-    positioned = list(enumerate(items, start=1))
+    positioned, rate_defaults = await _supply_defaults(conn, case, before, list(enumerate(items, start=1)))
     stored_costs = {i["id"]: _stored_costs(i) for i in before}
     new_costs = {
         pos: [_cost_key(c.net_amount, c.net_currency, c.supplier_note) for c in it.costs]
@@ -398,9 +539,7 @@ async def replace_items(
     }
     # Rewrite an item's lines only when they differ (or the item is new): unchanged lines keep their ids.
     rewrite = {pos for pos, lines in new_costs.items() if lines != stored_costs.get(positioned[pos - 1][1].id, [])}
-    changed = bool(rewrite) or _item_rows(before) != [
-        (it.id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes) for pos, it in positioned
-    ]
+    changed = bool(rewrite) or _item_rows(before) != _given_rows(positioned)
     try:
         if removed:
             await conn.execute("DELETE FROM booking.trip_case_version_itinerary WHERE id = ANY($1::uuid[])", removed)
@@ -412,12 +551,9 @@ async def replace_items(
             )
             await conn.executemany(
                 "UPDATE booking.trip_case_version_itinerary SET position = $2, title = $3, day_from = $4,"
-                " day_to = $5, source_tour_id = $6, notes = $7 WHERE id = $1::uuid",
-                [
-                    (it.id, pos, it.title, it.day_from, it.day_to, it.source_tour_id, it.notes)
-                    for pos, it in positioned
-                    if it.id
-                ],
+                " day_to = $5, source_tour_id = $6, notes = $7, hotel_room_type_id = $8::uuid, service_id = $9::uuid"
+                " WHERE id = $1::uuid",
+                [row for row in _given_rows(positioned) if row[0]],
             )
         await _insert_items(conn, version["id"], [(pos, it) for pos, it in positioned if not it.id])
         if rewrite:
@@ -445,6 +581,7 @@ async def replace_items(
         raise Conflict("version_locked", "the version is locked") from exc
     version = sql.version_dict(await _version(conn, case["id"], number))
     version["items"] = await _items(conn, version["id"])
+    version["rate_defaults"] = rate_defaults
     await audit.record(
         conn,
         actor_type="staff",
@@ -457,6 +594,7 @@ async def replace_items(
             "items": version["items"],
             "removed": removed,
             "costs_replaced": len(rewrite),
+            "rate_defaults": rate_defaults,
             "price_cleared": changed and price_before is not None,
         },
         entity_label=_label(case, number),
