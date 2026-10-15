@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -163,6 +164,8 @@ def render(m: InquiryMail, *, to: str, admin_url: str, environment: str) -> mail
     """Plain text + a simple HTML twin. Staff-only content: the customer's contact details are included."""
     prefix = "" if environment == "prod" else f"[{environment.capitalize()}] "
     name = m.customer_name or "A traveller"
+    # the subject is one header line: no control characters, and a sane length for a pasted-in name
+    subject_name = re.sub(r"[\x00-\x1f\x7f]+", " ", name).strip()[:100] or "A traveller"
     url = case_url(admin_url, m.code)
     duration = max((t.day_to for t in m.tours), default=None)
     facts = [
@@ -201,7 +204,7 @@ def render(m: InquiryMail, *, to: str, admin_url: str, environment: str) -> mail
         '<p style="color:#888;font-size:12px">AA-Booking, automatic message. Do not reply.</p></div>'
     )
     return mailer.Message(
-        to=to, subject=f"{prefix}New inquiry {m.code}: {name}", text="\n".join(text_lines), html=html_body
+        to=to, subject=f"{prefix}New inquiry {m.code}: {subject_name}", text="\n".join(text_lines), html=html_body
     )
 
 

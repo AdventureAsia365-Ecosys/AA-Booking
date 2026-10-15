@@ -29,7 +29,8 @@ PERMANENT_ERROR_CODES = frozenset(
         "SendingPausedException",
         "BadRequestException",
         "NotFoundException",
-        "AccessDeniedException",
+        # AccessDeniedException is NOT here: right after the Infra apply that grants ses:SendEmail,
+        # IAM propagation can deny the first sends; the runner's 5 backed-off attempts cover that.
     }
 )
 

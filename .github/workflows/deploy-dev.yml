@@ -14,8 +14,11 @@ name: Deploy Dev
 #   ECS_TASK_FAMILY       default aa-booking-dev-api (the Terraform task definition family)
 #   BOOKING_API_BASE_URL  e.g. the execute-api stage URL; the smoke test is skipped while unset
 #
-# No job guard: Booking has no jobs yet (ADR 0004 decision 8). This workflow never changes the
-# service's desired count — scaling 0 → 1 is a separate, approved step.
+# No job guard yet (AA-751 / X6 adds one): booking.job runs bk_inquiry_* and bk_notify_email. A rolling
+# deploy that stops a task mid-send lets the reaper re-queue the job, so a staff e-mail can arrive twice
+# (at-least-once, documented in CONTEXT.md). The base task definition is the family's latest ACTIVE
+# revision, so a redeploy of an older commit keeps the latest Terraform env/secrets: revert config in
+# Terraform. This workflow never changes the service's desired count; scaling 0 → 1 is a separate step.
 
 on:
   push:

@@ -236,3 +236,11 @@ async def test_the_ses_client_is_created_once_per_handler() -> None:
 async def test_one_job_per_notification_key() -> None:
     assert staff_email.idempotency_key(NOTE_ID) == f"bk_notify_email:{NOTE_ID}"
     assert staff_email.payload(NOTE_ID) == {"notification_id": NOTE_ID}
+
+
+def test_access_denied_is_retried_not_permanent():
+    # S238 review: IAM propagation right after the Infra apply can deny the first sends
+    from app import mailer
+
+    assert "AccessDeniedException" not in mailer.PERMANENT_ERROR_CODES
+    assert "MessageRejected" in mailer.PERMANENT_ERROR_CODES
