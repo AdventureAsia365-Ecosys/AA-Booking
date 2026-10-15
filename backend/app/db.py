@@ -65,6 +65,8 @@ class Database:
                     max_size=5,
                     timeout=CONNECT_TIMEOUT_S,
                     command_timeout=PROBE_TIMEOUT_S,
+                    # AA-824: named pool on the shared RDS (pg_stat_activity, data standards C2.2).
+                    server_settings={"application_name": "booking-api"},
                 )
         return self._pool
 
