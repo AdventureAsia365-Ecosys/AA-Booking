@@ -30,7 +30,7 @@ Design sources, in order:
 - **Owns** schema `booking.*` on the shared acc2 RDS (`aa-cis-dev-db`, PostgreSQL 15), migration key
   `bk-NNN`, and the **customer identity** (OTP) of the ecosystem (ADR 0001 decision 6).
 - **Consumes** through owner grants on views: TripPlanner `tripplanner.v_inquiry_outbox`
-  (`inquiry.submitted` v1 / v1.1, contract in `AA-Ecosys/docs/contracts/`, grant = TripPlanner `tp-009`) —
+  (`inquiry.submitted` v1 / v1.1 / v1.2, contract in `AA-Ecosys/docs/contracts/`, grant = TripPlanner `tp-009`) —
   pattern outbox → pull job → `booking.inbox_events`. CIS catalog read model (contract `catalog.tour.v1`, CIS
   migration 225 grant to role `booking`), **read live** at request time (no copy, no outbox consumer):
   `catalog.v_destination` (supplier place picker and check, AA-822) and `catalog.v_tour` / `v_tour_day` /
@@ -76,6 +76,7 @@ backend/
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
+                           + leg catalog tour key resolve / back-fill (leg_keys.py, `python -m app.inquiry.leg_keys`)
   app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py, approved
                            rows only) + rules/FX admin with maker-checker (policy.py, bk-007)
   app/routers/catalog.py   GET /booking/catalog/destinations (place picker, any active staff, AA-822);
@@ -176,7 +177,7 @@ tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
 | Kind | What |
 |---|---|
 | `bk_inquiry_pull` | Recurring singleton (every ~60 s): reads `tripplanner.v_inquiry_outbox`, anti-joins `booking.inbox_events`, inserts new rows `ON CONFLICT DO NOTHING`, queues one process job each. `booking.inbox_cursor.safe_id` is only a scan bound, advanced behind a 600 s window (contract rule 4). |
-| `bk_inquiry_process` | Validates v1/v1.1; creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
+| `bk_inquiry_process` | Validates v1/v1.1/v1.2; each leg gets the catalog tour key `(source_system, source_id)` from the v1.2 payload or by resolving `source_tour_id` against `catalog.v_tour` (null when unresolved; AA-830); creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
 ## Health contract (ADR 0004 decision 9)
@@ -306,6 +307,15 @@ once the contract is published (maker-checker via the contract). Version items g
 `service_id` (at most one); cost lines gain `supplier_rate_id` (provenance of a defaulted net). An item that books
 supply and is saved without cost lines takes the rate in force on its first day (trip start + day_from - 1) for the
 case pax. Known gap (ADR 0004a d4): CIS still connects as the owner role, so the DB does not hide these rates from CIS.
+
+### `bk-011` (AA-830, data standards X3 — needs `bk-002` only)
+
+`trip_case_legs.source_system` / `source_id`: the catalog tour key of contract catalog.tour.v1 (DM-2.2), nullable, both
+or neither, `cis` only (CHECK), indexed, no FK (soft key; the nightly schema dump reports orphans against
+`catalog.v_tour`, DM-4.2). `source_tour_id` stays as TripPlanner sent it (either key kind) for compatibility; never join
+on it. Filled by intake; legs opened before bk-011 are back-filled by `python -m app.inquiry.leg_keys` (DRY RUN by
+default, `--apply` writes only rows still null; a superseded tour_id is not in `catalog.v_tour` and stays unmatched,
+listed in the report). `/booking/health/ready` requires `bk-011`.
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),

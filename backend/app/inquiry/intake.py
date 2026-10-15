@@ -9,12 +9,13 @@
     lower id can still commit (see :data:`SAFE_AFTER_SECONDS`).
 
 ``bk_inquiry_process`` (one per inbox row)
-    Validates the payload (inquiry.submitted v1 / v1.1), then in ONE transaction, holding the inbox
+    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2), then in ONE transaction, holding the inbox
     row lock: creates a lead customer (O6), the trip case and its legs, a staff notification (plus one
     ``bk_notify_email`` job for it, AA-811) and an audit row, and marks the inbox row ``processed``.
     Re-running it is a no-op. A legacy hand-off with ``customer: null`` (or a contact with neither
     email nor phone) is ``parked``; an invalid payload is ``failed`` with the reason. Neither becomes
-    a trip case.
+    a trip case. Each leg gets the catalog tour key (bk-011, AA-830): from the v1.2 payload, else by
+    resolving ``source_tour_id`` against ``catalog.v_tour`` (``leg_keys.resolve``); unresolved stays null.
 
 Customer rule (contract v1.1, ``verified``): an unverified contact is never merged into an existing
 customer. It always becomes a new lead row (``verified = false``, ``source = 'tripplanner_lead'``);
@@ -32,7 +33,8 @@ from typing import Any
 
 import asyncpg
 
-from app.inquiry.contract import CONTRACT, SOURCE, Contact, ContractError, Inquiry, parse, version_label
+from app.inquiry import leg_keys
+from app.inquiry.contract import CONTRACT, SOURCE, Contact, ContractError, Inquiry, Leg, parse, version_label
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError, Recurring
@@ -197,6 +199,18 @@ async def resolve_customer(conn: asyncpg.Connection, contact: Contact) -> tuple[
     return lead_id, True, candidate is not None
 
 
+async def tour_keys(conn: asyncpg.Connection, legs: tuple[Leg, ...]) -> dict[int, leg_keys.TourKey]:
+    """Catalog tour key per leg position: the payload's (v1.2), else ``source_tour_id`` resolved against the catalog."""
+    out: dict[int, leg_keys.TourKey] = {
+        leg.position: (leg.source_system, leg.source_id) for leg in legs if leg.source_system and leg.source_id
+    }
+    missing = [leg for leg in legs if leg.position not in out]
+    if missing:
+        resolved = await leg_keys.resolve(conn, [leg.source_tour_id for leg in missing])
+        out.update({leg.position: resolved[leg.source_tour_id] for leg in missing if leg.source_tour_id in resolved})
+    return out
+
+
 async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inquiry) -> dict[str, Any]:
     contact = inquiry.contact
     assert contact is not None  # noqa: S101 — checked by the caller
@@ -214,11 +228,25 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
         event_id,
         json.dumps(inquiry.snapshot),
     )
+    keyed = 0
     if inquiry.legs:
+        keys = await tour_keys(conn, inquiry.legs)
+        keyed = sum(1 for leg in inquiry.legs if keys.get(leg.position))
         await conn.executemany(
-            "INSERT INTO booking.trip_case_legs (trip_case_id, position, source_tour_id, day_from, day_to)"
-            " VALUES ($1::uuid, $2, $3, $4, $5)",
-            [(case["id"], leg.position, leg.source_tour_id, leg.day_from, leg.day_to) for leg in inquiry.legs],
+            "INSERT INTO booking.trip_case_legs"
+            " (trip_case_id, position, source_tour_id, day_from, day_to, source_system, source_id)"
+            " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)",
+            [
+                (
+                    case["id"],
+                    leg.position,
+                    leg.source_tour_id,
+                    leg.day_from,
+                    leg.day_to,
+                    *(keys.get(leg.position) or (None, None)),
+                )
+                for leg in inquiry.legs
+            ],
         )
     summary = {
         "trip_case_id": case["id"],
@@ -227,6 +255,7 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
         "lead": created_lead,
         "needs_merge_review": review,
         "legs": len(inquiry.legs),
+        "legs_without_tour_key": len(inquiry.legs) - keyed,
         "contract_version": inquiry.version,
     }
     message = f"{contact.name or 'A traveller'} sent a trip with {len(inquiry.legs)} AA tour leg(s)."

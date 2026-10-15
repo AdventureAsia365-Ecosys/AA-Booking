@@ -259,7 +259,7 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     case["inquiry_snapshot"] = json.loads(row["inquiry_snapshot"]) if row["inquiry_snapshot"] else None
     case_id = case["id"]
     legs = await conn.fetch(
-        "SELECT position, source_tour_id, day_from, day_to FROM booking.trip_case_legs"
+        "SELECT position, source_tour_id, day_from, day_to, source_system, source_id FROM booking.trip_case_legs"
         " WHERE trip_case_id = $1::uuid ORDER BY day_from, position",
         case_id,
     )

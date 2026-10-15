@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import asyncpg
 import pytest
 
 from app.inquiry import intake
@@ -103,6 +104,7 @@ async def test_process_opens_a_trip_case_for_a_new_lead() -> None:
         "lead": True,
         "needs_merge_review": False,
         "legs": 2,
+        "legs_without_tour_key": 2,  # the catalog knows neither tour
         "contract_version": "1.1",
     }
     assert [args[1] for args in conn.sql("INSERT INTO booking.trip_case_legs")] == [1, 2]
@@ -139,6 +141,57 @@ async def test_process_without_legs_inserts_none() -> None:
     conn = conn_for(payload)
     assert (await intake.process(conn, process_job()))["legs"] == 0
     assert conn.sql("INSERT INTO booking.trip_case_legs") == []
+
+
+# ── catalog tour key per leg (AA-830, bk-011) ────────────────────────────────
+
+
+def leg_rows(conn: ScriptedConn) -> dict[int, tuple[Any, Any]]:
+    """position -> (source_system, source_id) of every inserted leg."""
+    return {args[1]: (args[5], args[6]) for args in conn.sql("INSERT INTO booking.trip_case_legs")}
+
+
+async def test_v1_2_legs_keep_the_payload_key_without_a_catalog_read() -> None:
+    payload = samples.v1_2(keys=["src-a", "src-b"])
+    conn = conn_for(payload)
+    result = await intake.process(conn, process_job())
+    assert result["contract_version"] == "1.2" and result["legs_without_tour_key"] == 0
+    sent = {leg["position"]: ("cis", leg["source_id"]) for leg in payload["itinerary"]["legs"]}
+    assert leg_rows(conn) == sent
+    assert conn.sql("FROM catalog.v_tour") == []
+
+
+async def test_v1_1_legs_are_resolved_against_the_catalog_by_either_key_kind() -> None:
+    payload = samples.v1_1()
+    by_pos = {leg["position"]: leg["source_tour_id"] for leg in payload["itinerary"]["legs"]}
+    catalog = [
+        {"source_system": "cis", "source_id": "src-1", "tour_id": by_pos[1]},  # leg 1 sent a version tour_id
+        {"source_system": "cis", "source_id": by_pos[2], "tour_id": "t-other"},  # leg 2 sent the source_id
+    ]
+    conn = conn_for(payload).on("FROM catalog.v_tour", catalog)
+    result = await intake.process(conn, process_job())
+    assert result["legs_without_tour_key"] == 0
+    assert leg_rows(conn) == {1: ("cis", "src-1"), 2: ("cis", by_pos[2])}
+    (asked,) = conn.sql("FROM catalog.v_tour")
+    assert asked == (sorted(by_pos.values()),)
+
+
+async def test_unresolved_v1_2_leg_is_resolved_by_booking_and_unknown_stays_null() -> None:
+    payload = samples.v1_2(keys=[None, "src-b"])
+    (first,) = [leg for leg in payload["itinerary"]["legs"] if leg["source_id"] is None]
+    catalog = [{"source_system": "cis", "source_id": "src-late", "tour_id": first["source_tour_id"]}]
+    conn = conn_for(payload).on("FROM catalog.v_tour", catalog)
+    await intake.process(conn, process_job())
+    rows = leg_rows(conn)
+    assert rows[first["position"]] == ("cis", "src-late")
+    assert conn.sql("FROM catalog.v_tour") == [([first["source_tour_id"]],)]
+
+
+async def test_unreadable_catalog_opens_the_case_with_null_keys() -> None:
+    conn = conn_for(samples.v1_1()).on("FROM catalog.v_tour", asyncpg.InsufficientPrivilegeError("no grant"))
+    result = await intake.process(conn, process_job())
+    assert result["outcome"] == "processed" and result["legs_without_tour_key"] == 2
+    assert set(leg_rows(conn).values()) == {(None, None)}
 
 
 # ── resolve_customer ─────────────────────────────────────────────────────────

@@ -1,7 +1,8 @@
 """inquiry.submitted sample payloads, shaped like TripPlanner backend/assembly/handoff.py builds them.
 
 Contract rule 7: consumer tests parse samples of every accepted version. ``v1_1_as_tripplanner_sends``
-is what TripPlanner main emits today (PR #69): the v1.1 shape still labelled ``version: 1``.
+is what TripPlanner emitted before AA-805 (PR #69): the v1.1 shape still labelled ``version: 1``; ``v1_2`` is
+what it emits from AA-830 on.
 """
 
 from __future__ import annotations
@@ -78,6 +79,28 @@ def v1_1(email: str | None = None, *, verified: bool = False, customer_id: str |
             "verified": verified,
         },
     )
+
+
+def v1_2(email: str | None = None, *, verified: bool = False, keys: list[str | None] | None = None) -> dict[str, Any]:
+    """v1.2 (AA-830): v1.1 plus the catalog tour key per leg. ``keys`` gives each leg's source_id in ``position``
+    order (None = TripPlanner could not resolve it: both fields null); default: a fresh source_id per leg."""
+    payload = v1_1(email, verified=verified)
+    payload["version"] = 1.2
+    legs = payload["itinerary"]["legs"]
+    keys = keys if keys is not None else [f"src-{uuid.uuid4()}" for _ in legs]
+    by_position = dict(zip(sorted(leg["position"] for leg in legs), keys, strict=True))
+    payload["itinerary"]["legs"] = [
+        {
+            "position": leg["position"],
+            "source_tour_id": leg["source_tour_id"],
+            "source_system": "cis" if by_position[leg["position"]] else None,
+            "source_id": by_position[leg["position"]],
+            "day_from": leg["day_from"],
+            "day_to": leg["day_to"],
+        }
+        for leg in legs
+    ]
+    return payload
 
 
 def v1_1_as_tripplanner_sends(email: str | None = None) -> dict[str, Any]:
