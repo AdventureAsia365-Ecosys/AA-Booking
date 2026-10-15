@@ -22,9 +22,11 @@
 --     draft -> published -> expired. Maker-checker (ADR 0005 d8): the person who publishes is not the last person
 --     who wrote the draft terms (its last editor, or its creator when nobody edited it; CHECK below, the API answers
 --     403 first). So a two-person team never deadlocks: when B corrects A's draft, A checks B's edit and publishes.
+--     Publishing is a move on its own: the same UPDATE may not change the terms or their writer (trigger below).
 --     A published contract is fixed
 --     ("never overwrite", ADR 0005 d2): only the move to expired is allowed (trigger below). Contracts are never
 --     deleted either.
+--   * Personal-data and commercial columns carry pii: / conf:commercial comment tags (data standards DM-6.1).
 --   * One 'MN' (Mongolia) row in booking.countries: AA sells Mongolia and its suppliers need a country.
 --
 -- Status columns stay TEXT + CHECK. Re-running the whole file is a no-op.
@@ -77,7 +79,10 @@ COMMENT ON TABLE booking.suppliers IS
 COMMENT ON COLUMN booking.suppliers.categories IS
     'bk-008 (Q20): one or more of hotel, transport, guide, entrance, activity, meal (ADR 0005 rate sheet types).';
 COMMENT ON COLUMN booking.suppliers.internal_notes IS
-    'bk-008 (spec 08 conflict 2): staff-only notes about the supplier; never shown to customers.';
+    'conf:commercial; bk-008 (spec 08 conflict 2): staff-only notes about the supplier; never shown to customers.';
+COMMENT ON COLUMN booking.suppliers.contact_name IS 'pii:name; bk-008: supplier contact person.';
+COMMENT ON COLUMN booking.suppliers.contact_email IS 'pii:contact; bk-008: supplier contact e-mail (lower-cased by the API).';
+COMMENT ON COLUMN booking.suppliers.contact_phone IS 'pii:contact; bk-008: supplier contact phone.';
 COMMENT ON COLUMN booking.suppliers.destination_id IS
     'bk-008: CIS place id (catalog.v_destination.destination_id, golden record shared.destinations). Validated by the API; no FK across schemas.';
 
@@ -139,6 +144,9 @@ COMMENT ON COLUMN booking.supplier_contracts.currency IS
     'bk-008: the supplier currency of the contract (ISO 4217); rates under it are converted with bk-004 fx_rates.';
 COMMENT ON COLUMN booking.supplier_contracts.reference IS
     'bk-008: the supplier''s contract number or a document reference (free text; document upload is out of scope).';
+COMMENT ON COLUMN booking.supplier_contracts.payment_terms IS 'conf:commercial; bk-008: payment terms agreed with the supplier.';
+COMMENT ON COLUMN booking.supplier_contracts.cancellation_policy IS 'conf:commercial; bk-008: supplier cancellation policy.';
+COMMENT ON COLUMN booking.supplier_contracts.notes IS 'conf:commercial; bk-008: staff-only notes on the contract.';
 COMMENT ON COLUMN booking.supplier_contracts.updated_by IS
     'bk-008: last editor of the draft terms (the maker); publishing does not change it.';
 
@@ -162,6 +170,18 @@ BEGIN
     IF OLD.status = 'draft' THEN
         IF NEW.status = 'expired' THEN
             RAISE EXCEPTION 'supplier contract % is a draft and cannot expire before it is published', OLD.id
+                USING ERRCODE = 'object_not_in_prerequisite_state';
+        END IF;
+        -- Publishing is a move on its own: the checker publishes exactly the terms the maker wrote, so the same
+        -- UPDATE may not change the terms or who wrote them (else the maker-checker CHECK could be side-stepped).
+        IF NEW.status = 'published'
+           AND (NEW.supplier_id, NEW.title, NEW.reference, NEW.valid_from, NEW.valid_to, NEW.currency,
+                NEW.payment_terms, NEW.cancellation_policy, NEW.notes, NEW.created_by, NEW.updated_by)
+               IS DISTINCT FROM
+               (OLD.supplier_id, OLD.title, OLD.reference, OLD.valid_from, OLD.valid_to, OLD.currency,
+                OLD.payment_terms, OLD.cancellation_policy, OLD.notes, OLD.created_by, OLD.updated_by)
+        THEN
+            RAISE EXCEPTION 'supplier contract % is published on its own, without changing its terms', OLD.id
                 USING ERRCODE = 'object_not_in_prerequisite_state';
         END IF;
         RETURN NEW;

@@ -143,6 +143,42 @@ async def test_maker_cannot_publish(app_conn: asyncpg.Connection) -> None:
     )
 
 
+async def test_publish_cannot_change_terms_or_writer(app_conn: asyncpg.Connection) -> None:
+    """The checker publishes the terms as the maker wrote them: no edit, and no rewrite of updated_by, in the same
+    UPDATE (that would side-step the maker-checker CHECK)."""
+    cid = await _contract(app_conn, await _supplier(app_conn))
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        await app_conn.execute(
+            "UPDATE booking.supplier_contracts SET status = 'published', published_by = $2, published_at = now(),"
+            " payment_terms = '100% on arrival' WHERE id = $1::uuid",
+            cid,
+            CHECKER,
+        )
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        await app_conn.execute(
+            "UPDATE booking.supplier_contracts SET status = 'published', published_by = $2, published_at = now(),"
+            " updated_by = $3 WHERE id = $1::uuid",
+            cid,
+            MAKER,
+            CHECKER,
+        )
+    assert await app_conn.fetchval("SELECT status FROM booking.supplier_contracts WHERE id = $1::uuid", cid) == "draft"
+
+
+async def test_pii_and_commercial_columns_are_tagged(app_conn: asyncpg.Connection) -> None:
+    rows = await app_conn.fetch(
+        "SELECT c.relname || '.' || a.attname AS col, col_description(c.oid, a.attnum) AS comment"
+        " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " WHERE n.nspname = 'booking' AND c.relname IN ('suppliers', 'supplier_contracts') AND a.attnum > 0"
+    )
+    tags = {r["col"]: (r["comment"] or "").split(";")[0] for r in rows}
+    assert tags["suppliers.contact_name"] == "pii:name"
+    assert tags["suppliers.contact_email"] == "pii:contact"
+    assert tags["suppliers.contact_phone"] == "pii:contact"
+    assert tags["suppliers.internal_notes"] == "conf:commercial"
+    assert tags["supplier_contracts.payment_terms"] == "conf:commercial"
+
+
 async def test_published_contract_is_locked_except_expiry(app_conn: asyncpg.Connection) -> None:
     cid = await _contract(app_conn, await _supplier(app_conn))
     with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):  # a draft cannot jump to expired
