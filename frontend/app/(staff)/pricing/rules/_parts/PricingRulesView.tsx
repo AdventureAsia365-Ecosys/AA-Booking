@@ -6,14 +6,18 @@
 // Approve need pricing.write (admin, contracting), and the API refuses an approval by the row's creator (403
 // own_row) — the Approve button follows the API's per-row `can_approve`.
 // Layout (AA-683 S239): both tables fit a 1440 px screen without sideways scroll. Target and floor margin share one
-// column, the Approve action sits under the status pill of a pending row (no Actions column that is empty most of
-// the time), and Note is the flexible column: two lines at most on desktop with the full text in a tooltip, the
-// full text on phone cards.
+// "Margin" column (target on top, floor under it, so the header stays short), the Approve action sits under the
+// status pill of a pending row (no Actions column that is empty most of the time), and Note is the flexible column:
+// two lines at most on desktop with the full text in a tooltip, the full text on phone cards.
+// Width budget: with a pending row the rules table needs about 1005 px, so it still fits the 1084 px content frame at
+// 1440 when <main> draws a classic scrollbar (6 px styled in Chrome/Edge, about 17 px in Firefox on Windows). Keep
+// the Status cell no wider than the widest pill ("Scheduled", 95 px): a plain "Approve" button (78 px), and the
+// "Needs a second person" hint wraps at 96 px.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CheckCircle2, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS } from "@/lib/api/proposals";
 import { pct } from "@/lib/proposalDraft";
@@ -46,11 +50,11 @@ function PolicyStatusBadge({ status }: { status: PolicyStatus }) {
 }
 
 /** Free-text note. Desktop table (Tailwind `md`, the kit DataTable's table mode): at most two lines with the full
- *  text in the tooltip, and never narrower than 130 px so it does not wrap word by word. Phone cards: the full text. */
+ *  text in the tooltip, and never narrower than 110 px so it does not wrap word by word. Phone cards: the full text. */
 function NoteText({ note }: { note: string | null }) {
   if (!note) return <span className="text-[13px] text-muted">—</span>;
   return (
-    <span title={note} className="block break-words text-[13px] text-muted md:line-clamp-2 md:min-w-[130px]">
+    <span title={note} className="block break-words text-[13px] text-muted md:line-clamp-2 md:min-w-[110px]">
       {note}
     </span>
   );
@@ -113,12 +117,14 @@ export function PricingRulesView() {
         <PolicyStatusBadge status={status} />
         {canApprove ? (
           <span onClick={(e) => e.stopPropagation()}>
-            <Button size="sm" variant="secondary" onClick={onApprove}>
-              <CheckCircle2 size={13} /> Approve
+            <Button size="sm" variant="secondary" onClick={onApprove} title="Approve this row (maker-checker)">
+              Approve
             </Button>
           </span>
         ) : (
-          <span className="text-xs text-muted">{canWrite ? "Needs a second person" : "Waiting"}</span>
+          <span className="block text-xs leading-snug text-muted md:max-w-[96px]">
+            {canWrite ? "Needs a second person" : "Waiting"}
+          </span>
         )}
       </span>
     );
@@ -128,11 +134,12 @@ export function PricingRulesView() {
     { id: "channel", header: "Channel", accessorFn: (r) => CHANNEL_LABEL[r.channel] ?? r.channel, cell: ({ getValue }) => <span className="font-medium text-ink">{getValue() as string}</span> },
     {
       id: "margin",
-      header: "Target / floor",
+      header: "Margin",
       accessorFn: (r) => Number(r.target_margin),
       cell: ({ row }) => (
-        <span className="whitespace-nowrap tabular-nums" title="Target margin / floor margin">
-          {pct(row.original.target_margin)} <span className="text-muted">/ {pct(row.original.floor_margin)}</span>
+        <span className="flex flex-col whitespace-nowrap tabular-nums" title="Target margin, then the floor margin">
+          <span className="text-ink">{pct(row.original.target_margin)}</span>
+          <span className="text-xs text-muted">floor {pct(row.original.floor_margin)}</span>
         </span>
       ),
     },
