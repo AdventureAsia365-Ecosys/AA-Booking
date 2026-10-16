@@ -5,6 +5,10 @@
 // only copy the API offers), Send (shared send modal), Delete draft (DELETE …/versions/{n}).
 // "+ New proposal": a case picker (GET /booking/trip-cases?q=) that opens the case's latest version, or
 // creates V1 when the case has none.
+// Layout (AA-683 S239): the table fits a 1440 px screen without sideways scroll. Proposal (V-number + title, case
+// code + customer) and Trip (first leg, dates + length) are the flexible columns, one truncated line per row with the
+// full text in the tooltip; the fixed columns keep their natural width. Version and Dates are no longer columns of
+// their own: they sit in those two cells.
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -159,7 +163,6 @@ export default function ProposalsPage() {
           emptyTitle="No proposals match"
           emptyDescription="Proposals are created from a trip case. Change the filters to widen the list."
           onRowClick={(r) => router.push(builderHref(r))}
-          tableMinWidth={1100}
         />
       </Section>
 
@@ -369,40 +372,56 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** A flexible table cell: at least `min` px wide on desktop, wider when the fixed columns leave room. Its lines use
+ *  CLAMP (one line, ellipsis) instead of `truncate`: a clamped line can wrap, so its min-content width is one word and
+ *  the long text never sets the column width. Phone cards (kit DataTable < 768 px = Tailwind below `md`) show the full
+ *  text. */
+function FlexCell({ min, children }: { min: number; children: React.ReactNode }) {
+  return (
+    <span className="block md:[min-width:var(--flex-min)]" style={{ "--flex-min": `${min}px` } as React.CSSProperties}>
+      {children}
+    </span>
+  );
+}
+
+const CLAMP = "block break-words md:line-clamp-1";
+
 const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
   {
     id: "proposal",
     header: "Proposal",
-    cell: ({ row }) => (
-      <span className="block min-w-0">
-        <span className="block truncate text-[13px] font-medium text-ink">{row.original.title ?? row.original.trip_title ?? "Custom trip"}</span>
-        <span className="text-xs text-muted">
-          <Code>{row.original.trip_case_code}</Code> · {row.original.customer.name ?? "Unnamed customer"}
-        </span>
-      </span>
-    ),
+    cell: ({ row }) => {
+      const title = row.original.title ?? row.original.trip_title ?? "Custom trip";
+      const customer = row.original.customer.name ?? "Unnamed customer";
+      return (
+        <FlexCell min={200}>
+          <span title={title} className={`${CLAMP} text-[13px] font-medium text-ink`}>
+            <span className="font-semibold text-accent-deep">V{row.original.version_number}</span> {title}
+          </span>
+          <span title={customer} className={`${CLAMP} text-xs text-muted`}>
+            <Code>{row.original.trip_case_code}</Code> · {customer}
+          </span>
+        </FlexCell>
+      );
+    },
   },
   {
     id: "legs",
     header: "Trip",
-    cell: ({ row }) => (
-      <span className="text-[13px] text-body">
-        {row.original.leg_titles[0] ?? "Custom"}
-        {row.original.leg_titles.length > 1 && <span className="text-muted"> +{row.original.leg_titles.length - 1}</span>}
-      </span>
-    ),
+    cell: ({ row }) => {
+      const { leg_titles: legs, start_date, duration_days } = row.original;
+      const when = [start_date ? formatDate(start_date) : null, duration_days ? `${duration_days} days` : null].filter(Boolean).join(" · ");
+      return (
+        <FlexCell min={160}>
+          <span title={legs.length ? legs.join("\n") : undefined} className="flex min-w-0 text-[13px] text-body">
+            <span className="break-words md:line-clamp-1">{legs[0] ?? "Custom"}</span>
+            {legs.length > 1 && <span className="shrink-0 pl-1 text-muted">+{legs.length - 1}</span>}
+          </span>
+          <span className={`${CLAMP} text-xs text-muted`}>{when || "No dates yet"}</span>
+        </FlexCell>
+      );
+    },
   },
-  {
-    id: "dates",
-    header: "Dates",
-    cell: ({ row }) => (
-      <span className="text-[13px] text-body">
-        {row.original.start_date ? formatDate(row.original.start_date) : "—"}
-        {row.original.duration_days && <span className="block text-xs text-muted">{row.original.duration_days} days</span>}
-      </span>
-    ),
-  },
-  { id: "v", header: "Version", accessorKey: "version_number", cell: ({ row }) => <span className="font-semibold text-accent-deep">V{row.original.version_number}</span> },
   { id: "badge", header: "Status", accessorKey: "badge", cell: ({ row }) => <VersionBadgePill badge={row.original.badge} /> },
   { id: "total", header: "Total", cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} /> },
   {

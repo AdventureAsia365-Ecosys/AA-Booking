@@ -1,7 +1,9 @@
 # AA-Booking staff admin: consolidated UI spec (S236)
 
-Status: wave 1 is built (AA-Booking PR #5, S236); `/audit-log` shipped ahead of wave 2 (S237). Under review with
-Ms. Thư (AA-683: the output of that issue is this file). Author: Claude Code (S236 figma-spec lane, consolidation).
+Status: wave 1 is built (AA-Booking PR #5, S236); `/audit-log` shipped ahead of wave 2 (S237). This file is the output
+of AA-683. Decided by Nghiệp in S239 (16/10/2026, AA-683 comment): no separate review step with Ms. Thư (waves 1–2 are
+built from this spec); Q1a–f resolved as "CIS kit wins"; the customer-facing spec (Q25: sign-in, My Trips, approve
+proposal, pay) moves to AA-680. Author: Claude Code (S236 figma-spec lane, consolidation).
 
 > **Repo copy (S237).** Copied from AA-Ecosys `docs/audits/2026-10-14-S236-design-review/booking-ui-spec/ui-spec.md`,
 > where the nine module specs (`01-shell.md` … `09-payments.md`) and the design-system note stay. This copy is the
@@ -463,6 +465,9 @@ Errors map from the API: 422 "no FX rate for VND" → an inline message and a li
 - **Search**: code, customer, version title.
 - **Filters**: badge (Draft / Sent / Approved / Superseded), sales, updated range.
 - **Columns**: proposal (title + code · customer), destinations (from legs), dates and days, version V{n}, badge, total, last edited (time · by).
+  *As built (S239, AA-683 width fix)*: version V{n} leads the proposal title, and dates · days sit under the first leg in
+  the Trip cell, so the table fits 1440 px without sideways scroll; title and leg are one clamped line each with the full
+  text in the tooltip.
 - **Row actions**: Open builder, Preview, Duplicate, Send, Delete (draft only).
 - **"+ New proposal"**: opens a case picker, then routes to the case's builder (04 C4).
 
