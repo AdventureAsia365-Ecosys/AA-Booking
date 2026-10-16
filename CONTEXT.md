@@ -108,7 +108,7 @@ migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Inf
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md, AA-825.md)
+                           AA-683.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-751.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -342,6 +342,18 @@ listed in the report). `/booking/health/ready` requires `bk-011`.
 `inbox_events_redact_due_idx (received_at, id) WHERE redacted_at IS NULL`; `job_finished_idx (finished_at, id) WHERE
 finished_at IS NOT NULL` on `booking.job` (same as CIS `shared.job`, the X6 finished index). No grant change.
 `/booking/health/ready` requires `bk-012`.
+
+### `bk-013` (AA-751 X6, job table template catch-up — needs `bk-002` + `bk-012`)
+
+`booking.job` gains the template columns bk-002 left out: `cancel_requested` (default false), `progress` (jsonb,
+default `{}`), `cost_usd` (numeric(12,6), default 0), `parent_job_id` (FK onto `booking.job.id`, ON DELETE NO ACTION,
+`job_parent_idx`). Indexes converge on the template names: `job_queued_due_idx (run_after, created_at) WHERE queued`
+and `job_running_idx (kind, locked_until) WHERE running` replace bk-002's `job_due_idx` / `job_lease_idx`
+(CREATE IF NOT EXISTS + DROP IF EXISTS, never RENAME: re-running every migration must converge);
+`job_active_pull_uq` stays (Booking-only). Queue autovacuum `scale_factor 0.02, threshold 50`. No grant change. A
+future kind that sets `parent_job_id` must accept that `bk_retention_job` never deletes a job while a child row still
+points at it (its FK guard picks the self-FK up). Readiness does not require `bk-013` yet (the app change that uses the
+columns adds it).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
