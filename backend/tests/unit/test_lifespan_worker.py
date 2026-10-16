@@ -1,4 +1,5 @@
-"""The app lifespan starts the job worker only when enabled, and stops it on shutdown."""
+"""The app lifespan starts the job worker (and the backlog metrics sampler) only when enabled, and stops them on
+shutdown."""
 
 from __future__ import annotations
 
@@ -35,10 +36,29 @@ class FakeWorker:
         self.stopped = True
 
 
+class FakeSampler:
+    instances: list[FakeSampler] = []
+
+    def __init__(self, pool: Any) -> None:
+        self.pool = pool
+        self.started = self.cancelled = False
+        FakeSampler.instances.append(self)
+
+    async def run_forever(self, stop: asyncio.Event) -> None:
+        self.started = True
+        try:
+            await asyncio.Event().wait()  # only a cancel ends it: the lifespan must cancel it, not wait for it
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+
+
 @pytest.fixture(autouse=True)
 def fake_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeWorker.instances = []
+    FakeSampler.instances = []
     monkeypatch.setattr(main_module, "Worker", FakeWorker)
+    monkeypatch.setattr(main_module, "JobMetricsSampler", FakeSampler)
 
 
 def _app(**kw: Any):
@@ -62,6 +82,19 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
     assert [type(h).__name__ for h in worker.hooks] == ["DailySchedule"]  # AA-825 daily retention runs
     # AA-751: retention runs keep no progress checkpoint, so a shutdown fails them instead of releasing them.
     assert worker.no_release == {"bk_retention_job", "bk_retention_inbox_redact"}
+    # AA-751: the backlog metrics sampler runs for the app lifetime too and is cancelled on shutdown.
+    (sampler,) = FakeSampler.instances
+    assert sampler.started and sampler.cancelled
+
+
+def test_every_handled_kind_has_an_expected_run_time() -> None:
+    """app/jobs/kinds.py EXPECTED_SECONDS lists exactly the kinds the worker handles (overdue-running metric)."""
+    from app.jobs.kinds import EXPECTED_SECONDS
+
+    with TestClient(_app(worker_enabled=True)):
+        pass
+    (worker,) = FakeWorker.instances
+    assert set(EXPECTED_SECONDS) == set(worker.handlers)
 
 
 @pytest.mark.parametrize("kw", [{"worker_enabled": False}, {"worker_enabled": True, "database_url": None}])
@@ -69,3 +102,4 @@ def test_worker_not_started(kw: dict) -> None:
     with TestClient(_app(**kw)) as client:
         client.get("/booking/health")
     assert FakeWorker.instances == []
+    assert FakeSampler.instances == []

@@ -75,7 +75,8 @@ backend/
   app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff/release) + Worker loop (O3, maintenance hooks,
-                           release on shutdown, AA-751)
+                           release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind) + metrics.py (backlog
+                           metrics sampler, AA/Jobs/Booking to CloudWatch, AA-751)
   app/retention/           AA-825 retention kinds bk_retention_job / bk_retention_inbox_redact: policy (windows),
                            redact (inbox payload PII), archive (S3 JSONL.gz), runner (batched count/delete/redact),
                            jobs (modes, handlers, daily schedule hook, admin status)
@@ -112,7 +113,8 @@ migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Inf
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-751.md, AA-751-release.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md, AA-825.md)
+                           AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-810.md, AA-811.md, AA-822.md,
+                           AA-823.md, AA-825.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Job template copy), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -198,6 +200,15 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   `cancelled` (never back to `queued`). Nothing in Booking sets it yet (no staff cancel endpoint); a running job is not
   interrupted by it.
 - **Per-attempt start:** each claim writes `progress.attempt_started_at`; `started_at` keeps the first attempt's time.
+- **Backlog metrics (AA-751, `app/jobs/metrics.py`).** A second lifespan task, next to the worker and only when it runs,
+  sends one `PutMetricData` to CloudWatch namespace `AA/Jobs/Booking` (no dimensions) every 300 s:
+  `OldestQueuedAgeSeconds` = age of the oldest due queued row without a cancel request (any kind), but **0 while a
+  non-overdue job is running** (the worker is serial); `OverdueRunningJobs` = running rows whose current attempt is older
+  than 2 x `EXPECTED_SECONDS[kind]` (`app/jobs/kinds.py`, default 300 s; every handled kind must be listed, a unit test
+  checks it). It reads `booking.job` directly (never through the queue), never raises, and is cancelled on shutdown
+  before the pool closes. AA-CIS-Infra owns the IAM grant (task role, namespace `AA/Jobs/Booking` only) and the three
+  alarms `<booking prefix>-jobs-queue-age` (> 900 s), `-jobs-overdue-running` (> 0) and `-jobs-sampling-stopped` (no
+  sample for 45 min, which also fires while the service is scaled to 0 or `WORKER_ENABLED` is off).
 
 | Kind | What |
 |---|---|
