@@ -6,9 +6,10 @@ rows, the loop does the deferred work. Several processes may run it at once (a r
 overlaps two tasks): claims use ``FOR UPDATE SKIP LOCKED`` and every handler is idempotent.
 
 Each tick: every ``maintenance_every`` ticks reap expired leases, schedule recurring kinds and prune
-their history; then claim one due job and run its handler under a heartbeat. A handler returns a
-result dict (stored on the job) or raises — :class:`PermanentError` fails the job at once, anything
-else is retried with backoff until ``max_attempts``.
+their history, and call the maintenance hooks (the daily retention schedule, AA-825); then claim one
+due job and run its handler under a heartbeat. A handler returns a result dict (stored on the job) or
+raises — :class:`PermanentError` fails the job at once, anything else is retried with backoff until
+``max_attempts``.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ log = logging.getLogger(__name__)
 
 Handler = Callable[[asyncpg.Pool, Job], Awaitable[dict[str, Any] | None]]
 PoolProvider = Callable[[], Awaitable[asyncpg.Pool]]
+# Called on every maintenance pass (e.g. the daily retention schedule, AA-825); must be cheap and idempotent.
+MaintenanceHook = Callable[[asyncpg.Pool], Awaitable[Any]]
 
 ERROR_MAX_CHARS = 2000
 
@@ -62,6 +65,7 @@ class Worker:
         handlers: dict[str, Handler],
         *,
         recurring: tuple[Recurring, ...] = (),
+        hooks: tuple[MaintenanceHook, ...] = (),
         worker_id: str | None = None,
         poll_seconds: float = 2.0,
         lease_seconds: int = 300,
@@ -73,6 +77,7 @@ class Worker:
         self._pool = pool
         self._handlers = handlers
         self._recurring = recurring
+        self._hooks = hooks
         self.worker_id = worker_id or default_worker_id()
         self._poll_seconds = poll_seconds
         self._lease_seconds = lease_seconds
@@ -87,6 +92,11 @@ class Worker:
             if await queue.enqueue(pool, rec.kind, {}, delay_seconds=rec.every_seconds, max_attempts=3):
                 log.debug("scheduled %s in %.0fs", rec.kind, rec.every_seconds)
             await queue.prune(pool, rec.kind, rec.keep_days)
+        for hook in self._hooks:
+            try:
+                await hook(pool)
+            except Exception as exc:  # noqa: BLE001 — a failing hook must not stop the queue
+                log.warning("maintenance hook %r failed (%s: %s)", hook, type(exc).__name__, exc)
 
     async def run_once(self) -> bool:
         """One tick. Returns True when a job was run (the caller then polls again at once)."""
