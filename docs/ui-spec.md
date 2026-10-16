@@ -59,7 +59,7 @@ AA-Booking/frontend/
 
 ### 1.2 Token table (CIS kit ↔ Figma)
 
-Rule: **CIS kit value wins** (ADR 0004 decision 1: copy the CIS kit and brand tokens). The Figma value is recorded so the drift is visible. The rows marked ⚠ are differences large enough that Nghiệp should choose (Q1).
+Rule: **CIS kit value wins** (ADR 0004 decision 1: copy the CIS kit and brand tokens). The Figma value is recorded so the drift is visible. The rows marked ⚠ were the differences large enough for Nghiệp to choose; they were resolved as "kit wins" (Q1, decided S239). The ⚠ markers stay only as a record of the Figma drift, not as open choices.
 
 | Role | CIS kit token (`K.*` / CSS var) | CIS light value | Figma value (sampled) | Decision |
 |---|---|---|---|---|
@@ -731,7 +731,7 @@ card fee as its own row (it is built into the price, ADR 0005).
 
 **Visual / technical**
 
-- **Q1. Visual drift: Figma vs the CIS kit.** Recommendation: kit everywhere (one brand across CIS and Booking, ADR 0004 dec. 1).
+- **Q1. Visual drift: Figma vs the CIS kit.** **Decided S239 (Nghiệp, AA-683): CIS kit wins on a–f.** Recommendation was: kit everywhere (one brand across CIS and Booking, ADR 0004 dec. 1).
   - a. Page background warm `#F8F6F2` (kit) or cool `#F4F6F8` (Figma).
   - b. Font Poppins + Fahkwang (kit) or Inter (Figma).
   - c. Sidebar flat (kit) or gradient (Figma).
@@ -783,7 +783,7 @@ card fee as its own row (it is built into the price, ADR 0005).
 
 **Scope**
 
-- **Q25. TripPlanner customer UI.** The relayed request notes that TripPlanner also has no built UI. This spec covers the **Booking staff admin** only. The customer-facing Booking surface (sign-in, My Trips, approve proposal, pay; O8) and the TripPlanner web UI need their own spec. Recommendation: a separate spec next, reusing the same `ui/` token copy.
+- **Q25. TripPlanner customer UI.** The relayed request notes that TripPlanner also has no built UI. This spec covers the **Booking staff admin** only. The customer-facing Booking surface (sign-in, My Trips, approve proposal, pay; O8) and the TripPlanner web UI need their own spec. Recommendation: a separate spec next, reusing the same `ui/` token copy. **Moved to AA-680 (S239):** the customer-facing spec is written there; this file stays the staff admin spec.
 - **Q26. Figma copy defects.** "Requires attentions", "Save Changs", "Finanlized", "ITINERARY BUIDER", "Suppplier", "flows" in pagers, "14:30 PM", wrong sidebar highlights, copy-pasted user menus on other entities, Kathmandu coordinates on Bali, mismatched counts. They are fixed in the build and not reproduced. Should they also go back to the designer? Recommendation: a short list to the designer, no blocking.
 
 ---
