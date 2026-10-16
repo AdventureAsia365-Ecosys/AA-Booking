@@ -352,7 +352,10 @@ and `job_running_idx (kind, locked_until) WHERE running` replace bk-002's `job_d
 (CREATE IF NOT EXISTS + DROP IF EXISTS, never RENAME: re-running every migration must converge);
 `job_active_pull_uq` stays (Booking-only). Queue autovacuum `scale_factor 0.02, threshold 50`. No grant change. A
 future kind that sets `parent_job_id` must accept that `bk_retention_job` never deletes a job while a child row still
-points at it (its FK guard picks the self-FK up). Readiness does not require `bk-013` yet (the app change that uses the
+points at it (its FK guard picks the self-FK up). The worker's recurring-kind prune (`app/jobs/queue.py prune`, e.g.
+`bk_inquiry_pull` history) has no such guard: before any kind sets `parent_job_id` to a recurring job, add
+`NOT EXISTS (SELECT 1 FROM booking.job c WHERE c.parent_job_id = booking.job.id)` to prune (`job_parent_idx` serves it),
+or one ForeignKeyViolation fails the whole DELETE, escapes `maintenance()` and stops the worker claiming. Readiness does not require `bk-013` yet (the app change that uses the
 columns adds it).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
