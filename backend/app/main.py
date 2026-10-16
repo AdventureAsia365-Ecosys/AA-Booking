@@ -7,7 +7,8 @@ Staff routes (everything under ``/booking`` except ``/booking/health*``) verify 
 JWKS (``app.auth``, ADR 0004 O1) and require an active ``booking.staff_users`` row.
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
-(``app.jobs.worker``) as one background task of this process — never from a request path.
+(``app.jobs.worker``) as one background task of this process — never from a request path — and, next to it, the
+backlog metrics sampler (``app.jobs.metrics``, AA-751: ``AA/Jobs/Booking`` to CloudWatch every 5 min).
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from app.auth.tokens import JwksCache, StaffTokenVerifier, http_fetcher
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
+from app.jobs.metrics import JobMetricsSampler
 from app.jobs.worker import Worker
 from app.notifications import staff_email
 from app.retention import jobs as retention_jobs
@@ -61,6 +63,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stop = asyncio.Event()
         task: asyncio.Task[None] | None = None
+        sampler_task: asyncio.Task[None] | None = None
         if settings.worker_enabled and db.configured:
             handlers = {
                 **intake.HANDLERS,
@@ -75,8 +78,15 @@ def create_app(
                 no_release=retention_jobs.NOT_RELEASED,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
+            # Independent of the worker task (AA-751): a stuck worker loop must still show in the metrics.
+            sampler_task = asyncio.create_task(JobMetricsSampler(db.pool).run_forever(stop), name="booking-job-metrics")
         yield
         stop.set()
+        if sampler_task is not None:
+            # Cancelled at once (a sample in flight is simply lost), before the pool closes.
+            sampler_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sampler_task
         if task is not None:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(task, timeout=WORKER_STOP_TIMEOUT_S)
