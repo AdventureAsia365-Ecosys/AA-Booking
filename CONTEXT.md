@@ -333,6 +333,16 @@ editing or withdrawing a pending pricing rule / FX row (append-only: enter a new
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).
 
+## AI boundary for high-risk advice (AA-820)
+
+AA-Booking must not use AI to advise travellers on insurance (choice, underwriting or claims), financing or
+instalments, refunds or claims decisions, or visas and immigration, unless a qualified staff member reviews each
+recommendation, with authority to change it, before it is sent, **and** the traveller is clearly told that AI was
+used. AI-drafted proposals and quotes stay behind the existing staff review before sending. Any traveller-facing chat
+must disclose AI at the start of each session. Source: Anthropic Usage Policy high-risk use case requirements
+(effective 12/11/2026); proposal wording in root `docs/legal/tenant-terms-ai-clause-draft.md` §5, may be tightened
+after the business review. Today Booking makes no AI calls, so this is a rule for future features.
+
 ## Staff admin frontend (AA-683)
 
 - `frontend/` is a Next.js app for Booking staff (UI spec S236). The browser only talks to its own BFF:
