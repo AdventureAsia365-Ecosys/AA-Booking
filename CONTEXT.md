@@ -74,7 +74,8 @@ backend/
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
   app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
   app/settings.py          environment → Settings
-  app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3, maintenance hooks)
+  app/jobs/                booking.job queue (claim/lease/reap/backoff/release) + Worker loop (O3, maintenance hooks,
+                           release on shutdown, AA-751)
   app/retention/           AA-825 retention kinds bk_retention_job / bk_retention_inbox_redact: policy (windows),
                            redact (inbox payload PII), archive (S3 JSONL.gz), runner (batched count/delete/redact),
                            jobs (modes, handlers, daily schedule hook, admin status)
@@ -102,14 +103,17 @@ backend/
                            net rates + the default net of a version item (rates.py)
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
-  tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready
+  tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready, booking.job vs template
+  tests/job_template/      byte copies of AA-CIS-App shared/jobs/job_table_template.sql + job_table_shape.py (AA-751;
+                           never edited here, drift-checked by CI "Job template copy")
+  scripts/                 check_job_template_copy.py (that drift check; stdlib, GitHub contents API)
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-751.md)
-.github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
+                           AA-683.md, AA-751.md, AA-751-release.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md, AA-825.md)
+.github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Job template copy), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
 
@@ -175,10 +179,25 @@ send, OTP) is not built: those still write rows only.
 
 ## Deferred work (`booking.job`, O3/O9)
 
-Booking owns its job table `booking.job` (same shape and semantics as CIS `shared.job`, ADR 0003), so
+Booking owns its job table `booking.job` (same shape and semantics as CIS `shared.job`, ADR 0003 / 0003a), so
 Booking jobs never block the CIS deploy guard. Kinds are `bk_*`. On Dev the worker loop runs inside the
 API process as one lifespan background task (never in a request path), one job at a time; overlapping
 tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
+
+The table follows the job table DDL template owned by CIS (`AA-CIS-App/shared/jobs/job_table_template.sql`, ADR 0003a
+decision 2; caught up by bk-013): Integration Tests render it into a scratch schema and compare `booking.job` with it
+through pg_catalog (`tests/integration/test_job_table_template.py`; the only allowed extra is the `bk_inquiry_pull`
+singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`):
+
+- **Shutdown releases.** The lifespan gives a running job 20 s (`WORKER_STOP_TIMEOUT_S`), then cancels the worker task,
+  which puts the job back to `queued` at once (due now, the interrupted attempt not counted, `progress.releases` + 1)
+  before the pool closes; the third release fails it. A kind in the worker's `no_release` set is failed at once
+  instead (today the two retention kinds, see below). A job is left to the lease reaper (300 s) only when the process
+  dies without a graceful stop.
+- **`cancel_requested`** is never claimed; the reaper, a release and a retryable failure end such a job as
+  `cancelled` (never back to `queued`). Nothing in Booking sets it yet (no staff cancel endpoint); a running job is not
+  interrupted by it.
+- **Per-attempt start:** each claim writes `progress.attempt_started_at`; `started_at` keeps the first attempt's time.
 
 | Kind | What |
 |---|---|
@@ -193,8 +212,9 @@ Retention runs (both kinds, `app/retention/jobs.py`, DM-7.2): a manual run is a 
 (maintenance hook, first pass at or after 19:00 UTC), which stays a DRY RUN until a live run of the same windows
 succeeded, then runs live unless the candidates exceed 2x the last live run (floor 1,000): then **held** (nothing
 written, a notification to each active admin). Batches of at most 1,000 rows (keyset on `(ts, id)`, `FOR UPDATE SKIP
-LOCKED`, 30 s statement timeout), at most 50,000 rows per run, `max_attempts = 1` (no progress column yet, X6), one
-advisory lock per kind. Every run writes its counts to the job result **and** one `booking.audit_logs` row
+LOCKED`, 30 s statement timeout), at most 50,000 rows per run, `max_attempts = 1` and **not released on shutdown**
+(the run keeps no progress checkpoint, so a second run could exceed the approved `max_rows`; a shutdown fails it at
+once, the next run counts afresh), one advisory lock per kind. Every run writes its counts to the job result **and** one `booking.audit_logs` row
 (`entity_type = 'retention'`, action `retention.dry_run|live|held|failed`); the last live run is read from the audit log.
 The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (AA-CIS-Infra); without it a live run of
 `bk_retention_job` with failed candidates fails before deleting them.
@@ -355,8 +375,8 @@ future kind that sets `parent_job_id` must accept that `bk_retention_job` never 
 points at it (its FK guard picks the self-FK up). The worker's recurring-kind prune (`app/jobs/queue.py prune`, e.g.
 `bk_inquiry_pull` history) has no such guard: before any kind sets `parent_job_id` to a recurring job, add
 `NOT EXISTS (SELECT 1 FROM booking.job c WHERE c.parent_job_id = booking.job.id)` to prune (`job_parent_idx` serves it),
-or one ForeignKeyViolation fails the whole DELETE, escapes `maintenance()` and stops the worker claiming. Readiness does not require `bk-013` yet (the app change that uses the
-columns adds it).
+or one ForeignKeyViolation fails the whole DELETE, escapes `maintenance()` and stops the worker claiming.
+`/booking/health/ready` requires `bk-013` (since the B2 release-on-shutdown change).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
