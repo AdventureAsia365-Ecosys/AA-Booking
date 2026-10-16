@@ -249,10 +249,24 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
     with_note["itinerary"]["custom_days"][0]["note"] = "Linh says call +84900000001"
     old = [with_note, samples.v1_1("old-lead2@example.test"), samples.legacy_guest()]
     old.append(samples.with_changes(samples.v1_1("bad@example.test"), version=2))  # failed
+    # Failed rows that do not keep the contract's shape: PII under an unknown key, and a customer that is a string.
+    extra = samples.v1_1("extra@example.test")
+    extra["whatsapp"] = "wa-lead@example.test"
+    extra["customer"]["full_name"] = "Hoa Pham"
+    old.append(extra)
+    old.append(samples.with_changes(samples.v1_1(), customer="Jane Doe <jane@example.test>"))
     for p in old:
         await publish(admin, p)
     await drain(pool)
     await admin.execute("UPDATE booking.inbox_events SET received_at = now() - interval '91 days'")
+    # A failed row whose payload is not an object at all.
+    not_object_key = "not-object-key"
+    await admin.execute(
+        "INSERT INTO booking.inbox_events (source, contract, idempotency_key, payload, received_at, status, error)"
+        " VALUES ('tripplanner', 'inquiry.submitted', $1, $2::jsonb, now() - interval '100 days', 'failed', 'bad')",
+        not_object_key,
+        json.dumps("call jane@example.test"),
+    )
     # A row still 'received' (its process job never ran) and a recent processed row.
     stuck_key = "stuck-key"
     await admin.execute(
@@ -268,20 +282,25 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
     s3 = StubS3()
 
     dry = result(await run(pool, s3, INBOX_KIND))
-    assert (dry["mode"], dry["candidates_total"], dry["skipped_unprocessed"]) == ("dry_run", 4, 1)
+    assert (dry["mode"], dry["candidates_total"], dry["skipped_unprocessed"]) == ("dry_run", 7, 1)
     assert await admin.fetchval("SELECT count(*) FROM booking.inbox_events WHERE redacted_at IS NOT NULL") == 0
 
-    live = result(await run(pool, s3, INBOX_KIND, dry_run=False, max_rows=4))
-    assert (live["mode"], live["action"], live["affected_total"], live["archived_total"]) == ("live", "redact", 4, 0)
+    live = result(await run(pool, s3, INBOX_KIND, dry_run=False, max_rows=7))
+    assert (live["mode"], live["action"], live["affected_total"], live["archived_total"]) == ("live", "redact", 7, 0)
     assert live["parts"][0]["fields_redacted"] == {
-        "customer.name": 3,
-        "customer.email": 3,
+        "customer.name": 4,
+        "customer.email": 4,
         "customer.phone": 1,
+        "customer.*": 1,
+        "customer": 1,
+        "*": 1,
+        "$": 1,
         "itinerary.custom_days[].note": 1,
     }
     assert s3.objects == {}
     after = {r["idempotency_key"]: r for r in await admin.fetch("SELECT * FROM booking.inbox_events")}
     old_keys = {p["idempotency_key"] for p in old}
+    assert after[not_object_key]["redacted_at"] is not None and json.loads(after[not_object_key]["payload"]) is None
     for key in old_keys:
         row, was = after[key], before[key]
         assert row["redacted_at"] is not None
@@ -293,15 +312,16 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
         )
         payload = json.loads(row["payload"])
         text = row["payload"]
-        assert "example.test" not in text and "+849" not in text and "Linh" not in text and "Minh" not in text
+        assert "example.test" not in text and "+849" not in text
+        assert not any(name in text for name in ("Linh", "Minh", "Hoa", "Jane", "whatsapp", "full_name"))
         assert payload["idempotency_key"] == key
         if payload.get("customer"):
             assert payload["customer"]["consent"] is True
-    failed_row = next(r for r in after.values() if r["status"] == "failed")
-    assert failed_row["error"] == redact.REDACTED_ERROR
+    failed_rows = [r for r in after.values() if r["status"] == "failed"]
+    assert len(failed_rows) == 4 and all(r["error"] == redact.REDACTED_ERROR for r in failed_rows)
     parked_row = next(r for r in after.values() if r["status"] == "parked")
     assert parked_row["error"] == before[parked_row["idempotency_key"]]["error"]
-    for untouched in (stuck_key, next(iter(set(after) - old_keys - {stuck_key}))):
+    for untouched in (stuck_key, next(iter(set(after) - old_keys - {stuck_key, not_object_key}))):
         assert after[untouched]["redacted_at"] is None and after[untouched]["payload"] == before[untouched]["payload"]
 
     # Dedupe still works: a full re-scan of the outbox inserts nothing and opens no second trip case.

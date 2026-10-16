@@ -85,7 +85,77 @@ def test_redaction_of_a_redacted_or_contactless_payload_reports_nothing() -> Non
     assert paths and paths_again == [] and again == out
     legacy, legacy_paths = redact.redact_payload(samples.legacy_guest())
     assert legacy_paths == [] and legacy["customer"] is None
-    assert redact.redact_payload("not an object") == ("not an object", [])
+    for v in ("v1", "v1_2", "v1_1_as_tripplanner_sends"):
+        sample = getattr(samples, v)("lead@example.test")
+        out, _ = redact.redact_payload(sample)
+        # A conforming payload keeps its shape: same keys at every level, PII nulled.
+        assert set(out) == set(sample) and set(out["customer"]) == set(sample["customer"])
+        assert out["itinerary"]["legs"] == sample["itinerary"]["legs"]
+        assert out["itinerary"]["days"] == sample["itinerary"]["days"]
+
+
+def test_redaction_is_an_allowlist_for_payloads_that_failed_the_contract() -> None:
+    """A failed row can hold personal data anywhere; only known non-PII keys survive (review of AA-825)."""
+    payload = samples.v1_1("lead@example.test")
+    payload["whatsapp"] = "+84900000077"
+    payload["contact_backup"] = {"email": "backup@example.test"}
+    payload["trip_id"] = {"owner": "owner@example.test"}  # an allowed key with a non-scalar value
+    payload["customer"]["full_name"] = "Hoa Pham"
+    payload["customer"]["consent_at"] = ["hoa@example.test"]
+    payload["itinerary"]["remarks"] = "Hoa, room for 2"
+    payload["itinerary"]["days"][0]["guest_email"] = "guest@example.test"
+    payload["itinerary"]["legs"].append("leg note from hoa@example.test")
+    payload["itinerary"]["custom_days"][0]["note"] = "call Hoa"
+
+    out, paths = redact.redact_payload(payload)
+
+    text = json.dumps(out)
+    assert "example.test" not in text and "Hoa" not in text and "+849" not in text
+    assert set(out) == {*redact.ENVELOPE_KEYS, "customer", "itinerary"}
+    assert out["trip_id"] is None and out["idempotency_key"] == payload["idempotency_key"]
+    assert set(out["customer"]) == {*redact.CUSTOMER_KEEP, *redact.CUSTOMER_FIELDS}
+    assert out["customer"]["consent_at"] is None and out["customer"]["consent"] is True
+    assert set(out["itinerary"]) == {"legs", "days", "custom_days"}
+    assert out["itinerary"]["legs"][-1] is None
+    assert set(out["itinerary"]["days"][0]) == set(redact.DAY_KEYS)
+    assert sorted(paths) == sorted(
+        [
+            "*",
+            "trip_id",
+            "customer.name",
+            "customer.email",
+            "customer.consent_at",
+            "customer.*",
+            "itinerary.*",
+            "itinerary.legs[2]",
+            "itinerary.days[0].*",
+            "itinerary.custom_days[0].note",
+        ]
+    )
+    # Key names from the payload never reach the report.
+    assert not any(k in p for p in paths for k in ("whatsapp", "contact_backup", "full_name", "remarks", "guest"))
+    again, paths_again = redact.redact_payload(out)
+    assert again == out and paths_again == []
+
+
+@pytest.mark.parametrize(
+    ("change", "path"),
+    [
+        ({"customer": "Jane Doe <jane@example.test>"}, "customer"),
+        ({"customer": ["jane@example.test"]}, "customer"),
+        ({"itinerary": "Jane, jane@example.test"}, "itinerary"),
+        ({"itinerary": {"legs": [], "days": [], "custom_days": "jane@example.test"}}, "itinerary.custom_days"),
+    ],
+)
+def test_redaction_nulls_parts_that_are_not_objects(change: dict[str, Any], path: str) -> None:
+    out, paths = redact.redact_payload(samples.with_changes(samples.legacy_guest(), **change))
+    assert "example.test" not in json.dumps(out) and path in paths
+
+
+def test_redaction_of_a_payload_that_is_not_an_object() -> None:
+    assert redact.redact_payload("call jane@example.test") == (None, ["$"])
+    assert redact.redact_payload(["jane@example.test"]) == (None, ["$"])
+    assert redact.redact_payload(None) == (None, [])
 
 
 def test_only_a_failed_rows_error_is_redacted() -> None:

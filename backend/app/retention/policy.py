@@ -7,8 +7,9 @@ Two owner-run TTL job kinds on ``booking.job`` (ADR 0003a decision 5, DM-7.2):
     then deleted 90 days after ``finished_at``. ``queued`` / ``running`` jobs are never touched (the status filter).
 
 ``bk_retention_inbox_redact``
-    ``booking.inbox_events`` rows received more than 90 days ago lose the personal data in ``payload`` (customer name,
-    email, phone, custom day notes) and a failed row's ``error`` text (DM-6.6). The row, ``idempotency_key`` and
+    ``booking.inbox_events`` rows received more than 90 days ago get ``payload`` rebuilt from an allowlist of the
+    contract's non-personal keys (customer name, email, phone and custom day notes nulled; every unknown key dropped,
+    see ``redact.py``) and lose a failed row's ``error`` text (DM-6.6). The row, ``idempotency_key`` and
     ``contract_version`` stay, so the pull's dedupe keeps working; ``redacted_at`` (bk-012) marks the row. Rows still
     ``received`` (not processed yet) are never redacted: they are counted as ``skipped_unprocessed`` instead. Nothing
     is deleted, so nothing is archived (DM-7.3 "archive after redaction" applies when a delete window is set).
