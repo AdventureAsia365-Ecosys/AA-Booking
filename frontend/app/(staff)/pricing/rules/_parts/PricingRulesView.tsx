@@ -5,11 +5,19 @@
 // price quotes. Rows are never edited: a change is a new row with a later date. Reads need pricing.read; New and
 // Approve need pricing.write (admin, contracting), and the API refuses an approval by the row's creator (403
 // own_row) — the Approve button follows the API's per-row `can_approve`.
+// Layout (AA-683 S239): both tables fit a 1440 px screen without sideways scroll. Target and floor margin share one
+// "Margin" column (target on top, floor under it, so the header stays short), the Approve action sits under the
+// status pill of a pending row (no Actions column that is empty most of the time), and Note is the flexible column:
+// two lines at most on desktop with the full text in a tooltip, the full text on phone cards.
+// Width budget: with a pending row the rules table needs about 1005 px, so it still fits the 1084 px content frame at
+// 1440 when <main> draws a classic scrollbar (6 px styled in Chrome/Edge, about 17 px in Firefox on Windows). Keep
+// the Status cell no wider than the widest pill ("Scheduled", 95 px): a plain "Approve" button (78 px), and the
+// "Needs a second person" hint wraps at 96 px.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CheckCircle2, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS } from "@/lib/api/proposals";
 import { pct } from "@/lib/proposalDraft";
@@ -19,7 +27,7 @@ import { SavedTabs } from "../../../_parts/SavedTabs";
 import { NewFxRateDrawer, NewRuleDrawer } from "./PolicyDrawers";
 
 const STATUS_META: Record<PolicyStatus, { label: string; tone: BookingTone; help: string }> = {
-  pending: { label: "Pending approval", tone: "warning", help: "Waiting for a second person. Not used for prices." },
+  pending: { label: "Pending", tone: "warning", help: "Pending approval: waiting for a second person. Not used for prices." },
   in_force: { label: "In force", tone: "success", help: "Used for prices today." },
   scheduled: { label: "Scheduled", tone: "info", help: "Approved; takes over on its date." },
   superseded: { label: "Superseded", tone: "neutral", help: "Approved, replaced by a newer approved row." },
@@ -38,6 +46,17 @@ function PolicyStatusBadge({ status }: { status: PolicyStatus }) {
     <Pill tone={meta.tone} title={meta.help}>
       {meta.label}
     </Pill>
+  );
+}
+
+/** Free-text note. Desktop table (Tailwind `md`, the kit DataTable's table mode): at most two lines with the full
+ *  text in the tooltip, and never narrower than 110 px so it does not wrap word by word. Phone cards: the full text. */
+function NoteText({ note }: { note: string | null }) {
+  if (!note) return <span className="text-[13px] text-muted">—</span>;
+  return (
+    <span title={note} className="block break-words text-[13px] text-muted md:line-clamp-2 md:min-w-[110px]">
+      {note}
+    </span>
   );
 }
 
@@ -90,37 +109,56 @@ export function PricingRulesView() {
     },
   });
 
-  function approveCell(onClick: () => void, canApprove: boolean, status: PolicyStatus) {
-    if (status !== "pending") return null;
-    if (!canApprove) {
-      return <span className="text-xs text-muted">{canWrite ? "Needs a second person" : "Waiting"}</span>;
-    }
+  /** Status pill; a pending row also gets its Approve button (or why it cannot be approved by this user) under it. */
+  function statusCell(status: PolicyStatus, canApprove: boolean, onApprove: () => void) {
+    if (status !== "pending") return <PolicyStatusBadge status={status} />;
     return (
-      <span onClick={(e) => e.stopPropagation()}>
-        <Button size="sm" variant="secondary" onClick={onClick}>
-          <CheckCircle2 size={13} /> Approve
-        </Button>
+      <span className="flex flex-col items-end gap-1.5 md:items-start">
+        <PolicyStatusBadge status={status} />
+        {canApprove ? (
+          <span onClick={(e) => e.stopPropagation()}>
+            <Button size="sm" variant="secondary" onClick={onApprove} title="Approve this row (maker-checker)">
+              Approve
+            </Button>
+          </span>
+        ) : (
+          <span className="block text-xs leading-snug text-muted md:max-w-[96px]">
+            {canWrite ? "Needs a second person" : "Waiting"}
+          </span>
+        )}
       </span>
     );
   }
 
   const ruleColumns: ColumnDef<PricingRuleRow, unknown>[] = [
     { id: "channel", header: "Channel", accessorFn: (r) => CHANNEL_LABEL[r.channel] ?? r.channel, cell: ({ getValue }) => <span className="font-medium text-ink">{getValue() as string}</span> },
-    { id: "target", header: "Target margin", accessorFn: (r) => Number(r.target_margin), cell: ({ row }) => pct(row.original.target_margin) },
-    { id: "floor", header: "Floor margin", accessorFn: (r) => Number(r.floor_margin), cell: ({ row }) => pct(row.original.floor_margin) },
+    {
+      id: "margin",
+      header: "Margin",
+      accessorFn: (r) => Number(r.target_margin),
+      cell: ({ row }) => (
+        <span className="flex flex-col whitespace-nowrap tabular-nums" title="Target margin, then the floor margin">
+          <span className="text-ink">{pct(row.original.target_margin)}</span>
+          <span className="text-xs text-muted">floor {pct(row.original.floor_margin)}</span>
+        </span>
+      ),
+    },
     { id: "peak", header: "Peak uplift", accessorFn: (r) => Number(r.peak_uplift_pts), cell: ({ row }) => `+${pct(row.original.peak_uplift_pts).replace("%", "")} pts` },
     { id: "card", header: "Card fee", accessorFn: (r) => Number(r.card_fee_pct), cell: ({ row }) => pct(row.original.card_fee_pct) },
     { id: "valid_from", header: "Valid from", accessorKey: "valid_from", cell: ({ row }) => <DateText value={row.original.valid_from} /> },
-    { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <PolicyStatusBadge status={row.original.status} /> },
+    {
+      id: "status",
+      header: "Status",
+      accessorKey: "status",
+      cell: ({ row }) =>
+        statusCell(row.original.status, row.original.can_approve, () => {
+          approve.reset();
+          setApproving({ kind: "rule", row: row.original });
+        }),
+    },
     { id: "created_by", header: "Entered by", accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => <Person person={row.original.created_by} at={row.original.created_by ? row.original.created_at : null} /> },
     { id: "approved_by", header: "Approved by", accessorFn: (r) => r.approved_by?.name ?? "", cell: ({ row }) => <Person person={row.original.approved_by} at={row.original.approved_at} /> },
-    { id: "note", header: "Note", accessorFn: (r) => r.note ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.note ?? "—"}</span> },
-    {
-      id: "actions",
-      header: "Actions",
-      enableSorting: false,
-      cell: ({ row }) => approveCell(() => { approve.reset(); setApproving({ kind: "rule", row: row.original }); }, row.original.can_approve, row.original.status),
-    },
+    { id: "note", header: "Note", accessorFn: (r) => r.note ?? "", cell: ({ row }) => <NoteText note={row.original.note} /> },
   ];
 
   const fxColumns: ColumnDef<FxRateRow, unknown>[] = [
@@ -129,15 +167,18 @@ export function PricingRulesView() {
     { id: "buffer", header: "Selling buffer", accessorFn: (r) => Number(r.buffer_pct), cell: ({ row }) => pct(row.original.buffer_pct) },
     { id: "as_of", header: "As of", accessorKey: "as_of", cell: ({ row }) => <DateText value={row.original.as_of} /> },
     { id: "source", header: "Source", accessorKey: "source", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.source}</span> },
-    { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <PolicyStatusBadge status={row.original.status} /> },
+    {
+      id: "status",
+      header: "Status",
+      accessorKey: "status",
+      cell: ({ row }) =>
+        statusCell(row.original.status, row.original.can_approve, () => {
+          approve.reset();
+          setApproving({ kind: "fx", row: row.original });
+        }),
+    },
     { id: "created_by", header: "Entered by", accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => <Person person={row.original.created_by} at={row.original.created_by ? row.original.created_at : null} /> },
     { id: "approved_by", header: "Approved by", accessorFn: (r) => r.approved_by?.name ?? "", cell: ({ row }) => <Person person={row.original.approved_by} at={row.original.approved_at} /> },
-    {
-      id: "actions",
-      header: "Actions",
-      enableSorting: false,
-      cell: ({ row }) => approveCell(() => { approve.reset(); setApproving({ kind: "fx", row: row.original }); }, row.original.can_approve, row.original.status),
-    },
   ];
 
   const pendingRules = ruleRows.filter((r) => r.status === "pending").length;
@@ -163,7 +204,7 @@ export function PricingRulesView() {
     >
       <div className="rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
         <strong className="text-ink">Maker-checker.</strong> Every new rule or FX rate starts as{" "}
-        <em>Pending approval</em> and is not used until another staff member approves it. The person who entered a row
+        <em>Pending</em> and is not used until another staff member approves it. The person who entered a row
         cannot approve it. Rows are never edited: enter a new row with a later date instead.
       </div>
       <SavedTabs
@@ -189,7 +230,6 @@ export function PricingRulesView() {
             pageSizeOptions={[25, 50, 100]}
             emptyTitle="No pricing rules"
             emptyDescription="The ADR 0005 seed rules come with migration bk-004. Add a rule to change a margin."
-            tableMinWidth={1100}
           />
         </Section>
       ) : (
@@ -217,7 +257,6 @@ export function PricingRulesView() {
                 ? "Add a dated rate (for example EUR from the ECB). A second person approves it before quotes use it."
                 : "An admin or contracting user adds dated rates; until then only USD prices work."
             }
-            tableMinWidth={1000}
           />
         </Section>
       )}
