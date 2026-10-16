@@ -1,5 +1,10 @@
 // AA-683: copied from AA-CIS-App frontend/app/_kit/Modal.tsx at CIS commit 039bb250 (ADR 0004 decision 1).
 // Keep byte-comparable with CIS: change only imports and storage keys here; brand changes go to CIS first.
+// Local deviation (AA-679, S239): the dialog is a flex column whose body scrolls between a fixed header and
+// footer (the whole dialog used to scroll, so a tall form pushed Cancel / Create below the fold at 390 px), it
+// fits the overlay (max-height 100% instead of 90vh) and the overlay's bottom padding reads
+// --aa-modal-inset-bottom (ui/shell.css sets it above the phone bottom nav). Upstream to CIS
+// app/_kit/Modal.tsx, then re-copy.
 "use client";
 // app/_kit/Modal.tsx
 // AA-662 — centered modal for confirm / destructive actions.
@@ -49,6 +54,7 @@ export function Modal({
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
+        paddingBottom: "var(--aa-modal-inset-bottom, 24px)",
         fontFamily: sans,
       }}
     >
@@ -59,8 +65,10 @@ export function Modal({
         style={{
           width,
           maxWidth: "100%",
-          maxHeight: "90vh",
-          overflow: "auto",
+          maxHeight: "100%",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
           background: K.card,
           borderRadius: RADIUS.lg,
           border: `1px solid ${K.line}`,
@@ -76,6 +84,7 @@ export function Modal({
               gap: 12,
               padding: "16px 20px",
               borderBottom: `1px solid ${K.line}`,
+              flexShrink: 0,
             }}
           >
             <div style={{ fontFamily: serif, fontSize: 17, fontWeight: 600, color: K.ink }}>
@@ -97,7 +106,18 @@ export function Modal({
             </button>
           </div>
         )}
-        <div style={{ padding: "18px 20px", fontSize: 14, color: K.body, lineHeight: 1.5 }}>
+        <div
+          style={{
+            flex: "1 1 auto",
+            minHeight: 0,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            padding: "18px 20px",
+            fontSize: 14,
+            color: K.body,
+            lineHeight: 1.5,
+          }}
+        >
           {children}
         </div>
         {footer && (
@@ -108,6 +128,7 @@ export function Modal({
               gap: 8,
               padding: "14px 20px",
               borderTop: `1px solid ${K.line}`,
+              flexShrink: 0,
             }}
           >
             {footer}
