@@ -56,9 +56,19 @@ It is a separate file so B1 and B2 do not both create `AA-751.md`.
 
 ## Should know
 
-- **B2 must be rebased on B1 (bk-013) before CI.** This branch is cut from main without bk-013; the code and tests
-  assume the bk-013 columns. Without them Integration Tests fail (`/ready` misses bk-013; `cancel_requested` /
-  `progress` columns missing). Locally the B1 file was copied in, uncommitted, to run the suite.
+- **B2 sits on B1 (bk-013) and the two ship as one ordered chain.** Rebased onto the B1 head `405cf92` (review
+  fix); the code and tests assume the bk-013 columns. The rebase kept B1's `### bk-013` CONTEXT section in full and
+  only changed its last sentence: readiness now requires `bk-013`. B2 merges only after B1 has merged **and** DB
+  Migrate has applied bk-013 on Dev (I2).
+- **No code guard for the merge order (review, accepted risk).** The ECS/ALB health check is the liveness route
+  `/booking/health`, not `/ready`, so if B2 reached main before bk-013 is applied, the new task would pass its health
+  check, replace the old one, and its worker would fail every tick with `UndefinedColumnError` (claim and reap use
+  `cancel_requested` / `progress`; `run_forever` backs off to 60 s; every `bk_*` kind stops). A revert recovers (the
+  old code ignores the extra columns). The guard is procedural; the PR body must carry these two read-only
+  preconditions, checked on Dev just before the human merge:
+  1. `SELECT version FROM shared.schema_versions WHERE version = 'bk-013'` returns one row.
+  2. `booking.job` has no non-exempt `queued` / `running` rows (F22; the recurring `bk_inquiry_pull` singleton is
+     exempt).
 - **The vendored files must equal AA-CIS-App main** (C1). They were copied from the C1 worktree while C1 was still in
   progress; after C1 merges, re-copy with `cp` from CIS main before the B2 PR (the "Job template copy" job fails
   until then, by design).

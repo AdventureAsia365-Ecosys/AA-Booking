@@ -376,7 +376,7 @@ points at it (its FK guard picks the self-FK up). The worker's recurring-kind pr
 `bk_inquiry_pull` history) has no such guard: before any kind sets `parent_job_id` to a recurring job, add
 `NOT EXISTS (SELECT 1 FROM booking.job c WHERE c.parent_job_id = booking.job.id)` to prune (`job_parent_idx` serves it),
 or one ForeignKeyViolation fails the whole DELETE, escapes `maintenance()` and stops the worker claiming.
-`/booking/health/ready` requires `bk-013` (since the B2 release-on-shutdown change).
+`/booking/health/ready` requires `bk-013` (since the AA-751 release-on-shutdown change).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
