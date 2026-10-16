@@ -18,7 +18,10 @@ samples (``-jobs-sampling-stopped``: fires when the service is scaled to 0 or th
 runs). The task role may put metrics into ``AA/Jobs/Booking`` only (IAM condition ``cloudwatch:namespace``).
 
 Never raises: a failed read or put is logged and the next tick tries again. boto3 is blocking, so the put runs in a
-thread with short timeouts and a single attempt (the next tick is the retry); boto3 is imported lazily.
+thread with short timeouts and at most one retry (botocore's ``retries={"max_attempts": 1}`` counts retries after
+the first request, so a failing put is sent at most twice: worst case about (3 s + 5 s) x 2 plus backoff, ~16-17 s, in
+the thread, holding no DB connection, well under the 300 s period); the next tick tries again. boto3 is imported
+lazily.
 """
 
 from __future__ import annotations
@@ -69,6 +72,7 @@ def cloudwatch_client() -> CloudWatchClient:
     import boto3  # lazy: only the sampler needs it at run time
     from botocore.config import Config
 
+    # botocore "max_attempts" = retries after the first request: 1 means at most 2 sends (see module docstring).
     config = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1})
     return boto3.client("cloudwatch", region_name=CLOUDWATCH_REGION, config=config)
 

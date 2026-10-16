@@ -30,6 +30,10 @@ only. Infra (IAM + alarms) is a separate AA-CIS-Infra PR; CIS has its own sample
 - **Publish:** one `put_metric_data(Namespace="AA/Jobs/Booking", MetricData=[OldestQueuedAgeSeconds (Seconds),
   OverdueRunningJobs (Count)])` per tick, no dimensions, server timestamp. boto3 client created lazily inside the
   thread on first use and reused; botocore `Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1})`.
+  botocore's `max_attempts` counts **retries after the first request**, so this is at most one retry (two sends), not a
+  single attempt: worst case about (3 s + 5 s) x 2 plus backoff, ~16-17 s per tick, inside the `to_thread` worker, with
+  no DB connection held, well under the 300 s period. Kept as the contract value (same as the CIS sampler);
+  `total_max_attempts=1` would be the one-send setting if ever wanted.
   Region is the constant `CLOUDWATCH_REGION = "us-west-1"` (same convention as `app.retention.policy.ARCHIVE_REGION`),
   so no new environment variable.
 - **Never raises:** a read failure logs `ops_metrics_sample_failed ... stage=read` and publishes **nothing** (missing
