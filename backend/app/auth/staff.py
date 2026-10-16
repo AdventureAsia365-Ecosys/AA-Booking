@@ -51,6 +51,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "trip_plan.write": frozenset({"admin", "contracting"}),
     "staff.admin": frozenset({"admin"}),
     "audit.read": frozenset({"admin"}),
+    # Retention runs and their status (AA-825): DRY RUN / live delete and redaction of Booking rows.
+    "retention.admin": frozenset({"admin"}),
 }
 
 # last_seen_at is refreshed at most this often (one write per staff user per 5 minutes, not per request).

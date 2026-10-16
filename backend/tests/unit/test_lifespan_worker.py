@@ -16,8 +16,8 @@ from app.settings import Settings
 class FakeWorker:
     instances: list[FakeWorker] = []
 
-    def __init__(self, pool: Any, handlers: dict, *, recurring: tuple = ()) -> None:
-        self.handlers, self.recurring = handlers, recurring
+    def __init__(self, pool: Any, handlers: dict, *, recurring: tuple = (), hooks: tuple = ()) -> None:
+        self.handlers, self.recurring, self.hooks = handlers, recurring, hooks
         self.started = self.stopped = False
         FakeWorker.instances.append(self)
 
@@ -43,8 +43,15 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         assert client.get("/booking/health").status_code == 200
     (worker,) = FakeWorker.instances
     assert worker.started and worker.stopped
-    assert set(worker.handlers) == {"bk_inquiry_pull", "bk_inquiry_process", "bk_notify_email"}
+    assert set(worker.handlers) == {
+        "bk_inquiry_pull",
+        "bk_inquiry_process",
+        "bk_notify_email",
+        "bk_retention_job",
+        "bk_retention_inbox_redact",
+    }
     assert [r.kind for r in worker.recurring] == ["bk_inquiry_pull"]
+    assert [type(h).__name__ for h in worker.hooks] == ["DailySchedule"]  # AA-825 daily retention runs
 
 
 @pytest.mark.parametrize("kw", [{"worker_enabled": False}, {"worker_enabled": True, "database_url": None}])

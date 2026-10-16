@@ -74,7 +74,12 @@ backend/
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
   app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
   app/settings.py          environment → Settings
-  app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3)
+  app/jobs/                booking.job queue (claim/lease/reap/backoff) + Worker loop (O3, maintenance hooks)
+  app/retention/           AA-825 retention kinds bk_retention_job / bk_retention_inbox_redact: policy (windows),
+                           redact (inbox payload PII), archive (S3 JSONL.gz), runner (batched count/delete/redact),
+                           jobs (modes, handlers, daily schedule hook, admin status)
+  app/routers/retention.py /booking/retention (status), POST /booking/retention/runs (DRY RUN default),
+                           GET /booking/retention/runs/{job_id} — retention.admin (admin only)
   app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
                            + leg catalog tour key resolve / back-fill (leg_keys.py, `python -m app.inquiry.leg_keys`)
   app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py, approved
@@ -103,7 +108,7 @@ migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Inf
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md)
+                           AA-683.md, AA-810.md, AA-811.md, AA-822.md, AA-823.md, AA-825.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -162,7 +167,8 @@ send, OTP) is not built: those still write rows only.
   same pair, and writing a rate makes you the contract's maker); catalog reads (`catalog.read`) = every role,
   content_creator included (without the price hint, channel and commercial notes, which need `pricing.read`); the
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
-  `version.write` (admin, sales); block / archive customers, staff admin, audit log read = admin. Notifications,
+  `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
+  (`retention.admin`, AA-825) = admin. Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
@@ -178,7 +184,20 @@ tasks during a rolling deploy are safe (`SKIP LOCKED`, idempotent handlers).
 |---|---|
 | `bk_inquiry_pull` | Recurring singleton (every ~60 s): reads `tripplanner.v_inquiry_outbox`, anti-joins `booking.inbox_events`, inserts new rows `ON CONFLICT DO NOTHING`, queues one process job each. `booking.inbox_cursor.safe_id` is only a scan bound, advanced behind a 600 s window (contract rule 4). |
 | `bk_inquiry_process` | Validates v1/v1.1/v1.2; each leg gets the catalog tour key `(source_system, source_id)` from the v1.2 payload or by resolving `source_tour_id` against `catalog.v_tour` (null when unresolved; AA-830); creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
+| `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d, archived to S3 first (`s3://aa-cis-bronze-005097885195/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per batch and UTC month); `queued` / `running` never. Rows referenced by a FK are never deleted. |
+| `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, nulls `customer.name` / `email` / `phone` and `itinerary.custom_days[].note` in `inbox_events.payload` and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
+
+Retention runs (both kinds, `app/retention/jobs.py`, DM-7.2): a manual run is a **DRY RUN** unless it says
+`dry_run: false` with `max_rows` (the approved count); the worker queues one `trigger: schedule` run per kind per UTC day
+(maintenance hook, first pass at or after 19:00 UTC), which stays a DRY RUN until a live run of the same windows
+succeeded, then runs live unless the candidates exceed 2x the last live run (floor 1,000): then **held** (nothing
+written, a notification to each active admin). Batches of at most 1,000 rows (keyset on `(ts, id)`, `FOR UPDATE SKIP
+LOCKED`, 30 s statement timeout), at most 50,000 rows per run, `max_attempts = 1` (no progress column yet, X6), one
+advisory lock per kind. Every run writes its counts to the job result **and** one `booking.audit_logs` row
+(`entity_type = 'retention'`, action `retention.dry_run|live|held|failed`); the last live run is read from the audit log.
+The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (AA-CIS-Infra); without it a live run of
+`bk_retention_job` with failed candidates fails before deleting them.
 
 ## Health contract (ADR 0004 decision 9)
 
@@ -316,6 +335,13 @@ or neither, `cis` only (CHECK), indexed, no FK (soft key; the nightly schema dum
 on it. Filled by intake; legs opened before bk-011 are back-filled by `python -m app.inquiry.leg_keys` (DRY RUN by
 default, `--apply` writes only rows still null; a superseded tour_id is not in `catalog.v_tour` and stays unmatched,
 listed in the report). `/booking/health/ready` requires `bk-011`.
+
+### `bk-012` (AA-825 retention, needs `bk-002` only)
+
+`inbox_events.redacted_at` (NULL = payload as received) + `COMMENT ON COLUMN … payload` `pii:contact` (DM-6.1) +
+`inbox_events_redact_due_idx (received_at, id) WHERE redacted_at IS NULL`; `job_finished_idx (finished_at, id) WHERE
+finished_at IS NOT NULL` on `booking.job` (same as CIS `shared.job`, the X6 finished index). No grant change.
+`/booking/health/ready` requires `bk-012`.
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
