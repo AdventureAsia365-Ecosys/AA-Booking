@@ -413,13 +413,13 @@ async def test_reaper_requeues_an_expired_lease_then_fails_without_attempts(
         " locked_until = now() - interval '1 second' WHERE id = $1::uuid",
         job_id,
     )
-    assert await queue.reap(pool) == {"requeued": 1, "failed": 0}
+    assert await queue.reap(pool) == {"requeued": 1, "failed": 0, "cancelled": 0}
     await admin.execute(
         "UPDATE booking.job SET status = 'running', attempt = 2, locked_by = 'dead',"
         " locked_until = now() - interval '1 second' WHERE id = $1::uuid",
         job_id,
     )
-    assert await queue.reap(pool) == {"requeued": 0, "failed": 1}
+    assert await queue.reap(pool) == {"requeued": 0, "failed": 1, "cancelled": 0}
     assert await admin.fetchval("SELECT status FROM booking.job WHERE id = $1::uuid", job_id) == "failed"
 
 

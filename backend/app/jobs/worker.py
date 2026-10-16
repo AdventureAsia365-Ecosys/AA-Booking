@@ -10,6 +10,13 @@ their history, and call the maintenance hooks (the daily retention schedule, AA-
 due job and run its handler under a heartbeat. A handler returns a result dict (stored on the job) or
 raises — :class:`PermanentError` fails the job at once, anything else is retried with backoff until
 ``max_attempts``.
+
+Shutdown (AA-751, data standards C6.2c): the lifespan sets ``stop`` and gives the loop
+``WORKER_STOP_TIMEOUT_S``; a job still running then is cancelled and **released** back to the queue at once
+(:func:`app.jobs.queue.release`: due now, the interrupted attempt not counted, ``cancelled`` when a cancel was
+requested, ``failed`` after ``MAX_RELEASES``), instead of staying ``running`` until its lease expires. A kind
+in ``no_release`` (it keeps no progress checkpoint, so running it again could repeat work an approval capped, e.g.
+the retention kinds) is failed at once instead, which is what the reaper did to it before.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ PoolProvider = Callable[[], Awaitable[asyncpg.Pool]]
 MaintenanceHook = Callable[[asyncpg.Pool], Awaitable[Any]]
 
 ERROR_MAX_CHARS = 2000
+NOT_RELEASED_ERROR = "stopped mid-run on shutdown; this kind is not run again (no progress checkpoint)"
 
 
 class PermanentError(Exception):
@@ -66,6 +74,7 @@ class Worker:
         *,
         recurring: tuple[Recurring, ...] = (),
         hooks: tuple[MaintenanceHook, ...] = (),
+        no_release: frozenset[str] = frozenset(),
         worker_id: str | None = None,
         poll_seconds: float = 2.0,
         lease_seconds: int = 300,
@@ -78,6 +87,7 @@ class Worker:
         self._handlers = handlers
         self._recurring = recurring
         self._hooks = hooks
+        self._no_release = no_release
         self.worker_id = worker_id or default_worker_id()
         self._poll_seconds = poll_seconds
         self._lease_seconds = lease_seconds
@@ -86,7 +96,7 @@ class Worker:
 
     async def maintenance(self, pool: asyncpg.Pool) -> None:
         reaped = await queue.reap(pool)
-        if reaped["requeued"] or reaped["failed"]:
+        if any(reaped.values()):
             log.warning("job reaper: %s", reaped)
         for rec in self._recurring:
             if await queue.enqueue(pool, rec.kind, {}, delay_seconds=rec.every_seconds, max_attempts=3):
@@ -114,6 +124,21 @@ class Worker:
         beat = asyncio.create_task(self._heartbeat(pool, job.id))
         try:
             result = await self._handlers[job.kind](pool, job)
+        except asyncio.CancelledError:
+            # Shutdown: the lifespan's wait_for timed out and cancelled this task mid-job. Release the row before the
+            # pool closes (wait_for waits for this task to finish), shielded so a second cancel cannot drop the
+            # UPDATE half-way; then let the cancellation through.
+            if job.kind in self._no_release:
+                end = queue.fail(pool, job, self.worker_id, NOT_RELEASED_ERROR, retryable=False)
+            else:
+                end = queue.release(pool, job.id, self.worker_id)
+            try:
+                status = await asyncio.shield(end)
+            except Exception as exc:  # noqa: BLE001 — the reaper ends it when the lease expires
+                log.warning("job %s %s: stop on shutdown failed (%s)", job.kind, job.id, type(exc).__name__)
+            else:
+                log.warning("job %s %s stopped on shutdown -> %s", job.kind, job.id, status or "not ours")
+            raise
         except PermanentError as exc:
             status = await queue.fail(pool, job, self.worker_id, _err(exc), retryable=False)
             log.warning("job %s %s failed permanently: %s", job.kind, job.id, _err(exc))

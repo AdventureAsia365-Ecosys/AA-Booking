@@ -44,8 +44,9 @@ from app.settings import Settings, load_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-# A job in flight finishes (each handler is one short transaction) or is re-queued by the reaper
-# when its lease expires; ECS gives the container 30 s after SIGTERM.
+# On shutdown a job in flight gets this long to finish; after that the worker task is cancelled and releases the
+# job back to the queue at once (app.jobs.queue.release, AA-751), before the pool closes. ECS gives the container
+# 30 s after SIGTERM (stopTimeout), so 20 s + the release UPDATE fit.
 WORKER_STOP_TIMEOUT_S = 20.0
 
 
@@ -66,7 +67,13 @@ def create_app(
                 staff_email.KIND: staff_email.build_handler(settings),
                 **retention_jobs.build_handlers(),
             }
-            worker = Worker(db.pool, handlers, recurring=intake.RECURRING, hooks=(retention_jobs.DailySchedule(),))
+            worker = Worker(
+                db.pool,
+                handlers,
+                recurring=intake.RECURRING,
+                hooks=(retention_jobs.DailySchedule(),),
+                no_release=retention_jobs.NOT_RELEASED,
+            )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
         yield
         stop.set()

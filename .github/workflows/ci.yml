@@ -3,6 +3,8 @@ name: CI
 # Five required checks, named like AA-CIS-App's so branch protection reads the same
 # (root ADR 0004 decision 3): Lint, Security Audit, Unit Tests, Integration Tests, Docker Build Check.
 # A sixth, non-required check builds the staff frontend (ADR 0004 decision 3, "Frontend Build").
+# A seventh, non-required check (AA-751) compares the vendored job table template with AA-CIS-App main
+# ("Job template copy").
 
 on:
   pull_request:
@@ -193,6 +195,21 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-${{ github.sha }}.cdx.json
           artifact-name: sbom-${{ github.sha }}.cdx.json
+
+  # Non-required (AA-751, S240 decision): backend/tests/job_template/ holds byte copies of AA-CIS-App
+  # shared/jobs/job_table_template.sql + job_table_shape.py (ADR 0003a decision 2); Integration Tests compares
+  # booking.job with that template. This job fails when a copy drifts from CIS main. Stdlib only, no install; the
+  # repos are public, github.token only lifts the API rate limit.
+  job-template-copy:
+    name: Job template copy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare the vendored job table template with AA-CIS-App main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_job_template_copy.py
 
   # Non-required (ADR 0004 decision 3): eslint, tsc and `next build` of the staff admin in frontend/.
   # Mirrors the CIS frontend checks. Needs no secret: the app reads BOOKING_API_URL / CIS_API_URL at

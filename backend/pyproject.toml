@@ -7,6 +7,8 @@ requires-python = ">=3.12,<3.13"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+# Byte copies of AA-CIS-App shared/jobs/ (AA-751): CIS style, never edited here.
+extend-exclude = ["tests/job_template/job_table_shape.py"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "BLE", "ASYNC", "S"]

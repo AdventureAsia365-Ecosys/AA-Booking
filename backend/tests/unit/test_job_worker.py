@@ -20,8 +20,9 @@ class FakeQueue:
     def __init__(self, jobs: list[Job] | None = None) -> None:
         self.jobs = list(jobs or [])
         self.events: list[tuple[Any, ...]] = []
-        self.reaped = {"requeued": 0, "failed": 0}
+        self.reaped = {"requeued": 0, "failed": 0, "cancelled": 0}
         self.beat_ok = True
+        self.release_status: str | BaseException = "queued"
 
     async def reap(self, pool: Any) -> dict[str, int]:
         self.events.append(("reap",))
@@ -47,6 +48,12 @@ class FakeQueue:
         self.events.append(("fail", job.id, retryable, error))
         return "queued" if retryable else "failed"
 
+    async def release(self, pool: Any, job_id: str, worker_id: str) -> str:
+        self.events.append(("release", job_id, worker_id))
+        if isinstance(self.release_status, BaseException):
+            raise self.release_status
+        return self.release_status
+
     async def heartbeat(self, pool: Any, job_id: str, worker_id: str, lease: int) -> bool:
         self.events.append(("beat", job_id))
         if isinstance(self.beat_ok, BaseException):
@@ -57,7 +64,7 @@ class FakeQueue:
 @pytest.fixture
 def fq(monkeypatch: pytest.MonkeyPatch) -> FakeQueue:
     fake = FakeQueue()
-    for name in ("reap", "enqueue", "prune", "claim", "complete", "fail", "heartbeat"):
+    for name in ("reap", "enqueue", "prune", "claim", "complete", "fail", "release", "heartbeat"):
         monkeypatch.setattr(worker_module.queue, name, getattr(fake, name))
     return fake
 
@@ -158,3 +165,67 @@ async def test_run_forever_backs_off_on_errors_and_stops(fq: FakeQueue) -> None:
     await asyncio.wait_for(w.run_forever(stop), timeout=2)
     assert calls["n"] >= 3
     assert any(e[0] == "complete" for e in fq.events)
+
+
+# ── Shutdown: release (AA-751, C6.2c) ─────────────────────────────────────────
+
+
+async def _cancel_mid_job(w: Worker, started: asyncio.Event) -> None:
+    """Run one tick, cancel it while the handler runs (what wait_for does on timeout), expect the cancel through."""
+    task = asyncio.create_task(w.run_once())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+def _blocking_handler(started: asyncio.Event):
+    async def handler(pool: Any, j: Job) -> dict:
+        started.set()
+        await asyncio.sleep(60)
+        return {}
+
+    return handler
+
+
+async def test_shutdown_mid_job_releases_it_and_reraises(fq: FakeQueue) -> None:
+    started = asyncio.Event()
+    fq.jobs = [job()]
+    w = Worker(provide, {"bk_a": _blocking_handler(started)}, worker_id="w")
+    await _cancel_mid_job(w, started)
+    assert ("release", "j1", "w") in fq.events
+    assert not any(e[0] in ("complete", "fail") for e in fq.events)
+
+
+async def test_shutdown_fails_a_kind_that_is_not_released(fq: FakeQueue) -> None:
+    started = asyncio.Event()
+    fq.jobs = [job()]
+    w = Worker(provide, {"bk_a": _blocking_handler(started)}, worker_id="w", no_release=frozenset({"bk_a"}))
+    await _cancel_mid_job(w, started)
+    assert ("fail", "j1", False, worker_module.NOT_RELEASED_ERROR) in fq.events
+    assert not any(e[0] == "release" for e in fq.events)
+
+
+async def test_a_failing_release_still_lets_the_cancel_through(fq: FakeQueue) -> None:
+    started = asyncio.Event()
+    fq.jobs = [job()]
+    fq.release_status = OSError("db gone")
+    w = Worker(provide, {"bk_a": _blocking_handler(started)}, worker_id="w")
+    await _cancel_mid_job(w, started)
+    assert ("release", "j1", "w") in fq.events
+
+
+async def test_wait_for_timeout_waits_for_the_release(fq: FakeQueue) -> None:
+    """The lifespan pattern (main.py): stop, then wait_for(task, timeout). The release runs before wait_for returns,
+    i.e. before the pool is closed."""
+    started = asyncio.Event()
+    fq.jobs = [job()]
+    w = Worker(provide, {"bk_a": _blocking_handler(started)}, worker_id="w", poll_seconds=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(w.run_forever(stop))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    stop.set()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(task, timeout=0.05)
+    assert ("release", "j1", "w") in fq.events
+    assert task.cancelled()

@@ -35,6 +35,15 @@ async def test_claim_maps_the_row_and_parses_text_payload() -> None:
     assert await queue.claim(ScriptedConn(), "w", ["bk_probe"], 60) is None
 
 
+async def test_claim_skips_cancel_requests_and_stamps_the_attempt() -> None:
+    conn = ScriptedConn()
+    await queue.claim(conn, "w", ["bk_probe"], 60)
+    ((sql, _),) = conn.calls
+    assert "AND NOT cancel_requested" in sql
+    assert "progress = progress || jsonb_build_object('attempt_started_at', now())" in sql
+    assert "started_at = coalesce(started_at, now())" in sql  # the first attempt's start is kept (F18)
+
+
 async def test_heartbeat_and_complete_report_ownership() -> None:
     assert await queue.heartbeat(ScriptedConn([("locked_until = now()", 1)]), "j1", "w", 60) is True
     assert await queue.heartbeat(ScriptedConn(), "j1", "w", 60) is False
@@ -45,7 +54,14 @@ async def test_heartbeat_and_complete_report_ownership() -> None:
 
 
 async def test_fail_requeues_while_attempts_remain() -> None:
-    assert await queue.fail(ScriptedConn([("status = 'queued'", 1)]), JOB, "w", "e", retryable=True) == "queued"
+    conn = ScriptedConn([("ELSE 'queued' END", "queued")])
+    assert await queue.fail(conn, JOB, "w", "e", retryable=True) == "queued"
+    (sql,) = [flat for flat, _ in conn.calls]
+    assert "WHEN cancel_requested THEN 'cancelled'" in sql and "RETURNING status" in sql
+    # A cancel request ends the job instead of re-queueing it (the claim would skip it forever).
+    assert await queue.fail(ScriptedConn([("ELSE 'queued' END", "cancelled")]), JOB, "w", "e", retryable=True) == (
+        "cancelled"
+    )
     assert await queue.fail(ScriptedConn(), JOB, "w", "e", retryable=True) == ""
 
 
@@ -58,8 +74,24 @@ async def test_fail_is_final_when_not_retryable_or_out_of_attempts() -> None:
     assert await queue.fail(ScriptedConn(), JOB, "w", "e", retryable=False) == ""
 
 
+async def test_release_returns_the_new_status_and_passes_the_cap() -> None:
+    conn = ScriptedConn([("WITH cur AS", "queued")])
+    assert await queue.release(conn, "j1", "w") == "queued"
+    ((sql, args),) = conn.calls
+    assert args == ("j1", "w", queue.MAX_RELEASES)
+    assert "WHERE j.id = $1::uuid AND j.status = 'running' AND j.locked_by = $2" in sql
+    assert "attempt = greatest(j.attempt - 1, 0)" in sql and "run_after = now()" in sql
+    assert "locked_by = NULL, locked_until = NULL" in sql
+    assert "jsonb_build_object('released', true, 'releases', cur.releases)" in sql
+    assert "WHEN cur.cancel_requested THEN 'cancelled' WHEN cur.releases >= $3 THEN 'failed' ELSE 'queued'" in sql
+    assert await queue.release(ScriptedConn(), "j1", "w") == ""  # no longer ours
+
+
 async def test_reap_and_prune_return_counts() -> None:
-    conn = ScriptedConn([("re-queued", 2), ("no attempts left", 1)])
-    assert await queue.reap(conn) == {"requeued": 2, "failed": 1}
-    assert await queue.reap(ScriptedConn()) == {"requeued": 0, "failed": 0}
+    conn = ScriptedConn([("re-queued", 2), ("no attempts left", {"failed": 1, "cancelled": 3})])
+    assert await queue.reap(conn) == {"requeued": 2, "failed": 1, "cancelled": 3}
+    requeue_sql, end_sql = (flat for flat, _ in conn.calls)
+    assert "AND NOT cancel_requested" in requeue_sql
+    assert "status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END" in end_sql
+    assert await queue.reap(ScriptedConn()) == {"requeued": 0, "failed": 0, "cancelled": 0}
     assert await queue.prune(ScriptedConn([("DELETE FROM booking.job", 4)]), "bk_inquiry_pull", 7) == 4

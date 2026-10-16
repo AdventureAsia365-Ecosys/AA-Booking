@@ -16,10 +16,12 @@ run that failed half-way) writes one ``booking.audit_logs`` row (``entity_type =
 id, ``entity_label`` = the kind, ``after`` = the result). The last live run is read back from the audit log, not from
 ``booking.job``, because ``bk_retention_job`` itself deletes old succeeded jobs.
 
-Retention jobs are queued with ``max_attempts = 1``: ``booking.job`` has no progress column yet (X6), so a retry could
-not know what an earlier attempt already deleted and might exceed the approved ``max_rows``. A failed run is reported
-(job ``error`` + audit row) and the next run starts from a fresh count. A session advisory lock per kind keeps two
-workers (rolling deploy) from running the same kind at once.
+Retention jobs are queued with ``max_attempts = 1`` and are not released back to the queue on shutdown
+(:data:`NOT_RELEASED`, AA-751): they keep no progress checkpoint, so a second run could not know what an interrupted
+one already deleted and might exceed the approved ``max_rows``. A failed run is reported (job ``error`` + audit row)
+and the next run starts from a fresh count; a run stopped by a shutdown is failed at once (no audit row for the
+batches it committed: the archive objects in S3 and the missing rows are the trace). A session advisory lock per kind
+keeps two workers (rolling deploy) from running the same kind at once.
 """
 
 from __future__ import annotations
@@ -49,6 +51,8 @@ GROWTH_FACTOR = 2
 GROWTH_FLOOR_ROWS = runner.BATCH_SIZE_MAX
 DEFAULT_PAUSE_MS = 200
 MAX_ATTEMPTS = 1
+# Kinds the worker fails instead of releasing on shutdown (app.jobs.worker no_release): see the module docstring.
+NOT_RELEASED: frozenset[str] = frozenset(KINDS)
 # The daily scheduled runs are queued on the first worker maintenance pass at or after this UTC hour (02:00 ICT).
 SCHEDULE_UTC_HOUR = 19
 SCHEDULER = "scheduler:bk-retention"
