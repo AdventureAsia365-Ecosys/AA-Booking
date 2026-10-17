@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.migration_guard import check_file, check_sql
+from tests.migration_guard import MASTER_ROLE, OWNER_ROLE, OWNER_TRANSFER, check_file, check_sql, migration_role
 
 MIGRATIONS = Path(__file__).resolve().parents[3] / "migrations"
 
@@ -137,3 +137,93 @@ def test_views_must_be_read_only_for_the_app() -> None:
 
 def test_bad_filename() -> None:
     assert _rules(GOOD, name="2_Example.sql") == {"filename"}
+
+
+# X1 (AA-Ecosys docs/audits/2026-10-17-S241-x1/x1-plan.md S5): the migration role is per file. DB Migrate runs a
+# file as the live owner of schema booking: the RDS master up to bk-014, bk_owner from bk-015 on.
+
+
+def _numbered(sql: str, number: int) -> tuple[str, str]:
+    return f"{number:03d}_example.sql", sql.replace("'bk-002'", f"'bk-{number:03d}'")
+
+
+def _dp(role: str, verb: str = "GRANT") -> str:
+    target = "TO booking" if verb == "GRANT" else "FROM booking"
+    return f"ALTER DEFAULT PRIVILEGES FOR ROLE {role} IN SCHEMA booking {verb} SELECT ON TABLES {target};\n"
+
+
+def test_migration_role_per_file() -> None:
+    assert OWNER_TRANSFER == 14
+    assert [migration_role(n) for n in (1, 13, 14, 15, 99)] == [MASTER_ROLE] * 3 + [OWNER_ROLE] * 2
+    assert (MASTER_ROLE, OWNER_ROLE) == ("aa_cis_admin", "bk_owner")
+
+
+@pytest.mark.parametrize(
+    ("number", "role", "verb", "ok"),
+    [
+        (13, "aa_cis_admin", "GRANT", True),
+        (13, "aa_cis_admin", "REVOKE", True),
+        (13, "bk_owner", "GRANT", False),
+        (14, "bk_owner", "GRANT", True),
+        (14, "bk_owner", "REVOKE", True),
+        (14, "aa_cis_admin", "REVOKE", True),  # bk-014 drops the old rows ...
+        (14, "aa_cis_admin", "GRANT", False),  # ... and never re-creates them
+        (15, "bk_owner", "GRANT", True),
+        (15, "bk_owner", "REVOKE", True),
+        (15, "aa_cis_admin", "GRANT", False),  # would fail as bk_owner: "must be member of role aa_cis_admin"
+        (15, "aa_cis_admin", "REVOKE", False),
+        (15, "booking", "GRANT", False),
+    ],
+)
+def test_default_privileges_follow_the_file_migration_role(number: int, role: str, verb: str, ok: bool) -> None:
+    name, sql = _numbered(GOOD.replace("COMMIT;", _dp(role, verb) + "COMMIT;"), number)
+    assert ("default-privileges" not in _rules(sql, name)) is ok
+
+
+@pytest.mark.parametrize(
+    ("number", "statement", "ok"),
+    [
+        (14, "ALTER SCHEMA booking OWNER TO bk_owner;", True),
+        (14, "ALTER TABLE booking.t OWNER TO bk_owner;", True),
+        (14, "ALTER VIEW booking.v OWNER TO bk_owner;", True),
+        (14, "ALTER SEQUENCE booking.s OWNER TO bk_owner;", True),
+        (14, "ALTER FUNCTION booking.f() OWNER TO bk_owner;", True),
+        (14, "ALTER TABLE booking.t OWNER TO aa_cis_admin;", False),
+        (14, "ALTER TABLE booking.t OWNER TO booking;", False),
+        (13, "ALTER TABLE booking.t OWNER TO bk_owner;", False),
+        (15, "ALTER TABLE booking.t OWNER TO bk_owner;", False),
+        (15, "ALTER SCHEMA booking OWNER TO aa_cis_admin;", False),
+        (15, "REASSIGN OWNED BY aa_cis_admin TO bk_owner;", False),
+        (14, "DROP OWNED BY booking;", False),
+    ],
+)
+def test_owner_changes_only_in_bk014_to_bk_owner(number: int, statement: str, ok: bool) -> None:
+    name, sql = _numbered(GOOD.replace("COMMIT;", statement + "\nCOMMIT;"), number)
+    assert ("owner" not in _rules(sql, name)) is ok
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SET ROLE bk_owner;",
+        "SET LOCAL ROLE bk_owner;",
+        "SET SESSION ROLE bk_owner;",
+        "RESET ROLE;",
+        "RESET ALL;",
+        "SET SESSION AUTHORIZATION aa_cis_admin;",
+        "RESET SESSION AUTHORIZATION;",
+        "SELECT set_config('role', 'aa_cis_admin', true);",
+        "SELECT set_config( E'role', 'aa_cis_admin', true);",
+        "DO $$ BEGIN PERFORM set_config('role', 'aa_cis_admin', true); END $$;",
+        "DO $$ BEGIN RESET ROLE; END $$;",
+    ],
+)
+def test_role_switches_are_refused(statement: str) -> None:
+    for number in (13, 14, 15):
+        name, sql = _numbered(GOOD.replace("COMMIT;", statement + "\nCOMMIT;"), number)
+        assert "no-set-role" in _rules(sql, name), (number, statement)
+
+
+def test_other_set_config_names_are_fine() -> None:
+    name, sql = _numbered(GOOD.replace("COMMIT;", "SELECT set_config('bk014.acl', 'x', true);\nCOMMIT;"), 14)
+    assert _rules(sql, name) == set()

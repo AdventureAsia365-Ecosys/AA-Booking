@@ -1,9 +1,10 @@
 """Clean-up shared by the bk-010 integration tests (hotels, room types, services, supplier rates).
 
 Rates of a published contract are fixed and sent / approved version items are locked by triggers, and role
-``booking`` may not delete hotels or services at all. The owner (``aa_cis_admin``) switches the user triggers off
-for the clean-up only, inside one transaction, so the next test module (bk-008 deletes every supplier and contract)
-starts from tables with no bk-010 rows pointing at them.
+``booking`` may not delete hotels or services at all. The owner of the tables (the live owner of schema booking:
+``aa_cis_admin`` before bk-014, ``bk_owner`` after it, X1) switches the user triggers off for the clean-up only,
+inside one transaction, so the next test module (bk-008 deletes every supplier and contract) starts from tables with
+no bk-010 rows pointing at them.
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ TRIGGERED = ("booking.version_item_costs", "booking.trip_case_version_itinerary"
 
 async def purge_supply(conn: asyncpg.Connection) -> None:
     async with conn.transaction():
+        owner = await conn.fetchval("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'booking'")
+        if owner != await conn.fetchval("SELECT current_user"):
+            await conn.execute(f'SET LOCAL ROLE "{owner}"')
         for table in TRIGGERED:
             await conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
         await conn.execute(

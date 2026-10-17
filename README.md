@@ -55,11 +55,15 @@ python3.12 -m venv .venv
 .venv/bin/pytest tests/unit
 ```
 
-Integration tests need a throwaway PostgreSQL 15 database whose name ends in `_test` or `_ci`, with
-a login named `aa_cis_admin` (the identity DB Migrate uses on Dev). The setup **drops** schema and
-role `booking` in that database:
+Integration tests need a throwaway PostgreSQL 15 database whose name ends in `_test` or `_ci`. They log
+in as `aa_cis_admin` (the identity DB Migrate uses on Dev) **without superuser**, like the RDS master, so
+first give the database the RDS role shape with a superuser DSN (creates `aa_cis_admin` NOSUPERUSER
+CREATEROLE, member of `bk_owner`; `bk_owner` NOLOGIN; `booking` LOGIN; X1 plan S5). The setup **drops**
+schemas `booking`, `tripplanner` and `catalog` in that database:
 
 ```bash
+.venv/bin/python -m tests.integration.bootstrap_roles \
+  postgresql://postgres:<pw>@localhost:5432/booking_ci postgresql://aa_cis_admin:<pw>@localhost:5432/booking_ci
 BOOKING_TEST_ADMIN_DSN=postgresql://aa_cis_admin:<pw>@localhost:5432/booking_ci .venv/bin/pytest tests/integration
 ```
 

@@ -9,8 +9,16 @@ Every Booking migration must:
   exceptions are the ``shared.schema_versions`` insert and reads of that one table;
 - never create or alter a login, set a password, create an extension or a SECURITY DEFINER
   function, or grant to PUBLIC;
-- state default privileges ``FOR ROLE aa_cis_admin IN SCHEMA booking`` (DB Migrate runs as the RDS
-  master user, ADR 0004 correction d);
+- state default privileges ``FOR ROLE <the file's migration role> IN SCHEMA booking``. The migration
+  role is per file (X1, AA-Ecosys docs/audits/2026-10-17-S241-x1/x1-plan.md S5/XD8): DB Migrate runs a
+  file as the live owner of schema ``booking``, which is the RDS master ``aa_cis_admin`` for bk-001 ...
+  bk-014 (ADR 0004 correction d) and ``bk_owner`` from bk-015 on, once bk-014 has handed every
+  ``booking`` object to ``bk_owner``. bk-014 itself may only REVOKE the old ``FOR ROLE aa_cis_admin``
+  rows and restate them ``FOR ROLE bk_owner``; any later ``FOR ROLE aa_cis_admin`` would fail as
+  ``bk_owner`` ("must be member of role aa_cis_admin") or bring the revoked rows back;
+- change an owner only in bk-014, and only to ``bk_owner`` (``ALTER ... OWNER TO bk_owner``);
+- never switch roles (``SET ROLE``, ``RESET ROLE``, ``SESSION AUTHORIZATION``, ``set_config('role', ...)``):
+  the runner does the switch (X1 S1 role lint);
 - revoke INSERT/UPDATE/DELETE from role ``booking`` on every view it creates.
 
 The checks are regexes over the SQL with comments removed and string literals blanked, so they
@@ -25,8 +33,16 @@ from pathlib import Path
 
 FILENAME_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 OWNER_SCHEMA = "booking"
-MIGRATION_ROLE = "aa_cis_admin"
+MASTER_ROLE = "aa_cis_admin"  # RDS master: DB Migrate's login role, owner of booking.* until bk-014
+OWNER_ROLE = "bk_owner"  # NOLOGIN owner of schema booking from bk-014 on (Infra roles/001, X1 S3)
+OWNER_TRANSFER = 14  # bk-014 hands every booking.* object from MASTER_ROLE to OWNER_ROLE
 APP_ROLE = "booking"
+
+
+def migration_role(number: int) -> str:
+    """Role DB Migrate runs file bk-<number> as (live owner of schema booking when the file starts, XD8)."""
+    return MASTER_ROLE if number <= OWNER_TRANSFER else OWNER_ROLE
+
 
 _IDENT = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)'
 _QUALIFIED = rf"{_IDENT}(?:\s*\.\s*{_IDENT})?"
@@ -130,6 +146,7 @@ def check_sql(name: str, sql: str) -> list[Violation]:
         bad("filename", "must look like NNN_snake_name.sql")
         return out
     version = f"bk-{m.group(1)}"
+    number = int(m.group(1))
 
     code, blank = _strip(sql)
     flat = re.sub(r"\s+", " ", blank).strip()
@@ -167,10 +184,21 @@ def check_sql(name: str, sql: str) -> list[Violation]:
         (r"\bCREATE\s+EXTENSION\b", "no-extension"),
         (r"\bALTER\s+ROLE\b", "no-alter-role"),
         (r"\bTO\s+PUBLIC\b", "no-public-grant"),
-        (r"\bSET\s+ROLE\b", "no-set-role"),
+        (r"\bSET\s+(?:(?:LOCAL|SESSION)\s+)?ROLE\b", "no-set-role"),
+        (r"\bRESET\s+(?:ROLE|ALL|SESSION\s+AUTHORIZATION)\b", "no-set-role"),
+        (r"\bSESSION\s+AUTHORIZATION\b", "no-set-role"),
+        (r"\b(?:REASSIGN|DROP)\s+OWNED\b", "owner"),
     ):
         if re.search(word, flat_u):
             bad(rule, f"matched {word}")
+    # set_config('role', ...) switches roles too; its name is a string literal, so look at the code with strings.
+    if re.search(r"\bset_config\s*\(\s*(?:E|U&)?'\s*role\s*'", code, flags=re.IGNORECASE):
+        bad("no-set-role", "set_config('role', ...)")
+
+    # Ownership changes: only bk-014 hands booking.* to bk_owner. Later objects are created by bk_owner itself.
+    for om in re.finditer(rf"\bOWNER\s+TO\s+({_IDENT})", flat, flags=re.IGNORECASE):
+        if number != OWNER_TRANSFER or _norm(om.group(1)) != OWNER_ROLE:
+            bad("owner", f"OWNER TO {om.group(1)}: only bk-{OWNER_TRANSFER:03d} may change an owner, to {OWNER_ROLE}")
 
     # CREATE targets.
     create_re = re.compile(
@@ -205,15 +233,19 @@ def check_sql(name: str, sql: str) -> list[Violation]:
     for am in alter_re.finditer(flat):
         kind, rest = re.sub(r"\s+", " ", am.group(1).upper()), am.group(2)
         if kind == "DEFAULT PRIVILEGES":
-            if not re.match(
-                rf"^FOR\s+ROLE\s+{MIGRATION_ROLE}\s+IN\s+SCHEMA\s+{OWNER_SCHEMA}\s+(GRANT|REVOKE)\b",
+            dp = re.match(
+                rf"^FOR\s+ROLE\s+({_IDENT})\s+IN\s+SCHEMA\s+{OWNER_SCHEMA}\s+(GRANT|REVOKE)\b",
                 rest,
                 flags=re.IGNORECASE,
-            ):
-                bad(
-                    "default-privileges",
-                    f"must be 'ALTER DEFAULT PRIVILEGES FOR ROLE {MIGRATION_ROLE} IN SCHEMA {OWNER_SCHEMA} ...'",
-                )
+            )
+            role, verb = (_norm(dp.group(1)), dp.group(2).upper()) if dp else ("", "")
+            allowed = {(migration_role(number), "GRANT"), (migration_role(number), "REVOKE")}
+            if number == OWNER_TRANSFER:
+                # bk-014: restate bk-001's rows FOR ROLE bk_owner and drop the old FOR ROLE aa_cis_admin rows.
+                allowed = {(OWNER_ROLE, "GRANT"), (OWNER_ROLE, "REVOKE"), (MASTER_ROLE, "REVOKE")}
+            if (role, verb) not in allowed:
+                expected = " or ".join(sorted({f"FOR ROLE {r} IN SCHEMA {OWNER_SCHEMA} {v}" for r, v in allowed}))
+                bad("default-privileges", f"{version} must use 'ALTER DEFAULT PRIVILEGES {expected}'")
             continue
         target = re.match(_QUALIFIED, rest)
         target_s = target.group(0) if target else rest[:40]
