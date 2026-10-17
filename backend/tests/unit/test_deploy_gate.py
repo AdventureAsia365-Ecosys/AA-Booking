@@ -27,6 +27,8 @@ SETTINGS = Settings(database_url="postgresql://booking:x@db.test/aa", environmen
 GOOD_CLAIMS: dict[str, Any] = {
     "repository": "AdventureAsia365-Ecosys/AA-Booking",
     "repository_owner": "AdventureAsia365-Ecosys",
+    "repository_id": "1418188499",
+    "repository_owner_id": "276539096",
     "ref": "refs/heads/main",
     "environment": "dev",
     "event_name": "push",
@@ -84,6 +86,7 @@ def test_constants_match_the_plan() -> None:
     assert GITHUB_OIDC_ISSUER == "https://token.actions.githubusercontent.com"
     assert GITHUB_JWKS_URL == "https://token.actions.githubusercontent.com/.well-known/jwks"
     assert DEPLOY_GATE_AUDIENCE == "aa-booking-deploy-gate"
+    assert (ci.DEPLOY_REPOSITORY_ID, ci.DEPLOY_REPOSITORY_OWNER_ID) == ("1418188499", "276539096")
 
 
 @pytest.mark.asyncio
@@ -101,6 +104,12 @@ async def test_valid_token_yields_the_caller(event: str) -> None:
     [
         {"repository": "AdventureAsia365-Ecosys/AA-CIS-App"},
         {"repository": "someone/AA-Booking"},
+        {"repository_id": "999"},
+        {"repository_id": 1418188499},
+        {"drop": ("repository_id",)},
+        {"repository_owner_id": "999"},
+        {"repository_owner_id": 276539096},
+        {"drop": ("repository_owner_id",)},
         {"ref": "refs/heads/feature"},
         {"ref": "refs/pull/7/merge"},
         {"environment": "prod"},
@@ -122,6 +131,12 @@ async def test_valid_token_yields_the_caller(event: str) -> None:
     ids=[
         "other-repo",
         "fork-repo",
+        "re-registered-repo-id",
+        "repo-id-not-string",
+        "no-repo-id",
+        "re-registered-owner-id",
+        "owner-id-not-string",
+        "no-owner-id",
         "branch",
         "pull-ref",
         "env-prod",
@@ -286,7 +301,8 @@ def test_gate_without_token_is_401_and_never_reads_the_db() -> None:
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"ref": "refs/heads/dev"}, {"aud": "booking"}, {"exp_in": -120}, {"repository": "x/y"}]
+    "kwargs",
+    [{"ref": "refs/heads/dev"}, {"aud": "booking"}, {"exp_in": -120}, {"repository": "x/y"}, {"repository_id": "1"}],
 )
 def test_gate_with_wrong_token_is_401(kwargs: dict[str, Any]) -> None:
     gh = LocalGithub()

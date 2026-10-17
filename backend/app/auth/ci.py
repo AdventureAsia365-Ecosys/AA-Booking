@@ -28,6 +28,11 @@ GITHUB_JWKS_URL = GITHUB_OIDC_ISSUER + "/.well-known/jwks"
 DEPLOY_GATE_AUDIENCE = "aa-booking-deploy-gate"
 
 DEPLOY_REPOSITORY = "AdventureAsia365-Ecosys/AA-Booking"
+# Immutable numeric ids (GitHub sends them as strings). Names are reusable: after a rename, transfer or deletion
+# someone else could register the old org/repo name and mint a token whose string claims all match, so the ids
+# are checked as well (`gh api repos/AdventureAsia365-Ecosys/AA-Booking --jq '.id,.owner.id'`).
+DEPLOY_REPOSITORY_ID = "1418188499"
+DEPLOY_REPOSITORY_OWNER_ID = "276539096"
 DEPLOY_REF = "refs/heads/main"
 DEPLOY_ENVIRONMENT = "dev"
 DEPLOY_EVENTS = frozenset({"push", "workflow_dispatch"})
@@ -72,6 +77,8 @@ class GithubDeployVerifier:
             self._jwks, token, audience=DEPLOY_GATE_AUDIENCE, issuer=self._issuer, required=REQUIRED_CLAIMS
         )
         _expect("repository", claims.get("repository") == DEPLOY_REPOSITORY)
+        _expect("repository_id", claims.get("repository_id") == DEPLOY_REPOSITORY_ID)
+        _expect("repository_owner_id", claims.get("repository_owner_id") == DEPLOY_REPOSITORY_OWNER_ID)
         _expect("ref", claims.get("ref") == DEPLOY_REF)
         _expect("environment", claims.get("environment") == DEPLOY_ENVIRONMENT)
         event = claims.get("event_name")

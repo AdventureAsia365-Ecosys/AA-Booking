@@ -184,7 +184,9 @@ send, OTP) is not built: those still write rows only.
   /booking/ops/deploy-gate` takes no staff JWT and no `staff_users` row. It accepts only a GitHub Actions OIDC token:
   RS256 against GitHub's JWKS (`https://token.actions.githubusercontent.com/.well-known/jwks`, same cache code as the
   staff JWKS), `iss` = `https://token.actions.githubusercontent.com`, `aud` = `aa-booking-deploy-gate`, `exp`/`iat`
-  required, `repository` = `AdventureAsia365-Ecosys/AA-Booking`, `ref` = `refs/heads/main`, `environment` = `dev`,
+  required, `repository` = `AdventureAsia365-Ecosys/AA-Booking` and its immutable `repository_id` = `1418188499` /
+  `repository_owner_id` = `276539096` (names are reusable after a rename or transfer; a repo transfer or recreate
+  means changing these constants), `ref` = `refs/heads/main`, `environment` = `dev`,
   `event_name` in `push`/`workflow_dispatch`, `job_workflow_ref` =
   `AdventureAsia365-Ecosys/AA-Booking/.github/workflows/deploy-dev.yml@refs/heads/main`. Any other token is 401;
   GitHub's JWKS unreachable (no cached keys) is 503. All values are code constants: no secret, no variable.
