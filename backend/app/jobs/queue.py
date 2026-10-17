@@ -15,6 +15,7 @@ first attempt's ``started_at`` is kept), and a graceful shutdown releases a runn
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -233,6 +234,27 @@ async def reap(pool: asyncpg.Pool) -> dict[str, int]:
         "failed": int(ended["failed"] or 0) if ended else 0,
         "cancelled": int(ended["cancelled"] or 0) if ended else 0,
     }
+
+
+async def active_count(pool: asyncpg.Pool, exempt_kinds: Iterable[str] = ()) -> dict[str, Any]:
+    """Queued + running jobs right now, with no time filter, for the deploy gate (AA-751 B3; same contract as CIS
+    ``shared/jobs/queue.py`` ``active_count`` plus ``by_kind``). A deploy stops the task, so any such job would be
+    interrupted. Rows of ``exempt_kinds`` are not counted. One GROUP BY query."""
+    rows = await pool.fetch(
+        """
+        SELECT status, kind, count(*)::int AS n
+        FROM booking.job
+        WHERE status IN ('queued', 'running') AND NOT (kind = ANY($1::text[]))
+        GROUP BY status, kind
+        """,
+        sorted(exempt_kinds),
+    )
+    by_status: dict[str, int] = {}
+    by_kind: dict[str, int] = {}
+    for r in rows:
+        by_status[r["status"]] = by_status.get(r["status"], 0) + r["n"]
+        by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + r["n"]
+    return {"active": sum(by_status.values()), "by_status": by_status, "by_kind": dict(sorted(by_kind.items()))}
 
 
 async def prune(pool: asyncpg.Pool, kind: str, keep_days: int) -> int:
