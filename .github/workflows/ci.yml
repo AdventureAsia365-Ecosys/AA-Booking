@@ -108,6 +108,11 @@ jobs:
   # aa_cis_admin (the DB Migrate identity), on a stub `shared` schema, exactly as
   # AA-CIS-Infra db/run_migration.py does; re-applies them (idempotency); checks the role `booking`
   # privileges; then calls /booking/health/ready as role `booking`.
+  # X1 plan S5 (AA-Ecosys docs/audits/2026-10-17-S241-x1/x1-plan.md): the container superuser is `postgres`
+  # and is used only by tests/integration/bootstrap_roles.py, which gives the database the RDS role shape:
+  # aa_cis_admin NOSUPERUSER CREATEROLE CREATEDB (owner of the database, member of bk_owner), bk_owner
+  # NOLOGIN, booking LOGIN. The tests then run as that non-superuser, like DB Migrate on RDS, and each file
+  # runs as its migration role (SET ROLE bk_owner from bk-015 on, XD8).
   test-integration:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -121,7 +126,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U aa_cis_admin -d booking_ci"
+          --health-cmd "pg_isready -U postgres -d booking_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -145,6 +150,7 @@ jobs:
           BOOKING_TEST_ADMIN_DSN: postgresql://aa_cis_admin:ci-only@localhost:5432/booking_ci
         run: |
           set -o pipefail
+          python -m tests.integration.bootstrap_roles "postgresql://postgres:ci-only@localhost:5432/booking_ci"
           pytest tests/integration -v --tb=short -rs -p no:cacheprovider | tee /tmp/integration.txt
           if grep -qE "^SKIPPED|[0-9]+ skipped" /tmp/integration.txt; then
             echo "::error::integration tests were skipped"; exit 1

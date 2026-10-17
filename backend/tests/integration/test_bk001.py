@@ -12,13 +12,16 @@ import pytest
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.integration.conftest import MIGRATIONS, apply_migrations
+from tests.integration.conftest import MIGRATIONS, apply_migrations, as_booking_owner
+from tests.migration_guard import MASTER_ROLE, OWNER_ROLE, OWNER_TRANSFER
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 BK001_TABLES = {"customers", "customer_otps", "customer_sessions", "media_files", "audit_logs", "inbox_events"}
 # Every bk-NNN in migrations/, in order (later migrations are applied too).
 VERSIONS = [f"bk-{p.name[:3]}" for p in MIGRATIONS]
+# Owner of every booking.* object after the replay: the RDS master until bk-014 is in migrations/, then bk_owner (X1).
+OWNER_AFTER_REPLAY = OWNER_ROLE if max(int(p.name[:3]) for p in MIGRATIONS) >= OWNER_TRANSFER else MASTER_ROLE
 
 
 def _email() -> str:
@@ -35,12 +38,25 @@ async def test_registered_once_and_rerun_is_a_noop(migrated_admin_dsn: str) -> N
         await conn.close()
 
 
+async def test_migrations_replay_as_a_non_superuser(migrated_admin_dsn: str) -> None:
+    """X1 S5: the replay logs in like DB Migrate on RDS, without superuser (which skips every ownership check)."""
+    conn = await asyncpg.connect(migrated_admin_dsn)
+    try:
+        row = await conn.fetchrow(
+            "SELECT session_user AS login, rolsuper, pg_has_role(session_user, 'booking', 'MEMBER') AS app_member"
+            " FROM pg_roles WHERE rolname = session_user"
+        )
+        assert (row["login"], row["rolsuper"], row["app_member"]) == (MASTER_ROLE, False, False)
+    finally:
+        await conn.close()
+
+
 async def test_tables_exist_and_are_owned_by_the_migration_role(migrated_admin_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_admin_dsn)
     try:
         rows = await conn.fetch("SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'booking'")
         assert BK001_TABLES <= {r["tablename"] for r in rows}
-        assert {r["tableowner"] for r in rows} == {"aa_cis_admin"}
+        assert {r["tableowner"] for r in rows} == {OWNER_AFTER_REPLAY}
         assert await conn.fetchval("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'booking'") is True  # set by test
     finally:
         await conn.close()
@@ -49,7 +65,8 @@ async def test_tables_exist_and_are_owned_by_the_migration_role(migrated_admin_d
 async def test_default_privileges_cover_future_tables(migrated_admin_dsn: str, migrated_booking_dsn: str) -> None:
     admin = await asyncpg.connect(migrated_admin_dsn)
     try:
-        await admin.execute("CREATE TABLE booking.zz_future_probe (id int)")
+        async with as_booking_owner(admin):  # the role the next migration runs as
+            await admin.execute("CREATE TABLE booking.zz_future_probe (id int)")
         app = await asyncpg.connect(migrated_booking_dsn)
         try:
             await app.execute("INSERT INTO booking.zz_future_probe VALUES (1)")

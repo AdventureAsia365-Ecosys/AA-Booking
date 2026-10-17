@@ -276,6 +276,15 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   `BEGIN/COMMIT`, does not register its own `bk-NNN`, touches anything outside schema `booking`
   (the `shared.schema_versions` row is the one exception), creates logins/passwords/extensions/
   `SECURITY DEFINER` functions, grants to anyone but `booking`, or leaves a view writable.
+- X1 (per-app owner roles, AA-Ecosys `docs/audits/2026-10-17-S241-x1/x1-plan.md`): DB Migrate runs a
+  file as the **live owner of schema `booking`** (`SET ROLE` when that is not its login). The guard's
+  migration role is therefore per file (`tests/migration_guard.py` `migration_role`): `aa_cis_admin`
+  for bk-001 … bk-014, `bk_owner` from bk-015 on (default privileges `FOR ROLE bk_owner`; `FOR ROLE
+  aa_cis_admin` only as bk-014's REVOKE). Only bk-014 may `ALTER … OWNER TO bk_owner`; no file may
+  switch roles (`SET`/`RESET ROLE`, `SESSION AUTHORIZATION`, `set_config('role', …)`).
+- Integration Tests replay the migrations as a **non-superuser** `aa_cis_admin` (CREATEROLE, member
+  of `bk_owner`), the RDS shape: `tests/integration/bootstrap_roles.py` sets the roles up with the
+  container superuser, which the tests never use.
 - Grants on other apps' objects are written by **their** owners, in their migrations, unguarded,
   after role `booking` exists (ADR 0004 decision 6).
 
