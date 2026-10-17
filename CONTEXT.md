@@ -118,6 +118,7 @@ docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-sli
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Job template copy), deploy-dev.yml
+.github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4)
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
 
@@ -223,9 +224,12 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   sample for 45 min, which also fires while the service is scaled to 0 or `WORKER_ENABLED` is off).
 - **Deploy gate (AA-751 B3/B4).** `GET /booking/ops/deploy-gate` returns `{active, by_status, by_kind, safe_to_deploy,
   exempt_kinds}`: `queued` + `running` rows with no time filter, kinds in `DEPLOY_GATE_EXEMPT` (`app/jobs/kinds.py`,
-  today `bk_inquiry_pull`, the always-queued pull) not counted. The `preflight` job of `deploy-dev.yml` skips the gate
-  when the service runs no task, otherwise blocks the deploy unless `safe_to_deploy` (or a `workflow_dispatch`
-  `override_running_jobs` reason is given); an unreachable gate blocks too. Pushes that only touch `backend/tests/**`
+  today `bk_inquiry_pull`, the always-queued pull) not counted. The `preflight` job of `deploy-dev.yml` (logic in
+  `.github/scripts/booking-deploy-preflight.sh`, tested with stub `aws`/`curl` by
+  `backend/tests/unit/test_deploy_preflight_script.py`) skips the gate only when the service has no task running,
+  pending or desired; a task that is starting (none running, one pending or desired) blocks; otherwise it blocks the
+  deploy unless `safe_to_deploy`. Every block can be lifted by a `workflow_dispatch` `override_running_jobs` reason;
+  an unreachable gate blocks too. Pushes that only touch `backend/tests/**`
   do not deploy.
 
 | Kind | What |

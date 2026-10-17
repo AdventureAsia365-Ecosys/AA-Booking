@@ -18,7 +18,9 @@ name: Deploy Dev
 # Job guard (AA-751 B3/B4, the `preflight` job): a deploy stops the running task, so a booking.job row that
 # is queued or running would be interrupted (released back to the queue, or re-run after the lease
 # expires: a staff e-mail could go out twice). Before building, preflight:
-#   1. reads the service's runningCount with the deploy role. 0 → nothing can be interrupted: pass.
+#   1. reads the service's running/pending/desired task counts with the deploy role. All 0 → nothing can be
+#      interrupted: pass. None running but one pending or desired (a task starting: crash replacement, a fresh
+#      0 → 1 scale) → blocked, since that task would claim queued jobs during the build and then be replaced.
 #   2. otherwise mints this run's GitHub OIDC token (audience aa-booking-deploy-gate; the job needs
 #      `id-token: write` and `environment: dev`) and calls GET <BASE_URL>/booking/ops/deploy-gate.
 #      Booking accepts only a token from this workflow file on main, environment dev, event push or
@@ -27,6 +29,8 @@ name: Deploy Dev
 #   4. not safe, or the gate is unreachable / not JSON (fail closed) → the deploy is blocked, unless a
 #      workflow_dispatch run gives `override_running_jobs` (Nghiệp only, with the reason): then a warning
 #      names the reason and the count, and the deploy goes on.
+# The logic is .github/scripts/booking-deploy-preflight.sh, tested with stub aws/curl by
+# backend/tests/unit/test_deploy_preflight_script.py (Unit Tests check).
 # Pushes that only change backend/tests/** do not deploy (nothing in the image changes).
 #
 # The base task definition is the family's latest ACTIVE revision, so a redeploy of an older commit keeps
@@ -40,6 +44,7 @@ on:
       - "backend/**"
       - "!backend/tests/**"
       - ".github/workflows/deploy-dev.yml"
+      - ".github/scripts/booking-deploy-preflight.sh"
   workflow_dispatch:
     inputs:
       override_running_jobs:
@@ -87,6 +92,10 @@ jobs:
       ECS_SERVICE: ${{ vars.ECS_SERVICE || 'aa-booking-dev-api' }}
       BASE_URL: ${{ vars.BOOKING_API_BASE_URL || 'https://api-booking.lumiguides.it.com' }}
     steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -97,59 +106,7 @@ jobs:
         env:
           OVERRIDE: ${{ inputs.override_running_jobs }}
           GATE_AUDIENCE: aa-booking-deploy-gate
-        run: |
-          set -uo pipefail
-          OVERRIDE="$(printf '%s' "${OVERRIDE:-}" | tr '\r\n' '  ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-          # Blocks the deploy, or lets it through with a warning when an override reason was given.
-          block() {
-            if [ -n "$OVERRIDE" ]; then
-              echo "::warning::Deploy guard OVERRIDDEN ($1). Reason: ${OVERRIDE}"
-              exit 0
-            fi
-            echo "::error::Deploy blocked: $1. Wait for the jobs to finish, or re-run via workflow_dispatch with an 'override_running_jobs' reason (Nghiệp only)."
-            exit 1
-          }
-
-          RUNNING=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
-            --query 'services[0].runningCount' --output text 2>/tmp/describe.err) || RUNNING=""
-          echo "service $ECS_SERVICE runningCount: ${RUNNING:-?}"
-          if ! [[ "$RUNNING" =~ ^[0-9]+$ ]]; then
-            cat /tmp/describe.err >&2 || true
-            block "cannot read the runningCount of $ECS_SERVICE"
-          fi
-          if [ "$RUNNING" = "0" ]; then
-            echo "::notice::no task running — nothing can be interrupted, gate skipped"
-            exit 0
-          fi
-
-          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
-            block "no GitHub OIDC token available to this job (id-token: write missing?)"
-          fi
-          TOKEN=$(curl -sS --fail --max-time 20 -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${GATE_AUDIENCE}" | jq -r '.value // empty') || TOKEN=""
-          if [ -z "$TOKEN" ]; then
-            block "could not mint the GitHub OIDC token for the deploy gate"
-          fi
-          echo "::add-mask::${TOKEN}"
-
-          GATE_URL="${BASE_URL%/}/booking/ops/deploy-gate"
-          rm -f /tmp/gate.json
-          CODE=$(curl -sS --max-time 20 -o /tmp/gate.json -w "%{http_code}" \
-            -H "Authorization: Bearer ${TOKEN}" "$GATE_URL") || CODE="000"
-          echo "GET $GATE_URL -> $CODE"
-          head -c 2000 /tmp/gate.json 2>/dev/null || true; echo
-          if [ "$CODE" != "200" ] || ! jq -e '(.safe_to_deploy | type) == "boolean" and (.active | type) == "number"' /tmp/gate.json >/dev/null 2>&1; then
-            block "deploy gate unreachable or invalid (HTTP $CODE) while $RUNNING task(s) run — cannot tell whether jobs are active"
-          fi
-
-          ACTIVE=$(jq -r '.active' /tmp/gate.json)
-          if [ "$(jq -r '.safe_to_deploy' /tmp/gate.json)" = "true" ]; then
-            echo "No queued/running booking.job rows (exempt: $(jq -r '.exempt_kinds // [] | join(", ")' /tmp/gate.json)) — safe to deploy."
-            exit 0
-          fi
-          BY_STATUS=$(jq -r '.by_status // {} | to_entries | map("\(.value) \(.key)") | join(", ")' /tmp/gate.json)
-          BY_KIND=$(jq -r '.by_kind // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' /tmp/gate.json)
-          block "${ACTIVE} job(s) queued/running (${BY_STATUS}; by kind: ${BY_KIND})"
+        run: bash .github/scripts/booking-deploy-preflight.sh
 
   deploy:
     name: Deploy to ECS Dev
