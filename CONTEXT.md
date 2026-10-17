@@ -278,6 +278,12 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   `shared` + SELECT, INSERT on `shared.schema_versions` (CIS 243): registration, and
   `booking.v_schema_versions` (a view reads with its owner's rights) for readiness. Rollback of bk-014
   is an Infra `roles/` undo file (the master), never a `booking/` file.
+- **Ownership only; not isolation yet.** `aa_cis_admin` inherits `bk_owner` (rl-001; on PostgreSQL 15
+  the grant follows the member's INHERIT, per-grant `INHERIT FALSE` needs 16), so the CIS runtime, which
+  logs in as `aa_cis_admin`, can still read and alter `booking.*` (PII read/write, DROP/ALTER, DISABLE
+  TRIGGER, exemption from any future non-FORCE RLS) until X1 S18 (CIS runtime on `cis_app`) + S19 (CIS
+  task role denied the master and `booking/*` secrets). P0-9 is not met at S8: the probe cell "CIS
+  runtime → `booking.customers` 42501" stays pending, and no SEC-1 / P0-9 item closes on bk-014 alone.
 - The app connects as role `booking`: `USAGE` on schema `booking` only (no `CREATE`), DML on its
   tables, `audit_logs` append-only, views read-only. Its LOGIN password is set out-of-band by
   Nghiep and stored only in Secrets Manager `booking/dev/database-url`. **No password in Git.**
@@ -437,6 +443,11 @@ default privileges for role `booking` restated `FOR ROLE bk_owner` (bk-001's thr
 rows revoked. Guards: refuses without `bk_owner`/membership/CIS 243 grants; raises if any object in `booking` is still
 not owned by `bk_owner` (an object newer than its list), if a SECURITY DEFINER function exists, if the default
 privileges are not exactly bk-001's rows, or if any non-owner privilege differs from a snapshot taken at the start.
+Runs only as `aa_cis_admin` (first guard): idempotent as the master (the CI re-run), never re-run by DB Migrate after
+the transfer (it would run as `bk_owner` and refuse; a forced redo is a `roles/` file). Locks: one up-front `LOCK TABLE`
+of the 32 tables + `v_customer_summary` (hot tables first, app inbox order), held until COMMIT, all or none within
+`lock_timeout` 5 s. Ownership only: the CIS runtime still reaches `booking.*` through `aa_cis_admin`'s membership in
+`bk_owner` until X1 S18/S19 (see "Ownership only; not isolation yet" above).
 Applied in the X1 S8 train (`rl-001 → 243 → bk-014 → tp-013`) with `booking.job` idle. Not added to
 `REQUIRED_SCHEMA_VERSIONS` here (migration-only PR, MIG-4); readiness keeps working because the view's new owner has
 the 243 SELECT grant.

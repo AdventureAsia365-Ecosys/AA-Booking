@@ -7,6 +7,8 @@ The session DB has every migration applied (conftest, test_bk001's re-run)."""
 
 from __future__ import annotations
 
+import re
+
 import asyncpg
 import pytest
 
@@ -16,6 +18,20 @@ from tests.migration_guard import MASTER_ROLE, OWNER_ROLE
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 BK014_SQL = next(p for p in MIGRATIONS if p.name.startswith("014_")).read_text(encoding="utf-8")
+
+# bk-014's own object list, parsed from its ALTER ... OWNER TO bk_owner lines: what the tests below check, so a later
+# migration that adds objects (bk-015+, created by bk_owner itself) does not change them.
+BK014_OBJECTS: dict[str, list[str]] = {
+    kind: re.findall(rf"^ALTER {kind} (booking\.\S+) OWNER TO bk_owner;$", BK014_SQL, re.M)
+    for kind in ("TABLE", "VIEW", "SEQUENCE", "FUNCTION")
+}
+
+LISTED_OWNER_SQL = {
+    "TABLE": "SELECT relowner::regrole::text FROM pg_class WHERE oid = $1::regclass AND relkind = 'r'",
+    "VIEW": "SELECT relowner::regrole::text FROM pg_class WHERE oid = $1::regclass AND relkind = 'v'",
+    "SEQUENCE": "SELECT relowner::regrole::text FROM pg_class WHERE oid = $1::regclass AND relkind = 'S'",
+    "FUNCTION": "SELECT proowner::regrole::text FROM pg_proc WHERE oid = $1::regprocedure",
+}
 
 OWNED_SQL = """
 SELECT 'schema' AS kind, nspname AS name, nspowner::regrole::text AS owner FROM pg_namespace WHERE nspname = 'booking'
@@ -35,16 +51,35 @@ async def _admin(dsn: str) -> asyncpg.Connection:
     return await asyncpg.connect(dsn)
 
 
-async def test_every_booking_object_is_owned_by_bk_owner(migrated_admin_dsn: str) -> None:
+async def test_bk014_lists_the_objects_its_header_names() -> None:
+    """32 tables, 2 views, 5 standalone sequences, 12 functions: a property of bk-014 itself, not of the replay."""
+    sizes = {kind: len(names) for kind, names in BK014_OBJECTS.items()}
+    assert sizes == {"TABLE": 32, "VIEW": 2, "SEQUENCE": 5, "FUNCTION": 12}
+    assert all(len(set(names)) == len(names) for names in BK014_OBJECTS.values())
+
+
+@pytest.mark.parametrize(
+    ("kind", "name"),
+    [(kind, name) for kind, names in BK014_OBJECTS.items() for name in names],
+    ids=lambda v: v,
+)
+async def test_every_object_bk014_lists_is_owned_by_bk_owner(migrated_admin_dsn: str, kind: str, name: str) -> None:
+    conn = await _admin(migrated_admin_dsn)
+    try:
+        assert await conn.fetchval(LISTED_OWNER_SQL[kind], name) == OWNER_ROLE
+    finally:
+        await conn.close()
+
+
+async def test_nothing_in_booking_is_owned_by_anyone_but_bk_owner(migrated_admin_dsn: str) -> None:
+    """Stays true as files are added: bk-015+ run as bk_owner (XD8), so their objects are bk_owner's too."""
     conn = await _admin(migrated_admin_dsn)
     try:
         rows = await conn.fetch(OWNED_SQL)
-        kinds: dict[str, int] = {}
-        for r in rows:
-            kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
         assert {(r["kind"], r["name"]) for r in rows if r["owner"] != OWNER_ROLE} == set()
-        # 32 tables, 2 views, 6 sequences (5 standalone + trip_case_status_history.seq identity), 12 functions.
-        assert (kinds["rel:r"], kinds["rel:v"], kinds["rel:S"], kinds["function"]) == (32, 2, 6, 12)
+        # The identity sequence follows its table (not in bk-014's list): trip_case_status_history.seq.
+        identity = await conn.fetchval("SELECT pg_get_serial_sequence('booking.trip_case_status_history', 'seq')")
+        assert await conn.fetchval(OWNER_OF, identity) == OWNER_ROLE
         assert await conn.fetchval("SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", OWNER_ROLE) is False
     finally:
         await conn.close()
@@ -162,6 +197,19 @@ async def test_guard_refuses_without_the_cis_243_grants(migrated_admin_dsn: str)
         await admin.execute("ROLLBACK")
     finally:
         await admin.execute("GRANT SELECT, INSERT ON shared.schema_versions TO bk_owner")
+        await admin.close()
+
+
+async def test_guard_refuses_to_run_as_bk_owner(migrated_admin_dsn: str) -> None:
+    """After the transfer DB Migrate would run a booking/ file as bk_owner (XD8): bk-014 must refuse, clearly."""
+    admin = await _admin(migrated_admin_dsn)
+    try:
+        async with as_booking_owner(admin) as role:
+            assert role == OWNER_ROLE
+            with pytest.raises(asyncpg.RaiseError, match="bk-014 runs only as the master before the transfer"):
+                await admin.execute(BK014_SQL)
+            await admin.execute("ROLLBACK")
+    finally:
         await admin.close()
 
 
