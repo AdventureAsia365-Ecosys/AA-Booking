@@ -178,7 +178,8 @@
   .aa-topbar { gap: 6px !important; padding: 0 10px !important; }
   .aa-topbar-search,
   .aa-topbar-crumb-root,
-  .aa-topbar-account-name { display: none !important; }
+  .aa-topbar-account-name,
+  .aa-topbar-cis-label { display: none !important; }
   .aa-topbar-menu,
   .aa-topbar-search-icon { display: inline-flex !important; }
   .aa-topbar-spacer { display: block !important; }

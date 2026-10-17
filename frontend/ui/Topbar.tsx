@@ -5,6 +5,9 @@
 //   - breadcrumb "Booking / <page>" from ui/nav.tsx;
 //   - right: theme switch, then the Figma pill cluster: bell (unread dot → popover) | dashed divider |
 //     role label + avatar → menu (Settings, Open CIS admin ↗, Sign out).
+// AA-883 (S241 admin console, Q1 "every app links across") — a visible "CIS console ↗" link left of
+// the theme switch, so the way back to the CIS console is one click (not only inside the account
+// menu). The label hides below 768 px (ui/shell.css), the icon stays.
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -152,6 +155,31 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
       </button>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <a
+          href={CIS_ADMIN_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="CIS console: content, tenants, staff and platform (opens in a new tab)"
+          aria-label="Open the CIS console (new tab)"
+          data-testid="topbar-cis-console"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            height: 36,
+            padding: "0 10px",
+            borderRadius: 8,
+            color: K.ink3,
+            fontSize: 12.5,
+            fontWeight: 600,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+            fontFamily: sans,
+          }}
+        >
+          <ExternalLink size={15} />
+          <span className="aa-topbar-cis-label">CIS console</span>
+        </a>
         <span className="aa-topbar-theme">
           <ThemeToggle />
         </span>
