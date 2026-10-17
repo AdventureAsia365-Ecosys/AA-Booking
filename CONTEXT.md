@@ -63,7 +63,9 @@ backend/
   app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
   app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
   app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin)
-  app/auth/                staff JWT + JWKS cache (tokens.py), profile/provisioning/permissions (staff.py), admin ops
+  app/auth/                staff JWT + JWKS cache (tokens.py), profile/provisioning/permissions (staff.py), admin ops,
+                           deploy workflow GitHub OIDC verifier (ci.py, AA-751)
+  app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
                            versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
   app/customers/           customers over booking.v_customer_summary (status lead/active/past), leads, archive
@@ -75,8 +77,8 @@ backend/
   app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff/release) + Worker loop (O3, maintenance hooks,
-                           release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind) + metrics.py (backlog
-                           metrics sampler, AA/Jobs/Booking to CloudWatch, AA-751)
+                           release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind, DEPLOY_GATE_EXEMPT) +
+                           metrics.py (backlog metrics sampler, AA/Jobs/Booking to CloudWatch, AA-751)
   app/retention/           AA-825 retention kinds bk_retention_job / bk_retention_inbox_redact: policy (windows),
                            redact (inbox payload PII), archive (S3 JSONL.gz), runner (batched count/delete/redact),
                            jobs (modes, handlers, daily schedule hook, admin status)
@@ -113,8 +115,8 @@ migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Inf
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
-                           AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-810.md, AA-811.md, AA-822.md,
-                           AA-823.md, AA-825.md)
+                           AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
+                           AA-811.md, AA-822.md, AA-823.md, AA-825.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Job template copy), deploy-dev.yml
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -155,10 +157,10 @@ send, OTP) is not built: those still write rows only.
 
 ## Staff authentication and permissions (AA-680, ADR 0004 O1)
 
-- Every `/booking/*` route except `/booking/health*` needs `Authorization: Bearer <CIS staff JWT>`: RS256,
-  `kid` header, `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `exp`, `sub` = CIS `admin_users.id`, claims
-  `email`, `name`, `cis_role` (`admin|reviewer|content`). The JWKS is cached 10 min; an unknown `kid` refetches
-  (at most every 30 s); with no key set at all the answer is 503, a bad token is 401.
+- Every `/booking/*` route except `/booking/health*` and `/booking/ops/*` needs
+  `Authorization: Bearer <CIS staff JWT>`: RS256, `kid` header, `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `exp`,
+  `sub` = CIS `admin_users.id`, claims `email`, `name`, `cis_role` (`admin|reviewer|content`). The JWKS is cached
+  10 min; an unknown `kid` refetches (at most every 30 s); with no key set at all the answer is 503, a bad token is 401.
 - First valid token → `booking.staff_users` row: CIS `admin` → active Booking `admin`; `reviewer` → `sales`,
   `content` → `content_creator`, **inactive** (403 `staff_inactive`) until a Booking admin activates them
   (`PATCH /booking/staff/{cis_user_id}`). Role and `active` are owned by Booking admins; later tokens only refresh
@@ -178,6 +180,16 @@ send, OTP) is not built: those still write rows only.
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
+- **One machine caller: the Deploy Dev workflow, by GitHub OIDC** (AA-751 B3, `app/auth/ci.py`). `GET
+  /booking/ops/deploy-gate` takes no staff JWT and no `staff_users` row. It accepts only a GitHub Actions OIDC token:
+  RS256 against GitHub's JWKS (`https://token.actions.githubusercontent.com/.well-known/jwks`, same cache code as the
+  staff JWKS), `iss` = `https://token.actions.githubusercontent.com`, `aud` = `aa-booking-deploy-gate`, `exp`/`iat`
+  required, `repository` = `AdventureAsia365-Ecosys/AA-Booking` and its immutable `repository_id` = `1418188499` /
+  `repository_owner_id` = `276539096` (names are reusable after a rename or transfer; a repo transfer or recreate
+  means changing these constants), `ref` = `refs/heads/main`, `environment` = `dev`,
+  `event_name` in `push`/`workflow_dispatch`, `job_workflow_ref` =
+  `AdventureAsia365-Ecosys/AA-Booking/.github/workflows/deploy-dev.yml@refs/heads/main`. Any other token is 401;
+  GitHub's JWKS unreachable (no cached keys) is 503. All values are code constants: no secret, no variable.
 
 ## Deferred work (`booking.job`, O3/O9)
 
@@ -209,6 +221,12 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   before the pool closes. AA-CIS-Infra owns the IAM grant (task role, namespace `AA/Jobs/Booking` only) and the three
   alarms `<booking prefix>-jobs-queue-age` (> 900 s), `-jobs-overdue-running` (> 0) and `-jobs-sampling-stopped` (no
   sample for 45 min, which also fires while the service is scaled to 0 or `WORKER_ENABLED` is off).
+- **Deploy gate (AA-751 B3/B4).** `GET /booking/ops/deploy-gate` returns `{active, by_status, by_kind, safe_to_deploy,
+  exempt_kinds}`: `queued` + `running` rows with no time filter, kinds in `DEPLOY_GATE_EXEMPT` (`app/jobs/kinds.py`,
+  today `bk_inquiry_pull`, the always-queued pull) not counted. The `preflight` job of `deploy-dev.yml` skips the gate
+  when the service runs no task, otherwise blocks the deploy unless `safe_to_deploy` (or a `workflow_dispatch`
+  `override_running_jobs` reason is given); an unreachable gate blocks too. Pushes that only touch `backend/tests/**`
+  do not deploy.
 
 | Kind | What |
 |---|---|

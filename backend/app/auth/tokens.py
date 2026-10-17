@@ -43,7 +43,7 @@ class InvalidToken(Exception):
 
 
 class AuthUnavailable(Exception):
-    """No CIS key set could be loaded (HTTP 503)."""
+    """No key set could be loaded from the JWKS (CIS, or GitHub for the deploy gate): HTTP 503."""
 
 
 @dataclass(frozen=True)
@@ -123,10 +123,42 @@ class JwksCache:
             elif kid not in self._keys and now - (self._attempted_at or 0.0) >= self._unknown_kid_refetch:
                 await self._refresh()
             if self._keys is None:
-                raise AuthUnavailable("CIS JWKS unavailable")
+                raise AuthUnavailable("JWKS unavailable")
             if kid not in self._keys:
                 raise InvalidToken("unknown signing key")
             return self._keys[kid]
+
+
+async def decode_rs256(
+    jwks: JwksCache, token: str, *, audience: str, issuer: str, required: list[str]
+) -> dict[str, Any]:
+    """Verify an RS256 JWT against ``jwks`` (``kid`` header required) and return its claims.
+
+    Raises :class:`InvalidToken` for anything wrong with the token itself and :class:`AuthUnavailable` (from the
+    cache) when no key set could be loaded. Shared by the staff verifier and the deploy-gate verifier (``app.auth.ci``).
+    """
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError as exc:
+        raise InvalidToken("malformed token") from exc
+    if header.get("alg") != ALGORITHM:
+        raise InvalidToken("unexpected algorithm")
+    kid = header.get("kid")
+    if not isinstance(kid, str) or not kid:
+        raise InvalidToken("missing kid")
+    key = await jwks.key(kid)
+    try:
+        return jwt.decode(
+            token,
+            key,
+            algorithms=[ALGORITHM],
+            audience=audience,
+            issuer=issuer,
+            leeway=LEEWAY_S,
+            options={"require": required},
+        )
+    except jwt.PyJWTError as exc:
+        raise InvalidToken(type(exc).__name__) from exc
 
 
 class StaffTokenVerifier:
@@ -136,28 +168,9 @@ class StaffTokenVerifier:
         self._audience = audience
 
     async def verify(self, token: str) -> StaffClaims:
-        try:
-            header = jwt.get_unverified_header(token)
-        except jwt.PyJWTError as exc:
-            raise InvalidToken("malformed token") from exc
-        if header.get("alg") != ALGORITHM:
-            raise InvalidToken("unexpected algorithm")
-        kid = header.get("kid")
-        if not isinstance(kid, str) or not kid:
-            raise InvalidToken("missing kid")
-        key = await self._jwks.key(kid)
-        try:
-            claims = jwt.decode(
-                token,
-                key,
-                algorithms=[ALGORITHM],
-                audience=self._audience,
-                issuer=self._issuer,
-                leeway=LEEWAY_S,
-                options={"require": ["exp", "iss", "aud", "sub"]},
-            )
-        except jwt.PyJWTError as exc:
-            raise InvalidToken(type(exc).__name__) from exc
+        claims = await decode_rs256(
+            self._jwks, token, audience=self._audience, issuer=self._issuer, required=["exp", "iss", "aud", "sub"]
+        )
         sub = claims.get("sub")
         cis_role = claims.get("cis_role")
         if not isinstance(sub, str) or not sub.strip() or len(sub) > 128:
