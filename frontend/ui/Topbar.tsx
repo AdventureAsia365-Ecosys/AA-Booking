@@ -19,7 +19,7 @@ import { pageTitle } from "./nav";
 import { staffDisplay, useStaff } from "./StaffContext";
 import { NotificationPopover } from "./booking/NotificationPopover";
 import { signOut } from "./signOut";
-import { CIS_ADMIN_URL } from "@/lib/config";
+import { CIS_CONSOLE_URL } from "@/lib/config";
 
 export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void; onOpenMenu: () => void }) {
   const pathname = usePathname();
@@ -156,7 +156,7 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <a
-          href={CIS_ADMIN_URL}
+          href={CIS_CONSOLE_URL}
           target="_blank"
           rel="noopener noreferrer"
           title="CIS console: content, tenants, staff and platform (opens in a new tab)"
@@ -352,7 +352,7 @@ function AccountMenu() {
           />
           <a
             role="menuitem"
-            href={CIS_ADMIN_URL}
+            href={CIS_CONSOLE_URL}
             target="_blank"
             rel="noopener noreferrer"
             style={{ ...menuRowStyle, textDecoration: "none" }}
