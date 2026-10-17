@@ -50,7 +50,7 @@ Design sources, in order:
 | DB access | asyncpg with plain SQL, no ORM in request paths; `ssl="require"` |
 | Lint / tests | ruff, pytest + pytest-asyncio, migration guard, integration tests on Postgres 15 |
 | Runtime | ECS Fargate service `aa-booking-dev-api` on `aa-cis-dev-cluster` (acc2, us-west-1) |
-| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the copied CIS kit tokens, react-query, TanStack Table. Vercel project not created yet. Customer surface (O8) not started |
+| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the copied CIS kit tokens, react-query, TanStack Table. Vercel project `aa-booking-admin`, deployed by CI (`.github/workflows/vercel-deploy.yml`, see Staff admin frontend). Customer surface (O8) not started |
 
 ## Layout
 
@@ -463,6 +463,11 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
   API). Public: `NEXT_PUBLIC_CIS_ADMIN_URL`, `NEXT_PUBLIC_GOOGLE_SIGNIN_URL` (unset = no Google button, AA-703).
+- Frontend deploys (S241): CI-created via `.github/workflows/vercel-deploy.yml` (Vercel project `aa-booking-admin`),
+  only when a PR or a push to `main` touches `frontend/**` — PR → preview + one PR comment with the URL, `main` →
+  production. The Vercel Git integration is off via `frontend/vercel.json` (`git.deploymentEnabled: false`) because
+  the Hobby team cap (~100 deployments / 24 h for all projects, canceled ones included) was being used up. Needs the
+  repo secret `VERCEL_TOKEN`.
 
 ## Working rules
 

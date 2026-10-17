@@ -85,3 +85,6 @@ curl -s localhost:8000/booking/health
   environment variable `AWS_ROLE_ARN`, ECR push with the git-SHA tag, new task definition revision,
   update service, wait stable, verify image, smoke `/booking/health` + `/booking/health/ready`.
   Skipped until the variable is set.
+- **Frontend deploys:** CI-created via `.github/workflows/vercel-deploy.yml` (only when `frontend/**`
+  changes: PR → preview, `main` → production); the Vercel Git integration is off via
+  `frontend/vercel.json` (`git.deploymentEnabled: false`). Needs the repo secret `VERCEL_TOKEN`.
