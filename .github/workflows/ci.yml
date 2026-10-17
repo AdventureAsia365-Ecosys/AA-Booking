@@ -120,7 +120,7 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: aa_cis_admin
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-only
           POSTGRES_DB: booking_ci
         ports:
