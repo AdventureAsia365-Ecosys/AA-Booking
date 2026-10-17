@@ -3,7 +3,7 @@
 // every such block, and an "Edit in CIS" link for the roles that edit content there (admin, content_creator).
 
 import { ExternalLink } from "lucide-react";
-import { CIS_ADMIN_URL } from "@/lib/config";
+import { CIS_ADMIN_URL, CIS_CONSOLE_PATH } from "@/lib/config";
 
 export function FromCisTag() {
   return (
@@ -13,7 +13,7 @@ export function FromCisTag() {
   );
 }
 
-export function ManagedInCisLink({ path = "", label = "Edit in CIS" }: { path?: string; label?: string }) {
+export function ManagedInCisLink({ path = CIS_CONSOLE_PATH, label = "Edit in CIS" }: { path?: string; label?: string }) {
   return (
     <a
       href={`${CIS_ADMIN_URL}${path}`}
