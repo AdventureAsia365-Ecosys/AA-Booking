@@ -267,8 +267,17 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   `AA-CIS-Infra/db/migrations/booking/` and applied by the **DB Migrate** workflow (check → apply).
   Never applied from a laptop. Apply a migration before merging code that needs it, then add it to
   `REQUIRED_SCHEMA_VERSIONS`.
-- DB Migrate runs as the RDS master user `aa_cis_admin`, so every `booking.*` object is owned by it.
-  Default privileges therefore say `FOR ROLE aa_cis_admin` (ADR 0004 decision 6).
+- **Owner of `booking.*` = NOLOGIN role `bk_owner` from bk-014** (X1, ADR 0008 decision 6; created by
+  AA-CIS-Infra `db/migrations/roles/001`, granted to the RDS master). Until bk-014 DB Migrate ran every
+  file as the RDS master `aa_cis_admin`, which owned everything (default privileges `FOR ROLE
+  aa_cis_admin`, ADR 0004 decision 6). bk-014 moves the schema and all 34 relations, 5 standalone
+  sequences and 12 functions to `bk_owner`, restates the default privileges `FOR ROLE bk_owner` and
+  revokes the old rows; role `booking`'s privileges are unchanged. From bk-015 on DB Migrate runs
+  each file as `bk_owner` (`SET ROLE`, it follows the live owner of schema `booking`), so new objects
+  are owned by `bk_owner` and new default privileges say `FOR ROLE bk_owner`. `bk_owner` needs USAGE on
+  `shared` + SELECT, INSERT on `shared.schema_versions` (CIS 243): registration, and
+  `booking.v_schema_versions` (a view reads with its owner's rights) for readiness. Rollback of bk-014
+  is an Infra `roles/` undo file (the master), never a `booking/` file.
 - The app connects as role `booking`: `USAGE` on schema `booking` only (no `CREATE`), DML on its
   tables, `audit_logs` append-only, views read-only. Its LOGIN password is set out-of-band by
   Nghiep and stored only in Secrets Manager `booking/dev/database-url`. **No password in Git.**
@@ -419,6 +428,18 @@ points at it (its FK guard picks the self-FK up). The worker's recurring-kind pr
 `NOT EXISTS (SELECT 1 FROM booking.job c WHERE c.parent_job_id = booking.job.id)` to prune (`job_parent_idx` serves it),
 or one ForeignKeyViolation fails the whole DELETE, escapes `maintenance()` and stops the worker claiming.
 `/booking/health/ready` requires `bk-013` (since the AA-751 release-on-shutdown change).
+
+### `bk-014` (AA-852, X1 plan S6 — needs Infra `rl-001` + CIS `243`)
+
+Ownership only, no shape change: schema `booking`, its 32 tables + 2 views (indexes, row types and the
+`trip_case_status_history.seq` identity sequence follow), 5 standalone sequences and 12 trigger functions → `bk_owner`;
+default privileges for role `booking` restated `FOR ROLE bk_owner` (bk-001's three rows), the `FOR ROLE aa_cis_admin`
+rows revoked. Guards: refuses without `bk_owner`/membership/CIS 243 grants; raises if any object in `booking` is still
+not owned by `bk_owner` (an object newer than its list), if a SECURITY DEFINER function exists, if the default
+privileges are not exactly bk-001's rows, or if any non-owner privilege differs from a snapshot taken at the start.
+Applied in the X1 S8 train (`rl-001 → 243 → bk-014 → tp-013`) with `booking.job` idle. Not added to
+`REQUIRED_SCHEMA_VERSIONS` here (migration-only PR, MIG-4); readiness keeps working because the view's new owner has
+the 243 SELECT grant.
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
