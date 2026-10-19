@@ -14,7 +14,15 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
 - ``CIS_JWKS_URL``: JWKS of the CIS staff login (ADR 0004 O1, AA-680). Default: the Dev value
   ``https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json``.
 - ``STAFF_JWT_ISSUER``: expected ``iss`` of staff JWTs. Default: ``https://api-cis.lumiguides.it.com``.
-  Both must be ``https://`` unless ``ENVIRONMENT`` is ``test`` or ``local``.
+  Both must be ``https://`` unless ``ENVIRONMENT`` is ``test`` or ``local``. Both describe the CIS **bridge** token,
+  accepted during the Cognito transition only (AA-680 PR-4 removes them).
+
+Cognito WORKFORCE staff sign-in (AA-680 Phase 2, root ADR 0006 §8; ``app.auth.identity_config``). All optional and
+**never set on Dev**: the defaults are the Dev pool and clients (code constants, public values). Same names as CIS.
+
+- ``COGNITO_WORKFORCE_ISSUER``: the WORKFORCE pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
+- ``COGNITO_BOOKING_STAFF_CLIENT_ID``: the ``booking-staff`` app client (the Booking staff UI's sign-in).
+- ``COGNITO_BREAKGLASS_CLIENT_ID``: the ``breakglass`` app client.
 
 Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` grants the task role
 ``ses:SendEmail`` as ``SES_FROM_ADDRESS`` only):
@@ -34,6 +42,8 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+from app.auth.identity_config import DEV_BOOKING_STAFF_CLIENT_ID, DEV_BREAKGLASS_CLIENT_ID, DEV_WORKFORCE_ISSUER
 
 SERVICE_NAME = "aa-booking-api"
 
@@ -66,6 +76,9 @@ class Settings:
     ses_configuration_set: str = ""
     ses_region: str = DEFAULT_SES_REGION
     staff_admin_url: str = DEFAULT_STAFF_ADMIN_URL
+    cognito_workforce_issuer: str = DEV_WORKFORCE_ISSUER
+    cognito_booking_staff_client_id: str = DEV_BOOKING_STAFF_CLIENT_ID
+    cognito_breakglass_client_id: str = DEV_BREAKGLASS_CLIENT_ID
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -90,6 +103,17 @@ class Settings:
             if value.startswith("http://") and self.environment in INSECURE_ENVIRONMENTS:
                 continue
             raise SettingsError(f"{name} must be an https:// URL, got {value!r}")
+        issuer = self.cognito_workforce_issuer
+        if not issuer.startswith("https://") or issuer.endswith("/"):
+            raise SettingsError(
+                f"COGNITO_WORKFORCE_ISSUER must be an https:// URL without a trailing slash, got {issuer!r}"
+            )
+        for name, client_id in (
+            ("COGNITO_BOOKING_STAFF_CLIENT_ID", self.cognito_booking_staff_client_id),
+            ("COGNITO_BREAKGLASS_CLIENT_ID", self.cognito_breakglass_client_id),
+        ):
+            if not client_id or not client_id.isalnum():
+                raise SettingsError(f"{name} must be a Cognito app client id (letters and digits), got {client_id!r}")
 
 
 def _flag(raw: str | None, default: bool, name: str) -> bool:
@@ -122,4 +146,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ses_configuration_set=(env.get("SES_CONFIGURATION_SET") or "").strip(),
         ses_region=(env.get("SES_REGION") or DEFAULT_SES_REGION).strip(),
         staff_admin_url=(env.get("STAFF_ADMIN_URL") or DEFAULT_STAFF_ADMIN_URL).strip().rstrip("/"),
+        cognito_workforce_issuer=(env.get("COGNITO_WORKFORCE_ISSUER") or "").strip() or DEV_WORKFORCE_ISSUER,
+        cognito_booking_staff_client_id=(env.get("COGNITO_BOOKING_STAFF_CLIENT_ID") or "").strip()
+        or DEV_BOOKING_STAFF_CLIENT_ID,
+        cognito_breakglass_client_id=(env.get("COGNITO_BREAKGLASS_CLIENT_ID") or "").strip()
+        or DEV_BREAKGLASS_CLIENT_ID,
     )

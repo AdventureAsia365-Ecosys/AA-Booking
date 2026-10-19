@@ -20,8 +20,7 @@ import pytest_asyncio
 
 from app import audit
 from app.auth import admin as staff_admin
-from app.auth.staff import Staff, provision
-from app.auth.tokens import StaffClaims
+from app.auth.staff import BridgeClaims, Staff, provision
 from app.customers import service as customers
 from app.db import Database
 from app.errors import Conflict, Forbidden, Invalid
@@ -64,7 +63,7 @@ async def pool(migrated_booking_dsn: str, admin: asyncpg.Connection) -> AsyncIte
 async def staff(pool: asyncpg.Pool, admin: asyncpg.Connection, sub: str, role: str = "admin") -> Staff:
     cis_role = "admin" if role == "admin" else "reviewer"
     async with pool.acquire() as conn, conn.transaction():
-        await provision(conn, StaffClaims(sub, f"{sub}@example.test", sub.title(), cis_role), role)
+        await provision(conn, BridgeClaims(sub, f"{sub}@example.test", sub.title(), cis_role), role)
     await admin.execute("UPDATE booking.staff_users SET active = true, role = $2 WHERE cis_user_id = $1", sub, role)
     return Staff(sub, f"{sub}@example.test", sub.title(), role, True, cis_role)
 

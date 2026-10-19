@@ -3,8 +3,8 @@ name: CI
 # Five required checks, named like AA-CIS-App's so branch protection reads the same
 # (root ADR 0004 decision 3): Lint, Security Audit, Unit Tests, Integration Tests, Docker Build Check.
 # A sixth, non-required check builds the staff frontend (ADR 0004 decision 3, "Frontend Build").
-# A seventh, non-required check (AA-751) compares the vendored job table template with AA-CIS-App main
-# ("Job template copy").
+# A seventh, non-required check compares the files vendored from AA-CIS-App main ("Vendored CIS copies": the job
+# table template, AA-751, and the multi-issuer verifier, AA-680).
 
 on:
   pull_request:
@@ -202,20 +202,21 @@ jobs:
           output-file: sbom-${{ github.sha }}.cdx.json
           artifact-name: sbom-${{ github.sha }}.cdx.json
 
-  # Non-required (AA-751, S240 decision): backend/tests/job_template/ holds byte copies of AA-CIS-App
-  # shared/jobs/job_table_template.sql + job_table_shape.py (ADR 0003a decision 2); Integration Tests compares
-  # booking.job with that template. This job fails when a copy drifts from CIS main. Stdlib only, no install; the
-  # repos are public, github.token only lifts the API rate limit.
-  job-template-copy:
-    name: Job template copy
+  # Non-required (AA-751, S240 decision): byte copies of AA-CIS-App files — backend/tests/job_template/ (shared/jobs/
+  # job_table_template.sql + job_table_shape.py, ADR 0003a decision 2; Integration Tests compares booking.job with that
+  # template) and backend/app/auth/identity_verifier.py (api/core/identity_verifier.py, root ADR 0006 §8 rule 9,
+  # AA-680). This job fails when a copy drifts from CIS main. Stdlib only, no install; the repos are public,
+  # github.token only lifts the API rate limit.
+  vendored-copies:
+    name: Vendored CIS copies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: Compare the vendored job table template with AA-CIS-App main
+      - name: Compare the vendored CIS files with AA-CIS-App main
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_job_template_copy.py
+        run: python3 scripts/check_vendored_copies.py
 
   # Non-required (ADR 0004 decision 3): eslint, tsc and `next build` of the staff admin in frontend/.
   # Mirrors the CIS frontend checks. Needs no secret: the app reads BOOKING_API_URL / CIS_API_URL at
