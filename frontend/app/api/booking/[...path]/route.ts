@@ -2,9 +2,12 @@
 // AA-683 — the BFF proxy (UI spec §6): browser → /api/booking/<path> → <BOOKING_API_URL>/booking/<path>
 // with `Authorization: Bearer <Booking JWT>` from the httpOnly cookie. The browser never holds a token.
 //
-// - No CIS session cookie → 401 (the page sends the user to /login).
-// - The Booking token is re-minted from the CIS session when it is missing or under 2 minutes from
-//   expiry, and once more if the API still answers 401 (clock skew, key rotation).
+// - Company e-mail session (AA-680: bk_staff_rt refresh cookie, path /api): the Cognito access token is refreshed
+//   (single-flight, lib/cognito.ts) when it is missing or under 2 minutes from expiry, and once more if the API still
+//   answers 401; the rotated cookies are set on the answer. A revoked / expired refresh token ends the session (401).
+// - Legacy CIS password session (bk_cis_session, until AA-680 PR-4): the Booking token is re-minted from the CIS
+//   session when it is missing or under 2 minutes from expiry, and once more if the API still answers 401.
+// - Neither → 401 (the page sends the user to /login).
 // - Only JSON bodies are forwarded (no uploads in Wave 1); the upstream status and body pass through.
 // - Path segments are re-encoded and `.` / `..` are refused, so a request can never leave /booking/.
 
@@ -13,10 +16,18 @@ import { bookingApiUrl, UPSTREAM_TIMEOUT_MS } from "@/lib/config";
 import {
   ACCESS_COOKIE,
   CIS_SESSION_COOKIE,
+  clearSessionCookies,
   cookieOptions,
   mintBookingToken,
   needsRefresh,
 } from "@/lib/session";
+import {
+  CognitoAuthError,
+  readRefreshCookie,
+  refreshStaffTokens,
+  setStaffSessionCookies,
+  type StaffTokens,
+} from "@/lib/cognito";
 import { isSameOrigin } from "@/lib/sameOrigin";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +43,7 @@ function json(status: number, detail: string, message: string) {
 
 function endSession(status: number, detail: string, message: string) {
   const res = json(status, detail, message);
-  res.cookies.set(CIS_SESSION_COOKIE, "", cookieOptions(0));
-  res.cookies.set(ACCESS_COOKIE, "", cookieOptions(0));
+  clearSessionCookies(res);
   return res;
 }
 
@@ -48,13 +58,27 @@ async function handler(req: NextRequest, { params }: Ctx) {
     if (!isSameOrigin(req)) return json(403, "bad_origin", "Cross-site request refused.");
   }
 
+  const rt = readRefreshCookie(req);
   const cisSession = req.cookies.get(CIS_SESSION_COOKIE)?.value;
-  if (!cisSession) return json(401, "not_signed_in", "Your session has ended. Sign in again.");
+  if (!rt && !cisSession) return json(401, "not_signed_in", "Your session has ended. Sign in again.");
 
   let access = req.cookies.get(ACCESS_COOKIE)?.value ?? "";
   let refreshed: { token: string; expiresIn: number } | null = null;
+  let rotated: StaffTokens | null = null;
 
   async function remint(): Promise<NextResponse | null> {
+    if (rt) {
+      try {
+        rotated = await refreshStaffTokens(rt.refreshToken);
+      } catch (e) {
+        if (e instanceof CognitoAuthError && e.code === "unreachable") {
+          return json(503, "auth_unavailable", "Company sign-in is not answering right now. Try again in a moment.");
+        }
+        return endSession(401, "session_expired", "Your session has ended. Sign in again.");
+      }
+      access = rotated.accessToken;
+      return null;
+    }
     const minted = await mintBookingToken(cisSession!);
     if (!minted.ok) {
       if (minted.reason === "unauthorized") {
@@ -96,7 +120,7 @@ async function handler(req: NextRequest, { params }: Ctx) {
   let upstream: Response;
   try {
     upstream = await send();
-    if (upstream.status === 401 && !refreshed) {
+    if (upstream.status === 401 && !refreshed && !rotated) {
       const failed = await remint();
       if (failed) return failed;
       upstream = await send();
@@ -116,6 +140,8 @@ async function handler(req: NextRequest, { params }: Ctx) {
   });
   const fresh = refreshed as { token: string; expiresIn: number } | null;
   if (fresh) out.cookies.set(ACCESS_COOKIE, fresh.token, cookieOptions(fresh.expiresIn));
+  const cognito = rotated as StaffTokens | null;
+  if (cognito && rt) setStaffSessionCookies(out, cognito, rt.sessionEnd, rt.refreshToken);
   return out;
 }
 

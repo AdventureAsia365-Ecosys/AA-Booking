@@ -2,7 +2,10 @@
 // AA-683 — staff sign-in (UI spec §4.1, ADR 0004 O1, Nghiệp S236 decision 2).
 //   1. CIS POST /auth/admin-login {username, password}      → CIS staff session token (24 h)
 //   2. CIS POST /auth/booking-token (Bearer = CIS token)    → Booking JWT (RS256, aud=booking, ~15 min)
-//   3. both tokens go into httpOnly cookies (lib/session.ts); neither is returned to the browser
+//   3. both tokens go into httpOnly cookies (lib/session.ts); neither is returned to the browser; a company e-mail
+//      (Cognito) session cookie is cleared, so only one session kind is held at a time
+// LEGACY (AA-680): kept as the fallback where company e-mail sign-in is not offered (previews, secret not set) and
+// for the E2E account until AA-680 PR-4 retires the CIS bridge.
 //   4. Booking GET /booking/staff/me tells the page whether the profile is active or pending activation
 // Error copy never says which of the two fields was wrong. Cross-origin or non-JSON posts are refused (403).
 
@@ -13,6 +16,8 @@ import {
   CIS_SESSION_COOKIE,
   CIS_SESSION_MAX_AGE_S,
   cookieOptions,
+  STAFF_REFRESH_COOKIE,
+  STAFF_REFRESH_COOKIE_PATH,
   mintBookingToken,
 } from "@/lib/session";
 import { fetchStaffMe } from "@/lib/api/server";
@@ -87,5 +92,6 @@ export async function POST(req: NextRequest) {
   });
   response.cookies.set(CIS_SESSION_COOKIE, cisToken, cookieOptions(CIS_SESSION_MAX_AGE_S));
   response.cookies.set(ACCESS_COOKIE, minted.token, cookieOptions(minted.expiresIn));
+  response.cookies.set(STAFF_REFRESH_COOKIE, "", { ...cookieOptions(0), path: STAFF_REFRESH_COOKIE_PATH });
   return response;
 }

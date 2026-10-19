@@ -480,11 +480,24 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
 
 ## Staff admin frontend (AA-683)
 
-- `frontend/` is a Next.js app for Booking staff (UI spec S236). The browser only talks to its own BFF:
-  `POST /api/auth/login` (CIS `/auth/admin-login` → `/auth/booking-token`), `POST /api/auth/logout`, and
-  `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the Booking JWT as Bearer. Tokens live only in
-  httpOnly cookies (`bk_cis_session`, `bk_access`); `proxy.ts` and the BFF re-mint the 15-minute Booking token
-  from the CIS session.
+- `frontend/` is a Next.js app for Booking staff (UI spec S236). The browser only talks to its own BFF.
+- **Sign-in (AA-680 Phase 2): "Sign in with company email"** = Cognito WORKFORCE managed login on
+  `staff-auth.lumiguides.it.com` through the confidential **booking-staff** client (authorization code + PKCE S256;
+  `lib/cognito.ts`, ported from CIS `frontend/lib/cognito.ts`): `GET /api/auth/signin/cognito?next=…` →
+  `GET /api/auth/callback/cognito` (state / nonce / iss / client checks, then `GET /booking/staff/me` decides: 403
+  `no_booking_role` → no session, refresh token revoked, `/login?reason=no_booking_role`) → cookies `bk_access` (the
+  access token; the cookie lives for the 12 h session) + `bk_staff_rt` (refresh token, path `/api`). `proxy.ts` sends a
+  page whose Cognito token is under 2 min from expiry to `GET /api/auth/refresh?next=…`; the BFF proxy refreshes
+  itself (single-flight). `POST /api/auth/logout` revokes the refresh token and returns the Cognito `/logout` URL.
+  Offered only on the registered hosts (`booking.lumiguides.it.com`, `aa-booking-admin.vercel.app`, `localhost:3001`
+  under `next dev`) with `COGNITO_BOOKING_STAFF_CLIENT_SECRET` set; elsewhere (Vercel previews) only the legacy form.
+- **Legacy CIS password bridge (until AA-680 PR-4)**: `POST /api/auth/login` (CIS `/auth/admin-login` →
+  `/auth/booking-token`) → `bk_cis_session` + `bk_access`; `proxy.ts` and the BFF re-mint the 15-minute Booking token
+  from the CIS session. On hosts with company sign-in the form sits collapsed under the company button (E2E account).
+  One session kind at a time: each sign-in clears the other kind's cookies.
+- `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the access token as Bearer. Tokens live only in
+  httpOnly cookies. Booking roles of company sign-in profiles are read-only on `/staff` (set in CIS → Platform →
+  Staff, API 409 `managed_in_directory`); Activate / Deactivate stays.
 - `frontend/ui/` holds byte copies of the CIS kit (`app/_kit`, `_brand/tokens.ts`, the `--aa-*` blocks of
   `globals.css`) with the source commit in each header. Brand values change in CIS first, then are copied again.
   Booking-only components are in `frontend/ui/booking/` and use Tailwind utilities mapped to the same variables.
@@ -503,7 +516,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
-  API). Public: `NEXT_PUBLIC_CIS_ADMIN_URL`, `NEXT_PUBLIC_GOOGLE_SIGNIN_URL` (unset = no Google button, AA-703).
+  API), `COGNITO_BOOKING_STAFF_CLIENT_SECRET` (secret; unset = no company sign-in), optional
+  `COGNITO_BOOKING_STAFF_CLIENT_ID` / `COGNITO_WORKFORCE_DOMAIN` / `COGNITO_WORKFORCE_ISSUER` (Dev defaults in code).
+  Public: `NEXT_PUBLIC_CIS_ADMIN_URL`. Staff never sign in with Google (ADR 0006a A9): the AA-703 Google placeholder is
+  removed.
 - Frontend deploys (S241): CI-created via `.github/workflows/vercel-deploy.yml` (Vercel project `aa-booking-admin`),
   only when a PR or a push to `main` touches `frontend/**` — PR → preview + one PR comment with the URL, `main` →
   production. The Vercel Git integration is off via `frontend/vercel.json` (`git.deploymentEnabled: false`) because

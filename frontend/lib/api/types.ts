@@ -34,6 +34,8 @@ export interface StaffProfile {
   cis_role: string | null;
   created_at: IsoDateTime | null;
   last_seen_at: IsoDateTime | null;
+  /** AA-680: linked to a company sign-in (Cognito); the role follows the booking-* group, set in CIS → Platform → Staff. */
+  managed_in_directory?: boolean;
 }
 
 export interface StaffMe extends StaffProfile {

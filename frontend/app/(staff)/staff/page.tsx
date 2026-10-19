@@ -13,6 +13,7 @@ import { Ban, CheckCircle2, Eye, Pencil } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
 import { ROLE_LABEL, STAFF_ROLES, isStaffRole } from "@/lib/rbac";
+import { CIS_STAFF_PATH } from "@/lib/config";
 import { DataTable, DateText, FilterBar, KpiTile, ManagedInCisLink, PageFrame, PersonCell, Pill, Section, StatusBadge, useUrlFilters } from "@/ui";
 import { useStaffActions } from "./_parts/useStaffActions";
 
@@ -49,12 +50,17 @@ export default function StaffPage() {
       cell: ({ row }) => {
         const s = row.original;
         const self = actions.isSelf(s);
+        const managed = actions.roleManagedInCis(s);
         return (
           <span className="inline-flex gap-1.5" onClick={(e) => e.stopPropagation()}>
             <IconAction label="View profile" onClick={() => router.push(`/staff/${encodeURIComponent(s.cis_user_id)}`)}>
               <Eye size={15} />
             </IconAction>
-            <IconAction label={self ? "You cannot change your own role" : "Change role"} disabled={self} onClick={() => actions.changeRole(s)}>
+            <IconAction
+              label={self ? "You cannot change your own role" : managed ? "Role is set in CIS → Platform → Staff" : "Change role"}
+              disabled={self || managed}
+              onClick={() => actions.changeRole(s)}
+            >
               <Pencil size={15} />
             </IconAction>
             {s.active ? (
@@ -75,8 +81,11 @@ export default function StaffPage() {
   return (
     <PageFrame title="Staff" description="Booking profiles of CIS staff accounts: their Booking role and whether they can use Booking.">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
-        <span>Staff accounts and passwords are managed in CIS admin. A person appears here after their first sign-in to Booking.</span>
-        <ManagedInCisLink label="Open CIS admin" />
+        <span>
+          Staff accounts and Booking roles are managed in CIS → Platform → Staff (company e-mail sign-in). A person appears here
+          after their first sign-in to Booking.
+        </span>
+        <ManagedInCisLink path={CIS_STAFF_PATH} label="Open CIS → Platform → Staff" />
       </div>
       <div className="aa-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiTile label="Total staff" value={value(items.length)} />

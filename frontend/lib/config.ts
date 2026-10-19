@@ -37,8 +37,10 @@ export const CIS_CONSOLE_URL = `${CIS_ADMIN_URL}${CIS_CONSOLE_PATH}`;
  *  A constant on Dev; it becomes configurable together with the production hostnames (AA-818). */
 export const CIS_MEDIA_URL = DEV_CIS_API_URL;
 
-/** Google sign-in start URL (AA-703). Empty = the "Continue with Google" button is not rendered. */
-export const GOOGLE_SIGNIN_URL = (process.env.NEXT_PUBLIC_GOOGLE_SIGNIN_URL || "").trim();
+/** CIS Platform → Staff: where Booking roles are granted (booking-* Cognito groups, ADR 0006a A1). Staff never sign
+ *  in with Google (ADR 0006a A9), so the old NEXT_PUBLIC_GOOGLE_SIGNIN_URL placeholder is gone (AA-680). */
+export const CIS_STAFF_PATH = "/admin/platform/staff";
+export const CIS_STAFF_URL = `${CIS_ADMIN_URL}${CIS_STAFF_PATH}`;
 
 /** Upstream request timeout for BFF calls, in milliseconds. */
 export const UPSTREAM_TIMEOUT_MS = 10_000;

@@ -20,11 +20,13 @@ export function SessionNotice({
   title,
   message,
   retry = false,
+  link,
 }: {
   tone: keyof typeof ICON;
   title: string;
   message: string;
   retry?: boolean;
+  link?: { href: string; label: string };
 }) {
   const router = useRouter();
   return (
@@ -35,6 +37,16 @@ export function SessionNotice({
         <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-accent-tint">{ICON[tone]}</div>
         <h1 className="font-display text-xl font-semibold text-ink">{title}</h1>
         <p className="mt-2 text-sm text-muted">{message}</p>
+        {link && (
+          <a
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-block text-sm font-medium text-accent-deep hover:underline"
+          >
+            {link.label}
+          </a>
+        )}
         <div className="mt-6 flex justify-center gap-2">
           {retry && (
             <Button variant="primary" onClick={() => router.refresh()}>
