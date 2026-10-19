@@ -1,0 +1,56 @@
+name: PR title
+# AA-890: with squash merges the PR title becomes the commit subject on main, so it must follow the
+# commit format "<type>: <description>" (types below, optional scope). Two Linear rules are checked too:
+# no "[AA-123]" in the title, and no closing keyword ("Fixes AA-123", "Closes AA-123", ...) in the body,
+# because Linear would close the issue on merge. Write "Refs AA-123" instead.
+#
+# Free: one short job per PR event, no checkout, no secrets beyond the default read-only token.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Conventional title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            refactor
+            docs
+            ci
+            test
+            perf
+          requireScope: false
+          subjectPattern: ^(?!.*\[AA-\d+\]).+$
+          subjectPatternError: |
+            The title "{title}" carries a Linear key in brackets. Remove "[AA-...]" from the title and put
+            "Refs AA-..." in the PR body instead.
+
+      - name: No Linear closing keywords in the body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          pattern='(^|[^[:alnum:]])(close[sd]?|closing|fix(e[sd])?|fixing|resolve[sd]?|resolving|complete[sd]?|completing)[[:space:]:]+AA-[0-9]+'
+          if printf '%s' "$BODY" | grep -qiE "$pattern"; then
+            printf '%s' "$BODY" | grep -inE "$pattern" | head -5
+            echo "::error title=Linear keyword::Use 'Refs AA-123' in the PR body. Closing keywords make Linear close the issue on merge; an issue is Done only after deploy and a live check."
+            exit 1
+          fi
+          echo "No closing keywords."
