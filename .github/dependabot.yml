@@ -3,8 +3,8 @@
 #   Version updates are off (open-pull-requests-limit: 0); the weekly schedule only paces the group.
 # - github-actions: weekly version updates, grouped into one PR (pinned action versions are a supply-chain
 #   control; Infra does the same).
-# Dependabot PRs get no repository secrets, so a secret-dependent check (Vercel deploy) fails on them. When that
-# happens, push the same change from a normal branch. Alerts and security updates are switched on in the repo
+# Dependabot PRs get no repository secrets, so the Vercel deploy job skips itself on them (AA-903) and they get
+# no preview. To see a preview, push the same change from a normal branch. Alerts and security updates are switched on in the repo
 # settings (on since AA-867). Triage and SLA: AA-Ecosys docs/security/vulnerability-management.md.
 version: 2
 updates:
