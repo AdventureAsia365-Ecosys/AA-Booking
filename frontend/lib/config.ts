@@ -5,7 +5,7 @@
 // Dev defaults (UI spec §6, ADR 0004 O2): the Booking REST API execute-api stage until
 // api-booking.lumiguides.it.com has its ACM certificate, and the live CIS API.
 
-export const DEV_BOOKING_API_URL = "https://9z3xnalp59.execute-api.us-west-1.amazonaws.com/dev";
+export const DEV_BOOKING_API_URL = "https://api-booking.lumiguides.it.com"; // custom domain (ADR 0004 O2); same API as the execute-api stage
 export const DEV_CIS_API_URL = "https://api-cis.lumiguides.it.com";
 export const DEV_CIS_ADMIN_URL = "https://aa-cis.lumiguides.it.com";
 
