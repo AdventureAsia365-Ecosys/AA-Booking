@@ -36,8 +36,11 @@ Design sources, in order:
   `catalog.v_destination` (supplier place picker and check, AA-822) and `catalog.v_tour` / `v_tour_day` /
   `v_tour_photo` (trip plan endpoints, AA-679, S237 decision D4). Later: other catalog views (`v_tour_place`), CIS
   golden records.
-- **Trusts** the CIS staff login (ADR 0004 O1): CIS issues an RS256 JWT with `aud=booking`; Booking
-  verifies it against the CIS JWKS and keeps only a thin staff profile (`booking.staff_users`).
+- **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
+  access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
+  (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
+  issues an RS256 JWT with `aud=booking`, verified against the CIS JWKS). Booking keeps only a thin staff profile
+  (`booking.staff_users`) and never reads the CIS staff directory.
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -63,8 +66,10 @@ backend/
   app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
   app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
   app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin)
-  app/auth/                staff JWT + JWKS cache (tokens.py), profile/provisioning/permissions (staff.py), admin ops,
-                           deploy workflow GitHub OIDC verifier (ci.py, AA-751)
+  app/auth/                identity_verifier.py (byte copy of AA-CIS-App api/core/identity_verifier.py, the multi-issuer
+                           verifier; never edited here), identity_config.py (accepted issuers + clients, JWKS prefetch,
+                           AA-680), profile / Cognito identity link / permissions (staff.py), admin ops (admin.py),
+                           deploy workflow GitHub OIDC verifier (ci.py, AA-751) over the single-issuer cache (tokens.py)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
                            versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
@@ -108,16 +113,17 @@ backend/
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready, booking.job vs template
   tests/job_template/      byte copies of AA-CIS-App shared/jobs/job_table_template.sql + job_table_shape.py (AA-751;
-                           never edited here, drift-checked by CI "Job template copy")
-  scripts/                 check_job_template_copy.py (that drift check; stdlib, GitHub contents API)
+                           never edited here, drift-checked by CI "Vendored CIS copies")
+  scripts/                 check_vendored_copies.py (that drift check, also for app/auth/identity_verifier.py; stdlib,
+                           GitHub contents API)
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
-docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
+docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md)
-.github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Job template copy), deploy-dev.yml
+.github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml
 .github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4)
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
@@ -139,7 +145,9 @@ scaling to 1 is an approved, billable step.
 Process environment (set by the task definition): `DATABASE_URL` (from the secret), `ENVIRONMENT`,
 `GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
 (optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
-`STAFF_JWT_ISSUER` (optional; default to the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
+`STAFF_JWT_ISSUER` (optional; the CIS bridge, default the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
+Cognito (AA-680, all optional and **not set on Dev**, defaults are code constants in `app/auth/identity_config.py`):
+`COGNITO_WORKFORCE_ISSUER`, `COGNITO_BOOKING_STAFF_CLIENT_ID`, `COGNITO_BREAKGLASS_CLIENT_ID` (same names as CIS).
 E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inquiry e-mail; empty = no e-mail),
 `SES_FROM_ADDRESS` (must equal the Infra `ses_from_address`, the only From the task role may use; empty = no e-mail),
 `SES_CONFIGURATION_SET` (Infra `aa-email-<env>-transactional`), `SES_REGION` (default `us-west-1`), `STAFF_ADMIN_URL`
@@ -156,16 +164,34 @@ transaction. Templates are in code (`app/notifications/staff_email.py`). Bounce/
 tables is not built yet (the SES configuration set's account suppression list applies). Customer e-mail (proposal
 send, OTP) is not built: those still write rows only.
 
-## Staff authentication and permissions (AA-680, ADR 0004 O1)
+## Staff authentication and permissions (AA-680; root ADR 0006 / 0006a, ADR 0004 O1)
 
-- Every `/booking/*` route except `/booking/health*` and `/booking/ops/*` needs
-  `Authorization: Bearer <CIS staff JWT>`: RS256, `kid` header, `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `exp`,
-  `sub` = CIS `admin_users.id`, claims `email`, `name`, `cis_role` (`admin|reviewer|content`). The JWKS is cached
-  10 min; an unknown `kid` refetches (at most every 30 s); with no key set at all the answer is 503, a bad token is 401.
-- First valid token → `booking.staff_users` row: CIS `admin` → active Booking `admin`; `reviewer` → `sales`,
-  `content` → `content_creator`, **inactive** (403 `staff_inactive`) until a Booking admin activates them
-  (`PATCH /booking/staff/{cis_user_id}`). Role and `active` are owned by Booking admins; later tokens only refresh
-  email/name/cis_role/last_seen_at.
+- Every `/booking/*` route except `/booking/health*` and `/booking/ops/*` needs `Authorization: Bearer <token>`,
+  checked by the multi-issuer verifier (`app/auth/identity_verifier.py`, a byte copy of the CIS module: RS256 only, the
+  issuer picked by the unverified `iss`, one JWKS cache per issuer, unknown `kid` refetch at most every 60 s, last good
+  keys kept on a failed fetch; no key set ever loaded = 503 `auth_unavailable`, any bad token = 401 `invalid_token`).
+  The lifespan prefetches both JWKS in the background (`identity_jwks_prefetched` per issuer; off when
+  `ENVIRONMENT=test`). Accepted (`app/auth/identity_config.py`):
+  - **WORKFORCE** (`https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS` on Dev) x clients
+    **booking-staff** and **breakglass**: access tokens only (`token_use = access`), the client in `client_id` (no
+    `aud` check), roles from `cognito:groups`. `cis-admin` is not accepted (no CIS screen calls Booking yet).
+  - **BRIDGE** (transition only, ADR 0006a A6): `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `sub` = CIS
+    `admin_users.id`, the role in `cis_role` (`admin|reviewer|content`). Removed by AA-680 PR-4 (`BRIDGE_ENABLED`).
+- **WORKFORCE identity (bk-016).** The Booking role is the first `booking-*` group in the order `booking-admin` →
+  `admin`, `booking-sales` → `sales`, `booking-contracting` → `contracting`, `booking-content_creator` →
+  `content_creator`, re-read on **every** request (a change is written and audited `staff.role_synced`); no
+  `booking-*` group = 403 `no_booking_role`, nothing written. `cis_role` = the highest `cis-*` group (informational).
+  The row is found by `(cognito_iss, cognito_sub)` only and never rebound. No row → one is created, active, keyed
+  `'cog:' || sub` (`email` from the token, `name` = the e-mail local part; audited `staff.provisioned`). Bridge-era rows
+  keep their CIS key: AA-CIS-Infra `db/scripts/aa680_link_staff_cognito.py` links them once from `shared.admin_users`.
+  A `cog:` key already bound to another issuer = 403 `identity_conflict`. `active = false` = 403 `staff_inactive`:
+  `active` stays a Booking admin switch (suspend); the **role** of a linked row is refused by `PATCH
+  /booking/staff/{id}` with 409 `managed_in_directory` (it is managed in CIS → Platform → Staff). `GET /booking/staff*`
+  shows `managed_in_directory`.
+- **BRIDGE provisioning** (unchanged): first valid token → `booking.staff_users` row keyed by `sub`: CIS `admin` →
+  active Booking `admin`; `reviewer` → `sales`, `content` → `content_creator`, **inactive** (403 `staff_inactive`)
+  until a Booking admin activates them. Later bridge tokens only refresh email/name/cis_role/last_seen_at, also on a
+  linked row. A bridge `sub` starting with `cog:` is 401.
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
   read trip cases / customers = admin, sales, contracting; write / assign / versions / customers write = admin,
   sales; staff directory (pickers) = admin, sales, contracting; pricing (margins, net costs, FX: `pricing.read`) =
@@ -180,7 +206,7 @@ send, OTP) is not built: those still write rows only.
   (`retention.admin`, AA-825) = admin. Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
-- Every staff write adds one `booking.audit_logs` row (`actor_ref` = CIS user id).
+- Every staff write adds one `booking.audit_logs` row (`actor_ref` = the staff key: CIS user id or `cog:<sub>`).
 - **One machine caller: the Deploy Dev workflow, by GitHub OIDC** (AA-751 B3, `app/auth/ci.py`). `GET
   /booking/ops/deploy-gate` takes no staff JWT and no `staff_users` row. It accepts only a GitHub Actions OIDC token:
   RS256 against GitHub's JWKS (`https://token.actions.githubusercontent.com/.well-known/jwks`, same cache code as the
@@ -451,6 +477,18 @@ of the 32 tables + `v_customer_summary` (hot tables first, app inbox order), hel
 Applied in the X1 S8 train (`rl-001 → 243 → bk-014 → tp-013`) with `booking.job` idle. Not added to
 `REQUIRED_SCHEMA_VERSIONS` here (migration-only PR, MIG-4); readiness keeps working because the view's new owner has
 the 243 SELECT grant.
+
+### `bk-016` (AA-680 Phase 2, root ADR 0006 / 0006a — needs `bk-003` only)
+
+`staff_users.cognito_iss` / `cognito_sub`: the linked Cognito WORKFORCE identity, a pair (both NULL or both set, issuer
+`https://…`, sub 1–128 chars; same check as CIS `shared.admin_users`), UNIQUE `(cognito_iss, cognito_sub)` (NULL pairs
+are distinct, so unlinked rows coexist). `cis_user_id` stays the primary key and every staff FK target; it is now
+**the Booking staff key** under its legacy name: CIS `admin_users.id` for bridge-era rows, `'cog:' || sub` for rows
+created on a WORKFORCE sign-in, and `staff_users_cognito_key_chk` makes a `cog:` key always carry its own sub.
+Bridge-era rows are linked once by AA-CIS-Infra `db/scripts/aa680_link_staff_cognito.py` (DB Migrate run-script, DRY
+RUN first) from `shared.admin_users.cognito_iss / cognito_sub`. No grant change (bk-003 grants are table-level). Not
+added to `REQUIRED_SCHEMA_VERSIONS` in its own PR (migration-only); the AA-680 code PR adds it after the apply, so
+`/booking/health/ready` requires `bk-016` from then on.
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),

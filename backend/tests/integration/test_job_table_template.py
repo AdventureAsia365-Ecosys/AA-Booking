@@ -1,7 +1,7 @@
 """booking.job conforms to the job table DDL template (AA-751, X6; ADR 0003a decision 2).
 
 The template and the comparator are byte copies of AA-CIS-App ``shared/jobs/`` (``tests/job_template/``, drift-checked
-by CI job "Job template copy"). The template is rendered with Booking's placeholders into a scratch schema inside a
+by CI job "Vendored CIS copies"). The template is rendered with Booking's placeholders into a scratch schema inside a
 transaction that is rolled back, then both tables are read from pg_catalog and compared: columns, CHECKs, PK / FK,
 indexes by definition, the updated_at trigger and reloptions. Runs after bk-013 (and, in this suite, after the second
 pass of every migration in test_bk001), so it also shows the catch-up converges.

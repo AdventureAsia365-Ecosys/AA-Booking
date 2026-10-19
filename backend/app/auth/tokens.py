@@ -1,12 +1,12 @@
-"""Staff JWT verification (ADR 0004 O1, AA-680): CIS signs, Booking verifies against the CIS JWKS.
+"""RS256 JWT verification against one JWKS: the cache and decoder of the deploy-gate verifier (``app.auth.ci``, AA-751).
 
-Contract (CIS side, AA-656/AA-680): RS256, ``kid`` header, ``iss`` = the CIS base URL, ``aud`` =
-``booking``, ``exp`` (15 min tokens), ``sub`` = CIS ``shared.admin_users.id`` as a string, claims
-``email``, ``name``, ``cis_role`` (``admin`` | ``reviewer`` | ``content``).
+Until AA-680 Phase 2 this module also verified the CIS staff JWT. Staff tokens (Cognito WORKFORCE and the CIS bridge)
+now go through the multi-issuer verifier ``app.auth.identity_verifier`` (a byte copy of the CIS module), configured in
+``app.auth.identity_config``; only the GitHub OIDC deploy gate still uses the cache and decoder here.
 
 The JWKS is cached for :data:`JWKS_TTL_S`. An unknown ``kid`` forces a refetch (key rotation), at most
 once per :data:`UNKNOWN_KID_REFETCH_S` so a stream of random ``kid`` values cannot make Booking hammer
-CIS. A failed fetch keeps the last good key set; with no key set at all the caller gets
+the issuer. A failed fetch keeps the last good key set; with no key set at all the caller gets
 :class:`AuthUnavailable` (HTTP 503), not "invalid token".
 """
 
@@ -18,16 +18,13 @@ import logging
 import time
 import urllib.request
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 import jwt
 
 log = logging.getLogger(__name__)
 
-AUDIENCE = "booking"
 ALGORITHM = "RS256"
-CIS_ROLES = frozenset({"admin", "reviewer", "content"})
 
 JWKS_TTL_S = 600.0
 UNKNOWN_KID_REFETCH_S = 30.0
@@ -39,19 +36,11 @@ JwksFetcher = Callable[[], Awaitable[dict[str, Any]]]
 
 
 class InvalidToken(Exception):
-    """The bearer token is missing, malformed, expired or not signed by a current CIS key (HTTP 401)."""
+    """The bearer token is missing, malformed, expired or not signed by a current key (HTTP 401)."""
 
 
 class AuthUnavailable(Exception):
-    """No key set could be loaded from the JWKS (CIS, or GitHub for the deploy gate): HTTP 503."""
-
-
-@dataclass(frozen=True)
-class StaffClaims:
-    sub: str
-    email: str | None
-    name: str | None
-    cis_role: str
+    """No key set could be loaded from the JWKS (GitHub for the deploy gate): HTTP 503."""
 
 
 def http_fetcher(url: str, timeout: float = FETCH_TIMEOUT_S) -> JwksFetcher:
@@ -135,7 +124,7 @@ async def decode_rs256(
     """Verify an RS256 JWT against ``jwks`` (``kid`` header required) and return its claims.
 
     Raises :class:`InvalidToken` for anything wrong with the token itself and :class:`AuthUnavailable` (from the
-    cache) when no key set could be loaded. Shared by the staff verifier and the deploy-gate verifier (``app.auth.ci``).
+    cache) when no key set could be loaded. Used by the deploy-gate verifier (``app.auth.ci``).
     """
     try:
         header = jwt.get_unverified_header(token)
@@ -159,34 +148,3 @@ async def decode_rs256(
         )
     except jwt.PyJWTError as exc:
         raise InvalidToken(type(exc).__name__) from exc
-
-
-class StaffTokenVerifier:
-    def __init__(self, jwks: JwksCache, issuer: str, audience: str = AUDIENCE) -> None:
-        self._jwks = jwks
-        self._issuer = issuer
-        self._audience = audience
-
-    async def verify(self, token: str) -> StaffClaims:
-        claims = await decode_rs256(
-            self._jwks, token, audience=self._audience, issuer=self._issuer, required=["exp", "iss", "aud", "sub"]
-        )
-        sub = claims.get("sub")
-        cis_role = claims.get("cis_role")
-        if not isinstance(sub, str) or not sub.strip() or len(sub) > 128:
-            raise InvalidToken("invalid sub")
-        if not isinstance(cis_role, str) or not cis_role:
-            raise InvalidToken("missing cis_role")
-        return StaffClaims(
-            sub=sub,
-            email=_text(claims.get("email")),
-            name=_text(claims.get("name")),
-            cis_role=cis_role,
-        )
-
-
-def _text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    return value[:320] or None
