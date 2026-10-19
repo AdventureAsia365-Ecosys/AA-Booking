@@ -1,3 +1,17 @@
+---
+id: ARCH-06-booking
+title: "AA-Booking — Repo Context"
+description: Stack, boundaries, ownership, domain terms and working rules of AA-Booking (booking API, booking job worker and staff admin); read it before designing or changing code in this repo.
+type: explanation
+status: active
+owner: nghiep
+audience: [engineer, agent]
+applies_to: [aa-booking-api, aa-booking-admin]
+last_reviewed: 2026-10-19
+review_every_days: 90
+related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
+---
+
 # AA-Booking — Repo Context
 
 AA-Booking (AAA) is the booking back office of the Adventure Asia ecosystem: customers (OTP
