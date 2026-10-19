@@ -92,7 +92,7 @@ jobs:
       ECS_SERVICE: ${{ vars.ECS_SERVICE || 'aa-booking-dev-api' }}
       BASE_URL: ${{ vars.BOOKING_API_BASE_URL || 'https://api-booking.lumiguides.it.com' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .github/scripts
 
@@ -122,7 +122,7 @@ jobs:
       ECS_TASK_FAMILY: ${{ vars.ECS_TASK_FAMILY || 'aa-booking-dev-api' }}
       BASE_URL: ${{ vars.BOOKING_API_BASE_URL || 'https://api-booking.lumiguides.it.com' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
