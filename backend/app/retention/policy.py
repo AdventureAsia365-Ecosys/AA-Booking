@@ -28,9 +28,20 @@ INBOX_KIND = "bk_retention_inbox_redact"
 # Archive location: the CIS archive bucket (AA-825, CIS ``services/retention/policy.py``), under a Booking-only
 # prefix so the task role can be granted ``s3:PutObject`` on ``archive/booking/*`` alone. Objects are
 # ``archive/booking/<table>/<yyyy>/<mm>/<job_id>-<run>-<part>-b<NNNNN>.jsonl.gz``.
-ARCHIVE_BUCKET = "aa-cis-bronze-005097885195"
+# The bucket name ends with the acc2 account ID (``aa-cis-bronze-<account>``). This repo is public, so the account
+# is not written here (AA-902): ``archive_bucket`` builds the name from the account the task runs in (STS, in
+# ``app.retention.jobs.default_bucket``); results and the summary show ``ARCHIVE_BUCKET_DISPLAY``.
+ARCHIVE_BUCKET_STEM = "aa-cis-bronze"
+ARCHIVE_BUCKET_DISPLAY = f"{ARCHIVE_BUCKET_STEM}-<acc2>"
 ARCHIVE_REGION = "us-west-1"
 ARCHIVE_PREFIX = "archive/booking"
+
+
+def archive_bucket(account_id: str) -> str:
+    """The archive bucket of an AWS account: ``aa-cis-bronze-<12-digit account ID>``."""
+    if len(account_id) != 12 or not account_id.isdigit():
+        raise ValueError("an AWS account ID has 12 digits")
+    return f"{ARCHIVE_BUCKET_STEM}-{account_id}"
 
 
 @dataclass(frozen=True)

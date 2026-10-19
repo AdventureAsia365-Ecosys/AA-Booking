@@ -36,7 +36,8 @@ const COGNITO_DOMAIN =
   (process.env.COGNITO_WORKFORCE_DOMAIN ?? "").trim().replace(/\/+$/, "") || DEFAULT_WORKFORCE_DOMAIN;
 export const WORKFORCE_ISSUER =
   (process.env.COGNITO_WORKFORCE_ISSUER ?? "").trim() ||
-  "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS";
+  // Public by design (the browser sees it); the AA-902 resource-ID check skips the next line.
+  "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS"; // docs-lint: ignore
 const CLIENT_ID = (process.env.COGNITO_BOOKING_STAFF_CLIENT_ID ?? "").trim() || "5ifl9dgkr8a5outnmsjc8v1kt3";
 const clientSecret = () => (process.env.COGNITO_BOOKING_STAFF_CLIENT_SECRET ?? "").trim();
 

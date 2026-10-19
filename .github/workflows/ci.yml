@@ -46,8 +46,8 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
-  # Unlike CIS (report-only), pip-audit FAILS here. The same job runs a gitleaks scan of the full
-  # git history: this repo carries the DB role / password flow, so a committed secret is the most
+  # Unlike CIS (report-only), pip-audit FAILS here. The same job runs the AA-902 resource-ID check and a gitleaks
+  # scan of the full git history: this repo carries the DB role / password flow, so a committed secret is the most
   # expensive mistake it can make (justification for this check over a type checker: AA-678 notes).
   security-audit:
     name: Security Audit
@@ -63,6 +63,12 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # AA-902: this repo is public, so no AWS account ID, ARN with an account, VPC/SG/subnet ID, Cognito pool ID
+      # or API Gateway host in any tracked file (DM-6.10). Stdlib only; runs first, it takes a second.
+      - name: No literal AWS resource IDs (failing)
+        working-directory: .
+        run: python3 .github/scripts/check_resource_ids.py
 
       - name: pip-audit (runtime + dev requirements, failing)
         run: |

@@ -26,6 +26,7 @@ keeps two workers (rolling deploy) from running the same kind at once.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from collections.abc import Callable
@@ -42,7 +43,15 @@ from app.jobs.worker import PermanentError
 from app.notifications.service import notify_staff
 from app.retention import runner
 from app.retention.archive import S3Archiver
-from app.retention.policy import ARCHIVE_BUCKET, ARCHIVE_PREFIX, ARCHIVE_REGION, KINDS, SPECS, Spec
+from app.retention.policy import (
+    ARCHIVE_BUCKET_DISPLAY,
+    ARCHIVE_PREFIX,
+    ARCHIVE_REGION,
+    KINDS,
+    SPECS,
+    Spec,
+    archive_bucket,
+)
 
 log = logging.getLogger(__name__)
 
@@ -61,10 +70,21 @@ AUDIT_ACTOR = "bk-retention"
 HELD_TYPE = "retention.held"
 
 S3Factory = Callable[[], Any]
+BucketFactory = Callable[[], str]
 
 
 def default_s3() -> Any:
     return boto3.client("s3", region_name=ARCHIVE_REGION)
+
+
+@functools.cache
+def default_bucket() -> str:
+    """The archive bucket of the account this task runs in (AA-902: no account ID in this public repo).
+
+    STS ``GetCallerIdentity`` needs no IAM permission. Called only when a live run archives rows; a failure raises
+    before anything is deleted (the archiver is built before the first batch) and is not cached."""
+    sts = boto3.client("sts", region_name=ARCHIVE_REGION)
+    return archive_bucket(sts.get_caller_identity()["Account"])
 
 
 # ── Mode ──────────────────────────────────────────────────────────────────────
@@ -167,7 +187,14 @@ _LOCK_SQL = "SELECT pg_try_advisory_lock(hashtextextended($1, 0))"
 _UNLOCK_SQL = "SELECT pg_advisory_unlock(hashtextextended($1, 0))"
 
 
-async def run_spec(pool: asyncpg.Pool, job: Job, spec: Spec, *, s3_factory: S3Factory = default_s3) -> dict[str, Any]:
+async def run_spec(
+    pool: asyncpg.Pool,
+    job: Job,
+    spec: Spec,
+    *,
+    s3_factory: S3Factory = default_s3,
+    bucket_factory: BucketFactory = default_bucket,
+) -> dict[str, Any]:
     payload = job.payload or {}
     trigger = payload.get("trigger", "manual")
     pause_s = max(0, int(payload.get("pause_ms", DEFAULT_PAUSE_MS))) / 1000.0
@@ -176,7 +203,7 @@ async def run_spec(pool: asyncpg.Pool, job: Job, spec: Spec, *, s3_factory: S3Fa
         if not await conn.fetchval(_LOCK_SQL, spec.kind):
             raise PermanentError(f"another {spec.kind} run holds the lock; this one did nothing")
         try:
-            return await _run_locked(conn, job, spec, payload, trigger, pause_s, batch_size, s3_factory)
+            return await _run_locked(conn, job, spec, payload, trigger, pause_s, batch_size, s3_factory, bucket_factory)
         finally:
             await conn.fetchval(_UNLOCK_SQL, spec.kind)
 
@@ -190,6 +217,7 @@ async def _run_locked(
     pause_s: float,
     batch_size: int,
     s3_factory: S3Factory,
+    bucket_factory: BucketFactory,
 ) -> dict[str, Any]:
     windows = spec.windows()
     refs = await runner.fk_refs(conn, spec.table) if spec.action == "delete" else []
@@ -222,7 +250,7 @@ async def _run_locked(
             cuts[spec.parts[0].name],
         )
     if any(p.archive for p in spec.parts):
-        result["archive"] = f"s3://{ARCHIVE_BUCKET}/{ARCHIVE_PREFIX}/{spec.archive_name}/yyyy/mm/"
+        result["archive"] = f"s3://{ARCHIVE_BUCKET_DISPLAY}/{ARCHIVE_PREFIX}/{spec.archive_name}/yyyy/mm/"
 
     if mode == "held":
         async with conn.transaction():
@@ -239,7 +267,7 @@ async def _run_locked(
     try:
         archiver = None
         if any(p.archive and r.candidates for p, r in zip(spec.parts, parts, strict=True)):
-            archiver = S3Archiver(s3_factory(), job.id)
+            archiver = S3Archiver(s3_factory(), job.id, bucket_factory())
         for part, res in zip(spec.parts, parts, strict=True):
             if remaining <= 0:
                 break
@@ -284,10 +312,12 @@ async def _run_locked(
     return result
 
 
-def build_handlers(s3_factory: S3Factory = default_s3) -> dict[str, Any]:
+def build_handlers(
+    s3_factory: S3Factory = default_s3, bucket_factory: BucketFactory = default_bucket
+) -> dict[str, Any]:
     def make(spec: Spec) -> Any:
         async def handler(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
-            return await run_spec(pool, job, spec, s3_factory=s3_factory)
+            return await run_spec(pool, job, spec, s3_factory=s3_factory, bucket_factory=bucket_factory)
 
         return handler
 
@@ -412,7 +442,7 @@ async def status(conn: asyncpg.Connection) -> dict[str, Any]:
         "growth_factor": GROWTH_FACTOR,
         "growth_floor_rows": GROWTH_FLOOR_ROWS,
         "schedule_utc_hour": SCHEDULE_UTC_HOUR,
-        "archive": f"s3://{ARCHIVE_BUCKET}/{ARCHIVE_PREFIX}/<table>/yyyy/mm/",
+        "archive": f"s3://{ARCHIVE_BUCKET_DISPLAY}/{ARCHIVE_PREFIX}/<table>/yyyy/mm/",
     }
 
 
