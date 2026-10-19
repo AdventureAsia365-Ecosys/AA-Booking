@@ -1,13 +1,16 @@
-"""Checks that Booking's vendored job table template files are byte copies of AA-CIS-App main (AA-751, X6).
+"""Checks that the files Booking vendors from AA-CIS-App are byte copies of AA-CIS-App main.
 
-``backend/tests/job_template/job_table_template.sql`` and ``job_table_shape.py`` are copies of AA-CIS-App
-``shared/jobs/`` (ADR 0003a decision 2: one DDL template, owned by CIS; every owner's CI compares its job table with
-it). This check fails when a copy differs from the file on AA-CIS-App ``main`` by even one byte, or is not on main yet.
-Modelled on AA-CIS-Infra ``db/check_migration_copies.py``.
+- ``tests/job_template/job_table_template.sql`` and ``job_table_shape.py`` = AA-CIS-App ``shared/jobs/`` (AA-751, X6;
+  ADR 0003a decision 2: one DDL template, owned by CIS; every owner's CI compares its job table with it);
+- ``app/auth/identity_verifier.py`` = AA-CIS-App ``api/core/identity_verifier.py`` (AA-680 Phase 2; root ADR 0006 §8
+  rule 9: the multi-issuer verifier is copied byte-identical into each app repo).
+
+This check fails when a copy differs from the file on AA-CIS-App ``main`` by even one byte, or is not on main yet.
+Modelled on AA-CIS-Infra ``db/check_migration_copies.py``. CI job "Vendored CIS copies" (non-required).
 
 Usage (from ``backend/``)::
 
-    python3 scripts/check_job_template_copy.py
+    python3 scripts/check_vendored_copies.py
 
 Reads the CIS files through the GitHub contents API (the app repos are public). ``GITHUB_TOKEN`` (or ``GH_TOKEN``) is
 used when set (higher rate limit); without it, or if GitHub rejects it, the call is anonymous. Rate limits, network
@@ -29,11 +32,12 @@ from typing import TextIO
 ORG = "AdventureAsia365-Ecosys"
 REPO = "AA-CIS-App"
 BRANCH = "main"
-LOCAL_DIR = Path(__file__).resolve().parent.parent / "tests" / "job_template"
-# local file name -> path in AA-CIS-App
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+# path under backend/ -> path in AA-CIS-App
 COPIES: dict[str, str] = {
-    "job_table_template.sql": "shared/jobs/job_table_template.sql",
-    "job_table_shape.py": "shared/jobs/job_table_shape.py",
+    "tests/job_template/job_table_template.sql": "shared/jobs/job_table_template.sql",
+    "tests/job_template/job_table_shape.py": "shared/jobs/job_table_shape.py",
+    "app/auth/identity_verifier.py": "api/core/identity_verifier.py",
 }
 
 
@@ -53,11 +57,11 @@ def first_difference(a: bytes, b: bytes) -> str:
     return f"one file is a prefix of the other ({len(a)} vs {len(b)} bytes)"
 
 
-def check_copy(name: str, local_dir: Path, fetch: Fetcher) -> str | None:
+def check_copy(name: str, base_dir: Path, fetch: Fetcher) -> str | None:
     """The problem with one copy, or None when it is a byte copy of CIS main."""
     source = COPIES[name]
     where = f"{ORG}/{REPO}@{BRANCH}:{source}"
-    local_path = local_dir / name
+    local_path = base_dir / name
     if not local_path.is_file():
         return f"missing; copy {where} here byte for byte"
     local = local_path.read_bytes()
@@ -90,7 +94,7 @@ def github_fetch(path: str, attempts: int = 3, sleep: Callable[[float], None] = 
             headers = {
                 "Accept": "application/vnd.github.raw",
                 "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "aa-booking-job-template-copy-check",
+                "User-Agent": "aa-booking-vendored-copy-check",
             }
             if auth:
                 headers["Authorization"] = f"Bearer {auth}"
@@ -116,11 +120,11 @@ def github_fetch(path: str, attempts: int = 3, sleep: Callable[[float], None] = 
     raise FetchError(f"could not read {REPO}:{path} from GitHub: {last}{hint}")
 
 
-def run(local_dir: Path = LOCAL_DIR, fetch: Fetcher = github_fetch, out: TextIO = sys.stdout) -> int:
+def run(base_dir: Path = BACKEND_DIR, fetch: Fetcher = github_fetch, out: TextIO = sys.stdout) -> int:
     failed = 0
     for name in COPIES:
-        problem = check_copy(name, local_dir, fetch)
-        rel = f"backend/tests/job_template/{name}"
+        problem = check_copy(name, base_dir, fetch)
+        rel = f"backend/{name}"
         if problem:
             failed += 1
             print(f"FAIL  {rel}: {problem}", file=out)

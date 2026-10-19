@@ -1,4 +1,6 @@
-"""Staff JWT verification against a local RSA key + fake JWKS (no network)."""
+"""The CIS bridge token through the Booking staff verifier (bridge profile of ``app.auth.identity_config``), and the
+single-issuer JWKS cache of ``app.auth.tokens`` that the deploy gate keeps using. Local RSA keys, fake JWKS, no
+network. The verifier's generic rules are covered by the vendored CIS tests (test_identity_verifier.py)."""
 
 from __future__ import annotations
 
@@ -9,8 +11,8 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app.auth import tokens
-from app.auth.tokens import AuthUnavailable, InvalidToken, JwksCache, StaffTokenVerifier, http_fetcher
+from app.auth import identity_verifier, tokens
+from app.auth.tokens import AuthUnavailable, InvalidToken, JwksCache, http_fetcher
 from tests.staff_tokens import ISSUER, LocalCis
 
 pytestmark = pytest.mark.asyncio
@@ -24,19 +26,20 @@ class Clock:
         return self.now
 
 
-async def test_valid_token_yields_claims() -> None:
+async def test_valid_bridge_token_yields_a_principal() -> None:
     cis = LocalCis()
-    claims = await cis.verifier().verify(cis.token(cis_role="reviewer", email="  A@B.test "))
-    assert claims.sub == "6f1c1f9e-0000-4000-8000-000000000001"
-    assert claims.cis_role == "reviewer"
-    assert claims.email == "A@B.test"
-    assert claims.name == "Staff One"
+    principal = await cis.verifier().verify(cis.token(cis_role="reviewer", email="  A@B.test "))
+    assert principal.iss == ISSUER
+    assert principal.sub == "6f1c1f9e-0000-4000-8000-000000000001"
+    assert principal.client_id == "booking"
+    assert principal.groups == ("reviewer",)
+    assert principal.email == "A@B.test"
 
 
 async def test_optional_profile_claims_may_be_absent() -> None:
     cis = LocalCis()
-    claims = await cis.verifier().verify(cis.token(email=None, name=None))
-    assert claims.email is None and claims.name is None
+    principal = await cis.verifier().verify(cis.token(email=None, name=None, cis_role=None))
+    assert principal.email is None and principal.groups == ()
 
 
 @pytest.mark.parametrize(
@@ -45,38 +48,45 @@ async def test_optional_profile_claims_may_be_absent() -> None:
         {"aud": "cis"},
         {"iss": "https://evil.test"},
         {"exp_in": -120},
-        {"cis_role": None},
         {"sub": ""},
         {"sub": "x" * 200},
         {"kid": ""},
         {"kid": "unknown"},
     ],
-    ids=["aud", "iss", "expired", "no-cis-role", "empty-sub", "long-sub", "no-kid", "unknown-kid"],
+    ids=["aud", "iss", "expired", "empty-sub", "long-sub", "no-kid", "unknown-kid"],
 )
 async def test_rejected_tokens(kwargs: dict[str, Any]) -> None:
     cis = LocalCis()
-    with pytest.raises(InvalidToken):
+    with pytest.raises(identity_verifier.InvalidToken):
         await cis.verifier().verify(cis.token(**kwargs))
 
 
 async def test_token_signed_by_another_key_is_rejected() -> None:
     cis = LocalCis()
     other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(identity_verifier.InvalidToken):
         await cis.verifier().verify(cis.token(key=other))
 
 
 async def test_hs256_token_is_rejected_before_any_key_lookup() -> None:
     cis = LocalCis()
     forged = cis.token(key="a-shared-secret-of-sufficient-length-1234", algorithm="HS256")
-    with pytest.raises(InvalidToken, match="algorithm"):
+    with pytest.raises(identity_verifier.InvalidToken, match="algorithm"):
         await cis.verifier().verify(forged)
     assert cis.fetches == 0
 
 
 async def test_malformed_token() -> None:
-    with pytest.raises(InvalidToken, match="malformed"):
+    with pytest.raises(identity_verifier.InvalidToken, match="malformed"):
         await LocalCis().verifier().verify("not-a-jwt")
+
+
+async def test_a_bridge_token_signed_with_the_workforce_key_is_rejected() -> None:
+    """Rule 2: the claimed issuer picks the key set; a kid from the other issuer is never looked up."""
+    cis = LocalCis()
+    forged = cis.token(key=cis.workforce.private_key, kid=cis.workforce.kid)
+    with pytest.raises(identity_verifier.InvalidToken, match="unknown signing key"):
+        await cis.verifier().verify(forged)
 
 
 async def test_slight_clock_skew_is_tolerated() -> None:
@@ -84,7 +94,7 @@ async def test_slight_clock_skew_is_tolerated() -> None:
     await cis.verifier().verify(cis.token(exp_in=-10))
 
 
-# ── JWKS cache ───────────────────────────────────────────────────────────────
+# ── app.auth.tokens JWKS cache (deploy gate) ─────────────────────────────────
 
 
 async def test_jwks_is_cached_for_the_ttl_then_refetched() -> None:
@@ -142,8 +152,8 @@ async def test_no_keys_at_all_is_auth_unavailable() -> None:
 async def test_verifier_maps_missing_jwks_to_auth_unavailable() -> None:
     cis = LocalCis()
     cis.fail_next = True
-    with pytest.raises(AuthUnavailable):
-        await StaffTokenVerifier(JwksCache(cis.fetch), ISSUER).verify(cis.token())
+    with pytest.raises(identity_verifier.AuthUnavailable):
+        await cis.verifier().verify(cis.token())
 
 
 async def test_non_rsa_and_broken_keys_are_ignored() -> None:

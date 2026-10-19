@@ -1,4 +1,8 @@
-"""Staff profile operations: admin list / activate / role, the picker directory, detail and preferences."""
+"""Staff profile operations: admin list / activate / role, the picker directory, detail and preferences.
+
+Rows linked to a Cognito identity (``cognito_sub`` set, bk-016) refuse a role change with 409 ``managed_in_directory``:
+their role follows the booking-* group on every sign-in. Their ``active`` flag is still a Booking admin switch.
+"""
 
 from __future__ import annotations
 
@@ -34,6 +38,14 @@ async def update_staff(
     if row is None:
         raise NotFound("staff_not_found", f"staff user {cis_user_id} not found")
     current = Staff.from_row(row)
+    if current.managed_in_directory and role is not None and role != current.role:
+        # AA-680 Phase 2: a row linked to a Cognito identity takes its role from the booking-* group on every sign-in,
+        # so a Booking-side role change would be overwritten. `active` stays a Booking switch (suspend / re-enable).
+        raise Conflict(
+            "managed_in_directory",
+            "this staff member's Booking role comes from their company sign-in groups:"
+            " change it in CIS → Platform → Staff",
+        )
     if cis_user_id == admin.cis_user_id and (active is False or (role is not None and role != "admin")):
         raise Conflict("cannot_demote_self", "an admin cannot deactivate or demote themself")
     new_active = current.active if active is None else active

@@ -3,8 +3,10 @@
 Every public path is under ``/booking``: the shared ALB forwards ``/booking/*`` to this service and
 the Booking REST API proxies ``/booking/{proxy+}`` (root ADR 0004 decision 5).
 
-Staff routes (everything under ``/booking`` except ``/booking/health*`` and ``/booking/ops/*``) verify a CIS staff JWT
-against the CIS JWKS (``app.auth``, ADR 0004 O1) and require an active ``booking.staff_users`` row. The one machine
+Staff routes (everything under ``/booking`` except ``/booking/health*`` and ``/booking/ops/*``) verify a Cognito
+WORKFORCE access token (clients booking-staff / breakglass) or, during the transition, the CIS bridge token, with the
+multi-issuer verifier (``app.auth.identity_config``, AA-680 Phase 2), and require an active ``booking.staff_users``
+row. The lifespan prefetches both issuers' JWKS in the background. The one machine
 route, ``/booking/ops/deploy-gate``, accepts only the Deploy Dev workflow's GitHub OIDC token (``app.auth.ci``).
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
@@ -22,8 +24,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.auth import identity_config
 from app.auth.ci import GithubDeployVerifier
-from app.auth.tokens import JwksCache, StaffTokenVerifier, http_fetcher
+from app.auth.identity_verifier import MultiIssuerVerifier
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
@@ -58,12 +61,12 @@ WORKER_STOP_TIMEOUT_S = 20.0
 def create_app(
     settings: Settings | None = None,
     db: Database | None = None,
-    verifier: StaffTokenVerifier | None = None,
+    verifier: MultiIssuerVerifier | None = None,
     deploy_verifier: GithubDeployVerifier | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
-    verifier = verifier or StaffTokenVerifier(JwksCache(http_fetcher(settings.cis_jwks_url)), settings.staff_jwt_issuer)
+    verifier = verifier or identity_config.build_staff_verifier(settings)
     deploy_verifier = deploy_verifier or GithubDeployVerifier.default()
 
     @asynccontextmanager
@@ -71,6 +74,8 @@ def create_app(
         stop = asyncio.Event()
         task: asyncio.Task[None] | None = None
         sampler_task: asyncio.Task[None] | None = None
+        # Off when ENVIRONMENT=test (no network in TestClient runs); never delays start-up, never raises.
+        prefetch_task = identity_config.start_staff_jwks_prefetch(verifier, settings)
         if settings.worker_enabled and db.configured:
             handlers = {
                 **intake.HANDLERS,
@@ -89,6 +94,7 @@ def create_app(
             sampler_task = asyncio.create_task(JobMetricsSampler(db.pool).run_forever(stop), name="booking-job-metrics")
         yield
         stop.set()
+        await identity_config.stop_staff_jwks_prefetch(prefetch_task)
         if sampler_task is not None:
             # Cancelled at once (a sample in flight is simply lost), before the pool closes.
             sampler_task.cancel()

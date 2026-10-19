@@ -7,8 +7,13 @@ requires-python = ">=3.12,<3.13"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-# Byte copies of AA-CIS-App shared/jobs/ (AA-751): CIS style, never edited here.
-extend-exclude = ["tests/job_template/job_table_shape.py"]
+# Byte copies of AA-CIS-App files (CIS style, never edited here; CI "Vendored CIS copies" checks them): shared/jobs/
+# (AA-751), the multi-issuer verifier api/core/identity_verifier.py and its tests up to the CIS config part (AA-680).
+extend-exclude = [
+    "tests/job_template/job_table_shape.py",
+    "app/auth/identity_verifier.py",
+    "tests/unit/test_identity_verifier.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "BLE", "ASYNC", "S"]

@@ -17,8 +17,7 @@ import pytest
 import pytest_asyncio
 
 from app.auth import admin as staff_admin
-from app.auth.staff import Staff, provision
-from app.auth.tokens import StaffClaims
+from app.auth.staff import BridgeClaims, Staff, provision
 from app.db import Database
 from app.errors import Conflict, Invalid
 from app.main import create_app
@@ -57,7 +56,7 @@ async def pool(migrated_booking_dsn: str, admin: asyncpg.Connection) -> AsyncIte
 
 async def provisioned(pool: asyncpg.Pool, sub: str, cis_role: str, role: str) -> Staff:
     async with pool.acquire() as conn, conn.transaction():
-        return await provision(conn, StaffClaims(sub, f"{sub}@example.test", sub.title(), cis_role), role)
+        return await provision(conn, BridgeClaims(sub, f"{sub}@example.test", sub.title(), cis_role), role)
 
 
 async def new_case(pool: asyncpg.Pool, legs: list[tuple[int, str, int, int]] = ()) -> dict[str, Any]:

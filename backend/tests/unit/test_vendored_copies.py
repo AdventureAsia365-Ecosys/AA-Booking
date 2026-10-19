@@ -1,4 +1,5 @@
-"""scripts/check_job_template_copy.py: the drift check of the vendored CIS job table template (AA-751)."""
+"""scripts/check_vendored_copies.py: the drift check of the files vendored from AA-CIS-App (job table template, AA-751;
+multi-issuer verifier, AA-680)."""
 
 from __future__ import annotations
 
@@ -9,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_job_template_copy.py"
-_spec = importlib.util.spec_from_file_location("check_job_template_copy", SCRIPT)
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_vendored_copies.py"
+_spec = importlib.util.spec_from_file_location("check_vendored_copies", SCRIPT)
 assert _spec and _spec.loader
 check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check)
@@ -18,12 +19,14 @@ _spec.loader.exec_module(check)
 
 def _local(tmp_path: Path) -> Path:
     for name in check.COPIES:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_bytes(f"-- {name}\nline two\n".encode())
     return tmp_path
 
 
 def test_the_vendored_files_exist_and_are_listed() -> None:
-    assert sorted(p.name for p in check.LOCAL_DIR.iterdir() if p.name in check.COPIES) == sorted(check.COPIES)
+    assert all((check.BACKEND_DIR / name).is_file() for name in check.COPIES)
+    assert check.COPIES["app/auth/identity_verifier.py"] == "api/core/identity_verifier.py"
 
 
 def test_byte_copies_pass(tmp_path: Path) -> None:
@@ -31,7 +34,7 @@ def test_byte_copies_pass(tmp_path: Path) -> None:
     by_source = {src: (local / name).read_bytes() for name, src in check.COPIES.items()}
     out = io.StringIO()
     assert check.run(local, by_source.get, out) == 0
-    assert "2 file(s) checked, 0 failed" in out.getvalue()
+    assert "3 file(s) checked, 0 failed" in out.getvalue()
 
 
 def test_a_one_byte_difference_fails_with_its_position(tmp_path: Path) -> None:
@@ -46,14 +49,14 @@ def test_a_one_byte_difference_fails_with_its_position(tmp_path: Path) -> None:
 
 def test_missing_upstream_missing_copy_and_fetch_errors_fail(tmp_path: Path) -> None:
     local = _local(tmp_path)
-    (local / "job_table_shape.py").unlink()
+    (local / "tests/job_template/job_table_shape.py").unlink()
 
     def fetch(path: str) -> bytes | None:
         raise check.FetchError("HTTP 500")
 
-    assert "missing; copy" in check.check_copy("job_table_shape.py", local, fetch)
-    assert "cannot compare" in check.check_copy("job_table_template.sql", local, fetch)
-    assert "not found on" in check.check_copy("job_table_template.sql", local, lambda _p: None)
+    assert "missing; copy" in check.check_copy("tests/job_template/job_table_shape.py", local, fetch)
+    assert "cannot compare" in check.check_copy("tests/job_template/job_table_template.sql", local, fetch)
+    assert "not found on" in check.check_copy("app/auth/identity_verifier.py", local, lambda _p: None)
     assert "prefix" in check.first_difference(b"ab", b"abc")
 
 
