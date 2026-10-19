@@ -5,6 +5,9 @@
 // only, audited server-side ("staff.updated"). Deactivate replaces Figma's Block / Suspend; there is no
 // reset password or invite here, because accounts and passwords live in CIS (ADR 0004 O1).
 // An admin cannot deactivate or demote themself (API 409 `cannot_demote_self`); the UI disables both.
+// AA-680: a profile linked to a company sign-in (`managed_in_directory`) takes its role from the booking-* group set
+// in CIS → Platform → Staff; the API refuses a role change (409 `managed_in_directory`), so the UI offers the CIS link
+// instead. Activate / Deactivate stays a Booking switch for every profile.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +28,7 @@ export function staffErrorText(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.code === "cannot_demote_self") return "You cannot deactivate or demote yourself. Ask another admin.";
     if (err.code === "staff_not_found") return "This staff profile no longer exists.";
+    if (err.code === "managed_in_directory") return "This person's Booking role is set in CIS → Platform → Staff.";
   }
   return err instanceof Error ? err.message : "Could not update the staff profile.";
 }
@@ -52,6 +56,7 @@ export function useStaffActions() {
   });
 
   const isSelf = (s: StaffProfile) => s.cis_user_id === me.cis_user_id;
+  const roleManagedInCis = (s: StaffProfile) => s.managed_in_directory === true;
   const name = pending ? pending.staff.name ?? pending.staff.email ?? pending.staff.cis_user_id : "";
 
   const dialogs = (
@@ -97,6 +102,7 @@ export function useStaffActions() {
 
   return {
     isSelf,
+    roleManagedInCis,
     changeRole: (s: StaffProfile) => {
       patch.reset();
       setRoleFor(s);

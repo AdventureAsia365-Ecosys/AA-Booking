@@ -1,19 +1,19 @@
 "use client";
 // app/login/LoginForm.tsx
-// AA-683 — the sign-in form. Posts {username, password} to the BFF (never to CIS from the browser);
-// on success goes to `next` (or the dashboard). The Google button renders only when
-// NEXT_PUBLIC_GOOGLE_SIGNIN_URL is set (AA-703 delivers the flow).
+// AA-683 — the LEGACY sign-in form (CIS username + password → the CIS bridge, until AA-680 PR-4). Posts
+// {username, password} to the BFF (never to CIS from the browser); on success goes to `next` (or the dashboard).
+// AA-680: the company e-mail button on the page is the primary sign-in; the Google placeholder is gone (staff never
+// sign in with Google, ADR 0006a A9). The "session ended" notice is rendered by the page now.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { GoogleMark } from "@/ui/GoogleMark";
 import { safeNext } from "@/lib/safeNext";
 
 const inputCls =
   "h-11 w-full rounded-md border border-line bg-card px-3.5 text-sm text-ink outline-none transition focus:border-accent-border focus:ring-2 focus:ring-accent-soft";
 
-export function LoginForm({ next, expired, googleUrl }: { next: string; expired: boolean; googleUrl: string }) {
+export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -53,11 +53,6 @@ export function LoginForm({ next, expired, googleUrl }: { next: string; expired:
 
   return (
     <form onSubmit={submit} className="mt-6 flex flex-col gap-4" noValidate>
-      {expired && !error && (
-        <p role="status" className="rounded-md border border-accent-border bg-accent-tint px-3 py-2 text-[13px] text-accent-deep">
-          Your session has ended. Sign in again to continue.
-        </p>
-      )}
       {error && (
         <p role="alert" className="rounded-md border border-danger-border bg-danger-soft px-3 py-2 text-[13px] text-danger">
           {error}
@@ -108,22 +103,6 @@ export function LoginForm({ next, expired, googleUrl }: { next: string; expired:
         {busy && <Loader2 size={16} className="animate-spin" />}
         {busy ? "Signing in…" : "Sign in"}
       </button>
-      {googleUrl && (
-        <>
-          <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.12em] text-muted2">
-            <span className="h-px flex-1 bg-line" />
-            or
-            <span className="h-px flex-1 bg-line" />
-          </div>
-          <a
-            href={googleUrl}
-            className="inline-flex h-11 items-center justify-center gap-2.5 rounded-full border border-line bg-card px-6 text-[13px] font-semibold text-ink transition hover:bg-bg"
-          >
-            <GoogleMark />
-            Continue with Google
-          </a>
-        </>
-      )}
     </form>
   );
 }

@@ -8,8 +8,8 @@ import type { StaffMe } from "./types";
 export type StaffMeResult =
   | { kind: "ok"; staff: StaffMe }
   | { kind: "unauthorized" } // 401: token missing / invalid / expired
-  | { kind: "inactive" } // 403 staff_inactive: profile exists, waits for a Booking admin
-  | { kind: "forbidden"; code: string } // 403 other (e.g. unknown_cis_role)
+  | { kind: "inactive" } // 403 staff_inactive: profile exists, waits for (or was suspended by) a Booking admin
+  | { kind: "forbidden"; code: string } // 403 other: no_booking_role (no booking-* group), identity_conflict, unknown_cis_role
   | { kind: "unavailable"; status: number | null }; // network, 404 (endpoint not deployed), 5xx
 
 /** GET /booking/staff/me with a Booking JWT. Provisions the profile on first call (backend rule). */

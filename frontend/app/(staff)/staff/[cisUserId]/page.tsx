@@ -14,6 +14,7 @@ import { Ban, CalendarDays, CheckCircle2, Clock, Lock, Mail, Pencil, ShieldOff, 
 import { api, ApiError } from "@/lib/api/client";
 import type { AuditLogItem, StaffAssignmentRow, StaffDetail } from "@/lib/api/types";
 import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
+import { CIS_STAFF_PATH } from "@/lib/config";
 import {
   Button,
   Code,
@@ -77,6 +78,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
 
   const s = q.data;
   const self = actions.isSelf(s);
+  const managed = actions.roleManagedInCis(s);
   const roleLabel = isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role;
   return (
     <main className="aa-admin-main flex-1 overflow-y-auto">
@@ -109,9 +111,13 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
                   <CheckCircle2 size={14} /> Activate
                 </Button>
               )}
-              <Button variant="primary" onClick={() => actions.changeRole(s)}>
-                <Pencil size={14} /> Change role
-              </Button>
+              {managed ? (
+                <ManagedInCisLink path={CIS_STAFF_PATH} label="Role is set in CIS → Platform → Staff" />
+              ) : (
+                <Button variant="primary" onClick={() => actions.changeRole(s)}>
+                  <Pencil size={14} /> Change role
+                </Button>
+              )}
             </>
           ) : undefined
         }
@@ -123,7 +129,9 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
         {!s.active && (
           <div role="status" className="mb-5 rounded-lg border border-warning bg-warning-soft px-4 py-3 text-[13px] text-body">
             {isAdmin && !self
-              ? "This profile is not active: the person cannot use Booking yet. Check the role, then activate it."
+              ? managed
+                ? "This profile is not active: the person cannot use Booking. Their role comes from CIS; activate the profile here."
+                : "This profile is not active: the person cannot use Booking yet. Check the role, then activate it."
               : "This profile is not active yet. A Booking admin needs to activate it."}
           </div>
         )}
@@ -158,14 +166,15 @@ function Overview({ s, roleLabel }: { s: StaffDetail; roleLabel: string }) {
             CIS account <Lock size={13} className="text-muted2" aria-label="Managed in CIS" />
           </span>
         }
-        description="Name, e-mail, CIS role and password are managed in CIS admin (ADR 0004 O1)."
-        actions={<ManagedInCisLink label="Open CIS admin" />}
+        description="The account, its company e-mail sign-in and the Booking role are managed in CIS → Platform → Staff."
+        actions={<ManagedInCisLink path={CIS_STAFF_PATH} label="Open CIS → Platform → Staff" />}
       >
         <FactGrid>
           <Fact label="Name">{s.name ?? "—"}</Fact>
           <Fact label="E-mail"><span className="break-all">{s.email ?? "—"}</span></Fact>
           <Fact label="CIS role">{s.cis_role ?? "—"}</Fact>
-          <Fact label="CIS user id"><span className="font-mono text-xs text-muted">{s.cis_user_id}</span></Fact>
+          <Fact label="Sign-in">{s.managed_in_directory ? "Company e-mail (role from CIS)" : "CIS password (legacy)"}</Fact>
+          <Fact label="Staff key"><span className="font-mono text-xs text-muted">{s.cis_user_id}</span></Fact>
         </FactGrid>
       </Section>
     </div>
