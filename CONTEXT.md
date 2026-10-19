@@ -41,6 +41,10 @@ Design sources, in order:
   (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
   issues an RS256 JWT with `aud=booking`, verified against the CIS JWKS). Booking keeps only a thin staff profile
   (`booking.staff_users`) and never reads the CIS staff directory.
+- **Publishes** to CIS (AA-858, contract `ops.overview.v1`, root ADR 0008 §5): two aggregate views in its own schema,
+  `booking.v_ops_funnel_daily` (per UTC day, metric, source system) and `booking.v_ops_case_status` (cases per current
+  status), `bk-017`, SELECT to the CIS runtime role `cis_app` (plus USAGE on schema `booking`); the CIS admin overview
+  reads them. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` → `booking.customers` 42501).
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -316,7 +320,10 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
 - The migration guard (unit test, required check) rejects any file that is not wrapped in
   `BEGIN/COMMIT`, does not register its own `bk-NNN`, touches anything outside schema `booking`
   (the `shared.schema_versions` row is the one exception), creates logins/passwords/extensions/
-  `SECURITY DEFINER` functions, grants to anyone but `booking`, or leaves a view writable.
+  `SECURITY DEFINER` functions, grants to anyone but `booking`, or leaves a view writable. One exception (bk-017,
+  AA-858): a contract read of another app's runtime role (`CONSUMER_ROLES` = `cis_app`) may get `USAGE ON SCHEMA
+  booking` and `SELECT` on `booking.v_*` views only (rule `consumer-grant`); every such grant is listed in AA-CIS-Infra
+  `db/owners.yaml` `booking.consumer_grants`, which the isolation probe checks.
 - X1 (per-app owner roles, AA-Ecosys `docs/audits/2026-10-17-S241-x1/x1-plan.md`): DB Migrate runs a
   file as the **live owner of schema `booking`** (`SET ROLE` when that is not its login). The guard's
   migration role is therefore per file (`tests/migration_guard.py` `migration_role`): `aa_cis_admin`
@@ -324,8 +331,8 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   aa_cis_admin` only as bk-014's REVOKE). Only bk-014 may `ALTER … OWNER TO bk_owner`; no file may
   switch roles (`SET`/`RESET ROLE`, `SESSION AUTHORIZATION`, `set_config('role', …)`).
 - Integration Tests replay the migrations as a **non-superuser** `aa_cis_admin` (CREATEROLE, member
-  of `bk_owner`), the RDS shape: `tests/integration/bootstrap_roles.py` sets the roles up with the
-  container superuser, which the tests never use.
+  of `bk_owner`, and of `cis_app` as on Dev, the bk-017 grantee), the RDS shape:
+  `tests/integration/bootstrap_roles.py` sets the roles up with the container superuser, which the tests never use.
 - Grants on other apps' objects are written by **their** owners, in their migrations, unguarded,
   after role `booking` exists (ADR 0004 decision 6).
 
@@ -489,6 +496,19 @@ Bridge-era rows are linked once by AA-CIS-Infra `db/scripts/aa680_link_staff_cog
 RUN first) from `shared.admin_users.cognito_iss / cognito_sub`. No grant change (bk-003 grants are table-level). Not
 added to `REQUIRED_SCHEMA_VERSIONS` in its own PR (migration-only); the AA-680 code PR adds it after the apply, so
 `/booking/health/ready` requires `bk-016` from then on.
+
+### `bk-017` (AA-858 ops overview — needs `bk-003`, `bk-005` and Infra `rl-001` (role `cis_app`))
+
+Two read-only aggregate views for the CIS admin overview (contract `ops.overview.v1`, AA-Ecosys `docs/contracts/`):
+`v_ops_funnel_daily (day, metric, source_system, n)`, UTC days, last 400 days, metrics `inquiry_received` /
+`inquiry_parked` / `inquiry_failed` (inbox rows of contract `inquiry.submitted`, by `received_at`, parked/failed = current
+status), `trip_case_created` (not soft-deleted cases, by `created_at`), `proposal_sent` / `confirmed` / `cancelled` (the
+**first** time a not soft-deleted case reached that status in `trip_case_status_history`); `v_ops_case_status (status,
+n)`: not soft-deleted cases by current status. Aggregates only (no id, name, e-mail, payload or free text). Owned by
+`bk_owner`; role `booking` keeps SELECT only; `cis_app` gets USAGE on schema `booking` + SELECT on the two views. The
+CIS runtime still logs in as `aa_cis_admin` until X1 S18 and reads them through its `bk_owner` membership. Metric names
+are append-only. Applied after `bk-016` (AA-680). No readiness change (`REQUIRED_SCHEMA_VERSIONS` untouched: the Booking
+app does not read the views).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),

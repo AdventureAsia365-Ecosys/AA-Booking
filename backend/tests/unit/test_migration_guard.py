@@ -36,7 +36,7 @@ def test_every_migration_passes_the_guard(path: Path) -> None:
 
 # Numbers taken by an open parallel branch: a gap is allowed only for these. Remove an entry once that
 # branch is merged (the file is then here and the gap is gone).
-RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {}
+RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {16: "AA-680 bk-016 staff Cognito identity (feat/aa680-cognito-staff)"}
 
 
 def test_migration_numbers_are_unique_and_contiguous() -> None:
@@ -133,6 +133,34 @@ def test_views_must_be_read_only_for_the_app() -> None:
     assert "view-read-only" in _rules(GOOD.replace("COMMIT;", view + "COMMIT;"))
     revoked = view + "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON booking.v FROM booking;\n"
     assert _rules(GOOD.replace("COMMIT;", revoked + "COMMIT;")) == set()
+
+
+@pytest.mark.parametrize(
+    ("statement", "ok"),
+    [
+        ("GRANT USAGE ON SCHEMA booking TO cis_app;", True),
+        ("GRANT SELECT ON booking.v_ops_a, booking.v_ops_b TO cis_app;", True),
+        ("GRANT SELECT ON TABLE booking.v_ops_a TO cis_app;", True),
+        ("REVOKE SELECT ON booking.v_ops_a FROM cis_app;", True),
+        ("REVOKE USAGE ON SCHEMA booking FROM cis_app;", True),
+        ("GRANT SELECT ON booking.customers TO cis_app;", False),  # a table, not a v_* view
+        ("GRANT SELECT ON booking.v_ops_a, booking.trip_cases TO cis_app;", False),
+        ("GRANT INSERT ON booking.v_ops_a TO cis_app;", False),
+        ("GRANT SELECT, UPDATE ON booking.v_ops_a TO cis_app;", False),
+        ("GRANT CREATE ON SCHEMA booking TO cis_app;", False),
+        ("GRANT ALL ON SCHEMA booking TO cis_app;", False),
+        ("GRANT SELECT ON ALL TABLES IN SCHEMA booking TO cis_app;", False),
+        ("GRANT EXECUTE ON FUNCTION booking.f() TO cis_app;", False),
+        ("GRANT SELECT ON booking.v_ops_a TO aa_app_user;", False),  # not a consumer role
+    ],
+)
+def test_consumer_role_gets_only_contract_view_reads(statement: str, ok: bool) -> None:
+    """bk-017 (AA-858): another app's runtime role may read booking.v_* views, nothing else."""
+    rules = _rules(GOOD.replace("COMMIT;", statement + "\nCOMMIT;"))
+    if ok:
+        assert rules == set()
+    else:
+        assert rules & {"consumer-grant", "grant"}
 
 
 def test_bad_filename() -> None:
