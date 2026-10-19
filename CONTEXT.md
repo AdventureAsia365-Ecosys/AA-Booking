@@ -303,17 +303,19 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   aa_cis_admin`, ADR 0004 decision 6). bk-014 moves the schema and all 34 relations, 5 standalone
   sequences and 12 functions to `bk_owner`, restates the default privileges `FOR ROLE bk_owner` and
   revokes the old rows; role `booking`'s privileges are unchanged. From bk-015 on DB Migrate runs
-  each file as `bk_owner` (`SET ROLE`, it follows the live owner of schema `booking`), so new objects
+  each file as `bk_owner` (`SET ROLE`, it follows the live owner of schema `booking`; since X1 S22 its login is
+  `db_migrator`, a member of `bk_owner`, no longer the RDS master), so new objects
   are owned by `bk_owner` and new default privileges say `FOR ROLE bk_owner`. `bk_owner` needs USAGE on
   `shared` + SELECT, INSERT on `shared.schema_versions` (CIS 243): registration, and
   `booking.v_schema_versions` (a view reads with its owner's rights) for readiness. Rollback of bk-014
   is an Infra `roles/` undo file (the master), never a `booking/` file.
-- **Ownership only; not isolation yet.** `aa_cis_admin` inherits `bk_owner` (rl-001; on PostgreSQL 15
-  the grant follows the member's INHERIT, per-grant `INHERIT FALSE` needs 16), so the CIS runtime, which
-  logs in as `aa_cis_admin`, can still read and alter `booking.*` (PII read/write, DROP/ALTER, DISABLE
-  TRIGGER, exemption from any future non-FORCE RLS) until X1 S18 (CIS runtime on `cis_app`) + S19 (CIS
-  task role denied the master and `booking/*` secrets). P0-9 is not met at S8: the probe cell "CIS
-  runtime → `booking.customers` 42501" stays pending, and no SEC-1 / P0-9 item closes on bk-014 alone.
+- **Isolation from CIS (X1 done, 19/10/2026).** The CIS runtime logs in as `cis_app` since X1 S18 and its
+  task role is denied the master and `booking/*` secrets since S19, so it cannot read `booking.*` (42501;
+  isolation probe cell "CIS runtime → `booking.customers` 42501" passes, 58/58 after S22). `cis_app` reads only the
+  contract views granted in bk-017. The RDS master `aa_cis_admin` still inherits `bk_owner` (rl-001; on
+  PostgreSQL 15 the grant follows the member's INHERIT, per-grant `INHERIT FALSE` needs 16), so it can read and
+  alter `booking.*`, but it is break-glass only (data standards DM-8.9): no app, workflow or ECS-exec script logs
+  in as the master, and the nightly probe cell `sessions.master_break_glass_only` flags any session of it.
 - The app connects as role `booking`: `USAGE` on schema `booking` only (no `CREATE`), DML on its
   tables, `audit_logs` append-only, views read-only. Its LOGIN password is set out-of-band by
   Nghiep and stored only in Secrets Manager `booking/dev/database-url`. **No password in Git.**
