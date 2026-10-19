@@ -1,6 +1,7 @@
 # ADR 0001 — Implement root ADR 0004 (AA-Booking stack and bootstrap) in this repo
 
-- **Status:** Proposed (14/10/2026, S235). Follows root ADR 0004; becomes Accepted with it.
+- **Status:** Accepted (14/10/2026, S235), with root ADR 0004 (accepted the same day). Was "Proposed; becomes
+  Accepted with it" until the S243 index (AA-888) recorded the change.
 - **Implements:** `AA-Ecosys/docs/adr/0004-aa-booking-stack-and-bootstrap.md` (decisions 1–9, the
   "Bootstrap scope" section), within ADR 0001 (ecosystem target architecture) and ADR 0002 (only CIS
   writes content).
