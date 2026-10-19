@@ -1,0 +1,45 @@
+# AA-895 (S243): same model as AA-CIS-App (S242) and AA-CIS-Infra (AA-867).
+# - npm (/frontend) and pip (/backend): security updates only, grouped into one PR per ecosystem per week.
+#   Version updates are off (open-pull-requests-limit: 0); the weekly schedule only paces the group.
+# - github-actions: weekly version updates, grouped into one PR (pinned action versions are a supply-chain
+#   control; Infra does the same).
+# Dependabot PRs get no repository secrets, so a secret-dependent check (Vercel deploy) fails on them. When that
+# happens, push the same change from a normal branch. Alerts and security updates are switched on in the repo
+# settings (on since AA-867). Triage and SLA: AA-Ecosys docs/security/vulnerability-management.md.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 0
+    groups:
+      frontend-security:
+        applies-to: security-updates
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: pip
+    directory: "/backend"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 0
+    groups:
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
