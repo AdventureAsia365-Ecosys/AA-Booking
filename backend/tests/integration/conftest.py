@@ -50,7 +50,9 @@ def _require_dsn() -> str:
 ROLE_SHAPE_SQL = """
 SELECT r.rolsuper, r.rolcreaterole, r.rolbypassrls,
        pg_has_role(r.rolname, $1, 'MEMBER') AS owner_member,
-       EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'booking' AND rolcanlogin) AS app_login
+       EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'booking' AND rolcanlogin) AS app_login,
+       EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                WHERE g.rolname = 'cis_app' AND m.member = r.oid) AS cis_reader_member
   FROM pg_roles r WHERE r.rolname = current_user"""
 
 
@@ -63,6 +65,7 @@ async def _check_role_shape(conn: asyncpg.Connection) -> None:
         "rolbypassrls": False,
         "owner_member": True,
         "app_login": True,
+        "cis_reader_member": True,  # bk-017 grants its contract views to cis_app (AA-858)
     }
     if dict(shape) != expected:
         pytest.fail(

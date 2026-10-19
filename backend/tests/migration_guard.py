@@ -19,7 +19,11 @@ Every Booking migration must:
 - change an owner only in bk-014, and only to ``bk_owner`` (``ALTER ... OWNER TO bk_owner``);
 - never switch roles (``SET ROLE``, ``RESET ROLE``, ``SESSION AUTHORIZATION``, ``set_config('role', ...)``):
   the runner does the switch (X1 S1 role lint);
-- revoke INSERT/UPDATE/DELETE from role ``booking`` on every view it creates.
+- revoke INSERT/UPDATE/DELETE from role ``booking`` on every view it creates;
+- grant to role ``booking`` only, with one exception: a contract read of another app's runtime role
+  (``CONSUMER_ROLES``, root ADR 0008 §5) may get ``USAGE ON SCHEMA booking`` and ``SELECT`` on views named
+  ``booking.v_*`` (bk-017, AA-858: ``cis_app`` reads the ops overview aggregates). Never a table, never
+  another privilege; the grant is mirrored in AA-CIS-Infra ``db/owners.yaml`` ``consumer_grants``.
 
 The checks are regexes over the SQL with comments removed and string literals blanked, so they
 are deliberately strict: loosen a rule here, in review, when a migration genuinely needs it.
@@ -37,6 +41,8 @@ MASTER_ROLE = "aa_cis_admin"  # RDS master: DB Migrate's login role, owner of bo
 OWNER_ROLE = "bk_owner"  # NOLOGIN owner of schema booking from bk-014 on (Infra roles/001, X1 S3)
 OWNER_TRANSFER = 14  # bk-014 hands every booking.* object from MASTER_ROLE to OWNER_ROLE
 APP_ROLE = "booking"
+# Other apps' runtime roles that may read a Booking contract view (USAGE on the schema + SELECT on booking.v_*).
+CONSUMER_ROLES = frozenset({"cis_app"})
 
 
 def migration_role(number: int) -> str:
@@ -133,6 +139,15 @@ def _grant_objects_in_owner_schema(objects: str) -> bool:
     names = re.sub(r"^(TABLE|SEQUENCE|FUNCTION|ROUTINE|PROCEDURE|TYPE)\s+", "", objects, flags=re.IGNORECASE)
     names = re.sub(r"\([^)]*\)", "", names)  # drop function argument lists, which may contain commas
     return all(_in_owner_schema(name.strip()) for name in names.split(","))
+
+
+def _consumer_grant_ok(privileges: str, objects: str) -> bool:
+    """A contract read of another app's runtime role: USAGE ON SCHEMA booking, or SELECT ON booking.v_* views."""
+    privs = _norm(privileges)
+    if re.fullmatch(rf"SCHEMA\s+{OWNER_SCHEMA}", objects, flags=re.IGNORECASE):
+        return privs == "usage"
+    names = re.sub(r"^TABLE\s+", "", objects, flags=re.IGNORECASE)
+    return privs == "select" and all(re.fullmatch(rf"{OWNER_SCHEMA}\.v_[a-z0-9_]+", _norm(n)) for n in names.split(","))
 
 
 def check_sql(name: str, sql: str) -> list[Violation]:
@@ -303,21 +318,33 @@ def check_sql(name: str, sql: str) -> list[Violation]:
         if not revoke:
             bad("view-read-only", f"REVOKE INSERT, UPDATE, DELETE ON {vm.group(1)} FROM {APP_ROLE} is missing")
 
-    # GRANT / REVOKE: objects in booking only, to/from role booking (REVOKE may also name PUBLIC).
+    # GRANT / REVOKE: objects in booking only, to/from role booking (REVOKE may also name PUBLIC), or a contract
+    # read of a CONSUMER_ROLES role: USAGE ON SCHEMA booking / SELECT ON booking.v_* only.
     for gm in re.finditer(r"\b(GRANT|REVOKE)\b([^;]*)", flat, flags=re.IGNORECASE):
         verb, rest = gm.group(1).upper(), gm.group(2)
-        on = re.search(r"\bON\s+(.*?)\s+(?:TO|FROM)\s+(.*)$", rest, flags=re.IGNORECASE)
+        on = re.search(r"^(.*?)\bON\s+(.*?)\s+(?:TO|FROM)\s+(.*)$", rest, flags=re.IGNORECASE)
         if not on:
             bad("grant", f"{verb} without ON ... TO/FROM: {rest[:60]!r}")
             continue
-        objects, grantees = on.group(1).strip(), on.group(2).strip()
+        privileges, objects, grantees = on.group(1).strip(), on.group(2).strip(), on.group(3).strip()
         if not _grant_objects_in_owner_schema(objects):
             bad("grant", f"{verb} ON {objects} is outside schema {OWNER_SCHEMA}")
         allowed = {APP_ROLE} | ({"public"} if verb == "REVOKE" else set())
         grantees = re.sub(r"\s+(CASCADE|RESTRICT|WITH\s+GRANT\s+OPTION)\s*$", "", grantees, flags=re.IGNORECASE)
         for g in re.split(r"\s*,\s*", grantees):
-            if _norm(g) not in allowed:
-                bad("grant", f"{verb} ... {g} — only role {APP_ROLE} may be a grantee")
+            if _norm(g) in CONSUMER_ROLES:
+                if not _consumer_grant_ok(privileges, objects):
+                    bad(
+                        "consumer-grant",
+                        f"{verb} {privileges} ON {objects} ... {g}: a consumer role gets only "
+                        f"USAGE ON SCHEMA {OWNER_SCHEMA} or SELECT ON {OWNER_SCHEMA}.v_* views",
+                    )
+            elif _norm(g) not in allowed:
+                bad(
+                    "grant",
+                    f"{verb} ... {g} — only role {APP_ROLE} (or a contract read of "
+                    f"{', '.join(sorted(CONSUMER_ROLES))}) may be a grantee",
+                )
 
     return out
 

@@ -15,7 +15,9 @@ Roles created (X1 plan, AA-Ecosys docs/audits/2026-10-17-S241-x1/x1-plan.md):
 
 * ``aa_cis_admin`` LOGIN NOSUPERUSER CREATEROLE CREATEDB, owner of the test database (the DB Migrate login);
 * ``bk_owner`` NOLOGIN, granted to ``aa_cis_admin`` (Infra ``roles/001``, X1 S3);
-* ``booking`` LOGIN with the CI-only password from ``conftest.py`` (on Dev Nghiep sets it out of band).
+* ``booking`` LOGIN with the CI-only password from ``conftest.py`` (on Dev Nghiep sets it out of band);
+* ``cis_app`` NOLOGIN here (on Dev the CIS runtime LOGIN of X1, Infra ``roles/001``), granted to ``aa_cis_admin``
+  as on Dev: the grantee of the bk-017 contract views (AA-858), which the tests read through ``SET ROLE cis_app``.
 
 The grants ``bk_owner`` needs on ``shared`` (CIS 243, X1 S4) are in ``stub_shared.sql``, which the tests
 apply as ``aa_cis_admin``.
@@ -34,6 +36,7 @@ from tests.integration.conftest import ADMIN_DSN, BOOKING_TEST_PASSWORD
 MASTER = "aa_cis_admin"
 OWNER = "bk_owner"
 APP = "booking"
+CIS_READER = "cis_app"
 
 
 async def _ensure_role(conn: asyncpg.Connection, name: str, attributes: str, password: str | None) -> None:
@@ -79,9 +82,14 @@ async def bootstrap(superuser_dsn: str, admin_dsn: str) -> None:
         await _ensure_role(conn, OWNER, "NOLOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS", None)
         await conn.execute(f"GRANT {OWNER} TO {MASTER}")
         await _ensure_role(conn, APP, "LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS", BOOKING_TEST_PASSWORD)
+        await _ensure_role(conn, CIS_READER, "NOLOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS", None)
+        await conn.execute(f"GRANT {CIS_READER} TO {MASTER}")
     finally:
         await conn.close()
-    print(f"bootstrap ok: {MASTER} (no superuser, member of {OWNER}), {OWNER} NOLOGIN, {APP} LOGIN")
+    print(
+        f"bootstrap ok: {MASTER} (no superuser, member of {OWNER} and {CIS_READER}), {OWNER} NOLOGIN, {APP} LOGIN, "
+        f"{CIS_READER} NOLOGIN"
+    )
 
 
 def main(argv: list[str]) -> None:
