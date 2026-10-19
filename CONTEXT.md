@@ -114,7 +114,7 @@ backend/
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
-docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
+docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Job template copy), deploy-dev.yml
@@ -451,6 +451,17 @@ of the 32 tables + `v_customer_summary` (hot tables first, app inbox order), hel
 Applied in the X1 S8 train (`rl-001 → 243 → bk-014 → tp-013`) with `booking.job` idle. Not added to
 `REQUIRED_SCHEMA_VERSIONS` here (migration-only PR, MIG-4); readiness keeps working because the view's new owner has
 the 243 SELECT grant.
+
+### `bk-016` (AA-680 Phase 2, root ADR 0006 / 0006a — needs `bk-003` only)
+
+`staff_users.cognito_iss` / `cognito_sub`: the linked Cognito WORKFORCE identity, a pair (both NULL or both set, issuer
+`https://…`, sub 1–128 chars; same check as CIS `shared.admin_users`), UNIQUE `(cognito_iss, cognito_sub)` (NULL pairs
+are distinct, so unlinked rows coexist). `cis_user_id` stays the primary key and every staff FK target; it is now
+**the Booking staff key** under its legacy name: CIS `admin_users.id` for bridge-era rows, `'cog:' || sub` for rows
+created on a WORKFORCE sign-in, and `staff_users_cognito_key_chk` makes a `cog:` key always carry its own sub.
+Bridge-era rows are linked once by AA-CIS-Infra `db/scripts/aa680_link_staff_cognito.py` (DB Migrate run-script, DRY
+RUN first) from `shared.admin_users.cognito_iss / cognito_sub`. No grant change (bk-003 grants are table-level). Not
+added to `REQUIRED_SCHEMA_VERSIONS` in its own PR (migration-only); the AA-680 code PR adds it after the apply.
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
