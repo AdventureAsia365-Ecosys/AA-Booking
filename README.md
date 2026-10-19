@@ -82,7 +82,7 @@ curl -s localhost:8000/booking/health
 
 ## CI / deploy
 
-- `.github/workflows/ci.yml`: Lint (ruff), Security Audit (pip-audit + gitleaks, failing), Unit
+- `.github/workflows/ci.yml`: Lint (ruff), Security Audit (AA-902 resource-ID check + pip-audit + gitleaks, failing), Unit
   Tests (incl. migration guard), Integration Tests (Postgres 15, applies `migrations/`), Docker
   Build Check (image starts, Trivy report, SBOM).
 - `.github/workflows/deploy-dev.yml`: on push to `main` (backend changes) — OIDC role from the `dev`

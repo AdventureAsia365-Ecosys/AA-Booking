@@ -34,7 +34,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-DEV_WORKFORCE_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS"
+# Public by design (every token and the JWKS URL carry it); the AA-902 resource-ID check skips this line.
+DEV_WORKFORCE_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS"  # docs-lint: ignore
 DEV_BOOKING_STAFF_CLIENT_ID = "5ifl9dgkr8a5outnmsjc8v1kt3"
 DEV_BREAKGLASS_CLIENT_ID = "2g3f3ncfuqdiuu1o5b70o4h0lq"
 

@@ -63,6 +63,9 @@ async def pool(migrated_booking_dsn: str, admin: asyncpg.Connection) -> AsyncIte
         await p.close()
 
 
+TEST_BUCKET = "aa-cis-bronze-test"
+
+
 class StubS3:
     def __init__(self, fail: bool = False) -> None:
         self.objects: dict[str, bytes] = {}
@@ -71,6 +74,7 @@ class StubS3:
     def put_object(self, **kw: Any) -> None:
         if self.fail:
             raise OSError("AccessDenied (stub)")
+        assert kw["Bucket"] == TEST_BUCKET
         self.objects[kw["Key"]] = kw["Body"]
 
     def rows(self) -> list[dict[str, Any]]:
@@ -84,7 +88,7 @@ async def run_jobs(pool: asyncpg.Pool, s3: StubS3) -> None:
     async def provide() -> asyncpg.Pool:
         return pool
 
-    w = Worker(provide, jobs.build_handlers(lambda: s3), maintenance_every=10_000)
+    w = Worker(provide, jobs.build_handlers(lambda: s3, lambda: TEST_BUCKET), maintenance_every=10_000)
     w._ticks = 1  # no maintenance (no schedule hook here)
     for _ in range(20):
         if not await w.run_once():

@@ -16,7 +16,7 @@ import gzip
 from datetime import UTC, datetime
 from typing import Any
 
-from app.retention.policy import ARCHIVE_BUCKET, ARCHIVE_PREFIX
+from app.retention.policy import ARCHIVE_PREFIX
 
 
 def object_key(archive_name: str, month_of: datetime, job_id: str, run: str, part: str, batch_no: int) -> str:
@@ -29,9 +29,9 @@ def encode(docs: list[str]) -> bytes:
 
 
 class S3Archiver:
-    """Writes one object per batch. ``s3`` is a boto3 S3 client (or a test double with ``put_object``)."""
+    """Writes one object per batch to ``bucket``. ``s3`` is a boto3 S3 client (or a test double with ``put_object``)."""
 
-    def __init__(self, s3: Any, job_id: str, bucket: str = ARCHIVE_BUCKET, run: str | None = None) -> None:
+    def __init__(self, s3: Any, job_id: str, bucket: str, run: str | None = None) -> None:
         self.s3 = s3
         self.job_id = job_id
         self.bucket = bucket

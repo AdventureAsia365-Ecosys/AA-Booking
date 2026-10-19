@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from app.auth.staff import PERMISSIONS
 from app.jobs.worker import PermanentError
 from app.retention import archive, jobs, redact, runner
-from app.retention.policy import INBOX_SPEC, JOB_SPEC, KINDS, spec_for
+from app.retention.policy import ARCHIVE_BUCKET_DISPLAY, INBOX_SPEC, JOB_SPEC, KINDS, archive_bucket, spec_for
 from app.routers.retention import RunRequest
 from tests import inquiry_samples as samples
 
@@ -224,14 +224,46 @@ async def test_archiver_writes_gzipped_json_lines_encrypted() -> None:
             self.calls.append(kw)
 
     s3 = StubS3()
-    key = await archive.S3Archiver(s3, "job-1", run="r").put(
+    key = await archive.S3Archiver(s3, "job-1", "test-archive-bucket", run="r").put(
         "job", "failed", 1, datetime(2026, 1, 2, tzinfo=UTC), ['{"a": 1}', '{"a": 2}']
     )
     (call,) = s3.calls
-    assert call["Key"] == key and call["Bucket"] == "aa-cis-bronze-005097885195"
+    assert call["Key"] == key and call["Bucket"] == "test-archive-bucket"
     assert call["ServerSideEncryption"] == "AES256" and call["Metadata"]["rows"] == "2"
     lines = gzip.decompress(call["Body"]).decode().splitlines()
     assert [json.loads(line) for line in lines] == [{"a": 1}, {"a": 2}]
+
+
+# ── Archive bucket (AA-902: no account ID in this public repo) ───────────────
+
+
+def test_archive_bucket_is_built_from_the_account_id() -> None:
+    assert archive_bucket("111111111111") == "aa-cis-bronze-111111111111"
+    assert ARCHIVE_BUCKET_DISPLAY == "aa-cis-bronze-<acc2>"
+    for bad in ("", "12345", "1111111111111", "11111111111x"):
+        with pytest.raises(ValueError):
+            archive_bucket(bad)
+
+
+def test_default_bucket_reads_the_account_from_sts_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class StubSts:
+        def get_caller_identity(self) -> dict[str, str]:
+            return {"Account": "222222222222", "Arn": "arn:aws:sts::222222222222:assumed-role/r/s"}
+
+    def fake_client(service: str, region_name: str) -> StubSts:
+        calls.append((service, region_name))
+        return StubSts()
+
+    monkeypatch.setattr(jobs.boto3, "client", fake_client)
+    jobs.default_bucket.cache_clear()
+    try:
+        assert jobs.default_bucket() == "aa-cis-bronze-222222222222"
+        assert jobs.default_bucket() == "aa-cis-bronze-222222222222"
+        assert calls == [("sts", "us-west-1")]
+    finally:
+        jobs.default_bucket.cache_clear()
 
 
 def test_same_month_prefix_stops_at_the_month_boundary() -> None:
