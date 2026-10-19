@@ -77,7 +77,7 @@ def test_email_settings_default_to_no_email() -> None:
     s = load_settings({})
     assert (s.staff_notify_email, s.ses_from_address, s.ses_configuration_set) == ("", "", "")
     assert s.ses_region == "us-west-1"
-    assert s.staff_admin_url == "https://aa-booking-admin.vercel.app"
+    assert s.staff_admin_url == "https://booking.lumiguides.it.com"
 
 
 def test_reads_email_settings() -> None:

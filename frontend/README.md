@@ -24,7 +24,7 @@ Set in Vercel (or `.env.local` for local runs). All are optional; defaults are i
 
 | Name | Where | Default | What |
 |---|---|---|---|
-| `BOOKING_API_URL` | server | Dev execute-api stage `https://9z3xnalp59.execute-api.us-west-1.amazonaws.com/dev` | Booking API base; `/booking/...` is appended |
+| `BOOKING_API_URL` | server | Dev custom domain `https://api-booking.lumiguides.it.com` | Booking API base; `/booking/...` is appended |
 | `CIS_API_URL` | server | `https://api-cis.lumiguides.it.com` | CIS API for `/auth/admin-login` and `/auth/booking-token` |
 | `NEXT_PUBLIC_CIS_ADMIN_URL` | browser | `https://aa-cis.lumiguides.it.com` | "Open CIS admin" / "Managed in CIS" links |
 | `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret** | unset | Secret of the Cognito `booking-staff` app client (AA-680). Unset = no "Sign in with company email" button, only the legacy CIS password form |

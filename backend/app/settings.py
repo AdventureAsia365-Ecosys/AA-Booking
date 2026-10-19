@@ -34,7 +34,7 @@ Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` g
   identity's default set still applies).
 - ``SES_REGION``: default ``us-west-1`` (the SES identity's region).
 - ``STAFF_ADMIN_URL``: base URL of the staff admin, for links in staff e-mail. Default: the Dev
-  Vercel alias ``https://aa-booking-admin.vercel.app``. Must be ``https://`` outside ``test``/``local``.
+  custom domain ``https://booking.lumiguides.it.com``. Must be ``https://`` outside ``test``/``local``.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 DEFAULT_STAFF_JWT_ISSUER = "https://api-cis.lumiguides.it.com"
 DEFAULT_CIS_JWKS_URL = f"{DEFAULT_STAFF_JWT_ISSUER}/auth/.well-known/jwks.json"
 DEFAULT_SES_REGION = "us-west-1"
-DEFAULT_STAFF_ADMIN_URL = "https://aa-booking-admin.vercel.app"
+DEFAULT_STAFF_ADMIN_URL = "https://booking.lumiguides.it.com"
 
 
 class SettingsError(ValueError):

@@ -224,7 +224,7 @@ async def test_new_inquiry_sends_one_staff_email(admin: asyncpg.Connection, pool
     assert "Hanoi and Halong Bay (Vietnam), days 2-4" in text  # catalog title (live read)
     # Not in the catalog and no named snapshot day: the generic title (legs in day order).
     assert text.index(f"1. AA tour {second_leg['source_tour_id']}, days 1-3") < text.index("2. Hanoi and Halong Bay")
-    assert f"https://aa-booking-admin.vercel.app/cases/{code}" in text
+    assert f"https://booking.lumiguides.it.com/cases/{code}" in text
     result = await admin.fetchval("SELECT result::text FROM booking.job WHERE kind = 'bk_notify_email'")
     assert json.loads(result)["message_id"] == "msg-1"
 
