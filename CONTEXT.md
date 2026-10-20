@@ -141,8 +141,12 @@ docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per r
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md)
-.github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml
+.github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
+                           docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
+                           freshness report)
 .github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4)
+tools/docs/                docs lint tools vendored from AA-Ecosys tools/docs (AA-888; README says how to keep them identical)
+docs/templates/            frontmatter.schema.json, copy of the AA-Ecosys schema the front-matter check uses
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
 ```
 
