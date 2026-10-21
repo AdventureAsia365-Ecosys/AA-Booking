@@ -22,6 +22,7 @@ import {
 } from "@/lib/session";
 import { fetchStaffMe } from "@/lib/api/server";
 import { isSameOrigin } from "@/lib/sameOrigin";
+import { isPreviewSignInHost } from "@/lib/cognito";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,10 @@ function fail(message: string, status: number, headers?: Record<string, string>)
 }
 
 export async function POST(req: NextRequest) {
+  // AA-911: the fixed Preview host has company sign-in only; the legacy password route does not exist there.
+  if (isPreviewSignInHost(req.headers.get("host") ?? req.nextUrl.host)) {
+    return new NextResponse(null, { status: 404 });
+  }
   // Login CSRF guard: only this site's own form may sign the browser in, and only with a JSON body
   // (a cross-site HTML form can send text/plain that would still parse as JSON).
   if (!isSameOrigin(req, { strict: true }) || !req.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {

@@ -1,15 +1,24 @@
 // lib/cognito.ts
 // AA-680 (Booking Phase 2) — staff sign-in with the company e-mail through the Cognito WORKFORCE pool:
-// authorization code + PKCE (S256) against the confidential `booking-staff` app client, on the AA-branded managed
+// authorization code + PKCE (S256) against a confidential app client, on the AA-branded managed
 // login (staff-auth.lumiguides.it.com). Ported from AA-CIS-App frontend/lib/cognito.ts (AA-816 C4), booking-staff
 // client only. SERVER ONLY: it reads the client secret. Route handlers import it; proxy.ts and client components never
 // do (proxy only redirects to /api/auth/refresh).
 //
 // Security rules this file enforces (same as CIS):
-//   - The redirect URI is always taken from a FIXED allowlist (the two production hosts, plus localhost:3001 in
-//     development), never built from the Host header. The request host is only COMPARED with the allowlist; an
-//     unlisted host (a Vercel preview) gets no Cognito sign-in at all, because preview hosts are not registered
-//     callback URLs (AA-CIS-Infra identity_variables.tf). Those hosts keep the legacy CIS password form.
+//   - The redirect URI is always taken from a FIXED allowlist (the two production hosts, the one fixed Preview host
+//     booking-preview.lumiguides.it.com, plus localhost:3001 in development), never built from the Host header. The
+//     request host is only COMPARED with the allowlist; any other host (a per-deployment *.vercel.app preview URL)
+//     gets no Cognito sign-in at all, because those hosts are not registered callback URLs (AA-CIS-Infra
+//     identity_variables.tf). AA-911 (ADR 0006a A11): the Preview host is re-pointed at the preview under test by
+//     the Vercel Deploy workflow (PR label `preview-signin` or the `alias_only_url` dispatch). A Vercel production
+//     build accepts only the production hosts and a preview build only the Preview host (VERCEL_ENV).
+//   - AA-911 decision D-1 (root ADR 0006a A11): a Vercel PREVIEW build uses the Preview-only `booking-staff-preview`
+//     client (its only callback is the Preview host), a production build the `booking-staff` client. Each reads its
+//     own secret env var, so a preview build never holds the production client secret, and the Booking API caps
+//     every token of the preview client at read-only (backend app/auth/staff.py). Preview code from an unmerged PR
+//     therefore never gets a token that can write, whatever the signed-in person's groups.
+//   - The Preview host never offers the legacy CIS password form (isPreviewSignInHost).
 //   - state, nonce, the PKCE verifier and the post-login path live in one short-lived httpOnly cookie scoped to the
 //     callback path; the callback checks state against it and the nonce against the ID token.
 //   - Token exchange, refresh and revoke authenticate with HTTP Basic (client id + secret).
@@ -29,8 +38,10 @@ import {
 import { safeNext } from "./safeNext";
 
 // ── Configuration: public identifiers as code constants (optional env overrides, like the backend) ────────────────
-// Only the client SECRET must be set in Vercel (COGNITO_BOOKING_STAFF_CLIENT_SECRET, server-only). Without it the
-// company e-mail sign-in is simply not offered and the legacy CIS password form stays.
+// Only the client SECRET must be set in Vercel, server-only and per target: COGNITO_BOOKING_STAFF_CLIENT_SECRET on
+// Production only, COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET on Preview only (AA-911). Without the secret of the
+// build's client the company e-mail sign-in is simply not offered (and the legacy CIS password form stays where it
+// still exists).
 const DEFAULT_WORKFORCE_DOMAIN = "https://staff-auth.lumiguides.it.com";
 const COGNITO_DOMAIN =
   (process.env.COGNITO_WORKFORCE_DOMAIN ?? "").trim().replace(/\/+$/, "") || DEFAULT_WORKFORCE_DOMAIN;
@@ -38,19 +49,55 @@ export const WORKFORCE_ISSUER =
   (process.env.COGNITO_WORKFORCE_ISSUER ?? "").trim() ||
   // Public by design (the browser sees it); the AA-902 resource-ID check skips the next line.
   "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS"; // docs-lint: ignore
-const CLIENT_ID = (process.env.COGNITO_BOOKING_STAFF_CLIENT_ID ?? "").trim() || "5ifl9dgkr8a5outnmsjc8v1kt3";
-const clientSecret = () => (process.env.COGNITO_BOOKING_STAFF_CLIENT_SECRET ?? "").trim();
+/** A Vercel preview build (VERCEL_ENV is fixed per deployment): it signs in with the Preview-only client. */
+const PREVIEW_BUILD = (process.env.VERCEL_ENV ?? "").trim() === "preview";
+const PRODUCTION_CLIENT_ID =
+  (process.env.COGNITO_BOOKING_STAFF_CLIENT_ID ?? "").trim() || "5ifl9dgkr8a5outnmsjc8v1kt3";
+// AA-911 D-1: the `booking-staff-preview` client (AA-CIS-Infra identity.tf). Empty until the Infra apply creates it,
+// then filled in here; while empty a preview build offers no company e-mail sign-in (never the production client).
+const DEFAULT_PREVIEW_CLIENT_ID = "7tlhphjurhqio0l26uh20valpp";
+const PREVIEW_CLIENT_ID =
+  (process.env.COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID ?? "").trim() || DEFAULT_PREVIEW_CLIENT_ID;
+const CLIENT_ID = PREVIEW_BUILD ? PREVIEW_CLIENT_ID : PRODUCTION_CLIENT_ID;
+const clientSecret = () =>
+  CLIENT_ID === ""
+    ? ""
+    : (
+        (PREVIEW_BUILD
+          ? process.env.COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET
+          : process.env.COGNITO_BOOKING_STAFF_CLIENT_SECRET) ?? ""
+      ).trim();
 
 export const CALLBACK_PATH = "/api/auth/callback/cognito";
-/** Refresh-token lifetime of the booking-staff client (identity.tf): the session cap. */
+/** Refresh-token lifetime of the booking-staff and booking-staff-preview clients (identity.tf): the session cap. */
 const REFRESH_TTL_S = 12 * 60 * 60;
 
-// Registered callback / logout origins of the booking-staff client (identity_variables.tf).
+// Registered callback / logout origins (identity_variables.tf): booking-staff = the production hosts + localhost;
+// booking-staff-preview = the Preview host only.
 const PROD_ORIGINS = ["https://booking.lumiguides.it.com", "https://aa-booking-admin.vercel.app"];
+// AA-911: the one fixed Preview host (Vercel domain on aa-booking-admin, aliased to the preview under test).
+export const PREVIEW_ORIGIN = "https://booking-preview.lumiguides.it.com";
 const DEV_ORIGIN = "http://localhost:3001";
 
+/**
+ * The origins this BUILD may run the Cognito flow on. A Vercel production build accepts only the production
+ * hosts; a Vercel preview build only the fixed Preview host, so neither can run the other environment's callback.
+ * Outside Vercel (VERCEL_ENV unset) a production build keeps the production hosts and `next dev` adds localhost.
+ */
 function origins(): string[] {
+  const vercelEnv = (process.env.VERCEL_ENV ?? "").trim();
+  if (vercelEnv === "production") return PROD_ORIGINS;
+  if (vercelEnv === "preview") return [PREVIEW_ORIGIN];
+  // Outside Vercel the build uses the production client, whose callbacks never include the Preview host.
   return process.env.NODE_ENV === "development" ? [...PROD_ORIGINS, DEV_ORIGIN] : PROD_ORIGINS;
+}
+
+/**
+ * True when the request is served on the fixed Preview sign-in host. That host never offers the legacy CIS
+ * password form or `POST /api/auth/login` (AA-911): a stable, possibly public URL must not expose a password form.
+ */
+export function isPreviewSignInHost(host: string | null | undefined): boolean {
+  return !!host && host.trim().toLowerCase() === new URL(PREVIEW_ORIGIN).host;
 }
 
 /** Host of the managed-login page (shown on /login so staff know where the sign-in opens). */

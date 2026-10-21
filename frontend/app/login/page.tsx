@@ -8,13 +8,14 @@
 // managed login (booking-staff client, staff-auth.lumiguides.it.com, an e-mail code). It is offered only on the
 // registered hosts with the client secret set (lib/cognito.ts). The legacy CIS username + password form (the bridge,
 // until AA-680 PR-4) stays: collapsed under the company button where that button exists, and as the only form on
-// hosts without company sign-in (Vercel previews). Booking roles are managed in CIS → Platform → Staff.
+// hosts without company sign-in (per-deployment Vercel preview URLs). Booking roles are managed in CIS → Platform →
+// Staff. AA-911: the fixed Preview host booking-preview.lumiguides.it.com never shows the legacy form.
 
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { LoginForm } from "./LoginForm";
 import { CIS_STAFF_URL } from "@/lib/config";
-import { cognitoSignInAvailable, workforceSignInHost } from "@/lib/cognito";
+import { cognitoSignInAvailable, isPreviewSignInHost, workforceSignInHost } from "@/lib/cognito";
 import { safeNext } from "@/lib/safeNext";
 
 export const metadata: Metadata = { title: "Sign in" };
@@ -45,7 +46,10 @@ export default async function LoginPage({
   const sp = await searchParams;
   const reason = REASONS[typeof sp.reason === "string" ? sp.reason : ""] ?? null;
   const next = safeNext(sp.next);
-  const company = cognitoSignInAvailable((await headers()).get("host"));
+  const host = (await headers()).get("host");
+  const company = cognitoSignInAvailable(host);
+  // AA-911: no legacy password form on the fixed Preview host (a stable URL that may be public).
+  const legacyForm = !isPreviewSignInHost(host);
   const signInHref = `/api/auth/signin/cognito${next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`;
   return (
     <main data-theme="light" className="bk-login-bg relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
@@ -86,15 +90,22 @@ export default async function LoginPage({
               <p className="mt-2 text-center text-xs text-muted">
                 Opens {workforceSignInHost()} and sends a one-time code to your @adventure.asia inbox.
               </p>
-              <details className="mt-6 border-t border-line pt-4">
-                <summary className="cursor-pointer text-[13px] font-medium text-muted hover:text-ink">
-                  Use a CIS username and password instead (legacy)
-                </summary>
-                <LoginForm next={next} />
-              </details>
+              {legacyForm && (
+                <details className="mt-6 border-t border-line pt-4">
+                  <summary className="cursor-pointer text-[13px] font-medium text-muted hover:text-ink">
+                    Use a CIS username and password instead (legacy)
+                  </summary>
+                  <LoginForm next={next} />
+                </details>
+              )}
             </>
-          ) : (
+          ) : legacyForm ? (
             <LoginForm next={next} />
+          ) : (
+            <p role="alert" className="mt-6 rounded-md border border-danger-border bg-danger-soft px-3 py-2 text-[13px] text-danger">
+              Company e-mail sign-in is not set up on this preview build. Point this address at a preview built after
+              the sign-in settings were added (root runbook preview-staff-sign-in).
+            </p>
           )}
         </div>
         <p className="mt-5 text-center text-xs text-muted">

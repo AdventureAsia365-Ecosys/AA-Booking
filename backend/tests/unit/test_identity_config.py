@@ -21,8 +21,10 @@ def test_defaults_are_the_dev_pool_clients_and_the_cis_bridge() -> None:
     assert workforce.name == identity_config.WORKFORCE
     assert workforce.issuer == identity_config.DEV_WORKFORCE_ISSUER
     assert workforce.jwks_url == f"{identity_config.DEV_WORKFORCE_ISSUER}/.well-known/jwks.json"
+    # AA-911 D-1: plus the Preview-only booking-staff-preview client once its id is filled in (empty until then).
+    preview = {identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID} - {""}
     assert workforce.client_ids == frozenset(
-        {identity_config.DEV_BOOKING_STAFF_CLIENT_ID, identity_config.DEV_BREAKGLASS_CLIENT_ID}
+        {identity_config.DEV_BOOKING_STAFF_CLIENT_ID, identity_config.DEV_BREAKGLASS_CLIENT_ID} | preview
     )
     assert (workforce.audience_claim, workforce.token_use, workforce.groups_claim) == (
         "client_id",
@@ -51,7 +53,8 @@ def test_env_overrides_and_blank_values() -> None:
     )
     workforce, _ = identity_config.booking_staff_issuers(settings)
     assert workforce.issuer == WORKFORCE_ISSUER
-    assert workforce.client_ids == frozenset({"abc123", identity_config.DEV_BREAKGLASS_CLIENT_ID})
+    preview = {identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID} - {""}
+    assert workforce.client_ids == frozenset({"abc123", identity_config.DEV_BREAKGLASS_CLIENT_ID} | preview)
 
 
 @pytest.mark.parametrize(

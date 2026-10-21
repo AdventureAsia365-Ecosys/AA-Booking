@@ -36,7 +36,8 @@ class Preferences(BaseModel):
 
 @router.get("/staff/me")
 async def me(staff: Me) -> dict[str, Any]:
-    return {**staff.public(), "permissions": staff.permissions}
+    # preview_viewer (AA-911 D-1): this session came from the Preview-only client and is read-only.
+    return {**staff.public(), "permissions": staff.permissions, "preview_viewer": staff.preview}
 
 
 @router.get("/staff/me/preferences")
