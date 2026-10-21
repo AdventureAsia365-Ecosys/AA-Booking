@@ -37,6 +37,7 @@ from app.retention import jobs as retention_jobs
 from app.routers import (
     catalog,
     customers,
+    docs,
     health,
     notifications,
     ops,
@@ -108,9 +109,10 @@ def create_app(
     app = FastAPI(
         title="AA-Booking API",
         lifespan=lifespan,
-        docs_url="/booking/docs",
+        # AA-876: FastAPI's own docs routes are off; app.routers.docs serves both paths behind a staff-admin gate.
+        docs_url=None,
         redoc_url=None,
-        openapi_url="/booking/openapi.json",
+        openapi_url=None,
     )
     app.state.settings = settings
     app.state.db = db
@@ -118,6 +120,7 @@ def create_app(
     app.state.deploy_verifier = deploy_verifier
     app.add_exception_handler(ServiceError, service_error_handler)
     app.include_router(health.router)
+    app.include_router(docs.router)
     app.include_router(staff.router)
     app.include_router(trip_cases.router)
     app.include_router(customers.router)
