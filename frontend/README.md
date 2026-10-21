@@ -26,8 +26,10 @@ Set in Vercel (or `.env.local` for local runs). All are optional; defaults are i
 |---|---|---|---|
 | `BOOKING_API_URL` | server | Dev custom domain `https://api-booking.lumiguides.it.com` | Booking API base; `/booking/...` is appended |
 | `NEXT_PUBLIC_CIS_ADMIN_URL` | browser | `https://aa-cis.lumiguides.it.com` | "Open CIS admin" / "Managed in CIS" links |
-| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret** | unset | Secret of the Cognito `booking-staff` app client (AA-680). Set for Production AND Preview (AA-911). Unset = no staff sign-in on that build |
+| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret**, Production target only | unset | Secret of the Cognito `booking-staff` app client (AA-680). Never on the Preview target (AA-911 D-1). Unset = no staff sign-in on that build |
 | `COGNITO_BOOKING_STAFF_CLIENT_ID` | server | `5ifl9dgkr8a5outnmsjc8v1kt3` | booking-staff client id (Dev); override only for another pool |
+| `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET` | server, **secret**, Preview target only | unset | Secret of the Preview-only `booking-staff-preview` client (AA-911). A preview build reads only this one, never the production secret |
+| `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID` | server | code constant (empty until the Infra apply) | booking-staff-preview client id; empty = no company sign-in on preview builds |
 | `COGNITO_WORKFORCE_DOMAIN` | server | `https://staff-auth.lumiguides.it.com` | managed-login domain |
 | `COGNITO_WORKFORCE_ISSUER` | server | the Dev WORKFORCE pool issuer | checked against the ID / access token `iss` |
 

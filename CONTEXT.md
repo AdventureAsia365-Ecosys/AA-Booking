@@ -582,20 +582,26 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   access token; the cookie lives for the 12 h session) + `bk_staff_rt` (refresh token, path `/api`). `proxy.ts` sends a
   page whose Cognito token is under 2 min from expiry to `GET /api/auth/refresh?next=…`; the BFF proxy refreshes
   itself (single-flight). `POST /api/auth/logout` revokes the refresh token and returns the Cognito `/logout` URL.
-  Offered only on the registered hosts with `COGNITO_BOOKING_STAFF_CLIENT_SECRET` set (Production AND Preview
-  targets): a Vercel production build accepts `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app`, a
-  preview build only the fixed Preview host `booking-preview.lumiguides.it.com`, `next dev` also `localhost:3001`
-  (`VERCEL_ENV` picks the list). Per-deployment `*.vercel.app` preview URLs get no sign-in: `/login` points staff at
-  the Preview host. There is no other staff sign-in (AA-911).
+  Offered only on the registered hosts with the build's client secret set: a Vercel production build uses the
+  `booking-staff` client (`COGNITO_BOOKING_STAFF_CLIENT_SECRET`, Production target only) and accepts
+  `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app`; a preview build uses the Preview-only
+  `booking-staff-preview` client (`COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET`, Preview target only; client id a code
+  constant filled in after the Infra apply) and accepts only the fixed Preview host `booking-preview.lumiguides.it.com`;
+  `next dev` uses `booking-staff` on the production hosts and `localhost:3001` (`VERCEL_ENV` picks client and list).
+  Per-deployment `*.vercel.app` preview URLs get no sign-in: `/login` points staff at the Preview host. There is no
+  other staff sign-in (AA-911).
 - **Preview sign-in (AA-911, root ADR 0006a A11):** `booking-preview.lumiguides.it.com` is a Vercel domain of
-  `aa-booking-admin` (bound to the never-pushed branch `preview-signin`, so production deploys never claim it) and a
-  registered `booking-staff` callback / sign-out URL. The Vercel Deploy workflow points it at a preview only on
+  `aa-booking-admin` (bound to the never-pushed branch `preview-signin`, so production deploys never claim it) and
+  the only callback / sign-out URL of the Preview-only `booking-staff-preview` client (AA-911 decision D-1; the
+  production `booking-staff` client does not list it). The Vercel Deploy workflow points it at a preview only on
   opt-in: the PR carries the label `preview-signin` when its preview deploys, or a dispatch with
   `alias_only_url=<https://aa-booking-admin-….vercel.app>` (checked over the Vercel REST API: this project, not
   production, READY). Preview builds send `X-Robots-Tag: noindex, nofollow`. Under Standard Deployment Protection the
   host is most likely behind Vercel Authentication (Hobby: only the owner passes; automation needs the project's
-  protection-bypass value). Unmerged same-repo PR code on that host sees the Booking tokens of whoever signs in
-  (accepted for Dev; separate preview client before prod / first paying tenant). Runbook: root
+  protection-bypass value). Unmerged same-repo PR code on that host sees the Booking tokens of whoever signs in,
+  but those are `booking-staff-preview` tokens, which the API caps at read-only (`app/auth/staff.py`: any
+  non-GET/HEAD/OPTIONS is 403 `preview_read_only` before any DB access; permissions limited to `PREVIEW_PERMISSIONS`;
+  `/booking/staff/me` says `preview_viewer: true`). Runbook: root
   `docs/ops/runbooks/preview-staff-sign-in.md`.
 - **CIS password bridge: retired (AA-911).** `POST /api/auth/login`, the legacy form and the re-mint in `proxy.ts` /
   the BFF are gone; a leftover `bk_cis_session` cookie is only cleared (sign-in, sign-out, `proxy.ts` → `/login`).
@@ -622,8 +628,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage; `CIS_API_URL` was retired with the
-  bridge, AA-911), `COGNITO_BOOKING_STAFF_CLIENT_SECRET` (secret; unset = no company sign-in), optional
-  `COGNITO_BOOKING_STAFF_CLIENT_ID` / `COGNITO_WORKFORCE_DOMAIN` / `COGNITO_WORKFORCE_ISSUER` (Dev defaults in code).
+  bridge, AA-911), `COGNITO_BOOKING_STAFF_CLIENT_SECRET` (secret, Production target only; unset = no company sign-in),
+  `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET` (secret, Preview target only, AA-911), optional
+  `COGNITO_BOOKING_STAFF_CLIENT_ID` / `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID` / `COGNITO_WORKFORCE_DOMAIN` /
+  `COGNITO_WORKFORCE_ISSUER` (Dev defaults in code).
   Public: `NEXT_PUBLIC_CIS_ADMIN_URL`. Staff never sign in with Google (ADR 0006a A9): the AA-703 Google placeholder is
   removed.
 - Frontend deploys (S241): CI-created via `.github/workflows/vercel-deploy.yml` (Vercel project `aa-booking-admin`),

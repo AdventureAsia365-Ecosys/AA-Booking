@@ -39,6 +39,7 @@ WORKFORCE_JWKS_URL = f"{WORKFORCE_ISSUER}/.well-known/jwks.json"
 BOOKING_STAFF_CLIENT = "bookingstaffclient00000001"
 BREAKGLASS_CLIENT = "breakglassclient0000000001"
 CIS_ADMIN_CLIENT = "cisadminclient000000000001"
+BOOKING_STAFF_PREVIEW_CLIENT = "bookingpreviewclient000001"
 WORKFORCE_SUB = "3a1b0c9e-0000-4000-8000-00000000c0de"
 
 
@@ -178,6 +179,7 @@ class LocalStaff:
             cognito_workforce_issuer=WORKFORCE_ISSUER,
             cognito_booking_staff_client_id=BOOKING_STAFF_CLIENT,
             cognito_breakglass_client_id=BREAKGLASS_CLIENT,
+            cognito_booking_staff_preview_client_id=BOOKING_STAFF_PREVIEW_CLIENT,
         )
 
     def verifier(self) -> MultiIssuerVerifier:

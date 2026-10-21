@@ -20,6 +20,9 @@ Cognito WORKFORCE staff sign-in (AA-680 Phase 2, root ADR 0006 §8; ``app.auth.i
 - ``COGNITO_WORKFORCE_ISSUER``: the WORKFORCE pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
 - ``COGNITO_BOOKING_STAFF_CLIENT_ID``: the ``booking-staff`` app client (the Booking staff UI's sign-in).
 - ``COGNITO_BREAKGLASS_CLIENT_ID``: the ``breakglass`` app client.
+- ``COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID``: the Preview-only ``booking-staff-preview`` app client (AA-911 D-1).
+  Default :data:`~app.auth.identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID`; empty = no preview client accepted.
+  Its sessions are capped at read-only. It must differ from the two clients above.
 
 Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` grants the task role
 ``ses:SendEmail`` as ``SES_FROM_ADDRESS`` only):
@@ -40,7 +43,12 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from app.auth.identity_config import DEV_BOOKING_STAFF_CLIENT_ID, DEV_BREAKGLASS_CLIENT_ID, DEV_WORKFORCE_ISSUER
+from app.auth.identity_config import (
+    DEV_BOOKING_STAFF_CLIENT_ID,
+    DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
+    DEV_BREAKGLASS_CLIENT_ID,
+    DEV_WORKFORCE_ISSUER,
+)
 
 SERVICE_NAME = "aa-booking-api"
 
@@ -72,6 +80,7 @@ class Settings:
     cognito_workforce_issuer: str = DEV_WORKFORCE_ISSUER
     cognito_booking_staff_client_id: str = DEV_BOOKING_STAFF_CLIENT_ID
     cognito_breakglass_client_id: str = DEV_BREAKGLASS_CLIENT_ID
+    cognito_booking_staff_preview_client_id: str = DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -103,6 +112,16 @@ class Settings:
         ):
             if not client_id or not client_id.isalnum():
                 raise SettingsError(f"{name} must be a Cognito app client id (letters and digits), got {client_id!r}")
+        preview = self.cognito_booking_staff_preview_client_id
+        if preview:
+            if not preview.isalnum():
+                raise SettingsError(
+                    "COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID must be a Cognito app client id (letters and digits) "
+                    f"or empty, got {preview!r}"
+                )
+            if preview in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id):
+                # The same id would cap Production sign-ins too, or (worse, after a later fix) un-cap Preview ones.
+                raise SettingsError("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID must differ from the production clients")
 
 
 def _flag(raw: str | None, default: bool, name: str) -> bool:
@@ -138,4 +157,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEV_BOOKING_STAFF_CLIENT_ID,
         cognito_breakglass_client_id=(env.get("COGNITO_BREAKGLASS_CLIENT_ID") or "").strip()
         or DEV_BREAKGLASS_CLIENT_ID,
+        cognito_booking_staff_preview_client_id=(env.get("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID") or "").strip()
+        or DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
     )
