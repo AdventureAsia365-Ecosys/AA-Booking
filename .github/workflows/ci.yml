@@ -225,7 +225,7 @@ jobs:
         run: python3 scripts/check_vendored_copies.py
 
   # Non-required (ADR 0004 decision 3): eslint, tsc and `next build` of the staff admin in frontend/.
-  # Mirrors the CIS frontend checks. Needs no secret: the app reads BOOKING_API_URL / CIS_API_URL at
+  # Mirrors the CIS frontend checks. Needs no secret: the app reads BOOKING_API_URL at
   # runtime and falls back to the Dev defaults in frontend/lib/config.ts.
   frontend-build:
     name: Frontend Build

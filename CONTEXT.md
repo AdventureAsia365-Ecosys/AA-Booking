@@ -604,8 +604,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
-- Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
-  API), `COGNITO_BOOKING_STAFF_CLIENT_SECRET` (secret; unset = no company sign-in), optional
+- Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage; `CIS_API_URL` was retired with the
+  bridge, AA-911), `COGNITO_BOOKING_STAFF_CLIENT_SECRET` (secret; unset = no company sign-in), optional
   `COGNITO_BOOKING_STAFF_CLIENT_ID` / `COGNITO_WORKFORCE_DOMAIN` / `COGNITO_WORKFORCE_ISSUER` (Dev defaults in code).
   Public: `NEXT_PUBLIC_CIS_ADMIN_URL`. Staff never sign in with Google (ADR 0006a A9): the AA-703 Google placeholder is
   removed.
