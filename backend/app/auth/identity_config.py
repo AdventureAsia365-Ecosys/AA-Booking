@@ -45,7 +45,7 @@ DEV_BOOKING_STAFF_CLIENT_ID = "5ifl9dgkr8a5outnmsjc8v1kt3"
 DEV_BREAKGLASS_CLIENT_ID = "2g3f3ncfuqdiuu1o5b70o4h0lq"
 # AA-911 D-1: the Preview-only booking-staff-preview client (AA-CIS-Infra identity.tf). Empty until the Infra apply
 # creates it; then the id is filled in here. Empty = no preview client accepted (fail closed).
-DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID = ""
+DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID = "7tlhphjurhqio0l26uh20valpp"
 
 # IssuerConfig.name of each accepted issuer; app.auth.staff picks the identity rules by it.
 WORKFORCE = "workforce"

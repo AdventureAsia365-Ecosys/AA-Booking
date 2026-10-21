@@ -55,7 +55,7 @@ const PRODUCTION_CLIENT_ID =
   (process.env.COGNITO_BOOKING_STAFF_CLIENT_ID ?? "").trim() || "5ifl9dgkr8a5outnmsjc8v1kt3";
 // AA-911 D-1: the `booking-staff-preview` client (AA-CIS-Infra identity.tf). Empty until the Infra apply creates it,
 // then filled in here; while empty a preview build offers no company e-mail sign-in (never the production client).
-const DEFAULT_PREVIEW_CLIENT_ID = "";
+const DEFAULT_PREVIEW_CLIENT_ID = "7tlhphjurhqio0l26uh20valpp";
 const PREVIEW_CLIENT_ID =
   (process.env.COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID ?? "").trim() || DEFAULT_PREVIEW_CLIENT_ID;
 const CLIENT_ID = PREVIEW_BUILD ? PREVIEW_CLIENT_ID : PRODUCTION_CLIENT_ID;
