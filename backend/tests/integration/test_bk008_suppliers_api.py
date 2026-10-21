@@ -207,7 +207,8 @@ async def test_contract_lifecycle_and_deactivate_rule(
     assert created.status_code == 201, created.text
     k = created.json()
     assert k["status"] == "draft" and k["phase"] == "draft" and k["currency"] == "BTN"
-    assert k["created_by"] == MAKER and k["created_by_name"] == "Staff One"  # refreshed from the token
+    # WORKFORCE tokens carry no display name: the name is the staff row's own (here the key), never the token's
+    assert k["created_by"] == MAKER and k["created_by_name"] == MAKER
 
     edited = await c.patch(f"/contracts/{k['id']}", json={"cancellation_policy": "Free until 30 days"}, headers=maker)
     assert edited.status_code == 200 and edited.json()["changed"] == ["cancellation_policy"]
