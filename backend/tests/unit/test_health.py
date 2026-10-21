@@ -63,4 +63,5 @@ def test_ready_503_when_database_url_missing() -> None:
 def test_only_booking_prefix_is_served() -> None:
     with TestClient(create_app(SETTINGS)) as client:
         assert client.get("/health").status_code == 404
-        assert client.get("/booking/openapi.json").status_code == 200
+        # SETTINGS is ENVIRONMENT=dev: the schema is served under /booking but gated (AA-876, test_docs_gate.py).
+        assert client.get("/booking/openapi.json").status_code == 403

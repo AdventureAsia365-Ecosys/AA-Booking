@@ -79,6 +79,7 @@ Design sources, in order:
 backend/
   app/main.py              FastAPI app factory; every path is under /booking
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
+  app/routers/docs.py      GET /booking/openapi.json, GET /booking/docs (staff.admin outside test/local, AA-876)
   app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff
   app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
   app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
@@ -227,6 +228,12 @@ send, OTP) is not built: those still write rows only.
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = the staff key: CIS user id or `cog:<sub>`).
+- **API docs are gated (AA-876, CIS AA-577 pattern).** FastAPI's own docs routes are off; `app/routers/docs.py`
+  serves `GET /booking/openapi.json` and `GET /booking/docs` (not in the schema). With `ENVIRONMENT` `test` / `local`
+  they are open; anywhere else (Dev included) they need a staff Bearer with `staff.admin`, and every refusal (no token,
+  bad token, auth unavailable, no role, inactive, not admin) is the same **403** `docs_forbidden`. The check goes
+  through `current_staff`, so it may provision or sync the caller's `staff_users` row. The Swagger page fetches the
+  schema without a Bearer, so on Dev the docs are for `curl` with a token. Local runs: `ENVIRONMENT=local`.
 - **One machine caller: the Deploy Dev workflow, by GitHub OIDC** (AA-751 B3, `app/auth/ci.py`). `GET
   /booking/ops/deploy-gate` takes no staff JWT and no `staff_users` row. It accepts only a GitHub Actions OIDC token:
   RS256 against GitHub's JWKS (`https://token.actions.githubusercontent.com/.well-known/jwks`, same cache code as the
@@ -353,6 +360,16 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   `tests/integration/bootstrap_roles.py` sets the roles up with the container superuser, which the tests never use.
 - Grants on other apps' objects are written by **their** owners, in their migrations, unguarded,
   after role `booking` exists (ADR 0004 decision 6).
+- **Column tags (data standards DM-6.1, bk-018, AA-877).** A column holding personal data carries
+  `COMMENT 'pii:<class>; <free text>'` (`contact`, `name`, `address`, `profile`, `online_id`, `free_text`, `travel`,
+  `payment`; further classes named later as `also pii:<class>`), commercial secrets `conf:commercial; …`, credentials
+  and their hashes `conf:credential; …`. bk-008/009/010/012 tagged their own columns; bk-018 tagged the rest. A new
+  column holding such data ships its tag **in the same migration file** that creates it (COMMENT replaces the whole
+  comment, so keep any earlier text after the tag; a view rebuilt with DROP + CREATE must restate its tags).
+  `tests/integration/test_bk018_pii_tags.py` fails on an untagged column named like personal data that is not on its
+  allowlist; the schema reference section *Personal and confidential data tags (DM-6.1)* (AA-CIS-Infra
+  `db/gen_schema_reference.py`, the authority) lists every tag and is the column inventory of the RoPA
+  (AA-Ecosys `docs/legal/register.md`). bk-018 is COMMENT only: `REQUIRED_SCHEMA_VERSIONS` is unchanged.
 
 ### `bk-001` (first slice, ADR 0004 decision 7)
 
