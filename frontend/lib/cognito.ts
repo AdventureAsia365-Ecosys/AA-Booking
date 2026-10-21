@@ -6,10 +6,14 @@
 // do (proxy only redirects to /api/auth/refresh).
 //
 // Security rules this file enforces (same as CIS):
-//   - The redirect URI is always taken from a FIXED allowlist (the two production hosts, plus localhost:3001 in
-//     development), never built from the Host header. The request host is only COMPARED with the allowlist; an
-//     unlisted host (a Vercel preview) gets no Cognito sign-in at all, because preview hosts are not registered
-//     callback URLs (AA-CIS-Infra identity_variables.tf). Those hosts keep the legacy CIS password form.
+//   - The redirect URI is always taken from a FIXED allowlist (the two production hosts, the one fixed Preview host
+//     booking-preview.lumiguides.it.com, plus localhost:3001 in development), never built from the Host header. The
+//     request host is only COMPARED with the allowlist; any other host (a per-deployment *.vercel.app preview URL)
+//     gets no Cognito sign-in at all, because those hosts are not registered callback URLs (AA-CIS-Infra
+//     identity_variables.tf). AA-911 (ADR 0006a A11): the Preview host is re-pointed at the preview under test by
+//     the Vercel Deploy workflow (PR label `preview-signin` or the `alias_only_url` dispatch). A Vercel production
+//     build accepts only the production hosts and a preview build only the Preview host (VERCEL_ENV).
+//   - The Preview host never offers the legacy CIS password form (isPreviewSignInHost).
 //   - state, nonce, the PKCE verifier and the post-login path live in one short-lived httpOnly cookie scoped to the
 //     callback path; the callback checks state against it and the nonce against the ID token.
 //   - Token exchange, refresh and revoke authenticate with HTTP Basic (client id + secret).
@@ -47,10 +51,28 @@ const REFRESH_TTL_S = 12 * 60 * 60;
 
 // Registered callback / logout origins of the booking-staff client (identity_variables.tf).
 const PROD_ORIGINS = ["https://booking.lumiguides.it.com", "https://aa-booking-admin.vercel.app"];
+// AA-911: the one fixed Preview host (Vercel domain on aa-booking-admin, aliased to the preview under test).
+export const PREVIEW_ORIGIN = "https://booking-preview.lumiguides.it.com";
 const DEV_ORIGIN = "http://localhost:3001";
 
+/**
+ * The origins this BUILD may run the Cognito flow on. A Vercel production build accepts only the production
+ * hosts; a Vercel preview build only the fixed Preview host, so neither can run the other environment's callback.
+ * Outside Vercel (VERCEL_ENV unset) a production build keeps the production hosts and `next dev` adds localhost.
+ */
 function origins(): string[] {
-  return process.env.NODE_ENV === "development" ? [...PROD_ORIGINS, DEV_ORIGIN] : PROD_ORIGINS;
+  const vercelEnv = (process.env.VERCEL_ENV ?? "").trim();
+  if (vercelEnv === "production") return PROD_ORIGINS;
+  if (vercelEnv === "preview") return [PREVIEW_ORIGIN];
+  return process.env.NODE_ENV === "development" ? [...PROD_ORIGINS, PREVIEW_ORIGIN, DEV_ORIGIN] : PROD_ORIGINS;
+}
+
+/**
+ * True when the request is served on the fixed Preview sign-in host. That host never offers the legacy CIS
+ * password form or `POST /api/auth/login` (AA-911): a stable, possibly public URL must not expose a password form.
+ */
+export function isPreviewSignInHost(host: string | null | undefined): boolean {
+  return !!host && host.trim().toLowerCase() === new URL(PREVIEW_ORIGIN).host;
 }
 
 /** Host of the managed-login page (shown on /login so staff know where the sign-in opens). */
