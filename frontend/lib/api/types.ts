@@ -40,6 +40,8 @@ export interface StaffProfile {
 
 export interface StaffMe extends StaffProfile {
   permissions: string[];
+  /** AA-911 D-1: this session came from the Preview-only client and is read-only (permissions already capped). */
+  preview_viewer?: boolean;
 }
 
 export interface StaffDirectoryEntry {

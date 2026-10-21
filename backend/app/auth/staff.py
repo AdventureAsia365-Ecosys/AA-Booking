@@ -14,6 +14,13 @@ a byte copy of the CIS verifier) **and** the matching active ``booking.staff_use
   ``reviewer`` → ``sales`` and ``content`` → ``content_creator``, both inactive until a Booking admin activates them.
   Later tokens refresh the profile fields (email, name, cis_role, last_seen_at) but never the role or the active flag.
 
+**Preview cap (AA-911 decision D-1, root ADR 0006a A11).** A WORKFORCE token from the Preview-only
+``booking-staff-preview`` client (the fixed Preview host ``booking-preview.lumiguides.it.com``, which runs unmerged PR
+code) is a read-only session whatever ``booking-*`` group the user holds: any request other than GET / HEAD / OPTIONS
+is 403 ``preview_read_only`` before anything is read or written, and :meth:`Staff.can` grants only
+:data:`PREVIEW_PERMISSIONS` (reads; never ``staff.admin``, ``audit.read`` or any write). ``/booking/staff/me`` reports
+``preview_viewer: true`` and the capped permission list, so the UI hides write actions.
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -22,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -85,6 +92,14 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "retention.admin": frozenset({"admin"}),
 }
 
+# AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin
+# reads (staff.admin, audit.read, retention.admin) and every write stay out.
+PREVIEW_PERMISSIONS: frozenset[str] = frozenset(
+    {"trip_case.read", "customer.read", "staff.directory", "pricing.read", "supply.read", "catalog.read"}
+)
+# The only methods a Preview-client session may call (RFC 9110 safe methods that routes here serve).
+PREVIEW_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
 # last_seen_at is refreshed at most this often (one write per staff user per 5 minutes, not per request).
 LAST_SEEN_EVERY = "5 minutes"
 LAST_SEEN_EVERY_TD = timedelta(minutes=5)
@@ -120,6 +135,8 @@ class Staff:
     updated_at: datetime | None = None
     last_seen_at: datetime | None = None
     cognito_sub: str | None = None
+    # Session flag, not a column: True when this request's token came from the Preview-only client (AA-911 D-1).
+    preview: bool = False
 
     @classmethod
     def from_row(cls, row: Any) -> Staff:
@@ -131,6 +148,8 @@ class Staff:
         return self.cognito_sub is not None
 
     def can(self, permission: str) -> bool:
+        if self.preview and permission not in PREVIEW_PERMISSIONS:
+            return False
         return self.active and self.role in PERMISSIONS.get(permission, frozenset())
 
     @property
@@ -368,12 +387,19 @@ async def current_staff(
         raise HTTPException(status_code=503, detail="auth_unavailable") from exc
     kind = identity_config.issuer_kind(verifier, principal.iss)
     if kind == identity_config.WORKFORCE:
+        preview = identity_config.is_preview_client(request.app.state.settings, principal.client_id)
+        if preview and request.method.upper() not in PREVIEW_METHODS:
+            # AA-911 D-1: a Preview-host session never writes, whatever its groups. Refused before any DB access.
+            log.info("booking_preview_write_refused method=%s path=%s", request.method, request.url.path)
+            raise HTTPException(status_code=403, detail="preview_read_only")
         role = booking_role(principal.groups)
         if role is None:
             raise HTTPException(status_code=403, detail="no_booking_role")
         pool = await get_pool(request)
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
+        if preview:
+            staff = replace(staff, preview=True)
     elif kind == identity_config.BRIDGE:
         claims = _bridge_claims(principal, token)
         role = ROLE_FROM_CIS.get(claims.cis_role)
