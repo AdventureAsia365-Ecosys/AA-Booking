@@ -594,7 +594,7 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `next dev` uses `booking-staff` on the production hosts and `localhost:3001` (`VERCEL_ENV` picks client and list). Per-deployment `*.vercel.app` preview URLs get only the legacy form; the Preview
   host never shows the legacy form and answers 404 on `POST /api/auth/login`.
 - **Preview sign-in (AA-911, root ADR 0006a A11):** `booking-preview.lumiguides.it.com` is a Vercel domain of
-  `aa-booking-admin` (bound to the never-pushed branch `preview-signin`, so production deploys never claim it) and a
+  `aa-booking-admin` (bound to the never-pushed branch `preview-signin`, so production deploys never claim it) and
   the only callback / sign-out URL of the Preview-only `booking-staff-preview` client (AA-911 decision D-1; the
   production `booking-staff` client does not list it). The Vercel Deploy workflow points it at a preview only on
   opt-in: the PR carries the label `preview-signin` when its preview deploys, or a dispatch with
