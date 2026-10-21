@@ -364,6 +364,16 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
   `tests/integration/bootstrap_roles.py` sets the roles up with the container superuser, which the tests never use.
 - Grants on other apps' objects are written by **their** owners, in their migrations, unguarded,
   after role `booking` exists (ADR 0004 decision 6).
+- **Column tags (data standards DM-6.1, bk-018, AA-877).** A column holding personal data carries
+  `COMMENT 'pii:<class>; <free text>'` (`contact`, `name`, `address`, `profile`, `online_id`, `free_text`, `travel`,
+  `payment`; further classes named later as `also pii:<class>`), commercial secrets `conf:commercial; …`, credentials
+  and their hashes `conf:credential; …`. bk-008/009/010/012 tagged their own columns; bk-018 tagged the rest. A new
+  column holding such data ships its tag **in the same migration file** that creates it (COMMENT replaces the whole
+  comment, so keep any earlier text after the tag; a view rebuilt with DROP + CREATE must restate its tags).
+  `tests/integration/test_bk018_pii_tags.py` fails on an untagged column named like personal data that is not on its
+  allowlist; the schema reference section *Personal and confidential data tags (DM-6.1)* (AA-CIS-Infra
+  `db/gen_schema_reference.py`, the authority) lists every tag and is the column inventory of the RoPA
+  (AA-Ecosys `docs/legal/register.md`). bk-018 is COMMENT only: `REQUIRED_SCHEMA_VERSIONS` is unchanged.
 
 ### `bk-001` (first slice, ADR 0004 decision 7)
 

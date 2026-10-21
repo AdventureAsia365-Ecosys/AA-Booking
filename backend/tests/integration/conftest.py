@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -112,17 +112,23 @@ def booking_dsn(admin_dsn: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
-async def apply_migrations(conn: asyncpg.Connection, *, first_pass: bool = False) -> None:
+async def apply_migrations(
+    conn: asyncpg.Connection, *, first_pass: bool = False, only: Iterable[int] | None = None
+) -> None:
     """Same call as AA-CIS-Infra db/run_migration.py: the whole file, simple protocol, as its migration role.
 
     Each file runs as ``migration_role(bk-NNN)``: the login role ``aa_cis_admin`` up to bk-014, ``SET ROLE
     bk_owner`` from bk-015 on. On the first pass that must be the role DB Migrate picks (the live owner of schema
     booking when the file starts, XD8): a mismatch fails here, before the Dev apply. A re-run (the idempotency
     check) uses the same per-file role; DB Migrate itself never re-runs a registered file. After a switched file
-    the login role may own nothing in schema booking (the runner's ownership post-check).
+    the login role may own nothing in schema booking (the runner's ownership post-check). ``only`` limits the run to
+    those bk- numbers, in file order (e.g. ``range(1, 18)`` = the state before bk-018).
     """
     login = await conn.fetchval("SELECT session_user")
+    wanted = None if only is None else set(only)
     for path in MIGRATIONS:
+        if wanted is not None and int(path.name[:3]) not in wanted:
+            continue
         role = migration_role(int(path.name[:3]))
         if first_pass:
             runner_role = await live_owner(conn) or login

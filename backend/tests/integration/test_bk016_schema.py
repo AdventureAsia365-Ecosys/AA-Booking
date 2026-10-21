@@ -72,7 +72,7 @@ async def test_bk016_is_registered_with_columns_checks_and_index(admin: asyncpg.
     )
     assert owner == "bk_owner"
     comment = await admin.fetchval("SELECT col_description('booking.staff_users'::regclass, 1)")
-    assert comment.startswith("The Booking staff key (legacy name")
+    assert comment.startswith("pii:online_id; The Booking staff key (legacy name")  # tag prefixed by bk-018 (AA-877)
 
 
 async def test_bk016_converges_when_every_migration_runs_again(admin: asyncpg.Connection) -> None:
