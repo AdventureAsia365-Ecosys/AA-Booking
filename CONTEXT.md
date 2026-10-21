@@ -79,6 +79,7 @@ Design sources, in order:
 backend/
   app/main.py              FastAPI app factory; every path is under /booking
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
+  app/routers/docs.py      GET /booking/openapi.json, GET /booking/docs (staff.admin outside test/local, AA-876)
   app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff
   app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
   app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
@@ -229,6 +230,14 @@ send, OTP) is not built: those still write rows only.
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = the staff key: CIS user id or `cog:<sub>`).
+- **API docs are gated (AA-876, CIS AA-577 pattern).** FastAPI's own docs routes are off; `app/routers/docs.py`
+  serves `GET /booking/openapi.json` and `GET /booking/docs` (not in the schema). With `ENVIRONMENT` `test` / `local`
+  they are open; anywhere else (Dev included) they need a staff Bearer with `staff.admin`, and every refusal (no token,
+  bad token, auth unavailable, no role, inactive, not admin) is the same **403** `docs_forbidden`. The check goes
+  through `current_staff`, so it may provision or sync the caller's `staff_users` row. The Swagger page fetches the
+  schema without a Bearer, so on Dev the docs are for `curl` with a token. Local runs: `ENVIRONMENT=local`.
+- The staff login BFF (`frontend/app/api/auth/login/route.ts`, CIS bridge) passes a CIS 429 (CIS login throttle or
+  the API Gateway login throttle, AA-876) on as a 429 "Too many sign-in attempts…" with `Retry-After`, not a 502.
 - **One machine caller: the Deploy Dev workflow, by GitHub OIDC** (AA-751 B3, `app/auth/ci.py`). `GET
   /booking/ops/deploy-gate` takes no staff JWT and no `staff_users` row. It accepts only a GitHub Actions OIDC token:
   RS256 against GitHub's JWKS (`https://token.actions.githubusercontent.com/.well-known/jwks`, same cache code as the
