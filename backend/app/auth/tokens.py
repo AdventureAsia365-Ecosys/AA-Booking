@@ -1,8 +1,9 @@
 """RS256 JWT verification against one JWKS: the cache and decoder of the deploy-gate verifier (``app.auth.ci``, AA-751).
 
-Until AA-680 Phase 2 this module also verified the CIS staff JWT. Staff tokens (Cognito WORKFORCE and the CIS bridge)
-now go through the multi-issuer verifier ``app.auth.identity_verifier`` (a byte copy of the CIS module), configured in
-``app.auth.identity_config``; only the GitHub OIDC deploy gate still uses the cache and decoder here.
+Until AA-680 Phase 2 this module also verified the CIS staff JWT. Staff tokens (Cognito WORKFORCE only; the CIS bridge
+token is retired, AA-911) now go through the multi-issuer verifier ``app.auth.identity_verifier`` (a byte copy of the
+CIS module), configured in ``app.auth.identity_config``; only the GitHub OIDC deploy gate still uses the cache and
+decoder here.
 
 The JWKS is cached for :data:`JWKS_TTL_S`. An unknown ``kid`` forces a refetch (key rotation), at most
 once per :data:`UNKNOWN_KID_REFETCH_S` so a stream of random ``kid`` values cannot make Booking hammer

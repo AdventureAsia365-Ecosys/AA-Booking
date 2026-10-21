@@ -19,7 +19,7 @@ from app.jobs import queue
 from app.jobs.kinds import DEPLOY_GATE_EXEMPT, EXPECTED_SECONDS
 from app.main import create_app
 from app.settings import Settings
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import LocalRsaIssuer, LocalStaff
 from tests.unit.fakes import ScriptedConn
 
 SETTINGS = Settings(database_url="postgresql://booking:x@db.test/aa", environment="test")
@@ -180,10 +180,10 @@ async def test_hs256_token_is_rejected_before_any_key_lookup() -> None:
 
 @pytest.mark.asyncio
 async def test_staff_jwt_is_not_a_deploy_token() -> None:
-    """A CIS staff token (other key, aud=booking) never opens the gate, even with GitHub-shaped claims."""
+    """A staff-shaped token from another key (aud=booking) never opens the gate, even with GitHub-shaped claims."""
     gh = LocalGithub()
     with pytest.raises(InvalidToken):
-        await gh.verifier().verify(LocalCis(kid=gh.kid).token(**GOOD_CLAIMS))
+        await gh.verifier().verify(LocalRsaIssuer(kid=gh.kid).token(**GOOD_CLAIMS))
 
 
 @pytest.mark.asyncio
@@ -254,7 +254,7 @@ class FakeDatabase(Database):
 
 
 def client(conn: ScriptedConn, gh: LocalGithub, configured: bool = True) -> TestClient:
-    app = create_app(SETTINGS, FakeDatabase(conn, configured), LocalCis().verifier(), gh.verifier())
+    app = create_app(SETTINGS, FakeDatabase(conn, configured), LocalStaff().verifier(), gh.verifier())
     return TestClient(app)
 
 
@@ -317,7 +317,7 @@ def test_gate_with_wrong_token_is_401(kwargs: dict[str, Any]) -> None:
 def test_gate_with_staff_token_is_401() -> None:
     gh = LocalGithub()
     with client(ScriptedConn(), gh) as c:
-        r = c.get("/booking/ops/deploy-gate", headers=auth(LocalCis().token()))
+        r = c.get("/booking/ops/deploy-gate", headers=auth(LocalStaff().token()))
     assert r.status_code == 401
 
 

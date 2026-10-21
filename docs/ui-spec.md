@@ -281,6 +281,9 @@ Rules that apply to every list page. They replace the Figma drift (counts that d
 
 ### 4.1 `/login` (W1)
 
+> Superseded (AA-911, root ADR 0006a A11): staff sign in with company e-mail (Cognito WORKFORCE, `booking-staff`
+> client) only; the CIS password flow below is retired and kept here as history.
+
 The O1 flow: CIS login, then a Booking token.
 
 1. The form takes the CIS username and password and posts them to the BFF `POST /api/auth/login`.

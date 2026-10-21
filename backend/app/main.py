@@ -4,9 +4,9 @@ Every public path is under ``/booking``: the shared ALB forwards ``/booking/*`` 
 the Booking REST API proxies ``/booking/{proxy+}`` (root ADR 0004 decision 5).
 
 Staff routes (everything under ``/booking`` except ``/booking/health*`` and ``/booking/ops/*``) verify a Cognito
-WORKFORCE access token (clients booking-staff / breakglass) or, during the transition, the CIS bridge token, with the
+WORKFORCE access token (clients booking-staff / breakglass; the CIS bridge token is retired, AA-911) with the
 multi-issuer verifier (``app.auth.identity_config``, AA-680 Phase 2), and require an active ``booking.staff_users``
-row. The lifespan prefetches both issuers' JWKS in the background. The one machine
+row. The lifespan prefetches the WORKFORCE JWKS in the background. The one machine
 route, ``/booking/ops/deploy-gate``, accepts only the Deploy Dev workflow's GitHub OIDC token (``app.auth.ci``).
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop

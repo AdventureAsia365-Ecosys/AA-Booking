@@ -1,18 +1,18 @@
 """Booking staff: the thin staff profile, sign-in rules, permissions and FastAPI dependencies.
 
 A request is staff-authenticated when its bearer token passes the multi-issuer verifier (``app.auth.identity_config``,
-a byte copy of the CIS verifier) **and** the matching active ``booking.staff_users`` row exists. Two issuers:
+a byte copy of the CIS verifier) **and** the matching active ``booking.staff_users`` row exists. One issuer:
 
 - **WORKFORCE** (Cognito staff pool, clients booking-staff / breakglass; AA-680 Phase 2, ADR 0006a). The row is found
   by its Cognito identity ``(cognito_iss, cognito_sub)`` (bk-016). The Booking role comes from the ``booking-*`` group
   on **every** request (the first in :data:`BOOKING_GROUP_ROLES` order wins); no ``booking-*`` group is 403
   ``no_booking_role`` and nothing is written. An identity with no row gets one, keyed ``'cog:' || sub`` and active,
-  from the token claims; bridge-era rows were linked to their identity once by the AA-CIS-Infra backfill script. A
-  linked row whose ``active`` is false is refused (403 ``staff_inactive``): ``active`` stays a Booking-side switch.
-- **BRIDGE** (the CIS-minted Booking token, during the transition only, ADR 0006a A6): the row is keyed by the CIS
-  ``admin_users.id`` (``sub``) and provisioned on the first token: CIS ``admin`` → Booking ``admin`` (active);
-  ``reviewer`` → ``sales`` and ``content`` → ``content_creator``, both inactive until a Booking admin activates them.
-  Later tokens refresh the profile fields (email, name, cis_role, last_seen_at) but never the role or the active flag.
+  from the token claims; bridge-era rows were linked to their identity, or deactivated, once by the AA-CIS-Infra
+  backfill scripts (aa680, aa911). A linked row whose ``active`` is false is refused (403 ``staff_inactive``):
+  ``active`` stays a Booking-side switch.
+
+The CIS bridge token (ADR 0004 O1) is retired (AA-911, root ADR 0006a A11): any other issuer is 401 ``invalid_token``
+and nothing is written.
 
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
@@ -27,7 +27,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import asyncpg
-import jwt
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -38,10 +37,6 @@ from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 log = logging.getLogger(__name__)
 
 STAFF_ROLES = ("admin", "sales", "contracting", "content_creator")
-# BRIDGE: CIS role (bridge token cis_role) → Booking role on first provisioning (ERD v2 identity note).
-ROLE_FROM_CIS = {"admin": "admin", "reviewer": "sales", "content": "content_creator"}
-AUTO_ACTIVE_CIS_ROLES = frozenset({"admin"})
-
 # WORKFORCE: Cognito group → Booking role, in precedence order (AA-CIS-Infra identity.tf local.id_staff_groups, ADR
 # 0006 decision 3). A user in several booking-* groups gets the first one listed here.
 BOOKING_GROUP_ROLES: tuple[tuple[str, str], ...] = (
@@ -103,9 +98,7 @@ _BASE_COLUMNS = (
     "last_seen_at",
 )
 
-bearer = HTTPBearer(
-    auto_error=False, description="Cognito WORKFORCE access token (booking-staff client) or the CIS bridge token"
-)
+bearer = HTTPBearer(auto_error=False, description="Cognito WORKFORCE access token (booking-staff or breakglass client)")
 
 
 @dataclass(frozen=True)
@@ -149,63 +142,6 @@ class Staff:
             "last_seen_at": self.last_seen_at,
             "managed_in_directory": self.managed_in_directory,
         }
-
-
-@dataclass(frozen=True)
-class BridgeClaims:
-    """What the CIS bridge token says about the caller (``sub`` = CIS ``admin_users.id``)."""
-
-    sub: str
-    email: str | None
-    name: str | None
-    cis_role: str
-
-
-async def provision(conn: asyncpg.Connection, claims: BridgeClaims, role: str) -> Staff:
-    """BRIDGE: create the profile on the first token, refresh profile fields afterwards. Returns the row."""
-    row = await conn.fetchrow(
-        f"""
-        INSERT INTO booking.staff_users AS s (cis_user_id, email, name, role, active, cis_role, last_seen_at)
-        VALUES ($1, $2, $3, $4, $5, $6, now())
-        ON CONFLICT (cis_user_id) DO UPDATE
-            SET email = coalesce(EXCLUDED.email, s.email),
-                name = coalesce(EXCLUDED.name, s.name),
-                cis_role = EXCLUDED.cis_role,
-                last_seen_at = now()
-            WHERE s.last_seen_at IS NULL
-               OR s.last_seen_at < now() - interval '{LAST_SEEN_EVERY}'
-               OR s.cis_role IS DISTINCT FROM EXCLUDED.cis_role
-               OR (EXCLUDED.email IS NOT NULL AND s.email IS DISTINCT FROM EXCLUDED.email)
-               OR (EXCLUDED.name IS NOT NULL AND s.name IS DISTINCT FROM EXCLUDED.name)
-        RETURNING {STAFF_COLUMNS}, (xmax = 0) AS inserted
-        """,  # noqa: S608 — constants only
-        claims.sub,
-        claims.email,
-        claims.name,
-        role,
-        claims.cis_role in AUTO_ACTIVE_CIS_ROLES,
-        claims.cis_role,
-    )
-    inserted = False
-    if row is None:  # unchanged within LAST_SEEN_EVERY: nothing written
-        row = await conn.fetchrow(
-            f"SELECT {STAFF_COLUMNS} FROM booking.staff_users WHERE cis_user_id = $1",  # noqa: S608
-            claims.sub,
-        )
-    else:
-        inserted = bool(row["inserted"])
-    staff = Staff.from_row(row)
-    if inserted:
-        await audit.record(
-            conn,
-            actor_type="system",
-            actor_ref=staff.cis_user_id,
-            action="staff.provisioned",
-            entity_type="staff_user",
-            entity_id=staff.cis_user_id,
-            after={**staff.public(), "from_cis_role": claims.cis_role},
-        )
-    return staff
 
 
 def booking_role(groups: tuple[str, ...]) -> str | None:
@@ -335,17 +271,6 @@ async def _sync_row(
     return updated
 
 
-def _bridge_claims(principal: Principal, token: str) -> BridgeClaims:
-    """BRIDGE: the verified principal plus the ``name`` claim, which the vendored Principal does not carry. The token
-    was verified by the caller, so reading one more claim without the signature check is safe here."""
-    if principal.sub.startswith(COGNITO_KEY_PREFIX):  # never a CIS admin_users.id; such a key belongs to a Cognito row
-        raise HTTPException(status_code=401, detail="invalid_token", headers={"WWW-Authenticate": "Bearer"})
-    raw = jwt.decode(token, options={"verify_signature": False}).get("name")
-    name = (raw.strip()[:320] or None) if isinstance(raw, str) else None
-    cis_role = principal.groups[0] if len(principal.groups) == 1 else ""
-    return BridgeClaims(sub=principal.sub, email=principal.email, name=name, cis_role=cis_role)
-
-
 async def get_pool(request: Request) -> asyncpg.Pool:
     db = request.app.state.db
     if not db.configured:
@@ -374,14 +299,6 @@ async def current_staff(
         pool = await get_pool(request)
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
-    elif kind == identity_config.BRIDGE:
-        claims = _bridge_claims(principal, token)
-        role = ROLE_FROM_CIS.get(claims.cis_role)
-        if role is None:
-            raise HTTPException(status_code=403, detail="unknown_cis_role")
-        pool = await get_pool(request)
-        async with pool.acquire() as conn, conn.transaction():
-            staff = await provision(conn, claims, role)
     else:  # an issuer the verifier holds but this module has no rules for: refuse
         raise HTTPException(status_code=401, detail="invalid_token", headers={"WWW-Authenticate": "Bearer"})
     if not staff.active:

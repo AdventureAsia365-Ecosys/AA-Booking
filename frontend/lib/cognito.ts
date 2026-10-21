@@ -13,7 +13,6 @@
 //     identity_variables.tf). AA-911 (ADR 0006a A11): the Preview host is re-pointed at the preview under test by
 //     the Vercel Deploy workflow (PR label `preview-signin` or the `alias_only_url` dispatch). A Vercel production
 //     build accepts only the production hosts and a preview build only the Preview host (VERCEL_ENV).
-//   - The Preview host never offers the legacy CIS password form (isPreviewSignInHost).
 //   - state, nonce, the PKCE verifier and the post-login path live in one short-lived httpOnly cookie scoped to the
 //     callback path; the callback checks state against it and the nonce against the ID token.
 //   - Token exchange, refresh and revoke authenticate with HTTP Basic (client id + secret).
@@ -34,7 +33,7 @@ import { safeNext } from "./safeNext";
 
 // ── Configuration: public identifiers as code constants (optional env overrides, like the backend) ────────────────
 // Only the client SECRET must be set in Vercel (COGNITO_BOOKING_STAFF_CLIENT_SECRET, server-only). Without it the
-// company e-mail sign-in is simply not offered and the legacy CIS password form stays.
+// company e-mail sign-in is simply not offered (the page says so; there is no other staff sign-in since AA-911).
 const DEFAULT_WORKFORCE_DOMAIN = "https://staff-auth.lumiguides.it.com";
 const COGNITO_DOMAIN =
   (process.env.COGNITO_WORKFORCE_DOMAIN ?? "").trim().replace(/\/+$/, "") || DEFAULT_WORKFORCE_DOMAIN;
@@ -65,14 +64,6 @@ function origins(): string[] {
   if (vercelEnv === "production") return PROD_ORIGINS;
   if (vercelEnv === "preview") return [PREVIEW_ORIGIN];
   return process.env.NODE_ENV === "development" ? [...PROD_ORIGINS, PREVIEW_ORIGIN, DEV_ORIGIN] : PROD_ORIGINS;
-}
-
-/**
- * True when the request is served on the fixed Preview sign-in host. That host never offers the legacy CIS
- * password form or `POST /api/auth/login` (AA-911): a stable, possibly public URL must not expose a password form.
- */
-export function isPreviewSignInHost(host: string | null | undefined): boolean {
-  return !!host && host.trim().toLowerCase() === new URL(PREVIEW_ORIGIN).host;
 }
 
 /** Host of the managed-login page (shown on /login so staff know where the sign-in opens). */

@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 
   const response = NextResponse.redirect(new URL(next, origin), { status: 303 });
   clearOAuthTx(response);
-  // One session kind at a time: a company e-mail sign-in replaces a legacy CIS password session.
+  // Clears a leftover cookie of the retired CIS password bridge (AA-911).
   response.cookies.set(CIS_SESSION_COOKIE, "", cookieOptions(0));
   setStaffSessionCookies(response, tokens);
   response.headers.set("Cache-Control", "no-store");

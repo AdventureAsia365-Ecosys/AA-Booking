@@ -22,11 +22,12 @@ from app.main import create_app
 from app.settings import Settings
 from tests.integration.conftest import MIGRATIONS
 from tests.integration.supply import purge_supply
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MAKER, CHECKER, SALES = "it-823-api-maker", "it-823-api-checker", "it-823-api-sales"
+ROLES = {MAKER: "contracting", CHECKER: "admin", SALES: "sales"}
 HANOI = "d0000000-0000-4000-8000-000000000001"
 NOWHERE = "d0000000-0000-4000-8000-0000000000ff"
 # Re-applied like test_bk004_pricing: other modules empty pricing_rules (FK created_by); bk-007 approves the seed.
@@ -54,12 +55,16 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     for path in POLICY:
         await conn.execute(path.read_text(encoding="utf-8"))
     await _clean(conn)
-    for staff_id, role in ((MAKER, "contracting"), (CHECKER, "admin"), (SALES, "sales")):
+    for staff_id, role in ROLES.items():
+        # Linked to the local WORKFORCE identity whose sub is the row key (AA-911: WORKFORCE is the only sign-in).
         await conn.execute(
-            "INSERT INTO booking.staff_users (cis_user_id, role, active, name) VALUES ($1, $2, true, $1)"
-            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true",
+            "INSERT INTO booking.staff_users (cis_user_id, role, active, name, cognito_iss, cognito_sub)"
+            " VALUES ($1, $2, true, $1, $3, $1)"
+            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true,"
+            " cognito_iss = EXCLUDED.cognito_iss, cognito_sub = EXCLUDED.cognito_sub",
             staff_id,
             role,
+            WORKFORCE_ISSUER,
         )
     try:
         yield conn
@@ -71,9 +76,9 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 @pytest_asyncio.fixture
 async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
-) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
+) -> AsyncIterator[tuple[httpx.AsyncClient, LocalStaff]]:
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
     try:
         transport = httpx.ASGITransport(app=app)
@@ -83,8 +88,9 @@ async def client(
         await db.close()
 
 
-def _auth(cis: LocalCis, sub: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {cis.token(sub=sub, cis_role='reviewer')}"}
+def _auth(cis: LocalStaff, sub: str) -> dict[str, str]:
+    # The WORKFORCE group carries the same role as the fixture row (the role is re-read from the group each request).
+    return {"Authorization": f"Bearer {cis.token(sub, ROLES[sub])}"}
 
 
 async def _ok(response: httpx.Response, status: int = 200) -> Any:
@@ -98,7 +104,7 @@ async def _supplier(c: httpx.AsyncClient, headers: dict[str, str], name: str, ca
 
 
 async def test_hotels_and_services_crud_rbac_and_facts_only(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     maker, checker, sales = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, SALES)
@@ -201,7 +207,7 @@ async def test_hotels_and_services_crud_rbac_and_facts_only(
 
 
 async def test_rates_default_the_item_net_and_price_the_version(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     maker, checker, sales = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, SALES)

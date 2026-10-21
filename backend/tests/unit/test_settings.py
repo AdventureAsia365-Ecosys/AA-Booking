@@ -53,24 +53,11 @@ def test_worker_flag_rejects_garbage() -> None:
         load_settings({"WORKER_ENABLED": "maybe"})
 
 
-def test_staff_auth_defaults_are_the_dev_cis() -> None:
-    s = load_settings({})
-    assert s.cis_jwks_url == "https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json"
-    assert s.staff_jwt_issuer == "https://api-cis.lumiguides.it.com"
-
-
-def test_staff_auth_overrides() -> None:
-    s = load_settings({"CIS_JWKS_URL": " https://cis.example/jwks ", "STAFF_JWT_ISSUER": "https://cis.example"})
-    assert (s.cis_jwks_url, s.staff_jwt_issuer) == ("https://cis.example/jwks", "https://cis.example")
-
-
-@pytest.mark.parametrize("name", ["CIS_JWKS_URL", "STAFF_JWT_ISSUER"])
-def test_staff_auth_urls_must_be_https_outside_test(name: str) -> None:
-    with pytest.raises(SettingsError, match=name):
-        load_settings({name: "http://cis.example"})
-    with pytest.raises(SettingsError, match=name):
-        load_settings({name: "ftp://cis.example", "ENVIRONMENT": "test"})
-    assert load_settings({name: "http://localhost:8000", "ENVIRONMENT": "local"})
+def test_retired_bridge_settings_are_ignored() -> None:
+    """AA-911: CIS_JWKS_URL / STAFF_JWT_ISSUER described the retired CIS bridge; a value left in the environment
+    (even an unsafe one) is not read and does not fail start-up."""
+    s = load_settings({"CIS_JWKS_URL": "http://cis.example/jwks", "STAFF_JWT_ISSUER": "ftp://cis.example"})
+    assert not hasattr(s, "cis_jwks_url") and not hasattr(s, "staff_jwt_issuer")
 
 
 def test_email_settings_default_to_no_email() -> None:

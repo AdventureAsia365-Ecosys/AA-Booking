@@ -16,7 +16,7 @@ from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from tests.integration.conftest import MIGRATIONS
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -34,11 +34,15 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     await conn.execute("DELETE FROM booking.pricing_rules WHERE valid_from <> $1", SEED_DAY)
     await conn.execute("DELETE FROM booking.fx_rates")
     for staff_id, role in ((MAKER, "contracting"), (CHECKER, "admin"), (SALES, "sales")):
+        # Linked to the local WORKFORCE identity whose sub is the row key (AA-911: WORKFORCE is the only sign-in).
         await conn.execute(
-            "INSERT INTO booking.staff_users (cis_user_id, role, active) VALUES ($1, $2, true)"
-            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true",
+            "INSERT INTO booking.staff_users (cis_user_id, role, active, cognito_iss, cognito_sub)"
+            " VALUES ($1, $2, true, $3, $1)"
+            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true,"
+            " cognito_iss = EXCLUDED.cognito_iss, cognito_sub = EXCLUDED.cognito_sub",
             staff_id,
             role,
+            WORKFORCE_ISSUER,
         )
     try:
         yield conn
@@ -50,12 +54,12 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 async def test_fx_and_rule_maker_checker(admin: asyncpg.Connection, migrated_booking_dsn: str) -> None:
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
-    # cis_role only matters on first provisioning; the fixture rows already carry the Booking role.
-    maker = {"Authorization": f"Bearer {cis.token(sub=MAKER, cis_role='reviewer')}"}
-    checker = {"Authorization": f"Bearer {cis.token(sub=CHECKER, cis_role='admin')}"}
-    sales = {"Authorization": f"Bearer {cis.token(sub=SALES, cis_role='reviewer')}"}
+    # The WORKFORCE group carries the same role as the fixture row.
+    maker = {"Authorization": f"Bearer {cis.token(MAKER, 'contracting')}"}
+    checker = {"Authorization": f"Bearer {cis.token(CHECKER, 'admin')}"}
+    sales = {"Authorization": f"Bearer {cis.token(SALES, 'sales')}"}
     today = datetime.now(UTC).date()
     preview = {"channel": "b2c_tailor_made", "items": [{"net_amount": "1000", "net_currency": "USD"}]}
     fx = {"currency": "EUR", "rate_per_usd": "0.92", "buffer_pct": "0.02", "as_of": str(today), "source": "manual-dev"}

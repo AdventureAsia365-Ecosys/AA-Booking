@@ -5,28 +5,14 @@
 // - token fresh → through; under 2 minutes left or expired → /api/auth/refresh?next=<path> (the refresh cookie is
 //   scoped to /api, so the refresh happens there; this file never sees it). The bk_access cookie lives as long as
 //   the 12 h session, so an expired token still tells this proxy which path to take.
-// Legacy CIS password session (bk_cis_session, until AA-680 PR-4):
-// - The Booking token is re-minted when missing or under 2 minutes from expiry; the fresh cookie is set
-//   on the response AND forwarded on the request, so the server render in this same request uses it.
-// Neither → /login?next=<path>.
-// - CIS refuses the mint (session expired, user deactivated in CIS) → both cookies cleared → /login.
-// - CIS unreachable → the request goes on with the old token; the (staff) layout shows the outage
-//   instead of logging the user out because of a network blip.
+// No company e-mail session → /login?next=<path>; a leftover cookie of the retired CIS password bridge (AA-911) is
+// cleared on the way.
 // /api/* is not matched: the BFF route handlers answer 401 JSON themselves (lib/session.ts).
 // Role checks per page happen in the shell (lib/rbac.ts); the Booking API enforces its own matrix.
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  ACCESS_COOKIE,
-  CIS_SESSION_COOKIE,
-  REFRESH_PATH,
-  clearSessionCookies,
-  cookieOptions,
-  isCognitoAccess,
-  mintBookingToken,
-  needsRefresh,
-} from "./lib/session";
+import { ACCESS_COOKIE, CIS_SESSION_COOKIE, REFRESH_PATH, clearSessionCookies, isCognitoAccess, needsRefresh } from "./lib/session";
 
 const PUBLIC_PATHS = ["/login"];
 
@@ -53,23 +39,12 @@ export async function proxy(request: NextRequest) {
   }
 
   const access = request.cookies.get(ACCESS_COOKIE)?.value;
-  const cisSession = request.cookies.get(CIS_SESSION_COOKIE)?.value;
-  if (isCognitoAccess(access) && !cisSession) {
+  const leftoverBridge = !!request.cookies.get(CIS_SESSION_COOKIE)?.value;
+  if (isCognitoAccess(access) && !leftoverBridge) {
     return needsRefresh(access) ? toRefresh(request) : NextResponse.next();
   }
-  if (!cisSession) return toLogin(request, false);
-
-  if (!needsRefresh(access)) return NextResponse.next();
-
-  const minted = await mintBookingToken(cisSession);
-  if (!minted.ok) {
-    if (minted.reason === "unauthorized") return toLogin(request, true, "expired");
-    return NextResponse.next();
-  }
-  request.cookies.set(ACCESS_COOKIE, minted.token);
-  const res = NextResponse.next({ request: { headers: request.headers } });
-  res.cookies.set(ACCESS_COOKIE, minted.token, cookieOptions(minted.expiresIn));
-  return res;
+  // No company session, or a bridge-era cookie pair (its bk_access is a CIS-minted token Booking now refuses).
+  return toLogin(request, leftoverBridge, leftoverBridge ? "expired" : undefined);
 }
 
 export const config = {

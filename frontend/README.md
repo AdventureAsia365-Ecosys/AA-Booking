@@ -25,16 +25,17 @@ Set in Vercel (or `.env.local` for local runs). All are optional; defaults are i
 | Name | Where | Default | What |
 |---|---|---|---|
 | `BOOKING_API_URL` | server | Dev custom domain `https://api-booking.lumiguides.it.com` | Booking API base; `/booking/...` is appended |
-| `CIS_API_URL` | server | `https://api-cis.lumiguides.it.com` | CIS API for `/auth/admin-login` and `/auth/booking-token` |
 | `NEXT_PUBLIC_CIS_ADMIN_URL` | browser | `https://aa-cis.lumiguides.it.com` | "Open CIS admin" / "Managed in CIS" links |
-| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret** | unset | Secret of the Cognito `booking-staff` app client (AA-680). Unset = no "Sign in with company email" button, only the legacy CIS password form |
+| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret** | unset | Secret of the Cognito `booking-staff` app client (AA-680). Set for Production AND Preview (AA-911). Unset = no staff sign-in on that build |
 | `COGNITO_BOOKING_STAFF_CLIENT_ID` | server | `5ifl9dgkr8a5outnmsjc8v1kt3` | booking-staff client id (Dev); override only for another pool |
 | `COGNITO_WORKFORCE_DOMAIN` | server | `https://staff-auth.lumiguides.it.com` | managed-login domain |
 | `COGNITO_WORKFORCE_ISSUER` | server | the Dev WORKFORCE pool issuer | checked against the ID / access token `iss` |
 
-Company e-mail sign-in is offered only on `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app` (the
-registered callback hosts; plus `localhost:3001` under `next dev`) when the client secret is set. Tokens stay in
-httpOnly cookies (`bk_access`, `bk_staff_rt`; legacy `bk_cis_session`).
+Company e-mail sign-in is the only staff sign-in (the CIS password bridge is retired, AA-911). It is offered only
+on the registered callback hosts when the client secret is set: a production build on `booking.lumiguides.it.com`
+and `aa-booking-admin.vercel.app`, a preview build on the fixed Preview host `booking-preview.lumiguides.it.com`
+(aliased by the Vercel Deploy workflow on opt-in), plus `localhost:3001` under `next dev`. Tokens stay in httpOnly
+cookies (`bk_access`, `bk_staff_rt`; a leftover `bk_cis_session` from the retired bridge is only cleared).
 
 ## Layout
 

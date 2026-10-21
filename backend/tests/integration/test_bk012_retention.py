@@ -25,7 +25,7 @@ from app.retention.policy import INBOX_KIND, JOB_KIND
 from app.settings import Settings
 from tests import inquiry_samples as samples
 from tests.integration.test_bk002_intake import INTAKE_TABLES, drain, publish
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -40,11 +40,15 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     await conn.execute("TRUNCATE tripplanner.outbox RESTART IDENTITY")
     await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
     for staff_id, role in ((ADMIN_ID, "admin"), (SALES_ID, "sales")):
+        # Linked to the local WORKFORCE identity whose sub is the row key (AA-911: WORKFORCE is the only sign-in).
         await conn.execute(
-            "INSERT INTO booking.staff_users (cis_user_id, role, active) VALUES ($1, $2, true)"
-            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true",
+            "INSERT INTO booking.staff_users (cis_user_id, role, active, cognito_iss, cognito_sub)"
+            " VALUES ($1, $2, true, $3, $1)"
+            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true,"
+            " cognito_iss = EXCLUDED.cognito_iss, cognito_sub = EXCLUDED.cognito_sub",
             staff_id,
             role,
+            WORKFORCE_ISSUER,
         )
     try:
         yield conn
@@ -349,10 +353,10 @@ async def test_admin_api_queues_runs_and_reports_status(
 ) -> None:
     await seed_job(admin, "succeeded", 45)
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
-    as_admin = {"Authorization": f"Bearer {cis.token(sub=ADMIN_ID, cis_role='admin')}"}
-    as_sales = {"Authorization": f"Bearer {cis.token(sub=SALES_ID, cis_role='reviewer')}"}
+    as_admin = {"Authorization": f"Bearer {cis.token(ADMIN_ID, 'admin')}"}
+    as_sales = {"Authorization": f"Bearer {cis.token(SALES_ID, 'sales')}"}
     try:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://booking") as client:

@@ -52,8 +52,8 @@ Design sources, in order:
   golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
-  (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
-  issues an RS256 JWT with `aud=booking`, verified against the CIS JWKS). Booking keeps only a thin staff profile
+  (granted in CIS → Platform → Staff). The CIS bridge token (ADR 0004 O1) is retired (AA-911, root ADR 0006a A11):
+  WORKFORCE is the only staff issuer. Booking keeps only a thin staff profile
   (`booking.staff_users`) and never reads the CIS staff directory.
 - **Publishes** to CIS (AA-858, contract `ops.overview.v1`, root ADR 0008 §5): two aggregate views in its own schema,
   `booking.v_ops_funnel_daily` (per UTC day, metric, source system) and `booking.v_ops_case_status` (cases per current
@@ -166,8 +166,8 @@ scaling to 1 is an approved, billable step.
 
 Process environment (set by the task definition): `DATABASE_URL` (from the secret), `ENVIRONMENT`,
 `GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
-(optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
-`STAFF_JWT_ISSUER` (optional; the CIS bridge, default the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
+(optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set). `CIS_JWKS_URL` / `STAFF_JWT_ISSUER` (the
+retired CIS bridge) are no longer read; a value left in a task definition is ignored.
 Cognito (AA-680, all optional and **not set on Dev**, defaults are code constants in `app/auth/identity_config.py`):
 `COGNITO_WORKFORCE_ISSUER`, `COGNITO_BOOKING_STAFF_CLIENT_ID`, `COGNITO_BREAKGLASS_CLIENT_ID` (same names as CIS).
 E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inquiry e-mail; empty = no e-mail),
@@ -192,28 +192,26 @@ send, OTP) is not built: those still write rows only.
   checked by the multi-issuer verifier (`app/auth/identity_verifier.py`, a byte copy of the CIS module: RS256 only, the
   issuer picked by the unverified `iss`, one JWKS cache per issuer, unknown `kid` refetch at most every 60 s, last good
   keys kept on a failed fetch; no key set ever loaded = 503 `auth_unavailable`, any bad token = 401 `invalid_token`).
-  The lifespan prefetches both JWKS in the background (`identity_jwks_prefetched` per issuer; off when
-  `ENVIRONMENT=test`). Accepted (`app/auth/identity_config.py`):
+  The lifespan prefetches the WORKFORCE JWKS in the background (`identity_jwks_prefetched`; off when
+  `ENVIRONMENT=test`). Accepted (`app/auth/identity_config.py`), and nothing else:
   - **WORKFORCE** (issuer `DEV_WORKFORCE_ISSUER` in `backend/app/auth/identity_config.py` on Dev) x clients
     **booking-staff** and **breakglass**: access tokens only (`token_use = access`), the client in `client_id` (no
     `aud` check), roles from `cognito:groups`. `cis-admin` is not accepted (no CIS screen calls Booking yet).
-  - **BRIDGE** (transition only, ADR 0006a A6): `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `sub` = CIS
-    `admin_users.id`, the role in `cis_role` (`admin|reviewer|content`). Removed by AA-680 PR-4 (`BRIDGE_ENABLED`).
+  - The CIS bridge token (`iss` = the CIS API, `aud` = `booking`, `cis_role`) is 401 `invalid_token`, even when
+    correctly signed: its issuer is not configured, so its JWKS is never fetched and no row is read or written
+    (AA-911).
 - **WORKFORCE identity (bk-016).** The Booking role is the first `booking-*` group in the order `booking-admin` →
   `admin`, `booking-sales` → `sales`, `booking-contracting` → `contracting`, `booking-content_creator` →
   `content_creator`, re-read on **every** request (a change is written and audited `staff.role_synced`); no
   `booking-*` group = 403 `no_booking_role`, nothing written. `cis_role` = the highest `cis-*` group (informational).
   The row is found by `(cognito_iss, cognito_sub)` only and never rebound. No row → one is created, active, keyed
   `'cog:' || sub` (`email` from the token, `name` = the e-mail local part; audited `staff.provisioned`). Bridge-era rows
-  keep their CIS key: AA-CIS-Infra `db/scripts/aa680_link_staff_cognito.py` links them once from `shared.admin_users`.
+  keep their CIS key: AA-CIS-Infra `db/scripts/aa680_link_staff_cognito.py` linked them from `shared.admin_users`, and
+  `db/scripts/aa911_bridge_staff_rows.py` links or deactivates the rest when the bridge is retired (AA-911).
   A `cog:` key already bound to another issuer = 403 `identity_conflict`. `active = false` = 403 `staff_inactive`:
   `active` stays a Booking admin switch (suspend); the **role** of a linked row is refused by `PATCH
   /booking/staff/{id}` with 409 `managed_in_directory` (it is managed in CIS → Platform → Staff). `GET /booking/staff*`
   shows `managed_in_directory`.
-- **BRIDGE provisioning** (unchanged): first valid token → `booking.staff_users` row keyed by `sub`: CIS `admin` →
-  active Booking `admin`; `reviewer` → `sales`, `content` → `content_creator`, **inactive** (403 `staff_inactive`)
-  until a Booking admin activates them. Later bridge tokens only refresh email/name/cis_role/last_seen_at, also on a
-  linked row. A bridge `sub` starting with `cog:` is 401.
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
   read trip cases / customers = admin, sales, contracting; write / assign / versions / customers write = admin,
   sales; staff directory (pickers) = admin, sales, contracting; pricing (margins, net costs, FX: `pricing.read`) =
@@ -570,8 +568,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   Offered only on the registered hosts with `COGNITO_BOOKING_STAFF_CLIENT_SECRET` set (Production AND Preview
   targets): a Vercel production build accepts `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app`, a
   preview build only the fixed Preview host `booking-preview.lumiguides.it.com`, `next dev` also `localhost:3001`
-  (`VERCEL_ENV` picks the list). Per-deployment `*.vercel.app` preview URLs get only the legacy form; the Preview
-  host never shows the legacy form and answers 404 on `POST /api/auth/login`.
+  (`VERCEL_ENV` picks the list). Per-deployment `*.vercel.app` preview URLs get no sign-in: `/login` points staff at
+  the Preview host. There is no other staff sign-in (AA-911).
 - **Preview sign-in (AA-911, root ADR 0006a A11):** `booking-preview.lumiguides.it.com` is a Vercel domain of
   `aa-booking-admin` (bound to the never-pushed branch `preview-signin`, so production deploys never claim it) and a
   registered `booking-staff` callback / sign-out URL. The Vercel Deploy workflow points it at a preview only on
@@ -582,10 +580,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   protection-bypass value). Unmerged same-repo PR code on that host sees the Booking tokens of whoever signs in
   (accepted for Dev; separate preview client before prod / first paying tenant). Runbook: root
   `docs/ops/runbooks/preview-staff-sign-in.md`.
-- **Legacy CIS password bridge (until AA-680 PR-4)**: `POST /api/auth/login` (CIS `/auth/admin-login` →
-  `/auth/booking-token`) → `bk_cis_session` + `bk_access`; `proxy.ts` and the BFF re-mint the 15-minute Booking token
-  from the CIS session. On hosts with company sign-in the form sits collapsed under the company button (E2E account).
-  One session kind at a time: each sign-in clears the other kind's cookies.
+- **CIS password bridge: retired (AA-911).** `POST /api/auth/login`, the legacy form and the re-mint in `proxy.ts` /
+  the BFF are gone; a leftover `bk_cis_session` cookie is only cleared (sign-in, sign-out, `proxy.ts` → `/login`).
+  Agents cannot sign in to the Booking UI (the E2E Cognito user holds no `booking-*` group, ADR 0006a A10): Booking
+  UI checks are done by Nghiệp until a preview machine principal is decided.
 - `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the access token as Bearer. Tokens live only in
   httpOnly cookies. Booking roles of company sign-in profiles are read-only on `/staff` (set in CIS → Platform →
   Staff, API 409 `managed_in_directory`); Activate / Deactivate stays.

@@ -3,8 +3,7 @@
 // - Company e-mail session (Cognito): the refresh token is revoked (best effort, which also invalidates the access
 //   tokens issued from it) and the answer carries `logoutUrl`, the Cognito /logout URL that ends the managed-login
 //   session and returns to <origin>/login (a registered logout URL). The browser navigates there (ui/signOut.ts).
-// - Legacy CIS password session: the CIS session itself is not revoked (CIS has no revoke endpoint); it simply stops
-//   being held here.
+// - A leftover cookie of the retired CIS password bridge (AA-911) is cleared too.
 
 import { NextRequest, NextResponse } from "next/server";
 import { allowedOriginForRequest, cognitoLogoutUrl, readRefreshCookie, revokeRefreshToken } from "@/lib/cognito";

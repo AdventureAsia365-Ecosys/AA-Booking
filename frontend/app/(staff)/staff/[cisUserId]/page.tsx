@@ -173,7 +173,7 @@ function Overview({ s, roleLabel }: { s: StaffDetail; roleLabel: string }) {
           <Fact label="Name">{s.name ?? "—"}</Fact>
           <Fact label="E-mail"><span className="break-all">{s.email ?? "—"}</span></Fact>
           <Fact label="CIS role">{s.cis_role ?? "—"}</Fact>
-          <Fact label="Sign-in">{s.managed_in_directory ? "Company e-mail (role from CIS)" : "CIS password (legacy)"}</Fact>
+          <Fact label="Sign-in">{s.managed_in_directory ? "Company e-mail (role from CIS)" : "Not linked"}</Fact>
           <Fact label="Staff key"><span className="font-mono text-xs text-muted">{s.cis_user_id}</span></Fact>
         </FactGrid>
       </Section>

@@ -3,8 +3,8 @@
 // is (GET /booking/staff/me with the Booking JWT from the cookie, refreshed by proxy.ts) and:
 //   ok           → StaffProvider + AdminShell (role-aware nav and page gate);
 //   401          → /login (session over);
-//   403 inactive → "pending activation" screen (legacy CIS non-admins start inactive, bk-003 rule; an admin can
-//                  also suspend a profile);
+//   403 inactive → "pending activation" screen (an admin suspended the profile, or a bridge-era row was
+//                  deactivated when the CIS bridge was retired, AA-911);
 //   403 no_booking_role → "no Booking role" screen with the CIS Platform → Staff link (AA-680: the role comes from
 //                  the booking-* group of the company sign-in);
 //   other 403    → "no Booking access" screen;

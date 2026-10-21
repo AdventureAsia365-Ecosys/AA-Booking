@@ -17,14 +17,14 @@ import pytest
 import pytest_asyncio
 
 from app.auth import admin as staff_admin
-from app.auth.staff import BridgeClaims, Staff, provision
+from app.auth.staff import Staff
 from app.db import Database
 from app.errors import Conflict, Invalid
 from app.main import create_app
 from app.settings import Settings
 from app.trip_cases import service, versions
 from app.trip_cases.versions import Item
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import LocalStaff, seed_linked_staff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -55,8 +55,10 @@ async def pool(migrated_booking_dsn: str, admin: asyncpg.Connection) -> AsyncIte
 
 
 async def provisioned(pool: asyncpg.Pool, sub: str, cis_role: str, role: str) -> Staff:
+    """A linked staff row keyed by ``sub`` (AA-911: the bridge provisioning is gone). Admins start active and the
+    others inactive, as the old bridge left them, so the activation flows below still have something to activate."""
     async with pool.acquire() as conn, conn.transaction():
-        return await provision(conn, BridgeClaims(sub, f"{sub}@example.test", sub.title(), cis_role), role)
+        return await seed_linked_staff(conn, sub, role, active=cis_role == "admin", cis_role=cis_role)
 
 
 async def new_case(pool: asyncpg.Pool, legs: list[tuple[int, str, int, int]] = ()) -> dict[str, Any]:
@@ -77,22 +79,6 @@ async def new_case(pool: asyncpg.Pool, legs: list[tuple[int, str, int, int]] = (
             [(case["id"], *leg) for leg in legs],
         )
     return dict(case)
-
-
-async def test_provisioning_admin_active_others_inactive(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
-    boss = await provisioned(pool, "boss", "admin", "admin")
-    rev = await provisioned(pool, "rev", "reviewer", "sales")
-    assert (boss.role, boss.active) == ("admin", True)
-    assert (rev.role, rev.active) == ("sales", False)
-    # A second login does not touch role/active and is not audited again.
-    await admin.execute("UPDATE booking.staff_users SET active = true, role = 'contracting' WHERE cis_user_id = 'rev'")
-    again = await provisioned(pool, "rev", "admin", "admin")
-    assert (again.role, again.active, again.cis_role) == ("contracting", True, "admin")
-    audits = await admin.fetch("SELECT actor_ref, action FROM booking.audit_logs ORDER BY created_at")
-    assert [(a["actor_ref"], a["action"]) for a in audits] == [
-        ("boss", "staff.provisioned"),
-        ("rev", "staff.provisioned"),
-    ]
 
 
 async def test_admin_updates_staff(pool: asyncpg.Pool) -> None:
@@ -275,14 +261,16 @@ async def test_staff_uuid_ids_fill_audit_actor_id(pool: asyncpg.Pool, admin: asy
     assert row["actor_id"] == sub and row["entity_id"] == sub
 
 
-async def test_http_flow_with_a_cis_token(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
-    """JWT (local RSA key) → provisioning → trip case endpoints, through the real app and pool."""
+async def test_http_flow_with_a_workforce_token(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
+    """WORKFORCE token (local RSA key) → linked staff rows → trip case endpoints, through the real app and pool."""
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
-    boss = {"Authorization": f"Bearer {cis.token(sub='boss', cis_role='admin')}"}
-    rev = {"Authorization": f"Bearer {cis.token(sub='rev', cis_role='reviewer')}"}
+    boss = {"Authorization": f"Bearer {cis.token('boss', 'admin')}"}
+    rev = {"Authorization": f"Bearer {cis.token('rev', 'sales')}"}
     try:
+        await provisioned(await db.pool(), "boss", "admin", "admin")
+        await provisioned(await db.pool(), "rev", "reviewer", "sales")  # inactive until boss activates it
         case = await new_case(await db.pool(), [(1, "tour-a", 1, 2)])
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://booking") as client:
             me = await client.get("/booking/staff/me", headers=boss)

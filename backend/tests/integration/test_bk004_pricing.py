@@ -26,7 +26,7 @@ from app.trip_cases import service as cases
 from app.trip_cases import versions
 from app.trip_cases.versions import Item
 from tests.integration.conftest import MIGRATIONS
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -59,10 +59,14 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     # Policy tables are append-only for role booking; the migration role (owner) cleans test rows.
     await conn.execute("DELETE FROM booking.pricing_rules WHERE valid_from <> $1", SEED_DAY)
     await conn.execute("DELETE FROM booking.fx_rates")
+    # Linked to the local WORKFORCE identity whose sub is the row key (AA-911: WORKFORCE is the only sign-in).
     await conn.execute(
-        "INSERT INTO booking.staff_users (cis_user_id, role, active) VALUES ($1, 'contracting', true)"
-        " ON CONFLICT (cis_user_id) DO NOTHING",
+        "INSERT INTO booking.staff_users (cis_user_id, role, active, cognito_iss, cognito_sub)"
+        " VALUES ($1, 'contracting', true, $2, $1)"
+        " ON CONFLICT (cis_user_id) DO UPDATE SET role = 'contracting', active = true,"
+        " cognito_iss = EXCLUDED.cognito_iss, cognito_sub = EXCLUDED.cognito_sub",
         STAFF_ID,
+        WORKFORCE_ISSUER,
     )
     try:
         yield conn
@@ -257,12 +261,12 @@ async def test_quote_preview_end_to_end(admin: asyncpg.Connection, migrated_book
     )
     await admin.execute(APPROVE_ALL_FX)
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
-    # Real staff auth (AA-681): a CIS-signed JWT for the active contracting row the fixture made, and one for
-    # a content writer, provisioned on first use (inactive) and refused.
-    contracting = {"Authorization": f"Bearer {cis.token(sub=STAFF_ID, cis_role='reviewer')}"}
-    writer = {"Authorization": f"Bearer {cis.token(sub='it-writer-810', cis_role='content')}"}
+    # Real staff auth (AA-681, AA-911): a WORKFORCE token for the active contracting row the fixture linked, and
+    # one for a CIS content writer with no booking-* group, refused before any write.
+    contracting = {"Authorization": f"Bearer {cis.token(STAFF_ID, 'contracting')}"}
+    writer = {"Authorization": f"Bearer {cis.workforce.token(['cis-content'], sub='it-writer-810')}"}
     try:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://booking") as client:
@@ -354,9 +358,10 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
     await admin.execute(APPROVE_ALL_FX)
     await admin.execute("UPDATE booking.staff_users SET role = 'sales' WHERE cis_user_id = $1", STAFF_ID)
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
-    sales = {"Authorization": f"Bearer {cis.token(sub=STAFF_ID, cis_role='reviewer')}"}
+    # The row was switched to sales above; the WORKFORCE group must say the same (it sets the role each request).
+    sales = {"Authorization": f"Bearer {cis.token(STAFF_ID, 'sales')}"}
     base = f"/booking/trip-cases/{case_ref}/versions"
     items = {
         "items": [

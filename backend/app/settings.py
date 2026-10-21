@@ -11,11 +11,8 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
 - ``WORKER_ENABLED``: ``true`` / ``false``. Runs the ``booking.job`` worker loop inside the API
   process (Dev, AA-681 slice 2). Default: on when ``ENVIRONMENT`` is ``dev`` and ``DATABASE_URL``
   is set, off otherwise (tests and local runs start it explicitly).
-- ``CIS_JWKS_URL``: JWKS of the CIS staff login (ADR 0004 O1, AA-680). Default: the Dev value
-  ``https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json``.
-- ``STAFF_JWT_ISSUER``: expected ``iss`` of staff JWTs. Default: ``https://api-cis.lumiguides.it.com``.
-  Both must be ``https://`` unless ``ENVIRONMENT`` is ``test`` or ``local``. Both describe the CIS **bridge** token,
-  accepted during the Cognito transition only (AA-680 PR-4 removes them).
+- ``CIS_JWKS_URL`` / ``STAFF_JWT_ISSUER`` (the retired CIS bridge token, AA-911): no longer read. A value still set
+  in the environment is ignored.
 
 Cognito WORKFORCE staff sign-in (AA-680 Phase 2, root ADR 0006 §8; ``app.auth.identity_config``). All optional and
 **never set on Dev**: the defaults are the Dev pool and clients (code constants, public values). Same names as CIS.
@@ -52,8 +49,6 @@ INSECURE_ENVIRONMENTS = frozenset({"test", "local"})
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
-DEFAULT_STAFF_JWT_ISSUER = "https://api-cis.lumiguides.it.com"
-DEFAULT_CIS_JWKS_URL = f"{DEFAULT_STAFF_JWT_ISSUER}/auth/.well-known/jwks.json"
 DEFAULT_SES_REGION = "us-west-1"
 DEFAULT_STAFF_ADMIN_URL = "https://booking.lumiguides.it.com"
 
@@ -69,8 +64,6 @@ class Settings:
     environment: str = "dev"
     git_sha: str = "unknown"
     worker_enabled: bool = False
-    cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
-    staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
     staff_notify_email: str = ""
     ses_from_address: str = ""
     ses_configuration_set: str = ""
@@ -93,11 +86,7 @@ class Settings:
         ):
             if address and (address.count("@") != 1 or any(c.isspace() for c in address)):
                 raise SettingsError(f"{name} must be a single e-mail address, got {address!r}")
-        for name, value in (
-            ("CIS_JWKS_URL", self.cis_jwks_url),
-            ("STAFF_JWT_ISSUER", self.staff_jwt_issuer),
-            ("STAFF_ADMIN_URL", self.staff_admin_url),
-        ):
+        for name, value in (("STAFF_ADMIN_URL", self.staff_admin_url),):
             if value.startswith("https://"):
                 continue
             if value.startswith("http://") and self.environment in INSECURE_ENVIRONMENTS:
@@ -139,8 +128,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         worker_enabled=_flag(
             env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
         ),
-        cis_jwks_url=(env.get("CIS_JWKS_URL") or DEFAULT_CIS_JWKS_URL).strip(),
-        staff_jwt_issuer=(env.get("STAFF_JWT_ISSUER") or DEFAULT_STAFF_JWT_ISSUER).strip(),
         staff_notify_email=(env.get("STAFF_NOTIFY_EMAIL") or "").strip(),
         ses_from_address=(env.get("SES_FROM_ADDRESS") or "").strip(),
         ses_configuration_set=(env.get("SES_CONFIGURATION_SET") or "").strip(),

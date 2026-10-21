@@ -20,7 +20,7 @@ import pytest_asyncio
 
 from app import audit
 from app.auth import admin as staff_admin
-from app.auth.staff import BridgeClaims, Staff, provision
+from app.auth.staff import Staff
 from app.customers import service as customers
 from app.db import Database
 from app.errors import Conflict, Forbidden, Invalid
@@ -29,7 +29,7 @@ from app.notifications import service as notifications
 from app.settings import Settings
 from app.trip_cases import service, versions
 from app.trip_cases.versions import Item
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import LocalStaff, seed_linked_staff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -61,9 +61,10 @@ async def pool(migrated_booking_dsn: str, admin: asyncpg.Connection) -> AsyncIte
 
 
 async def staff(pool: asyncpg.Pool, admin: asyncpg.Connection, sub: str, role: str = "admin") -> Staff:
+    """An active staff row keyed by ``sub``, linked to the local WORKFORCE identity ``sub`` (AA-911)."""
     cis_role = "admin" if role == "admin" else "reviewer"
     async with pool.acquire() as conn, conn.transaction():
-        await provision(conn, BridgeClaims(sub, f"{sub}@example.test", sub.title(), cis_role), role)
+        await seed_linked_staff(conn, sub, role, cis_role=cis_role)
     await admin.execute("UPDATE booking.staff_users SET active = true, role = $2 WHERE cis_user_id = $1", sub, role)
     return Staff(sub, f"{sub}@example.test", sub.title(), role, True, cis_role)
 
@@ -594,15 +595,19 @@ async def test_bk005_privileges_and_settings(pool: asyncpg.Pool) -> None:
 
 async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
-    boss = {"Authorization": f"Bearer {cis.token(sub='boss', cis_role='admin')}"}
-    cathy = {"Authorization": f"Bearer {cis.token(sub='cathy', cis_role='reviewer')}"}
+    boss = {"Authorization": f"Bearer {cis.token('boss', 'admin')}"}
+    # AA-911: the role follows the WORKFORCE group, so cathy signs in as contracting from the start.
+    cathy = {"Authorization": f"Bearer {cis.token('cathy', 'contracting')}"}
     try:
+        async with (await db.pool()).acquire() as conn:
+            await seed_linked_staff(conn, "boss", "admin", cis_role="admin")
+            await seed_linked_staff(conn, "cathy", "contracting", active=False)  # inactive until boss activates it
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://booking") as client:
             assert (await client.get("/booking/staff/me", headers=boss)).status_code == 200
-            await client.get("/booking/staff/me", headers=cathy)  # provisioned inactive
-            await client.patch("/booking/staff/cathy", json={"active": True, "role": "contracting"}, headers=boss)
+            assert (await client.get("/booking/staff/me", headers=cathy)).status_code == 403  # staff_inactive
+            await client.patch("/booking/staff/cathy", json={"active": True}, headers=boss)
             created = await client.post(
                 "/booking/trip-cases",
                 json={"new_customer": {"name": "Dee", "email": "dee@x.test", "contact_consent": True}, "pax": 2},

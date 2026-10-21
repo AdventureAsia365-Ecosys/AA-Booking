@@ -3,7 +3,8 @@
 // the browser bundle); NEXT_PUBLIC_* values are inlined at build time and must be referenced literally.
 //
 // Dev defaults (UI spec §6, ADR 0004 O2): the Booking REST API execute-api stage until
-// api-booking.lumiguides.it.com has its ACM certificate, and the live CIS API.
+// api-booking.lumiguides.it.com has its ACM certificate, and the live CIS API (catalog photos only; the CIS sign-in
+// bridge is retired, AA-911).
 
 export const DEV_BOOKING_API_URL = "https://api-booking.lumiguides.it.com"; // custom domain (ADR 0004 O2); same API as the execute-api stage
 export const DEV_CIS_API_URL = "https://api-cis.lumiguides.it.com";
@@ -16,11 +17,6 @@ function trimSlash(url: string): string {
 /** Booking API base (server only). Paths are appended as `/booking/...`. */
 export function bookingApiUrl(): string {
   return trimSlash(process.env.BOOKING_API_URL || DEV_BOOKING_API_URL);
-}
-
-/** CIS API base (server only): `/auth/admin-login`, `/auth/booking-token`. */
-export function cisApiUrl(): string {
-  return trimSlash(process.env.CIS_API_URL || DEV_CIS_API_URL);
 }
 
 /** CIS admin web app, for "Managed in CIS" / "Open CIS admin" links. */

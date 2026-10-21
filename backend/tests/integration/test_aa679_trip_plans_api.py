@@ -15,7 +15,7 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -24,6 +24,7 @@ BHUTAN_B = "aa679000-0000-4000-8000-00000000000b"
 LAOS = "aa679000-0000-4000-8000-00000000000c"
 MISSING = "aa679000-0000-4000-8000-0000000000ff"
 ADMIN, CONTRACTING, SALES, CONTENT = "it-679-admin", "it-679-contracting", "it-679-sales", "it-679-content"
+ROLES = {ADMIN: "admin", CONTRACTING: "contracting", SALES: "sales", CONTENT: "content_creator"}
 TABLES = (
     "booking.notification_reads, booking.trip_case_countries, booking.trip_case_version_itinerary, "
     "booking.trip_case_versions, booking.staff_assignments, booking.trip_case_status_history, "
@@ -37,17 +38,15 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await conn.execute(f"TRUNCATE {TABLES} CASCADE")
     await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
-    for staff_id, role in (
-        (ADMIN, "admin"),
-        (CONTRACTING, "contracting"),
-        (SALES, "sales"),
-        (CONTENT, "content_creator"),
-    ):
+    for staff_id, role in ROLES.items():
+        # Linked to the local WORKFORCE identity whose sub is the row key (AA-911: WORKFORCE is the only sign-in).
         await conn.execute(
-            "INSERT INTO booking.staff_users (cis_user_id, name, role, active) VALUES ($1, $2, $3, true)",
+            "INSERT INTO booking.staff_users (cis_user_id, name, role, active, cognito_iss, cognito_sub)"
+            " VALUES ($1, $2, $3, true, $4, $1)",
             staff_id,
             staff_id.replace("it-679-", "").title(),
             role,
+            WORKFORCE_ISSUER,
         )
     await conn.executemany(
         "INSERT INTO catalog.v_tour (source_id, sku, title, country, duration_days, cover_photo_path, photo_count,"
@@ -81,9 +80,9 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 @pytest_asyncio.fixture
 async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
-) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
+) -> AsyncIterator[tuple[httpx.AsyncClient, LocalStaff]]:
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
     try:
         transport = httpx.ASGITransport(app=app)
@@ -93,9 +92,9 @@ async def client(
         await db.close()
 
 
-def _auth(cis: LocalCis, sub: str) -> dict[str, str]:
-    # cis_role only matters on first provisioning; the fixture rows already carry the Booking role.
-    return {"Authorization": f"Bearer {cis.token(sub=sub, cis_role='reviewer')}"}
+def _auth(cis: LocalStaff, sub: str) -> dict[str, str]:
+    # The WORKFORCE group carries the same role as the fixture row (the role is re-read from the group each request).
+    return {"Authorization": f"Bearer {cis.token(sub, ROLES[sub])}"}
 
 
 COMMERCIAL = {
@@ -107,7 +106,7 @@ COMMERCIAL = {
 }
 
 
-async def test_list_facets_and_detail(client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection) -> None:
+async def test_list_facets_and_detail(client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection) -> None:
     c, cis = client
     contracting, content = _auth(cis, CONTRACTING), _auth(cis, CONTENT)
 
@@ -165,7 +164,7 @@ async def test_list_facets_and_detail(client: tuple[httpx.AsyncClient, LocalCis]
 
 
 async def test_commercial_upsert_is_one_row_and_audited(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     contracting, sales = _auth(cis, CONTRACTING), _auth(cis, SALES)
@@ -194,7 +193,7 @@ async def test_commercial_upsert_is_one_row_and_audited(
     assert bad.status_code == 422
 
 
-async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection) -> None:
+async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection) -> None:
     c, cis = client
     contracting, sales = _auth(cis, CONTRACTING), _auth(cis, SALES)
     use = f"/catalog/trip-plans/{BHUTAN_A}/trip-cases"
@@ -252,7 +251,7 @@ async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], adm
 
 
 async def test_tour_leaving_the_catalog_drops_out(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     contracting = _auth(cis, CONTRACTING)
@@ -273,7 +272,7 @@ async def test_tour_leaving_the_catalog_drops_out(
 
 
 async def test_catalog_unavailable_is_503(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     await admin.execute("REVOKE SELECT ON catalog.v_tour FROM booking")

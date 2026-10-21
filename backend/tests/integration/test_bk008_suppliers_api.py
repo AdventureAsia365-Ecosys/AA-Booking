@@ -17,11 +17,12 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.staff_tokens import LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MAKER, CHECKER, SALES = "it-822-api-maker", "it-822-api-checker", "it-822-api-sales"
+ROLES = {MAKER: "contracting", CHECKER: "admin", SALES: "sales"}
 HANOI = "d0000000-0000-4000-8000-000000000001"
 LUANG_PRABANG = "d0000000-0000-4000-8000-000000000002"
 ATLANTIS = "d0000000-0000-4000-8000-000000000004"  # a catalog place whose country is not in booking.countries
@@ -38,12 +39,16 @@ async def _clean(conn: asyncpg.Connection) -> None:
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await _clean(conn)
-    for staff_id, role in ((MAKER, "contracting"), (CHECKER, "admin"), (SALES, "sales")):
+    for staff_id, role in ROLES.items():
+        # Linked to the local WORKFORCE identity whose sub is the row key (AA-911: WORKFORCE is the only sign-in).
         await conn.execute(
-            "INSERT INTO booking.staff_users (cis_user_id, role, active, name) VALUES ($1, $2, true, $1)"
-            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true",
+            "INSERT INTO booking.staff_users (cis_user_id, role, active, name, cognito_iss, cognito_sub)"
+            " VALUES ($1, $2, true, $1, $3, $1)"
+            " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true,"
+            " cognito_iss = EXCLUDED.cognito_iss, cognito_sub = EXCLUDED.cognito_sub",
             staff_id,
             role,
+            WORKFORCE_ISSUER,
         )
     try:
         yield conn
@@ -55,9 +60,9 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 @pytest_asyncio.fixture
 async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
-) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
+) -> AsyncIterator[tuple[httpx.AsyncClient, LocalStaff]]:
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
     try:
         transport = httpx.ASGITransport(app=app)
@@ -67,13 +72,13 @@ async def client(
         await db.close()
 
 
-def _auth(cis: LocalCis, sub: str) -> dict[str, str]:
-    # cis_role only matters on first provisioning; the fixture rows already carry the Booking role.
-    return {"Authorization": f"Bearer {cis.token(sub=sub, cis_role='reviewer')}"}
+def _auth(cis: LocalStaff, sub: str) -> dict[str, str]:
+    # The WORKFORCE group carries the same role as the fixture row (the role is re-read from the group each request).
+    return {"Authorization": f"Bearer {cis.token(sub, ROLES[sub])}"}
 
 
 async def test_supplier_crud_rbac_and_place_check(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     maker, checker, sales = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, SALES)
@@ -175,7 +180,7 @@ async def test_supplier_crud_rbac_and_place_check(
 
 
 async def test_contract_lifecycle_and_deactivate_rule(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     c, cis = client
     maker, checker, sales = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, SALES)
@@ -264,7 +269,7 @@ async def test_contract_lifecycle_and_deactivate_rule(
     assert reason == "Deactivated: closed"
 
 
-async def test_creator_publishes_after_a_checker_edit(client: tuple[httpx.AsyncClient, LocalCis]) -> None:
+async def test_creator_publishes_after_a_checker_edit(client: tuple[httpx.AsyncClient, LocalStaff]) -> None:
     """The maker is the last writer of the terms: when B corrects A's draft, B cannot publish it, A can."""
     c, cis = client
     maker, checker = _auth(cis, MAKER), _auth(cis, CHECKER)
@@ -283,7 +288,7 @@ async def test_creator_publishes_after_a_checker_edit(client: tuple[httpx.AsyncC
 
 
 async def test_clearing_the_country_keeps_the_place_country(
-    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    client: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     """With a CIS place set, the country follows the place: clearing it is a no-op, not a NULL next to the place."""
     c, cis = client

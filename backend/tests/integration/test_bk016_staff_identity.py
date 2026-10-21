@@ -1,6 +1,7 @@
 """AA-680 Phase 2 on a real PostgreSQL, as role ``booking``: Cognito WORKFORCE sign-in through the real app and pool —
 the first sign-in creates a ``cog:`` row, the role follows the booking-* group, a backfilled bridge-era row is found by
-its identity, the identity is never rebound, and an admin cannot change a linked row's role."""
+its identity, a bridge-shaped token is refused (AA-911), the identity is never rebound, and an admin cannot change a
+linked row's role."""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.staff_tokens import WORKFORCE_ISSUER, LocalCis
+from tests.staff_tokens import WORKFORCE_ISSUER, LocalRsaIssuer, LocalStaff
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -33,9 +34,9 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 
 @pytest_asyncio.fixture
-async def http(migrated_booking_dsn: str) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
+async def http(migrated_booking_dsn: str) -> AsyncIterator[tuple[httpx.AsyncClient, LocalStaff]]:
     settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
-    db, cis = Database(settings), LocalCis()
+    db, cis = Database(settings), LocalStaff()
     app = create_app(settings, db, cis.verifier())
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://booking") as client:
@@ -49,7 +50,7 @@ def bearer(token: str) -> dict[str, str]:
 
 
 async def test_first_sign_in_creates_a_cog_row_then_the_role_follows_the_group(
-    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     client, cis = http
     sub = str(uuid.uuid4())
@@ -76,7 +77,7 @@ async def test_first_sign_in_creates_a_cog_row_then_the_role_follows_the_group(
 
 
 async def test_no_booking_group_is_refused_and_writes_nothing(
-    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     client, cis = http
     r = await client.get("/booking/staff/me", headers=bearer(cis.workforce.token(["cis-admin"], sub=str(uuid.uuid4()))))
@@ -84,10 +85,11 @@ async def test_no_booking_group_is_refused_and_writes_nothing(
     assert await admin.fetchval("SELECT count(*) FROM booking.staff_users WHERE cis_user_id LIKE 'cog:%'") == 0
 
 
-async def test_backfilled_bridge_row_is_found_by_identity_and_the_bridge_still_works(
-    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+async def test_backfilled_bridge_row_is_found_by_identity_and_a_bridge_token_is_refused(
+    http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
-    """The row the Infra backfill linked keeps its CIS key (and so its history): no cog: row is created."""
+    """The row the Infra backfill linked keeps its CIS key (and so its history): no cog: row is created. AA-911: a
+    bridge-shaped token for the same CIS key is 401 and changes nothing."""
     client, cis = http
     sub, legacy = str(uuid.uuid4()), "b16-" + str(uuid.uuid4())[:8]
     await admin.execute(
@@ -98,15 +100,16 @@ async def test_backfilled_bridge_row_is_found_by_identity_and_the_bridge_still_w
         sub,
     )
     cognito = await client.get("/booking/staff/me", headers=bearer(cis.workforce.token(["booking-sales"], sub=sub)))
-    bridge = await client.get("/booking/staff/me", headers=bearer(cis.token(sub=legacy, cis_role="reviewer")))
+    bridge = await client.get("/booking/staff/me", headers=bearer(LocalRsaIssuer().token(sub=legacy, cis_role="admin")))
     assert cognito.status_code == 200 and cognito.json()["cis_user_id"] == legacy
     assert cognito.json()["role"] == "sales" and cognito.json()["name"] == "Legacy Sales"
-    assert bridge.status_code == 200 and bridge.json()["role"] == "sales"  # the bridge never changes the role
+    assert bridge.status_code == 401 and bridge.json()["detail"] == "invalid_token"
+    assert await admin.fetchval("SELECT role FROM booking.staff_users WHERE cis_user_id = $1", legacy) == "sales"
     assert await admin.fetchval("SELECT count(*) FROM booking.staff_users WHERE cis_user_id = $1", f"cog:{sub}") == 0
 
 
 async def test_inactive_linked_row_is_refused(
-    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     client, cis = http
     sub = str(uuid.uuid4())
@@ -121,7 +124,7 @@ async def test_inactive_linked_row_is_refused(
     assert r.status_code == 403 and r.json()["detail"] == "staff_inactive"
 
 
-async def test_identity_is_never_rebound(http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection) -> None:
+async def test_identity_is_never_rebound(http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection) -> None:
     """cog:<sub> exists but is bound to another pool's issuer: the WORKFORCE identity cannot take it over."""
     client, cis = http
     sub = str(uuid.uuid4())
@@ -138,7 +141,7 @@ async def test_identity_is_never_rebound(http: tuple[httpx.AsyncClient, LocalCis
 
 
 async def test_concurrent_first_sign_ins_create_one_row(
-    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     client, cis = http
     sub = str(uuid.uuid4())
@@ -150,7 +153,7 @@ async def test_concurrent_first_sign_ins_create_one_row(
 
 
 async def test_admin_cannot_change_a_linked_role_but_can_suspend(
-    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+    http: tuple[httpx.AsyncClient, LocalStaff], admin: asyncpg.Connection
 ) -> None:
     client, cis = http
     boss_sub, sales_sub = str(uuid.uuid4()), str(uuid.uuid4())

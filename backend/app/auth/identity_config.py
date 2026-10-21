@@ -1,14 +1,14 @@
 """Booking staff-surface issuers for the multi-issuer verifier (root ADR 0006 §8, ADR 0006a; AA-680 Phase 2).
 
-Booking staff routes accept exactly:
+Booking staff routes accept exactly one issuer:
 
 - **WORKFORCE** (Cognito staff pool) x {booking-staff, breakglass}: access tokens only (``token_use == "access"``),
   audience = the ``client_id`` claim (Cognito access tokens carry no ``aud``), roles from ``cognito:groups``.
   ``cis-admin`` is deliberately left out until a CIS screen really calls the Booking API (least privilege; ADR 0006
   §8 rule 6 lists it, the AA-680 notes record the deviation).
-- **BRIDGE** (the CIS-minted Booking token, ADR 0004 O1 / CIS PR #721) during the transition only (ADR 0006a A6):
-  ``aud = booking``, no ``token_use``, the role in ``cis_role``. AA-680 PR-4 deletes it: set :data:`BRIDGE_ENABLED`
-  to False (or drop the entry), then the CIS mint, JWKS route and signing secret.
+
+The CIS-minted bridge token (ADR 0004 O1, CIS PR #721) is retired (AA-911, root ADR 0006a A11): its issuer is not
+configured, so a bridge token, even one correctly signed by the old CIS key, is refused as ``invalid_token``.
 
 The Dev values are code constants with optional env overrides read by ``app.settings``
 (``COGNITO_WORKFORCE_ISSUER``, ``COGNITO_BOOKING_STAFF_CLIENT_ID``, ``COGNITO_BREAKGLASS_CLIENT_ID``, same names as CIS
@@ -17,7 +17,7 @@ The Dev values are code constants with optional env overrides read by ``app.sett
 outputs and the pool's ``/.well-known/openid-configuration``), never the custom sign-in domain.
 
 The verifier (``app.auth.identity_verifier``) is a byte copy of AA-CIS-App ``api/core/identity_verifier.py``: never edit
-it here. One JWKS cache per issuer; the lifespan prefetches both key sets in the background (the JWKS is reached
+it here. One JWKS cache per issuer; the lifespan prefetches the WORKFORCE key set in the background (the JWKS is reached
 through the single NAT instance) and logs ``identity_jwks_prefetched`` per issuer.
 """
 
@@ -39,13 +39,8 @@ DEV_WORKFORCE_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bC
 DEV_BOOKING_STAFF_CLIENT_ID = "5ifl9dgkr8a5outnmsjc8v1kt3"
 DEV_BREAKGLASS_CLIENT_ID = "2g3f3ncfuqdiuu1o5b70o4h0lq"
 
-# IssuerConfig.name of each accepted issuer; app.auth.staff picks the identity rules by it.
+# IssuerConfig.name of the accepted issuer; app.auth.staff checks it.
 WORKFORCE = "workforce"
-BRIDGE = "bridge"
-
-# AA-680 PR-4 (bridge retirement) turns this off and then deletes the bridge code paths.
-BRIDGE_ENABLED = True
-BRIDGE_AUDIENCE = "booking"
 
 
 def workforce_config(settings: Settings) -> IssuerConfig:
@@ -57,24 +52,9 @@ def workforce_config(settings: Settings) -> IssuerConfig:
     )
 
 
-def bridge_config(settings: Settings) -> IssuerConfig:
-    """The CIS bridge token: RS256 against the CIS JWKS, ``aud = booking``, role in ``cis_role``."""
-    return IssuerConfig(
-        issuer=settings.staff_jwt_issuer,
-        client_ids=frozenset({BRIDGE_AUDIENCE}),
-        jwks_url=settings.cis_jwks_url,
-        audience_claim="aud",
-        token_use=None,
-        groups_claim="cis_role",
-        name=BRIDGE,
-    )
-
-
 def booking_staff_issuers(settings: Settings) -> tuple[IssuerConfig, ...]:
-    issuers = [workforce_config(settings)]
-    if BRIDGE_ENABLED:
-        issuers.append(bridge_config(settings))
-    return tuple(issuers)
+    """WORKFORCE only (AA-911: the CIS bridge issuer is gone)."""
+    return (workforce_config(settings),)
 
 
 def build_staff_verifier(settings: Settings, fetcher: JwksFetcher | None = None) -> MultiIssuerVerifier:
@@ -82,7 +62,7 @@ def build_staff_verifier(settings: Settings, fetcher: JwksFetcher | None = None)
 
 
 def issuer_kind(verifier: MultiIssuerVerifier, iss: str) -> str | None:
-    """:data:`WORKFORCE`, :data:`BRIDGE` (the IssuerConfig name of ``iss``) or None for an issuer it does not hold."""
+    """:data:`WORKFORCE` (the IssuerConfig name of ``iss``) or None for an issuer it does not hold."""
     for cfg in verifier.issuers:
         if cfg.issuer == iss:
             return cfg.name or None
