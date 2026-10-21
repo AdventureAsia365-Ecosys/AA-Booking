@@ -26,8 +26,8 @@ import { isPreviewSignInHost } from "@/lib/cognito";
 
 export const dynamic = "force-dynamic";
 
-function fail(message: string, status: number) {
-  return NextResponse.json({ ok: false, message }, { status });
+function fail(message: string, status: number, headers?: Record<string, string>) {
+  return NextResponse.json({ ok: false, message }, { status, headers });
 }
 
 export async function POST(req: NextRequest) {
@@ -65,6 +65,12 @@ export async function POST(req: NextRequest) {
     });
     if (res.status === 401 || res.status === 403) {
       return fail("That username and password do not match a CIS staff account.", 401);
+    }
+    // AA-876 — the CIS login throttle (or the API Gateway login throttle) answers 429: say so, keep Retry-After.
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("retry-after");
+      const headers = retryAfter ? { "Retry-After": retryAfter } : undefined;
+      return fail("Too many sign-in attempts. Try again in a few minutes.", 429, headers);
     }
     if (!res.ok) return fail("CIS sign-in is not answering. Try again in a moment.", 502);
     const data = (await res.json()) as { token?: unknown };
