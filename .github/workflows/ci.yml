@@ -191,14 +191,24 @@ jobs:
           [ "$code" = "503" ] && jq -e '.db == "not_configured"' /tmp/ready.json
           docker rm -f booking-ci
 
-      # Report-only, as in CIS (AA-177): flip to exit-code 1 once a real report has been reviewed.
-      - name: Scan image for vulnerabilities (Trivy, report-only)
+      # AA-879: blocking, like CIS. Fails on any CRITICAL/HIGH finding that HAS a fix (`ignore-unfixed`).
+      # Reviewed report before the flip (main run 39622898902, 21/10/2026): 44 HIGH OS findings, none with a
+      # fixed version. An accepted fixable finding goes into .trivyignore (repo root) with a `# reason` line
+      # and `exp:YYYY-MM-DD` at most 90 days ahead; .github/scripts/check_trivyignore.py is a byte copy of
+      # the AA-CIS-App script (tested there, tests/unit/test_aa879_ci_gates.py).
+      - name: Trivy ignore entries carry a reason and an expiry
+        working-directory: .
+        run: python3 .github/scripts/check_trivyignore.py .trivyignore
+
+      - name: Scan image for vulnerabilities (Trivy, failing on fixable CRITICAL/HIGH)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: "aa-booking-api:ci-${{ github.sha }}"
           format: "table"
           severity: "CRITICAL,HIGH"
-          exit-code: "0"
+          ignore-unfixed: true
+          trivyignores: ".trivyignore"
+          exit-code: "1"
 
       - name: Generate SBOM (syft, CycloneDX)
         uses: anchore/sbom-action@v0.24.3
