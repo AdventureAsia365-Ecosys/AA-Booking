@@ -4,9 +4,12 @@
 FROM python:3.12-slim
 
 ARG GIT_SHA=unknown
+# Release version (AA-891): the deploy and CI read it from .release-please-manifest.json (outside this build context).
+ARG APP_VERSION=unknown
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    GIT_SHA=${GIT_SHA}
+    GIT_SHA=${GIT_SHA} \
+    APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
 

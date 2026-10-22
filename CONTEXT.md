@@ -143,8 +143,9 @@ docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
-                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md)
+                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
+                           release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
                            freshness report)
 .github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4)
@@ -168,7 +169,8 @@ owns code only ("App owns code, Infra owns resources"). The service starts with 
 scaling to 1 is an approved, billable step.
 
 Process environment (set by the task definition): `DATABASE_URL` (from the secret), `ENVIRONMENT`,
-`GIT_SHA` (baked into the image), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
+`GIT_SHA` and `APP_VERSION` (both baked into the image; `APP_VERSION` = the release version from
+`.release-please-manifest.json`, AA-891), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
 (optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
 `STAFF_JWT_ISSUER` (optional; the CIS bridge, default the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
 Cognito (AA-680, all optional and **not set on Dev**, defaults are code constants in `app/auth/identity_config.py`):
@@ -179,6 +181,17 @@ E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inq
 (links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
 Error tracking (AA-871, optional): `SENTRY_DSN` (Sentry off when empty; never logged) and `SENTRY_REQUIRED` (`true` =
 start-up fails without a DSN, the missing-DSN guard; off until Infra wires the DSN secret).
+
+## Releases (AA-891)
+
+One version for the whole repo (API image and staff admin), kept by release-please in manifest mode
+(`release-please-config.json`, `.release-please-manifest.json`; `CHANGELOG.md`; tags `vX.Y.Z`; pre-1.0 a `feat` or a
+breaking change bumps the minor, a `fix` the patch). `.github/workflows/release-please.yml` keeps one release PR open on
+`main`, opened with a token of the GitHub App `aa-ecosys-ci-bot` (environment `release`) so the required checks run on
+it; merging it tags the release. The version also lives in `backend/pyproject.toml` (an `extra-files` entry, bumped by the
+same PR). A release commit deploys nothing (Deploy Dev ignores those files, Vercel Deploy watches `frontend/**` only);
+the next backend deploy, or a Deploy Dev dispatch on `main`, bakes the new version, which `GET /booking/health` returns
+as `version` next to `git_sha`. Details: `docs/implementation-notes/AA-891.md`.
 
 ## Logs, request ids and errors (AA-871)
 

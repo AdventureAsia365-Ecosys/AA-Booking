@@ -8,6 +8,8 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
   ``ENVIRONMENT`` is ``test`` or ``local`` (CI's Postgres service has no TLS).
 - ``ENVIRONMENT``: ``dev`` (default), ``test`` or ``local``.
 - ``GIT_SHA``: commit the image was built from (Docker build arg), echoed by ``/booking/health``.
+- ``APP_VERSION``: release version the image was built at (Docker build arg read from ``.release-please-manifest.json``
+  by the deploy, AA-891), echoed by ``/booking/health`` next to ``git_sha``.
 - ``WORKER_ENABLED``: ``true`` / ``false``. Runs the ``booking.job`` worker loop inside the API
   process (Dev, AA-681 slice 2). Default: on when ``ENVIRONMENT`` is ``dev`` and ``DATABASE_URL``
   is set, off otherwise (tests and local runs start it explicitly).
@@ -83,6 +85,7 @@ class Settings:
     db_ssl: str = "require"
     environment: str = "dev"
     git_sha: str = "unknown"
+    app_version: str = "unknown"
     worker_enabled: bool = False
     cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
     staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
@@ -168,6 +171,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         db_ssl=(env.get("DB_SSL") or "require").strip().lower(),
         environment=environment,
         git_sha=(env.get("GIT_SHA") or "unknown").strip(),
+        app_version=(env.get("APP_VERSION") or "unknown").strip(),
         worker_enabled=_flag(
             env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
         ),

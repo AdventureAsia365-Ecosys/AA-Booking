@@ -18,7 +18,8 @@ router = APIRouter(prefix="/booking", tags=["health"])
 
 @router.get("/health")
 async def health(request: Request) -> dict[str, str]:
-    return {"status": "ok", "service": SERVICE_NAME, "git_sha": request.app.state.settings.git_sha}
+    settings = request.app.state.settings
+    return {"status": "ok", "service": SERVICE_NAME, "version": settings.app_version, "git_sha": settings.git_sha}
 
 
 @router.get("/health/ready")

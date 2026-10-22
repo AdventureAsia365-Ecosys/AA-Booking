@@ -1,0 +1,67 @@
+name: Release Please
+
+# AA-891: release-please (manifest mode: release-please-config.json + .release-please-manifest.json) keeps one release
+# PR open on main with the next version and CHANGELOG.md; merging it tags vX.Y.Z and creates the GitHub release.
+# The version the deploy bakes into the image (/booking/health "version") is read from the manifest.
+#
+# Token (AA-901): the release PR is opened with an installation token of the GitHub App aa-ecosys-ci-bot, so the
+# required CI checks run on it (events made with GITHUB_TOKEN start no workflows). GITHUB_TOKEN stays read-only.
+# Configuration in the GitHub environment `release` (deployment branches: main only):
+#   AA_CI_BOT_APP_ID        variable, the App id (not a secret)
+#   AA_CI_BOT_PRIVATE_KEY   secret, the App private key (PEM)
+#
+# A merged release PR changes only CHANGELOG.md, the manifest and backend/pyproject.toml: Deploy Dev ignores those
+# paths and Vercel Deploy only watches frontend/**, so a release never deploys by itself.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release PR
+    # A dispatch from another branch is skipped here rather than refused by the environment's branch rule.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 10
+    steps:
+      - name: Mint an aa-ecosys-ci-bot token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.AA_CI_BOT_APP_ID }}
+          private-key: ${{ secrets.AA_CI_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
+      - name: Release PR / release
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Summary
+        env:
+          RELEASED: ${{ steps.release.outputs.release_created }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          if [ "${RELEASED}" = "true" ]; then
+            echo "Released ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -n "${PR}" ]; then
+            echo "Release PR updated" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nothing to release" >> "$GITHUB_STEP_SUMMARY"
+          fi

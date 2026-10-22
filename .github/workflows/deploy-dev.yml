@@ -31,7 +31,12 @@ name: Deploy Dev
 #      names the reason and the count, and the deploy goes on.
 # The logic is .github/scripts/booking-deploy-preflight.sh, tested with stub aws/curl by
 # backend/tests/unit/test_deploy_preflight_script.py (Unit Tests check).
-# Pushes that only change backend/tests/** do not deploy (nothing in the image changes).
+# Pushes that only change backend/tests/** or backend/pyproject.toml do not deploy (nothing in the image changes; the
+# image copies only requirements.txt and app/). A merged release PR (AA-891: CHANGELOG.md, .release-please-manifest.json,
+# the pyproject version) therefore never deploys by itself.
+#
+# Release version (AA-891): the build reads it from .release-please-manifest.json and bakes it in as APP_VERSION, the
+# same way as GIT_SHA; /booking/health returns it as "version" and the smoke test checks it.
 #
 # The base task definition is the family's latest ACTIVE revision, so a redeploy of an older commit keeps
 # the latest Terraform env/secrets: revert config in Terraform. This workflow never changes the service's
@@ -43,6 +48,7 @@ on:
     paths:
       - "backend/**"
       - "!backend/tests/**"
+      - "!backend/pyproject.toml"
       - ".github/workflows/deploy-dev.yml"
       - ".github/scripts/booking-deploy-preflight.sh"
   workflow_dispatch:
@@ -140,16 +146,19 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          APP_VERSION=$(jq -r '."."' .release-please-manifest.json)
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad version in the manifest: $APP_VERSION"; exit 1; }
           # The repository is IMMUTABLE (AA-869): a re-deploy of the same commit (a manual dispatch after a
           # Terraform change to env/secrets) reuses the image already pushed for this SHA instead of failing
           # on the push. `docker manifest inspect` needs only the pull rights the ECR login already gives.
           if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
             echo "image for ${GITHUB_SHA} already in ECR: reusing it (no build, no push)"
           else
-            docker build --build-arg GIT_SHA="${GITHUB_SHA}" -t "$IMAGE" backend
+            docker build --build-arg GIT_SHA="${GITHUB_SHA}" --build-arg APP_VERSION="${APP_VERSION}" -t "$IMAGE" backend
             docker push "$IMAGE"
           fi
           echo "DEPLOY_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
 
       - name: Register task definition and update service
         run: |
@@ -205,8 +214,9 @@ jobs:
           fail=0
           code=$(curl -s --max-time 20 -o /tmp/health.json -w "%{http_code}" "$BASE/booking/health")
           cat /tmp/health.json; echo
-          if [ "$code" != "200" ] || ! jq -e --arg sha "$GITHUB_SHA" '.status == "ok" and .git_sha == $sha' /tmp/health.json >/dev/null; then
-            echo "::error::/booking/health -> $code (expected 200 and git_sha $GITHUB_SHA)"; fail=1
+          if [ "$code" != "200" ] || ! jq -e --arg sha "$GITHUB_SHA" --arg ver "$APP_VERSION" \
+            '.status == "ok" and .git_sha == $sha and .version == $ver' /tmp/health.json >/dev/null; then
+            echo "::error::/booking/health -> $code (expected 200, git_sha $GITHUB_SHA, version $APP_VERSION)"; fail=1
           fi
           code=$(curl -s --max-time 20 -o /tmp/ready.json -w "%{http_code}" "$BASE/booking/health/ready")
           cat /tmp/ready.json; echo
