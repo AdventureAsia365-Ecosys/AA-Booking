@@ -51,9 +51,11 @@ def _scrub_request(request: dict) -> None:
     headers = request.get("headers")
     if isinstance(headers, dict):
         request["headers"] = {k: v for k, v in headers.items() if str(k).lower() in SAFE_HEADERS}
-    for field in ("url", "query_string"):
-        if isinstance(request.get(field), str):
-            request[field] = scrub(request[field])
+    # The query string can carry customer values (search terms, emails, phone numbers): never sent. The URL keeps
+    # only scheme, host and path.
+    request.pop("query_string", None)
+    if isinstance(request.get("url"), str):
+        request["url"] = scrub(request["url"].split("?", 1)[0].split("#", 1)[0])
 
 
 def _scrub_frames(holder: dict) -> None:
@@ -93,6 +95,11 @@ def before_send(event: dict, hint: Any) -> dict:
     return event
 
 
+def before_send_transaction(event: dict, hint: Any) -> dict:
+    """Transactions (10 % traces) carry the same request block as errors: apply the same scrub (AA-871 review)."""
+    return before_send(event, hint)
+
+
 def before_breadcrumb(crumb: dict, hint: Any) -> dict:
     """Redact PII / secrets in a breadcrumb's message and data (log lines, HTTP URLs, SQL)."""
     for key in ("message", "data"):
@@ -121,6 +128,7 @@ def init_sentry(settings: Settings, service: str = "api") -> bool:
         traces_sample_rate=TRACES_SAMPLE_RATE,
         profiles_sample_rate=PROFILES_SAMPLE_RATE,
         before_send=before_send,
+        before_send_transaction=before_send_transaction,
         before_breadcrumb=before_breadcrumb,
     )
     sentry_sdk.set_tag("service", service)

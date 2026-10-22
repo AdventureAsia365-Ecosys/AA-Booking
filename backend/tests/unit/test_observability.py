@@ -236,6 +236,7 @@ def test_sentry_init_options_with_dsn() -> None:
     assert kw["max_request_body_size"] == "never"
     assert kw["traces_sample_rate"] == 0.1 and kw["profiles_sample_rate"] == 0.1
     assert kw["before_send"] is sentry.before_send and kw["before_breadcrumb"] is sentry.before_breadcrumb
+    assert kw["before_send_transaction"] is sentry.before_send_transaction
     tag.assert_called_with("service", "api")
 
 
@@ -347,3 +348,24 @@ def test_dsn_must_be_https_and_is_not_in_repr() -> None:
         load_settings({"SENTRY_DSN": "http://k@o.example/1"})
     s = load_settings({"SENTRY_DSN": "https://k@o.example/1"})
     assert "k@o.example" not in repr(s)
+
+
+def test_transactions_get_the_same_request_scrub_and_no_query_string() -> None:
+    # AA-871 review: traced transactions carry the request block too; plain customer values in the query string
+    # (a name or a search term that no PII pattern catches) must never reach Sentry.
+    event = {
+        "type": "transaction",
+        "transaction": "/booking/customers",
+        "request": {
+            "url": "https://api-booking.example/booking/customers?q=Nguyen+Van+An#top",
+            "query_string": "q=Nguyen+Van+An&page=2",
+            "headers": {"Authorization": "Bearer abc", "X-Request-ID": "r1", "X-Forwarded-For": "1.2.3.4"},
+            "cookies": {"s": "1"},
+        },
+        "user": {"ip_address": "1.2.3.4"},
+    }
+    out = sentry.before_send_transaction(event, {})
+    text = json.dumps(out)
+    assert "Nguyen" not in text and "page=2" not in text and "Bearer abc" not in text and "1.2.3.4" not in text
+    assert "query_string" not in out["request"] and out["request"]["url"] == "https://api-booking.example/booking/customers"
+    assert set(out["request"]["headers"]) == {"X-Request-ID"}
