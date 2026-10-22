@@ -207,6 +207,17 @@ jobs:
             echo "::notice::No VERCEL_AUTOMATION_BYPASS_SECRET — status only logged (401/403 = deployment protection)."
           fi
 
+      # AA-879 — the deployment just built (preview or production) must send the six security headers of
+      # frontend/next.config.ts. The deployment URL sits behind Vercel protection; the script reads it with
+      # `vercel curl` (team token from VERCEL_TOKEN, the project's own automation-bypass token, nothing new
+      # to store). /login is the one page that answers 200 without a session.
+      - name: Check the security headers
+        if: steps.deploy.outputs.url != ''
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: bash .github/scripts/check_security_headers.sh "$URL" /login
+
       - name: Job summary
         if: always() && steps.plan.outputs.enabled == 'true'
         env:

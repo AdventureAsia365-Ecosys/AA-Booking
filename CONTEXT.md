@@ -642,6 +642,13 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   the Preview sign-in host now serves it), `main` → production. The Vercel Git integration is off via `frontend/vercel.json` (`git.deploymentEnabled: false`) because
   the Hobby team cap (~100 deployments / 24 h for all projects, canceled ones included) was being used up. Needs the
   repo secret `VERCEL_TOKEN`.
+- Security headers (AA-879): `frontend/next.config.ts` sends the same six headers as the CIS admin, the CIS portal and
+  TripPlanner (HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal CSP `frame-ancestors 'none';
+  base-uri 'self'; form-action 'self'; object-src 'none'`, `Permissions-Policy`). Every preview and production
+  deployment is checked by the step "Check the security headers" (`.github/scripts/check_security_headers.sh`, GET
+  `/login` through `vercel curl`, which uses the project's automation-bypass token with `VERCEL_TOKEN`).
+- Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
+  accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 
 ## Working rules
 
