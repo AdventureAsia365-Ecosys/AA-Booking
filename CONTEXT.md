@@ -7,7 +7,7 @@ status: active
 owner: nghiep
 audience: [engineer, agent]
 applies_to: [aa-booking-api, aa-booking-admin]
-last_reviewed: 2026-10-19
+last_reviewed: 2026-10-22
 review_every_days: 90
 related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 ---
@@ -99,6 +99,8 @@ backend/
   app/paging.py            keyset cursors (next_before) + ILIKE escaping; app/reference.py settings/countries
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
   app/db.py                lazy asyncpg pool + readiness probe (every REQUIRED_SCHEMA_VERSIONS row)
+  app/observability/       AA-871: JSON logs (log_config.py), X-Request-ID middleware (request_id.py), PII / secret
+                           redaction (scrub.py), Sentry init + before_send (sentry.py); set up once by main.build_app()
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff/release) + Worker loop (O3, maintenance hooks,
                            release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind, DEPLOY_GATE_EXEMPT) +
@@ -141,7 +143,7 @@ docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
-                           AA-811.md, AA-822.md, AA-823.md, AA-825.md)
+                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
                            freshness report)
@@ -175,6 +177,24 @@ E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inq
 `SES_FROM_ADDRESS` (must equal the Infra `ses_from_address`, the only From the task role may use; empty = no e-mail),
 `SES_CONFIGURATION_SET` (Infra `aa-email-<env>-transactional`), `SES_REGION` (default `us-west-1`), `STAFF_ADMIN_URL`
 (links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
+Error tracking (AA-871, optional): `SENTRY_DSN` (Sentry off when empty; never logged) and `SENTRY_REQUIRED` (`true` =
+start-up fails without a DSN, the missing-DSN guard; off until Infra wires the DSN secret).
+
+## Logs, request ids and errors (AA-871)
+
+- Every stdout line is **one JSON object** (structlog; the existing stdlib `logging` calls render the same way):
+  `timestamp`, `level`, `logger`, `event`, `service`, `environment`, `git_sha`, and the bound context: `request_id` on
+  every line written while serving a request, `job_id` + `job_kind` on every line written while a job runs. One
+  `request_completed` line per request (method, path, route template, status, `duration_ms`; no query string) replaces
+  uvicorn's access log. Values are redacted before rendering (`app/observability/scrub.py`: e-mails, `+` phone numbers,
+  Bearer tokens, JWTs, key-like query values, Postgres `Key (email)=(…)` details, and whole values under keys such as
+  `email`, `phone`, `name`, `token`, `authorization`). Log ids, never personal data (DM-6.4).
+- **Request id:** a well-formed `X-Request-ID` (`[A-Za-z0-9._:-]{1,128}`) is kept, anything else is replaced by a new
+  `uuid4().hex`; it is echoed as `X-Request-ID` on every response (the unhandled 500 too) and set as the Sentry tag
+  `request_id`. API Gateway passes its `context.requestId` in that header once Infra maps it on the proxy integrations.
+- **Sentry** (only with `SENTRY_DSN`): CIS AA-870 settings (`send_default_pii=False`, no bodies or cookies, header
+  allowlist, 10 % traces / profiles) plus no frame locals, no `user`, and the scrubber over every text field;
+  `release` = `GIT_SHA`. A job that ends `failed` is captured with tags `job_kind` / `job_id`.
 
 ## E-mail (AA-811)
 

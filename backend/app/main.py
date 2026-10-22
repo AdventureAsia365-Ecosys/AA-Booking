@@ -12,13 +12,17 @@ route, ``/booking/ops/deploy-gate``, accepts only the Deploy Dev workflow's GitH
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
 (``app.jobs.worker``) as one background task of this process — never from a request path — and, next to it, the
 backlog metrics sampler (``app.jobs.metrics``, AA-751: ``AA/Jobs/Booking`` to CloudWatch every 5 min).
+
+Observability (AA-871, ``app.observability``): JSON log lines on stdout (stdlib and structlog calls alike), a request id
+per request (``X-Request-ID`` in, or generated; echoed on every response and bound to every log line), and Sentry when
+``SENTRY_DSN`` is set. :func:`build_app` sets logging and Sentry up once per process; :func:`create_app` only adds the
+middleware, so tests that build their own app never touch either.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -33,6 +37,8 @@ from app.inquiry import intake
 from app.jobs.metrics import JobMetricsSampler
 from app.jobs.worker import Worker
 from app.notifications import staff_email
+from app.observability import setup as setup_observability
+from app.observability.request_id import RequestIdMiddleware, unhandled_error_handler
 from app.retention import jobs as retention_jobs
 from app.routers import (
     catalog,
@@ -50,8 +56,6 @@ from app.routers import (
     trip_cases,
 )
 from app.settings import Settings, load_settings
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 # On shutdown a job in flight gets this long to finish; after that the worker task is cancelled and releases the
 # job back to the queue at once (app.jobs.queue.release, AA-751), before the pool closes. ECS gives the container
@@ -119,6 +123,9 @@ def create_app(
     app.state.staff_verifier = verifier
     app.state.deploy_verifier = deploy_verifier
     app.add_exception_handler(ServiceError, service_error_handler)
+    # AA-871: the unhandled 500 keeps the request id (it is answered outside the middleware below).
+    app.add_exception_handler(Exception, unhandled_error_handler)
+    app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(docs.router)
     app.include_router(staff.router)
@@ -135,4 +142,12 @@ def create_app(
     return app
 
 
-app = create_app()
+def build_app() -> FastAPI:
+    """The process's app (``uvicorn app.main:app``): settings from the environment, JSON logging and Sentry, then
+    :func:`create_app`."""
+    settings = load_settings()
+    setup_observability(settings)
+    return create_app(settings)
+
+
+app = build_app()
