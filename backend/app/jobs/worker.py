@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
+import sentry_sdk
+import structlog
 
 from app.jobs import queue
 from app.jobs.queue import Job
@@ -45,6 +47,17 @@ MaintenanceHook = Callable[[asyncpg.Pool], Awaitable[Any]]
 
 ERROR_MAX_CHARS = 2000
 NOT_RELEASED_ERROR = "stopped mid-run on shutdown; this kind is not run again (no progress checkpoint)"
+
+
+def _report_failed(job: Job, exc: BaseException, status: str) -> None:
+    """AA-871: a job that ended ``failed`` (permanent error, or its last attempt) goes to Sentry with its id and kind;
+    a retried attempt does not. No-op when Sentry is off."""
+    if status != "failed":
+        return
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("job_kind", job.kind)
+        scope.set_tag("job_id", job.id)
+        sentry_sdk.capture_exception(exc)
 
 
 class PermanentError(Exception):
@@ -121,6 +134,11 @@ class Worker:
         return True
 
     async def _run(self, pool: asyncpg.Pool, job: Job) -> None:
+        # AA-871: every log line written while this job runs (handler code included) carries its id and kind.
+        with structlog.contextvars.bound_contextvars(job_id=job.id, job_kind=job.kind):
+            await self._run_bound(pool, job)
+
+    async def _run_bound(self, pool: asyncpg.Pool, job: Job) -> None:
         beat = asyncio.create_task(self._heartbeat(pool, job.id))
         try:
             result = await self._handlers[job.kind](pool, job)
@@ -142,9 +160,11 @@ class Worker:
         except PermanentError as exc:
             status = await queue.fail(pool, job, self.worker_id, _err(exc), retryable=False)
             log.warning("job %s %s failed permanently: %s", job.kind, job.id, _err(exc))
+            _report_failed(job, exc, status)
         except Exception as exc:  # noqa: BLE001 — every other error is retried with backoff
             status = await queue.fail(pool, job, self.worker_id, _err(exc), retryable=True)
             log.warning("job %s %s attempt %d error -> %s: %s", job.kind, job.id, job.attempt, status, _err(exc))
+            _report_failed(job, exc, status)
         else:
             await queue.complete(pool, job.id, self.worker_id, result)
             log.info("job %s %s succeeded: %s", job.kind, job.id, result)

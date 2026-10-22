@@ -11,3 +11,7 @@ cryptography==50.0.2
 # Transactional e-mail through SES v2 (AA-811, app/mailer.py) — same pins as AA-CIS-App.
 boto3==1.43.49
 botocore==1.43.49
+# JSON logs + request ids (AA-871, app/observability): structlog renders stdlib and structlog calls as one JSON line.
+structlog==25.5.0
+# Error tracking (AA-871), same SDK as AA-CIS-App; off unless SENTRY_DSN is set.
+sentry-sdk[fastapi]==2.70.0

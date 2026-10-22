@@ -38,13 +38,20 @@ Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` g
 - ``SES_REGION``: default ``us-west-1`` (the SES identity's region).
 - ``STAFF_ADMIN_URL``: base URL of the staff admin, for links in staff e-mail. Default: the Dev
   custom domain ``https://booking.lumiguides.it.com``. Must be ``https://`` outside ``test``/``local``.
+
+Error tracking (AA-871, ``app.observability.sentry``):
+
+- ``SENTRY_DSN``: the Sentry project DSN (task definition secret). Empty (default) = Sentry off. Must be ``https://``.
+  Never logged.
+- ``SENTRY_REQUIRED``: ``true`` makes start-up fail when ``SENTRY_DSN`` is empty (the missing-DSN guard). Default off,
+  so a deploy before the secret exists still starts; Infra turns it on together with the secret.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.auth.identity_config import (
     DEV_BOOKING_STAFF_CLIENT_ID,
@@ -88,6 +95,8 @@ class Settings:
     cognito_booking_staff_client_id: str = DEV_BOOKING_STAFF_CLIENT_ID
     cognito_breakglass_client_id: str = DEV_BREAKGLASS_CLIENT_ID
     cognito_booking_staff_preview_client_id: str = DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID
+    sentry_dsn: str = field(default="", repr=False)
+    sentry_required: bool = False
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -133,6 +142,10 @@ class Settings:
             if preview in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id):
                 # The same id would cap Production sign-ins too, or (worse, after a later fix) un-cap Preview ones.
                 raise SettingsError("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID must differ from the production clients")
+        if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
+            raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
+        if self.sentry_required and not self.sentry_dsn:
+            raise SettingsError("SENTRY_REQUIRED is on but SENTRY_DSN is empty")
 
 
 def _flag(raw: str | None, default: bool, name: str) -> bool:
@@ -172,4 +185,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEV_BREAKGLASS_CLIENT_ID,
         cognito_booking_staff_preview_client_id=(env.get("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID") or "").strip()
         or DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
+        sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
+        sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )
