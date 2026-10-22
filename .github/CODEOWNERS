@@ -1,0 +1,29 @@
+# CODEOWNERS - AA-Booking.
+#
+# Owners of the risky paths only: CI and workflows, database migrations, sign-in and authorization code and the
+# agent rules. There is deliberately no catch-all `*` rule.
+# Dev phase: not enforced. Branch protection does not require code-owner review, so this file only adds a review
+# request; the agent still merges after green CI (risky classes after an agent review). From the first prod or the
+# first paying tenant, "Require review from Code Owners" is turned on and these paths need the owner's approval.
+# Later rules win over earlier ones.
+
+# CI, workflows, Dependabot, CI scripts and this file
+/.github/                                     @pqnghiep1354
+
+# Database migrations (copied to the infra repo and applied by its DB Migrate workflow)
+/migrations/                                  @pqnghiep1354
+
+# Staff sign-in, tokens and authorization (API)
+/backend/app/auth/                            @pqnghiep1354
+
+# Sign-in routes, sessions, roles and the page gate (staff admin)
+/frontend/app/api/auth/                       @pqnghiep1354
+/frontend/lib/cognito.ts                      @pqnghiep1354
+/frontend/lib/session.ts                      @pqnghiep1354
+/frontend/lib/rbac.ts                         @pqnghiep1354
+/frontend/lib/safeNext.ts                     @pqnghiep1354
+/frontend/lib/sameOrigin.ts                   @pqnghiep1354
+/frontend/proxy.ts                            @pqnghiep1354
+
+# Agent rules
+/.claude/                                     @pqnghiep1354
