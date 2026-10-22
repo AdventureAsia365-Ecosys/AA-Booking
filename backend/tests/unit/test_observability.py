@@ -273,6 +273,28 @@ def test_before_send_strips_pii() -> None:
     assert "vars" not in out["exception"]["values"][0]["stacktrace"]["frames"][0]
 
 
+def test_value_echoing_exception_messages_are_dropped() -> None:
+    event = {
+        "exception": {
+            "values": [
+                {
+                    "type": "DataError",
+                    "module": "asyncpg.exceptions",
+                    "value": "invalid input for query argument $1: 'Jane'",
+                },
+                {
+                    "type": "ValidationError",
+                    "module": "pydantic_core._pydantic_core",
+                    "value": "input_value='Jane Doe'",
+                },
+                {"type": "RuntimeError", "module": "builtins", "value": "lease lost"},
+            ]
+        }
+    }
+    values = [v["value"] for v in sentry.before_send(event, {})["exception"]["values"]]
+    assert values == [FILTERED, FILTERED, "lease lost"]
+
+
 class _Capture(sentry_sdk.transport.Transport):
     def __init__(self, options=None) -> None:
         super().__init__(options)

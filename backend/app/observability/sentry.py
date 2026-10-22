@@ -16,7 +16,7 @@ from typing import Any
 
 import sentry_sdk
 
-from app.observability.scrub import scrub
+from app.observability.scrub import FILTERED, scrub
 from app.settings import SERVICE_NAME, Settings
 
 log = logging.getLogger(__name__)
@@ -39,6 +39,9 @@ TRACES_SAMPLE_RATE = 0.1
 PROFILES_SAMPLE_RATE = 0.1
 # Tags this code sets itself; not passed through the scrubber.
 _KEEP_TAGS = frozenset({"request_id", "job_id", "job_kind", "service", "environment", "release"})
+# Exceptions whose message echoes input values (asyncpg: bad query arguments; pydantic: input_value=...): only the type
+# and the stack are sent.
+_VALUE_ECHOING_MODULES = frozenset({"asyncpg", "pydantic", "pydantic_core", "jsonschema", "json"})
 
 
 def _scrub_request(request: dict) -> None:
@@ -68,7 +71,9 @@ def before_send(event: dict, hint: Any) -> dict:
         _scrub_request(request)
     event.pop("user", None)
     for exc in (event.get("exception") or {}).get("values") or []:
-        if isinstance(exc.get("value"), str):
+        if str(exc.get("module") or "").split(".")[0] in _VALUE_ECHOING_MODULES:
+            exc["value"] = FILTERED
+        elif isinstance(exc.get("value"), str):
             exc["value"] = scrub(exc["value"])
         _scrub_frames(exc)
     for thread in (event.get("threads") or {}).get("values") or []:
