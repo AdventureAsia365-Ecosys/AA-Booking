@@ -75,8 +75,8 @@ def test_release_please_config() -> None:
     assert config["bump-minor-pre-major"] is True
     assert config["include-v-in-tag"] is True
     assert config["include-component-in-tag"] is False
-    # The squash commit of the release PR must pass the PR title check ("<type>: <description>").
-    assert config["pull-request-title-pattern"] == "chore: release ${version}"
+    # Default release PR title "chore(main): release x.y.z", as in the other app repos; pr-title.yml allows a scope.
+    assert "pull-request-title-pattern" not in config and "pull-request-title-pattern" not in config["packages"]["."]
     assert set(config["packages"]) == {"."}
     package = config["packages"]["."]
     assert package["changelog-path"] == "CHANGELOG.md"
@@ -101,10 +101,10 @@ def test_release_workflow_uses_the_ci_bot_app_token() -> None:
     ]
     assert "environment: release" in text
     assert "if: github.ref == 'refs/heads/main'" in text
-    assert "uses: actions/create-github-app-token@v2" in text
+    assert "uses: actions/create-github-app-token@v3" in text
     assert "app-id: ${{ vars.AA_CI_BOT_APP_ID }}" in text
     assert "private-key: ${{ secrets.AA_CI_BOT_PRIVATE_KEY }}" in text
-    assert "uses: googleapis/release-please-action@v4" in text
+    assert "uses: googleapis/release-please-action@v5" in text
     assert "token: ${{ steps.app-token.outputs.token }}" in text
     assert "GITHUB_TOKEN" not in text.split("\njobs:")[1]
 
