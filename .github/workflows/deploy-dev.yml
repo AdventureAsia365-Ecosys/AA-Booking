@@ -140,8 +140,15 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
-          docker build --build-arg GIT_SHA="${GITHUB_SHA}" -t "$IMAGE" backend
-          docker push "$IMAGE"
+          # The repository is IMMUTABLE (AA-869): a re-deploy of the same commit (a manual dispatch after a
+          # Terraform change to env/secrets) reuses the image already pushed for this SHA instead of failing
+          # on the push. `docker manifest inspect` needs only the pull rights the ECR login already gives.
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "image for ${GITHUB_SHA} already in ECR: reusing it (no build, no push)"
+          else
+            docker build --build-arg GIT_SHA="${GITHUB_SHA}" -t "$IMAGE" backend
+            docker push "$IMAGE"
+          fi
           echo "DEPLOY_IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Register task definition and update service
