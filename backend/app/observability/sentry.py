@@ -39,6 +39,8 @@ TRACES_SAMPLE_RATE = 0.1
 PROFILES_SAMPLE_RATE = 0.1
 # Tags this code sets itself; not passed through the scrubber.
 _KEEP_TAGS = frozenset({"request_id", "job_id", "job_kind", "service", "environment", "release"})
+# Contexts the SDK fills from the process, never from a request: sent as they are.
+_SDK_CONTEXTS = frozenset({"runtime", "os", "trace"})
 # Exceptions whose message echoes input values (asyncpg: bad query arguments; pydantic: input_value=...): only the type
 # and the stack are sent.
 _VALUE_ECHOING_MODULES = frozenset({"asyncpg", "pydantic", "pydantic_core", "jsonschema", "json"})
@@ -84,9 +86,13 @@ def before_send(event: dict, hint: Any) -> dict:
         event["message"] = scrub(event["message"])
     if isinstance(event.get("logentry"), dict):
         event["logentry"] = scrub(event["logentry"])
-    for key in ("extra", "contexts"):
-        if isinstance(event.get(key), dict):
-            event[key] = scrub(event[key])
+    if isinstance(event.get("extra"), dict):
+        event["extra"] = scrub(event["extra"])
+    contexts = event.get("contexts")
+    if isinstance(contexts, dict):
+        # The SDK's own contexts (runtime {"name": "CPython"}, os, trace) hold no customer data; a key scrub would
+        # turn `runtime.name` into [Filtered] (seen on AA-BOOKING-API-1). Every other context is scrubbed.
+        event["contexts"] = {k: v if k in _SDK_CONTEXTS else scrub(v) for k, v in contexts.items()}
     if isinstance(event.get("tags"), dict):
         event["tags"] = scrub(event["tags"], keep=_KEEP_TAGS)
     crumbs = event.get("breadcrumbs")
