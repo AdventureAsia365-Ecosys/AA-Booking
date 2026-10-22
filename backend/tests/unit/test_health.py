@@ -8,7 +8,7 @@ from app.db import Database, Readiness
 from app.main import create_app
 from app.settings import Settings
 
-SETTINGS = Settings(database_url=None, git_sha="0123abc")
+SETTINGS = Settings(database_url=None, git_sha="0123abc", app_version="0.2.0")
 
 
 class ExplodingDatabase(Database):
@@ -34,7 +34,7 @@ def test_liveness_shape_and_no_db_call() -> None:
     with TestClient(create_app(SETTINGS, ExplodingDatabase(SETTINGS))) as client:
         r = client.get("/booking/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "service": "aa-booking-api", "git_sha": "0123abc"}
+    assert r.json() == {"status": "ok", "service": "aa-booking-api", "version": "0.2.0", "git_sha": "0123abc"}
 
 
 def test_ready_200_when_ready() -> None:

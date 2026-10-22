@@ -168,10 +168,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # AA-891: the release version comes from the manifest at the repo root, like the Deploy Dev build.
       - name: Build image
         run: |
           docker build \
             --build-arg GIT_SHA=${{ github.sha }} \
+            --build-arg APP_VERSION="$(jq -r '."."' ../.release-please-manifest.json)" \
             --tag aa-booking-api:ci-${{ github.sha }} \
             .
 
@@ -185,7 +187,8 @@ jobs:
             sleep 1
           done
           cat /tmp/health.json
-          jq -e --arg sha "${{ github.sha }}" '.status == "ok" and .service == "aa-booking-api" and .git_sha == $sha' /tmp/health.json
+          jq -e --arg sha "${{ github.sha }}" --arg ver "$(jq -r '."."' ../.release-please-manifest.json)" \
+            '.status == "ok" and .service == "aa-booking-api" and .git_sha == $sha and .version == $ver' /tmp/health.json
           code=$(curl -s -o /tmp/ready.json -w "%{http_code}" http://localhost:8000/booking/health/ready)
           cat /tmp/ready.json
           [ "$code" = "503" ] && jq -e '.db == "not_configured"' /tmp/ready.json
