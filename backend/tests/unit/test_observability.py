@@ -367,5 +367,8 @@ def test_transactions_get_the_same_request_scrub_and_no_query_string() -> None:
     out = sentry.before_send_transaction(event, {})
     text = json.dumps(out)
     assert "Nguyen" not in text and "page=2" not in text and "Bearer abc" not in text and "1.2.3.4" not in text
-    assert "query_string" not in out["request"] and out["request"]["url"] == "https://api-booking.example/booking/customers"
+    assert (
+        "query_string" not in out["request"]
+        and out["request"]["url"] == "https://api-booking.example/booking/customers"
+    )
     assert set(out["request"]["headers"]) == {"X-Request-ID"}
