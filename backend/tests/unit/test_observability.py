@@ -372,3 +372,20 @@ def test_transactions_get_the_same_request_scrub_and_no_query_string() -> None:
         and out["request"]["url"] == "https://api-booking.example/booking/customers"
     )
     assert set(out["request"]["headers"]) == {"X-Request-ID"}
+
+
+def test_sdk_contexts_are_sent_as_they_are_other_contexts_are_scrubbed() -> None:
+    # AA-BOOKING-API-1 showed `runtime = [Filtered] 3.12.15`: the key scrub hit runtime.name ("CPython").
+    event = {
+        "contexts": {
+            "runtime": {"name": "CPython", "version": "3.12.15"},
+            "os": {"name": "Linux"},
+            "trace": {"trace_id": "a" * 32, "span_id": "b" * 16},
+            "customer": {"name": "Jane Roe", "email": "jane@example.com"},
+        }
+    }
+    out = sentry.before_send(event, None)["contexts"]
+    assert out["runtime"] == {"name": "CPython", "version": "3.12.15"}
+    assert out["os"] == {"name": "Linux"}
+    assert out["trace"]["trace_id"] == "a" * 32
+    assert out["customer"] == {"name": FILTERED, "email": FILTERED}
