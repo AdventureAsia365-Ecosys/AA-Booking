@@ -920,7 +920,7 @@ async def list_versions(
     clause = " AND ".join(where)
     base = (
         "FROM booking.trip_case_versions v JOIN booking.trip_cases tc ON tc.id = v.trip_case_id"
-        " JOIN booking.customers c ON c.id = tc.customer_id"
+        " LEFT JOIN booking.customers c ON c.id = tc.customer_id"  # b2b cases have no customer (bk-020)
     )
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(

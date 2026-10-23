@@ -34,14 +34,19 @@ SOURCE_SYSTEM = "cis"
 PAGE = 100
 PARITY_BASIS = "per_person_2pax_low_season"
 
+# has_fixed_departures (AA-973) = a departure that is not cancelled and starts after today (UTC); departure edits touch
+# the plan row, so they show in updated_at too.
 # updated_at = the latest change that can alter what a product offers: the plan row (sellable, price hint; touched by
-# every component replace), any component row, and the hotel / room type / service behind a component (status). With
+# every component replace and departure edit), any component row, and the hotel / room type / service behind a
+# component (status). With
 # updated_since, plans that stopped being sellable are listed too (sellable = false, no components), so a delta sync
 # sees them go. A tour that leaves catalog.v_tour gives no change signal: removals of that kind need a periodic full
 # resync (no updated_since) until the AA-975 event feed exists.
 PRODUCTS_SQL = """
 SELECT * FROM (
     SELECT p.id::text AS trip_plan_id, p.source_system, p.source_id, p.sellable,
+           EXISTS (SELECT 1 FROM booking.departures d WHERE d.trip_plan_id = p.id AND d.status <> 'cancelled'
+                   AND d.start_date > (now() AT TIME ZONE 'UTC')::date) AS has_fixed_departures,
            greatest(p.updated_at, (
                SELECT greatest(max(c.created_at), max(rt.updated_at), max(h.updated_at), max(s.updated_at))
                FROM booking.trip_plan_components c
@@ -105,7 +110,7 @@ async def list_products(
             "tour": {"source_system": r["source_system"], "source_id": r["source_id"]},
             "trip_plan_id": r["trip_plan_id"],
             "sellable": bool(r["sellable"]),
-            "has_fixed_departures": False,  # departures arrive with AA-973
+            "has_fixed_departures": bool(r["has_fixed_departures"]) and bool(r["sellable"]),
             "components": parts.get(r["trip_plan_id"], []),
             "updated_at": r["updated_at"].isoformat(),
         }

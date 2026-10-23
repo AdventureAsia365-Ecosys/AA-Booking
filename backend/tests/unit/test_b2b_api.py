@@ -26,6 +26,7 @@ TENANT = "5b7d6f00-0000-4000-8000-0000000000aa"
 PARTNER_ID = "6c8e7a00-0000-4000-8000-0000000000bb"
 ROOM = "7d9f8b00-0000-4000-8000-0000000000c1"
 SERVICE = "7d9f8b00-0000-4000-8000-0000000000c2"
+DEP = "7d9f8b00-0000-4000-8000-0000000000d1"
 TODAY = datetime.now(UTC).date()
 
 B2B_RULE = {
@@ -162,7 +163,11 @@ def test_quote_prices_lines_and_stores_append_only() -> None:
         "source": "base",
     }
     assert re.fullmatch(r"[a-f0-9]{64}", body["price_hash"])
-    assert all(line["unit"] == "per_line" and line["availability"] == "available" for line in body["lines"])
+    # AA-973: a line without a fixed departure goes on request (AA ops confirm with the supplier).
+    assert all(
+        line["unit"] == "per_line" and line["availability"] == "on_request" and line["departure_id"] is None
+        for line in body["lines"]
+    )
     valid_until = datetime.fromisoformat(body["valid_until"])
     assert timedelta(hours=47) < valid_until - datetime.now(UTC) <= timedelta(hours=48)
     # Two room nights looked up separately (season change safe), one double room (default mix for 2), in ONE query.
@@ -338,7 +343,16 @@ def test_products_page() -> None:
     conn = _conn()
     conn.on(
         "FROM booking.trip_plans p WHERE (p.sellable",
-        [{"trip_plan_id": plan, "source_system": "cis", "source_id": "src-1", "sellable": True, "updated_at": now}],
+        [
+            {
+                "trip_plan_id": plan,
+                "source_system": "cis",
+                "source_id": "src-1",
+                "sellable": True,
+                "has_fixed_departures": False,
+                "updated_at": now,
+            }
+        ],
     )
     conn.on(
         "WHERE c.trip_plan_id = ANY",
@@ -362,7 +376,16 @@ def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:
     conn = _conn()
     conn.on(
         "FROM booking.trip_plans p WHERE (p.sellable",
-        [{"trip_plan_id": gone, "source_system": "cis", "source_id": "src-2", "sellable": False, "updated_at": now}],
+        [
+            {
+                "trip_plan_id": gone,
+                "source_system": "cis",
+                "source_id": "src-2",
+                "sellable": False,
+                "has_fixed_departures": True,
+                "updated_at": now,
+            }
+        ],
     )
     since = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
     resp = _client(conn, m2m).get(
@@ -371,6 +394,7 @@ def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:
     assert resp.status_code == 200, resp.text
     [item] = resp.json()["items"]
     assert item["sellable"] is False and item["components"] == []
+    assert item["has_fixed_departures"] is False  # an unsellable plan offers no departure either
     assert conn.sql("WHERE c.trip_plan_id = ANY") == []  # no component read for an unsellable plan
     [args] = conn.sql("FROM booking.trip_plans p WHERE (p.sellable")
     assert args[1] is not None  # the delta flag that lets unsellable plans through
@@ -435,6 +459,10 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/quotes",
         "/booking/b2b/v1/fx-rates",
         "/booking/b2b/v1/price-parity",
+        "/booking/b2b/v1/departures",
+        "/booking/b2b/v1/holds",
+        "/booking/b2b/v1/holds/{hold_id}",
+        "/booking/b2b/v1/holds/{hold_id}/confirm",
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -444,7 +472,7 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
             schema = resp.get("content", {}).get("application/json", {}).get("schema", {})
             if "$ref" in schema:
                 refs.add(schema["$ref"].rsplit("/", 1)[1])
-    assert refs == {"ProductPage", "Quote", "FxRates", "PriceParity"}
+    assert refs == {"ProductPage", "Quote", "FxRates", "PriceParity", "DeparturePage", "Hold", "Booking"}
     keys: set[str] = set()
     pending, seen = list(refs), set()
     schemas = spec["components"]["schemas"]
@@ -475,6 +503,7 @@ def test_price_hash_is_canonical() -> None:
         "rooms": [],
         "unit": "per_line",
         "availability": "available",
+        "departure_id": None,
         "b2b_price": D("97.57"),
     }
     a = quotes.price_hash(currency="USD", fx=fx, rule=rule, margin=D("0.1500"), lines=[line], total=D("97.57"))
@@ -484,6 +513,10 @@ def test_price_hash_is_canonical() -> None:
         currency="USD", fx=fx, rule=rule, margin=D("0.15"), lines=[{**line, "b2b_price": D("97.58")}], total=D("97.58")
     )
     assert c != a
+    d = quotes.price_hash(
+        currency="USD", fx=fx, rule=rule, margin=D("0.15"), lines=[{**line, "departure_id": DEP}], total=D("97.57")
+    )
+    assert d != a  # the departure is part of what was quoted (AA-973)
 
 
 def _ask(adult: int, child: int = 0, *rooms: RoomAsk) -> LineAsk:

@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
-from app.b2b import plan_components
+from app.b2b import departures, plan_components
 from app.catalog import trip_plans
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
@@ -215,3 +215,51 @@ async def put_trip_plan_components(
     ]
     async with pool.acquire() as conn, conn.transaction():
         return await plan_components.replace_components(conn, staff, source_id, items)
+
+
+# ── Fixed departures of a plan (bk-020, AA-973: what booking.b2b.v1 /departures lists and holds take seats from) ──
+
+
+class DepartureIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_date: date
+    capacity: int = Field(ge=0, le=departures.MAX_CAPACITY)
+    auto_confirm: bool = True
+    status: Literal["scheduled", "guaranteed"] = "scheduled"
+
+
+class DeparturePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capacity: int | None = Field(default=None, ge=0, le=departures.MAX_CAPACITY)
+    status: Literal["scheduled", "guaranteed", "cancelled"] | None = None
+    auto_confirm: bool | None = None
+
+
+@router.get("/trip-plans/{source_id}/departures")
+async def get_trip_plan_departures(
+    source_id: SourceId,
+    _: CanReadSupply,
+    pool: Pool,
+    start: Annotated[date | None, Query(alias="from")] = None,
+    end: Annotated[date | None, Query(alias="to")] = None,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await departures.list_departures(conn, source_id, start=start, end=end)
+
+
+@router.post("/trip-plans/{source_id}/departures", status_code=201)
+async def post_trip_plan_departure(
+    body: DepartureIn, source_id: SourceId, staff: CanWritePlans, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await departures.create_departure(conn, staff, source_id, body.model_dump())
+
+
+@router.patch("/departures/{departure_id}")
+async def patch_departure(
+    body: DeparturePatch, departure_id: Annotated[uuid.UUID, Path()], staff: CanWritePlans, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await departures.update_departure(conn, staff, str(departure_id), body.model_dump(exclude_none=True))

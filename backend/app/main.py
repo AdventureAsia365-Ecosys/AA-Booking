@@ -35,6 +35,7 @@ from fastapi.exceptions import RequestValidationError
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
+from app.b2b import expiry as b2b_expiry
 from app.b2b.errors import B2BError, b2b_error_handler, validation_error_handler
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
@@ -98,12 +99,13 @@ def create_app(
                 **intake.HANDLERS,
                 staff_email.KIND: staff_email.build_handler(settings),
                 **retention_jobs.build_handlers(),
+                **b2b_expiry.HANDLERS,
             }
             worker = Worker(
                 db.pool,
                 handlers,
                 recurring=intake.RECURRING,
-                hooks=(retention_jobs.DailySchedule(),),
+                hooks=(retention_jobs.DailySchedule(), b2b_expiry.ExpirySchedule()),
                 no_release=retention_jobs.NOT_RELEASED,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")

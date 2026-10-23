@@ -62,7 +62,8 @@ Design sources, in order:
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
   API `/booking/b2b/v1` takes only client-credentials tokens of the Cognito M2M pool `aa-m2m-<env>` plus the agency's
   `X-AA-Tenant-Id`, checked against `booking.b2b_partners` (see "B2B API" below). The agency-facing price is
-  `b2b_price`; the supplier net never leaves Booking.
+  `b2b_price`; the supplier net never leaves Booking. Fixed departures, holds and their confirmation into a **B2B
+  trip case** (no customer, the agency as `party_tenant_id`) are AA-973 (bk-020).
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -98,8 +99,11 @@ backend/
   app/b2b/                 booking.b2b.v1 (AA-972): access.py (scope + partner check), errors.py (contract Problem),
                            components.py (component ids, net cost of a line from rates in force), quotes.py (price,
                            price_hash, append-only store), reads.py (products, FX rates, price parity), partners.py and
-                           plan_components.py (staff admin)
-  app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972)
+                           plan_components.py (staff admin); AA-973: departures.py (capacity, held / sold counted under a
+                           departure row lock, line availability, staff departure edits), holds.py (place / read /
+                           release / confirm → B2B trip case + approved version), expiry.py (bk_b2b_hold_expire job + hook)
+  app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
+                           /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973)
   app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
@@ -128,7 +132,8 @@ backend/
                            rows only) + rules/FX admin with maker-checker (policy.py, bk-007)
   app/routers/catalog.py   GET /booking/catalog/destinations (place picker, any active staff, AA-822);
                            GET /booking/catalog/trip-plans (+ /facets, /{source_id}), PUT …/{source_id}/commercial,
-                           POST …/{source_id}/trip-cases (AA-679, bk-009)
+                           POST …/{source_id}/trip-cases (AA-679, bk-009); GET|PUT …/{source_id}/components (AA-972);
+                           GET|POST …/{source_id}/departures, PATCH /booking/catalog/departures/{id} (AA-973)
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day
@@ -155,7 +160,7 @@ docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
-                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md)
+                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
@@ -275,7 +280,8 @@ send, OTP) is not built: those still write rows only.
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
   (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
-  are read with `supply.read` and replaced with `trip_plan.write`. Notifications,
+  are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair.
+  Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = the staff key: CIS user id or `cog:<sub>`).
@@ -310,8 +316,36 @@ send, OTP) is not built: those still write rows only.
 - **Routes (AA-972)**: `GET /products` (sellable trip plans still in `catalog.v_tour`, with their bookable components
   `rt:<room type>`, `sv:<service>`, and `tp:<plan>` for the whole plan), `POST /quotes`, `GET /fx-rates` (approved
   rates in force on a date, plain), `GET /price-parity` (the public "from" price per person from the bk-009 price hint,
-  warn-only; `null` without a per-person hint or rate). Departures, holds, confirm / cancel and events are AA-973 …
-  AA-975.
+  warn-only; `null` without a per-person hint or rate). **AA-973**: `GET /departures`, `POST /holds`,
+  `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). `extend`, the re-hold limit, VND and cancel are
+  AA-974; events AA-975.
+- **Departures and seats (AA-973)**: a departure is a start date of a trip plan with a seat `capacity`, a status
+  (`scheduled` ↔ `guaranteed`, `cancelled` final) and `auto_confirm`; staff keep them under
+  `/booking/catalog/trip-plans/{source_id}/departures` (capacity never below held + sold, audited, edits touch the
+  plan's `updated_at`). **Held and sold are counted, never stored**: held = seats of `active` holds not past
+  `expires_at`, sold = seats of `confirmed` holds whose line is not declined / cancelled; seats = adults + children.
+  Holds lock the departure rows (`FOR UPDATE`, id order) before counting, so two holds on the last seat run one after
+  the other and exactly one wins. Line availability (quotes and holds): no departure = `on_request`; a departure with
+  room that auto-confirms = `available`, that does not = `on_request`; full, cancelled or started = `sold_out`. A
+  `departure_id` only belongs to the `tp:` line of its own plan on its `start_date` (else 422 `invalid`). Products
+  report `has_fixed_departures`.
+- **Holds (AA-973)**: `POST /holds` (scope `hold`, `Idempotency-Key` required) holds the lines of one quote for one
+  proposal version: one `active` or `confirmed` set per `(partner, proposal_ref, proposal_version)` (the same quote
+  again returns that hold; another quote is 422 `invalid` until it is released); the same key for another request is
+  422; a hash that is not the quote's, or a quote past `valid_until`, is 409 `price_changed` (no re-pricing within
+  validity); a line that does not fit is 422 `sold_out` and nothing is held. Length = setting `b2b_hold_hours` (48),
+  capped by the earliest departure start. An `active` hold past `expires_at` reads `expired` at once; the job
+  `bk_b2b_hold_expire` writes the status. `DELETE` releases (released / expired: no-op; confirmed: 422). Error codes
+  follow the contract: `sold_out` 422, `hold_expired` 410.
+- **Confirm (AA-973, memo seam 1)**: `POST /holds/{id}/confirm` (scope `book`) is the only B2B path that creates a
+  commercial record: one transaction opens a **B2B trip case** (`channel = 'b2b'`, `customer_id` NULL,
+  `party_tenant_id` = the agency, `source_system = 'crm'`, `source_id` = the proposal ref, status `confirmed` inserted
+  directly, `idempotency_key = b2b_hold:<hold id>`), **one approved version** (V1, channel `b2b`, the quote's total,
+  currency and FX lock) with one item and one cost row per line (net from the quote), sets the hold lines `available`
+  → `confirmed` (`on_request` waits for the AA-975 desk) and the hold `confirmed`. Expired / released → 410
+  `hold_expired`; wrong hash → 409; a departure cancelled since the hold → 422 `sold_out`; a replay returns the same
+  booking. `booking_id` = the trip case id. Staff trip-case reads LEFT JOIN customers, so B2B cases show with no
+  customer (`channel`, `party_tenant_id` in the case body; list filter `source=crm`).
 - **Products sync**: `updated_since` filters on the latest of the plan row (touched by every component replace, also
   when the set is emptied), its component rows and the hotels / room types / services behind them, and then also lists
   plans that stopped being sellable (`sellable = false`, no components). A tour that leaves `catalog.v_tour` gives no
@@ -381,6 +415,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_inquiry_process` | Validates v1/v1.1/v1.2; each leg gets the catalog tour key `(source_system, source_id)` from the v1.2 payload or by resolving `source_tour_id` against `catalog.v_tour` (null when unresolved; AA-830); creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
 | `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d, archived to S3 first (`s3://aa-cis-bronze-<acc2>/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per batch and UTC month); `queued` / `running` never. Rows referenced by a FK are never deleted. |
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
+| `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). AA-975 adds the `hold.expired` event here. |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
 Retention runs (both kinds, `app/retention/jobs.py`, DM-7.2): a manual run is a **DRY RUN** unless it says
@@ -645,6 +680,18 @@ service date, nights, pax counts by age band, rooms, unit, availability, `b2b_pr
 `supplier_rate_ids` `conf:commercial`) — **append-only** for role `booking` (SELECT, INSERT); `trip_plan_components`
 (a hotel room type or a service on a day of a trip plan; SELECT, INSERT, DELETE for the replace-set PUT); settings row
 `b2b_quote_valid_hours` = 48. No personal data. In `REQUIRED_SCHEMA_VERSIONS`.
+
+### `bk-020` (AA-973 CRM-B2 — needs `bk-002`, `bk-003`, `bk-005`, `bk-009`, `bk-019`)
+
+`departures` (trip plan, `start_date` unique per plan, `capacity` 0–1000, status `scheduled|guaranteed|cancelled`,
+`auto_confirm`; SELECT/INSERT/UPDATE, never deleted; held / sold are NOT columns); `b2b_holds` (partner, client, quote,
+proposal ref / version, `idempotency_key` unique per partner, status `active|confirmed|expired|released` with the
+matching timestamp required by CHECK, `expires_at`, `extended_count` 0–1 for AA-974, `trip_case_id` on confirm,
+`deposit_ref`; one `active`/`confirmed` set per partner proposal version, unique partial index) + `b2b_hold_lines`
+(line ref, `departure_id`, `seats`, `held_as` `available|on_request`, `status` adding `confirmed|declined|cancelled`) —
+SELECT/INSERT/UPDATE, no DELETE; `b2b_quote_lines.departure_id`; `trip_cases.channel` (`b2c` default, `b2b`) +
+`party_tenant_id`, `customer_id` nullable with CHECK "b2c ⇔ customer and no agency, b2b ⇔ agency and no customer",
+`source_system` + `crm`; settings row `b2b_hold_hours` = 48. No personal data. In `REQUIRED_SCHEMA_VERSIONS` (code PR).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
