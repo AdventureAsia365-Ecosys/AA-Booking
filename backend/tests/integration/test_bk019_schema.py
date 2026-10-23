@@ -31,7 +31,8 @@ async def test_registered_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> Non
     before = await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint")
     await admin.execute(MIGRATION.read_text(encoding="utf-8"))
     assert await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint") == before
-    assert await admin.fetchval("SELECT value::text FROM booking.settings WHERE key = 'b2b_quote_valid_hours'") == "48"
+    sql = "SELECT value::text FROM booking.settings WHERE key = 'b2b_quote_valid_hours'"  # gitleaks:allow
+    assert await admin.fetchval(sql) == "48"
 
 
 async def test_grants(admin: asyncpg.Connection) -> None:
