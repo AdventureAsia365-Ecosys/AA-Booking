@@ -30,6 +30,11 @@ from app.errors import Conflict, Invalid, NotFound
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
 
+HOTEL_RATES = (
+    suppliers.RATE_ROOM_TYPE + " IN (SELECT t.id FROM booking.hotel_room_types t WHERE t.hotel_id = $1::uuid)"  # noqa: S608 — constants
+)
+SERVICE_RATES = suppliers.RATE_SERVICE + " = $1::uuid"
+
 STATUSES = ("active", "inactive")
 SERVICE_TYPES = ("activity", "transfer", "guide", "entrance", "meal")
 SERVICE_UNITS = ("person", "group", "vehicle", "day")
@@ -356,17 +361,20 @@ async def get_record(conn: asyncpg.Connection, kind: Kind, ref: str) -> dict[str
     record = (await suppliers.place_names(conn, [await resolve(conn, kind, ref)]))[0]
     if kind is HOTEL:
         record["room_types"] = await list_room_types(conn, record["id"])
+    # AA-910: the rates that price this hotel's room types (or this service) show here too, deleted ones included.
+    rates = HOTEL_RATES if kind is HOTEL else SERVICE_RATES
     activity = await conn.fetch(
-        """
+        f"""
         SELECT l.id::text AS id, l.created_at AS at, l.actor_ref, st.name AS actor_name, l.action, l.entity_type,
                l.entity_label, l.summary
         FROM booking.audit_logs l LEFT JOIN booking.staff_users st ON st.cis_user_id = l.actor_ref
         WHERE (l.entity_type = $2 AND l.entity_id = $1::uuid)
            OR (l.entity_type = 'hotel_room_type' AND l.entity_id IN (
                SELECT t.id FROM booking.hotel_room_types t WHERE t.hotel_id = $1::uuid))
+           OR (l.entity_type = 'supplier_rate' AND {rates})
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT 20
-        """,
+        """,  # noqa: S608 — constants only
         record["id"],
         kind.entity,
     )

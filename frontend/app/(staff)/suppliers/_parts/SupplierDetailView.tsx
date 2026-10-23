@@ -192,12 +192,12 @@ function Profile({ s }: { s: SupplierDetail }) {
               {s.recent_activity.map((a) => (
                 <li key={a.id} className="flex gap-3 border-b border-line2 py-3 first:pt-0 last:border-b-0 last:pb-0">
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-panel text-muted">
-                    {a.entity_type === "supplier_contract" ? <FileText size={14} /> : <Store size={14} />}
+                    {a.entity_type === "supplier_contract" ? <FileText size={14} /> : a.entity_type === "supplier_rate" ? <Tag size={14} /> : <Store size={14} />}
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-medium text-ink">
                       {a.summary ?? a.action}
-                      {a.entity_type === "supplier_contract" && a.entity_label && <span className="font-normal text-muted"> · {a.entity_label}</span>}
+                      {(a.entity_type === "supplier_contract" || a.entity_type === "supplier_rate") && a.entity_label && <span className="font-normal text-muted"> · {a.entity_label}</span>}
                     </span>
                     <span className="text-xs text-muted">
                       {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />

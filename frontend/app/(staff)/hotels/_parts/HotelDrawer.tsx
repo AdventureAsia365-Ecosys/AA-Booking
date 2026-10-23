@@ -247,7 +247,7 @@ function Activity({ h }: { h: HotelDetail }) {
           {h.recent_activity.map((a) => (
             <li key={a.id} className="border-b border-line2 py-2 text-[13px] last:border-b-0">
               <span className="font-medium text-ink">{a.summary ?? a.action}</span>
-              {a.entity_type === "hotel_room_type" && a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}
+              {(a.entity_type === "hotel_room_type" || a.entity_type === "supplier_rate") && a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}
               <span className="block text-xs text-muted">
                 {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />
               </span>
