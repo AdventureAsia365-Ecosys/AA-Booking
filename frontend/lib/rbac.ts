@@ -66,6 +66,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/billing", roles: [A, S] },
   { pattern: "/billing/*", roles: [A, S] },
   { pattern: "/trip-checks", roles: [A, S] },
+  // B2B desk (AA-975): on-request lines and departure incidents; every operational role (API b2b_desk.*).
+  { pattern: "/b2b-desk", roles: [A, S, C] },
 ];
 
 function matches(pattern: string, pathname: string): boolean {

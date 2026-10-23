@@ -30,6 +30,8 @@ STAFF_TYPES = (
     # (app.catalog.lifecycle; entity trip_case or trip_plan).
     "tour.retired",
     "tour.reinstated",
+    # AA-975: a confirmed B2B booking has on-request lines for the desk to accept or decline (app.b2b.desk).
+    "b2b.on_request",
 )
 CUSTOMER_TYPES = ("proposal.sent",)
 MAX_PAGE = 100

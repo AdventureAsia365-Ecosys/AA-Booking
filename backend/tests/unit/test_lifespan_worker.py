@@ -82,8 +82,13 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
     }
     assert [r.kind for r in worker.recurring] == ["bk_inquiry_pull"]
     # AA-825 daily retention runs; AA-973 B2B hold expiry when a hold is due; AA-986 L5 the CIS lifecycle outbox pull
-    # when the outbox has a new row.
-    assert [type(h).__name__ for h in worker.hooks] == ["DailySchedule", "ExpirySchedule", "PullSchedule"]
+    # when the outbox has a new row; AA-975 the stamping of the Booking outbox feed order.
+    assert [type(h).__name__ for h in worker.hooks] == [
+        "DailySchedule",
+        "ExpirySchedule",
+        "PullSchedule",
+        "OutboxSequencer",
+    ]
     # AA-751: retention runs keep no progress checkpoint, so a shutdown fails them instead of releasing them.
     assert worker.no_release == {"bk_retention_job", "bk_retention_inbox_redact"}
     # AA-751: the backlog metrics sampler runs for the app lifetime too and is cancelled on shutdown.

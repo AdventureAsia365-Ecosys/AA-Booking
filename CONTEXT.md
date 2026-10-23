@@ -68,7 +68,9 @@ Design sources, in order:
   `X-AA-Tenant-Id`, checked against `booking.b2b_partners` (see "B2B API" below). The agency-facing price is
   `b2b_price`; the supplier net never leaves Booking. Fixed departures, holds and their confirmation into a **B2B
   trip case** (no customer, the agency as `party_tenant_id`) are AA-973 (bk-020); VND quotes, cancellation fees, the
-  one-time hold extension and the re-hold limit are AA-974 (bk-021).
+  one-time hold extension and the re-hold limit are AA-974 (bk-021); the event feed `GET /booking/b2b/v1/events`
+  over the shared outbox `booking.outbox`, the on-request desk and the departure incident flag (staff admin "B2B
+  desk") are AA-975 (bk-022).
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -334,7 +336,8 @@ send, OTP) is not built: those still write rows only.
   rates in force on a date, plain), `GET /price-parity` (the public "from" price per person from the bk-009 price hint,
   warn-only; `null` without a per-person hint or rate). **AA-973**: `GET /departures`, `POST /holds`,
   `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). **AA-974**: VND quotes, `POST /holds/{id}/extend`,
-  the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below); events AA-975.
+  the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below). **AA-975**:
+  `GET /events` (below).
 - **Departures and seats (AA-973)**: a departure is a start date of a trip plan with a seat `capacity`, a status
   (`scheduled` ↔ `guaranteed`, `cancelled` final) and `auto_confirm`; staff keep them under
   `/booking/catalog/trip-plans/{source_id}/departures` (capacity never below held + sold, audited, edits touch the
@@ -357,8 +360,9 @@ send, OTP) is not built: those still write rows only.
   commercial record: one transaction opens a **B2B trip case** (`channel = 'b2b'`, `customer_id` NULL,
   `party_tenant_id` = the agency, `source_system = 'crm'`, `source_id` = the proposal ref, status `confirmed` inserted
   directly, `idempotency_key = b2b_hold:<hold id>`), **one approved version** (V1, channel `b2b`, the quote's total,
-  currency and FX lock) with one item and one cost row per line (net from the quote), sets the hold lines `available`
-  → `confirmed` (`on_request` waits for the AA-975 desk) and the hold `confirmed`. Expired / released → 410
+  currency and FX lock) with one item and one cost row per line (net from the quote), sets the hold `confirmed`, then
+  the hold lines `available` → `confirmed` (so their `line.confirmed` events name the booking); `on_request` lines go
+  to the B2B desk with their answer deadline (AA-975, below). Expired / released → 410
   `hold_expired`; wrong hash → 409; a departure cancelled since the hold → 422 `sold_out`; a replay returns the same
   booking. `booking_id` = the trip case id. Staff trip-case reads LEFT JOIN customers, so B2B cases show with no
   customer (`channel`, `party_tenant_id` in the case body; list filter `source=crm`). A B2B case is owned by the
@@ -395,6 +399,34 @@ send, OTP) is not built: those still write rows only.
   reason and fee) and audits; a repeat returns the stored result. The hold
   itself stays `confirmed` (the contract's Hold status has no `cancelled`). Seeded default (proposed for Ms. Thư):
   60+ days 0 %, 30–59 25 %, 15–29 50 %, 7–14 75 %, 0–6 100 %.
+- **Event feed (AA-975, bk-022, contract minor 1.1)**: `GET /events?after=<cursor>&limit=` (scope `read`; default
+  200, max 500) returns the calling agency's events oldest first: `hold.expired`, `hold.extended`, `line.confirmed`,
+  `line.declined` (+ `decline_code`), `booking.cancelled`, `departure.guaranteed`, `departure.cancelled`,
+  `departure.incident` / `departure.incident_cleared` (+ `incident_code`). Ids and codes only (no payload, no free
+  text: an event can never carry traveller data). Every event is a row of the **shared outbox** `booking.outbox`
+  written by a trigger in the transaction of the change (holds, hold lines, cancellations, departures, incidents), so
+  every path emits (requests, the expiry job, lazy expiry, the desk, AA-682 later; memo seam 8). Departure events fan
+  out: one row per agency with a live hold or a confirmed, not declined / cancelled line on that departure. **Order**:
+  readers page on `feed_seq`, which `app/outbox.py` stamps on **committed** rows in id order under one advisory lock
+  (the feed stamps before it reads; the worker hook `OutboxSequencer` stamps on every maintenance pass), so a row that
+  commits late is never skipped. Cursor `bk1.<feed_seq>` (opaque); `next_cursor` = the last item's, or `after` when
+  nothing is new; a malformed cursor or one ahead of the feed is 422 `invalid`. At least once: a replay from an older
+  cursor returns the same events (same `event_id`, order) again, each once; consumers dedupe on `event_id`.
+  `departure.time_change` is in the contract but has no producer (departures carry no start time yet). No outbox
+  retention window yet (no PII; a DM-7.5 decision when volume needs one).
+- **B2B desk (AA-975, staff `/booking/b2b-desk`, permissions `b2b_desk.read` / `b2b_desk.write`: admin, sales,
+  contracting)**: **on request** = lines of confirmed B2B bookings held `on_request` (no departure, or a departure
+  without `auto_confirm`). At confirm each gets `answer_due_at` = `booking.b2b_answer_due(now(), n, tz)` with settings
+  `b2b_on_request_answer_business_days` (1) and `b2b_ops_timezone` (Asia/Ho_Chi_Minh): Mon–Fri, a weekend start
+  counts from Monday 00:00, no public holidays; one staff notification `b2b.on_request` per booking. Staff accept
+  (`confirmed`) or decline with a code (`sold_out | supplier_unavailable | minimum_not_met | other`; the seats go back
+  on sale); SLA badge `overdue` / `due_soon` (≤ 4 h) / `on_time`; the same answer again is a no-op, another answer 409
+  `line_answered`; audited. Pre-confirm holds are not on the desk (no deposit yet), so the hold length stays
+  `b2b_hold_hours`. **Incidents** (design Fix B3): "Flag incident on departure" with a contract code (`weather | road |
+  health | political | supplier | other`, no free text), at most one open per departure (409 `incident_open`), a
+  cancelled departure takes none (409), clear ends it; each emits `departure.incident(_cleared)` to the agencies on
+  it; audited. `GET /summary` (open, overdue, due soon, open incidents), `GET /departures` (from 14 days ago to 90
+  ahead: seats, agencies, open incident, CIS title). Staff page `/b2b-desk` (Operations → B2B desk).
 - **Products sync**: `updated_since` filters on the latest of the plan row (touched by every component replace, also
   when the set is emptied), its component rows, the hotels / room types / services behind them and (AA-986 L5) the
   tour's `catalog.v_tour.updated_at` (follows the Master row, CIS 273, so a restored tour is listed again), and then
@@ -402,7 +434,8 @@ send, OTP) is not built: those still write rows only.
   ADR 0015 decision 5): with `updated_since` and CIS 274, a plan that was offered to agencies (sellable, or with
   components) whose tour is `retired` in `catalog.v_tour_retired` is listed with `withdrawn: true`, `withdrawn_reason`, no components and `updated_at` = the retirement time; a
   `paused` tour is a temporary absence and is not listed (it is only missing). Without CIS 274 a removal shows only in
-  a periodic full resync (no `updated_since`). The event `product.withdrawn` is AA-975. The CRM should overlap its
+  a periodic full resync (no `updated_since`). A `product.withdrawn` event is not in the feed (the contract enum has
+  none; the products delta carries it). The CRM should overlap its
   `updated_since` window by a few minutes (`updated_at` is the writing transaction's start time).
 - **Tours that are not served (AA-986 L5, root ADR 0015 decision 5, Q4)**: `POST /quotes`, `POST /holds` and `POST
   /holds/{id}/confirm` refuse a `tp:` line whose plan's tour is not in `catalog.v_tour`, or is `retired` / `paused` in
@@ -478,7 +511,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d, archived to S3 first (`s3://aa-cis-bronze-<acc2>/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per batch and UTC month); `queued` / `running` never. Rows referenced by a FK are never deleted. |
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
-| `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). AA-975 adds the `hold.expired` event here. |
+| `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
 Retention runs (both kinds, `app/retention/jobs.py`, DM-7.2): a manual run is a **DRY RUN** unless it says
@@ -769,6 +802,21 @@ before, fee %, currency, total, fee, refundable with fee + refundable = total; S
 index `(partner_id, proposal_ref, created_at)`, backfill of the seeded policy on holds already confirmed; settings `b2b_hold_extend_hours` = 72, `b2b_rehold_limit_per_day` = 3.
 No personal data. In `REQUIRED_SCHEMA_VERSIONS` (code PR).
 
+### `bk-022` (AA-975 CRM-B3 — needs `bk-003`, `bk-005`, `bk-019`, `bk-020`, `bk-021`)
+
+`outbox` (the one Booking outbox: identity `id`, `event_id` unique, `stream` `b2b` (AA-835 adds `supply`),
+`event_type` from the contract list, typed ids `partner_id` / `hold_id` / `booking_id` / `line_ref` / `departure_id`,
+codes `incident_code` / `decline_code`, `occurred_at`, `feed_seq` (unique, from sequence `outbox_feed_seq`) +
+`sequenced_at`; CHECKs tie each type to its ids and codes; no FKs (log); role `booking`: SELECT, INSERT of the
+trigger columns only, UPDATE of `feed_seq` / `sequenced_at` only, no DELETE); event triggers on `b2b_holds`,
+`b2b_hold_lines`, `b2b_cancellations`, `departures`, `departure_incidents` (+ fan-out function
+`outbox_departure_event`); `departure_incidents` (code CHECK, flagged / cleared by + at, one open per departure;
+SELECT, INSERT, UPDATE of the clear columns only); `b2b_hold_lines` `answer_due_at`, `answered_at`, `answered_by`,
+`decline_code` (declined ⇔ a code; answered only once off `on_request`); `b2b_answer_due()`; settings
+`b2b_on_request_answer_business_days` = 1, `b2b_ops_timezone` = Asia/Ho_Chi_Minh; backfill of `answer_due_at` on
+older on-request lines. No personal data, no free-text column. In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-022
+before the code deploys (readiness fails until then).
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
 operations / money (AA-682).
@@ -779,8 +827,8 @@ Post-sale status edges, **customer e-mail** (proposal send writes a customer not
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix
 and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
-contract), the supply outbox / `v_supply_*` views / `supply.hotel.v1`·`supply.service.v1` contracts (ADR 0004a, own
-issue), supplier media (`entity_media`), contract document upload, supplier hard delete,
+contract), the supply stream of the outbox / `v_supply_*` views / `supply.hotel.v1`·`supply.service.v1` contracts (ADR
+0004a, AA-835; the shared outbox `booking.outbox` exists since bk-022), supplier media (`entity_media`), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).
@@ -848,7 +896,9 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   with facts, room types, rates, activity; `?hotel=HTL-…`) and `/services` + `/services/{SVC-…}` (S237, AA-823) read
   the real API; AA-986 L5: Trip plans has a "Show: Orphaned plans" filter (KPI tile + table of plans whose tour left
   the catalog, with reason and what is attached; a paused tour is not listed), the case page flags each leg whose tour
-  is retired / out of the catalog and shows an alert box for them (a pause carries no staff flag, ADR 0015), and the bell labels `tour.retired` / `tour.reinstated`; the proposal
+  is retired / out of the catalog and shows an alert box for them (a pause carries no staff flag, ADR 0015), and the bell labels `tour.retired` / `tour.reinstated`; AA-975: `/b2b-desk` (Operations → B2B desk: KPI tiles, an "On
+  request" tab with SLA badge, Accept / Decline (reason code), and a "Departures & incidents" tab with Flag incident /
+  Clear; the bell's `b2b.on_request` opens it); the proposal
   item drawer can book a room type or service (its net defaults from the rate); the other
   wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a

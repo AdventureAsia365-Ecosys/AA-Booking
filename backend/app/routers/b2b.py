@@ -8,7 +8,7 @@ AA-972 serves ``GET /products``, ``POST /quotes``, ``GET /fx-rates`` and ``GET /
 ``GET /departures``, ``POST /holds``, ``GET`` / ``DELETE /holds/{hold_id}`` and ``POST /holds/{hold_id}/confirm``
 (``app.b2b.departures``, ``app.b2b.holds``); AA-974 the commercial rules: VND quotes, ``POST /holds/{hold_id}/extend``
 (once), the 429 re-hold limit on ``POST /holds`` and ``POST /bookings/{booking_id}/cancel`` (+ ``?dry_run=true``,
-``app.b2b.cancellation``). The event feed is AA-975.
+``app.b2b.cancellation``); AA-975 the event feed ``GET /events`` (``app.b2b.events``, outbox bk-022).
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.m2m import SCOPE_BOOK, SCOPE_HOLD, SCOPE_QUOTE, SCOPE_READ
-from app.b2b import cancellation, departures, holds, quotes, reads
+from app.b2b import cancellation, departures, events, holds, quotes, reads
 from app.b2b.access import B2BContext, require_scope
 from app.b2b.components import LineAsk, RoomAsk
 from app.b2b.errors import PREFIX
@@ -233,6 +233,41 @@ class CancellationResult(Strict):
     cancelled_at: datetime | None
 
 
+EventType = Literal[
+    "hold.expired",
+    "hold.extended",
+    "line.confirmed",
+    "line.declined",
+    "booking.cancelled",
+    "departure.guaranteed",
+    "departure.cancelled",
+    "departure.incident",
+    "departure.incident_cleared",
+    "departure.time_change",
+]
+IncidentCode = Literal["weather", "road", "health", "political", "supplier", "other"]
+DeclineCode = Literal["sold_out", "supplier_unavailable", "minimum_not_met", "other"]
+
+
+class Event(Strict):
+    event_id: str = Field(max_length=64)
+    cursor: str = Field(max_length=200)
+    type: EventType
+    occurred_at: datetime
+    hold_id: str | None = Field(default=None, max_length=64)
+    booking_id: str | None = Field(default=None, max_length=64)
+    line_ref: str | None = Field(default=None, max_length=64)
+    departure_id: str | None = Field(default=None, max_length=64)
+    incident_code: IncidentCode | None = None
+    decline_code: DeclineCode | None = None
+    new_start_time: datetime | None = None
+
+
+class EventPage(Strict):
+    items: list[Event]
+    next_cursor: str = Field(max_length=200)
+
+
 class PriceParity(Strict):
     tour: TourKey
     currency: Currency
@@ -301,6 +336,15 @@ def _caller(ctx: B2BContext) -> holds.Caller:
     return holds.Caller(
         partner_id=ctx.partner_id, tenant_id=str(ctx.partner["tenant_id"]), client_id=ctx.caller.client_id
     )
+
+
+@router.get("/events", response_model=EventPage)
+async def list_events(
+    ctx: CanRead,
+    after: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=events.MAX_LIMIT)] = events.DEFAULT_LIMIT,
+) -> dict:
+    return await events.list_events(ctx.pool, partner_id=ctx.partner_id, after=after, limit=limit)
 
 
 @router.get("/departures", response_model=DeparturePage)

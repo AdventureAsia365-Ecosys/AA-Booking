@@ -466,6 +466,7 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/holds/{hold_id}/confirm",
         "/booking/b2b/v1/holds/{hold_id}/extend",
         "/booking/b2b/v1/bookings/{booking_id}/cancel",
+        "/booking/b2b/v1/events",
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -484,6 +485,7 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "Hold",
         "Booking",
         "CancellationResult",
+        "EventPage",
     }
     keys: set[str] = set()
     pending, seen = list(refs), set()

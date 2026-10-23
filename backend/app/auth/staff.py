@@ -92,12 +92,24 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "retention.admin": frozenset({"admin"}),
     # B2B partners (bk-019, AA-972): which agencies may call booking.b2b.v1 and through which M2M client.
     "b2b.admin": frozenset({"admin"}),
+    # B2B desk (bk-022, AA-975): on-request lines to accept / decline and incidents on departures. Every operational
+    # role reads and answers it (no separate ops role exists); content creators do not.
+    "b2b_desk.read": frozenset({"admin", "sales", "contracting"}),
+    "b2b_desk.write": frozenset({"admin", "sales", "contracting"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin
 # reads (staff.admin, audit.read, retention.admin) and every write stay out.
 PREVIEW_PERMISSIONS: frozenset[str] = frozenset(
-    {"trip_case.read", "customer.read", "staff.directory", "pricing.read", "supply.read", "catalog.read"}
+    {
+        "trip_case.read",
+        "customer.read",
+        "staff.directory",
+        "pricing.read",
+        "supply.read",
+        "catalog.read",
+        "b2b_desk.read",
+    }
 )
 # The only methods a Preview-client session may call (RFC 9110 safe methods that routes here serve).
 PREVIEW_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
