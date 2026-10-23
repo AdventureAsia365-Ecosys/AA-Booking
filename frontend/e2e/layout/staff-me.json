@@ -1,0 +1,30 @@
+{
+  "cis_user_id": "u-layout",
+  "email": "layout.check@example.test",
+  "name": "Layout Check",
+  "role": "admin",
+  "active": true,
+  "cis_role": "admin",
+  "created_at": "2026-10-12T03:40:00+00:00",
+  "last_seen_at": "2026-10-20T08:15:00+00:00",
+  "managed_in_directory": true,
+  "permissions": [
+    "audit.read",
+    "catalog.read",
+    "customer.admin",
+    "customer.read",
+    "customer.write",
+    "pricing.read",
+    "pricing.write",
+    "retention.admin",
+    "staff.admin",
+    "staff.directory",
+    "supply.read",
+    "supply.write",
+    "trip_case.assign",
+    "trip_case.read",
+    "trip_case.write",
+    "trip_plan.write",
+    "version.write"
+  ]
+}

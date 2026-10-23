@@ -1,0 +1,66 @@
+// playwright.config.ts
+// AA-910 — one project for now:
+//   • "layout-mock" — e2e/layout/*.spec.ts: every staff page that has a table, at 1440 x 900 (plus a 1280 squeeze
+//     check), light and dark, against the PRODUCTION build (`npm run build` first) with the Booking API mocked:
+//     browser calls to the BFF (/api/booking/*) are answered by route interception from e2e/layout/fixtures.ts, and
+//     the one server-side call (GET /booking/staff/me from the (staff) layout) goes to e2e/layout/stub-api.mjs via
+//     this server's BOOKING_API_URL. No real sign-in, no Dev data, no secret.
+//
+// Why a fake session cookie is safe: proxy.ts and the (staff) layout only DECODE the bk_access JWT (to route a
+// missing / expiring token to the refresh or login page); they never trust it. Trust lives in the Booking API, which
+// verifies the Cognito signature (backend app/auth). The test's unsigned token is accepted only by the stub above.
+// Nothing in the app was changed or flagged for this check, so production auth is exactly as before.
+//
+// Run:   npm run build && npm run test:layout
+// Shots: LAYOUT_SHOTS_DIR=<dir> (default e2e/layout/results), measurements.json + measurements.md land there too.
+import { defineConfig, devices } from "@playwright/test";
+
+const PORT = Number(process.env.LAYOUT_PORT || 3199);
+const STUB_PORT = Number(process.env.LAYOUT_STUB_PORT || 55481);
+
+export default defineConfig({
+  testDir: "./e2e",
+  outputDir: "./e2e/layout/results/test-output",
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
+  fullyParallel: false,
+  workers: 1, // one Chromium at a time (WSL RAM budget); the whole run is ~1-2 min
+  retries: 0, // the API is mocked: a failure is a real layout change, not a flake
+  reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
+  use: {
+    baseURL: `http://127.0.0.1:${PORT}`,
+    headless: true,
+    screenshot: "off", // the spec takes its own named screenshots
+    trace: "retain-on-failure",
+  },
+  projects: [
+    {
+      name: "layout-mock",
+      testMatch: /layout\/.*\.spec\.ts$/,
+      use: {
+        ...devices["Desktop Chrome"],
+        // Headless Chromium hides scrollbars by default, which hides a real 6-17 px of width loss (lesson S239,
+        // AA-683): turn them back on so the measurement matches a desktop browser.
+        launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] },
+      },
+    },
+  ],
+  webServer: [
+    {
+      command: `node e2e/layout/stub-api.mjs ${STUB_PORT}`,
+      url: `http://127.0.0.1:${STUB_PORT}/health`,
+      reuseExistingServer: !process.env.CI,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      command: `npx next start --port ${PORT} --hostname 127.0.0.1`,
+      url: `http://127.0.0.1:${PORT}/login`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      env: { BOOKING_API_URL: `http://127.0.0.1:${STUB_PORT}`, NEXT_TELEMETRY_DISABLED: "1" },
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+  ],
+});
