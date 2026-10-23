@@ -17,6 +17,7 @@ import {
   ClipboardList,
   CreditCard,
   Globe,
+  Handshake,
   LayoutGrid,
   Map as MapIcon,
   MapPin,
@@ -69,6 +70,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/billing", label: "Payments & Invoices", icon: <CreditCard size={ICON} />, wave: 3, shipped: false },
       { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: false },
+      { href: "/b2b-desk", label: "B2B desk", icon: <Handshake size={ICON} />, wave: 3, shipped: true },
     ],
   },
   {

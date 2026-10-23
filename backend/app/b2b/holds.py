@@ -25,8 +25,9 @@
   case** (``channel = 'b2b'``, no customer, ``party_tenant_id`` = the agency, ``source_system = 'crm'``, status
   ``confirmed``, ``idempotency_key = b2b_hold:<id>``), **one approved version** (channel ``b2b``, the quote's total,
   currency and FX lock) with one item and one cost row per line (net from the quote, never shown to the agency), the
-  hold lines ``available`` → ``confirmed`` (``on_request`` stays for the AA-975 desk), the hold ``confirmed`` with the
-  cancellation policy in force that day locked on it (AA-974).
+  hold ``confirmed`` with the cancellation policy in force that day locked on it (AA-974; written first, so the
+  ``line.confirmed`` events name the booking), the hold lines ``available`` → ``confirmed``, and the ``on_request``
+  lines opened on the on-request desk with their answer deadline (AA-975, ``app.b2b.desk``).
 
 No personal data anywhere: seats and pax are counts, the proposal ref and deposit ref are opaque CRM ids.
 """
@@ -44,7 +45,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.b2b import cancellation, departures, served
+from app.b2b import cancellation, departures, desk, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
 
@@ -562,10 +563,7 @@ async def confirm_hold(
         case_id, code = await _open_case(conn, caller, hold, quote, lines)
         # AA-974: the cancellation policy in force today is locked on the hold; a later cancel charges by it.
         policy = await cancellation.policy_for_lines(conn, lines, datetime.now(UTC).date())
-        await conn.execute(
-            "UPDATE booking.b2b_hold_lines SET status = 'confirmed' WHERE hold_id = $1::uuid AND held_as = 'available'",
-            hold["id"],
-        )
+        # The hold first: the line.confirmed events (bk-022 trigger on the lines) read its trip case as booking_id.
         await conn.execute(
             "UPDATE booking.b2b_holds SET status = 'confirmed', confirmed_at = now(), trip_case_id = $2::uuid,"
             " deposit_ref = $3, cancellation_policy_id = $4::uuid WHERE id = $1::uuid",
@@ -574,6 +572,12 @@ async def confirm_hold(
             deposit_ref,
             policy.id if policy is not None else None,
         )
+        await conn.execute(
+            "UPDATE booking.b2b_hold_lines SET status = 'confirmed' WHERE hold_id = $1::uuid AND held_as = 'available'",
+            hold["id"],
+        )
+        # AA-975: on-request lines go to the desk with their answer deadline (1 business day, ops time zone).
+        await desk.open_requests(conn, hold_id=hold["id"], case_id=case_id, case_code=code)
         await audit.record(
             conn,
             actor_type="system",

@@ -75,6 +75,7 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.trip_cases WHERE channel = 'b2b'")
         await conn.execute("DELETE FROM booking.b2b_quote_lines")
         await conn.execute("DELETE FROM booking.b2b_quotes")
+        await conn.execute("DELETE FROM booking.departure_incidents")  # AA-975 (bk-022), references departures
         await conn.execute("DELETE FROM booking.departures")
         await conn.execute("DELETE FROM booking.b2b_partners")
     await conn.execute("DELETE FROM booking.trip_plan_components")

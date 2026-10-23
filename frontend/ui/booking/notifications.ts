@@ -12,11 +12,14 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   // AA-986 L5 (root ADR 0015, Q4): a CIS tour used by an open case or a trip plan left the catalog / came back.
   "tour.retired": "Tour withdrawn",
   "tour.reinstated": "Tour back in catalog",
+  // AA-975: a confirmed B2B booking has on-request lines for the B2B desk.
+  "b2b.on_request": "B2B on request",
 };
 
 /** Where an item leads, and the action label (one per type, spec §4.3). */
 export function notificationTarget(n: StaffNotification): { href: string; label: string } | null {
   const code = typeof n.data?.code === "string" ? n.data.code : null;
+  if (n.type === "b2b.on_request") return { href: "/b2b-desk", label: "Open B2B desk" };
   if (n.entity_type === "trip_case" || n.entity_type === "trip_case_version") {
     const ref = code ?? n.entity_id;
     return ref ? { href: `/cases/${encodeURIComponent(ref)}`, label: "Open case" } : null;

@@ -4,13 +4,14 @@
 // and the message with case codes in bold. The message is the plain text the API stored; codes are found
 // by pattern, so no markup is ever trusted from the database.
 
-import { BadgeCheck, Bell, Inbox, Repeat, UserCheck } from "lucide-react";
+import { BadgeCheck, Bell, Handshake, Inbox, Repeat, UserCheck } from "lucide-react";
 
 const TYPE_ICON: Record<string, React.ComponentType<{ size?: number }>> = {
   "trip_case.new_inquiry": Inbox,
   "trip_case.assigned": UserCheck,
   "trip_case.status_changed": Repeat,
   "proposal.approved": BadgeCheck,
+  "b2b.on_request": Handshake,
 };
 
 export function NotificationIcon({ type, read, size = 40 }: { type: string; read: boolean; size?: number }) {

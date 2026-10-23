@@ -46,9 +46,11 @@ from app.jobs.worker import Worker
 from app.notifications import staff_email
 from app.observability import setup as setup_observability
 from app.observability.request_id import RequestIdMiddleware, unhandled_error_handler
+from app.outbox import OutboxSequencer
 from app.retention import jobs as retention_jobs
 from app.routers import (
     b2b,
+    b2b_desk,
     b2b_partners,
     catalog,
     customers,
@@ -107,7 +109,13 @@ def create_app(
                 db.pool,
                 handlers,
                 recurring=intake.RECURRING,
-                hooks=(retention_jobs.DailySchedule(), b2b_expiry.ExpirySchedule(), tour_lifecycle.PullSchedule()),
+                hooks=(
+                    retention_jobs.DailySchedule(),
+                    b2b_expiry.ExpirySchedule(),
+                    tour_lifecycle.PullSchedule(),
+                    # AA-975 (bk-022): stamp the feed order of committed outbox rows.
+                    OutboxSequencer(),
+                ),
                 no_release=retention_jobs.NOT_RELEASED,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
@@ -162,6 +170,7 @@ def create_app(
     app.include_router(ops.router)
     app.include_router(b2b.router)
     app.include_router(b2b_partners.router)
+    app.include_router(b2b_desk.router)
     return app
 
 
