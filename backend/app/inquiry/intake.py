@@ -9,7 +9,7 @@
     lower id can still commit (see :data:`SAFE_AFTER_SECONDS`).
 
 ``bk_inquiry_process`` (one per inbox row)
-    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2), then in ONE transaction, holding the inbox
+    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2 / v1.3), then in ONE transaction, holding the inbox
     row lock: creates a lead customer (O6), the trip case and its legs, a staff notification (plus one
     ``bk_notify_email`` job for it, AA-811) and an audit row, and marks the inbox row ``processed``.
     Re-running it is a no-op. A legacy hand-off with ``customer: null`` (or a contact with neither
@@ -211,6 +211,27 @@ async def tour_keys(conn: asyncpg.Connection, legs: tuple[Leg, ...]) -> dict[int
     return out
 
 
+def unavailable_legs(legs: tuple[Leg, ...]) -> dict[str, int]:
+    """Count per reason of the legs whose tour AA no longer serves (v1.3, AA-986 L6); empty when every leg is served.
+
+    A leg flagged unavailable without a reason counts as ``not_served``."""
+    counts: dict[str, int] = {}
+    for leg in legs:
+        if not leg.available:
+            reason = leg.reason or "not_served"
+            counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def unavailable_note(counts: dict[str, int]) -> str:
+    """One staff-facing sentence: "1 leg is a tour AA no longer offers (retired 1): check it before quoting."."""
+    total = sum(counts.values())
+    detail = ", ".join(f"{reason.replace('_', ' ')} {n}" for reason, n in counts.items())
+    if total == 1:
+        return f"1 leg is a tour AA no longer offers ({detail}): check it before quoting."
+    return f"{total} legs are tours AA no longer offers ({detail}): check them before quoting."
+
+
 async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inquiry) -> dict[str, Any]:
     contact = inquiry.contact
     assert contact is not None  # noqa: S101 — checked by the caller
@@ -248,6 +269,7 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
                 for leg in inquiry.legs
             ],
         )
+    unavailable = unavailable_legs(inquiry.legs)
     summary = {
         "trip_case_id": case["id"],
         "code": case["code"],
@@ -256,9 +278,12 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
         "needs_merge_review": review,
         "legs": len(inquiry.legs),
         "legs_without_tour_key": len(inquiry.legs) - keyed,
+        "legs_unavailable": unavailable,
         "contract_version": inquiry.version,
     }
     message = f"{contact.name or 'A traveller'} sent a trip with {len(inquiry.legs)} AA tour leg(s)."
+    if unavailable:
+        message += " " + unavailable_note(unavailable)
     if review:
         message += " The contact matches an existing customer: review before merging."
     notification_id = await conn.fetchval(

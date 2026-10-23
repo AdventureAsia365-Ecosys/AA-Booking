@@ -136,6 +136,36 @@ async def test_sends_one_email_with_the_inquiry_details() -> None:
     assert "review before merging" not in text
 
 
+async def test_unavailable_tour_is_marked_in_the_email() -> None:
+    snapshot = json.loads(case_row()["inquiry_snapshot"]) | {
+        "legs": [
+            {"position": 1, "source_tour_id": TOUR_A, "available": True, "reason": None, "reason_detail": None},
+            {
+                "position": 2,
+                "source_tour_id": TOUR_B,
+                "available": False,
+                "reason": "stop_removed",
+                "reason_detail": None,
+            },
+        ]
+    }
+    ses = StubSes()
+    await run(conn_for(case_row(inquiry_snapshot=json.dumps(snapshot))), ses)
+    (sent,) = ses.sent
+    text = sent["Content"]["Simple"]["Body"]["Text"]["Data"]
+    assert "1. Hanoi and Halong Bay (Vietnam), days 1-4\n" in text  # served: unmarked
+    assert "2. Luang Prabang walk, days 5-6 [no longer offered by AA: stop removed]" in text
+    assert "1 requested tour AA no longer offers (marked above): check before quoting." in text
+    assert "check before quoting" in sent["Content"]["Simple"]["Body"]["Html"]["Data"]
+
+
+async def test_inquiry_without_leg_flags_has_no_unavailable_note() -> None:
+    ses = StubSes()
+    await run(conn_for(), ses)
+    (sent,) = ses.sent
+    assert "no longer offer" not in sent["Content"]["Simple"]["Body"]["Text"]["Data"]
+
+
 async def test_dates_pax_review_and_html_escaping() -> None:
     row = case_row(
         customer_name="<b>Eve</b>",

@@ -150,11 +150,31 @@ export interface TripCaseSummary {
   mom_delta: { created_this_month: number; created_last_month: number; delta: number };
 }
 
+/** AA-986 L5 (root ADR 0015) — the served state of a CIS catalog key, read live by the backend. */
+export type CatalogState = "served" | "retired" | "paused" | "not_in_catalog";
+
+export interface CatalogKeyState {
+  source_system: "cis";
+  source_id: string;
+  state: CatalogState;
+  reason: string | null;
+  changed_at: IsoDateTime | null;
+}
+
+/** A key the case uses that is retired or no longer in the catalog, and where the case uses it. */
+export interface TourAlert extends CatalogKeyState {
+  used_by: ("leg" | "case" | "item")[];
+}
+
 export interface TripCaseLeg {
   position: number;
   source_tour_id: string;
   day_from: number;
   day_to: number;
+  source_system?: string | null;
+  source_id?: string | null;
+  /** null when the leg has no catalog key or the catalog could not be read. */
+  catalog?: CatalogKeyState | null;
 }
 
 export type VersionBadge = "draft" | "sent" | "approved" | "superseded";
@@ -213,6 +233,8 @@ export interface TripCaseDetail extends Omit<TripCaseListItem, "latest_version">
   status_history: StatusHistoryRow[];
   assignments: AssignmentRow[];
   allowed_transitions: TripCaseStatus[];
+  /** AA-986 L5: tours this case uses that AA no longer serves (kept; staff decide what to do). */
+  tour_alerts?: TourAlert[];
 }
 
 export interface ActivityItem {

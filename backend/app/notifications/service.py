@@ -26,6 +26,10 @@ STAFF_TYPES = (
     "trip_case.assigned",
     "trip_case.status_changed",
     "proposal.approved",
+    # AA-986 L5 (root ADR 0015, Q4): a CIS tour used by an open trip case or a trip plan left the catalog / came back
+    # (app.catalog.lifecycle; entity trip_case or trip_plan).
+    "tour.retired",
+    "tour.reinstated",
 )
 CUSTOMER_TYPES = ("proposal.sent",)
 MAX_PAGE = 100

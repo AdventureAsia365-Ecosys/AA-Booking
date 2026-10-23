@@ -17,6 +17,7 @@ import asyncpg
 
 from app import audit, paging
 from app.auth.staff import Staff
+from app.catalog import liveness
 from app.errors import Conflict, Invalid, NotFound
 from app.notifications import service as notifications
 from app.trip_cases import sql
@@ -299,12 +300,49 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
         case_id,
     )
     case["legs"] = [dict(r) for r in legs]
+    await _tour_flags(conn, case)
     case.update(sql.trip_shape(case["inquiry_snapshot"], case["legs"], case.get("start_date")))
     case["versions"] = [sql.version_dict(r) for r in versions]
     case["status_history"] = [dict(r) for r in history]
     case["assignments"] = [dict(r) for r in assignments]
     case["allowed_transitions"] = await allowed_transitions(conn, case["status"])
     return case
+
+
+# Catalog keys an item of a live version of the case refers to: only keys of a Booking trip plan (staff "use for trip
+# case" and the B2B confirm write the plan's source_id; a TripPlanner item may carry a CIS tour_id, which is no key).
+ITEM_KEYS_SQL = """
+SELECT DISTINCT i.source_tour_id AS source_id
+FROM booking.trip_case_version_itinerary i
+JOIN booking.trip_case_versions cv ON cv.id = i.trip_case_version_id
+JOIN booking.trip_plans p ON p.source_system = 'cis' AND p.source_id = i.source_tour_id
+WHERE cv.trip_case_id = $1::uuid AND cv.deleted_at IS NULL
+"""
+
+
+async def _tour_flags(conn: asyncpg.Connection, case: dict[str, Any]) -> None:
+    """AA-986 L5 (root ADR 0015 decision 5, Q4): each leg gets ``catalog`` (the served state of its key, or None when
+    the leg has no key or the catalog cannot be read) and the case gets ``tour_alerts``: every key it uses (legs, its
+    own key when it was started from a trip plan, items of its versions) that is retired or no longer in the catalog,
+    with where it is used. A paused tour is temporary and raises no alert (its leg still says ``paused``). Read live,
+    soft: a catalog problem never fails the case page or the write that returns it."""
+    where: dict[str, list[str]] = {}
+    for leg in case["legs"]:
+        if leg.get("source_system") == "cis" and leg.get("source_id"):
+            where.setdefault(leg["source_id"], []).append("leg")
+    if case.get("source_system") == "cis" and case.get("source_id"):
+        where.setdefault(case["source_id"], []).append("case")
+    for row in await conn.fetch(ITEM_KEYS_SQL, case["id"]):
+        where.setdefault(row["source_id"], []).append("item")
+    found = await liveness.states(conn, where) if where else {}
+    for leg in case["legs"]:
+        state = found.get(leg.get("source_id") or "") if leg.get("source_system") == "cis" else None
+        leg["catalog"] = state.out() if state is not None else None
+    case["tour_alerts"] = [
+        {**state.out(), "used_by": sorted(set(where[key]))}
+        for key, state in sorted(found.items())
+        if state.state in (liveness.RETIRED, liveness.NOT_IN_CATALOG)
+    ]
 
 
 async def activity(conn: asyncpg.Connection, ref: str, *, before: str | None = None, limit: int = 50) -> dict[str, Any]:

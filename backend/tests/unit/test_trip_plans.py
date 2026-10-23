@@ -142,10 +142,12 @@ async def test_facets_totals() -> None:
             [{"country": "Bhutan", "tours": 2, "sellable": 1}, {"country": "Laos", "tours": 1, "sellable": 0}],
         )
         .on("DISTINCT p.trip_style", [{"trip_style": "Private"}])
+        .on("FROM booking.trip_plans p WHERE p.source_system = 'cis' AND NOT EXISTS", 2)
     )
     assert await trip_plans.facets(conn) == {
         "total": 3,
         "sellable": 1,
+        "orphaned": 2,
         "countries": [{"country": "Bhutan", "tours": 2, "sellable": 1}, {"country": "Laos", "tours": 1, "sellable": 0}],
         "trip_styles": ["Private"],
     }

@@ -1,0 +1,416 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://adventure.asia/contracts/inquiry.submitted.v1.3.json",
+  "title": "inquiry.submitted v1.3 (TripPlanner → AA-Booking)",
+  "description": "One row of tripplanner.outbox / tripplanner.v_inquiry_outbox (payload column). Written in the same transaction as the 'sent' trip event (ADR 0001 decision 6, AA-676). The consumer stores idempotency_key in its own inbox and processes each key once. Producer: AA-TripPlanner-Web backend/assembly/handoff.py. v1.3 (AA-986 L6, root ADR 0015 decision 5): additive over v1.2 — every leg and every day also says whether AA still serves its tour: `available`, `reason`, `reason_detail`. Stops whose tour AA no longer serves (retired, paused, or a stop the tour no longer has) are still handed off, after the served days and legs, with available false, so staff see why such a leg cannot be matched; the hand-off is never refused over it. v1.2 (AA-830): every leg carries the catalog tour key (source_system, source_id). Consumers must accept version 1, 1.1, 1.2 and 1.3 and key legs on (source_system, source_id), never on source_tour_id (data standards DM-2.2).",
+  "type": "object",
+  "required": [
+    "contract",
+    "version",
+    "idempotency_key",
+    "source",
+    "trip_id",
+    "handoff_id",
+    "submitted_at",
+    "customer",
+    "itinerary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "inquiry.submitted"
+    },
+    "version": {
+      "enum": [
+        1.3
+      ],
+      "description": "major.minor; 1.3 is additive over 1.2 (and 1.1, 1); payloads labelled 1, 1.1 or 1.2 are validated by those files"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "<trip_id>:<handoff_id>. A re-send after a real edit is a new hand-off with a new key."
+    },
+    "source": {
+      "const": "tripplanner"
+    },
+    "trip_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "handoff_id": {
+      "type": "string",
+      "description": "id of the 'sent' event in tripplanner.trip_events"
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "customer": {
+      "description": "Who sent the inquiry. null = legacy guest hand-off (deprecated by O6: guests must give name + email). customer_id null = contact matched nobody verifiable or matched an existing customer without proof (TripPlanner never links on an unverified match); the fields then carry exactly what this request submitted.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "customer_id",
+            "name",
+            "phone",
+            "email",
+            "consent",
+            "consent_at",
+            "verified"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "customer_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid",
+              "description": "tripplanner.customers.id when this request created/claimed the customer; null for a contact snapshot"
+            },
+            "name": {
+              "type": "string"
+            },
+            "phone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "lower(trim()); required non-null by O6 once the TripPlanner guest form ships"
+            },
+            "consent": {
+              "type": "boolean",
+              "description": "explicit contact consent from the registration form"
+            },
+            "consent_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "verified": {
+              "type": "boolean",
+              "description": "true only when the contact was verified by OTP (AA-Booking owns OTP). Consumers must not merge an unverified customer into an existing booking.customers row automatically."
+            }
+          }
+        }
+      ]
+    },
+    "itinerary": {
+      "type": "object",
+      "required": [
+        "legs",
+        "days",
+        "custom_days"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "legs": {
+          "description": "Consecutive days taken from the same real AA tour (ADR 0001 decision 5). day_from/day_to are that tour's own day indexes. Key a leg on (source_system, source_id). v1.3: legs of stops AA no longer serves come after the served legs (available false); their source_system / source_id name the catalog key when the producer knows it (the tour is in the tombstone or still served), else null.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "position",
+              "source_tour_id",
+              "source_system",
+              "source_id",
+              "day_from",
+              "day_to",
+              "available",
+              "reason",
+              "reason_detail"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source_tour_id": {
+                "type": "string",
+                "description": "Kept for compatibility with v1 / v1.1 readers: the TripPlanner component's tour key as before, which is either a catalog source_id or a version tour_id (it changes on re-upload). Do not key on it; use source_system + source_id."
+              },
+              "source_system": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "cis",
+                  null
+                ],
+                "description": "Catalog key system (catalog.v_tour.source_system). null together with source_id when the producer could not resolve source_tour_id against catalog.v_tour at send time (the tour left the catalog, or the catalog was unreadable); the hand-off is still sent."
+              },
+              "source_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 128,
+                "description": "Stable catalog tour key (catalog.v_tour.source_id = COALESCE(raw_tours.source_group_id, tour_id)); does not change on re-upload. null exactly when source_system is null."
+              },
+              "day_from": {
+                "type": "integer"
+              },
+              "day_to": {
+                "type": "integer"
+              },
+              "available": {
+                "type": "boolean",
+                "description": "true when AA serves the tour of this leg / day at send time (catalog.v_tour). false = the stop's tour left the catalog or no longer has this stop; see reason."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "retired",
+                  "paused",
+                  "stop_removed",
+                  "not_served",
+                  null
+                ],
+                "description": "null exactly when available is true. retired: AA no longer offers the tour (catalog.v_tour_retired state retired: deleted at the source, Master trashed, orphan supersede); paused: temporarily unavailable (any other tombstone state: Master inactive, or a supersede waiting for the new version's Master); stop_removed: the tour is still served but no longer has this stop; not_served: not in the catalog and no tombstone row (or the tombstone could not be read)."
+              },
+              "reason_detail": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 64,
+                "description": "The CIS lifecycle reason from catalog.v_tour_retired.reason (e.g. source_deleted, master_trashed, superseded_orphan, master_inactive, superseded_pending) when reason is retired or paused; else null. Informational: consumers must not branch on values they do not know."
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "source_system": {
+                        "const": "cis"
+                      },
+                      "source_id": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "source_system": {
+                        "type": "null"
+                      },
+                      "source_id": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "available": {
+                        "const": true
+                      },
+                      "reason": {
+                        "type": "null"
+                      },
+                      "reason_detail": {
+                        "type": "null"
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "available": {
+                        "const": false
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "days": {
+          "description": "One entry per pinned component: the served ones in trip-day order (several components can share a day), then (v1.3) the ones whose tour AA no longer serves, with available false and their last known trip day (or the day after the last served day).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "day",
+              "component_id",
+              "name",
+              "source_tour_id",
+              "source_day_index",
+              "destination_id",
+              "lat",
+              "lng",
+              "available",
+              "reason",
+              "reason_detail"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "day": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "component_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_tour_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_day_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "destination_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "CIS shared.destinations.id"
+              },
+              "lat": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "lng": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "available": {
+                "type": "boolean",
+                "description": "true when AA serves the tour of this leg / day at send time (catalog.v_tour). false = the stop's tour left the catalog or no longer has this stop; see reason."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "retired",
+                  "paused",
+                  "stop_removed",
+                  "not_served",
+                  null
+                ],
+                "description": "null exactly when available is true. retired: AA no longer offers the tour (catalog.v_tour_retired state retired: deleted at the source, Master trashed, orphan supersede); paused: temporarily unavailable (any other tombstone state: Master inactive, or a supersede waiting for the new version's Master); stop_removed: the tour is still served but no longer has this stop; not_served: not in the catalog and no tombstone row (or the tombstone could not be read)."
+              },
+              "reason_detail": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 64,
+                "description": "The CIS lifecycle reason from catalog.v_tour_retired.reason (e.g. source_deleted, master_trashed, superseded_orphan, master_inactive, superseded_pending) when reason is retired or paused; else null. Informational: consumers must not branch on values they do not know."
+              }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "available": {
+                        "const": true
+                      },
+                      "reason": {
+                        "type": "null"
+                      },
+                      "reason_detail": {
+                        "type": "null"
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "available": {
+                        "const": false
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "custom_days": {
+          "description": "Days the traveller added on top of the AA legs (not part of any tour).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "day_id",
+              "kind",
+              "after_component_id",
+              "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "day_id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "extra_night",
+                  "free_day",
+                  "extend_end"
+                ]
+              },
+              "after_component_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
