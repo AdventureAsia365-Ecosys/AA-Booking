@@ -667,7 +667,12 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
     assert activity.status_code == 200 and activity.json()["items"]
     assert notes.status_code == 200 and read.status_code == 200 and read_bad.status_code == 422
     assert prefs.json()["notify"]["trip_case.assigned"] is False and prefs_get.json() == prefs.json()
-    assert settings_rows.json()["values"] == {"deposit_pct": 30, "quote_validity_days": 14, "b2b_quote_valid_hours": 48}
+    assert settings_rows.json()["values"] == {
+        "deposit_pct": 30,
+        "quote_validity_days": 14,
+        "b2b_quote_valid_hours": 48,
+        "b2b_hold_hours": 48,
+    }
     assert {"iso2": "VN", "name": "Vietnam"} in countries.json()["items"]
     assert audit_denied.status_code == 403 and audit_ok.status_code == 200 and audit_ok.json()["items"]
     assert staff_detail.json()["role"] == "contracting"
