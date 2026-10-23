@@ -39,3 +39,8 @@ f7e8f237b0d0800d0a2cecdc06f96825638ca2c6:backend/tests/integration/test_bk019_sc
 
 # Synthetic test value: a DSN on db.internal in a unit test.
 48795258cf99d881fc5cec5f801185efe5c82e48:backend/tests/unit/test_db_readiness.py:uri-embedded-credentials:14
+
+# AA-981 canary (test/aa981-canary, closed unmerged): a FAKE random value committed on purpose to prove the
+# scan goes red. Its PR head stays fetchable, so it is pinned by commit.
+c9faec31c3d21b2d98cacfa55e27fd53adb865f5:canary/aa981-canary.tfvars:credential-key-literal:2
+c9faec31c3d21b2d98cacfa55e27fd53adb865f5:canary/aa981-canary.tfvars:terraform-plaintext-secret:2
