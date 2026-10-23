@@ -12,6 +12,19 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   trip_case_version: "Proposal version",
   customer: "Customer",
   staff_user: "Staff",
+  supplier: "Supplier",
+  supplier_contract: "Supplier contract",
+  supplier_rate: "Supplier rate",
+  hotel: "Hotel",
+  hotel_room_type: "Room type",
+  service: "Service",
+  pricing_rule: "Pricing rule",
+  fx_rate: "FX rate",
+  trip_plan: "Trip plan",
+  departure: "Departure",
+  b2b_hold: "B2B hold",
+  b2b_partner: "B2B partner",
+  retention: "Retention",
 };
 
 export function auditEntityLabel(entityType: string): string {
@@ -59,6 +72,9 @@ export function auditEntityHref(row: AuditRef): string | null {
   }
   if (row.entity_type === "customer" && row.entity_id) return `/customers/${encodeURIComponent(row.entity_id)}`;
   if (row.entity_type === "staff_user" && row.entity_id) return `/staff/${encodeURIComponent(row.entity_id)}`;
+  // The supplier and service pages resolve a record by its UUID as well as its code.
+  if (row.entity_type === "supplier" && row.entity_id) return `/suppliers/${encodeURIComponent(row.entity_id)}`;
+  if (row.entity_type === "service" && row.entity_id) return `/services/${encodeURIComponent(row.entity_id)}`;
   return null;
 }
 

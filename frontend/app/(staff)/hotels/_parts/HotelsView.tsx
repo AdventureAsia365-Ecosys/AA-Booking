@@ -10,7 +10,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, Eye, Pencil, Plus, Power } from "lucide-react";
 import { supplyApi, type Hotel, type HotelDetail } from "@/lib/api/supply";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
-import { Button, Code, DataTable, DateText, FilterBar, FromCisTag, PageFrame, Section, useUrlFilters } from "@/ui";
+import { Button, Code, DataTable, DateText, FilterBar, PageFrame, Section, useUrlFilters } from "@/ui";
 import { RowMenu, type RowMenuItem } from "@/ui/booking/RowMenu";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { Stars } from "@/app/(staff)/_parts/supply";
@@ -115,28 +115,30 @@ export function HotelsView() {
             ]}
           />
         </div>
-        <DataTable<Hotel>
-          searchable={false}
-          tableId="hotels"
-          data={list.data?.items ?? []}
-          columns={columns}
-          getRowId={(r) => r.id}
-          loading={list.isLoading}
-          error={list.isError ? (list.error as Error).message : null}
-          onRetry={() => list.refetch()}
-          pageSizeOptions={PAGE_SIZES}
-          serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-          emptyTitle={filtered ? "No hotels match" : "No hotels yet"}
-          emptyDescription={
-            filtered
-              ? "Change the search or the filters, or reset them to see every hotel."
-              : status.canWrite
-                ? "Add the first hotel with Add hotel. It needs a supplier with the Hotel category."
-                : "Contracting adds hotels here; they appear once created."
-          }
-          onRowClick={(r) => set("hotel", r.code)}
-          tableMinWidth={1000}
-        />
+        <div className="bk-dt-sticky-end">
+          <DataTable<Hotel>
+            searchable={false}
+            tableId="hotels"
+            data={list.data?.items ?? []}
+            columns={columns}
+            getRowId={(r) => r.id}
+            loading={list.isLoading}
+            error={list.isError ? (list.error as Error).message : null}
+            onRetry={() => list.refetch()}
+            pageSizeOptions={PAGE_SIZES}
+            serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
+            emptyTitle={filtered ? "No hotels match" : "No hotels yet"}
+            emptyDescription={
+              filtered
+                ? "Change the search or the filters, or reset them to see every hotel."
+                : status.canWrite
+                  ? "Add the first hotel with Add hotel. It needs a supplier with the Hotel category."
+                  : "Contracting adds hotels here; they appear once created."
+            }
+            onRowClick={(r) => set("hotel", r.code)}
+            tableMinWidth={860}
+          />
+        </div>
       </Section>
       {open && <HotelDrawer hotelRef={open} onClose={() => set("hotel", null)} />}
       {form && (
@@ -154,41 +156,70 @@ export function HotelsView() {
   );
 }
 
+// AA-910: the table fits the 1084 px list frame at 1440 px. Text cells have a max width (a table cell grows to its
+// content, so `truncate` alone never cuts; the CIS marker of the place is in the column header), the hotel style sits under the name, "Updated" sits under the status pill,
+// and the row menu column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 const COLUMNS: ColumnDef<Hotel, unknown>[] = [
   {
     id: "hotel",
     header: "Hotel",
     accessorFn: (r) => r.name,
     cell: ({ row }) => (
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate text-[13.5px] font-medium text-ink">{row.original.name}</span>
-        <Code>{row.original.code}</Code>
+      <span className="flex min-w-0 max-w-[200px] flex-col">
+        <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.name}>
+          {row.original.name}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+          <Code>{row.original.code}</Code>
+          {row.original.hotel_style && (
+            <span className="truncate" title={row.original.hotel_style}>
+              · {row.original.hotel_style}
+            </span>
+          )}
+        </span>
       </span>
     ),
   },
   { id: "stars", header: "Stars", accessorKey: "star_rating", cell: ({ row }) => <Stars value={row.original.star_rating} /> },
-  { id: "style", header: "Style", accessorFn: (r) => r.hotel_style ?? "", cell: ({ row }) => row.original.hotel_style ?? "—" },
   {
     id: "place",
-    header: "Place",
+    header: "Place (CIS)",
     accessorFn: (r) => r.destination?.name ?? r.country_name ?? "",
-    cell: ({ row }) =>
-      row.original.destination ? (
-        <span className="inline-flex items-center gap-1.5 text-[13px] text-body">
-          {row.original.destination.name}, {row.original.country_name ?? row.original.destination.country} <FromCisTag />
+    cell: ({ row }) => {
+      const r = row.original;
+      const text = r.destination ? `${r.destination.name}, ${r.country_name ?? r.destination.country}` : (r.country_name ?? "—");
+      return (
+        <span className="flex min-w-0 items-center text-[13px] text-body md:max-w-[150px]">
+          <span className="md:truncate" title={text}>
+            {text}
+          </span>
         </span>
-      ) : (
-        <span className="text-[13px] text-body">{row.original.country_name ?? "—"}</span>
-      ),
+      );
+    },
   },
   {
     id: "supplier",
     header: "Supplier",
     accessorKey: "supplier_name",
-    cell: ({ row }) => <span className="block max-w-[200px] truncate text-[13px] text-body">{row.original.supplier_name}</span>,
+    cell: ({ row }) => (
+      <span className="block break-words text-[13px] text-body md:max-w-[120px] md:truncate" title={row.original.supplier_name}>
+        {row.original.supplier_name}
+      </span>
+    ),
   },
-  { id: "rooms", header: "Room types", accessorKey: "room_type_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.room_type_count}</span> },
-  { id: "rates", header: "Rates in force", accessorKey: "rates_in_force", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.rates_in_force}</span> },
-  { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <SupplierStatusBadge status={row.original.status} /> },
-  { id: "updated", header: "Updated", accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="text-[13px] text-muted" /> },
+  { id: "rooms", header: "Rooms", accessorKey: "room_type_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.room_type_count}</span> },
+  { id: "rates", header: "Rates", accessorKey: "rates_in_force", cell: ({ row }) => <span className="bk-tabular text-[13px]" title="Rates in force">{row.original.rates_in_force}</span> },
+  {
+    id: "status",
+    header: "Status",
+    accessorKey: "status",
+    cell: ({ row }) => (
+      <span className="flex flex-col items-end gap-1 md:items-start">
+        <SupplierStatusBadge status={row.original.status} />
+        <span className="whitespace-nowrap text-xs text-muted">
+          Updated <DateText value={row.original.updated_at} relative />
+        </span>
+      </span>
+    ),
+  },
 ];

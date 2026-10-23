@@ -11,7 +11,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, Eye, Plus, Power } from "lucide-react";
 import { SERVICE_TYPES, supplyApi, type Service } from "@/lib/api/supply";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
-import { Button, Code, DataTable, DateText, FilterBar, FromCisTag, PageFrame, Section, useUrlFilters } from "@/ui";
+import { Button, Code, DataTable, DateText, FilterBar, PageFrame, Section, useUrlFilters } from "@/ui";
 import { RowMenu, type RowMenuItem } from "@/ui/booking/RowMenu";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
@@ -109,28 +109,30 @@ export function ServicesView() {
             ]}
           />
         </div>
-        <DataTable<Service>
-          searchable={false}
-          tableId="services"
-          data={list.data?.items ?? []}
-          columns={columns}
-          getRowId={(r) => r.id}
-          loading={list.isLoading}
-          error={list.isError ? (list.error as Error).message : null}
-          onRetry={() => list.refetch()}
-          pageSizeOptions={PAGE_SIZES}
-          serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-          emptyTitle={filtered ? "No services match" : "No services yet"}
-          emptyDescription={
-            filtered
-              ? "Change the search or the filters, or reset them to see every service."
-              : status.canWrite
-                ? "Add the first service with Add service. Its supplier needs the matching category."
-                : "Contracting adds services here; they appear once created."
-          }
-          onRowClick={(r) => router.push(serviceHref(r))}
-          tableMinWidth={980}
-        />
+        <div className="bk-dt-sticky-end">
+          <DataTable<Service>
+            searchable={false}
+            tableId="services"
+            data={list.data?.items ?? []}
+            columns={columns}
+            getRowId={(r) => r.id}
+            loading={list.isLoading}
+            error={list.isError ? (list.error as Error).message : null}
+            onRetry={() => list.refetch()}
+            pageSizeOptions={PAGE_SIZES}
+            serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
+            emptyTitle={filtered ? "No services match" : "No services yet"}
+            emptyDescription={
+              filtered
+                ? "Change the search or the filters, or reset them to see every service."
+                : status.canWrite
+                  ? "Add the first service with Add service. Its supplier needs the matching category."
+                  : "Contracting adds services here; they appear once created."
+            }
+            onRowClick={(r) => router.push(serviceHref(r))}
+            tableMinWidth={860}
+          />
+        </div>
       </Section>
       {adding && <ServiceFormDrawer onClose={() => setAdding(false)} onSaved={(s) => router.push(serviceHref(s))} />}
       {status.dialogs}
@@ -138,41 +140,72 @@ export function ServicesView() {
   );
 }
 
+// AA-910: the table fits the 1084 px list frame at 1440 px. Text cells have a max width (a table cell grows to its
+// content, so `truncate` alone never cuts; the CIS marker of the place is in the column header), the pricing unit sits under the type, "Updated" sits under the status pill,
+// and the row menu column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 const COLUMNS: ColumnDef<Service, unknown>[] = [
   {
     id: "service",
     header: "Service",
     accessorFn: (r) => r.title,
     cell: ({ row }) => (
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate text-[13.5px] font-medium text-ink">{row.original.title}</span>
+      <span className="flex min-w-0 max-w-[200px] flex-col">
+        <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
+          {row.original.title}
+        </span>
         <Code>{row.original.code}</Code>
       </span>
     ),
   },
-  { id: "type", header: "Type", accessorKey: "service_type", cell: ({ row }) => SERVICE_TYPE_LABEL[row.original.service_type] ?? row.original.service_type },
-  { id: "unit", header: "Priced", enableSorting: false, cell: ({ row }) => <span className="text-[13px] text-body">{UNIT_LABEL[row.original.unit]}</span> },
+  {
+    id: "type",
+    header: "Type",
+    accessorKey: "service_type",
+    cell: ({ row }) => (
+      <span className="flex flex-col whitespace-nowrap text-[13px] text-body">
+        {SERVICE_TYPE_LABEL[row.original.service_type] ?? row.original.service_type}
+        <span className="text-xs text-muted">{UNIT_LABEL[row.original.unit]}</span>
+      </span>
+    ),
+  },
   {
     id: "place",
     header: "Place (CIS)",
     accessorFn: (r) => r.destination?.name ?? r.country_name ?? "",
-    cell: ({ row }) =>
-      row.original.destination ? (
-        <span className="inline-flex items-center gap-1.5 text-[13px] text-body">
-          {row.original.destination.name} <FromCisTag />
+    cell: ({ row }) => {
+      const text = row.original.destination?.name ?? row.original.country_name ?? "—";
+      return (
+        <span className="flex min-w-0 items-center text-[13px] text-body md:max-w-[150px]">
+          <span className="md:truncate" title={text}>
+            {text}
+          </span>
         </span>
-      ) : (
-        <span className="text-[13px] text-body">{row.original.country_name ?? "—"}</span>
-      ),
+      );
+    },
   },
   {
     id: "supplier",
     header: "Supplier",
     accessorKey: "supplier_name",
-    cell: ({ row }) => <span className="block max-w-[200px] truncate text-[13px] text-body">{row.original.supplier_name}</span>,
+    cell: ({ row }) => (
+      <span className="block break-words text-[13px] text-body md:max-w-[120px] md:truncate" title={row.original.supplier_name}>
+        {row.original.supplier_name}
+      </span>
+    ),
   },
-  { id: "group", header: "Max group", accessorKey: "max_group_size", cell: ({ row }) => row.original.max_group_size ?? "—" },
-  { id: "rates", header: "Rates in force", accessorKey: "rates_in_force", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.rates_in_force}</span> },
-  { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <SupplierStatusBadge status={row.original.status} /> },
-  { id: "updated", header: "Updated", accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="text-[13px] text-muted" /> },
+  { id: "group", header: "Max pax", accessorKey: "max_group_size", cell: ({ row }) => row.original.max_group_size ?? "—" },
+  { id: "rates", header: "Rates", accessorKey: "rates_in_force", cell: ({ row }) => <span className="bk-tabular text-[13px]" title="Rates in force">{row.original.rates_in_force}</span> },
+  {
+    id: "status",
+    header: "Status",
+    accessorKey: "status",
+    cell: ({ row }) => (
+      <span className="flex flex-col items-end gap-1 md:items-start">
+        <SupplierStatusBadge status={row.original.status} />
+        <span className="whitespace-nowrap text-xs text-muted">
+          Updated <DateText value={row.original.updated_at} relative />
+        </span>
+      </span>
+    ),
+  },
 ];

@@ -12,7 +12,7 @@
 // Width budget: with a pending row the rules table needs about 1005 px, so it still fits the 1084 px content frame at
 // 1440 when <main> draws a classic scrollbar (6 px styled in Chrome/Edge, about 17 px in Firefox on Windows). Keep
 // the Status cell no wider than the widest pill ("Scheduled", 95 px): a plain "Approve" button (78 px), and the
-// "Needs a second person" hint wraps at 96 px.
+// "Needs a second person" hint wraps at 96 px. AA-910: FX values stay on one line; Source is cut at 180 px (tooltip).
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -163,10 +163,20 @@ export function PricingRulesView() {
 
   const fxColumns: ColumnDef<FxRateRow, unknown>[] = [
     { id: "currency", header: "Currency", accessorKey: "currency", cell: ({ row }) => <span className="font-mono font-semibold text-ink">{row.original.currency}</span> },
-    { id: "rate", header: "Units per 1 USD", accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="tabular-nums">{rate(row.original.rate_per_usd)}</span> },
+    { id: "rate", header: "Units per 1 USD", accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{rate(row.original.rate_per_usd)}</span> },
     { id: "buffer", header: "Selling buffer", accessorFn: (r) => Number(r.buffer_pct), cell: ({ row }) => pct(row.original.buffer_pct) },
-    { id: "as_of", header: "As of", accessorKey: "as_of", cell: ({ row }) => <DateText value={row.original.as_of} /> },
-    { id: "source", header: "Source", accessorKey: "source", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.source}</span> },
+    { id: "as_of", header: "As of", accessorKey: "as_of", cell: ({ row }) => <DateText value={row.original.as_of} className="whitespace-nowrap" /> },
+    {
+      id: "source",
+      header: "Source",
+      accessorKey: "source",
+      // AA-910: one line on desktop (the full text in the tooltip); it used to wrap to 3 lines at 1440 px.
+      cell: ({ row }) => (
+        <span title={row.original.source} className="block break-words text-[13px] text-muted md:max-w-[180px] md:truncate">
+          {row.original.source}
+        </span>
+      ),
+    },
     {
       id: "status",
       header: "Status",

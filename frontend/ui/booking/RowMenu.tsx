@@ -3,6 +3,9 @@
 // AA-683 (fe-people) — the "⋯" action menu of a list row (Figma USER MANAGEMENT-4 row menu). The panel is
 // `position: fixed` at the trigger's rect, so the DataTable's scrolling wrapper never clips it. Escape,
 // an outside click, scrolling or picking an item closes it. Clicks never bubble to the row (onRowClick).
+// AA-910: a trigger that is only partly visible is scrolled into view by the click (focus) itself; that scroll
+// arrives just after opening and used to close the menu at once. Scrolls within OPEN_GRACE_MS of opening now move
+// the panel to the trigger's new place instead of closing it.
 
 import { useEffect, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
@@ -18,12 +21,24 @@ export interface RowMenuItem {
 }
 
 const PANEL_WIDTH = 208;
+const OPEN_GRACE_MS = 400;
+
+/** Where the panel goes for a trigger rect: right-aligned under it, above it when there is no room below. */
+function placeFor(r: DOMRect, itemCount: number): { top: number; left: number } {
+  const left = Math.max(8, Math.min(r.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8));
+  const below = r.bottom + 4;
+  const estimated = itemCount * 38 + 12;
+  const top = below + estimated > window.innerHeight ? Math.max(8, r.top - estimated - 4) : below;
+  return { top, left };
+}
 
 export function RowMenu({ items, label = "Row actions" }: { items: RowMenuItem[]; label?: string }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const openedAt = useRef(0);
   const open = pos !== null;
+  const itemCount = items.length;
 
   useEffect(() => {
     if (!open) return;
@@ -40,27 +55,31 @@ export function RowMenu({ items, label = "Row actions" }: { items: RowMenuItem[]
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("scroll", close, true);
+    const onScroll = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (r && performance.now() - openedAt.current < OPEN_GRACE_MS) setPos(placeFor(r, itemCount));
+      else close();
+    };
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     panel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
     };
-  }, [open]);
+  }, [open, itemCount]);
 
   function toggle(e: React.MouseEvent) {
     e.stopPropagation();
     if (open) return setPos(null);
-    const r = btn.current?.getBoundingClientRect();
-    if (!r) return;
-    const left = Math.max(8, Math.min(r.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8));
-    const below = r.bottom + 4;
-    const estimated = items.length * 38 + 12;
-    const top = below + estimated > window.innerHeight ? Math.max(8, r.top - estimated - 4) : below;
-    setPos({ top, left });
+    const b = btn.current;
+    if (!b) return;
+    // Bring a clipped trigger fully into its scroll box first, then place the panel at its final rect.
+    b.scrollIntoView({ block: "nearest", inline: "nearest" });
+    openedAt.current = performance.now();
+    setPos(placeFor(b.getBoundingClientRect(), items.length));
   }
 
   if (items.length === 0) return null;
