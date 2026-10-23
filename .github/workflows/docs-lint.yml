@@ -8,7 +8,8 @@ name: Docs lint
 # Weekly (and on demand): freshness report of pages past their review date, as a run artifact.
 #
 # Not repeated here: literal resource IDs are already blocked in every tracked file by the required "Security Audit"
-# job (.github/scripts/check_resource_ids.py, AA-902), and gitleaks runs there on the full history.
+# job (.github/scripts/check_resource_ids.py, AA-902), and gitleaks runs in secret-scan.yml (every PR) and
+# secret-scan-history.yml (full history).
 #
 # No path filter, so the "Docs lint" check reports on every PR and can be added to the required checks. It takes
 # under a minute; Actions minutes are free on a public repo. No AWS, no secrets beyond the read-only token.

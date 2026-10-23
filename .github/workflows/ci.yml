@@ -46,18 +46,16 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
-  # Unlike CIS (report-only), pip-audit FAILS here. The same job runs the AA-902 resource-ID check and a gitleaks
-  # scan of the full git history: this repo carries the DB role / password flow, so a committed secret is the most
-  # expensive mistake it can make (justification for this check over a type checker: AA-678 notes).
+  # Unlike CIS (report-only), pip-audit FAILS here. The same job runs the AA-902 resource-ID check. This repo carries
+  # the DB role / password flow, so a committed secret is the most expensive mistake it can make (AA-678 notes): the
+  # gitleaks scan that ran here moved to .github/workflows/secret-scan.yml (AA-981 follow-up), check "gitleaks" on
+  # every PR with the base branch's rules and "gitleaks full history" (secret-scan-history.yml)
+  # nightly and on push to main.
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
-    env:
-      GITLEAKS_VERSION: "8.30.1"
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
@@ -75,18 +73,6 @@ jobs:
           pip install pip-audit==2.10.1 --quiet
           pip-audit -r requirements.txt
           pip-audit -r requirements-dev.txt
-
-      - name: gitleaks (full history, failing)
-        working-directory: .
-        run: |
-          set -euo pipefail
-          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
-          curl -sSfL -o /tmp/gitleaks_checksums.txt "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          (cd /tmp && grep " ${tarball}\$" gitleaks_checksums.txt | sha256sum -c -)
-          tar -xzf "/tmp/${tarball}" -C /tmp gitleaks
-          /tmp/gitleaks git --redact --verbose --exit-code 1 .
 
   test-unit:
     name: Unit Tests

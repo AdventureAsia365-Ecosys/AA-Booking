@@ -82,9 +82,23 @@ curl -s localhost:8000/booking/health
 
 ## CI / deploy
 
-- `.github/workflows/ci.yml`: Lint (ruff), Security Audit (AA-902 resource-ID check + pip-audit + gitleaks, failing), Unit
+- `.github/workflows/ci.yml`: Lint (ruff), Security Audit (AA-902 resource-ID check + pip-audit, failing), Unit
   Tests (incl. migration guard), Integration Tests (Postgres 15, applies `migrations/`), Docker
   Build Check (image starts, Trivy report, SBOM).
+- `.github/workflows/secret-scan.yml` (AA-981 follow-up): check **gitleaks** on every PR (lines the PR adds, rules and
+  baseline from the base branch) and **gitleaks full history** (`secret-scan-history.yml`) nightly, on push to `main` and on demand (every
+  branch, tag and pull request head). Rules in `.gitleaks.toml` (same as the root repo), reviewed findings pinned
+  in `.gitleaksignore`; a PR that changes either file, either secret scan workflow, `.github/CODEOWNERS` or any
+  `.gitattributes`, or adds an inline `gitleaks:allow`, needs the label `secret-scan-baseline-reviewed` after the last push (any later push, reopen or label change
+  removes it). Merge commits (remerge diff), renames and type changes are scanned too, every file as text. A red
+  result means the value is public: rotate it, even if it was force-pushed away. False positives: prefer a
+  narrow allowlist in `.gitleaks.toml`; a commit fingerprint does not survive the squash merge (header of
+  `.gitleaksignore`).
+  The PR check runs on `pull_request_target`: GitHub always runs the base branch's copy of the workflow and the PR
+  head is only read as data, so a PR cannot change the check that judges it. It also scans a squash preview of the PR
+  (what the squash merge writes), and it fails when another workflow has a job named `gitleaks`. `.gitleaks.toml`
+  carries a copy of the gitleaks v8.30.1 default rules and no path allowlist, so every file is scanned (`.svg`,
+  `go.sum`, `node_modules/`, images, lock files); UTF-16 files are transcoded to UTF-8 and scanned too.
 - `.github/workflows/deploy-dev.yml`: on push to `main` (backend changes) — OIDC role from the `dev`
   environment variable `AWS_ROLE_ARN`, ECR push with the git-SHA tag, new task definition revision,
   update service, wait stable, verify image, smoke `/booking/health` + `/booking/health/ready`.
