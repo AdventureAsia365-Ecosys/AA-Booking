@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.2.0...v0.3.0) (2026-10-23)
+
+
+### Features
+
+* M2M auth and the B2B quote API (booking.b2b.v1) ([#64](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/64)) ([4b66d83](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/4b66d831851b9f9d4ab01b525758380fc60a86bd))
+* migration bk-019 (B2B partners, quotes, trip plan components) ([#62](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/62)) ([8ba07e0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/8ba07e052d00381829bfa5497615da5802b644de))
+
 ## [0.2.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.1.0...v0.2.0) (2026-10-22)
 
 
