@@ -12,6 +12,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CalendarDays, Pencil, UserPlus, Users as UsersIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import type { ActivityItem, TripCaseDetail } from "@/lib/api/types";
+import { CATALOG_STATE_META, catalogReasonLabel } from "@/lib/tourState";
 import {
   Button,
   Code,
@@ -188,6 +189,38 @@ function WorkspaceSkeleton() {
   );
 }
 
+/** AA-986 L5 (root ADR 0015, Q4): a tour this case uses left the CIS catalog. The case is kept as it is; staff decide
+ *  with the customer or agency (cancelling is never automatic). Paused tours raise no alert (temporary). */
+function TourAlerts({ c }: { c: TripCaseDetail }) {
+  const where = { leg: "a trip leg", case: "the trip plan it started from", item: "a proposal item" } as const;
+  return (
+    <div role="alert" className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[13px]">
+      <p className="font-semibold text-ink">AA no longer serves a tour in this case</p>
+      <ul className="mt-1.5 flex flex-col gap-1 text-body">
+        {(c.tour_alerts ?? []).map((a) => (
+          <li key={a.source_id} className="min-w-0 break-words">
+            <Pill tone={CATALOG_STATE_META[a.state].tone}>{CATALOG_STATE_META[a.state].label}</Pill>{" "}
+            <span className="break-all font-mono text-[11px] text-muted2">{a.source_id}</span>
+            {" — "}
+            {catalogReasonLabel(a.reason)}
+            {a.changed_at ? (
+              <>
+                {" since "}
+                <DateText value={a.changed_at} />
+              </>
+            ) : null}
+            {"; used by "}
+            {a.used_by.map((u) => where[u]).join(", ")}.
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-xs text-muted">
+        Confirmed bookings and holds are kept. New quotes and holds on this tour are refused. Cancelling is your decision.
+      </p>
+    </div>
+  );
+}
+
 function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: boolean; onAssign: () => void }) {
   const days = snapshotDays(c.inquiry_snapshot);
   const customDays = snapshotCustomDays(c.inquiry_snapshot);
@@ -221,6 +254,7 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
             )}
           </Section>
         )}
+        {!!c.tour_alerts?.length && <TourAlerts c={c} />}
         <Section title="Trip legs" description="The CIS tours this case is built from, in day order." actions={<FromCisTag />}>
           {c.legs.length ? (
             <ol className="flex flex-col gap-2">
@@ -232,7 +266,14 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
                       Days {l.day_from}–{l.day_to}
                     </span>
                   </span>
-                  <span className="break-all font-mono text-[11px] text-muted2">{l.source_tour_id}</span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-2">
+                    {l.catalog && l.catalog.state !== "served" && (
+                      <Pill tone={CATALOG_STATE_META[l.catalog.state].tone} title={CATALOG_STATE_META[l.catalog.state].help}>
+                        {CATALOG_STATE_META[l.catalog.state].label}
+                      </Pill>
+                    )}
+                    <span className="break-all font-mono text-[11px] text-muted2">{l.source_tour_id}</span>
+                  </span>
                 </li>
               ))}
             </ol>
