@@ -120,6 +120,62 @@ async def rate_in_force(
     return dict(row) if row else None
 
 
+@dataclass(frozen=True)
+class RateAsk:
+    """One rate lookup: a room type or a service, a day, a pax count (None = any band)."""
+
+    room_type_id: str | None
+    service_id: str | None
+    on: date
+    pax: int | None
+
+
+# The same choice as rate_in_force (in force on the day, pax band, RATE_ORDER), for many asks in one round trip
+# (AA-972 review: a B2B quote must not run one query per night or component).
+RATES_MANY_SQL = f"""
+SELECT a.n, r.id, r.unit, r.net_amount, r.currency
+FROM unnest($1::uuid[], $2::uuid[], $3::date[], $4::int[]) WITH ORDINALITY
+     AS a(room_type_id, service_id, on_day, pax, n)
+LEFT JOIN LATERAL (
+    SELECT x.id::text AS id, x.unit, x.net_amount::text AS net_amount, x.currency::text AS currency
+    FROM booking.supplier_rates x JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
+    WHERE (x.hotel_room_type_id = a.room_type_id OR x.service_id = a.service_id)
+      AND {RATE_IN_FORCE_ON.format(day="a.on_day")}
+      AND (a.pax IS NULL OR ((x.pax_min IS NULL OR x.pax_min <= a.pax) AND (x.pax_max IS NULL OR x.pax_max >= a.pax)))
+    ORDER BY {RATE_ORDER} LIMIT 1
+) r ON true
+ORDER BY a.n
+"""  # noqa: S608 — constants only
+
+
+async def rates_in_force_many(conn: asyncpg.Connection, asks: list[RateAsk]) -> list[dict[str, Any] | None]:
+    """The rate in force for every ask (same order; None where none), in one query. Duplicate asks are looked up once.
+
+    Each found rate has ``id``, ``unit``, ``net_amount`` (text) and ``currency`` (stripped).
+    """
+    unique = list(dict.fromkeys(asks))
+    if not unique:
+        return []
+    rows = await conn.fetch(
+        RATES_MANY_SQL,
+        [a.room_type_id for a in unique],
+        [a.service_id for a in unique],
+        [a.on for a in unique],
+        [a.pax for a in unique],
+    )
+    found: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if row["id"] is not None:
+            found[int(row["n"])] = {
+                "id": row["id"],
+                "unit": row["unit"],
+                "net_amount": row["net_amount"],
+                "currency": str(row["currency"]).strip(),
+            }
+    by_ask = {ask: found.get(i) for i, ask in enumerate(unique, start=1)}
+    return [by_ask[a] for a in asks]
+
+
 # ── Default net of a version item ────────────────────────────────────────────
 
 

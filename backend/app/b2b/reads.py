@@ -1,0 +1,166 @@
+"""Read routes of booking.b2b.v1 (AA-972): products, approved FX rates, the public "from" price for parity.
+
+- **Products**: sellable ``booking.trip_plans`` rows whose tour is in ``catalog.v_tour`` now (live, O7: a tour that
+  leaves the catalog drops out), with their bookable components (``app.b2b.components``). No prices, no content:
+  content comes from ``catalog.http.v1``. Keyset pages ordered by ``source_id``; ``updated_since`` filters on the
+  latest of the plan's ``updated_at``, its newest component and the ``updated_at`` of the hotels, room types and
+  services behind its components, and also lists plans that stopped being sellable (``sellable = false``, no
+  components). Tours that leave the catalog need a periodic full resync (no ``updated_since``) until AA-975.
+- **FX rates**: the approved ``booking.fx_rates`` row in force on the asked date for every currency (plain rate, no
+  buffer): the R17 "Booking's approved rates" source.
+- **Price parity** (ADR 0005a decision 1, warn never block): the plan's public "from" price per person from the bk-009
+  price hint when its basis is ``per_person``, converted to the asked currency (hint currency → USD at the plain rate
+  → asked currency x rate x (1 + buffer)), rounded up to the cent. ``null`` when there is no per-person hint or no
+  approved rate. Booking never compares or refuses anything: the CRM warns when its sell price is below.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import Any
+
+import asyncpg
+
+from app.b2b.components import components_by_plan
+from app.b2b.errors import B2BError
+from app.b2b.quotes import ceil_cents, money
+from app.catalog.destinations import CATALOG_ERRORS
+from app.pricing import engine, repository
+
+SOURCE_SYSTEM = "cis"
+PAGE = 100
+PARITY_BASIS = "per_person_2pax_low_season"
+
+# updated_at = the latest change that can alter what a product offers: the plan row (sellable, price hint; touched by
+# every component replace), any component row, and the hotel / room type / service behind a component (status). With
+# updated_since, plans that stopped being sellable are listed too (sellable = false, no components), so a delta sync
+# sees them go. A tour that leaves catalog.v_tour gives no change signal: removals of that kind need a periodic full
+# resync (no updated_since) until the AA-975 event feed exists.
+PRODUCTS_SQL = """
+SELECT * FROM (
+    SELECT p.id::text AS trip_plan_id, p.source_system, p.source_id, p.sellable,
+           greatest(p.updated_at, (
+               SELECT greatest(max(c.created_at), max(rt.updated_at), max(h.updated_at), max(s.updated_at))
+               FROM booking.trip_plan_components c
+               LEFT JOIN booking.hotel_room_types rt ON rt.id = c.hotel_room_type_id
+               LEFT JOIN booking.hotels h ON h.id = rt.hotel_id
+               LEFT JOIN booking.services s ON s.id = c.service_id
+               WHERE c.trip_plan_id = p.id)) AS updated_at
+    FROM booking.trip_plans p
+    WHERE (p.sellable OR $2::timestamptz IS NOT NULL) AND p.source_system = 'cis'
+      AND EXISTS (SELECT 1 FROM catalog.v_tour t WHERE t.source_system = p.source_system AND t.source_id = p.source_id)
+      AND ($1::text IS NULL OR p.source_id > $1)
+) x
+WHERE ($2::timestamptz IS NULL OR x.updated_at >= $2)
+ORDER BY x.source_id
+LIMIT $3
+"""
+
+FX_ALL_SQL = """
+SELECT DISTINCT ON (f.currency) f.currency::text AS currency, f.rate_per_usd, f.as_of, f.source
+FROM booking.fx_rates f
+JOIN booking.policy_approvals a ON a.fx_rate_id = f.id
+WHERE f.as_of <= $1
+ORDER BY f.currency, f.as_of DESC
+"""
+
+PLAN_HINT_SQL = """
+SELECT p.price_hint_amount, p.price_hint_currency::text AS price_hint_currency, p.price_hint_basis
+FROM booking.trip_plans p
+WHERE p.source_system = $1 AND p.source_id = $2 AND p.sellable
+  AND EXISTS (SELECT 1 FROM catalog.v_tour t WHERE t.source_system = p.source_system AND t.source_id = p.source_id)
+"""
+
+
+def _encode_cursor(source_id: str) -> str:
+    return base64.urlsafe_b64encode(source_id.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str | None) -> str | None:
+    if not cursor:
+        return None
+    try:
+        return base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        raise B2BError("invalid", "invalid cursor") from None
+
+
+async def list_products(
+    pool: asyncpg.Pool, *, cursor: str | None, updated_since: datetime | None, limit: int = PAGE
+) -> dict[str, Any]:
+    after = _decode_cursor(cursor)
+    if updated_since is not None and updated_since.tzinfo is None:
+        updated_since = updated_since.replace(tzinfo=UTC)
+    async with pool.acquire() as conn:
+        try:
+            rows = await conn.fetch(PRODUCTS_SQL, after, updated_since, limit)
+        except CATALOG_ERRORS:
+            raise B2BError("unavailable", "the catalog is not readable right now", retry_after_s=60) from None
+        parts = await components_by_plan(conn, [r["trip_plan_id"] for r in rows if r["sellable"]])
+    items = [
+        {
+            "tour": {"source_system": r["source_system"], "source_id": r["source_id"]},
+            "trip_plan_id": r["trip_plan_id"],
+            "sellable": bool(r["sellable"]),
+            "has_fixed_departures": False,  # departures arrive with AA-973
+            "components": parts.get(r["trip_plan_id"], []),
+            "updated_at": r["updated_at"].isoformat(),
+        }
+        for r in rows
+    ]
+    next_cursor = _encode_cursor(rows[-1]["source_id"]) if len(rows) == limit else None
+    return {"items": items, "next_cursor": next_cursor}
+
+
+async def fx_rates(pool: asyncpg.Pool, on: date) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(FX_ALL_SQL, on)
+    return {
+        "date": on.isoformat(),
+        "base_currency": engine.BASE_CURRENCY,
+        "rates": [
+            {
+                "currency": r["currency"].strip(),
+                "rate_per_usd": format(r["rate_per_usd"].quantize(Decimal("0.00000001")), "f"),
+                "as_of": r["as_of"].isoformat(),
+                "source": (r["source"] or "")[:64],
+            }
+            for r in rows
+        ],
+    }
+
+
+async def price_parity(pool: asyncpg.Pool, *, source_id: str, currency: str, on: date) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        try:
+            plan = await conn.fetchrow(PLAN_HINT_SQL, SOURCE_SYSTEM, source_id)
+        except CATALOG_ERRORS:
+            raise B2BError("unavailable", "the catalog is not readable right now", retry_after_s=60) from None
+        if plan is None:
+            raise B2BError("not_found", "no sellable trip plan with this key")
+        from_price = None
+        if plan["price_hint_basis"] == "per_person" and plan["price_hint_amount"] is not None:
+            hint_currency = plan["price_hint_currency"].strip()
+            amount = plan["price_hint_amount"]
+            if hint_currency != currency:
+                dated = await repository.fx_rates_in_force(conn, {hint_currency, currency}, on)
+                rates = {code: d.rate for code, d in dated.items()}
+                try:
+                    usd = engine.to_usd(amount, hint_currency, rates)
+                    sell_rate = None if currency == engine.BASE_CURRENCY else rates.get(currency)
+                    if currency != engine.BASE_CURRENCY and sell_rate is None:
+                        raise engine.MissingFxRate(currency)
+                    amount = ceil_cents(engine.from_usd(usd, sell_rate))
+                except engine.PricingError:
+                    amount = None
+            if amount is not None:
+                from_price = money(amount, currency)
+    return {
+        "tour": {"source_system": SOURCE_SYSTEM, "source_id": source_id},
+        "currency": currency,
+        "from_price": from_price,
+        "basis": PARITY_BASIS,
+    }
