@@ -1,15 +1,18 @@
 """AA-986 L5 (root ADR 0015 decision 5, Q4) on a real PostgreSQL, as role ``booking``.
 
-``catalog.v_tour_retired`` and ``catalog.v_tour_lifecycle_outbox`` (CIS 274) are stood in by plain tables with the
-columns Booking selects, created by the ``lifecycle_views`` fixture around each test that needs them and dropped
-after (lessons.md: stand-ins only around the code that needs them); ``catalog.v_tour`` is the CI stub table.
+``catalog.v_tour_retired`` and ``catalog.v_tour_lifecycle_outbox`` (CIS 274) are stood in by plain tables built from
+the EXACT column lists CIS migration 274 asserts in its closing check (copied below; a rename on either side must be
+copied here, and the fixture fails when Booking selects a column 274 does not have), created by the
+``lifecycle_views`` fixture around each test that needs them and dropped after (lessons.md: stand-ins only around the
+code that needs them); ``catalog.v_tour`` is the CI stub table.
 
 - without CIS 274 (views missing): a plan whose tour left ``catalog.v_tour`` is 409 ``tour_not_served`` /
   ``not_in_catalog``, the delta feed and the staff reads keep working (degraded, no error);
 - with CIS 274: retired → new quote, new hold and confirm refused (409, reason), a confirmed booking kept and its
   replay answered, the delta lists the product as withdrawn, the lifecycle pull notifies staff once per open trip case
   and per plan (idempotent), the case shows the alert, the plan is in the orphaned filter; paused → refused but not
-  withdrawn; restored → sold again, listed live again, ``tour.reinstated`` sent.
+  withdrawn, not orphaned, no alert; restored (274 keeps the row with ``state = 'restored'``) → sold again, listed live
+  again, ``tour.reinstated`` sent.
 """
 
 from __future__ import annotations
@@ -46,15 +49,28 @@ from tests.staff_tokens import LocalCis, LocalM2M
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 Client = tuple[httpx.AsyncClient, LocalCis, LocalM2M, Database]
-STUBS = """
-CREATE TABLE catalog.v_tour_retired (
-    source_system text NOT NULL DEFAULT 'cis', source_id text NOT NULL, tour_id uuid,
-    state text NOT NULL, reason text, changed_at timestamptz NOT NULL DEFAULT now());
-CREATE TABLE catalog.v_tour_lifecycle_outbox (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, idempotency_key text NOT NULL UNIQUE,
-    source_system text NOT NULL DEFAULT 'cis', source_id text NOT NULL, tour_id uuid, event text NOT NULL,
-    reason text NOT NULL, replaced_by_tour_id uuid, occurred_at timestamptz NOT NULL DEFAULT now());
+# Copied verbatim from the closing check of CIS api/migrations/274_tour_retired_outbox_tenant_notifications.sql.
+CIS_274_RETIRED_COLUMNS = (
+    "source_system text, source_id text, tour_id uuid, state text, reason text, changed_at timestamp with time zone"
+)
+CIS_274_OUTBOX_COLUMNS = (
+    "event_id bigint, source_system text, source_id text, tour_id uuid, event text, reason text, "
+    "replaced_by_tour_id uuid, occurred_at timestamp with time zone, idempotency_key text"
+)
+STUBS = f"""
+CREATE TABLE catalog.v_tour_retired ({CIS_274_RETIRED_COLUMNS});
+ALTER TABLE catalog.v_tour_retired
+    ALTER COLUMN source_system SET DEFAULT 'cis', ALTER COLUMN changed_at SET DEFAULT now();
+CREATE TABLE catalog.v_tour_lifecycle_outbox ({CIS_274_OUTBOX_COLUMNS});
+ALTER TABLE catalog.v_tour_lifecycle_outbox
+    ALTER COLUMN event_id SET NOT NULL, ALTER COLUMN source_system SET DEFAULT 'cis',
+    ALTER COLUMN occurred_at SET DEFAULT now();
+ALTER TABLE catalog.v_tour_lifecycle_outbox ALTER COLUMN event_id ADD GENERATED ALWAYS AS IDENTITY;
 GRANT SELECT ON catalog.v_tour_retired, catalog.v_tour_lifecycle_outbox TO booking;
+"""
+COLUMNS_SQL = """
+SELECT string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ' ORDER BY a.attnum)
+FROM pg_attribute a WHERE a.attrelid = $1::regclass AND a.attnum > 0 AND NOT a.attisdropped
 """
 DROP = "DROP TABLE IF EXISTS catalog.v_tour_retired; DROP TABLE IF EXISTS catalog.v_tour_lifecycle_outbox;"
 ADMIN_ID = "it-973-admin"
@@ -71,6 +87,13 @@ async def _forget(conn: asyncpg.Connection) -> None:
 async def lifecycle_views(admin: asyncpg.Connection) -> AsyncIterator[asyncpg.Connection]:  # noqa: F811
     await admin.execute(DROP)
     await admin.execute(STUBS)
+    for view, cis_274 in (
+        (liveness.RETIRED_VIEW, CIS_274_RETIRED_COLUMNS),
+        (liveness.OUTBOX_VIEW, CIS_274_OUTBOX_COLUMNS),
+    ):
+        assert await admin.fetchval(COLUMNS_SQL, view.qualified) == cis_274  # the stub is 274's shape, no more
+        missing = set(view.columns) - {c.split(" ", 1)[0] for c in cis_274.split(", ")}
+        assert not missing, f"Booking selects {missing} that CIS 274 {view.qualified} does not have"
     liveness.reset_cache()
     await _forget(admin)
     try:
@@ -194,6 +217,18 @@ async def test_retire_pause_restore_end_to_end(
     assert withdrawn["sellable"] is False and withdrawn["components"] == []
     full = await _ok(await c.get("/b2b/v1/products", headers=_m2m(m2m, scope="booking.b2b/read")))
     assert full["items"] == []
+    # A retired plan that was never offered to agencies (not sellable, no components) is never told withdrawn.
+    await admin_conn.execute("INSERT INTO booking.trip_plans (source_id, sellable) VALUES ('l5-never-offered', false)")
+    await admin_conn.execute(
+        "INSERT INTO catalog.v_tour_retired (source_id, state, reason) VALUES ('l5-never-offered', 'retired',"
+        " 'source_deleted')"
+    )
+    delta = await _ok(
+        await c.get("/b2b/v1/products", params={"updated_since": since}, headers=_m2m(m2m, scope="booking.b2b/read"))
+    )
+    assert [i["tour"]["source_id"] for i in delta["items"]] == [SOURCE_ID]
+    await admin_conn.execute("DELETE FROM catalog.v_tour_retired WHERE source_id = 'l5-never-offered'")
+    await admin_conn.execute("DELETE FROM booking.trip_plans WHERE source_id = 'l5-never-offered'")
 
     # Lifecycle pull: scheduled because the outbox has news; notifies once per open case and per plan.
     pool = await db.pool()
@@ -213,6 +248,10 @@ async def test_retire_pause_restore_end_to_end(
     assert (
         by_entity["trip_plan"]["data"]["confirmed_holds"] == 1 and by_entity["trip_plan"]["data"]["active_holds"] == 1
     )
+    # the active hold can no longer be confirmed: the text says so and the data names it with its agency
+    [listed] = by_entity["trip_plan"]["data"]["active_hold_list"]
+    assert listed["hold_id"] == open_hold["hold_id"] and listed["agency_name"]
+    assert "can no longer be confirmed and will expire: contact the agency now" in by_entity["trip_plan"]["message"]
     status = await admin_conn.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", case_id)
     assert status == "confirmed"  # nothing cancelled (Q4)
 
@@ -239,11 +278,21 @@ async def test_retire_pause_restore_end_to_end(
         await c.get("/b2b/v1/products", params={"updated_since": since}, headers=_m2m(m2m, scope="booking.b2b/read"))
     )
     assert delta["items"] == []
+    # ADR 0015 decision 5 (paused, AA-Booking): confirmed work kept, NO staff flag: not orphaned, no alert.
+    assert (await _ok(await c.get("/catalog/trip-plans?orphaned=true", headers=staff)))["items"] == []
+    assert (await _ok(await c.get("/catalog/trip-plans/facets", headers=staff)))["orphaned"] == 0
+    case = await _ok(await c.get(f"/trip-cases/{case_id}", headers=staff))
+    assert case["tour_alerts"] == [] and case["legs"][0]["catalog"]["state"] == "paused"
     await _event(admin_conn, "tle:2", "paused", "master_inactive")
     assert (await _pull(db))["applied"] == {"ignored": 1}
 
-    # Restored: back in v_tour (its updated_at moves), no tombstone; sold again, listed live, staff told.
-    await admin_conn.execute("DELETE FROM catalog.v_tour_retired WHERE source_id = $1", SOURCE_ID)
+    # Restored: back in v_tour (its updated_at moves); CIS 274 keeps the key's row with state 'restored' (it is no
+    # tombstone); sold again, listed live, staff told.
+    await admin_conn.execute(
+        "UPDATE catalog.v_tour_retired SET state = 'restored', reason = 'restore', changed_at = now()"
+        " WHERE source_id = $1",
+        SOURCE_ID,
+    )
     await admin_conn.execute(
         "INSERT INTO catalog.v_tour (source_id, title, country, duration_days, updated_at)"
         " VALUES ($1, 'Hanoi 1D', 'Vietnam', 1, now())",
@@ -259,4 +308,6 @@ async def test_retire_pause_restore_end_to_end(
     )
     [live] = delta["items"]
     assert live["withdrawn"] is False and live["sellable"] is True
-    assert (await _ok(await c.get(f"/trip-cases/{case_id}", headers=staff)))["tour_alerts"] == []
+    case = await _ok(await c.get(f"/trip-cases/{case_id}", headers=staff))
+    assert case["tour_alerts"] == [] and case["legs"][0]["catalog"]["state"] == "served"
+    assert (await _ok(await c.get("/catalog/trip-plans?orphaned=true", headers=staff)))["items"] == []

@@ -67,7 +67,8 @@ WHERE (p.sellable OR $2::timestamptz IS NOT NULL) AND p.source_system = 'cis'
 # AA-986 L5 (root ADR 0015 decision 5): with updated_since and CIS 274, plans whose tour was RETIRED (not paused: a
 # paused tour is a temporary absence and is never listed as withdrawn) are listed as withdrawn products, updated_at =
 # the retirement time. A key that is back in catalog.v_tour is never listed twice (the live row wins; keyset paging on
-# source_id needs one row per plan).
+# source_id needs one row per plan). Only plans that were offered to agencies are listed: sellable, or with components
+# (built for sale); a plan never offered is not told to partners, so its key and existence stay internal.
 WITHDRAWN_PRODUCTS_SQL = """
 SELECT p.id::text AS trip_plan_id, p.source_system, p.source_id, false AS sellable, false AS has_fixed_departures,
        r.changed_at AS updated_at, true AS withdrawn, r.reason AS withdrawn_reason
@@ -77,6 +78,7 @@ JOIN LATERAL (SELECT r.state, r.reason, r.changed_at FROM catalog.v_tour_retired
               ORDER BY r.changed_at DESC NULLS LAST LIMIT 1) r ON r.state = 'retired'
 WHERE $2::timestamptz IS NOT NULL AND p.source_system = 'cis'
   AND ($1::text IS NULL OR p.source_id > $1)
+  AND (p.sellable OR EXISTS (SELECT 1 FROM booking.trip_plan_components c WHERE c.trip_plan_id = p.id))
   AND NOT EXISTS (SELECT 1 FROM catalog.v_tour t WHERE t.source_system = p.source_system AND t.source_id = p.source_id)
 """
 

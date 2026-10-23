@@ -3,13 +3,15 @@
 Booking reads CIS only through the ``catalog`` contract views, as role ``booking``:
 
 - ``catalog.v_tour`` (CIS 225): the live tours. A key in it is served.
-- ``catalog.v_tour_retired`` (CIS 274, contract catalog.tour.v1.3): one row per key whose latest lifecycle event is
-  retired, paused or superseded, with ``state`` (``retired`` | ``paused``), ``reason`` and ``changed_at``.
+- ``catalog.v_tour_retired`` (CIS 274, contract catalog.tour.v1.3): one row per key that is not served now
+  (``state`` ``retired`` | ``paused``) or that is served again after a change (``state`` ``restored``, the key is
+  back in ``v_tour``), with ``reason`` and ``changed_at``.
 - ``catalog.v_tour_lifecycle_outbox`` (CIS 274): the append-only events, pulled by ``bk_tour_lifecycle_pull``
   (:mod:`app.catalog.lifecycle`).
 
 **Rule** (ADR 0015 decision 5, AA-Booking): a key is *not served* when it is not in ``catalog.v_tour`` **or** when
-``v_tour_retired`` calls it ``retired`` / ``paused``. Fail closed: Booking never sells a key that either view calls
+``v_tour_retired`` calls it ``retired`` / ``paused`` (a ``restored`` row, or any other state, is no tombstone: the
+``v_tour`` check decides). Fail closed: Booking never sells a key that either view calls
 gone; a disagreement is logged (``catalog_liveness_disagree``) and is what the nightly probe of ADR 0015 decision 6
 reports. States: ``served``, ``retired``, ``paused`` (temporary: Master inactive or a supersede waiting for its new
 Master) and ``not_in_catalog`` (absent from ``v_tour`` with no tombstone: never served, or CIS 274 not applied yet).
@@ -44,7 +46,9 @@ SERVED = "served"
 RETIRED = "retired"
 PAUSED = "paused"
 NOT_IN_CATALOG = "not_in_catalog"
+RESTORED = "restored"  # a v_tour_retired row of a key served again (CIS 274): not a tombstone
 NOT_SERVED = frozenset({RETIRED, PAUSED, NOT_IN_CATALOG})
+TOMBSTONES = frozenset({RETIRED, PAUSED})
 
 
 @dataclass(frozen=True)
@@ -58,13 +62,14 @@ class View:
         return f"{self.schema}.{self.name}"
 
 
-# The columns Booking selects (ADR 0015 decision 4 names; the CIS 274 PR fixes them). A view without one of them is
-# treated as missing, so a renamed column degrades the feature instead of failing a request.
+# The columns Booking selects, as CIS 274 defines them (its closing check asserts the full column list of both views).
+# A view without one of them is treated as missing, so a renamed column degrades the feature instead of failing a
+# request.
 RETIRED_VIEW = View("catalog", "v_tour_retired", ("source_system", "source_id", "state", "reason", "changed_at"))
 OUTBOX_VIEW = View(
     "catalog",
     "v_tour_lifecycle_outbox",
-    ("id", "idempotency_key", "source_system", "source_id", "event", "reason", "occurred_at"),
+    ("event_id", "idempotency_key", "source_system", "source_id", "event", "reason", "occurred_at"),
 )
 
 CACHE_SECONDS = 60.0
@@ -155,12 +160,14 @@ def key_state(row: Any) -> KeyState:
     """The rule of the module docstring over one row of :func:`states_sql`."""
     source_id = row["source_id"]
     tomb = row["tomb_state"]
-    if tomb is not None and tomb != SERVED:
-        state = RETIRED if tomb == RETIRED else PAUSED  # any other tombstone state is temporary (ADR 0015 Q11)
+    if tomb in TOMBSTONES:
         if row["in_catalog"]:
             log.warning("catalog_liveness_disagree source_id=%s tombstone=%s in_v_tour=true", source_id, tomb)
-        return KeyState(source_id, state, row["tomb_reason"], row["tomb_changed_at"])
+        return KeyState(source_id, tomb, row["tomb_reason"], row["tomb_changed_at"])
+    # ``restored`` (or a state this module does not know) is no tombstone: v_tour alone decides.
     if row["in_catalog"]:
+        if tomb is not None:
+            return KeyState(source_id, SERVED, row["tomb_reason"], row["tomb_changed_at"])
         return KeyState(source_id, SERVED)
     return KeyState(source_id, NOT_IN_CATALOG, NOT_IN_CATALOG)
 

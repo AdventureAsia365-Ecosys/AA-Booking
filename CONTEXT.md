@@ -50,7 +50,7 @@ Design sources, in order:
   `catalog.v_destination` (supplier place picker and check, AA-822) and `catalog.v_tour` / `v_tour_day` /
   `v_tour_photo` (trip plan endpoints, AA-679, S237 decision D4). **Tour liveness** (AA-986 L5, root ADR 0015
   decision 5, contract `catalog.tour.v1.3`, CIS migration 274): `catalog.v_tour_retired` (tombstone: `retired` /
-  `paused` + reason), read live next to `v_tour` (`app/catalog/liveness.py`), and `catalog.v_tour_lifecycle_outbox`,
+  `paused` + reason; a `restored` row of a key served again is no tombstone), read live next to `v_tour` (`app/catalog/liveness.py`), and `catalog.v_tour_lifecycle_outbox`,
   pulled by `bk_tour_lifecycle_pull` into `booking.inbox_events` (source `cis`, contract `catalog.tour`) for staff
   notifications. Both are feature-detected: without CIS 274 Booking degrades to `v_tour` alone. Later: other catalog
   views (`v_tour_place`), CIS golden records.
@@ -145,7 +145,7 @@ backend/
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day;
-                           list_orphaned (AA-986 L5: plans whose tour left v_tour, reason + what is attached)
+                           list_orphaned (AA-986 L5: plans whose tour left v_tour, not paused; reason + attached)
   app/catalog/liveness.py  AA-986 L5: served state of a catalog key (served | retired | paused | not_in_catalog) from
                            v_tour + v_tour_retired, feature detection of the CIS 274 views, strict / soft reads
   app/catalog/lifecycle.py AA-986 L5: bk_tour_lifecycle_pull (outbox → inbox → staff notifications) + PullSchedule
@@ -399,8 +399,8 @@ send, OTP) is not built: those still write rows only.
   when the set is emptied), its component rows, the hotels / room types / services behind them and (AA-986 L5) the
   tour's `catalog.v_tour.updated_at` (follows the Master row, CIS 273, so a restored tour is listed again), and then
   also lists plans that stopped being sellable (`sellable = false`, no components). **Withdrawn** (AA-986 L5, root
-  ADR 0015 decision 5): with `updated_since` and CIS 274, a plan whose tour is `retired` in `catalog.v_tour_retired`
-  is listed with `withdrawn: true`, `withdrawn_reason`, no components and `updated_at` = the retirement time; a
+  ADR 0015 decision 5): with `updated_since` and CIS 274, a plan that was offered to agencies (sellable, or with
+  components) whose tour is `retired` in `catalog.v_tour_retired` is listed with `withdrawn: true`, `withdrawn_reason`, no components and `updated_at` = the retirement time; a
   `paused` tour is a temporary absence and is not listed (it is only missing). Without CIS 274 a removal shows only in
   a periodic full resync (no `updated_since`). The event `product.withdrawn` is AA-975. The CRM should overlap its
   `updated_since` window by a few minutes (`updated_at` is the writing transaction's start time).
@@ -477,7 +477,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_inquiry_process` | Validates v1/v1.1/v1.2; each leg gets the catalog tour key `(source_system, source_id)` from the v1.2 payload or by resolving `source_tour_id` against `catalog.v_tour` (null when unresolved; AA-830); creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
 | `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d, archived to S3 first (`s3://aa-cis-bronze-<acc2>/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per batch and UTC month); `queued` / `running` never. Rows referenced by a FK are never deleted. |
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
-| `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed / active B2B holds on future departures); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
+| `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). AA-975 adds the `hold.expired` event here. |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
@@ -847,8 +847,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   photos load from the CIS public API, `lib/config.ts` `CIS_MEDIA_URL`), `/hotels` (S237, AA-823: grid + hotel drawer
   with facts, room types, rates, activity; `?hotel=HTL-…`) and `/services` + `/services/{SVC-…}` (S237, AA-823) read
   the real API; AA-986 L5: Trip plans has a "Show: Orphaned plans" filter (KPI tile + table of plans whose tour left
-  the catalog, with reason and what is attached), the case page flags each leg whose tour is not served and shows an
-  alert box for retired / out-of-catalog tours, and the bell labels `tour.retired` / `tour.reinstated`; the proposal
+  the catalog, with reason and what is attached; a paused tour is not listed), the case page flags each leg whose tour
+  is retired / out of the catalog and shows an alert box for them (a pause carries no staff flag, ADR 0015), and the bell labels `tour.retired` / `tour.reinstated`; the proposal
   item drawer can book a room type or service (its net defaults from the rate); the other
   wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a

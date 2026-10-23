@@ -13,8 +13,9 @@
   same items. Item titles are the CIS day titles (the UI spec's "+ Add from CIS tour"); items carry the plan's
   ``source_id`` as ``source_tour_id``. Prices are never pre-filled: a version is priced from its cost lines (ADR 0005).
 - **Orphaned plans** (AA-986 L5, root ADR 0015): ``list_orphaned`` lists the plans whose tour left
-  ``catalog.v_tour``, with the reason from ``catalog.v_tour_retired`` (CIS 274) and the open cases, future departures
-  and confirmed holds still attached; nothing is deleted or cancelled.
+  ``catalog.v_tour`` (not a paused one: no staff flag for a pause), with the reason from ``catalog.v_tour_retired``
+  (CIS 274) and the open cases, future departures and confirmed holds still attached; nothing is deleted or
+  cancelled.
 - The price hint (``price_hint_*``) and the default channel are commercial data: only staff with ``pricing.read``
   see them (content creators read the catalog without them).
 """
@@ -160,13 +161,27 @@ async def list_plans(
 
 
 # AA-986 L5 (root ADR 0015 decision 5): "orphaned plans" = Booking trip plans whose tour is no longer in
-# catalog.v_tour (retired, paused, or gone before CIS 274 could say why). No catalog content is left to show, so the
-# row carries the key, the commercial fields, the reason from catalog.v_tour_retired (CIS 274, when readable) and what
-# is still attached to it: open trip cases, future departures and confirmed B2B holds on them (all kept, Q4).
+# catalog.v_tour (retired, or gone before CIS 274 could say why). No catalog content is left to show, so the row
+# carries the key, the commercial fields, the reason from catalog.v_tour_retired (CIS 274, when readable) and what is
+# still attached to it: open trip cases, future departures and confirmed B2B holds on them (all kept, Q4).
+# A PAUSED key is not orphaned: ADR 0015 decision 5 (paused table, AA-Booking) says "confirmed work kept, no staff
+# flag" — a pause is temporary, so it is left out of the list and the facet count (sales are still refused, 409).
 ORPHAN_WHERE = (
     "p.source_system = 'cis' AND NOT EXISTS (SELECT 1 FROM catalog.v_tour t"
     " WHERE t.source_system = p.source_system AND t.source_id = p.source_id)"
 )
+NOT_PAUSED = (
+    " AND NOT EXISTS (SELECT 1 FROM catalog.v_tour_retired pr"
+    " WHERE pr.source_system = p.source_system AND pr.source_id = p.source_id AND pr.state = 'paused')"
+)
+
+
+def orphan_where(with_retired: bool) -> str:
+    """The orphaned predicate; with CIS 274 readable, paused keys are left out (without it they cannot be told apart
+    from a retirement and stay listed as ``not_in_catalog``)."""
+    return ORPHAN_WHERE + (NOT_PAUSED if with_retired else "")
+
+
 ORPHAN_COUNTS = """
     (SELECT count(*) FROM booking.trip_cases tc
      WHERE tc.deleted_at IS NULL AND tc.status NOT IN ('completed', 'cancelled')
@@ -228,13 +243,14 @@ async def list_orphaned(
 ) -> dict[str, Any]:
     """Trip plans whose tour left the catalog, newest departure from it first. ``q`` = the exact ``source_id``."""
     args: list[Any] = []
-    where = ORPHAN_WHERE
-    if q and q.strip():
-        args.append(q.strip())
-        where += f" AND p.source_id = ${len(args)}"
     limit = max(1, min(limit, MAX_PAGE))
     async with catalog_reads():
-        join = ORPHAN_TOMBSTONE if await liveness.view_ready(conn, liveness.RETIRED_VIEW) else NO_TOMBSTONE
+        with_retired = await liveness.view_ready(conn, liveness.RETIRED_VIEW)
+        join = ORPHAN_TOMBSTONE if with_retired else NO_TOMBSTONE
+        where = orphan_where(with_retired)
+        if q and q.strip():
+            args.append(q.strip())
+            where += f" AND p.source_id = ${len(args)}"
         total = await conn.fetchval(f"SELECT count(*) FROM booking.trip_plans p WHERE {where}", *args)  # noqa: S608
         rows = await conn.fetch(
             f"""
@@ -262,7 +278,8 @@ async def facets(conn: asyncpg.Connection) -> dict[str, Any]:
         styles = await conn.fetch(
             f"SELECT DISTINCT p.trip_style {JOIN} WHERE p.trip_style IS NOT NULL ORDER BY p.trip_style"  # noqa: S608
         )
-        orphaned = await conn.fetchval(f"SELECT count(*) FROM booking.trip_plans p WHERE {ORPHAN_WHERE}")  # noqa: S608
+        where = orphan_where(await liveness.view_ready(conn, liveness.RETIRED_VIEW))
+        orphaned = await conn.fetchval(f"SELECT count(*) FROM booking.trip_plans p WHERE {where}")  # noqa: S608
     return {
         "total": sum(r["tours"] for r in countries),
         "sellable": sum(r["sellable"] for r in countries),

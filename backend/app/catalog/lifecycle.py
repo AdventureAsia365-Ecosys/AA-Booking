@@ -10,8 +10,10 @@
   that only advances over rows older than :data:`SAFE_AFTER_SECONDS` (a lower id can still commit until then).
 - ``retired``: one staff notification (shared staff queue, type ``tour.retired``) per **open** trip case that uses
   the key (a leg, the case's own source key, or an item of one of its versions) and one per **trip plan** of the
-  key (with its confirmed and active B2B holds on future departures). Nothing is cancelled or changed: confirmed
-  bookings, holds and trip cases are kept (Q4); cancelling is a staff decision. The flag itself is derived at read
+  key (with its confirmed bookings and active B2B holds on future departures; an active hold can no longer be
+  confirmed, so the text tells staff to contact the agency and ``data.active_hold_list`` names the holds and
+  agencies). Nothing is cancelled or changed: confirmed bookings, holds and trip cases are kept (Q4); cancelling is
+  a staff decision. The flag itself is derived at read
   time (``app.catalog.liveness``), so it needs no column and goes away by itself on restore.
 - ``restored``: when Booking told staff about the retirement, the same cases and plan get ``tour.reinstated``.
 - ``paused`` and ``superseded``: nothing (ADR 0015: a pause flags no staff and pushes nothing; a supersede is
@@ -67,23 +69,23 @@ OUTBOX = liveness.OUTBOX_VIEW.qualified
 PENDING_SQL = f"""
 SELECT EXISTS (
     SELECT 1 FROM {OUTBOX} o
-    WHERE o.id > coalesce((SELECT safe_id FROM booking.inbox_cursor WHERE source = $1 AND contract = $2), 0)
+    WHERE o.event_id > coalesce((SELECT safe_id FROM booking.inbox_cursor WHERE source = $1 AND contract = $2), 0)
       AND NOT EXISTS (SELECT 1 FROM booking.inbox_events i
                       WHERE i.source = $1 AND i.contract = $2 AND i.idempotency_key = o.idempotency_key))
 """  # noqa: S608 — module constant
 SCAN_SQL = f"""
-SELECT o.id, o.idempotency_key, o.source_system, o.source_id, o.event, o.reason, o.occurred_at
+SELECT o.event_id, o.idempotency_key, o.source_system, o.source_id, o.event, o.reason, o.occurred_at
 FROM {OUTBOX} o
-WHERE o.id > $1
+WHERE o.event_id > $1
   AND NOT EXISTS (SELECT 1 FROM booking.inbox_events i
                   WHERE i.source = $2 AND i.contract = $3 AND i.idempotency_key = o.idempotency_key)
-ORDER BY o.id
+ORDER BY o.event_id
 LIMIT $4
 """  # noqa: S608 — module constant
 ADVANCE_SQL = f"""
 UPDATE booking.inbox_cursor SET safe_id = greatest(safe_id, coalesce((
-    SELECT max(o.id) FROM {OUTBOX} o
-    WHERE o.id > $3 AND o.occurred_at < now() - make_interval(secs => $4)), 0))
+    SELECT max(o.event_id) FROM {OUTBOX} o
+    WHERE o.event_id > $3 AND o.occurred_at < now() - make_interval(secs => $4)), 0))
 WHERE source = $1 AND contract = $2
 RETURNING safe_id
 """  # noqa: S608 — module constant
@@ -118,7 +120,16 @@ SELECT p.id::text AS id, p.sellable,
         JOIN booking.b2b_hold_lines l ON l.hold_id = h.id
         JOIN booking.departures d ON d.id = l.departure_id
         WHERE d.trip_plan_id = p.id AND d.start_date >= $2 AND h.status = 'active' AND h.expires_at > now())
-           AS active_holds
+           AS active_holds,
+       -- the active holds staff must act on (they can no longer be confirmed): ids and agencies, capped for the bell
+       (SELECT coalesce(json_agg(x ORDER BY x.expires_at), '[]'::json)::text FROM (
+            SELECT DISTINCT h.id::text AS hold_id, h.expires_at, pa.agency_name
+            FROM booking.b2b_holds h
+            JOIN booking.b2b_partners pa ON pa.id = h.partner_id
+            JOIN booking.b2b_hold_lines l ON l.hold_id = h.id
+            JOIN booking.departures d ON d.id = l.departure_id
+            WHERE d.trip_plan_id = p.id AND d.start_date >= $2 AND h.status = 'active' AND h.expires_at > now()
+            ORDER BY h.expires_at LIMIT 20) x) AS active_hold_list
 FROM booking.trip_plans p
 WHERE p.source_system = 'cis' AND p.source_id = $1
 """
@@ -135,7 +146,7 @@ def _payload(row: Any) -> dict[str, Any]:
         "version": CONTRACT_VERSION,
         "idempotency_key": row["idempotency_key"],
         "source": SOURCE,
-        "outbox_id": row["id"],
+        "outbox_id": row["event_id"],
         "source_system": row["source_system"],
         "source_id": row["source_id"],
         "event": row["event"],
@@ -148,9 +159,36 @@ def _why(reason: str | None) -> str:
     return REASON_WORDS.get(reason or "", reason or "it left the catalog")
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def plan_retired_message(source_id: str, reason: str | None, confirmed: int, active: int) -> str:
+    """The staff text for a retired trip plan. Confirmed bookings are kept; active holds are NOT safe: confirm is
+    refused (409 ``tour_not_served``) and they expire on their own, so staff must contact the agency (Q4)."""
+    text = (
+        f"AA no longer serves tour {source_id} ({_why(reason)}). Its trip plan is no longer offered to agencies. "
+        f"{_plural(confirmed, 'confirmed booking')} on future departures "
+        f"{'is' if confirmed == 1 else 'are'} kept."
+    )
+    if active:
+        text += (
+            f" {_plural(active, 'active B2B hold')} can no longer be confirmed and will expire: contact the "
+            f"agenc{'y' if active == 1 else 'ies'} now."
+        )
+    return text + " See Trip plans, filter Orphaned."
+
+
+def _hold_list(plan: Any) -> list[dict[str, Any]]:
+    raw = plan.get("active_hold_list")  # json text from PLAN_SQL (asyncpg Record and dict both have .get)
+    if not raw:
+        return []
+    return json.loads(raw) if isinstance(raw, str) else list(raw)
+
+
 async def _notify(conn: asyncpg.Connection, kind: str, row: Any, cases: list[Any], plan: Any | None) -> dict[str, int]:
     source_id, reason = row["source_id"], row["reason"]
-    base = {"source_system": SOURCE, "source_id": source_id, "reason": reason, "outbox_id": row["id"]}
+    base = {"source_system": SOURCE, "source_id": source_id, "reason": reason, "outbox_id": row["event_id"]}
     retired = kind == TYPE_RETIRED
     for case in cases:
         via = [w for w, on in (("leg", case["via_leg"]), ("case", case["via_case"]), ("item", case["via_item"])) if on]
@@ -176,11 +214,7 @@ async def _notify(conn: asyncpg.Connection, kind: str, row: Any, cases: list[Any
     if plan is not None:
         if retired:
             title = f"Tour withdrawn: trip plan {source_id[:8]}"
-            message = (
-                f"AA no longer serves tour {source_id} ({_why(reason)}). Its trip plan is no longer offered to "
-                f"agencies; {plan['confirmed_holds']} confirmed and {plan['active_holds']} active B2B holds on future "
-                "departures are kept (see Trip plans, filter Orphaned)."
-            )
+            message = plan_retired_message(source_id, reason, plan["confirmed_holds"], plan["active_holds"])
         else:
             title = f"Tour back in the catalog: trip plan {source_id[:8]}"
             message = f"Tour {source_id} is served again; its trip plan is offered as before."
@@ -196,6 +230,7 @@ async def _notify(conn: asyncpg.Connection, kind: str, row: Any, cases: list[Any
                 "sellable": plan["sellable"],
                 "confirmed_holds": plan["confirmed_holds"],
                 "active_holds": plan["active_holds"],
+                "active_hold_list": _hold_list(plan),
             },
         )
     return {"cases": len(cases), "plans": 1 if plan is not None else 0}
@@ -221,7 +256,7 @@ async def apply_event(conn: asyncpg.Connection, row: Any, *, today: date) -> dic
         action=f"catalog.{kind}",
         entity_type="trip_plan" if plan is not None else "catalog_tour",
         entity_id=plan["id"] if plan is not None else None,
-        after={"source_id": source_id, "reason": row["reason"], "outbox_id": row["id"], **counts},
+        after={"source_id": source_id, "reason": row["reason"], "outbox_id": row["event_id"], **counts},
         entity_label=f"tour {source_id[:8]}",
         summary=f"CIS tour {event}: notified staff about {counts['cases']} trip case(s), {counts['plans']} plan(s)",
     )
@@ -248,7 +283,7 @@ async def pull(pool: asyncpg.Pool, job: Job, *, today: date | None = None) -> di
         )
         rows = await conn.fetch(SCAN_SQL, safe_id, SOURCE, CONTRACT, BATCH)
         for row in rows:
-            event_id = await conn.fetchval(
+            inbox_id = await conn.fetchval(
                 """
                 INSERT INTO booking.inbox_events
                     (source, contract, idempotency_key, payload, contract_version, source_position)
@@ -261,15 +296,15 @@ async def pull(pool: asyncpg.Pool, job: Job, *, today: date | None = None) -> di
                 row["idempotency_key"],
                 json.dumps(_payload(row)),
                 CONTRACT_VERSION,
-                row["id"],
+                row["event_id"],
             )
-            if event_id is None:
+            if inbox_id is None:
                 continue
             result = await apply_event(conn, row, today=today)
             applied[result["outcome"]] = applied.get(result["outcome"], 0) + 1
             await conn.execute(
                 "UPDATE booking.inbox_events SET status = 'processed', processed_at = now() WHERE id = $1::uuid",
-                event_id,
+                inbox_id,
             )
         drained = len(rows) < BATCH
         if drained:

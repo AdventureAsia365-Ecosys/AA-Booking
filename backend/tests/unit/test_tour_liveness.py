@@ -53,8 +53,12 @@ WHEN = datetime(2026, 10, 23, 8, 0, tzinfo=UTC)
             "paused",
             "master_inactive",
         ),
-        # an unknown tombstone state is temporary (paused), never served
-        (state_row(KEY, in_catalog=False, tomb_state="superseded", tomb_reason="superseded_pending"), "paused", None),
+        # CIS 274 keeps a row with state 'restored' once a key is served again: not a tombstone, v_tour decides
+        (state_row(KEY, tomb_state="restored", tomb_reason="restore"), liveness.SERVED, "restore"),
+        (state_row(KEY, in_catalog=False, tomb_state="restored", tomb_reason="restore"), "not_in_catalog", None),
+        # a state this module does not know is no tombstone either (never sold blindly: absent from v_tour = refused)
+        (state_row(KEY, tomb_state="superseded", tomb_reason="superseded_pending"), liveness.SERVED, None),
+        (state_row(KEY, in_catalog=False, tomb_state="superseded"), "not_in_catalog", "not_in_catalog"),
         # fail closed: a tombstone wins over v_tour (the nightly probe reports the disagreement)
         (state_row(KEY, tomb_state="retired", tomb_reason="master_trashed"), "retired", "master_trashed"),
     ],
@@ -190,6 +194,8 @@ def test_delta_lists_retired_tours_as_withdrawn() -> None:
     assert item["sellable"] is False and item["components"] == []
     [(flat, _)] = [c for c in conn.calls if "WHERE (p.sellable" in c[0]]
     assert "UNION ALL" in flat and "catalog.v_tour_retired" in flat and "r.state = 'retired'" in flat
+    # only plans that were offered to agencies are told withdrawn (never-offered plans stay internal)
+    assert "(p.sellable OR EXISTS (SELECT 1 FROM booking.trip_plan_components c" in flat.split("UNION ALL")[1]
 
 
 def test_full_list_and_missing_view_list_no_withdrawn() -> None:
@@ -211,7 +217,7 @@ def test_full_list_and_missing_view_list_no_withdrawn() -> None:
 
 def _event(event: str = "retired", reason: str = "source_deleted", **kw: Any) -> dict[str, Any]:
     return {
-        "id": kw.get("id", 7),
+        "event_id": kw.get("event_id", 7),
         "idempotency_key": kw.get("key", f"tle:{event}:7"),
         "source_system": "cis",
         "source_id": KEY,
@@ -223,13 +229,14 @@ def _event(event: str = "retired", reason: str = "source_deleted", **kw: Any) ->
 
 CASE = {"id": "0c000000-0000-4000-8000-000000000001", "code": "TC-000042", "status": "confirmed", "channel": "b2b",
         "via_leg": False, "via_case": False, "via_item": True}  # fmt: skip
-PLAN_ROW = {"id": PLAN, "sellable": True, "confirmed_holds": 2, "active_holds": 1}
+HOLD_LIST = '[{"hold_id": "4b000000-0000-4000-8000-000000000001", "expires_at": "2026-10-24T08:00:00+00:00", "agency_name": "Agency A"}]'  # noqa: E501
+PLAN_ROW = {"id": PLAN, "sellable": True, "confirmed_holds": 2, "active_holds": 1, "active_hold_list": HOLD_LIST}
 
 
 def _pull_conn(events: list[dict[str, Any]], *, inserted: Any = "1b000000-0000-4000-8000-000000000001") -> ScriptedConn:
     conn = ScriptedConn().on(VIEW_READY_FRAGMENT, True)
     conn.on("SELECT safe_id FROM booking.inbox_cursor", 0)
-    conn.on("FROM catalog.v_tour_lifecycle_outbox o WHERE o.id > $1", events)
+    conn.on("FROM catalog.v_tour_lifecycle_outbox o WHERE o.event_id > $1", events)
     conn.on("INSERT INTO booking.inbox_events", inserted)
     conn.on("FROM booking.trip_cases tc WHERE tc.deleted_at IS NULL", [CASE])
     conn.on("FROM booking.trip_plans p WHERE p.source_system = 'cis' AND p.source_id = $1", PLAN_ROW)
@@ -260,7 +267,13 @@ async def test_retired_event_notifies_staff_per_case_and_plan_and_changes_nothin
     ]
     case_data = json.loads(rows[0][6])
     assert case_data["source_id"] == KEY and case_data["via"] == ["item"] and case_data["code"] == "TC-000042"
-    assert "agency" in rows[0][3] and "2 confirmed and 1 active" in rows[1][3]
+    assert "agency" in rows[0][3]
+    # the plan text never says the active holds are safe: they can no longer be confirmed (409) and will expire
+    assert "2 confirmed bookings on future departures are kept" in rows[1][3]
+    assert "1 active B2B hold can no longer be confirmed and will expire: contact the agency now" in rows[1][3]
+    assert "holds" not in rows[1][3].split("kept")[0]
+    plan_data = json.loads(rows[1][6])
+    assert plan_data["active_hold_list"][0]["agency_name"] == "Agency A"
     [inbox] = conn.sql("INSERT INTO booking.inbox_events")
     assert inbox[:3] == ("cis", "catalog.tour", "tle:retired:7") and json.loads(inbox[3])["event"] == "retired"
     assert conn.sql("SET status = 'processed'")
@@ -268,6 +281,28 @@ async def test_retired_event_notifies_staff_per_case_and_plan_and_changes_nothin
     assert not any(k in flat for flat, _ in conn.calls for k in ("UPDATE booking.trip_cases", "b2b_holds SET"))
     [audit] = conn.sql("INSERT INTO booking.audit_logs")
     assert audit[3] == "catalog.tour.retired"
+
+
+@pytest.mark.parametrize(
+    ("confirmed", "active", "has", "lacks"),
+    [
+        (0, 0, ["0 confirmed bookings on future departures are kept."], ["active B2B hold"]),
+        (1, 0, ["1 confirmed booking on future departures is kept."], ["active B2B hold"]),
+        (3, 2, ["2 active B2B holds can no longer be confirmed and will expire: contact the agencies now."], []),
+    ],
+)
+def test_plan_retired_message_never_calls_active_holds_safe(
+    confirmed: int, active: int, has: list[str], lacks: list[str]
+) -> None:
+    text = lifecycle.plan_retired_message(KEY, "source_deleted", confirmed, active)
+    assert all(h in text for h in has) and not any(word in text for word in lacks)
+    assert "holds on future departures are kept" not in text and "Orphaned" in text
+
+
+def test_hold_list_accepts_json_text_a_list_or_nothing() -> None:
+    assert lifecycle._hold_list({"active_hold_list": HOLD_LIST})[0]["agency_name"] == "Agency A"
+    assert lifecycle._hold_list({"active_hold_list": [{"hold_id": "h"}]}) == [{"hold_id": "h"}]
+    assert lifecycle._hold_list({"active_hold_list": None}) == [] and lifecycle._hold_list({}) == []
 
 
 @pytest.mark.asyncio
@@ -385,7 +420,23 @@ async def test_orphaned_plans_carry_reason_and_what_is_attached() -> None:
     assert "tomb_state" not in item
     [(flat, args)] = [c for c in conn.calls if "LEFT JOIN LATERAL" in c[0]]
     assert "catalog.v_tour_retired" in flat and args[0] == KEY
+    # a paused key is no orphan (ADR 0015 decision 5: no staff flag for a pause), in the page and in its total
+    paused_out = "pr.state = 'paused'"
+    [(total_sql, _)] = [c for c in conn.calls if "SELECT count(*) FROM booking.trip_plans" in c[0]]
+    assert paused_out in flat and paused_out in total_sql
     liveness.reset_cache()
     degraded = ScriptedConn().on(VIEW_READY_FRAGMENT, None).on("FROM booking.trip_plans p LEFT JOIN LATERAL", [])
     await trip_plans.list_orphaned(degraded, SALES)
+    assert all("v_tour_retired" not in flat for flat, _ in degraded.calls)
+
+
+@pytest.mark.asyncio
+async def test_orphaned_facet_leaves_paused_keys_out_when_the_tombstone_is_readable() -> None:
+    conn = ScriptedConn().on(VIEW_READY_FRAGMENT, True).on("FROM booking.trip_plans p WHERE p.source_system", 1)
+    assert (await trip_plans.facets(conn))["orphaned"] == 1
+    [(flat, _)] = [c for c in conn.calls if "FROM booking.trip_plans p WHERE p.source_system" in c[0]]
+    assert "pr.state = 'paused'" in flat
+    liveness.reset_cache()
+    degraded = ScriptedConn().on(VIEW_READY_FRAGMENT, None)
+    await trip_plans.facets(degraded)
     assert all("v_tour_retired" not in flat for flat, _ in degraded.calls)
