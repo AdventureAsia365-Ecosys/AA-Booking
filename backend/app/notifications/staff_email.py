@@ -50,6 +50,9 @@ class Tour:
     country: str | None
     day_from: int
     day_to: int
+    # AA-986 L6: why AA no longer serves this tour (retired | paused | stop_removed | not_served), None when served.
+    # Read from the inquiry snapshot's leg flags (v1.3); older inquiries have none.
+    unavailable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,15 @@ async def _catalog_tours(conn: asyncpg.Connection, keys: list[str]) -> dict[str,
     return out
 
 
+def unavailable_by_position(snapshot: dict[str, Any]) -> dict[int, str]:
+    """Leg position -> reason, for the legs a v1.3 inquiry flagged ``available: false`` (AA-986 L6)."""
+    out: dict[int, str] = {}
+    for leg in snapshot.get("legs") or []:
+        if isinstance(leg, dict) and leg.get("available") is False and isinstance(leg.get("position"), int):
+            out[leg["position"]] = str(leg.get("reason") or "not_served")
+    return out
+
+
 async def load_inquiry(conn: asyncpg.Connection, notification_id: str) -> InquiryMail | None:
     row = await conn.fetchrow(CASE_SQL, notification_id)
     if row is None or row["type"] != NEW_INQUIRY_TYPE:
@@ -116,11 +128,14 @@ async def load_inquiry(conn: asyncpg.Connection, notification_id: str) -> Inquir
     snapshot = loads(row["inquiry_snapshot"], {})
     legs = sorted(loads(row["legs"], []), key=lambda leg: (leg["day_from"], leg["position"]))
     catalog = await _catalog_tours(conn, sorted({tour_key(leg) for leg in legs}))
+    gone = unavailable_by_position(snapshot)
     tours = []
     for leg in legs:
         hit = catalog.get(tour_key(leg)) or {}
         title = (hit.get("title") or "").strip() or leg_title(snapshot, leg["source_tour_id"])
-        tours.append(Tour(title, hit.get("country"), int(leg["day_from"]), int(leg["day_to"])))
+        tours.append(
+            Tour(title, hit.get("country"), int(leg["day_from"]), int(leg["day_to"]), gone.get(int(leg["position"])))
+        )
     countries: list[str] = []
     for name in [t.country for t in tours] + list(row["countries"] or []):
         if name and name not in countries:
@@ -164,7 +179,10 @@ def _travellers(m: InquiryMail) -> str:
 
 def _tour_line(t: Tour) -> str:
     days = f"day {t.day_from}" if t.day_from == t.day_to else f"days {t.day_from}-{t.day_to}"
-    return f"{t.title}{f' ({t.country})' if t.country else ''}, {days}"
+    line = f"{t.title}{f' ({t.country})' if t.country else ''}, {days}"
+    if t.unavailable:
+        line += f" [no longer offered by AA: {t.unavailable.replace('_', ' ')}]"
+    return line
 
 
 def case_url(admin_url: str, code: str) -> str:
@@ -190,11 +208,20 @@ def render(m: InquiryMail, *, to: str, admin_url: str, environment: str) -> mail
     ]
     tours = [_tour_line(t) for t in m.tours]
     review = "The contact matches an existing customer: review before merging." if m.needs_merge_review else None
+    gone = sum(1 for t in m.tours if t.unavailable)
+    gone_note = (
+        f"{gone} requested tour{'s' if gone != 1 else ''} AA no longer offer{'s' if gone == 1 else ''}"
+        " (marked above): check before quoting."
+        if gone
+        else None
+    )
 
     text_lines = [f"New inquiry {m.code} from TripPlanner", ""]
     text_lines += [f"{label}: {value}" for label, value in facts]
     text_lines += ["", "Tours requested:"]
     text_lines += [f"  {i}. {line}" for i, line in enumerate(tours, 1)] or ["  (custom trip, no AA tour)"]
+    if gone_note:
+        text_lines += ["", gone_note]
     if review:
         text_lines += ["", review]
     text_lines += ["", f"Open the trip case: {url}", "", "-- ", "AA-Booking, automatic message. Do not reply."]
@@ -210,6 +237,7 @@ def render(m: InquiryMail, *, to: str, admin_url: str, environment: str) -> mail
         f'<h2 style="font-size:18px">New inquiry {e(m.code)} from TripPlanner</h2>'
         f"<table>{rows}</table>"
         f"<p><strong>Tours requested</strong></p><ol>{items}</ol>"
+        + (f'<p style="color:#b45309">{e(gone_note)}</p>' if gone_note else "")
         + (f'<p style="color:#b45309">{e(review)}</p>' if review else "")
         + f'<p><a href="{e(url, quote=True)}">Open the trip case {e(m.code)}</a></p>'
         '<p style="color:#888;font-size:12px">AA-Booking, automatic message. Do not reply.</p></div>'

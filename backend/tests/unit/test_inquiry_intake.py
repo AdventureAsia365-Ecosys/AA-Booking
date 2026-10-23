@@ -9,7 +9,7 @@ import asyncpg
 import pytest
 
 from app.inquiry import intake
-from app.inquiry.contract import Contact
+from app.inquiry.contract import Contact, Leg
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
 from tests import inquiry_samples as samples
@@ -105,6 +105,7 @@ async def test_process_opens_a_trip_case_for_a_new_lead() -> None:
         "needs_merge_review": False,
         "legs": 2,
         "legs_without_tour_key": 2,  # the catalog knows neither tour
+        "legs_unavailable": {},
         "contract_version": "1.1",
     }
     assert [args[1] for args in conn.sql("INSERT INTO booking.trip_case_legs")] == [1, 2]
@@ -141,6 +142,50 @@ async def test_process_without_legs_inserts_none() -> None:
     conn = conn_for(payload)
     assert (await intake.process(conn, process_job()))["legs"] == 0
     assert conn.sql("INSERT INTO booking.trip_case_legs") == []
+
+
+# ── legs AA no longer serves (v1.3, AA-986 L6) ───────────────────────────────
+
+
+@pytest.mark.parametrize("reason", ["retired", "paused", "stop_removed", "not_served"])
+async def test_v1_3_unavailable_leg_is_counted_in_summary_audit_and_notification(reason: str) -> None:
+    conn = conn_for(samples.v1_3(unavailable=reason))
+    result = await intake.process(conn, process_job())
+    assert result["outcome"] == "processed" and result["contract_version"] == "1.3"
+    assert result["legs"] == 3 and result["legs_unavailable"] == {reason: 1}
+    # every leg is still opened (staff decide; slice L5 stores the flag on the leg)
+    assert sorted(leg_rows(conn)) == [1, 2, 3]
+    (note,) = conn.sql("INSERT INTO booking.notifications")
+    assert f"1 leg is a tour AA no longer offers ({reason.replace('_', ' ')} 1): check it before quoting." in note[1]
+    assert json.loads(note[3])["legs_unavailable"] == {reason: 1}
+    (audit,) = conn.sql("INSERT INTO booking.audit_logs")
+    assert json.loads(audit[1])["legs_unavailable"] == {reason: 1}
+    (case,) = conn.sql("INSERT INTO booking.trip_cases")
+    snapshot = json.loads(case[4])
+    assert [leg["available"] for leg in snapshot["legs"]] == [True, True, False]
+    assert snapshot["legs"][-1]["reason"] == reason
+
+
+async def test_v1_3_all_served_has_no_unavailable_note() -> None:
+    conn = conn_for(samples.v1_3())
+    result = await intake.process(conn, process_job())
+    assert result["legs_unavailable"] == {}
+    (note,) = conn.sql("INSERT INTO booking.notifications")
+    assert "no longer offers" not in note[1]
+
+
+async def test_unavailable_counts_and_note_wording() -> None:
+    legs = tuple(
+        Leg(i, f"t{i}", i, i, available=avail, reason=reason)
+        for i, (avail, reason) in enumerate(
+            [(True, None), (False, "retired"), (False, "stop_removed"), (False, "retired"), (False, None)], 1
+        )
+    )
+    counts = intake.unavailable_legs(legs)
+    assert counts == {"not_served": 1, "retired": 2, "stop_removed": 1}
+    assert intake.unavailable_note(counts) == (
+        "4 legs are tours AA no longer offers (not served 1, retired 2, stop removed 1): check them before quoting."
+    )
 
 
 # ── catalog tour key per leg (AA-830, bk-011) ────────────────────────────────

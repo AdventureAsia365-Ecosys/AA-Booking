@@ -198,6 +198,21 @@ def test_parse_v1_3_carries_the_flag_per_leg() -> None:
     assert (gone.available, gone.reason, gone.reason_detail) == (False, "retired", "source_deleted")
     assert gone.source_system == "cis" and gone.source_id
     assert [d["available"] for d in inquiry.snapshot["days"]] == [True, False]
+    # review round: the snapshot keeps the leg flags too, by position (trip_case_legs has no column for them yet)
+    snap_legs = inquiry.snapshot["legs"]
+    assert [leg["position"] for leg in snap_legs] == [leg.position for leg in inquiry.legs]
+    assert snap_legs[-1] == {
+        "position": gone.position,
+        "source_tour_id": gone.source_tour_id,
+        "available": False,
+        "reason": "retired",
+        "reason_detail": "source_deleted",
+    }
+    assert all(leg["available"] and leg["reason"] is None for leg in snap_legs[:-1])
+
+
+def test_older_versions_keep_the_snapshot_shape() -> None:
+    assert "legs" not in parse(samples.v1_2()).snapshot
 
 
 def test_older_versions_read_as_available() -> None:

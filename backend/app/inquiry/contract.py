@@ -4,7 +4,8 @@ Contract rule 2: a consumer accepts every minor of its major. Booking accepts ve
 
 - ``version: 1.3`` must satisfy ``inquiry.submitted.v1.3`` (AA-986 L6, root ADR 0015 decision 5: every leg and day
   also says ``available`` + ``reason`` + ``reason_detail``; stops whose tour AA no longer serves come after the served
-  ones with ``available: false``, so staff see why such a leg cannot be matched);
+  ones with ``available: false``, so staff see why such a leg cannot be matched; the snapshot keeps the leg flags
+  under ``legs``);
 
 - ``version: 1.2`` must satisfy ``inquiry.submitted.v1.2`` (AA-830: each leg also carries the catalog tour key
   ``source_system`` + ``source_id``, both null when TripPlanner could not resolve it);
@@ -152,6 +153,24 @@ def parse(payload: dict[str, Any]) -> Inquiry:
         )
         for leg in sorted(itinerary["legs"], key=lambda leg: leg["position"])
     )
+    snapshot: dict[str, Any] = {
+        "days": itinerary["days"],
+        "custom_days": itinerary["custom_days"],
+        "contract_version": version,
+    }
+    if version == "1.3":
+        # AA-986 L6 review: the leg-level flags are kept too (trip_case_legs has no column for them until slice L5),
+        # so staff and the "new inquiry" e-mail can tell which leg AA no longer serves, by position.
+        snapshot["legs"] = [
+            {
+                "position": leg.position,
+                "source_tour_id": leg.source_tour_id,
+                "available": leg.available,
+                "reason": leg.reason,
+                "reason_detail": leg.reason_detail,
+            }
+            for leg in legs
+        ]
     return Inquiry(
         version=version,
         idempotency_key=payload["idempotency_key"],
@@ -160,5 +179,5 @@ def parse(payload: dict[str, Any]) -> Inquiry:
         submitted_at=payload["submitted_at"],
         contact=contact,
         legs=legs,
-        snapshot={"days": itinerary["days"], "custom_days": itinerary["custom_days"], "contract_version": version},
+        snapshot=snapshot,
     )
