@@ -1,7 +1,7 @@
 """AA-974 (bk-021) schema on a real PostgreSQL: registration, re-run no-op, the settings rows, grants (both new tables
 append-only for the app), owner bk_owner, the seeded default B2B cancellation policy (approved), the tiers CHECK,
-maker-checker on cancellation-policy approvals, the extend columns' CHECK, the cancellation amounts CHECK, and no
-personal-data-looking column."""
+maker-checker on cancellation-policy approvals, the extend columns' CHECK, the cancellation amounts CHECK, the backfill
+of the policy on holds confirmed before bk-021, and no personal-data-looking column."""
 
 from __future__ import annotations
 
@@ -244,6 +244,79 @@ async def test_extend_and_cancellation_checks(admin: asyncpg.Connection) -> None
             with pytest.raises(asyncpg.UniqueViolationError):  # one cancellation per booking
                 async with admin.transaction():
                     await cancel(1_000_000, 1_000_000)
+            raise _Rollback
+    except _Rollback:
+        pass
+
+
+def _backfill_sql() -> str:
+    """The backfill statement of the migration file, so the test runs the shipped text inside its own transaction."""
+    text = MIGRATION.read_text(encoding="utf-8")
+    start = text.index("UPDATE booking.b2b_holds SET cancellation_policy_id")
+    return text[start : text.index(";", start) + 1]
+
+
+async def test_backfill_locks_the_seed_policy_on_confirmed_holds(admin: asyncpg.Connection) -> None:
+    """Holds confirmed before bk-021 get the seeded default locked; other holds and already locked ones keep theirs."""
+    tenant = str(uuid.uuid4())
+    try:
+        async with admin.transaction():
+            partner = await admin.fetchval(
+                "INSERT INTO booking.b2b_partners (tenant_id, agency_name, m2m_client_id)"
+                " VALUES ($1::uuid, 'Schema Agency 21b', 'client021b') RETURNING id::text",
+                tenant,
+            )
+            quote = await admin.fetchval(
+                "INSERT INTO booking.b2b_quotes (partner_id, m2m_client_id, proposal_ref, proposal_version, currency,"
+                " fx_rate_per_usd, fx_as_of, fx_source, pricing_rule_valid_from, margin_applied, card_fee_pct,"
+                " rounding, priced_on, total_b2b_price, price_hash, valid_until)"
+                " VALUES ($1::uuid, 'client021b', 'p-21b', 1, 'USD', 1, current_date, 'usd', current_date, 0.15, 0.03,"
+                " 'line_ceil_0.01', current_date, 100, $2, now() + interval '1 day') RETURNING id::text",
+                partner,
+                "c" * 64,
+            )
+            later = await admin.fetchval(
+                "INSERT INTO booking.cancellation_policies (channel, valid_from, title, tiers)"
+                " VALUES ('b2b', DATE '2026-09-01', 'Backdated', '[{\"min_days\": 0, \"fee_pct\": 10}]')"
+                " RETURNING id::text"
+            )
+
+            async def hold(version: int, status: str, policy: str | None = None) -> str:
+                case = None
+                if status == "confirmed":
+                    case = await admin.fetchval(
+                        "INSERT INTO booking.trip_cases (customer_id, status, source_system, source_id, channel,"
+                        " party_tenant_id) VALUES (NULL, 'confirmed', 'crm', $1, 'b2b', $2::uuid) RETURNING id::text",
+                        f"p-21b-{version}",
+                        tenant,
+                    )
+                return await admin.fetchval(
+                    "INSERT INTO booking.b2b_holds (partner_id, m2m_client_id, quote_id, proposal_ref,"
+                    " proposal_version, idempotency_key, expires_at, status, confirmed_at, trip_case_id,"
+                    " cancellation_policy_id) VALUES ($1::uuid, 'client021b', $2::uuid, 'p-21b', $3, $4, $5, $6,"
+                    " CASE WHEN $6 = 'confirmed' THEN now() END, $7::uuid, $8::uuid) RETURNING id::text",
+                    partner,
+                    quote,
+                    version,
+                    f"key-021b-{version}",
+                    datetime.now(UTC) + timedelta(hours=1),
+                    status,
+                    case,
+                    policy,
+                )
+
+            legacy = await hold(1, "confirmed")
+            locked = await hold(2, "confirmed", later)
+            active = await hold(3, "active")
+            await admin.execute(_backfill_sql())
+            await admin.execute(_backfill_sql())  # re-runnable
+            got = dict(
+                await admin.fetch(
+                    "SELECT id::text, cancellation_policy_id::text FROM booking.b2b_holds WHERE id = ANY($1::uuid[])",
+                    [legacy, locked, active],
+                )
+            )
+            assert got == {legacy: SEED, locked: later, active: None}
             raise _Rollback
     except _Rollback:
         pass
