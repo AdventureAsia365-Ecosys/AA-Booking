@@ -7,7 +7,7 @@ import { CIS_ADMIN_URL, CIS_CONSOLE_PATH } from "@/lib/config";
 
 export function FromCisTag() {
   return (
-    <span className="inline-flex items-center rounded-full bg-neutral-bg px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-neutral-fg">
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-neutral-bg px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-neutral-fg">
       From CIS
     </span>
   );

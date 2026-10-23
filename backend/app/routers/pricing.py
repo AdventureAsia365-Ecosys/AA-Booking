@@ -8,6 +8,8 @@ staff use while building a version. ``POST …/versions/{n}/price`` (routers/tri
 ``/booking/pricing/rules`` and ``/booking/pricing/fx-rates`` (GET list, POST new pending row, POST ``/{id}/approve``)
 manage the policy rows themselves with maker-checker (``app.pricing.policy``, bk-007): reads need ``pricing.read``,
 writes and approvals ``pricing.write`` (admin, contracting), and the creator of a row cannot approve it (403).
+``/booking/pricing/cancellation-policies`` (AA-974, bk-021) does the same for the B2B cancellation-fee schedules
+(``app.b2b.cancellation``): a row per trip plan (``source_id``) or the B2B default, in force once approved.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.staff import Staff, get_pool, require
+from app.b2b import cancellation
 from app.pricing import engine, policy, service
 
 log = logging.getLogger(__name__)
@@ -234,3 +237,52 @@ async def create_fx_rate(body: FxRateCreate, staff: CanWritePricing, pool: Pool)
 async def approve_fx_rate(fx_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.approve_fx_rate(conn, staff, str(fx_id), today=_today())
+
+
+# ── B2B cancellation-fee policies (AA-974, bk-021, same maker-checker) ───────
+
+
+class TierIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    min_days: int = Field(ge=0, le=cancellation.MAX_DAYS)
+    fee_pct: Annotated[Decimal, Field(ge=0, le=100, max_digits=5, decimal_places=2, allow_inf_nan=False)]
+
+
+class CancellationPolicyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=120)
+    source_id: str | None = Field(default=None, min_length=1, max_length=128)
+    valid_from: date
+    tiers: list[TierIn] = Field(min_length=1, max_length=cancellation.MAX_TIERS)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/cancellation-policies")
+async def list_cancellation_policies(
+    staff: CanPrice,
+    pool: Pool,
+    source_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=cancellation.MAX_ROWS)] = cancellation.MAX_ROWS,
+) -> dict[str, Any]:
+    today = _today()
+    async with pool.acquire() as conn:
+        items = await cancellation.list_policies(conn, staff, today=today, source_id=source_id, limit=limit)
+    return {"items": items, "today": today}
+
+
+@router.post("/cancellation-policies", status_code=201)
+async def create_cancellation_policy(
+    body: CancellationPolicyCreate, staff: CanWritePricing, pool: Pool
+) -> dict[str, Any]:
+    data = body.model_dump()
+    data["tiers"] = [{"min_days": t.min_days, "fee_pct": t.fee_pct} for t in body.tiers]
+    async with pool.acquire() as conn, conn.transaction():
+        return await cancellation.create_policy(conn, staff, data, today=_today())
+
+
+@router.post("/cancellation-policies/{policy_id}/approve")
+async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await cancellation.approve_policy(conn, staff, str(policy_id), today=_today())

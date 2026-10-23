@@ -307,6 +307,28 @@ async def test_rates_default_the_item_net_and_price_the_version(
         ),
         201,
     )
+    gone = await _ok(
+        await c.post(
+            f"/contracts/{draft['id']}/rates",
+            json={"hotel_room_type_id": rooms[1]["id"], "net_amount": "7"},
+            headers=maker,
+        ),
+        201,
+    )
+    assert (await c.delete(f"/rates/{gone['id']}", headers=maker)).status_code == 204
+
+    # AA-910: the rate rows (deleted rate included) show on the supplier, hotel and service pages.
+    def rate_rows(record: dict[str, Any]) -> list[str]:
+        return sorted(a["action"] for a in record["recent_activity"] if a["entity_type"] == "supplier_rate")
+
+    sup_page = await _ok(await c.get(f"/suppliers/{sup['id']}", headers=sales))
+    hotel_page = await _ok(await c.get(f"/hotels/{hotel['code']}", headers=sales))
+    svc_page = await _ok(await c.get(f"/services/{svc['code']}", headers=sales))
+    assert rate_rows(sup_page) == ["supplier_rate.created"] * 6 + ["supplier_rate.deleted", "supplier_rate.updated"]
+    assert rate_rows(hotel_page) == ["supplier_rate.created"] * 3 + ["supplier_rate.deleted"]
+    assert rate_rows(svc_page) == ["supplier_rate.created"] * 3 + ["supplier_rate.updated"]
+    deleted = next(a for a in hotel_page["recent_activity"] if a["action"] == "supplier_rate.deleted")
+    assert deleted["entity_label"].endswith("Emerald · Family Suite") and deleted["summary"] == "Removed rate 7.00 VND"
 
     customer_id = await admin.fetchval(
         "INSERT INTO booking.customers (email) VALUES ('it-823-api@example.test') RETURNING id"

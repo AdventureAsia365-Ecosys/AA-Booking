@@ -58,6 +58,15 @@ CONTRACT_EDITABLE = (
 CONTRACT_REQUIRED = ("title", "valid_from", "currency")
 CONTRACT_STATUS_TARGETS = ("published", "expired")
 
+
+# AA-910: SQL (``l`` = ``booking.audit_logs``) for the room type / service a ``supplier_rate`` audit row prices, from
+# the row's own snapshot (a created or deleted rate carries ``hotel_room_type_id`` / ``service_id``), else from the
+# live rate (an update keeps only the changed fields). The supplier, hotel and service pages list their rates' rows.
+RATE_ROOM_TYPE = """coalesce((l.after->>'hotel_room_type_id')::uuid, (l.before->>'hotel_room_type_id')::uuid,
+    (SELECT x.hotel_room_type_id FROM booking.supplier_rates x WHERE x.id = l.entity_id))"""
+RATE_SERVICE = """coalesce((l.after->>'service_id')::uuid, (l.before->>'service_id')::uuid,
+    (SELECT x.service_id FROM booking.supplier_rates x WHERE x.id = l.entity_id))"""
+
 TODAY = "(now() AT TIME ZONE 'UTC')::date"
 # Published and not over yet (in force today, or starting later): blocks a deactivation.
 LIVE_CONTRACT = f"k.status = 'published' AND (k.valid_to IS NULL OR k.valid_to >= {TODAY})"
@@ -288,16 +297,21 @@ async def get_supplier(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     )
     supplier["contract_counts"] = dict(counts) if counts else {"total": 0, "drafts": 0, "in_force": 0}
     activity = await conn.fetch(
-        """
+        f"""
         SELECT l.id::text AS id, l.created_at AS at, l.actor_ref, st.name AS actor_name, l.action, l.entity_type,
                l.entity_label, l.summary
         FROM booking.audit_logs l LEFT JOIN booking.staff_users st ON st.cis_user_id = l.actor_ref
         WHERE (l.entity_type = 'supplier' AND l.entity_id = $1::uuid)
            OR (l.entity_type = 'supplier_contract' AND l.entity_id IN (
                SELECT k.id FROM booking.supplier_contracts k WHERE k.supplier_id = $1::uuid))
+           OR (l.entity_type = 'supplier_rate' AND (
+               {RATE_ROOM_TYPE} IN (
+                   SELECT t.id FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id
+                   WHERE h.supplier_id = $1::uuid)
+               OR {RATE_SERVICE} IN (SELECT sv.id FROM booking.services sv WHERE sv.supplier_id = $1::uuid)))
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT 20
-        """,
+        """,  # noqa: S608 — constants only
         supplier["id"],
     )
     supplier["recent_activity"] = [

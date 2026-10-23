@@ -593,6 +593,62 @@ async def test_approve_rules() -> None:
         assert err.value.code == code
 
 
+def badge_rows(*snapshots: dict[int, str]):
+    """Answers for the version badge read (``_version_badges``): one snapshot per call, before then after the write."""
+    calls = iter(snapshots)
+
+    def answer(*_: Any) -> list[dict[str, Any]]:
+        snap = next(calls)
+        return [
+            {"id": f"00000000-0000-4000-8000-00000000000{n}", "version_number": n, "badge": b} for n, b in snap.items()
+        ]
+
+    return answer
+
+
+async def test_send_audits_the_versions_it_supersedes() -> None:
+    """AA-910: sending V2 makes the sent V1 superseded (a derived badge, no write to V1): one audit row says so."""
+    conn = send_conn("proposal_sent", version_number=2).on(
+        "FROM booking.trip_case_versions AS v", badge_rows({1: "sent", 2: "draft"}, {1: "superseded", 2: "sent"})
+    )
+    await versions.send_version(
+        conn, SALES, "TC-1", 2, to=None, subject="s", message="m", valid_until=None, today=date(2026, 10, 14)
+    )
+    rows = audit_args(conn)
+    assert [r[3] for r in rows] == ["trip_case_version.sent", "trip_case_version.superseded"]
+    superseded = rows[1]
+    assert superseded[5] == "00000000-0000-4000-8000-000000000001" and superseded[8] == "TC-000001 V1"
+    assert json.loads(superseded[6]) == {"badge": "sent"}
+    assert json.loads(superseded[7]) == {"badge": "superseded", "by": "sent", "superseded_by": 2}
+    assert superseded[9] == "V1 superseded: V2 was sent"
+
+
+async def test_approve_audits_newly_superseded_versions_only() -> None:
+    """AA-910: approving V2 supersedes every other live version; V1 (already superseded by the send of V2) gets no
+    second row, the unsent draft V3 gets one."""
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.trip_cases tc", case_row("proposal_sent"))
+        .on("FROM booking.trip_case_versions v", version_row(version_number=2, is_sent_to_customer=True, badge="sent"))
+        .on(
+            "FROM booking.trip_case_versions AS v",
+            badge_rows({1: "superseded", 2: "sent", 3: "draft"}, {1: "superseded", 2: "approved", 3: "superseded"}),
+        )
+    )
+    await versions.approve_version(conn, SALES, "TC-1", 2, None)
+    rows = [r for r in audit_args(conn) if r[3] == "trip_case_version.superseded"]
+    assert [(r[8], r[9]) for r in rows] == [("TC-000001 V3", "V3 superseded: V2 was approved")]
+    assert json.loads(rows[0][6]) == {"badge": "draft"}
+
+
+async def test_first_send_supersedes_nothing() -> None:
+    conn = send_conn().on("FROM booking.trip_case_versions AS v", badge_rows({1: "draft"}, {1: "sent"}))
+    await versions.send_version(
+        conn, SALES, "TC-1", 1, to=None, subject="s", message="m", valid_until=None, today=date(2026, 10, 14)
+    )
+    assert [r[3] for r in audit_args(conn)] == ["trip_case_version.sent"]
+
+
 async def test_list_versions_filters_and_shape() -> None:
     row = {
         **version_row(),

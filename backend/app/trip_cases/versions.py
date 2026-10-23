@@ -309,6 +309,46 @@ def _label(case: Any, number: int) -> str:
     return f"{case['code']} V{number}"
 
 
+async def _version_badges(conn: asyncpg.Connection, case_id: str) -> dict[str, tuple[int, str]]:
+    """{version id: (number, derived badge)} of the case's live versions (``sql.VERSION_BADGE``)."""
+    rows = await conn.fetch(
+        f"SELECT v.id::text AS id, v.version_number, {sql.VERSION_BADGE} AS badge"  # noqa: S608 — constant
+        " FROM booking.trip_case_versions AS v WHERE v.trip_case_id = $1::uuid AND v.deleted_at IS NULL",
+        case_id,
+    )
+    return {r["id"]: (r["version_number"], r["badge"]) for r in rows}
+
+
+async def _audit_superseded(
+    conn: asyncpg.Connection,
+    staff: Staff,
+    case: Any,
+    before: dict[str, tuple[int, str]],
+    number: int,
+    how: str,
+) -> None:
+    """AA-910: one ``trip_case_version.superseded`` audit row per version that the send / approval of V``number``
+    just made superseded. The badge is derived (nothing is written to those versions), so without this row the trail
+    showed V2 sent but never that V1 stopped being the offer."""
+    after = await _version_badges(conn, case["id"])
+    for vid, (n, badge) in sorted(after.items(), key=lambda kv: kv[1][0]):
+        old = before.get(vid, (n, None))[1]
+        if badge != "superseded" or old == "superseded" or n == number:
+            continue
+        await audit.record(
+            conn,
+            actor_type="staff",
+            actor_ref=staff.cis_user_id,
+            action="trip_case_version.superseded",
+            entity_type="trip_case_version",
+            entity_id=vid,
+            before={"badge": old},
+            after={"badge": "superseded", "superseded_by": number, "by": how},
+            entity_label=_label(case, n),
+            summary=f"V{n} superseded: V{number} was {how}",
+        )
+
+
 def _editable(version: dict[str, Any]) -> None:
     if version["is_approved"]:
         raise Conflict("version_locked", "an approved version cannot change")
@@ -762,6 +802,7 @@ async def send_version(
             "invalid_valid_until",
             f"valid_until must be {VALIDITY_MIN_DAYS} to {VALIDITY_MAX_DAYS} days from today",
         )
+    badges = await _version_badges(conn, case["id"])
     await conn.execute(
         "UPDATE booking.trip_case_versions SET is_sent_to_customer = true, sent_at = now(), sent_by = $2,"
         " valid_until = $3, updated_by = $2 WHERE id = $1::uuid",
@@ -816,6 +857,7 @@ async def send_version(
         entity_label=label,
         summary=f"Marked V{number} as sent (valid until {valid_until.isoformat()}); no e-mail sent",
     )
+    await _audit_superseded(conn, staff, case, badges, number, "sent")
     out = sql.version_dict(await _version(conn, case["id"], number))
     out["trip_case"] = {"id": case["id"], "code": case["code"], "status": "proposal_sent"}
     out["notification_id"] = notification_id
@@ -839,6 +881,7 @@ async def approve_version(
         raise Conflict("version_superseded", "a later version was sent; approve that one")
     if case["status"] != "proposal_sent":
         raise Conflict("case_not_awaiting_approval", f"the case is {case['status']}, not proposal_sent")
+    badges = await _version_badges(conn, case["id"])
     await conn.execute(
         "UPDATE booking.trip_case_versions SET is_approved = true, approved_at = now(), approved_by = $2,"
         " approval_note = $3, updated_by = $2 WHERE id = $1::uuid",
@@ -869,6 +912,7 @@ async def approve_version(
         entity_label=label,
         summary=f"Recorded approval of V{number}; case confirmed",
     )
+    await _audit_superseded(conn, staff, case, badges, number, "approved")
     out = sql.version_dict(await _version(conn, case["id"], number))
     out["trip_case"] = {"id": case["id"], "code": case["code"], "status": "confirmed"}
     return out

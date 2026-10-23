@@ -6,8 +6,9 @@ Machine routes only: an M2M access token of the ``aa-m2m`` pool with the route's
 
 AA-972 serves ``GET /products``, ``POST /quotes``, ``GET /fx-rates`` and ``GET /price-parity``; AA-973
 ``GET /departures``, ``POST /holds``, ``GET`` / ``DELETE /holds/{hold_id}`` and ``POST /holds/{hold_id}/confirm``
-(``app.b2b.departures``, ``app.b2b.holds``). Commercial rules (VND, cancellation fees, extend, re-hold limit) are
-AA-974, the event feed AA-975.
+(``app.b2b.departures``, ``app.b2b.holds``); AA-974 the commercial rules: VND quotes, ``POST /holds/{hold_id}/extend``
+(once), the 429 re-hold limit on ``POST /holds`` and ``POST /bookings/{booking_id}/cancel`` (+ ``?dry_run=true``,
+``app.b2b.cancellation``). The event feed is AA-975.
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -22,7 +23,7 @@ from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.m2m import SCOPE_BOOK, SCOPE_HOLD, SCOPE_QUOTE, SCOPE_READ
-from app.b2b import departures, holds, quotes, reads
+from app.b2b import cancellation, departures, holds, quotes, reads
 from app.b2b.access import B2BContext, require_scope
 from app.b2b.components import LineAsk, RoomAsk
 from app.b2b.errors import PREFIX
@@ -84,6 +85,14 @@ class HoldRequest(Strict):
     price_hash: PriceHash
     proposal_ref: str = Field(min_length=1, max_length=64)
     proposal_version: int = Field(ge=1, le=PROPOSAL_VERSION_MAX)
+
+
+class ExtendRequest(Strict):
+    reason: Literal["payment_claimed", "client_recheck"]
+
+
+class CancelRequest(Strict):
+    reason_code: Literal["client_cancelled", "agency_cancelled", "departure_cancelled", "other"]
 
 
 class ConfirmRequest(Strict):
@@ -206,6 +215,21 @@ class Booking(Strict):
     lines: list[BookingLine]
 
 
+class FeeBasis(Strict):
+    policy_id: str = Field(max_length=64)
+    days_before_departure: int
+    fee_pct: str = Field(pattern=r"^\d+(\.\d{1,2})?$")
+
+
+class CancellationResult(Strict):
+    booking_id: str = Field(max_length=64)
+    dry_run: bool
+    fee: Money
+    refundable_b2b_amount: Money
+    fee_basis: FeeBasis
+    cancelled_at: datetime | None
+
+
 class PriceParity(Strict):
     tour: TourKey
     currency: Currency
@@ -321,5 +345,29 @@ async def confirm_hold(hold_id: HoldId, body: ConfirmRequest, ctx: CanBook, idem
         hold_id,
         price_hash=body.price_hash,
         deposit_ref=body.deposit_ref,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.post("/holds/{hold_id}/extend", response_model=Hold)
+async def extend_hold(hold_id: HoldId, body: ExtendRequest, ctx: CanHold, idempotency_key: IdempotencyKey) -> dict:
+    return await holds.extend_hold(ctx.pool, _caller(ctx), hold_id, reason=body.reason, idempotency_key=idempotency_key)
+
+
+@router.post("/bookings/{booking_id}/cancel", response_model=CancellationResult)
+async def cancel_booking(
+    booking_id: Annotated[str, Path(min_length=1, max_length=64)],
+    body: CancelRequest,
+    ctx: CanBook,
+    idempotency_key: IdempotencyKey,
+    dry_run: bool = False,
+) -> dict:
+    return await cancellation.cancel_booking(
+        ctx.pool,
+        partner_id=ctx.partner_id,
+        client_id=ctx.caller.client_id,
+        booking_id=booking_id,
+        reason_code=body.reason_code,
+        dry_run=dry_run,
         idempotency_key=idempotency_key,
     )

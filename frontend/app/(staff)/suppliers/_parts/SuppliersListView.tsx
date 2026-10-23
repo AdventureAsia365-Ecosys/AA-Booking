@@ -3,6 +3,8 @@
 // 08 screen 1). GET /booking/suppliers with server-side search, status / category / country filters and pagination;
 // KPI strip from /suppliers/summary (Total, Active, Inactive, contracts ending in 30 days: 08 conflict 8). Admin and
 // contracting add, edit and deactivate (supply.write); sales read. Suppliers are never deleted (08 conflict 4).
+// AA-910: fits the 1084 px frame at 1440 px (location under the name, text cells with a max width); the row menu
+// column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -127,28 +129,30 @@ export function SuppliersListView() {
             ]}
           />
         </div>
-        <DataTable<Supplier>
-          searchable={false}
-          tableId="suppliers"
-          data={list.data?.items ?? []}
-          columns={columns}
-          getRowId={(r) => r.id}
-          loading={list.isLoading}
-          error={list.isError ? (list.error as Error).message : null}
-          onRetry={() => list.refetch()}
-          pageSizeOptions={PAGE_SIZES}
-          serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-          emptyTitle={filtered ? "No suppliers match" : "No suppliers yet"}
-          emptyDescription={
-            filtered
-              ? "Change the search or the filters, or reset them to see every supplier."
-              : actions.canWrite
-                ? "Add the first supplier with Add supplier. Contracts are added on its page."
-                : "Contracting adds suppliers here; they appear once created."
-          }
-          onRowClick={(r) => router.push(supplierHref(r))}
-          tableMinWidth={980}
-        />
+        <div className="bk-dt-sticky-end">
+          <DataTable<Supplier>
+            searchable={false}
+            tableId="suppliers"
+            data={list.data?.items ?? []}
+            columns={columns}
+            getRowId={(r) => r.id}
+            loading={list.isLoading}
+            error={list.isError ? (list.error as Error).message : null}
+            onRetry={() => list.refetch()}
+            pageSizeOptions={PAGE_SIZES}
+            serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
+            emptyTitle={filtered ? "No suppliers match" : "No suppliers yet"}
+            emptyDescription={
+              filtered
+                ? "Change the search or the filters, or reset them to see every supplier."
+                : actions.canWrite
+                  ? "Add the first supplier with Add supplier. Contracts are added on its page."
+                  : "Contracting adds suppliers here; they appear once created."
+            }
+            onRowClick={(r) => router.push(supplierHref(r))}
+            tableMinWidth={880}
+          />
+        </div>
       </Section>
       {actions.dialogs}
     </PageFrame>
@@ -160,12 +164,24 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
     id: "supplier",
     header: "Supplier",
     accessorFn: (r) => r.company_name,
-    cell: ({ row }) => (
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate text-[13.5px] font-medium text-ink">{row.original.company_name}</span>
-        <Code>{row.original.code}</Code>
-      </span>
-    ),
+    cell: ({ row }) => {
+      const where = locationText(row.original);
+      return (
+        <span className="flex min-w-0 max-w-[240px] flex-col">
+          <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.company_name}>
+            {row.original.company_name}
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+            <Code>{row.original.code}</Code>
+            {where && (
+              <span className="truncate" title={where}>
+                · {where}
+              </span>
+            )}
+          </span>
+        </span>
+      );
+    },
   },
   { id: "categories", header: "Categories", enableSorting: false, cell: ({ row }) => <CategoryChips categories={row.original.categories} /> },
   {
@@ -174,23 +190,21 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
     accessorFn: (r) => r.contact_name ?? "",
     cell: ({ row }) =>
       row.original.contact_name || row.original.contact_email ? (
-        <PersonCell name={row.original.contact_name ?? row.original.contact_email} sub={row.original.contact_name ? row.original.contact_email : null} />
+        <PersonCell
+          className="md:max-w-[220px]"
+          name={row.original.contact_name ?? row.original.contact_email}
+          sub={row.original.contact_name ? row.original.contact_email : null}
+        />
       ) : (
         <span className="text-[13px] text-muted">—</span>
       ),
   },
   {
-    id: "location",
-    header: "Location",
-    accessorFn: (r) => locationText(r) ?? "",
-    cell: ({ row }) => <span className="block max-w-[200px] truncate text-[13px] text-body">{locationText(row.original) ?? "—"}</span>,
-  },
-  {
     id: "contracts",
-    header: "Contracts in force",
+    header: "Contracts",
     accessorKey: "contracts_in_force",
     cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.contracts_in_force}</span>,
   },
   { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <SupplierStatusBadge status={row.original.status} /> },
-  { id: "updated", header: "Updated", accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="text-[13px] text-muted" /> },
+  { id: "updated", header: "Updated", accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="whitespace-nowrap text-[13px] text-muted" /> },
 ];
