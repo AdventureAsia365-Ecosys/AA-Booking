@@ -10,6 +10,8 @@
   "managed_in_directory": true,
   "permissions": [
     "audit.read",
+    "b2b_desk.read",
+    "b2b_desk.write",
     "catalog.read",
     "customer.admin",
     "customer.read",

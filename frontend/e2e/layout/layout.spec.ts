@@ -56,6 +56,8 @@ const PAGES: PageCase[] = [
   { name: "service-rates", path: "/services/SVC-000001?tab=rates" },
   { name: "pricing-rules", path: "/pricing/rules" },
   { name: "pricing-fx", path: "/pricing/rules?tab=fx", fx: true },
+  { name: "b2b-desk-on-request", path: "/b2b-desk" },
+  { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },
   { name: "staff", path: "/staff" },
   { name: "staff-cases", path: "/staff/u-001?tab=cases" },
   // Not a kit DataTable: a feed of entries with an expandable before / after grid (opened on the first entry).

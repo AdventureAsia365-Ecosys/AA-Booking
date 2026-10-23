@@ -178,11 +178,15 @@ function OnRequestTab() {
       cell: ({ row }) => {
         const l = row.original;
         return (
-          <span className="flex min-w-0 flex-col">
+          // AA-910: capped on desktop (full text in the tooltips) so the table fits 1440 px with the action buttons.
+          <span className="flex min-w-0 flex-col md:max-w-[240px]">
             <span className="max-w-[300px] truncate text-[13.5px] font-medium text-ink" title={l.component.label ?? l.component.id}>
               {l.component.label ?? l.component.id}
             </span>
-            <span className="text-xs text-muted">
+            <span
+              className="text-xs text-muted md:truncate"
+              title={`${KIND_LABEL[l.component.kind] ?? l.component.kind}${l.component.supplier ? ` · ${l.component.supplier.name}` : ""} · line ${l.line_ref}`}
+            >
               {KIND_LABEL[l.component.kind] ?? l.component.kind}
               {l.component.supplier ? ` · ${l.component.supplier.name}` : ""} · line {l.line_ref}
             </span>
@@ -213,7 +217,7 @@ function OnRequestTab() {
           <a className="text-[13px] font-medium text-accent-deep hover:underline" href={`/cases/${encodeURIComponent(row.original.trip_case.code)}`}>
             {row.original.trip_case.code}
           </a>
-          <span className="max-w-[200px] truncate text-xs text-muted" title={row.original.partner.agency_name}>
+          <span className="max-w-[200px] truncate text-xs text-muted md:max-w-[160px]" title={row.original.partner.agency_name}>
             {row.original.partner.agency_name}
           </span>
         </span>

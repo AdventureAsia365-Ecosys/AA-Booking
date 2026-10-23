@@ -19,7 +19,7 @@ npm run build      # next build
 ```bash
 npx playwright install chromium   # once per machine
 npm run build                     # the check serves the production build
-npm run test:layout               # Playwright project "layout-mock", ~4 min, 80 tests
+npm run test:layout               # Playwright project "layout-mock", ~5 min, 88 tests
 LAYOUT_SHOTS_DIR=/some/dir npm run test:layout   # screenshots + measurements.{json,md} elsewhere
 ```
 

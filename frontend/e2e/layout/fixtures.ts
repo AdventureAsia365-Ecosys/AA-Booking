@@ -36,6 +36,7 @@ import type {
 import type { Hotel, HotelDetail, Page, RoomType, Service, ServiceDetail, SupplierRate } from "../../lib/api/supply";
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
+import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import staffMeJson from "./staff-me.json";
 
 const NOW = "2026-10-20T08:15:00+00:00";
@@ -619,6 +620,63 @@ function orphanedPlan(i: number): OrphanedPlanItem {
   };
 }
 
+// ── B2B desk (AA-975) ────────────────────────────────────────────────────────
+const SLAS: OnRequestLine["sla"][] = ["overdue", "due_soon", "on_time", "answered", "closed"];
+function onRequestLine(i: number): OnRequestLine {
+  const sla = SLAS[i % SLAS.length];
+  const answered = sla === "answered" || sla === "closed";
+  return {
+    hold_id: uuid("8", i),
+    line_ref: `L${i + 1}`,
+    status: answered ? (i % 2 ? "confirmed" : "declined") : "on_request",
+    sla,
+    answer_due_at: NOW,
+    requested_at: EARLIER,
+    answered_at: answered ? NOW : null,
+    answered_by: answered ? person("u-002", 1) : null,
+    decline_code: answered && i % 2 === 0 ? "supplier_unavailable" : null,
+    trip_case: { id: uuid("c", i), code: `TC-${pad(i + 1)}` },
+    proposal_ref: `PRP-${pad(i + 1)}-V2`,
+    partner: { id: uuid("9", i), agency_name: `Southeast Asia Discovery Travel and Incentives Agency Ltd ${i}`, tenant_id: "agency-tenant-with-a-long-identifier-0001" },
+    component: {
+      id: uuid("a", i),
+      kind: i % 2 ? "hotel_room" : "service",
+      label: i % 2 ? "Family Suite with River View and Private Balcony" : "Private Hoi An Ancient Town Walking Tour with Lantern Making Workshop",
+      supplier: { id: SUP_ID, name: "Vietnam Heritage Riverside Hospitality and Transport Joint Stock Company" },
+    },
+    service_date: "2027-01-14",
+    nights: i % 2 ? 3 : null,
+    pax: { adult: 4, child: 2, infant: 1 },
+    seats: 7,
+    departure: i % 3 ? { id: uuid("b", i), start_date: "2027-01-10" } : null,
+  };
+}
+const DESK_SUMMARY: DeskSummary = { on_request: { open: 23, overdue: 4, due_soon: 6 }, open_incidents: 2, due_soon_hours: 24 };
+function deskDepartures(): DeskDepartures {
+  return {
+    from: "2026-10-24",
+    to: "2027-04-24",
+    items: range(ROWS).map((i) => ({
+      id: uuid("b", i),
+      trip_plan_id: uuid("6", i),
+      source_id: `tour-${pad(i + 1, 5)}`,
+      tour_title: `Grand Indochina Discovery: Hanoi, Ha Long Bay, Hoi An, Angkor and the Mekong Delta ${i}`,
+      start_date: "2027-01-10",
+      capacity: 24,
+      held: 6,
+      sold: 12,
+      available: 6,
+      status: (["scheduled", "guaranteed", "cancelled"] as const)[i % 3],
+      auto_confirm: i % 2 === 0,
+      partners: 5,
+      open_incident:
+        i % 4 === 0
+          ? { id: `inc-${i}`, departure_id: uuid("b", i), incident_code: "political", flagged_at: NOW, flagged_by: person("u-002", 1), cleared_at: null, cleared_by: null }
+          : null,
+    })),
+  };
+}
+
 // ── Router ───────────────────────────────────────────────────────────────────
 export type FixtureAnswer = { status: number; body: unknown };
 
@@ -685,6 +743,14 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "pricing/rules") return ok(RULES);
   if (p === "pricing/fx-rates") return ok(FX);
+
+  if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
+  if (p === "b2b-desk/on-request") {
+    const state = (query.get("state") || "open") as OnRequestPage["state"];
+    return ok({ ...page(range(ROWS).map(onRequestLine), 63), state } satisfies OnRequestPage);
+  }
+  if (p === "b2b-desk/departures") return ok(deskDepartures());
+  if (at(0) === "b2b-desk" && at(1) === "departures" && at(3) === "incidents") return ok({ items: [] });
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (p === "catalog/trip-plans") {
