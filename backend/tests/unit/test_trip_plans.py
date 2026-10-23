@@ -125,7 +125,13 @@ async def test_list_builds_filters_and_rejects_unknown_sort() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error",
-    [asyncpg.UndefinedTableError("x"), asyncpg.InsufficientPrivilegeError("x"), asyncpg.InvalidSchemaNameError("x")],
+    [
+        asyncpg.UndefinedTableError("x"),
+        asyncpg.InsufficientPrivilegeError("x"),
+        asyncpg.InvalidSchemaNameError("x"),
+        asyncpg.QueryCanceledError("x"),  # server statement_timeout
+        TimeoutError(),  # the pool's client-side command_timeout
+    ],
 )
 async def test_catalog_errors_are_unavailable(error: Exception) -> None:
     conn = ScriptedConn().on("catalog.v_tour", error)
@@ -139,18 +145,24 @@ async def test_facets_totals() -> None:
         ScriptedConn()
         .on(
             "GROUP BY t.country",
-            [{"country": "Bhutan", "tours": 2, "sellable": 1}, {"country": "Laos", "tours": 1, "sellable": 0}],
+            [
+                {"country": "Bhutan", "tours": 2, "sellable": 1},
+                {"country": "Laos", "tours": 1, "sellable": 0},
+                {"country": None, "tours": 2, "sellable": 1},  # counted in the KPIs, not a country option
+            ],
         )
         .on("DISTINCT p.trip_style", [{"trip_style": "Private"}])
         .on("FROM booking.trip_plans p WHERE p.source_system = 'cis' AND NOT EXISTS", 2)
     )
     assert await trip_plans.facets(conn) == {
-        "total": 3,
-        "sellable": 1,
+        "total": 5,
+        "sellable": 2,
         "orphaned": 2,
         "countries": [{"country": "Bhutan", "tours": 2, "sellable": 1}, {"country": "Laos", "tours": 1, "sellable": 0}],
         "trip_styles": ["Private"],
     }
+    grouped = next(flat for flat, _ in conn.calls if "GROUP BY t.country" in flat)
+    assert "IS NOT NULL" not in grouped  # the NULL-country group is fetched, then left out of the options only
 
 
 @pytest.mark.asyncio

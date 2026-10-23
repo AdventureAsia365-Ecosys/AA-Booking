@@ -47,8 +47,16 @@ async def test_resolve_without_keys_reads_nothing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_on_an_unreadable_catalog_is_empty() -> None:
-    conn = conn_with(catalog=asyncpg.UndefinedTableError("relation catalog.v_tour does not exist"))
+@pytest.mark.parametrize(
+    "error",
+    [
+        asyncpg.UndefinedTableError("relation catalog.v_tour does not exist"),
+        asyncpg.QueryCanceledError("canceling statement due to statement timeout"),
+        TimeoutError(),  # the pool's command_timeout
+    ],
+)
+async def test_resolve_on_an_unreadable_catalog_is_empty(error: Exception) -> None:
+    conn = conn_with(catalog=error)
     assert await leg_keys.resolve(conn, ["tour-v2"]) == {}
 
 

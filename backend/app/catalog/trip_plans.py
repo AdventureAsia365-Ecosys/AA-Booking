@@ -84,7 +84,8 @@ JOIN = (
 
 @asynccontextmanager
 async def catalog_reads() -> AsyncIterator[None]:
-    """A missing catalog view or grant (CIS 225 not applied, grant revoked) is a 503, not a 500."""
+    """A missing catalog view or grant (CIS 225 not applied, grant revoked) is a 503, not a 500. So is a catalog read
+    that runs past ``statement_timeout`` or the pool's command timeout (see ``CATALOG_ERRORS``)."""
     try:
         yield
     except CATALOG_ERRORS as exc:
@@ -269,11 +270,14 @@ async def list_orphaned(
 
 
 async def facets(conn: asyncpg.Connection) -> dict[str, Any]:
-    """Filter options and counts for the list page, computed on the server (not from the current page)."""
+    """Filter options and counts for the list page, computed on the server (not from the current page).
+
+    ``total`` / ``sellable`` count every catalog tour, a tour without a country included, so the KPI matches the
+    list ``total``; only the country options leave the country-less group out (there is nothing to filter on)."""
     async with catalog_reads():
-        countries = await conn.fetch(
+        groups = await conn.fetch(
             f"SELECT t.country, count(*) AS tours, count(*) FILTER (WHERE p.sellable) AS sellable {JOIN}"  # noqa: S608
-            " WHERE t.country IS NOT NULL GROUP BY t.country ORDER BY t.country"
+            " GROUP BY t.country ORDER BY t.country NULLS LAST"
         )
         styles = await conn.fetch(
             f"SELECT DISTINCT p.trip_style {JOIN} WHERE p.trip_style IS NOT NULL ORDER BY p.trip_style"  # noqa: S608
@@ -281,10 +285,10 @@ async def facets(conn: asyncpg.Connection) -> dict[str, Any]:
         where = orphan_where(await liveness.view_ready(conn, liveness.RETIRED_VIEW))
         orphaned = await conn.fetchval(f"SELECT count(*) FROM booking.trip_plans p WHERE {where}")  # noqa: S608
     return {
-        "total": sum(r["tours"] for r in countries),
-        "sellable": sum(r["sellable"] for r in countries),
+        "total": sum(r["tours"] for r in groups),
+        "sellable": sum(r["sellable"] for r in groups),
         "orphaned": orphaned or 0,
-        "countries": [dict(r) for r in countries],
+        "countries": [dict(r) for r in groups if r["country"] is not None],
         "trip_styles": [r["trip_style"] for r in styles],
     }
 
