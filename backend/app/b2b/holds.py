@@ -268,7 +268,8 @@ async def _create(
         "INSERT INTO booking.b2b_hold_lines (hold_id, line_no, line_ref, departure_id, seats, held_as, status)"
         " VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $6)",
         [
-            (hold_id, r["line_no"], ask.line_ref, dep_id, ask.seats, availability)
+            # seats count only on a departure (column comment: 0 without one); usage filters by departure anyway
+            (hold_id, r["line_no"], ask.line_ref, dep_id, ask.seats if dep_id else 0, availability)
             for r, ask, (availability, dep_id, _) in zip(lines, asks, result, strict=True)
         ],
     )

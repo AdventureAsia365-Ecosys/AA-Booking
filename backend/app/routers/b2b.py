@@ -36,6 +36,8 @@ CanBook = Annotated[B2BContext, Depends(require_scope(SCOPE_BOOK))]
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
 HoldId = Annotated[str, Path(min_length=1, max_length=64)]
 PriceHash = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+# proposal_version is an INTEGER column (bk-019 / bk-020): a larger value is a 422 Problem, not a 500 from asyncpg.
+PROPOSAL_VERSION_MAX = 2_147_483_647
 
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 Kind = Literal["trip_plan", "hotel_room", "transfer", "guide", "activity", "entrance", "meal"]
@@ -72,7 +74,7 @@ class QuoteLineRequest(Strict):
 
 class QuoteRequest(Strict):
     proposal_ref: str = Field(min_length=1, max_length=64)
-    proposal_version: int = Field(ge=1)
+    proposal_version: int = Field(ge=1, le=PROPOSAL_VERSION_MAX)
     currency: Currency
     lines: list[QuoteLineRequest] = Field(min_length=1, max_length=200)
 
@@ -81,7 +83,7 @@ class HoldRequest(Strict):
     quote_id: str = Field(min_length=1, max_length=64)
     price_hash: PriceHash
     proposal_ref: str = Field(min_length=1, max_length=64)
-    proposal_version: int = Field(ge=1)
+    proposal_version: int = Field(ge=1, le=PROPOSAL_VERSION_MAX)
 
 
 class ConfirmRequest(Strict):

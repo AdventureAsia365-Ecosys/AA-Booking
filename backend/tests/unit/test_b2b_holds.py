@@ -12,7 +12,7 @@ from app.b2b import departures, expiry
 from app.b2b.departures import AVAILABLE, ON_REQUEST, SOLD_OUT, SeatAsk, evaluate
 from app.b2b.errors import B2BError
 from tests.staff_tokens import LocalM2M
-from tests.unit.test_b2b_api import _client, _conn, _headers
+from tests.unit.test_b2b_api import _client, _conn, _headers, _quote_body
 
 PLAN = "8e000000-0000-4000-8000-000000000a01"
 OTHER_PLAN = "8e000000-0000-4000-8000-000000000a02"
@@ -107,3 +107,17 @@ def test_hold_routes_check_input_before_any_write() -> None:
     hold_only = {**_headers(m2m.token("booking.b2b/hold")), **key}
     assert client.post("/booking/b2b/v1/holds/h1/confirm", json=confirm, headers=hold_only).status_code == 403
     assert not conn.sql("INSERT INTO booking.b2b_holds")
+
+
+def test_proposal_version_above_int4_is_a_problem_not_a_500() -> None:
+    m2m, conn = LocalM2M(), _conn()
+    client = _client(conn, m2m)
+    headers = {**_headers(m2m.token()), "Idempotency-Key": "k" * 8}
+    too_big = 2**31
+    hold = {"quote_id": "q", "price_hash": "a" * 64, "proposal_ref": "P", "proposal_version": too_big}
+    resp = client.post("/booking/b2b/v1/holds", json=hold, headers=headers)
+    assert resp.status_code == 422 and resp.json()["error"] == "invalid", resp.text
+    assert "proposal_version" in resp.json()["message"]
+    assert not conn.sql("INSERT INTO booking.b2b_holds")
+    quote = client.post("/booking/b2b/v1/quotes", json=_quote_body(proposal_version=too_big), headers=headers)
+    assert quote.status_code == 422 and quote.json()["error"] == "invalid", quote.text

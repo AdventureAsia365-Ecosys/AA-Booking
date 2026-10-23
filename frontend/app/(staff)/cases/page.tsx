@@ -125,6 +125,7 @@ export default function TripCasesPage() {
                       { value: "tripplanner", label: "TripPlanner" },
                       { value: "manual", label: "Manual" },
                       { value: "cis", label: "CIS trip plan" },
+                      { value: "crm", label: "B2B agency (CRM)" },
                     ],
                   },
                 ]}

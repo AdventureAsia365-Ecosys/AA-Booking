@@ -258,6 +258,12 @@ async def test_departures_quote_hold_confirm(
     dep1 = await _departure(c, cis, DAY1, 4)
     dup = await c.post(f"/catalog/trip-plans/{SOURCE_ID}/departures", json=body, headers=maker)
     assert dup.status_code == 409
+    started = await c.post(
+        f"/catalog/trip-plans/{SOURCE_ID}/departures",
+        json={"start_date": datetime.now(UTC).date().isoformat(), "capacity": 4},
+        headers=maker,
+    )
+    assert started.status_code == 422 and "invalid_start_date" in started.text, started.text
     dep2 = await _departure(c, cis, DAY2, 10, auto_confirm=False)
     staff_list = await _ok(await c.get(f"/catalog/trip-plans/{SOURCE_ID}/departures", headers=sales))
     assert [(d["start_date"], d["available"]) for d in staff_list["items"]] == [(DAY1, 4), (DAY2, 10)]

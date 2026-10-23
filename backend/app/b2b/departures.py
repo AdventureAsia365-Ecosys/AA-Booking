@@ -300,6 +300,8 @@ async def create_departure(
     """``data``: ``start_date``, ``capacity``, ``auto_confirm`` (default true), ``status`` (scheduled | guaranteed)."""
     plan_id = await _plan_id(conn, source_id)
     _check_capacity(int(data["capacity"]))
+    if data["start_date"] <= datetime.now(UTC).date():
+        raise Invalid("invalid_start_date", "a new departure starts after today (UTC); a started one is never sold")
     status = data.get("status") or "scheduled"
     if status not in ("scheduled", "guaranteed"):
         raise Invalid("invalid_status", "a new departure is scheduled or guaranteed")
