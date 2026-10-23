@@ -9,7 +9,7 @@
     lower id can still commit (see :data:`SAFE_AFTER_SECONDS`).
 
 ``bk_inquiry_process`` (one per inbox row)
-    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2), then in ONE transaction, holding the inbox
+    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2 / v1.3), then in ONE transaction, holding the inbox
     row lock: creates a lead customer (O6), the trip case and its legs, a staff notification (plus one
     ``bk_notify_email`` job for it, AA-811) and an audit row, and marks the inbox row ``processed``.
     Re-running it is a no-op. A legacy hand-off with ``customer: null`` (or a contact with neither

@@ -1,6 +1,6 @@
 """AA-825 — what ``bk_retention_inbox_redact`` keeps of an ``inquiry.submitted`` inbox row (DM-6.6). Pure functions.
 
-The payload is **rebuilt from an allowlist**, not scrubbed with a denylist: only keys of the contract (v1 / v1.1 / v1.2,
+The payload is **rebuilt from an allowlist**, not scrubbed with a denylist: only keys of the contract (v1 to v1.3,
 ``backend/app/contracts/``) that carry no personal data survive, and every other key is dropped. This matters most for
 ``failed`` rows, whose payload by definition did not pass the contract and can hold personal data anywhere (an extra
 key, a ``customer`` that is a string, an unknown contact field of a future version). A denylist would leave that data in
@@ -29,8 +29,20 @@ from typing import Any
 ENVELOPE_KEYS = ("contract", "version", "idempotency_key", "source", "trip_id", "handoff_id", "submitted_at")
 CUSTOMER_KEEP = ("customer_id", "consent", "consent_at", "verified")
 CUSTOMER_FIELDS = ("name", "email", "phone")
-LEG_KEYS = ("position", "source_tour_id", "source_system", "source_id", "day_from", "day_to")
-DAY_KEYS = ("day", "component_id", "name", "source_tour_id", "source_day_index", "destination_id", "lat", "lng")
+# AA-986 L6 (v1.3): whether AA still serves the stop's tour, and why not. No personal data.
+AVAILABILITY_KEYS = ("available", "reason", "reason_detail")
+LEG_KEYS = ("position", "source_tour_id", "source_system", "source_id", "day_from", "day_to", *AVAILABILITY_KEYS)
+DAY_KEYS = (
+    "day",
+    "component_id",
+    "name",
+    "source_tour_id",
+    "source_day_index",
+    "destination_id",
+    "lat",
+    "lng",
+    *AVAILABILITY_KEYS,
+)
 CUSTOM_DAY_KEEP = ("day_id", "kind", "after_component_id")
 CUSTOM_DAY_FIELDS = ("note",)
 REDACTED_ERROR = "contract validation error (details redacted after 90 days, DM-6.6)"
