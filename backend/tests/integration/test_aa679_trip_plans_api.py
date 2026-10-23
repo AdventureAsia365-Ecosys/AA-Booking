@@ -148,6 +148,14 @@ async def test_list_facets_and_detail(client: tuple[httpx.AsyncClient, LocalCis]
         {"country": "Bhutan", "tours": 2, "sellable": 1},
         {"country": "Laos", "tours": 1, "sellable": 0},
     ]
+    # A tour without a country counts in the KPI totals (same total as the list) but is no country option.
+    await admin.execute(
+        "INSERT INTO catalog.v_tour (source_id, title) VALUES ('aa679000-0000-4000-8000-0000000000aa', 'No country')"
+    )
+    with_none = (await c.get("/catalog/trip-plans/facets", headers=content)).json()
+    listed = (await c.get("/catalog/trip-plans", params={"limit": 1}, headers=content)).json()
+    assert with_none["total"] == listed["total"] == 4 and len(with_none["countries"]) == 2
+    await admin.execute("DELETE FROM catalog.v_tour WHERE title = 'No country'")
 
     detail = (await c.get(f"/catalog/trip-plans/{BHUTAN_A}", headers=contracting)).json()
     assert [d["day_number"] for d in detail["days"]] == [1, 2, 3] and detail["days"][0]["places"] == ["Paro"]
