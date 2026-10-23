@@ -1071,6 +1071,49 @@
         "title": "DeparturePatch",
         "type": "object"
       },
+      "DeployGate": {
+        "description": "Read by ``.github/scripts/booking-deploy-preflight.sh``. ``by_status`` / ``by_kind`` count active jobs.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Kind",
+            "type": "object"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "exempt_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Exempt Kinds",
+            "type": "array"
+          },
+          "safe_to_deploy": {
+            "title": "Safe To Deploy",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "active",
+          "by_status",
+          "by_kind",
+          "safe_to_deploy",
+          "exempt_kinds"
+        ],
+        "title": "DeployGate",
+        "type": "object"
+      },
       "ExtendRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8186,9 +8229,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Deploy Gate Booking Ops Deploy Gate Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/DeployGate"
                 }
               }
             },

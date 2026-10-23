@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "export_openapi.py"
@@ -15,6 +16,9 @@ _spec = importlib.util.spec_from_file_location("export_openapi", SCRIPT)
 assert _spec and _spec.loader
 export = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export)
+
+# Same rule as PUBLIC_PATHS in .github/workflows/api-contract.yml.
+PUBLIC_PATHS = re.compile(r"^/booking/(b2b/|health|ops/)")
 
 
 def test_committed_document_is_current() -> None:
@@ -64,3 +68,20 @@ def test_public_health_bodies_name_every_field() -> None:
     schemas = export.build_spec()["components"]["schemas"]
     assert set(schemas["Health"]["properties"]) == {"status", "service", "version", "git_sha"}
     assert {"status", "db", "schema_version"} <= set(schemas["Readiness"]["properties"])
+
+
+def test_every_public_response_names_its_fields() -> None:
+    """oasdiff only sees a removed field when the 2xx JSON body is a named model. Booking's public surface is fully
+    typed (unlike CIS, there is no allow-list): a public route answering a bare ``dict`` fails here."""
+    untyped = []
+    for path, ops in export.build_spec()["paths"].items():
+        if not PUBLIC_PATHS.match(path):
+            continue
+        for method, op in ops.items():
+            for code, resp in op.get("responses", {}).items():
+                if not code.startswith("2") or code == "204":
+                    continue
+                schema = resp.get("content", {}).get("application/json", {}).get("schema") or {}
+                if "$ref" not in schema:
+                    untyped.append(f"{method.upper()} {path} {code}")
+    assert not untyped, f"public route(s) without a named response model (declare response_model=): {untyped}"
