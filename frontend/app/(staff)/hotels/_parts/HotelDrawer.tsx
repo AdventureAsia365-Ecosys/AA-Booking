@@ -23,7 +23,7 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
   const [editing, setEditing] = useState(false);
   const h = q.data;
   return (
-    <Drawer open onClose={onClose} title={h ? h.name : "Hotel"} width={680}>
+    <Drawer open onClose={onClose} title={h ? h.name : "Hotel"} width={880}>
       {q.isLoading ? (
         <div className="flex flex-col gap-3" aria-label="Loading hotel">
           <Skeleton w="60%" h={18} />
@@ -229,6 +229,7 @@ function HotelRates({ h }: { h: HotelDetail }) {
         error={rates.isError ? (rates.error as Error).message : null}
         onRetry={() => rates.refetch()}
         showContract
+        compact
         emptyTitle="No rates yet"
         emptyDescription={`Rates are entered under a contract on the supplier page (${h.supplier_name} → Rates).`}
       />
@@ -246,7 +247,7 @@ function Activity({ h }: { h: HotelDetail }) {
           {h.recent_activity.map((a) => (
             <li key={a.id} className="border-b border-line2 py-2 text-[13px] last:border-b-0">
               <span className="font-medium text-ink">{a.summary ?? a.action}</span>
-              {a.entity_type === "hotel_room_type" && a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}
+              {(a.entity_type === "hotel_room_type" || a.entity_type === "supplier_rate") && a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}
               <span className="block text-xs text-muted">
                 {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />
               </span>

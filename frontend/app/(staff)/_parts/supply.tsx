@@ -122,7 +122,10 @@ export function RateState({ rate }: { rate: SupplierRate }) {
   return <Pill tone={meta.tone}>{meta.label}</Pill>;
 }
 
-/** Net rates as a table: what (optional), season, validity, meal plan, pax band, net, state and an optional menu. */
+/** Net rates as a table: what (optional), season + validity, meal plan + pax band, net, state and an optional menu.
+ *  AA-910: fits the 1092 px detail frame at 1440 px (season + validity and meal plan + pax band share a column, text
+ *  cells have a desktop max width), and the row menu column stays pinned to the right when the table has to scroll
+ *  inside its frame. */
 export function RatesTable({
   rates,
   loading,
@@ -130,6 +133,7 @@ export function RatesTable({
   onRetry,
   showTarget = true,
   showContract = false,
+  compact = false,
   menu,
   emptyTitle,
   emptyDescription,
@@ -141,6 +145,9 @@ export function RatesTable({
   onRetry?: () => void;
   showTarget?: boolean;
   showContract?: boolean;
+  /** Narrow frame (the 880 px hotel drawer, which already names the hotel): no code / hotel line under the room type,
+   *  narrower text cells, and the validity dates may wrap. */
+  compact?: boolean;
   menu?: (r: SupplierRate) => React.ReactNode;
   emptyTitle: string;
   emptyDescription: string;
@@ -153,31 +160,69 @@ export function RatesTable({
             id: "target",
             header: "Room type / service",
             accessorFn: (r: SupplierRate) => rateTarget(r),
+            cell: ({ row }: { row: { original: SupplierRate } }) => {
+              const r = row.original;
+              const what = r.hotel_room_type_id ? r.room_type_name : r.service_title;
+              return (
+                <span className={`flex min-w-0 flex-col ${compact ? "max-w-[150px]" : "max-w-[240px]"}`} title={rateTarget(r)}>
+                  <span className="truncate text-[13.5px] font-medium text-ink">{what ?? "—"}</span>
+                  {!compact && (
+                    <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+                      <Code>{r.hotel_code ?? r.service_code}</Code>
+                      {r.hotel_room_type_id && r.hotel_name && <span className="truncate">· {r.hotel_name}</span>}
+                    </span>
+                  )}
+                </span>
+              );
+            },
+          } as ColumnDef<SupplierRate, unknown>,
+        ]
+      : []),
+    ...(showContract
+      ? [
+          {
+            id: "contract",
+            header: "Contract",
+            accessorKey: "contract_title",
             cell: ({ row }: { row: { original: SupplierRate } }) => (
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-[13.5px] font-medium text-ink">{rateTarget(row.original)}</span>
-                <Code>{row.original.hotel_code ?? row.original.service_code}</Code>
+              <span className={`block break-words text-[13px] text-body md:truncate ${compact ? "md:max-w-[100px]" : "md:max-w-[140px]"}`} title={row.original.contract_title}>
+                {row.original.contract_title}
               </span>
             ),
           } as ColumnDef<SupplierRate, unknown>,
         ]
       : []),
-    ...(showContract
-      ? [{ id: "contract", header: "Contract", accessorKey: "contract_title" } as ColumnDef<SupplierRate, unknown>]
-      : []),
-    { id: "season", header: "Season", accessorFn: (r) => r.season ?? "", cell: ({ row }) => row.original.season ?? "—" },
     {
       id: "validity",
-      header: "Valid",
+      header: "Season / valid",
       accessorKey: "valid_from",
       cell: ({ row }) => (
-        <span className="whitespace-nowrap text-[13px] text-body">
-          <DateText value={row.original.valid_from} /> – {row.original.valid_to ? <DateText value={row.original.valid_to} /> : "open-ended"}
+        <span className={`flex min-w-0 flex-col text-[13px] text-body ${compact ? "md:max-w-[140px]" : "md:max-w-[200px]"}`}>
+          <span className="md:truncate" title={row.original.season ?? undefined}>
+            {row.original.season ?? "—"}
+          </span>
+          <span className={`text-xs text-muted ${compact ? "" : "whitespace-nowrap"}`}>
+            <DateText value={row.original.valid_from} className="whitespace-nowrap" /> –{" "}
+            {row.original.valid_to ? (
+              <DateText value={row.original.valid_to} className="whitespace-nowrap" />
+            ) : (
+              <span className="whitespace-nowrap">open-ended</span>
+            )}
+          </span>
         </span>
       ),
     },
-    { id: "meal", header: "Meal plan", accessorFn: (r) => r.meal_plan ?? "", cell: ({ row }) => row.original.meal_plan ?? "—" },
-    { id: "pax", header: "Pax", enableSorting: false, cell: ({ row }) => paxText(row.original) },
+    {
+      id: "meal",
+      header: "Meal / pax",
+      accessorFn: (r) => r.meal_plan ?? "",
+      cell: ({ row }) => (
+        <span className="flex flex-col whitespace-nowrap text-[13px] text-body">
+          {row.original.meal_plan ?? "—"}
+          <span className="text-xs text-muted">{paxText(row.original)} pax</span>
+        </span>
+      ),
+    },
     {
       id: "net",
       header: "Net",
@@ -197,20 +242,22 @@ export function RatesTable({
       : []),
   ];
   return (
-    <DataTable<SupplierRate>
-      searchable={false}
-      tableId={tableId}
-      data={rates}
-      columns={columns}
-      getRowId={(r) => r.id}
-      loading={loading}
-      error={error ?? null}
-      onRetry={onRetry}
-      pageSizeOptions={[25, 50, 100]}
-      emptyTitle={emptyTitle}
-      emptyDescription={emptyDescription}
-      tableMinWidth={showTarget ? 900 : 680}
-    />
+    <div className={menu ? "bk-dt-sticky-end" : undefined}>
+      <DataTable<SupplierRate>
+        searchable={false}
+        tableId={tableId}
+        data={rates}
+        columns={columns}
+        getRowId={(r) => r.id}
+        loading={loading}
+        error={error ?? null}
+        onRetry={onRetry}
+        pageSizeOptions={[25, 50, 100]}
+        emptyTitle={emptyTitle}
+        emptyDescription={emptyDescription}
+        tableMinWidth={showTarget ? 760 : 600}
+      />
+    </div>
   );
 }
 

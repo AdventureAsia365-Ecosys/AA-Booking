@@ -76,7 +76,7 @@ export function DetailHeader({
             </div>
             {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
           </div>
-          <div role="tablist" className="-mb-px flex gap-6 overflow-x-auto">
+          <div role="tablist" className="bk-tabstrip -mb-px flex gap-6">
             {tabs.map((t) => {
               const on = t.key === activeTab;
               return (

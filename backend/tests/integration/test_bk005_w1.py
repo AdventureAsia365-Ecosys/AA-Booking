@@ -254,6 +254,20 @@ async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, 
             await versions.approve_version(conn, boss, case["code"], 1, None)
     assert {v["version_number"]: v["badge"] for v in listed["items"]} == {1: "superseded", 2: "sent"}
     assert superseded.value.code == "version_superseded"
+    # AA-910: the derived "superseded" badge leaves a trail (real VERSION_BADGE SQL, not a scripted answer).
+    trail = await admin.fetch(
+        "SELECT entity_id::text AS entity_id, entity_label, before, after, summary FROM booking.audit_logs"
+        " WHERE action = 'trip_case_version.superseded'"
+    )
+    v1_id = await admin.fetchval(
+        "SELECT id::text FROM booking.trip_case_versions WHERE trip_case_id = $1::uuid AND version_number = 1",
+        case["id"],
+    )
+    assert [(r["entity_id"], r["entity_label"], r["summary"]) for r in trail] == [
+        (v1_id, f"{case['code']} V1", "V1 superseded: V2 was sent")
+    ]
+    assert json.loads(trail[0]["before"]) == {"badge": "sent"}
+    assert json.loads(trail[0]["after"]) == {"badge": "superseded", "superseded_by": 2, "by": "sent"}
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(Conflict) as bare:  # confirmed is reached by approving a version only
             await service.change_status(conn, boss, case["code"], "confirmed", None)

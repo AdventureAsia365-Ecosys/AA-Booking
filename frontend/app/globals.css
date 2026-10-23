@@ -92,6 +92,37 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--aa-line); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--aa-muted2); }
 
+/* AA-910 — tab strips (SavedTabs, DetailHeader, case page). They scroll sideways on a phone, but never show a
+   scrollbar: a 1 px vertical overflow (the -1px underline offset) used to draw a scrollbar under the tabs at
+   1440 px. `bk-tabstrip-line` draws the 1 px baseline inside the strip (an inset shadow, under the tabs' 2 px
+   active underline) so nothing has to hang below it. */
+.bk-tabstrip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.bk-tabstrip::-webkit-scrollbar {
+  display: none;
+}
+.bk-tabstrip-line {
+  box-shadow: inset 0 -1px 0 var(--aa-line);
+}
+
+/* AA-910 — wrap a kit DataTable in `bk-dt-sticky-end` when its last column is the row menu ("⋯"): from 768 px
+   (table mode; phones get cards) the last column stays pinned to the right edge of the table's own scroll box, so
+   the menu is reachable even when a narrow window makes the table scroll sideways inside its frame. */
+@media (min-width: 768px) {
+  .bk-dt-sticky-end table th:last-child,
+  .bk-dt-sticky-end table td:last-child {
+    position: sticky;
+    right: 0;
+    box-shadow: inset 1px 0 0 var(--aa-line2);
+  }
+  .bk-dt-sticky-end table td:last-child {
+    background: var(--aa-card);
+  }
+}
+
 :focus-visible {
   outline: 2px solid var(--aa-accent-border);
   outline-offset: 2px;

@@ -125,7 +125,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
             </div>
           </div>
           <Stepper status={c.status} cancelReason={cancelNote} />
-          <div role="tablist" className="-mb-5 flex gap-5 overflow-x-auto">
+          <div role="tablist" className="bk-tabstrip -mb-5 flex gap-5">
             {TABS.map((t) => {
               const on = t.key === tab;
               const later = "wave" in t;
