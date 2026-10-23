@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal as D
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
+from app.supply.rates import RateAsk, rate_in_force, rates_in_force_many
 from tests.integration.conftest import MIGRATIONS
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import CRM_CLIENT, M2M_ISSUER, OTHER_M2M_CLIENT, LocalCis, LocalM2M
@@ -287,3 +288,123 @@ async def test_app_role_cannot_rewrite_a_quote(
             await app.execute("DELETE FROM booking.b2b_quote_lines WHERE quote_id = $1::uuid", quote["quote_id"])
     finally:
         await app.close()
+
+
+# ── Review round (AA-972): room mix per occupancy, batched rate lookups, change signal ───────────
+
+
+async def test_room_mix_batched_rates_and_change_signal(
+    client: tuple[httpx.AsyncClient, LocalCis, LocalM2M], admin: asyncpg.Connection, supply: dict[str, str]
+) -> None:
+    c, cis, m2m = client
+    boss, maker = _staff(cis, ADMIN), _staff(cis, MAKER)
+    await _ok(
+        await c.post(
+            "/b2b-partners", json={"tenant_id": TENANT, "agency_name": "A", "m2m_client_id": CRM_CLIENT}, headers=boss
+        ),
+        201,
+    )
+    # A second published contract: a room type with a single band (750,000 VND = 30 USD) and a double band
+    # (1,000,000 VND = 40 USD), no band above 2.
+    sid = await admin.fetchval(
+        "SELECT h.supplier_id::text FROM booking.hotels h JOIN booking.hotel_room_types t ON t.hotel_id = h.id"
+        " WHERE t.id = $1::uuid",
+        supply["room"],
+    )
+    contract = await _insert(
+        admin, "supplier_contracts", supplier_id=sid, title="bands", valid_from=date(2027, 1, 1),
+        valid_to=date(2027, 12, 31), currency="VND", created_by=MAKER,
+    )  # fmt: skip
+    hotel = await admin.fetchval(
+        "SELECT hotel_id::text FROM booking.hotel_room_types WHERE id = $1::uuid", supply["room"]
+    )
+    banded = await _insert(
+        admin, "hotel_room_types", hotel_id=hotel, name="Superior", max_occupancy=3, created_by=MAKER
+    )
+    common = {"supplier_contract_id": contract, "valid_from": date(2027, 1, 1), "valid_to": date(2027, 12, 31)}
+    for low, high, amount in ((1, 1, 750_000), (2, 2, 1_000_000)):
+        await _insert(
+            admin, "supplier_rates", **common, hotel_room_type_id=banded, unit="room_night", net_amount=amount,
+            currency="VND", pax_min=low, pax_max=high, created_by=MAKER,
+        )  # fmt: skip
+    await admin.execute(PUBLISH, contract, CHECKER)
+
+    # The batched lookup picks exactly what rate_in_force picks, ask by ask.
+    asks = [
+        RateAsk(banded, None, date(2027, 3, 1), 1),
+        RateAsk(banded, None, date(2027, 3, 1), 2),
+        RateAsk(banded, None, date(2027, 3, 1), 3),
+        RateAsk(banded, None, date(2026, 3, 1), 2),  # before both contracts
+        RateAsk(supply["room"], None, date(2027, 3, 1), None),
+        RateAsk(None, supply["service"], date(2027, 6, 1), 4),
+        RateAsk(banded, None, date(2027, 3, 1), 1),  # duplicate
+    ]
+    many = await rates_in_force_many(admin, asks)
+    for ask, got in zip(asks, many, strict=True):
+        one = await rate_in_force(
+            admin, room_type_id=ask.room_type_id, service_id=ask.service_id, on=ask.on, pax=ask.pax
+        )
+        assert (got and got["id"]) == (one and one["id"]), ask
+        if one:
+            assert D(got["net_amount"]) == D(one["net_amount"]) and got["currency"] == one["currency"].strip()
+    assert [g is None for g in many] == [False, False, True, True, False, False, False]
+
+    def room_line(ref: str, adult: int, rooms: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"line_ref": ref, "component_id": f"rt:{banded}", "service_date": "2027-03-01", "nights": 2,
+                "pax": {"adult": adult}, "rooms": rooms}  # fmt: skip
+
+    lines = [
+        room_line("four-in-two-doubles", 4, [{"occupancy": "double", "count": 2}]),
+        room_line("two-singles", 2, [{"occupancy": "single", "count": 2, "room_type_id": f"rt:{banded}"}]),
+        room_line("three-default", 3, []),
+    ]
+    quote = await _ok(
+        await c.post(
+            "/b2b/v1/quotes",
+            json={"proposal_ref": "PRO-R", "proposal_version": 1, "currency": "USD", "lines": lines},
+            headers=_m2m(m2m),
+        ),
+        201,
+    )
+    nets = await admin.fetch(
+        "SELECT line_ref, net_cost_usd FROM booking.b2b_quote_lines WHERE quote_id = $1::uuid ORDER BY line_no",
+        quote["quote_id"],
+    )
+    # 2 nights each: 2 doubles = 160; 2 singles = 120; default for 3 = 1 double + 1 single = 140 (USD net).
+    assert [(r["line_ref"], r["net_cost_usd"]) for r in nets] == [
+        ("four-in-two-doubles", D("160.0000")),
+        ("two-singles", D("120.0000")),
+        ("three-default", D("140.0000")),
+    ]
+    triple = {"proposal_ref": "PRO-T", "proposal_version": 1, "currency": "USD",
+              "lines": [room_line("triple", 3, [{"occupancy": "triple"}])]}  # fmt: skip
+    refused = await c.post("/b2b/v1/quotes", json=triple, headers=_m2m(m2m))
+    assert refused.status_code == 422 and "for 3 per room" in refused.json()["message"]
+
+    # Change signal: emptying the component set and deactivating a room type both move the product's updated_at.
+    commercial = {"sellable": True, "price_hint": None}
+    await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
+    items = {"items": [{"day_no": 1, "hotel_room_type_id": banded}]}
+    plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
+        "trip_plan_id"
+    ]
+    read = _m2m(m2m, scope="booking.b2b/read")
+
+    async def stamp() -> datetime:
+        await admin.execute("SELECT pg_sleep(0.01)")
+        [product] = (await _ok(await c.get("/b2b/v1/products", headers=read)))["items"]
+        assert product["trip_plan_id"] == plan_id
+        return datetime.fromisoformat(product["updated_at"])
+
+    first = await stamp()
+    await admin.execute("UPDATE booking.hotel_room_types SET status = 'inactive' WHERE id = $1::uuid", banded)
+    second = await stamp()
+    assert second > first
+    await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json={"items": []}, headers=maker))
+    third = await stamp()
+    assert third > second
+    # A delta sync sees the plan go unsellable.
+    await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json={"sellable": False}, headers=maker))
+    delta = await _ok(await c.get("/b2b/v1/products", params={"updated_since": third.isoformat()}, headers=read))
+    assert [(p["trip_plan_id"], p["sellable"], p["components"]) for p in delta["items"]] == [(plan_id, False, [])]
+    assert (await _ok(await c.get("/b2b/v1/products", headers=read)))["items"] == []

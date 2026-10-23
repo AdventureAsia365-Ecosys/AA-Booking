@@ -3,7 +3,9 @@
 - **Products**: sellable ``booking.trip_plans`` rows whose tour is in ``catalog.v_tour`` now (live, O7: a tour that
   leaves the catalog drops out), with their bookable components (``app.b2b.components``). No prices, no content:
   content comes from ``catalog.http.v1``. Keyset pages ordered by ``source_id``; ``updated_since`` filters on the
-  later of the plan's ``updated_at`` and its newest component.
+  latest of the plan's ``updated_at``, its newest component and the ``updated_at`` of the hotels, room types and
+  services behind its components, and also lists plans that stopped being sellable (``sellable = false``, no
+  components). Tours that leave the catalog need a periodic full resync (no ``updated_since``) until AA-975.
 - **FX rates**: the approved ``booking.fx_rates`` row in force on the asked date for every currency (plain rate, no
   buffer): the R17 "Booking's approved rates" source.
 - **Price parity** (ADR 0005a decision 1, warn never block): the plan's public "from" price per person from the bk-009
@@ -32,13 +34,23 @@ SOURCE_SYSTEM = "cis"
 PAGE = 100
 PARITY_BASIS = "per_person_2pax_low_season"
 
+# updated_at = the latest change that can alter what a product offers: the plan row (sellable, price hint; touched by
+# every component replace), any component row, and the hotel / room type / service behind a component (status). With
+# updated_since, plans that stopped being sellable are listed too (sellable = false, no components), so a delta sync
+# sees them go. A tour that leaves catalog.v_tour gives no change signal: removals of that kind need a periodic full
+# resync (no updated_since) until the AA-975 event feed exists.
 PRODUCTS_SQL = """
 SELECT * FROM (
     SELECT p.id::text AS trip_plan_id, p.source_system, p.source_id, p.sellable,
-           greatest(p.updated_at, coalesce((SELECT max(c.created_at) FROM booking.trip_plan_components c
-                                            WHERE c.trip_plan_id = p.id), p.updated_at)) AS updated_at
+           greatest(p.updated_at, (
+               SELECT greatest(max(c.created_at), max(rt.updated_at), max(h.updated_at), max(s.updated_at))
+               FROM booking.trip_plan_components c
+               LEFT JOIN booking.hotel_room_types rt ON rt.id = c.hotel_room_type_id
+               LEFT JOIN booking.hotels h ON h.id = rt.hotel_id
+               LEFT JOIN booking.services s ON s.id = c.service_id
+               WHERE c.trip_plan_id = p.id)) AS updated_at
     FROM booking.trip_plans p
-    WHERE p.sellable AND p.source_system = 'cis'
+    WHERE (p.sellable OR $2::timestamptz IS NOT NULL) AND p.source_system = 'cis'
       AND EXISTS (SELECT 1 FROM catalog.v_tour t WHERE t.source_system = p.source_system AND t.source_id = p.source_id)
       AND ($1::text IS NULL OR p.source_id > $1)
 ) x
@@ -87,14 +99,14 @@ async def list_products(
             rows = await conn.fetch(PRODUCTS_SQL, after, updated_since, limit)
         except CATALOG_ERRORS:
             raise B2BError("unavailable", "the catalog is not readable right now", retry_after_s=60) from None
-        parts = await components_by_plan(conn, [r["trip_plan_id"] for r in rows])
+        parts = await components_by_plan(conn, [r["trip_plan_id"] for r in rows if r["sellable"]])
     items = [
         {
             "tour": {"source_system": r["source_system"], "source_id": r["source_id"]},
             "trip_plan_id": r["trip_plan_id"],
             "sellable": bool(r["sellable"]),
             "has_fixed_departures": False,  # departures arrive with AA-973
-            "components": parts[r["trip_plan_id"]],
+            "components": parts.get(r["trip_plan_id"], []),
             "updated_at": r["updated_at"].isoformat(),
         }
         for r in rows

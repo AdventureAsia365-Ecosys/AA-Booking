@@ -2,7 +2,8 @@
 
 A component is a Booking supply item (a hotel room type or a service, bk-010) on a day of a sellable plan; the set is
 what ``GET /booking/b2b/v1/products`` lists and what a ``tp:`` quote line prices. ``PUT`` replaces the whole set of a
-plan in one transaction (delete + insert; role ``booking`` has SELECT, INSERT, DELETE) and writes one audit row when it
+plan in one transaction (delete + insert; role ``booking`` has SELECT, INSERT, DELETE), touches the plan's
+``updated_at`` (the products feed's change signal, also when the set is emptied) and writes one audit row when it
 changed. The plan must already have its commercial row (``PUT …/commercial``); every item must exist and be active.
 Ids only: no content is copied (O7).
 """
@@ -135,6 +136,8 @@ async def replace_components(
             " VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5)",
             [(plan_id, i["day_no"], i["hotel_room_type_id"], i["service_id"], staff.cis_user_id) for i in norm],
         )
+        # The plan's updated_at is the products feed's change signal (an emptied set leaves no component row).
+        await conn.execute("UPDATE booking.trip_plans SET updated_at = now() WHERE id = $1::uuid", plan_id)
         await audit.record(
             conn,
             actor_type="staff",

@@ -312,8 +312,20 @@ send, OTP) is not built: those still write rows only.
   rates in force on a date, plain), `GET /price-parity` (the public "from" price per person from the bk-009 price hint,
   warn-only; `null` without a per-person hint or rate). Departures, holds, confirm / cancel and events are AA-973 …
   AA-975.
+- **Products sync**: `updated_since` filters on the latest of the plan row (touched by every component replace, also
+  when the set is emptied), its component rows and the hotels / room types / services behind them, and then also lists
+  plans that stopped being sellable (`sellable = false`, no components). A tour that leaves `catalog.v_tour` gives no
+  change signal: the CRM must run a periodic full resync (no `updated_since`) for removals until the AA-975 event
+  feed, and should overlap its `updated_since` window by a few minutes (`updated_at` is the writing transaction's
+  start time).
 - **Quote**: net cost per line from the supplier rate in force on the service day (per night for rooms, by unit for
-  services; infants not counted), the approved `b2b` rule in force today (seed 15 % / 10 % floor / 3 % card fee,
+  services; infants not counted). Rooms are priced per entry of the line's room mix, the rate's pax band matched
+  against that room's occupancy (single 1, double / twin 2, triple 3, family = the travellers left over shared by the
+  family rooms, capped by `max_occupancy`); no `rooms` = doubles plus one single for an odd party; the rooms must hold
+  the adults; a `rooms[].room_type_id` must name the line's room type (`rt:`) or the plan's only room type (`tp:`).
+  Bounded work: a fixed number of queries per quote (items, plans, components, then one batched rate query,
+  `app.supply.rates.rates_in_force_many`) and at most 1,000 rate lookups per quote (more = 422 `invalid` "quote too
+  large", refused before any rate is read). Then the approved `b2b` rule in force today (seed 15 % / 10 % floor / 3 % card fee,
   policy data) and the approved FX rows in force today, through the AA-810 engine's functions (no second engine,
   `peak = false`). Each line's `b2b_price` is rounded up to the cent, the total is their exact sum. FX lock = the
   selling rate applied (rate x (1 + buffer)); `valid_until` = now + setting `b2b_quote_valid_hours` (48).

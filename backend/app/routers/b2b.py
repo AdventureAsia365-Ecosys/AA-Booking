@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.auth.m2m import SCOPE_QUOTE, SCOPE_READ
 from app.b2b import quotes, reads
 from app.b2b.access import B2BContext, require_scope
-from app.b2b.components import LineAsk
+from app.b2b.components import LineAsk, RoomAsk
 from app.b2b.errors import PREFIX
 
 router = APIRouter(prefix=PREFIX, tags=["b2b"])
@@ -174,7 +174,7 @@ async def create_quote(body: QuoteRequest, ctx: CanQuote) -> dict:
                 adult=line.pax.adult,
                 child=line.pax.child,
                 infant=line.pax.infant,
-                room_count=sum(r.count for r in line.rooms) or None,
+                rooms=tuple(RoomAsk(r.occupancy, r.count, r.room_type_id) for r in line.rooms),
             ),
             rooms=[r.model_dump() for r in line.rooms],
             departure_id=line.departure_id,

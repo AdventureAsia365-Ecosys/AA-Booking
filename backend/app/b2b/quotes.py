@@ -28,7 +28,7 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b.components import LineAsk, LineCost, line_cost
+from app.b2b.components import LineAsk, LineCost, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, repository
 
@@ -190,7 +190,7 @@ async def create_quote(
     on = now.date()
 
     async with pool.acquire() as conn:
-        costs: list[LineCost] = [await line_cost(conn, line.ask) for line in lines]
+        costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
         currencies = {currency, *(cur for lc in costs for _, cur in lc.costs)}
         rule, rates = await _pricing_data(conn, currencies, on)
         fx = _lock(currency, rates, on)

@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.b2b import quotes
-from app.b2b.components import LineAsk
+from app.b2b import components, quotes
+from app.b2b.components import LineAsk, RoomAsk
 from app.main import create_app
 from app.pricing import repository
 from app.pricing.engine import Channel, PricingRule
@@ -54,6 +54,25 @@ def _rate(rid: str, unit: str, amount: str, currency: str) -> dict[str, Any]:
     return {"id": rid, "unit": unit, "net_amount": amount, "currency": currency}
 
 
+def _rates(per_ask: Any) -> Any:
+    """Script the batched rate query: ``per_ask(room, service, on, pax)`` → a rate dict or None, for each ask."""
+
+    def answer(rooms: list, services: list, days: list, paxes: list) -> list[dict[str, Any]]:
+        out = []
+        for n, ask in enumerate(zip(rooms, services, days, paxes, strict=True), start=1):
+            rate = per_ask(*ask)
+            out.append({"n": n, **(rate or {"id": None, "unit": None, "net_amount": None, "currency": None})})
+        return out
+
+    return answer
+
+
+def _rate_asks(conn: ScriptedConn) -> list[tuple[Any, ...]]:
+    """The (room, service, day, pax) asks of the single batched rate query of a request."""
+    [call] = conn.sql("FROM booking.supplier_rates x")
+    return list(zip(*call, strict=True))
+
+
 def _conn(partner: Any = PARTNER) -> ScriptedConn:
     conn = ScriptedConn()
     conn.on("FROM booking.b2b_partners WHERE tenant_id", partner)
@@ -62,16 +81,15 @@ def _conn(partner: Any = PARTNER) -> ScriptedConn:
     conn.on("FROM booking.settings", "48")
     conn.on(
         "FROM booking.hotel_room_types rt JOIN booking.hotels",
-        {"id": ROOM, "status": "active", "hotel_status": "active"},
+        [{"id": ROOM, "status": "active", "max_occupancy": None, "hotel_status": "active"}],
     )
-    conn.on(
-        "FROM booking.services WHERE id",
-        {"id": SERVICE, "status": "active", "service_type": "transfer", "unit": "person"},
-    )
+    conn.on("FROM booking.services WHERE id", [{"id": SERVICE, "status": "active", "service_type": "transfer"}])
     conn.on(
         "FROM booking.supplier_rates x",
-        lambda room, service, on, pax: (
-            _rate("r-room", "room_night", "1000000.00", "VND") if room else _rate("r-svc", "person", "10.00", "USD")
+        _rates(
+            lambda room, service, on, pax: (
+                _rate("r-room", "room_night", "1000000.00", "VND") if room else _rate("r-svc", "person", "10.00", "USD")
+            )
         ),
     )
     conn.on("INSERT INTO booking.b2b_quotes", "9a000000-0000-4000-8000-000000000001")
@@ -147,9 +165,9 @@ def test_quote_prices_lines_and_stores_append_only() -> None:
     assert all(line["unit"] == "per_line" and line["availability"] == "available" for line in body["lines"])
     valid_until = datetime.fromisoformat(body["valid_until"])
     assert timedelta(hours=47) < valid_until - datetime.now(UTC) <= timedelta(hours=48)
-    # Two room nights looked up separately (season change safe), each with the party size.
-    room_calls = [a for a in conn.sql("FROM booking.supplier_rates x") if a[0]]
-    assert [a[2] for a in room_calls] == [date(2027, 3, 1), date(2027, 3, 2)] and room_calls[0][3] == 2
+    # Two room nights looked up separately (season change safe), one double room (default mix for 2), in ONE query.
+    room_asks = [a for a in _rate_asks(conn) if a[0]]
+    assert [a[2] for a in room_asks] == [date(2027, 3, 1), date(2027, 3, 2)] and {a[3] for a in room_asks} == {2}
     [quote_args] = conn.sql("INSERT INTO booking.b2b_quotes")
     assert quote_args[0] == PARTNER_ID and quote_args[1] == CRM_CLIENT and quote_args[15] == body["price_hash"]
     lines = conn.sql("INSERT INTO booking.b2b_quote_lines")
@@ -168,7 +186,7 @@ def test_same_request_same_hash_and_price_change_new_hash() -> None:
     assert first.json()["price_hash"] == again.json()["price_hash"]
     assert first.json()["quote_id"] == again.json()["quote_id"]  # scripted id; real ids differ
     conn = _conn().on(
-        "FROM booking.supplier_rates x", lambda room, service, on, pax: _rate("r", "person", "11.00", "USD")
+        "FROM booking.supplier_rates x", _rates(lambda room, service, on, pax: _rate("r", "person", "11.00", "USD"))
     )
     body = _quote_body(lines=[_quote_body()["lines"][1]])
     changed = _client(conn, m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(m2m.token()))
@@ -290,12 +308,12 @@ def test_trip_plan_line_sums_its_components() -> None:
     m2m = LocalM2M()
     plan = "8e000000-0000-4000-8000-0000000000d1"
     conn = _conn()
-    conn.on("FROM booking.trip_plans WHERE id", {"id": plan, "sellable": True})
+    conn.on("FROM booking.trip_plans WHERE id", [{"id": plan, "sellable": True}])
     conn.on(
         "FROM booking.trip_plan_components WHERE trip_plan_id",
         [
-            {"day_no": 1, "room_type_id": ROOM, "service_id": None},
-            {"day_no": 2, "room_type_id": None, "service_id": SERVICE},
+            {"trip_plan_id": plan, "day_no": 1, "room_type_id": ROOM, "service_id": None},
+            {"trip_plan_id": plan, "day_no": 2, "room_type_id": None, "service_id": SERVICE},
         ],
     )
     line = {"line_ref": "T", "component_id": f"tp:{plan}", "service_date": "2027-03-01", "pax": {"adult": 2}}
@@ -305,7 +323,7 @@ def test_trip_plan_line_sums_its_components() -> None:
     assert resp.status_code == 201, resp.text
     # 1 night (40 USD) + transfer 20 USD = 60 net → 73.1707… → 73.18
     assert resp.json()["total_b2b_price"] == {"amount": "73.18", "currency": "USD"}
-    assert [a[2] for a in conn.sql("FROM booking.supplier_rates x")] == [date(2027, 3, 1), date(2027, 3, 2)]
+    assert [a[2] for a in _rate_asks(conn)] == [date(2027, 3, 1), date(2027, 3, 2)]
     [row] = conn.sql("INSERT INTO booking.b2b_quote_lines")
     assert row[4] == "trip_plan"
 
@@ -319,11 +337,11 @@ def test_products_page() -> None:
     now = datetime.now(UTC)
     conn = _conn()
     conn.on(
-        "FROM booking.trip_plans p WHERE p.sellable",
+        "FROM booking.trip_plans p WHERE (p.sellable",
         [{"trip_plan_id": plan, "source_system": "cis", "source_id": "src-1", "sellable": True, "updated_at": now}],
     )
     conn.on(
-        "FROM booking.trip_plan_components c LEFT JOIN",
+        "WHERE c.trip_plan_id = ANY",
         [
             {"trip_plan_id": plan, "day_no": 1, "room_type_id": ROOM, "service_id": None, "service_type": None,
              "destination_id": "d1", "created_at": now},
@@ -335,6 +353,27 @@ def test_products_page() -> None:
     assert item["tour"] == {"source_system": "cis", "source_id": "src-1"} and item["has_fixed_departures"] is False
     assert [c["component_id"] for c in item["components"]] == [f"tp:{plan}", f"rt:{ROOM}"]
     assert item["components"][1]["kind"] == "hotel_room" and resp.json()["next_cursor"] is None
+
+
+def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:
+    m2m = LocalM2M()
+    gone = "8e000000-0000-4000-8000-0000000000d2"
+    now = datetime.now(UTC)
+    conn = _conn()
+    conn.on(
+        "FROM booking.trip_plans p WHERE (p.sellable",
+        [{"trip_plan_id": gone, "source_system": "cis", "source_id": "src-2", "sellable": False, "updated_at": now}],
+    )
+    since = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    resp = _client(conn, m2m).get(
+        "/booking/b2b/v1/products", params={"updated_since": since}, headers=_headers(m2m.token("booking.b2b/read"))
+    )
+    assert resp.status_code == 200, resp.text
+    [item] = resp.json()["items"]
+    assert item["sellable"] is False and item["components"] == []
+    assert conn.sql("WHERE c.trip_plan_id = ANY") == []  # no component read for an unsellable plan
+    [args] = conn.sql("FROM booking.trip_plans p WHERE (p.sellable")
+    assert args[1] is not None  # the delta flag that lets unsellable plans through
 
 
 def test_fx_rates_and_parity() -> None:
@@ -447,7 +486,125 @@ def test_price_hash_is_canonical() -> None:
     assert c != a
 
 
-def test_line_ask_room_defaults() -> None:
-    ask = LineAsk("L", "rt:x", date(2027, 1, 1), None, adult=3, child=0, infant=1, room_count=None)
-    assert ask.party == 3 and ask.rooms == 2
-    assert LineAsk("L", "rt:x", date(2027, 1, 1), None, 1, 0, 0, room_count=4).rooms == 4
+def _ask(adult: int, child: int = 0, *rooms: RoomAsk) -> LineAsk:
+    return LineAsk("L", "rt:x", date(2027, 1, 1), None, adult=adult, child=child, infant=1, rooms=rooms)
+
+
+def test_room_mix() -> None:
+    assert _ask(3).party == 3
+    assert components.room_mix(_ask(3), None) == [(2, 1), (1, 1)]  # default: doubles, the odd one in a single
+    assert components.room_mix(_ask(1), None) == [(1, 1)]
+    assert components.room_mix(_ask(4, 0, RoomAsk("double", 2)), 2) == [(2, 2)]
+    assert components.room_mix(_ask(2, 0, RoomAsk("single", 2)), None) == [(1, 2)]
+    assert components.room_mix(_ask(2, 0, RoomAsk("twin"), RoomAsk("double")), None) == [(2, 2)]
+    assert components.room_mix(_ask(2, 1, RoomAsk("family")), 4) == [(3, 1)]  # 3 travellers share the family room
+    assert components.room_mix(_ask(4, 1, RoomAsk("double"), RoomAsk("family")), None) == [(2, 1), (3, 1)]
+    with pytest.raises(components.B2BError, match="at most 2"):
+        components.room_mix(_ask(3, 0, RoomAsk("triple")), 2)
+    with pytest.raises(components.B2BError, match="fewer than 3 adults"):
+        components.room_mix(_ask(3, 0, RoomAsk("single")), None)
+    with pytest.raises(components.B2BError, match="fewer than 5 adults"):
+        components.room_mix(_ask(5, 0, RoomAsk("family")), 4)  # capped at the room type's max occupancy
+
+
+# ── Review round (AA-972): room mix, bounded work ────────────────────────────
+
+BANDS = {1: "30.00", 2: "40.00"}  # single and double bands of one room type (USD); no band above 2
+
+
+def _banded_conn() -> ScriptedConn:
+    def per_ask(room: Any, service: Any, on: Any, pax: int) -> dict[str, Any] | None:
+        if room:
+            return _rate(f"r-{pax}", "room_night", BANDS[pax], "USD") if pax in BANDS else None
+        return _rate("r-svc", "person", "10.00", "USD")
+
+    return _conn().on("FROM booking.supplier_rates x", _rates(per_ask))
+
+
+def _room_line(adult: int, rooms: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+    line = {"line_ref": "R", "component_id": f"rt:{ROOM}", "service_date": "2027-03-01", "pax": {"adult": adult}}
+    return {**line, "rooms": rooms, **extra}
+
+
+@pytest.mark.parametrize(
+    ("adult", "rooms", "net", "paxes"),
+    [
+        (4, [{"occupancy": "double", "count": 2}], 80, {2}),  # was a spurious 422 (band matched against the party)
+        (2, [{"occupancy": "single", "count": 2}], 60, {1}),  # was priced at the double band x 2
+        (4, [], 80, {2}),  # default mix: 2 doubles
+        (3, [], 70, {1, 2}),  # default mix: 1 double + 1 single
+    ],
+)
+def test_room_lines_price_each_room_by_its_occupancy(adult: int, rooms: list, net: int, paxes: set) -> None:
+    m2m, conn = LocalM2M(), _banded_conn()
+    body = _quote_body(lines=[_room_line(adult, rooms)])
+    resp = _client(conn, m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(m2m.token()))
+    assert resp.status_code == 201, resp.text
+    [line] = conn.sql("INSERT INTO booking.b2b_quote_lines")
+    assert line[14] == D(net).quantize(D("0.0001"))
+    assert {a[3] for a in _rate_asks(conn)} == paxes
+
+
+def test_room_type_id_must_match_the_component() -> None:
+    m2m = LocalM2M()
+    token = m2m.token()
+    other = "7d9f8b00-0000-4000-8000-0000000000ff"
+    for ref in (f"rt:{ROOM}", ROOM):
+        body = _quote_body(lines=[_room_line(2, [{"occupancy": "double", "room_type_id": ref}])])
+        assert (
+            _client(_banded_conn(), m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(token)).status_code
+            == 201
+        )
+    for ref in (f"rt:{other}", "junk"):
+        body = _quote_body(lines=[_room_line(2, [{"occupancy": "double", "room_type_id": ref}])])
+        resp = _client(_banded_conn(), m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(token))
+        _problem(resp, 422, "invalid")
+        assert "room_type_id" in resp.json()["message"]
+    svc = {"line_ref": "S", "component_id": f"sv:{SERVICE}", "service_date": "2027-03-01", "pax": {"adult": 2}}
+    body = _quote_body(lines=[{**svc, "rooms": [{"occupancy": "double", "room_type_id": ROOM}]}])
+    _problem(
+        _client(_banded_conn(), m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(token)), 422, "invalid"
+    )
+
+
+def test_room_mix_refusals_name_the_line() -> None:
+    m2m = LocalM2M()
+    conn = _banded_conn().on(
+        "FROM booking.hotel_room_types rt JOIN booking.hotels",
+        [{"id": ROOM, "status": "active", "max_occupancy": 2, "hotel_status": "active"}],
+    )
+    body = _quote_body(lines=[_room_line(3, [{"occupancy": "triple"}])])
+    resp = _client(conn, m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(m2m.token()))
+    _problem(resp, 422, "invalid")
+    assert "line R" in resp.json()["message"] and conn.sql("FROM booking.supplier_rates x") == []
+    no_band = _quote_body(lines=[_room_line(3, [{"occupancy": "family"}])])  # family of 3, no band for 3
+    resp = _client(_banded_conn(), m2m).post("/booking/b2b/v1/quotes", json=no_band, headers=_headers(m2m.token()))
+    _problem(resp, 422, "invalid")
+    assert "for 3 per room" in resp.json()["message"]
+
+
+def test_quote_too_large_is_refused_before_any_rate_lookup() -> None:
+    m2m, conn = LocalM2M(), _banded_conn()
+    lines = [_room_line(2, [], line_ref=f"L{i}", nights=6) for i in range(170)]  # 170 x 6 = 1,020 lookups
+    resp = _client(conn, m2m).post(
+        "/booking/b2b/v1/quotes", json=_quote_body(lines=lines), headers=_headers(m2m.token())
+    )
+    _problem(resp, 422, "invalid")
+    assert "too large" in resp.json()["message"]
+    assert conn.sql("FROM booking.supplier_rates x") == []
+    ok = _client(_banded_conn(), m2m).post(
+        "/booking/b2b/v1/quotes", json=_quote_body(lines=lines[:166]), headers=_headers(m2m.token())
+    )  # 996 lookups
+    assert ok.status_code == 201, ok.text
+
+
+def test_quote_runs_a_fixed_number_of_queries() -> None:
+    m2m, conn = LocalM2M(), _banded_conn()
+    lines = [_room_line(2, [], line_ref=f"L{i}", nights=5) for i in range(40)]
+    resp = _client(conn, m2m).post(
+        "/booking/b2b/v1/quotes", json=_quote_body(lines=lines), headers=_headers(m2m.token())
+    )
+    assert resp.status_code == 201, resp.text
+    assert len(conn.sql("FROM booking.supplier_rates x")) == 1
+    assert len(conn.sql("FROM booking.hotel_room_types rt JOIN booking.hotels")) == 1
+    assert len(_rate_asks(conn)) == 5  # 200 planned lookups, deduplicated to the 5 distinct nights
