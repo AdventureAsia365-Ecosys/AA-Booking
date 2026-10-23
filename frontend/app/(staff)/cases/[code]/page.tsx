@@ -94,6 +94,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                   <h1 className="break-words font-display text-xl font-semibold text-ink sm:text-2xl">{c.trip_title ?? "Custom trip"}</h1>
                   <TripCaseStatusBadge status={c.status} />
                   {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>TripPlanner</Pill>}
+                  {c.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
                 </div>
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
                   <Code>{c.code}</Code>
@@ -120,7 +121,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                   <Pencil size={14} /> Edit details
                 </Button>
               )}
-              <StatusActions c={c} />
+              {c.channel !== "b2b" && <StatusActions c={c} />}
             </div>
           </div>
           <Stepper status={c.status} cancelReason={cancelNote} />
@@ -244,22 +245,34 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
         <Section title="People">
           <div className="flex flex-col gap-4">
             <div>
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Customer</p>
-              <Link href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`} className="block rounded-md hover:bg-bg">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+                {c.channel === "b2b" ? "Agency" : "Customer"}
+              </p>
+              {c.channel === "b2b" || !c.customer_id ? (
                 <PersonCell
-                  name={c.customer_name}
-                  sub={[c.customer_email, c.customer_phone].filter(Boolean).join(" · ") || null}
-                  chips={!c.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}
+                  name="B2B agency booking"
+                  sub={c.party_tenant_id ? `Partner tenant ${c.party_tenant_id}` : "No customer on this case"}
+                  chips={<Pill tone="accent" dot={false}>B2B</Pill>}
                 />
-              </Link>
-              {c.customer_needs_merge_review && (
-                <p className="mt-2 text-xs text-warning">
-                  This lead may duplicate an existing customer:{" "}
-                  <Link href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`} className="font-semibold underline">
-                    review it
+              ) : (
+                <>
+                  <Link href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`} className="block rounded-md hover:bg-bg">
+                    <PersonCell
+                      name={c.customer_name}
+                      sub={[c.customer_email, c.customer_phone].filter(Boolean).join(" · ") || null}
+                      chips={!c.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}
+                    />
                   </Link>
-                  .
-                </p>
+                  {c.customer_needs_merge_review && (
+                    <p className="mt-2 text-xs text-warning">
+                      This lead may duplicate an existing customer:{" "}
+                      <Link href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`} className="font-semibold underline">
+                        review it
+                      </Link>
+                      .
+                    </p>
+                  )}
+                </>
               )}
             </div>
             <div>
@@ -297,6 +310,8 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
                 "TripPlanner"
               ) : c.source_system === "manual" ? (
                 "Manual"
+              ) : c.source_system === "crm" ? (
+                "B2B agency (AA-Partner CRM)"
               ) : c.source_id ? (
                 <Link href={`/catalog/trip-plans/${encodeURIComponent(c.source_id)}`} className="text-accent-deep hover:underline">
                   CIS trip plan

@@ -88,7 +88,11 @@ export const TRIP_CASE_STATUSES = [
 ] as const;
 export type TripCaseStatus = (typeof TRIP_CASE_STATUSES)[number];
 
-export type SourceSystem = "tripplanner" | "manual" | "cis";
+/** "crm": a B2B case opened by AA-Partner through booking.b2b.v1 (bk-020, AA-973). */
+export type SourceSystem = "tripplanner" | "manual" | "cis" | "crm";
+
+/** b2c: a direct customer; b2b: an agency booking from the partner API (no customer row, party_tenant_id set). */
+export type TripCaseChannel = "b2c" | "b2b";
 
 export interface CaseAssignee {
   cis_user_id: string;
@@ -109,7 +113,11 @@ export interface TripCaseListItem extends TripShape {
   id: string;
   code: string;
   status: TripCaseStatus;
-  customer_id: string;
+  /** null only on a B2B case (channel "b2b", bk-020). */
+  customer_id: string | null;
+  channel: TripCaseChannel;
+  /** The agency (AA-Partner tenant id) of a B2B case; null on B2C. */
+  party_tenant_id: string | null;
   trip_style: string | null;
   start_date: IsoDate | null;
   end_date: IsoDate | null;

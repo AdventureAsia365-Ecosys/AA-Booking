@@ -10,7 +10,9 @@ one e-mail is one SES call, a retention run is at most 50 batches of 1,000 rows 
 
 ``DEPLOY_GATE_EXEMPT``: kinds the deploy gate (``GET /booking/ops/deploy-gate``, ``app.routers.ops``) does not count.
 ``bk_inquiry_pull`` is the recurring singleton that is always queued (re-enqueued at +60 s): counting it would block
-every deploy, and interrupting it is harmless (a release puts it back, the next pull re-reads the outbox). Same
+every deploy, and interrupting it is harmless (a release puts it back, the next pull re-reads the outbox).
+``bk_b2b_hold_expire`` (AA-973) is not exempt: it is queued only while a B2B hold is due and finishes in seconds, so it
+holds a deploy back for one short run at most (DM-11.4 stays the default). Same
 exemption idea as CIS ``deploy_gate_exempt``; the two lists stay separate until one registry exists (X1).
 """
 
@@ -27,6 +29,7 @@ EXPECTED_SECONDS: dict[str, int] = {
     "bk_notify_email": 60,
     "bk_retention_job": 900,
     "bk_retention_inbox_redact": 900,
+    "bk_b2b_hold_expire": 120,
 }
 
 

@@ -12,6 +12,10 @@
 - **price_hash** (:func:`price_hash`): SHA-256 of a canonical JSON of the currency, the FX lock, the rule, the rounding
   rule, every line (what was asked + its price) and the total. Not the quote id, time, validity or proposal ref, so
   the same request on the same data gives the same hash, and any price change gives a new one.
+- **Availability** (AA-973, ``app.b2b.departures``): per line, ``available`` on a fixed departure with seats that
+  auto-confirms, ``on_request`` without a departure or on one that does not auto-confirm, ``sold_out`` when the
+  departure is full, cancelled or started. A quote reserves nothing; the hold re-checks under a lock. The line's
+  ``departure_id`` is stored and hashed (hash version 2).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -28,16 +32,16 @@ from typing import Any
 
 import asyncpg
 
+from app.b2b import departures
 from app.b2b.components import LineAsk, LineCost, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, repository
 
 log = logging.getLogger(__name__)
 
-HASH_VERSION = "booking.b2b.v1/quote/1"
+HASH_VERSION = "booking.b2b.v1/quote/2"  # /2 (AA-973): lines carry departure_id
 ROUNDING = "line_ceil_0.01"
 UNIT = "per_line"  # b2b_price is the whole line (quantity included)
-AVAILABLE = "available"  # until AA-973 adds departures and capacity
 VALID_HOURS_KEY = "b2b_quote_valid_hours"  # gitleaks:allow (setting name, not a secret)
 DEFAULT_VALID_HOURS = 48
 MAX_VALID_HOURS = 720
@@ -122,6 +126,7 @@ def price_hash(
                 "rooms": line["rooms"],
                 "unit": line["unit"],
                 "availability": line["availability"],
+                "departure_id": line["departure_id"],
                 "b2b_price": format(line["b2b_price"], "f"),
             }
             for line in lines
@@ -183,14 +188,25 @@ async def create_quote(
     refs = [line.ask.line_ref for line in lines]
     if len(set(refs)) != len(refs):
         raise B2BError("invalid", "line_ref must be unique within a quote")
-    for line in lines:
-        if line.departure_id:
-            raise B2BError("invalid", f"line {line.ask.line_ref}: unknown departure_id (no departures yet)")
     now = now or datetime.now(UTC)
     on = now.date()
 
     async with pool.acquire() as conn:
         costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
+        seats = await departures.availability(
+            conn,
+            [
+                departures.SeatAsk(
+                    line_ref=line.ask.line_ref,
+                    component_id=line.ask.component_id,
+                    service_date=line.ask.service_date,
+                    departure_id=line.departure_id,
+                    seats=departures.seats(line.ask.adult, line.ask.child),
+                )
+                for line in lines
+            ],
+            today=on,
+        )
         currencies = {currency, *(cur for lc in costs for _, cur in lc.costs)}
         rule, rates = await _pricing_data(conn, currencies, on)
         fx = _lock(currency, rates, on)
@@ -199,7 +215,9 @@ async def create_quote(
         sell_rate = engine_rates.get(currency)
 
         priced: list[dict[str, Any]] = []
-        for no, (line, lc) in enumerate(zip(lines, costs, strict=True), start=1):
+        for no, (line, lc, (availability, departure_id, _)) in enumerate(
+            zip(lines, costs, seats, strict=True), start=1
+        ):
             try:
                 net_usd = sum((engine.to_usd(amount, cur, engine_rates) for amount, cur in lc.costs), start=engine.ZERO)
                 sell = engine.from_usd(engine.sell_price_usd(net_usd, margin, rule.rule.card_fee_pct), sell_rate)
@@ -219,7 +237,8 @@ async def create_quote(
                     "pax_infant": ask.infant,
                     "rooms": line.rooms,
                     "unit": UNIT,
-                    "availability": AVAILABLE,
+                    "availability": availability,
+                    "departure_id": departure_id,
                     "b2b_price": ceil_cents(sell),
                     "net_cost_usd": net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
                     "supplier_rate_ids": lc.rate_ids,
@@ -262,8 +281,10 @@ async def create_quote(
                 """
                 INSERT INTO booking.b2b_quote_lines
                     (quote_id, line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult,
-                     pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[])
+                     pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids,
+                     departure_id)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[],
+                        $17::uuid)
                 """,
                 [
                     (
@@ -283,6 +304,7 @@ async def create_quote(
                         p["b2b_price"],
                         p["net_cost_usd"],
                         p["supplier_rate_ids"],
+                        p["departure_id"],
                     )
                     for p in priced
                 ],
@@ -306,7 +328,7 @@ async def create_quote(
                 "b2b_price": money(p["b2b_price"], currency),
                 "unit": p["unit"],
                 "availability": p["availability"],
-                "departure_id": None,
+                "departure_id": p["departure_id"],
             }
             for p in priced
         ],

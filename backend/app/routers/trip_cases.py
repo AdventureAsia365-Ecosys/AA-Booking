@@ -199,7 +199,7 @@ async def list_trip_cases(
     status: Annotated[list[str] | None, Query(description="repeat or comma-separate")] = None,
     assignee: Annotated[str | None, Query(max_length=128, description="CIS user id, 'me' or 'none'")] = None,
     q: Annotated[str | None, Query(max_length=200, description="case code, customer code, name or e-mail")] = None,
-    source: Annotated[str | None, Query(max_length=20, description="tripplanner | manual | cis")] = None,
+    source: Annotated[str | None, Query(max_length=20, description="tripplanner | manual | cis | crm")] = None,
     customer_id: Annotated[uuid.UUID | None, Query()] = None,
     created_from: Annotated[date | None, Query()] = None,
     created_to: Annotated[date | None, Query(description="inclusive")] = None,

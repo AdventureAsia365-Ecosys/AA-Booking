@@ -4,8 +4,10 @@ Machine routes only: an M2M access token of the ``aa-m2m`` pool with the route's
 ``X-AA-Tenant-Id`` (``app.b2b.access``). No staff token is accepted here, and no M2M token is accepted on staff routes
 (separate verifiers). Errors are the contract's ``Problem`` (``app.b2b.errors``). No personal data crosses this API.
 
-AA-972 serves ``GET /products``, ``POST /quotes``, ``GET /fx-rates`` and ``GET /price-parity``. Departures and holds are
-AA-973, commercial rules (VND, cancellation fees) AA-974, the event feed AA-975.
+AA-972 serves ``GET /products``, ``POST /quotes``, ``GET /fx-rates`` and ``GET /price-parity``; AA-973
+``GET /departures``, ``POST /holds``, ``GET`` / ``DELETE /holds/{hold_id}`` and ``POST /holds/{hold_id}/confirm``
+(``app.b2b.departures``, ``app.b2b.holds``). Commercial rules (VND, cancellation fees, extend, re-hold limit) are
+AA-974, the event feed AA-975.
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -16,11 +18,11 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth.m2m import SCOPE_QUOTE, SCOPE_READ
-from app.b2b import quotes, reads
+from app.auth.m2m import SCOPE_BOOK, SCOPE_HOLD, SCOPE_QUOTE, SCOPE_READ
+from app.b2b import departures, holds, quotes, reads
 from app.b2b.access import B2BContext, require_scope
 from app.b2b.components import LineAsk, RoomAsk
 from app.b2b.errors import PREFIX
@@ -29,6 +31,13 @@ router = APIRouter(prefix=PREFIX, tags=["b2b"])
 
 CanRead = Annotated[B2BContext, Depends(require_scope(SCOPE_READ))]
 CanQuote = Annotated[B2BContext, Depends(require_scope(SCOPE_QUOTE))]
+CanHold = Annotated[B2BContext, Depends(require_scope(SCOPE_HOLD))]
+CanBook = Annotated[B2BContext, Depends(require_scope(SCOPE_BOOK))]
+IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
+HoldId = Annotated[str, Path(min_length=1, max_length=64)]
+PriceHash = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+# proposal_version is an INTEGER column (bk-019 / bk-020): a larger value is a 422 Problem, not a 500 from asyncpg.
+PROPOSAL_VERSION_MAX = 2_147_483_647
 
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 Kind = Literal["trip_plan", "hotel_room", "transfer", "guide", "activity", "entrance", "meal"]
@@ -65,9 +74,21 @@ class QuoteLineRequest(Strict):
 
 class QuoteRequest(Strict):
     proposal_ref: str = Field(min_length=1, max_length=64)
-    proposal_version: int = Field(ge=1)
+    proposal_version: int = Field(ge=1, le=PROPOSAL_VERSION_MAX)
     currency: Currency
     lines: list[QuoteLineRequest] = Field(min_length=1, max_length=200)
+
+
+class HoldRequest(Strict):
+    quote_id: str = Field(min_length=1, max_length=64)
+    price_hash: PriceHash
+    proposal_ref: str = Field(min_length=1, max_length=64)
+    proposal_version: int = Field(ge=1, le=PROPOSAL_VERSION_MAX)
+
+
+class ConfirmRequest(Strict):
+    price_hash: PriceHash
+    deposit_ref: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 # ── Response models (contract booking.b2b.v1 components.schemas) ─────────────
@@ -143,6 +164,48 @@ class FxRates(Strict):
     rates: list[FxRate]
 
 
+class Departure(Strict):
+    departure_id: str = Field(max_length=64)
+    tour: TourKey
+    start_date: date
+    capacity: int = Field(ge=0)
+    held: int = Field(ge=0)
+    sold: int = Field(ge=0)
+    available: int = Field(ge=0)
+    status: Literal["scheduled", "guaranteed", "cancelled"]
+    auto_confirm: bool
+
+
+class DeparturePage(Strict):
+    items: list[Departure]
+
+
+class HoldLine(Strict):
+    line_ref: str = Field(max_length=64)
+    line_status: Literal["available", "on_request"]
+
+
+class Hold(Strict):
+    hold_id: str = Field(max_length=64)
+    quote_id: str = Field(max_length=64)
+    status: Literal["active", "confirmed", "expired", "released"]
+    expires_at: datetime
+    extended_count: int = Field(ge=0, le=1)
+    lines: list[HoldLine]
+
+
+class BookingLine(Strict):
+    line_ref: str = Field(max_length=64)
+    status: Literal["confirmed", "on_request", "declined", "cancelled"]
+
+
+class Booking(Strict):
+    booking_id: str = Field(max_length=64)
+    hold_id: str = Field(max_length=64)
+    trip_case_code: str = Field(max_length=32)
+    lines: list[BookingLine]
+
+
 class PriceParity(Strict):
     tour: TourKey
     currency: Currency
@@ -205,3 +268,58 @@ async def get_price_parity(
     currency: Annotated[str, Query(pattern=r"^[A-Z]{3}$")],
 ) -> dict:
     return await reads.price_parity(ctx.pool, source_id=source_id, currency=currency, on=datetime.now(UTC).date())
+
+
+def _caller(ctx: B2BContext) -> holds.Caller:
+    return holds.Caller(
+        partner_id=ctx.partner_id, tenant_id=str(ctx.partner["tenant_id"]), client_id=ctx.caller.client_id
+    )
+
+
+@router.get("/departures", response_model=DeparturePage)
+async def list_departures(
+    ctx: CanRead,
+    source_system: Literal["cis"],
+    source_id: Annotated[str, Query(min_length=1, max_length=128)],
+    start: Annotated[date | None, Query(alias="from")] = None,
+    end: Annotated[date | None, Query(alias="to")] = None,
+) -> dict:
+    return await departures.list_for_tour(
+        ctx.pool, source_system=source_system, source_id=source_id, start=start, end=end, today=datetime.now(UTC).date()
+    )
+
+
+@router.post("/holds", response_model=Hold, status_code=201)
+async def create_hold(body: HoldRequest, ctx: CanHold, idempotency_key: IdempotencyKey) -> dict:
+    return await holds.create_hold(
+        ctx.pool,
+        _caller(ctx),
+        quote_id=body.quote_id,
+        price_hash=body.price_hash,
+        proposal_ref=body.proposal_ref,
+        proposal_version=body.proposal_version,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.get("/holds/{hold_id}", response_model=Hold)
+async def get_hold(hold_id: HoldId, ctx: CanRead) -> dict:
+    return await holds.get_hold(ctx.pool, _caller(ctx), hold_id)
+
+
+@router.delete("/holds/{hold_id}", status_code=204)
+async def release_hold(hold_id: HoldId, ctx: CanHold) -> Response:
+    await holds.release_hold(ctx.pool, _caller(ctx), hold_id)
+    return Response(status_code=204)
+
+
+@router.post("/holds/{hold_id}/confirm", response_model=Booking, status_code=201)
+async def confirm_hold(hold_id: HoldId, body: ConfirmRequest, ctx: CanBook, idempotency_key: IdempotencyKey) -> dict:
+    return await holds.confirm_hold(
+        ctx.pool,
+        _caller(ctx),
+        hold_id,
+        price_hash=body.price_hash,
+        deposit_ref=body.deposit_ref,
+        idempotency_key=idempotency_key,
+    )

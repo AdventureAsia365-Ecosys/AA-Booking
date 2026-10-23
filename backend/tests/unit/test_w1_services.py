@@ -547,6 +547,27 @@ async def test_send_needs_items_and_validity_setting_fallbacks() -> None:
     assert await versions._validity_days(ScriptedConn().on("FROM booking.settings", "90")) == 30
 
 
+async def test_send_and_approve_refuse_b2b_cases() -> None:
+    """AA-973 review: a B2B case has no customer (customer_id NULL); send / approve would read a missing customer or
+    re-confirm a partner booking. Both are 409 before any read of the customer or write."""
+    b2b = {"channel": "b2b", "customer_id": None}
+    for status, call in (
+        ("building", lambda conn: versions.send_version(
+            conn, SALES, "TC-1", 1, to=None, subject="s", message="m", valid_until=None, today=date(2026, 10, 14)
+        )),
+        ("proposal_sent", lambda conn: versions.approve_version(conn, SALES, "TC-1", 1, None)),
+    ):  # fmt: skip
+        conn = (
+            ScriptedConn()
+            .on("FROM booking.trip_cases tc", case_row(status, **b2b))
+            .on("FROM booking.trip_case_versions v", version_row(is_sent_to_customer=True, badge="sent"))
+        )
+        with pytest.raises(Conflict) as err:
+            await call(conn)
+        assert err.value.code == "b2b_case_managed_by_partner_api"
+        assert conn.sql("FROM booking.customers") == [] and conn.sql("UPDATE booking.") == []
+
+
 async def test_approve_rules() -> None:
     def approve_conn(status: str = "proposal_sent", **version: Any) -> ScriptedConn:
         return (

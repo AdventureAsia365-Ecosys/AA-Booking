@@ -46,7 +46,7 @@ from app.pricing import engine
 from app.pricing import service as pricing
 from app.supply import rates as supply_rates
 from app.trip_cases import sql
-from app.trip_cases.service import is_terminal, resolve_case, set_status
+from app.trip_cases.service import ensure_staff_managed, is_terminal, resolve_case, set_status
 from app.trip_cases.sql import leg_title  # noqa: F401 — re-exported (tests, older imports)
 
 MAX_ITEMS = 200
@@ -734,6 +734,7 @@ async def send_version(
     today: date | None = None,
 ) -> dict[str, Any]:
     case = await resolve_case(conn, ref, lock=True)
+    ensure_staff_managed(case)
     if case["status"] not in SEND_CHAIN:
         raise Conflict(
             "case_not_sendable",
@@ -828,6 +829,7 @@ async def approve_version(
     """Staff record the customer's approval of a sent version: version approved + case -> confirmed."""
     note = (note or "").strip() or None
     case = await resolve_case(conn, ref, lock=True)
+    ensure_staff_managed(case)
     version = dict(await _version(conn, case["id"], number, lock=True))
     if version["is_approved"]:
         raise Conflict("version_already_approved", f"V{number} is already approved")
@@ -920,7 +922,7 @@ async def list_versions(
     clause = " AND ".join(where)
     base = (
         "FROM booking.trip_case_versions v JOIN booking.trip_cases tc ON tc.id = v.trip_case_id"
-        " JOIN booking.customers c ON c.id = tc.customer_id"
+        " LEFT JOIN booking.customers c ON c.id = tc.customer_id"  # b2b cases have no customer (bk-020)
     )
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(
