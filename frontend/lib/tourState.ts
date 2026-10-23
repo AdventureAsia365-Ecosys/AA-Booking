@@ -37,3 +37,10 @@ export function catalogReasonLabel(reason: string | null | undefined): string {
   if (!reason) return "reason not known";
   return REASONS[reason] ?? reason.replace(/_/g, " ");
 }
+
+/** The states staff are flagged about (leg pill, case alert, orphaned plans). A pause is temporary and carries no staff
+ *  flag (root ADR 0015 decision 5, paused table: "confirmed work kept, no staff flag"); the backend agrees (tour_alerts
+ *  and the orphaned filter leave paused keys out). */
+export function isFlaggedState(state: CatalogState | null | undefined): boolean {
+  return state === "retired" || state === "not_in_catalog";
+}

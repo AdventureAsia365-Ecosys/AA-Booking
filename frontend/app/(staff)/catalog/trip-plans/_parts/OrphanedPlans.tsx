@@ -84,7 +84,7 @@ export function OrphanedPlansTable() {
         enableCsv
         csvFilename="trip-plans-orphaned.csv"
         emptyTitle={query.q ? "No orphaned plan with this key" : "No orphaned trip plans"}
-        emptyDescription="A trip plan shows here when CIS stops serving its tour (deleted, trashed or paused)."
+        emptyDescription="A trip plan shows here when CIS stops serving its tour (deleted or trashed). A paused tour is temporary and is not listed."
         tableMinWidth={860}
       />
       <p className="mt-3 text-xs text-muted">

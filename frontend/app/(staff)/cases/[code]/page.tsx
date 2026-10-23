@@ -12,7 +12,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CalendarDays, Pencil, UserPlus, Users as UsersIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import type { ActivityItem, TripCaseDetail } from "@/lib/api/types";
-import { CATALOG_STATE_META, catalogReasonLabel } from "@/lib/tourState";
+import { CATALOG_STATE_META, catalogReasonLabel, isFlaggedState } from "@/lib/tourState";
 import {
   Button,
   Code,
@@ -267,7 +267,7 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
                     </span>
                   </span>
                   <span className="flex min-w-0 flex-wrap items-center gap-2">
-                    {l.catalog && l.catalog.state !== "served" && (
+                    {l.catalog && isFlaggedState(l.catalog.state) && (
                       <Pill tone={CATALOG_STATE_META[l.catalog.state].tone} title={CATALOG_STATE_META[l.catalog.state].help}>
                         {CATALOG_STATE_META[l.catalog.state].label}
                       </Pill>
