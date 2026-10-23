@@ -86,11 +86,12 @@ curl -s localhost:8000/booking/health
   Tests (incl. migration guard), Integration Tests (Postgres 15, applies `migrations/`), Docker
   Build Check (image starts, Trivy report, SBOM).
 - `.github/workflows/secret-scan.yml` (AA-981 follow-up): check **gitleaks** on every PR (lines the PR adds, rules and
-  baseline from the base branch) and **gitleaks full history** nightly, on push to `main` and on demand (every
+  baseline from the base branch) and **gitleaks full history** (`secret-scan-history.yml`) nightly, on push to `main` and on demand (every
   branch, tag and pull request head). Rules in `.gitleaks.toml` (same as the root repo), reviewed findings pinned
-  in `.gitleaksignore`; a PR that changes either file or `secret-scan.yml`, or adds an inline `gitleaks:allow`,
-  needs the label `secret-scan-baseline-reviewed` after the last push (any later push, reopen or label change
-  removes it). Merge commits are scanned too (remerge diff). False positives: prefer a
+  in `.gitleaksignore`; a PR that changes either file, either secret scan workflow, `.github/CODEOWNERS` or any
+  `.gitattributes`, or adds an inline `gitleaks:allow`, needs the label `secret-scan-baseline-reviewed` after the last push (any later push, reopen or label change
+  removes it). Merge commits (remerge diff), renames and type changes are scanned too, every file as text. A red
+  result means the value is public: rotate it, even if it was force-pushed away. False positives: prefer a
   narrow allowlist in `.gitleaks.toml`; a commit fingerprint does not survive the squash merge (header of
   `.gitleaksignore`).
 - `.github/workflows/deploy-dev.yml`: on push to `main` (backend changes) — OIDC role from the `dev`

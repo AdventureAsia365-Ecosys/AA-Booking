@@ -49,7 +49,8 @@ jobs:
   # Unlike CIS (report-only), pip-audit FAILS here. The same job runs the AA-902 resource-ID check. This repo carries
   # the DB role / password flow, so a committed secret is the most expensive mistake it can make (AA-678 notes): the
   # gitleaks scan that ran here moved to .github/workflows/secret-scan.yml (AA-981 follow-up), check "gitleaks" on
-  # every PR with the base branch's rules and "gitleaks full history" nightly and on push to main.
+  # every PR with the base branch's rules and "gitleaks full history" (secret-scan-history.yml)
+  # nightly and on push to main.
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
