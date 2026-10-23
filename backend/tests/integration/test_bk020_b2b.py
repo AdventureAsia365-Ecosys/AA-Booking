@@ -5,8 +5,11 @@
 - quote availability per line (available / on_request / sold_out) → hold (Idempotency-Key, one set per proposal
   version, price_changed, sold_out) → confirm → B2B trip case + approved version, no customer (memo seams 1, 2);
 - Linear R: capacity 0 → ``sold_out``; confirm after expiry → refused (contract: 410 ``hold_expired``);
-- Linear E: two concurrent holds on the last seat → exactly one wins;
+- Linear E: two concurrent holds on the last seat → exactly one wins; a confirm that began before expiry and waited
+  while another hold took the freed seat is refused (no oversell);
 - the expiry job writes expired holds and frees nothing twice.
+
+Dates are relative to today (lessons.md S245: no hard-coded future dates): departures start in 30 / 37 days.
 """
 
 from __future__ import annotations
@@ -37,7 +40,11 @@ ADMIN, MAKER, CHECKER, SALES = "it-973-admin", "it-973-maker", "it-973-checker",
 POLICY = [p for p in MIGRATIONS if p.name[:3] in ("004", "006", "007")]
 SOURCE_ID = "e1000000-0000-4000-8000-000000000973"
 TENANT = "e2000000-0000-4000-8000-000000000973"
-DAY1, DAY2 = "2027-03-01", "2027-03-08"
+TODAY = date.today()
+DAY1_DATE = TODAY + timedelta(days=30)  # > 48 h away: a hold gets its full 48 h
+DAY1, DAY2 = DAY1_DATE.isoformat(), (DAY1_DATE + timedelta(days=7)).isoformat()
+FROM = TODAY.isoformat()
+VALID_FROM, VALID_TO = TODAY - timedelta(days=30), TODAY + timedelta(days=365)
 PUBLISH = (
     "UPDATE booking.supplier_contracts SET status = 'published', published_by = $2, published_at = now()"
     " WHERE id = $1::uuid"
@@ -140,15 +147,15 @@ async def plan(
         created_by=MAKER,
     )  # fmt: skip
     contract = await _insert(
-        admin, "supplier_contracts", supplier_id=sid, title="2027", valid_from=date(2027, 1, 1),
-        valid_to=date(2027, 12, 31), currency="VND", created_by=MAKER,
+        admin, "supplier_contracts", supplier_id=sid, title="Contract 973", valid_from=VALID_FROM,
+        valid_to=VALID_TO, currency="VND", created_by=MAKER,
     )  # fmt: skip
     hotel = await _insert(admin, "hotels", supplier_id=sid, name="Hanoi Emerald", created_by=MAKER)
     room = await _insert(admin, "hotel_room_types", hotel_id=hotel, name="Deluxe", max_occupancy=2, created_by=MAKER)
     service = await _insert(
         admin, "services", supplier_id=sid, service_type="transfer", title="Airport pick-up", created_by=MAKER
     )
-    common = {"supplier_contract_id": contract, "valid_from": date(2027, 1, 1), "valid_to": date(2027, 12, 31)}
+    common = {"supplier_contract_id": contract, "valid_from": VALID_FROM, "valid_to": VALID_TO}
     await _insert(
         admin, "supplier_rates", **common, hotel_room_type_id=room, unit="room_night", net_amount=1_000_000,
         currency="VND", created_by=MAKER,
@@ -159,7 +166,7 @@ async def plan(
     )  # fmt: skip
     await admin.execute(PUBLISH, contract, CHECKER)
     fx = await _insert(
-        admin, "fx_rates", currency="VND", rate_per_usd=25_000, buffer_pct=0, as_of=date(2026, 1, 1),
+        admin, "fx_rates", currency="VND", rate_per_usd=25_000, buffer_pct=0, as_of=TODAY - timedelta(days=1),
         source="synthetic", created_by=MAKER,
     )  # fmt: skip
     await admin.execute(
@@ -231,7 +238,7 @@ def _hold_body(quote: dict[str, Any], ref: str, version: int = 1) -> dict[str, A
 
 async def _seats(c: httpx.AsyncClient, m2m: LocalM2M) -> dict[str, tuple[int, int, int]]:
     page = await _ok(
-        await c.get(f"/b2b/v1/departures?source_system=cis&source_id={SOURCE_ID}&from=2027-01-01", headers=_m2m(m2m))
+        await c.get(f"/b2b/v1/departures?source_system=cis&source_id={SOURCE_ID}&from={FROM}", headers=_m2m(m2m))
     )
     return {d["start_date"]: (d["held"], d["sold"], d["available"]) for d in page["items"]}
 
@@ -255,7 +262,7 @@ async def test_departures_quote_hold_confirm(
     staff_list = await _ok(await c.get(f"/catalog/trip-plans/{SOURCE_ID}/departures", headers=sales))
     assert [(d["start_date"], d["available"]) for d in staff_list["items"]] == [(DAY1, 4), (DAY2, 10)]
     page = await _ok(
-        await c.get(f"/b2b/v1/departures?source_system=cis&source_id={SOURCE_ID}&from=2027-01-01", headers=_m2m(m2m))
+        await c.get(f"/b2b/v1/departures?source_system=cis&source_id={SOURCE_ID}&from={FROM}", headers=_m2m(m2m))
     )
     first = page["items"][0]
     assert first == {
@@ -366,8 +373,8 @@ async def test_departures_quote_hold_confirm(
         "source_system": "crm",
         "source_id": "PRO-1",
         "status": "confirmed",
-        "start_date": date(2027, 3, 1),
-        "end_date": date(2027, 3, 1),
+        "start_date": DAY1_DATE,
+        "end_date": DAY1_DATE,
         "pax": 2,
         "currency": "USD",
     }
@@ -402,6 +409,11 @@ async def test_departures_quote_hold_confirm(
     assert [(i["code"], i["channel"], i["customer_name"]) for i in listed["items"]] == [(case["code"], "b2b", None)]
     detail = await _ok(await c.get(f"/trip-cases/{case['code']}", headers=boss))
     assert detail["party_tenant_id"] == TENANT and detail["versions"][0]["channel"] == "b2b"
+    # ... but do not move it: a staff cancel would leave the seats sold (cancel is the partner API, AA-974).
+    cancel = {"to_status": "cancelled", "reason": "agency asked by phone"}
+    refused = await c.post(f"/trip-cases/{case['code']}/status", json=cancel, headers=boss)
+    assert refused.status_code == 409 and refused.json()["detail"] == "b2b_case_managed_by_partner_api", refused.text
+    assert await admin.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", case["id"]) == "confirmed"
 
     # Staff: capacity never below held + sold; cancel is final; a cancelled departure is sold out.
     patch = f"/catalog/departures/{dep1['id']}"
@@ -470,7 +482,8 @@ async def test_capacity_zero_release_and_expiry(
     )
     # The schedule hook queues one run only while something is due; the handler writes the status.
     pool = await db.pool()
-    hook = expiry.ExpirySchedule(now=lambda: datetime(2026, 10, 23, 12, 0, tzinfo=UTC))
+    minute = datetime.now(UTC).replace(second=0, microsecond=0)
+    hook = expiry.ExpirySchedule(now=lambda: minute)
     job_id = await hook(pool)
     assert job_id is not None and await hook(pool) is None  # same minute: one job
     assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE kind = $1", expiry.KIND) == 1
@@ -480,7 +493,7 @@ async def test_capacity_zero_release_and_expiry(
     )
     assert row["status"] == "expired" and row["expired_at"] is not None
     assert await expiry.expire_due(pool) == 0
-    later = expiry.ExpirySchedule(now=lambda: datetime(2026, 10, 23, 12, 5, tzinfo=UTC))
+    later = expiry.ExpirySchedule(now=lambda: minute + timedelta(minutes=5))
     assert await later(pool) is None  # nothing due: no job row
 
 
@@ -515,3 +528,50 @@ async def test_two_concurrent_holds_on_the_last_seat(
     assert loser.json()["error"] == "sold_out"
     assert await admin.fetchval("SELECT count(*) FROM booking.b2b_holds WHERE status = 'active'") == 1
     assert (await _seats(c, m2m))[DAY1] == (1, 0, 0)
+
+
+async def test_confirm_that_waited_past_expiry_does_not_oversell(
+    client: tuple[httpx.AsyncClient, LocalCis, LocalM2M, Database], admin: asyncpg.Connection, plan: dict[str, str]
+) -> None:
+    """Review S248: a confirm whose transaction began before ``expires_at`` waits (here: on the hold row, held by
+    another session); meanwhile the hold expires and another proposal takes the freed last seat and commits. The
+    confirm must then answer 410 ``hold_expired``, not turn the expired hold into a sale (sold + held > capacity)."""
+    c, cis, m2m, _ = client
+    dep = await _departure(c, cis, DAY1, 1)
+    first, second = [
+        await _ok(await _quote(c, m2m, ref, [_plan_line("tour", plan["plan"], dep["id"], adult=1)]), 201)
+        for ref in ("LATE-1", "LATE-2")
+    ]
+    hold = await _ok(
+        await c.post("/b2b/v1/holds", json=_hold_body(first, "LATE-1"), headers=_m2m(m2m, "late-key-1")), 201
+    )
+    await admin.execute(
+        "UPDATE booking.b2b_holds SET expires_at = now() + interval '2 seconds' WHERE id = $1::uuid", hold["hold_id"]
+    )
+    expires_at = await admin.fetchval("SELECT expires_at FROM booking.b2b_holds WHERE id = $1::uuid", hold["hold_id"])
+
+    tx = admin.transaction()
+    await tx.start()
+    await admin.execute("SELECT 1 FROM booking.b2b_holds WHERE id = $1::uuid FOR UPDATE", hold["hold_id"])
+    confirm = asyncio.create_task(
+        c.post(
+            f"/b2b/v1/holds/{hold['hold_id']}/confirm",
+            json={"price_hash": first["price_hash"]},
+            headers=_m2m(m2m, "late-conf-1"),
+        )
+    )
+    try:
+        await asyncio.sleep(0.3)
+        assert datetime.now(UTC) < expires_at, "the confirm must start before the hold expires"
+        waiting = await admin.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
+        await asyncio.sleep(max((expires_at - datetime.now(UTC)).total_seconds(), 0) + 0.3)
+        # The hold has expired: the other proposal takes the last seat and commits while the confirm still waits.
+        other = await c.post("/b2b/v1/holds", json=_hold_body(second, "LATE-2"), headers=_m2m(m2m, "late-key-2"))
+    finally:
+        await tx.rollback()
+    assert waiting == 1  # the confirm was queued on the hold row
+    assert other.status_code == 201, other.text
+    _problem(await confirm, 410, "hold_expired")
+    held, sold, available = (await _seats(c, m2m))[DAY1]
+    assert (held, sold, available) == (1, 0, 0) and held + sold <= 1
+    assert await admin.fetchval("SELECT count(*) FROM booking.trip_cases WHERE channel = 'b2b'") == 0

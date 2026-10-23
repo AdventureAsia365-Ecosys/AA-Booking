@@ -41,6 +41,8 @@ TERMINAL_STATUSES = frozenset({"cancelled", "completed"})
 APPROVAL_ONLY_STATUSES = frozenset({"confirmed"})
 ASSIGNMENT_ROLES = ("sales", "contracting", "ops", "guide")
 EDITABLE_FIELDS = ("pax", "pax_adults", "pax_children", "start_date", "currency", "trip_style", "notes")
+# Staff may still annotate a B2B case (AA-973): the rest of it is what the partner API sold.
+B2B_STAFF_EDITABLE = frozenset({"trip_style", "notes"})
 SOURCES = ("tripplanner", "manual", "cis", "crm")  # crm: B2B cases opened by booking.b2b.v1 confirm (AA-973)
 INITIAL_STATUSES = ("new_inquiry", "discovery")
 SORTS = {"created_at": "tc.created_at", "updated_at": "tc.updated_at", "start_date": "tc.start_date"}
@@ -79,6 +81,17 @@ def _case_dict(row: Any) -> dict[str, Any]:
     if "countries" in out:
         out["countries"] = list(out["countries"] or [])
     return out
+
+
+def ensure_staff_managed(case: Any) -> None:
+    """A B2B case (``channel = 'b2b'``, AA-973) is opened confirmed by the partner API and has no customer: its status
+    and its proposals belong to booking.b2b.v1 (cancel: AA-974), so staff status moves, sends and approvals are 409.
+    A staff cancel here would leave the hold ``confirmed`` with its seats sold and the agency never told."""
+    if case.get("channel") == "b2b":
+        raise Conflict(
+            "b2b_case_managed_by_partner_api",
+            "this is a B2B case booked through the partner API; its status and proposals change only there",
+        )
 
 
 def reason_required(from_status: str, to_status: str) -> bool:
@@ -403,6 +416,8 @@ async def update_case(conn: asyncpg.Connection, staff: Staff, ref: str, changes:
     before = _plain(row, EDITABLE_FIELDS)
     changes = _pax_consistent(changes, before)
     changed = {k: v for k, v in changes.items() if before[k] != v}
+    if set(changed) - B2B_STAFF_EDITABLE:
+        ensure_staff_managed(row)  # B2B: pax / dates / currency are what the hold sold (AA-973)
     before_countries = await _countries(conn, row["id"]) if countries_sent else None
     countries_changed = countries_sent and [c.upper() for c in countries] != before_countries
     if not changed and not countries_changed:
@@ -487,6 +502,7 @@ async def change_status(
         raise Invalid("unknown_status", f"unknown status {to_status}")
     reason = (reason or "").strip() or None
     row = await resolve_case(conn, ref, lock=True)
+    ensure_staff_managed(row)
     from_status = row["status"]
     if from_status == to_status:
         raise Conflict("status_unchanged", f"trip case is already {to_status}")

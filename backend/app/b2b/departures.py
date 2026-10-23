@@ -42,15 +42,18 @@ d.id::text AS id, d.trip_plan_id::text AS trip_plan_id, d.start_date, d.capacity
 d.created_at, d.updated_at
 """
 
-# Seats per departure: held (live holds) and sold (confirmed holds, line not declined / cancelled).
+# Seats per departure: held (live holds) and sold (confirmed holds, line not declined / cancelled). ``$2`` is the
+# instant "live" is judged at (NULL = the transaction's now(), which only ever counts a hold MORE than the wall clock
+# would: safe for places and quotes); ``$3`` leaves one hold out (confirm's own re-count).
 USAGE_SQL = """
 SELECT l.departure_id::text AS departure_id,
-       coalesce(sum(l.seats) FILTER (WHERE h.status = 'active' AND h.expires_at > now()), 0)::int AS held,
+       coalesce(sum(l.seats) FILTER (
+           WHERE h.status = 'active' AND h.expires_at > coalesce($2::timestamptz, now())), 0)::int AS held,
        coalesce(sum(l.seats) FILTER (
            WHERE h.status = 'confirmed' AND l.status NOT IN ('declined', 'cancelled')), 0)::int AS sold
 FROM booking.b2b_hold_lines l
 JOIN booking.b2b_holds h ON h.id = l.hold_id
-WHERE l.departure_id = ANY($1::uuid[])
+WHERE l.departure_id = ANY($1::uuid[]) AND ($3::uuid IS NULL OR h.id <> $3::uuid)
 GROUP BY l.departure_id
 """
 
@@ -102,11 +105,19 @@ def _invalid(line_ref: str, why: str) -> B2BError:
     return B2BError("invalid", f"line {line_ref}: {why}")
 
 
-async def usage(conn: asyncpg.Connection, departure_ids: list[str]) -> dict[str, tuple[int, int]]:
-    """``{departure id: (held, sold)}``; a departure with no hold line is absent (0, 0)."""
+async def usage(
+    conn: asyncpg.Connection,
+    departure_ids: list[str],
+    *,
+    at: datetime | None = None,
+    exclude_hold: str | None = None,
+) -> dict[str, tuple[int, int]]:
+    """``{departure id: (held, sold)}``; a departure with no hold line is absent (0, 0). ``at``: judge live holds at
+    this instant instead of the transaction start; ``exclude_hold``: leave that hold's lines out."""
     if not departure_ids:
         return {}
-    return {r["departure_id"]: (r["held"], r["sold"]) for r in await conn.fetch(USAGE_SQL, departure_ids)}
+    rows = await conn.fetch(USAGE_SQL, departure_ids, at, exclude_hold)
+    return {r["departure_id"]: (r["held"], r["sold"]) for r in rows}
 
 
 def free_seats(row: Any, held: int, sold: int) -> int:

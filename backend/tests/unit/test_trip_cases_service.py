@@ -139,6 +139,24 @@ async def test_update_case_rejects_other_fields_and_check_violations() -> None:
         await service.update_case(conn, STAFF, "TC-000001", {"start_date": date(2027, 1, 1)})
 
 
+async def test_update_case_b2b_allows_notes_only() -> None:
+    """AA-973 review: on a B2B case staff may annotate (notes, trip style) but not move pax / dates / currency,
+    which are what the partner hold sold."""
+    b2b = case_row("confirmed", channel="b2b", customer_id=None, pax=2)
+    conn = ScriptedConn().on("FROM booking.trip_cases tc", b2b)
+    with pytest.raises(Conflict) as err:
+        await service.update_case(conn, STAFF, "TC-000001", {"pax": 3})
+    assert err.value.code == "b2b_case_managed_by_partner_api"
+    assert conn.sql("UPDATE booking.trip_cases") == []
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.trip_cases tc", b2b)
+        .on("UPDATE booking.trip_cases", {**b2b, "notes": "agency rang"})
+    )
+    out = await service.update_case(conn, STAFF, "TC-000001", {"notes": "agency rang", "pax": 2})
+    assert out["changed"] == ["notes"]
+
+
 async def test_change_status_legal_edge_sets_actor_and_reason() -> None:
     conn = (
         ScriptedConn()
@@ -172,6 +190,21 @@ async def test_change_status_errors() -> None:
     conn.on("SET status", asyncpg.CheckViolationError("illegal"))
     with pytest.raises(Conflict):
         await service.change_status(conn, STAFF, "x", "building", None)
+
+
+@pytest.mark.parametrize("to_status", ["cancelled", "new_inquiry", "discovery"])
+async def test_change_status_refuses_b2b_cases(to_status: str) -> None:
+    """AA-973 review: a B2B case (no customer, seats sold through a hold) is moved only by the partner API (AA-974
+    cancel); a staff cancel would leave the seats sold, a reopen would lead to a send with no customer."""
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.trip_cases tc", case_row("confirmed", channel="b2b", customer_id=None))
+        .on("from_status = $1", transitions("cancelled", "new_inquiry", "discovery"))
+    )
+    with pytest.raises(Conflict) as err:
+        await service.change_status(conn, STAFF, "TC-000001", to_status, "agency asked")
+    assert err.value.code == "b2b_case_managed_by_partner_api"
+    assert conn.sql("UPDATE booking.trip_cases") == [] and conn.sql("INSERT INTO booking.audit_logs") == []
 
 
 async def test_assign_new_holder_closes_the_previous_one() -> None:

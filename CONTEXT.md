@@ -345,7 +345,11 @@ send, OTP) is not built: those still write rows only.
   → `confirmed` (`on_request` waits for the AA-975 desk) and the hold `confirmed`. Expired / released → 410
   `hold_expired`; wrong hash → 409; a departure cancelled since the hold → 422 `sold_out`; a replay returns the same
   booking. `booking_id` = the trip case id. Staff trip-case reads LEFT JOIN customers, so B2B cases show with no
-  customer (`channel`, `party_tenant_id` in the case body; list filter `source=crm`).
+  customer (`channel`, `party_tenant_id` in the case body; list filter `source=crm`). A B2B case is owned by the
+  partner API: staff status moves, send, approve and edits of pax / dates / currency are 409
+  `b2b_case_managed_by_partner_api` (notes, trip style, countries stay editable; cancel is AA-974). Confirm locks the
+  departures and judges expiry on the clock read after the locks, so a confirm that waited past `expires_at` is 410
+  and never sells seats a newer hold took.
 - **Products sync**: `updated_since` filters on the latest of the plan row (touched by every component replace, also
   when the set is emptied), its component rows and the hotels / room types / services behind them, and then also lists
   plans that stopped being sellable (`sellable = false`, no components). A tour that leaves `catalog.v_tour` gives no

@@ -378,13 +378,8 @@ async def confirm_hold(
         if hold["status"] != "active":
             raise B2BError("hold_expired", f"the hold is {hold['status']}; place a new hold")
         lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
-        held = {r["line_no"]: r for r in await conn.fetch(LINES_SQL, hold["id"])}
-        dep_ids = sorted({r["departure_id"] for r in held.values() if r["departure_id"]})
-        if dep_ids:
-            rows = await conn.fetch(departures.LOCK_SQL, dep_ids)
-            for row in rows:
-                if row["status"] == "cancelled":
-                    raise B2BError("sold_out", f"departure {row['id']} was cancelled; the hold cannot be confirmed")
+        held = await conn.fetch(LINES_SQL, hold["id"])
+        await _recheck_under_lock(conn, hold, held)
         case_id, code = await _open_case(conn, caller, hold, quote, lines)
         await conn.execute(
             "UPDATE booking.b2b_hold_lines SET status = 'confirmed' WHERE hold_id = $1::uuid AND held_as = 'available'",
@@ -418,6 +413,36 @@ async def confirm_hold(
         out = await _booking_out(conn, confirmed)
     log.info("b2b_hold_confirmed hold=%s trip_case=%s partner=%s", hold["id"], code, caller.partner_id)
     return out
+
+
+async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[Any]) -> None:
+    """Lock the hold's departures (id order, as a place does), then judge the hold again on the wall clock read AFTER
+    the locks. The first check (``_find``) used the transaction's ``now()``: a confirm that began just before
+    ``expires_at`` could otherwise wait on the lock while a place that began after it counted these seats as free,
+    took them and committed, and then turn the expired hold into a sale (capacity exceeded). Read after the locks, the
+    clock is past any such place's start, so that hold now reads expired (410). The seats are then re-counted without
+    this hold, judged at the same instant: other live holds + sold + this hold's seats must fit (defensive; a staff
+    capacity edit also locks the departure and keeps capacity >= held + sold)."""
+    dep_ids = sorted({r["departure_id"] for r in held if r["departure_id"]})
+    rows = {r["id"]: r for r in await conn.fetch(departures.LOCK_SQL, dep_ids)} if dep_ids else {}
+    checked_at = await conn.fetchval("SELECT clock_timestamp()")
+    if hold["expires_at"] <= checked_at:
+        raise B2BError("hold_expired", "the hold expired while it was being confirmed; place a new hold")
+    for row in rows.values():
+        if row["status"] == "cancelled":
+            raise B2BError("sold_out", f"departure {row['id']} was cancelled; the hold cannot be confirmed")
+    if not rows:
+        return
+    used = await departures.usage(conn, list(rows), at=checked_at, exclude_hold=hold["id"])
+    mine: dict[str, int] = {}
+    for line in held:
+        if line["departure_id"]:
+            mine[line["departure_id"]] = mine.get(line["departure_id"], 0) + int(line["seats"])
+    for dep_id, row in rows.items():
+        others_held, sold = used.get(dep_id, (0, 0))
+        if others_held + sold + mine.get(dep_id, 0) > int(row["capacity"]):
+            log.warning("b2b_hold_confirm_over_capacity hold=%s departure=%s", hold["id"], dep_id)
+            raise B2BError("hold_expired", f"departure {dep_id} no longer has this hold's seats; place a new hold")
 
 
 async def _open_case(
