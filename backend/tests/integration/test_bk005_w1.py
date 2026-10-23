@@ -672,6 +672,8 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
         "quote_validity_days": 14,
         "b2b_quote_valid_hours": 48,
         "b2b_hold_hours": 48,
+        "b2b_hold_extend_hours": 72,
+        "b2b_rehold_limit_per_day": 3,
     }
     assert {"iso2": "VN", "name": "Vietnam"} in countries.json()["items"]
     assert audit_denied.status_code == 403 and audit_ok.status_code == 200 and audit_ok.json()["items"]
