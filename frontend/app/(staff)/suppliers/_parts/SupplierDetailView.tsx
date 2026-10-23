@@ -268,9 +268,15 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       header: "Contract",
       accessorKey: "title",
       cell: ({ row }) => (
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-[13.5px] font-medium text-ink">{row.original.title}</span>
-          {row.original.reference && <span className="truncate text-xs text-muted">{row.original.reference}</span>}
+        <span className="flex min-w-0 max-w-[220px] flex-col">
+          <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
+            {row.original.title}
+          </span>
+          {row.original.reference && (
+            <span className="truncate text-xs text-muted" title={row.original.reference}>
+              {row.original.reference}
+            </span>
+          )}
         </span>
       ),
     },
@@ -279,8 +285,11 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       header: "Validity",
       accessorKey: "valid_from",
       cell: ({ row }) => (
-        <span className="whitespace-nowrap text-[13px] text-body">
-          <DateText value={row.original.valid_from} /> – {row.original.valid_to ? <DateText value={row.original.valid_to} /> : "open-ended"}
+        <span className="flex flex-col whitespace-nowrap text-[13px] text-body">
+          <DateText value={row.original.valid_from} />
+          <span className="text-xs text-muted">
+            to {row.original.valid_to ? <DateText value={row.original.valid_to} /> : "open-ended"}
+          </span>
         </span>
       ),
     },
@@ -290,7 +299,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       header: "Payment terms",
       enableSorting: false,
       cell: ({ row }) => (
-        <span className="block max-w-[260px] truncate text-[13px] text-body" title={row.original.payment_terms ?? undefined}>
+        <span className="block break-words text-[13px] text-body md:max-w-[160px] md:truncate" title={row.original.payment_terms ?? undefined}>
           {row.original.payment_terms ?? "—"}
         </span>
       ),
@@ -298,14 +307,24 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     { id: "phase", header: "Status", accessorKey: "phase", cell: ({ row }) => <ContractPhaseBadge phase={row.original.phase} /> },
     {
       id: "who",
-      header: "Entered / published by",
+      header: "Entered by",
       enableSorting: false,
-      cell: ({ row }) => (
-        <span className="text-xs text-muted">
-          {row.original.updated_by_name ?? row.original.created_by_name ?? "—"}
-          {row.original.published_by && <> · {row.original.published_by_name ?? "—"}</>}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const entered = row.original.updated_by_name ?? row.original.created_by_name ?? "—";
+        const published = row.original.published_by ? (row.original.published_by_name ?? "—") : null;
+        return (
+          <span className="flex min-w-0 flex-col text-xs text-muted md:max-w-[160px]">
+            <span className="text-[13px] text-body md:truncate" title={entered}>
+              {entered}
+            </span>
+            {published && (
+              <span className="md:truncate" title={`Published by ${published}`}>
+                Published by {published}
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
       id: "actions",
@@ -334,20 +353,22 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
         )
       }
     >
-      <DataTable<SupplierContract>
-        searchable={false}
-        tableId="supplier-contracts"
-        data={list.data?.items ?? []}
-        columns={columns}
-        getRowId={(r) => r.id}
-        loading={list.isLoading}
-        error={list.isError ? (list.error as Error).message : null}
-        onRetry={() => list.refetch()}
-        pageSizeOptions={[25, 50, 100]}
-        emptyTitle="No contracts yet"
-        emptyDescription={canWrite ? "Add the supplier's terms with New contract." : "Contracting adds the supplier's contracts here."}
-        tableMinWidth={900}
-      />
+      <div className="bk-dt-sticky-end">
+        <DataTable<SupplierContract>
+          searchable={false}
+          tableId="supplier-contracts"
+          data={list.data?.items ?? []}
+          columns={columns}
+          getRowId={(r) => r.id}
+          loading={list.isLoading}
+          error={list.isError ? (list.error as Error).message : null}
+          onRetry={() => list.refetch()}
+          pageSizeOptions={[25, 50, 100]}
+          emptyTitle="No contracts yet"
+          emptyDescription={canWrite ? "Add the supplier's terms with New contract." : "Contracting adds the supplier's contracts here."}
+          tableMinWidth={820}
+        />
+      </div>
       {drawer && <ContractDrawer supplierRef={s.code} contract={drawer.contract} onClose={() => setDrawer(null)} />}
       <ConfirmDialog
         open={move !== null}

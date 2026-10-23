@@ -23,7 +23,7 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
   const [editing, setEditing] = useState(false);
   const h = q.data;
   return (
-    <Drawer open onClose={onClose} title={h ? h.name : "Hotel"} width={680}>
+    <Drawer open onClose={onClose} title={h ? h.name : "Hotel"} width={880}>
       {q.isLoading ? (
         <div className="flex flex-col gap-3" aria-label="Loading hotel">
           <Skeleton w="60%" h={18} />
@@ -229,6 +229,7 @@ function HotelRates({ h }: { h: HotelDetail }) {
         error={rates.isError ? (rates.error as Error).message : null}
         onRetry={() => rates.refetch()}
         showContract
+        compact
         emptyTitle="No rates yet"
         emptyDescription={`Rates are entered under a contract on the supplier page (${h.supplier_name} → Rates).`}
       />
