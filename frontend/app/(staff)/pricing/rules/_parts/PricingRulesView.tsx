@@ -172,7 +172,7 @@ export function PricingRulesView() {
       accessorKey: "source",
       // AA-910: one line on desktop (the full text in the tooltip); it used to wrap to 3 lines at 1440 px.
       cell: ({ row }) => (
-        <span title={row.original.source} className="block break-words text-[13px] text-muted md:max-w-[180px] md:truncate">
+        <span title={row.original.source} className="block break-words text-[13px] text-muted md:max-w-[160px] md:truncate">
           {row.original.source}
         </span>
       ),

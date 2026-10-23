@@ -142,7 +142,7 @@ const COLUMNS: ColumnDef<CustomerSummary, unknown>[] = [
     id: "customer",
     header: "Customer",
     accessorFn: (r) => r.name ?? "",
-    cell: ({ row }) => <PersonCell name={row.original.name} sub={row.original.email ?? row.original.code} />,
+    cell: ({ row }) => <PersonCell className="md:max-w-[220px]" name={row.original.name} sub={row.original.email ?? row.original.code} />,
   },
   { id: "phone", header: "Phone", accessorFn: (r) => r.phone ?? "", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.phone ?? "—"}</span> },
   {

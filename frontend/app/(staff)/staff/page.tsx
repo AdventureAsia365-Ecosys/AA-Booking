@@ -158,7 +158,7 @@ function IconAction({
 }
 
 const COLUMNS: ColumnDef<StaffProfile, unknown>[] = [
-  { id: "name", header: "User", accessorFn: (r) => r.name ?? r.email ?? "", cell: ({ row }) => <PersonCell name={row.original.name ?? row.original.email} sub={row.original.email} /> },
+  { id: "name", header: "User", accessorFn: (r) => r.name ?? r.email ?? "", cell: ({ row }) => <PersonCell className="md:max-w-[240px]" name={row.original.name ?? row.original.email} sub={row.original.email} /> },
   { id: "role", header: "Booking role", accessorKey: "role", cell: ({ row }) => <Pill dot={false}>{isStaffRole(row.original.role) ? ROLE_LABEL[row.original.role] : row.original.role}</Pill> },
   { id: "cis_role", header: "CIS role", accessorFn: (r) => r.cis_role ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.cis_role ?? "—"}</span> },
   { id: "status", header: "Status", accessorFn: (r) => (r.active ? "active" : "inactive"), cell: ({ row }) => <StatusBadge kind="staff" value={row.original.active ? "active" : "inactive"} /> },

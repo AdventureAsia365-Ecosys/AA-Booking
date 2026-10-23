@@ -28,7 +28,7 @@ export function PersonCell({
       </span>
       <span className="min-w-0">
         <span className="flex items-center gap-1.5">
-          <span className="truncate text-[13px] font-medium text-ink" title={name || undefined}>
+          <span className="min-w-0 truncate text-[13px] font-medium text-ink" title={name || undefined}>
             {name || "Unnamed"}
           </span>
           {chips}

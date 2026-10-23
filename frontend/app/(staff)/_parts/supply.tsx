@@ -164,7 +164,7 @@ export function RatesTable({
               const r = row.original;
               const what = r.hotel_room_type_id ? r.room_type_name : r.service_title;
               return (
-                <span className={`flex min-w-0 flex-col ${compact ? "max-w-[150px]" : "max-w-[240px]"}`} title={rateTarget(r)}>
+                <span className={`flex min-w-0 flex-col ${compact ? "max-w-[130px]" : "max-w-[240px]"}`} title={rateTarget(r)}>
                   <span className="truncate text-[13.5px] font-medium text-ink">{what ?? "—"}</span>
                   {!compact && (
                     <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
@@ -185,7 +185,7 @@ export function RatesTable({
             header: "Contract",
             accessorKey: "contract_title",
             cell: ({ row }: { row: { original: SupplierRate } }) => (
-              <span className={`block break-words text-[13px] text-body md:truncate ${compact ? "md:max-w-[100px]" : "md:max-w-[140px]"}`} title={row.original.contract_title}>
+              <span className={`block break-words text-[13px] text-body md:truncate ${compact ? "md:max-w-[90px]" : "md:max-w-[140px]"}`} title={row.original.contract_title}>
                 {row.original.contract_title}
               </span>
             ),
@@ -197,7 +197,7 @@ export function RatesTable({
       header: "Season / valid",
       accessorKey: "valid_from",
       cell: ({ row }) => (
-        <span className={`flex min-w-0 flex-col text-[13px] text-body ${compact ? "md:max-w-[140px]" : "md:max-w-[200px]"}`}>
+        <span className={`flex min-w-0 flex-col text-[13px] text-body ${compact ? "md:max-w-[120px]" : "md:max-w-[200px]"}`}>
           <span className="md:truncate" title={row.original.season ?? undefined}>
             {row.original.season ?? "—"}
           </span>
