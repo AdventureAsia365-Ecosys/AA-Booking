@@ -2,7 +2,7 @@
 
 Contract rule 7: consumer tests parse samples of every accepted version. ``v1_1_as_tripplanner_sends``
 is what TripPlanner emitted before AA-805 (PR #69): the v1.1 shape still labelled ``version: 1``; ``v1_2`` is
-what it emits from AA-830 on.
+what it emitted from AA-830 on; ``v1_3`` what it emits from AA-986 L6 on.
 """
 
 from __future__ import annotations
@@ -100,6 +100,47 @@ def v1_2(email: str | None = None, *, verified: bool = False, keys: list[str | N
         }
         for leg in legs
     ]
+    return payload
+
+
+def v1_3(email: str | None = None, *, unavailable: str | None = None) -> dict[str, Any]:
+    """v1.3 (AA-986 L6): v1.2 plus ``available`` / ``reason`` / ``reason_detail`` on every leg and day. With
+    ``unavailable`` (a reason), one more leg and day of a tour AA no longer serves follow the served ones."""
+    payload = v1_2(email)
+    payload["version"] = 1.3
+    served = {"available": True, "reason": None, "reason_detail": None}
+    itinerary = payload["itinerary"]
+    itinerary["legs"] = [leg | served for leg in itinerary["legs"]]
+    itinerary["days"] = [day | served for day in itinerary["days"]]
+    if unavailable:
+        gone, flag = (
+            f"src-{uuid.uuid4()}",
+            {"available": False, "reason": unavailable, "reason_detail": "source_deleted"},
+        )
+        itinerary["legs"].append(
+            {
+                "position": len(itinerary["legs"]) + 1,
+                "source_tour_id": gone,
+                "source_system": "cis",
+                "source_id": gone,
+                "day_from": 3,
+                "day_to": 4,
+            }
+            | flag
+        )
+        itinerary["days"].append(
+            {
+                "day": 2,
+                "component_id": "c-gone",
+                "name": "Hue Citadel",
+                "source_tour_id": gone,
+                "source_day_index": 3,
+                "destination_id": None,
+                "lat": 16.47,
+                "lng": 107.58,
+            }
+            | flag
+        )
     return payload
 
 

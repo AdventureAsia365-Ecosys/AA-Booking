@@ -85,7 +85,7 @@ def test_redaction_of_a_redacted_or_contactless_payload_reports_nothing() -> Non
     assert paths and paths_again == [] and again == out
     legacy, legacy_paths = redact.redact_payload(samples.legacy_guest())
     assert legacy_paths == [] and legacy["customer"] is None
-    for v in ("v1", "v1_2", "v1_1_as_tripplanner_sends"):
+    for v in ("v1", "v1_2", "v1_3", "v1_1_as_tripplanner_sends"):
         sample = getattr(samples, v)("lead@example.test")
         out, _ = redact.redact_payload(sample)
         # A conforming payload keeps its shape: same keys at every level, PII nulled.
@@ -117,7 +117,7 @@ def test_redaction_is_an_allowlist_for_payloads_that_failed_the_contract() -> No
     assert out["customer"]["consent_at"] is None and out["customer"]["consent"] is True
     assert set(out["itinerary"]) == {"legs", "days", "custom_days"}
     assert out["itinerary"]["legs"][-1] is None
-    assert set(out["itinerary"]["days"][0]) == set(redact.DAY_KEYS)
+    assert set(out["itinerary"]["days"][0]) == set(redact.DAY_KEYS) - set(redact.AVAILABILITY_KEYS)  # v1.1 sample
     assert sorted(paths) == sorted(
         [
             "*",

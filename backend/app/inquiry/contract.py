@@ -1,6 +1,11 @@
 """``inquiry.submitted`` (TripPlanner → AA-Booking): validation and the normalised inquiry.
 
-Contract rule 2: a consumer accepts every minor of its major. Booking accepts version 1, 1.1 and 1.2:
+Contract rule 2: a consumer accepts every minor of its major. Booking accepts version 1, 1.1, 1.2 and 1.3:
+
+- ``version: 1.3`` must satisfy ``inquiry.submitted.v1.3`` (AA-986 L6, root ADR 0015 decision 5: every leg and day
+  also says ``available`` + ``reason`` + ``reason_detail``; stops whose tour AA no longer serves come after the served
+  ones with ``available: false``, so staff see why such a leg cannot be matched; the snapshot keeps the leg flags
+  under ``legs``);
 
 - ``version: 1.2`` must satisfy ``inquiry.submitted.v1.2`` (AA-830: each leg also carries the catalog tour key
   ``source_system`` + ``source_id``, both null when TripPlanner could not resolve it);
@@ -26,7 +31,7 @@ from app.contracts import load
 
 CONTRACT = "inquiry.submitted"
 SOURCE = "tripplanner"
-SUPPORTED_VERSIONS = ("1", "1.1", "1.2")
+SUPPORTED_VERSIONS = ("1", "1.1", "1.2", "1.3")
 
 
 class ContractError(ValueError):
@@ -43,7 +48,7 @@ def _errors(validator: Draft202012Validator, payload: Any) -> list[str]:
 
 
 def version_label(payload: Any) -> str | None:
-    """'1', '1.1' or '1.2' (the JSON number as a label), or None when absent / not a number."""
+    """'1', '1.1', '1.2' or '1.3' (the JSON number as a label), or None when absent / not a number."""
     if not isinstance(payload, dict):
         return None
     v = payload.get("version")
@@ -59,7 +64,7 @@ def validate(payload: Any) -> str:
         raise ContractError(
             f"unsupported {CONTRACT} version {payload.get('version') if isinstance(payload, dict) else None!r}"
         )
-    if label in ("1.1", "1.2"):
+    if label in ("1.1", "1.2", "1.3"):
         errors = _errors(_validator(f"inquiry.submitted.v{label}"), payload)
     else:
         errors = _errors(_validator("inquiry.submitted.v1"), payload)
@@ -91,6 +96,11 @@ class Leg:
     # could not resolve it (intake then resolves source_tour_id itself).
     source_system: str | None = None
     source_id: str | None = None
+    # AA-986 L6 (v1.3): does AA still serve this leg's tour? True for v1 / v1.1 / v1.2 (no flag sent). reason:
+    # retired | paused | stop_removed | not_served (None when available); reason_detail: the CIS lifecycle reason.
+    available: bool = True
+    reason: str | None = None
+    reason_detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,9 +147,30 @@ def parse(payload: dict[str, Any]) -> Inquiry:
             int(leg["day_to"]),
             _clean(leg.get("source_system")),
             _clean(leg.get("source_id")),
+            leg.get("available") is not False,
+            _clean(leg.get("reason")),
+            _clean(leg.get("reason_detail")),
         )
         for leg in sorted(itinerary["legs"], key=lambda leg: leg["position"])
     )
+    snapshot: dict[str, Any] = {
+        "days": itinerary["days"],
+        "custom_days": itinerary["custom_days"],
+        "contract_version": version,
+    }
+    if version == "1.3":
+        # AA-986 L6 review: the leg-level flags are kept too (trip_case_legs has no column for them until slice L5),
+        # so staff and the "new inquiry" e-mail can tell which leg AA no longer serves, by position.
+        snapshot["legs"] = [
+            {
+                "position": leg.position,
+                "source_tour_id": leg.source_tour_id,
+                "available": leg.available,
+                "reason": leg.reason,
+                "reason_detail": leg.reason_detail,
+            }
+            for leg in legs
+        ]
     return Inquiry(
         version=version,
         idempotency_key=payload["idempotency_key"],
@@ -148,5 +179,5 @@ def parse(payload: dict[str, Any]) -> Inquiry:
         submitted_at=payload["submitted_at"],
         contact=contact,
         legs=legs,
-        snapshot={"days": itinerary["days"], "custom_days": itinerary["custom_days"], "contract_version": version},
+        snapshot=snapshot,
     )
