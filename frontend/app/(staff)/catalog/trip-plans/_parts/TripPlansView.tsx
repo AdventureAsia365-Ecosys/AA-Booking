@@ -8,10 +8,11 @@
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CalendarDays, Globe, Store } from "lucide-react";
+import { CalendarDays, Globe, Store, Unlink } from "lucide-react";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, Money, PageFrame, Pill, Section, useCan, useUrlFilters } from "@/ui";
+import { OrphanedPlansTable } from "./OrphanedPlans";
 import { SellableBadge, priceBasisLabel } from "./shared";
 
 const SORTS = [
@@ -28,6 +29,8 @@ export function TripPlansView() {
   const paging = useOffsetPage();
   const canPrice = useCan("pricing.read");
 
+  // AA-986 L5: "show=orphaned" switches the table to the plans whose tour left the CIS catalog.
+  const orphanedView = get("show") === "orphaned";
   const sellableParam = get("sellable");
   const query = {
     q: get("q") || undefined,
@@ -38,7 +41,11 @@ export function TripPlansView() {
     limit: paging.limit,
     offset: paging.offset,
   };
-  const list = useQuery({ queryKey: ["trip-plans", "list", query], queryFn: () => tripPlansApi.list(query) });
+  const list = useQuery({
+    queryKey: ["trip-plans", "list", query],
+    queryFn: () => tripPlansApi.list(query),
+    enabled: !orphanedView,
+  });
   const facets = useQuery({ queryKey: ["trip-plans", "facets"], queryFn: tripPlansApi.facets, staleTime: 60_000 });
 
   const columns: ColumnDef<TripPlanListItem, unknown>[] = [
@@ -101,7 +108,7 @@ export function TripPlansView() {
       description="CIS tours, and which of them Booking sells. Tour content is read-only here: edit it in CIS."
       actions={<ManagedInCisLink path="/admin/master-content" label="Open CIS content" />}
     >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="CIS tours" value={f?.total} icon={<CalendarDays size={16} />} hint={<FromCisTag />} />
         <KpiTile
           label="Sellable"
@@ -111,65 +118,99 @@ export function TripPlansView() {
           hintTone="neutral"
         />
         <KpiTile label="Countries" value={f?.countries.length} icon={<Globe size={16} />} />
+        <KpiTile
+          label="Orphaned plans"
+          value={f?.orphaned}
+          icon={<Unlink size={16} />}
+          hint={f ? (f.orphaned ? "Tour left the CIS catalog" : "None") : undefined}
+          hintTone={f?.orphaned ? "warning" : "neutral"}
+        />
       </div>
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search title, SKU or CIS source id" }}
-            selects={[
-              {
-                key: "country",
-                label: "Country",
-                allLabel: "All countries",
-                options: (f?.countries ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.tours})` })),
-              },
-              {
-                key: "sellable",
-                label: "Status",
-                allLabel: "Any status",
-                options: [
-                  { value: "yes", label: "Sellable" },
-                  { value: "no", label: "Not for sale" },
-                ],
-              },
-              {
-                key: "style",
-                label: "Trip style",
-                allLabel: "Any style",
-                options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
-              },
-              { key: "sort", label: "Sort", allLabel: "Title A–Z", options: SORTS.slice(1) },
-            ]}
-          />
-        </div>
-        <DataTable<TripPlanListItem>
-          searchable={false}
-          tableId="trip-plans"
-          data={list.data?.items ?? []}
-          columns={columns}
-          getRowId={(r) => r.source_id}
-          loading={list.isLoading}
-          error={list.isError ? (list.error as Error).message : null}
-          onRetry={() => list.refetch()}
-          pageSizeOptions={PAGE_SIZES}
-          serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-          enableCsv
-          csvFilename="trip-plans.csv"
-          emptyTitle={filtered ? "No trip plans match" : "No CIS tours yet"}
-          emptyDescription={
-            filtered
-              ? "Change the search or the filters, or reset them to see every CIS tour."
-              : "Tours appear here as soon as CIS publishes them to the catalog."
-          }
-          onRowClick={(r) => router.push(`/catalog/trip-plans/${encodeURIComponent(r.source_id)}`)}
-          tableMinWidth={canPrice ? 920 : 780}
-        />
-        <p className="mt-3 text-xs text-muted">
-          <Pill tone="neutral" dot={false}>
-            Live
-          </Pill>{" "}
-          Read from the CIS catalog on every visit: a tour CIS unpublishes disappears from this list.
-        </p>
+        {orphanedView ? (
+          <>
+            <div className="mb-4">
+              <FilterBar
+                search={{ placeholder: "Exact CIS source id" }}
+                selects={[
+                  {
+                    key: "show",
+                    label: "Show",
+                    allLabel: "CIS catalog tours",
+                    options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                  },
+                ]}
+              />
+            </div>
+            <OrphanedPlansTable />
+          </>
+        ) : (
+          <>
+            <div className="mb-4">
+              <FilterBar
+                search={{ placeholder: "Search title, SKU or CIS source id" }}
+                selects={[
+                  {
+                    key: "show",
+                    label: "Show",
+                    allLabel: "CIS catalog tours",
+                    options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                  },
+                  {
+                    key: "country",
+                    label: "Country",
+                    allLabel: "All countries",
+                    options: (f?.countries ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.tours})` })),
+                  },
+                  {
+                    key: "sellable",
+                    label: "Status",
+                    allLabel: "Any status",
+                    options: [
+                      { value: "yes", label: "Sellable" },
+                      { value: "no", label: "Not for sale" },
+                    ],
+                  },
+                  {
+                    key: "style",
+                    label: "Trip style",
+                    allLabel: "Any style",
+                    options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
+                  },
+                  { key: "sort", label: "Sort", allLabel: "Title A–Z", options: SORTS.slice(1) },
+                ]}
+              />
+            </div>
+            <DataTable<TripPlanListItem>
+              searchable={false}
+              tableId="trip-plans"
+              data={list.data?.items ?? []}
+              columns={columns}
+              getRowId={(r) => r.source_id}
+              loading={list.isLoading}
+              error={list.isError ? (list.error as Error).message : null}
+              onRetry={() => list.refetch()}
+              pageSizeOptions={PAGE_SIZES}
+              serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
+              enableCsv
+              csvFilename="trip-plans.csv"
+              emptyTitle={filtered ? "No trip plans match" : "No CIS tours yet"}
+              emptyDescription={
+                filtered
+                  ? "Change the search or the filters, or reset them to see every CIS tour."
+                  : "Tours appear here as soon as CIS publishes them to the catalog."
+              }
+              onRowClick={(r) => router.push(`/catalog/trip-plans/${encodeURIComponent(r.source_id)}`)}
+              tableMinWidth={canPrice ? 920 : 780}
+            />
+            <p className="mt-3 text-xs text-muted">
+              <Pill tone="neutral" dot={false}>
+                Live
+              </Pill>{" "}
+              Read from the CIS catalog on every visit: a tour CIS unpublishes leaves this list and shows under Orphaned plans.
+            </p>
+          </>
+        )}
       </Section>
     </PageFrame>
   );

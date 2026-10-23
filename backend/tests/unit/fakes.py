@@ -62,3 +62,34 @@ class ScriptedConn:
     @asynccontextmanager
     async def acquire(self):
         yield self
+
+
+# ── AA-986 L5: the served state of catalog keys (app.catalog.liveness) ─────────
+
+PLAN_KEYS_FRAGMENT = "WHERE id = ANY($1::uuid[]) AND source_system = 'cis'"
+STATES_FRAGMENT = "FROM unnest($1::text[]) AS k(source_id)"
+VIEW_READY_FRAGMENT = "FROM pg_class c JOIN pg_namespace n"
+
+
+def state_row(
+    source_id: str,
+    *,
+    in_catalog: bool = True,
+    tomb_state: str | None = None,
+    tomb_reason: str | None = None,
+    tomb_changed_at: Any = None,
+) -> dict[str, Any]:
+    return {
+        "source_id": source_id,
+        "in_catalog": in_catalog,
+        "tomb_state": tomb_state,
+        "tomb_reason": tomb_reason,
+        "tomb_changed_at": tomb_changed_at,
+    }
+
+
+def served_plan(conn: ScriptedConn, plan_id: str, source_id: str, **state: Any) -> ScriptedConn:
+    """Script the B2B served check for one ``tp:`` plan (default: in ``catalog.v_tour``, no tombstone)."""
+    conn.on(PLAN_KEYS_FRAGMENT, [{"id": plan_id, "source_id": source_id}])
+    conn.on(STATES_FRAGMENT, [state_row(source_id, **state)])
+    return conn
