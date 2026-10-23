@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.3.0...v0.4.0) (2026-10-23)
+
+
+### Features
+
+* accept inquiry.submitted v1.3 (available and reason per leg and day) ([#76](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/76)) ([ab5641d](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ab5641d1c90baf971441e2bf38140cf19bb27ce1))
+* B2B commercial rules: VND quotes, cancel with fee and dry run, extend once, re-hold limit ([#71](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/71)) ([c314e00](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c314e002bfe47e295a2e9de6830d9baed274736e))
+* B2B departures, holds and confirm into a B2B trip case (booking.b2b.v1) ([#67](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/67)) ([d635c85](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d635c85fb1d19a9f8c32505e9af0e7016e4f2d79))
+* migration bk-020 (departures, B2B holds, B2B trip case) ([#65](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/65)) ([331e482](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/331e482df4f59d7d6919f6bb89f31b37d95ccd94))
+* migration bk-021 (B2B cancellation policies, cancellations, hold extend, re-hold limit) ([#70](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/70)) ([30fc319](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/30fc319f9406b1ae9f752f72cd481ef397dfd6a8))
+* refuse B2B sales of tours that left the catalog; staff flags, notifications and orphaned plans ([#75](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/75)) ([d5eea5a](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d5eea5a95ba0879105d12eefb4c3669184000718))
+
+
+### Bug Fixes
+
+* Booking staff admin fits 1440 px and shows rate / superseded audit rows ([#68](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/68)) ([d7539bd](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d7539bd48a2127c39d5eedff2eabc526f3bcce62))
+
 ## [0.3.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.2.0...v0.3.0) (2026-10-23)
 
 
