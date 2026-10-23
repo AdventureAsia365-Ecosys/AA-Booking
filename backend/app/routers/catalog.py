@@ -9,6 +9,8 @@ Sellable trip plans (AA-679, S237 decision D4, bk-009):
 is one tour with its CIS days and photos plus the commercial row. ``PUT …/{source_id}/commercial`` upserts the
 commercial row (``trip_plan.write``: admin, contracting). ``POST …/{source_id}/trip-cases`` starts a trip case, or a
 new version of an existing case, from a sellable plan (``trip_case.write`` + ``version.write``: admin, sales).
+``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
+the set) keep the plan's bookable supply items (bk-019, AA-972), which ``/booking/b2b/v1/products`` lists.
 
 ``source_id`` is the stable CIS catalog key of contract catalog.tour.v1 (a uuid string), never the CIS ``tour_id``.
 """
@@ -26,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
+from app.b2b import plan_components
 from app.catalog import trip_plans
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
@@ -38,6 +41,7 @@ Me = Annotated[Staff, Depends(current_staff)]
 CanRead = Annotated[Staff, Depends(require("catalog.read"))]
 CanWritePlans = Annotated[Staff, Depends(require("trip_plan.write"))]
 CanStartCase = Annotated[Staff, Depends(require("trip_case.write"))]
+CanReadSupply = Annotated[Staff, Depends(require("supply.read"))]
 
 
 def _source_id(source_id: Annotated[uuid.UUID, Path(description="CIS catalog source_id (catalog.tour.v1)")]) -> str:
@@ -166,3 +170,48 @@ async def use_trip_plan(body: UseForTripCase, source_id: SourceId, staff: CanSta
         data["customer_id"] = str(data["customer_id"])
     async with pool.acquire() as conn, conn.transaction():
         return await trip_plans.use_for_trip_case(conn, staff, source_id, data)
+
+
+# ── Bookable components of a plan (bk-019, AA-972: what booking.b2b.v1 /products lists and a tp: line prices) ──
+
+
+class PlanComponentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    day_no: int = Field(ge=1, le=366)
+    hotel_room_type_id: uuid.UUID | None = None
+    service_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _one_target(self) -> PlanComponentIn:
+        if (self.hotel_room_type_id is None) == (self.service_id is None):
+            raise ValueError("name exactly one of hotel_room_type_id, service_id")
+        return self
+
+
+class PlanComponentsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PlanComponentIn] = Field(max_length=plan_components.MAX_COMPONENTS)
+
+
+@router.get("/trip-plans/{source_id}/components")
+async def get_trip_plan_components(source_id: SourceId, _: CanReadSupply, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await plan_components.list_components(conn, source_id)
+
+
+@router.put("/trip-plans/{source_id}/components")
+async def put_trip_plan_components(
+    body: PlanComponentsBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
+) -> dict[str, Any]:
+    items = [
+        {
+            "day_no": i.day_no,
+            "hotel_room_type_id": str(i.hotel_room_type_id) if i.hotel_room_type_id else None,
+            "service_id": str(i.service_id) if i.service_id else None,
+        }
+        for i in body.items
+    ]
+    async with pool.acquire() as conn, conn.transaction():
+        return await plan_components.replace_components(conn, staff, source_id, items)

@@ -13,7 +13,7 @@ from typing import Any
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app.auth import identity_config
+from app.auth import identity_config, m2m
 from app.auth.identity_verifier import MultiIssuerVerifier
 from app.settings import Settings
 
@@ -140,3 +140,73 @@ class LocalCis:
     def verifier(self) -> MultiIssuerVerifier:
         """The Booking staff verifier (production issuer profiles) over the two local issuers."""
         return identity_config.build_staff_verifier(self.settings(), self.fetch)
+
+
+# ── Cognito M2M pool stand-in (AA-972, app.auth.m2m) ─────────────────────────
+
+M2M_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_TESTM2M"
+CRM_CLIENT = "crmm2mclient00000000000001"
+OTHER_M2M_CLIENT = "otherm2mclient000000000001"
+ALL_B2B_SCOPES = "booking.b2b/read booking.b2b/quote booking.b2b/hold booking.b2b/book"
+
+
+class LocalM2M:
+    """client-credentials access tokens: sub = client_id, token_use = access, scope = one space-separated string."""
+
+    def __init__(self, kid: str = "m1") -> None:
+        self.kid = kid
+        self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.fetches = 0
+        self.fail = False
+
+    def jwks(self) -> dict[str, Any]:
+        return {"keys": [_jwk(self.private_key, self.kid)]}
+
+    async def fetch(self, url: str) -> dict[str, Any]:
+        self.fetches += 1
+        if self.fail:
+            raise OSError("JWKS down")
+        if url == f"{M2M_ISSUER}/.well-known/jwks.json":
+            return self.jwks()
+        raise OSError(f"unexpected JWKS URL {url}")
+
+    def token(
+        self,
+        scope: str | None = ALL_B2B_SCOPES,
+        *,
+        client_id: str = CRM_CLIENT,
+        sub: str | None = None,
+        token_use: str = "access",  # noqa: S107 — a claim value, not a password
+        iss: str = M2M_ISSUER,
+        exp_in: int = 3600,
+        key: Any = None,
+        **extra: Any,
+    ) -> str:
+        now = int(time.time())
+        claims: dict[str, Any] = {
+            "sub": sub or client_id,
+            "iss": iss,
+            "client_id": client_id,
+            "token_use": token_use,
+            "iat": now,
+            "exp": now + exp_in,
+            "version": 2,
+            **extra,
+        }
+        if scope is not None:
+            claims["scope"] = scope
+        return jwt.encode(claims, key or self.private_key, algorithm="RS256", headers={"kid": self.kid})
+
+    def settings(self, **overrides: Any) -> Settings:
+        return Settings(
+            database_url=None,
+            environment="test",
+            cognito_m2m_issuer=M2M_ISSUER,
+            cognito_m2m_crm_client_id=CRM_CLIENT,
+            **overrides,
+        )
+
+    def verifier(self) -> MultiIssuerVerifier:
+        built = m2m.build_m2m_verifier(self.settings(), self.fetch)
+        assert built is not None  # noqa: S101
+        return built

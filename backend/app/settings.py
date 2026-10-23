@@ -29,6 +29,13 @@ Cognito WORKFORCE staff sign-in (AA-680 Phase 2, root ADR 0006 §8; ``app.auth.i
   Default :data:`~app.auth.identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID`; empty = no preview client accepted.
   Its sessions are capped at read-only. It must differ from the two clients above.
 
+Cognito M2M (AA-972, root ADR 0006b decision 7; ``app.auth.m2m``): service-to-service tokens of the ``aa-m2m-<env>``
+pool for the B2B API ``/booking/b2b/v1`` (contract booking.b2b.v1). Set by AA-CIS-Infra ``booking.tf`` from the pool
+and the AA-Partner (CRM) app client; both empty (default) = every B2B route answers 503 ``unavailable`` (fail closed).
+
+- ``COGNITO_M2M_ISSUER``: the M2M pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
+- ``COGNITO_M2M_CRM_CLIENT_ID``: the AA-Partner (CRM) client-credentials app client. Required with the issuer.
+
 Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` grants the task role
 ``ses:SendEmail`` as ``SES_FROM_ADDRESS`` only):
 
@@ -98,6 +105,8 @@ class Settings:
     cognito_booking_staff_client_id: str = DEV_BOOKING_STAFF_CLIENT_ID
     cognito_breakglass_client_id: str = DEV_BREAKGLASS_CLIENT_ID
     cognito_booking_staff_preview_client_id: str = DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID
+    cognito_m2m_issuer: str = ""
+    cognito_m2m_crm_client_id: str = ""
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
@@ -145,6 +154,20 @@ class Settings:
             if preview in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id):
                 # The same id would cap Production sign-ins too, or (worse, after a later fix) un-cap Preview ones.
                 raise SettingsError("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID must differ from the production clients")
+        m2m_issuer, m2m_client = self.cognito_m2m_issuer, self.cognito_m2m_crm_client_id
+        if m2m_issuer and (not m2m_issuer.startswith("https://") or m2m_issuer.endswith("/")):
+            raise SettingsError(
+                f"COGNITO_M2M_ISSUER must be an https:// URL without a trailing slash, got {m2m_issuer!r}"
+            )
+        if m2m_client and not m2m_client.isalnum():
+            raise SettingsError(
+                f"COGNITO_M2M_CRM_CLIENT_ID must be a Cognito app client id (letters and digits), got {m2m_client!r}"
+            )
+        if bool(m2m_issuer) != bool(m2m_client):
+            raise SettingsError("COGNITO_M2M_ISSUER and COGNITO_M2M_CRM_CLIENT_ID are set together or not at all")
+        if m2m_issuer and m2m_issuer == self.cognito_workforce_issuer:
+            # One verifier per route class: a staff token must never satisfy the M2M check (or the reverse).
+            raise SettingsError("COGNITO_M2M_ISSUER must differ from COGNITO_WORKFORCE_ISSUER")
         if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
             raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
         if self.sentry_required and not self.sentry_dsn:
@@ -189,6 +212,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEV_BREAKGLASS_CLIENT_ID,
         cognito_booking_staff_preview_client_id=(env.get("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID") or "").strip()
         or DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
+        cognito_m2m_issuer=(env.get("COGNITO_M2M_ISSUER") or "").strip(),
+        cognito_m2m_crm_client_id=(env.get("COGNITO_M2M_CRM_CLIENT_ID") or "").strip(),
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )

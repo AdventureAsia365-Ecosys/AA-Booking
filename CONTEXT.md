@@ -7,7 +7,7 @@ status: active
 owner: nghiep
 audience: [engineer, agent]
 applies_to: [aa-booking-api, aa-booking-admin]
-last_reviewed: 2026-10-22
+last_reviewed: 2026-10-23
 review_every_days: 90
 related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 ---
@@ -59,6 +59,10 @@ Design sources, in order:
   `booking.v_ops_funnel_daily` (per UTC day, metric, source system) and `booking.v_ops_case_status` (cases per current
   status), `bk-017`, SELECT to the CIS runtime role `cis_app` (plus USAGE on schema `booking`); the CIS admin overview
   reads them. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` → `booking.customers` 42501).
+- **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
+  API `/booking/b2b/v1` takes only client-credentials tokens of the Cognito M2M pool `aa-m2m-<env>` plus the agency's
+  `X-AA-Tenant-Id`, checked against `booking.b2b_partners` (see "B2B API" below). The agency-facing price is
+  `b2b_price`; the supplier net never leaves Booking.
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -89,6 +93,14 @@ backend/
                            verifier; never edited here), identity_config.py (accepted issuers + clients, JWKS prefetch,
                            AA-680), profile / Cognito identity link / permissions (staff.py), admin ops (admin.py),
                            deploy workflow GitHub OIDC verifier (ci.py, AA-751) over the single-issuer cache (tokens.py)
+  app/auth/m2m.py          aa-m2m client-credentials tokens for the B2B API (AA-972): IssuerConfig over the vendored
+                           verifier (scope claim as groups), 401 / 403 split, scope constants
+  app/b2b/                 booking.b2b.v1 (AA-972): access.py (scope + partner check), errors.py (contract Problem),
+                           components.py (component ids, net cost of a line from rates in force), quotes.py (price,
+                           price_hash, append-only store), reads.py (products, FX rates, price parity), partners.py and
+                           plan_components.py (staff admin)
+  app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972)
+  app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
                            versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
@@ -143,7 +155,7 @@ docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
-                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md)
+                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
@@ -179,6 +191,8 @@ E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inq
 `SES_FROM_ADDRESS` (must equal the Infra `ses_from_address`, the only From the task role may use; empty = no e-mail),
 `SES_CONFIGURATION_SET` (Infra `aa-email-<env>-transactional`), `SES_REGION` (default `us-west-1`), `STAFF_ADMIN_URL`
 (links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
+B2B API (AA-972, both set by AA-CIS-Infra `booking.tf` from the M2M pool and the AA-Partner client; empty = every
+`/booking/b2b/v1` route answers 503): `COGNITO_M2M_ISSUER`, `COGNITO_M2M_CRM_CLIENT_ID`.
 Error tracking (AA-871, optional): `SENTRY_DSN` (Sentry off when empty; never logged) and `SENTRY_REQUIRED` (`true` =
 start-up fails without a DSN, the missing-DSN guard; off until Infra wires the DSN secret).
 
@@ -222,7 +236,8 @@ send, OTP) is not built: those still write rows only.
 
 ## Staff authentication and permissions (AA-680; root ADR 0006 / 0006a, ADR 0004 O1)
 
-- Every `/booking/*` route except `/booking/health*` and `/booking/ops/*` needs `Authorization: Bearer <token>`,
+- Every `/booking/*` route except `/booking/health*`, `/booking/ops/*` and `/booking/b2b/v1/*` (M2M, see "B2B API")
+  needs `Authorization: Bearer <token>`,
   checked by the multi-issuer verifier (`app/auth/identity_verifier.py`, a byte copy of the CIS module: RS256 only, the
   issuer picked by the unverified `iss`, one JWKS cache per issuer, unknown `kid` refetch at most every 60 s, last good
   keys kept on a failed fetch; no key set ever loaded = 503 `auth_unavailable`, any bad token = 401 `invalid_token`).
@@ -259,7 +274,8 @@ send, OTP) is not built: those still write rows only.
   content_creator included (without the price hint, channel and commercial notes, which need `pricing.read`); the
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
-  (`retention.admin`, AA-825) = admin. Notifications,
+  (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
+  are read with `supply.read` and replaced with `trip_plan.write`. Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
 - Every staff write adds one `booking.audit_logs` row (`actor_ref` = the staff key: CIS user id or `cog:<sub>`).
@@ -281,6 +297,31 @@ send, OTP) is not built: those still write rows only.
   `event_name` in `push`/`workflow_dispatch`, `job_workflow_ref` =
   `AdventureAsia365-Ecosys/AA-Booking/.github/workflows/deploy-dev.yml@refs/heads/main`. Any other token is 401;
   GitHub's JWKS unreachable (no cached keys) is 503. All values are code constants: no secret, no variable.
+
+## B2B API (AA-972; root ADR 0005a, ADR 0006b decision 7; contract `booking.b2b.v1`)
+
+- **Caller**: AA-Partner's API server, client credentials of the Cognito M2M pool `aa-m2m-<env>` (resource server
+  `booking.b2b`, scopes `read`, `quote`, `hold`, `book`). `app/auth/m2m.py` builds a second verifier from the same
+  vendored module (the `scope` claim read as groups). No staff token is accepted on `/booking/b2b/v1`, no M2M token
+  on staff routes. Refusals use the contract's Problem body `{error, message}`: bad / missing token 401
+  `unauthorized`; a validly signed token of another client, a missing scope or a client that is not the partner's
+  `m2m_client_id` 403 `forbidden`; no active `b2b_partners` row for `X-AA-Tenant-Id` 403 `unknown_partner`; not
+  configured, JWKS never loaded or pricing data missing 503 `unavailable`; bad input 422 `invalid`.
+- **Routes (AA-972)**: `GET /products` (sellable trip plans still in `catalog.v_tour`, with their bookable components
+  `rt:<room type>`, `sv:<service>`, and `tp:<plan>` for the whole plan), `POST /quotes`, `GET /fx-rates` (approved
+  rates in force on a date, plain), `GET /price-parity` (the public "from" price per person from the bk-009 price hint,
+  warn-only; `null` without a per-person hint or rate). Departures, holds, confirm / cancel and events are AA-973 …
+  AA-975.
+- **Quote**: net cost per line from the supplier rate in force on the service day (per night for rooms, by unit for
+  services; infants not counted), the approved `b2b` rule in force today (seed 15 % / 10 % floor / 3 % card fee,
+  policy data) and the approved FX rows in force today, through the AA-810 engine's functions (no second engine,
+  `peak = false`). Each line's `b2b_price` is rounded up to the cent, the total is their exact sum. FX lock = the
+  selling rate applied (rate x (1 + buffer)); `valid_until` = now + setting `b2b_quote_valid_hours` (48).
+  `price_hash` = SHA-256 of a canonical JSON of currency, FX lock, rule, rounding, lines and total (not the id, time or
+  proposal ref): same request on the same data → same hash. Quote currencies = the engine's five; VND is AA-974.
+  Stored append-only in `b2b_quotes` / `b2b_quote_lines` with the net (`net_cost_usd`, `conf:commercial`) that never
+  leaves Booking. No column, field or key is named `supplier_net` (unit test over the B2B OpenAPI, integration test
+  over the schema).
 
 ## Deferred work (`booking.job`, O3/O9)
 
@@ -581,6 +622,17 @@ n)`: not soft-deleted cases by current status. Aggregates only (no id, name, e-m
 CIS runtime still logs in as `aa_cis_admin` until X1 S18 and reads them through its `bk_owner` membership. Metric names
 are append-only. Applied after `bk-016` (AA-680). No readiness change (`REQUIRED_SCHEMA_VERSIONS` untouched: the Booking
 app does not read the views).
+
+### `bk-019` (AA-972 CRM-B1 — needs `bk-001`, `bk-003`, `bk-005`, `bk-009`, `bk-010`)
+
+`b2b_partners` (agency CIS `tenant_id` unique soft key, `agency_name` `conf:commercial`, status `active|suspended`,
+billing currency, `credit_terms_ref`, `m2m_client_id`; SELECT/INSERT/UPDATE, never deleted); `b2b_quotes` +
+`b2b_quote_lines` (proposal ref/version, currency, FX lock: plain rate, buffer, date, source; rule `valid_from`, margin
+and card fee `conf:commercial`, rounding, `total_b2b_price`, `price_hash`, `valid_until`; lines: component, kind,
+service date, nights, pax counts by age band, rooms, unit, availability, `b2b_price`, `net_cost_usd` and
+`supplier_rate_ids` `conf:commercial`) — **append-only** for role `booking` (SELECT, INSERT); `trip_plan_components`
+(a hotel room type or a service on a day of a trip plan; SELECT, INSERT, DELETE for the replace-set PUT); settings row
+`b2b_quote_valid_hours` = 48. No personal data. In `REQUIRED_SCHEMA_VERSIONS`.
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),

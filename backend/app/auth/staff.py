@@ -90,6 +90,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "audit.read": frozenset({"admin"}),
     # Retention runs and their status (AA-825): DRY RUN / live delete and redaction of Booking rows.
     "retention.admin": frozenset({"admin"}),
+    # B2B partners (bk-019, AA-972): which agencies may call booking.b2b.v1 and through which M2M client.
+    "b2b.admin": frozenset({"admin"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin
