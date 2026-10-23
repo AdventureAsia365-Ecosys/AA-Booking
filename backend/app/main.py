@@ -37,6 +37,7 @@ from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
 from app.b2b import expiry as b2b_expiry
 from app.b2b.errors import B2BError, b2b_error_handler, validation_error_handler
+from app.catalog import lifecycle as tour_lifecycle
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
@@ -100,12 +101,13 @@ def create_app(
                 staff_email.KIND: staff_email.build_handler(settings),
                 **retention_jobs.build_handlers(),
                 **b2b_expiry.HANDLERS,
+                **tour_lifecycle.HANDLERS,
             }
             worker = Worker(
                 db.pool,
                 handlers,
                 recurring=intake.RECURRING,
-                hooks=(retention_jobs.DailySchedule(), b2b_expiry.ExpirySchedule()),
+                hooks=(retention_jobs.DailySchedule(), b2b_expiry.ExpirySchedule(), tour_lifecycle.PullSchedule()),
                 no_release=retention_jobs.NOT_RELEASED,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")

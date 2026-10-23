@@ -127,6 +127,9 @@ class Product(Strict):
     has_fixed_departures: bool
     components: list[Component]
     updated_at: datetime
+    # AA-986 L5 (root ADR 0015): a delta lists a product whose tour was retired once, withdrawn (no components).
+    withdrawn: bool = False
+    withdrawn_reason: str | None = Field(default=None, max_length=64)
 
 
 class ProductPage(Strict):

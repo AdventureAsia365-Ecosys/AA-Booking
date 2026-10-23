@@ -17,6 +17,8 @@
 - **Read / release** (``GET``, ``DELETE /holds/{id}``): another partner's hold is 404. An ``active`` hold past
   ``expires_at`` reads as ``expired`` (the expiry job writes it later, ``app.b2b.expiry``). Release: active →
   ``released``; released / expired → no-op; confirmed → 422 (cancel the booking instead, ``app.b2b.cancellation``).
+- **Served tours only** (AA-986 L5, root ADR 0015 decision 5): a new hold and a confirm refuse a ``tp:`` line whose
+  tour is not served with 409 ``tour_not_served`` (``app.b2b.served``); replays and confirmed bookings are kept.
 - **Confirm** (``POST /holds/{id}/confirm``, scope ``book``; memo seam 1): the only place Booking creates a commercial
   record for B2B. Expired / released → 410 ``hold_expired``; wrong hash → 409 ``price_changed``; a cancelled
   departure → 422 ``sold_out``; already confirmed → the same booking. Otherwise, in one transaction: a **B2B trip
@@ -42,7 +44,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.b2b import cancellation, departures
+from app.b2b import cancellation, departures, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
 
@@ -341,8 +343,10 @@ async def _create(
             )
         return await _hold_out(conn, current)
 
-    await _check_rehold_limit(conn, caller, proposal_ref, now)
     lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
+    # AA-986 L5: no new hold on a tour that left the catalog (a replay above still answers with its hold).
+    await served.require_served(conn, [(r["line_ref"], r["component_id"]) for r in lines])
+    await _check_rehold_limit(conn, caller, proposal_ref, now)
     asks = [
         departures.SeatAsk(
             line_ref=r["line_ref"],
@@ -551,6 +555,8 @@ async def confirm_hold(
         if hold["status"] != "active":
             raise B2BError("hold_expired", f"the hold is {hold['status']}; place a new hold")
         lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
+        # AA-986 L5: never sell a tour that left the catalog; a confirmed hold above still returns its booking.
+        await served.require_served(conn, [(r["line_ref"], r["component_id"]) for r in lines])
         held = await conn.fetch(LINES_SQL, hold["id"])
         await _recheck_under_lock(conn, hold, held)
         case_id, code = await _open_case(conn, caller, hold, quote, lines)
