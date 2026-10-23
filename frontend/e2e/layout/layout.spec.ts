@@ -10,13 +10,16 @@
 //                the design below 1440, AA-910 decision), and where the last column is the row menu it stays pinned
 //                (`bk-dt-sticky-end`, position: sticky) and in view.
 //   390 x 844  — phones (cards instead of tables): no horizontal page scroll, console clean.
+// The browser clock is frozen at fixtures.ts CLOCK and every fixture timestamp is older than 7 days, so relative dates
+// render as the (widest) absolute date on any day the check runs.
 // The API is mocked (see playwright.config.ts for why the fake session is safe). Measurements go to
 // $LAYOUT_SHOTS_DIR/measurements.{json,md}.
 
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { answer } from "./fixtures";
+import { answer, CLOCK } from "./fixtures";
+import { MEASURE_DIR, OUT } from "./paths";
 
 type PageCase = {
   name: string;
@@ -64,8 +67,6 @@ const PAGES: PageCase[] = [
   { name: "audit-log", path: "/audit-log", ready: 'button:has-text("Show changes")', click: 'button:has-text("Show changes")', noTable: true },
 ];
 
-const OUT = process.env.LAYOUT_SHOTS_DIR ? path.resolve(process.env.LAYOUT_SHOTS_DIR) : path.join(__dirname, "results");
-const MEASURE_DIR = path.join(OUT, ".measurements");
 const SLACK_PX = 20;
 const FX_HEADERS = ["Currency", "Units per 1 USD", "Selling buffer", "As of", "Source"];
 // 1x1 transparent PNG for CIS photos (the trip plan covers point at the CIS media host).
@@ -79,9 +80,15 @@ function fakeAccessToken(): string {
 
 type Collected = { unmocked: string[]; consoleErrors: string[]; blockedExternal: string[] };
 
+// Google Fonts answers, fetched once per worker and replayed: 88 tests then make a handful of font requests, not
+// hundreds, so a network hiccup is far less likely to fail a test.
+const fontCache = new Map<string, { status: number; headers: Record<string, string>; body: Buffer }>();
+
 async function prepare(page: Page, baseURL: string): Promise<Collected> {
   const c: Collected = { unmocked: [], consoleErrors: [], blockedExternal: [] };
   const origin = new URL(baseURL).origin;
+  // The pixels must not depend on the day the check runs: relative dates ("3 d ago" vs "28 Sept 2026") change widths.
+  await page.clock.setFixedTime(new Date(CLOCK));
   await page.context().addCookies([{ name: "bk_access", value: fakeAccessToken(), url: origin }]);
   page.on("console", (m) => {
     if (m.type() === "error") c.consoleErrors.push(m.text().slice(0, 300));
@@ -100,7 +107,15 @@ async function prepare(page: Page, baseURL: string): Promise<Collected> {
       return route.fulfill({ status: a.status, json: a.body });
     }
     // The real brand fonts: table widths depend on them, so the check loads them like a browser does.
-    if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") return route.continue();
+    if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") {
+      let hit = fontCache.get(req.url());
+      if (!hit) {
+        const res = await route.fetch();
+        hit = { status: res.status(), headers: res.headers(), body: await res.body() };
+        if (res.ok()) fontCache.set(req.url(), hit);
+      }
+      return route.fulfill(hit);
+    }
     c.blockedExternal.push(`${req.resourceType()} ${url.hostname}${url.pathname}`);
     if (req.resourceType() === "image") return route.fulfill({ status: 200, contentType: "image/png", body: PIXEL });
     return route.fulfill({ status: 204, body: "" });
@@ -255,14 +270,17 @@ async function open(page: Page, pc: PageCase, c: Collected) {
   await page.waitForTimeout(400);
 }
 
-/** For the screenshot only (after measuring): a table that starts below the fold (detail tabs, the hotel drawer's rates)
- *  is scrolled up so the evidence shows it. */
-async function bringTableIntoView(page: Page, pc: PageCase) {
+/** For the screenshot only (after measuring): a list that starts below the fold (detail tabs, the hotel drawer's rates,
+ *  the phone cards under the KPI tiles) is scrolled up so the evidence shows it. */
+async function bringListIntoView(page: Page, pc: PageCase, selector: string, which: "first" | "last") {
   const scope = pc.within ? page.locator(pc.within) : page.locator("main");
-  const table = scope.locator("table").last();
-  if (!(await table.count())) return;
-  await table.evaluate((t) => {
-    if (t.getBoundingClientRect().top > window.innerHeight * 0.55) t.scrollIntoView({ block: "start" });
+  const all = scope.locator(selector);
+  const list = which === "first" ? all.first() : all.last();
+  if (!(await list.count())) return;
+  await list.evaluate((t) => {
+    if (t.getBoundingClientRect().top <= window.innerHeight * 0.55) return;
+    (t as HTMLElement).style.scrollMarginTop = "80px"; // clear the sticky top bar, so the list's top edge shows
+    t.scrollIntoView({ block: "start" });
   });
   await page.waitForTimeout(150);
 }
@@ -300,7 +318,7 @@ for (const scheme of ["light", "dark"] as const) {
         await open(page, pc, c);
         const m = await measure(page);
         fs.mkdirSync(OUT, { recursive: true });
-        await bringTableIntoView(page, pc);
+        await bringListIntoView(page, pc, "table", "last");
         await page.screenshot({ path: path.join(OUT, `${pc.name}-1440-${scheme}.png`) });
         save(testInfo, pc, 1440, scheme, m, c);
 
@@ -351,9 +369,12 @@ test.describe("390 x 844 phone, light", () => {
   for (const pc of PAGES) {
     test(`${pc.name} at 390: page never scrolls sideways`, async ({ page, baseURL }, testInfo) => {
       const c = await prepare(page, baseURL!);
-      await open(page, { ...pc, ready: pc.phoneReady ?? pc.ready }, c);
+      const phonePc = { ...pc, ready: pc.phoneReady ?? pc.ready };
+      await open(page, phonePc, c);
       const m = await measure(page);
       fs.mkdirSync(OUT, { recursive: true });
+      // The first card (or row) of the list, not the page header, so the phone evidence shows the list itself.
+      await bringListIntoView(page, phonePc, phonePc.ready ?? '[data-testid="kit-datatable-row"]', "first");
       await page.screenshot({ path: path.join(OUT, `${pc.name}-390-light.png`) });
       save(testInfo, pc, 390, "light", m, c);
       commonChecks({ ...pc, noTable: true }, m, c, "light");

@@ -216,11 +216,12 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     ),
   },
   {
-    // AA-910: pax shares this cell (line 2, "20 days · 6 pax") so the list fits 1440 px; the accessor keeps the
-    // start date first, so sorting is still by date, and the CSV still carries the pax.
+    // AA-910: pax shares this cell (line 2, "20 days · 6 pax") so the list fits 1440 px. The accessor stays the plain
+    // start date: sorting is by date (no-date rows together, as before) and the CSV column holds the date only. The kit
+    // CSV exports one value per visible column, so the list CSV no longer has a Pax column (the case page has it).
     id: "dates",
     header: "Dates / pax",
-    accessorFn: (r) => [r.start_date ?? "", r.duration_days ? `${r.duration_days} days` : "", r.pax ? `${r.pax} pax` : ""].filter(Boolean).join(" · "),
+    accessorKey: "start_date",
     cell: ({ row }) => {
       const r = row.original;
       const sub = [r.duration_days ? `${r.duration_days} days` : null, r.pax ? `${r.pax} pax` : null].filter(Boolean).join(" · ");
@@ -243,15 +244,16 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   },
   {
     // AA-910: "Updated" sits under the status pill (as on /hotels and /services) so the list fits 1440 px. The
-    // accessor starts with the status, so the header still sorts by status, and the CSV keeps the update time.
+    // accessor stays the plain status (sorting and the CSV column are the status only, as on those lists).
     id: "status",
     header: "Status",
-    accessorFn: (r) => `${r.status} · ${r.updated_at}`,
+    accessorKey: "status",
     cell: ({ row }) => (
       <span className="flex flex-col items-start gap-1">
         <TripCaseStatusBadge status={row.original.status} />
-        <span className="whitespace-nowrap text-xs text-muted">
-          Updated <DateText value={row.original.updated_at} relative />
+        {/* AA-910: the date never breaks, but it may drop under "Updated" (a row older than 7 days shows the full date, much wider than "3 d ago"). */}
+        <span className="text-xs text-muted">
+          Updated <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
         </span>
       </span>
     ),

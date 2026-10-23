@@ -202,8 +202,9 @@ const COLUMNS: ColumnDef<Service, unknown>[] = [
     cell: ({ row }) => (
       <span className="flex flex-col items-end gap-1 md:items-start">
         <SupplierStatusBadge status={row.original.status} />
-        <span className="whitespace-nowrap text-xs text-muted">
-          Updated <DateText value={row.original.updated_at} relative />
+        {/* AA-910: the date never breaks, but it may drop under "Updated" (a row older than 7 days shows the full date, much wider than "3 d ago"). */}
+        <span className="text-xs text-muted">
+          Updated <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
         </span>
       </span>
     ),

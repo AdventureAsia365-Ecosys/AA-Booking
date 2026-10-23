@@ -236,7 +236,7 @@ function OnRequestTab() {
             {l.decline_code && <span className="text-xs text-muted">{DECLINE_LABEL[l.decline_code]}</span>}
             {l.answered_at && (
               <span className="text-xs text-muted">
-                {l.answered_by?.name ?? "Staff"} · <DateText value={l.answered_at} relative />
+                {l.answered_by?.name ?? "Staff"} · <DateText value={l.answered_at} relative className="whitespace-nowrap" />
               </span>
             )}
           </span>
@@ -436,7 +436,7 @@ function DeparturesTab() {
           <span className="flex flex-col gap-1">
             <Pill tone="danger">{INCIDENT_LABEL[inc.incident_code]}</Pill>
             <span className="text-xs text-muted">
-              {inc.flagged_by.name ?? "Staff"} · <DateText value={inc.flagged_at} relative />
+              {inc.flagged_by.name ?? "Staff"} · <DateText value={inc.flagged_at} relative className="whitespace-nowrap" />
             </span>
           </span>
         );

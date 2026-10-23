@@ -39,8 +39,15 @@ import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../l
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import staffMeJson from "./staff-me.json";
 
-const NOW = "2026-10-20T08:15:00+00:00";
-const EARLIER = "2026-10-12T03:40:00+00:00";
+/** The browser clock during the check (layout.spec.ts freezes it with page.clock.setFixedTime): the run gives the same
+ *  pixels on any day. It matches the `today` the pricing fixtures report. */
+export const CLOCK = "2026-10-23T02:00:00+00:00";
+// Every fixture timestamp is more than 7 days before CLOCK, so each relative "Updated" / "Last seen" / "Last activity"
+// renders the absolute date (DateText relativeTime) — the widest form, and the one Dev shows for most rows. September
+// is the widest en-GB short month in Poppins ("28 Sept 2026" = 78 px at 12 px; "1 Jul 2026" = 58 px), and the day has
+// two digits.
+const NOW = "2026-09-28T08:15:00+00:00";
+const EARLIER = "2026-09-20T03:40:00+00:00";
 const ROWS = 25; // the default page size of every list page
 const pad = (n: number, w = 6) => String(n).padStart(w, "0");
 const uuid = (prefix: string, i: number) => `${prefix}${prefix}${prefix}${prefix}-0000-4000-8000-${pad(i, 12)}`;
@@ -528,7 +535,7 @@ const FX: PolicyList<FxRateRow> = {
     currency,
     rate_per_usd,
     buffer_pct: "0.0150",
-    as_of: "2026-10-19",
+    as_of: "2026-09-28",
     source: "Vietcombank published sell rate, 08:30 ICT, checked against the State Bank of Vietnam reference rate",
   })),
 };

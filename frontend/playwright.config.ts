@@ -12,7 +12,9 @@
 // Nothing in the app was changed or flagged for this check, so production auth is exactly as before.
 //
 // Run:   npm run build && npm run test:layout
-// Shots: LAYOUT_SHOTS_DIR=<dir> (default e2e/layout/results), measurements.json + measurements.md land there too.
+// Shots: LAYOUT_SHOTS_DIR=<dir> (default e2e/layout/results), measurements.json + measurements.md land there too
+//        (rebuilt from this run's tests only: e2e/layout/global-setup.ts clears the per-test files first).
+// Clock: the spec freezes the browser clock at fixtures.ts CLOCK, so the result does not depend on the day it runs.
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.LAYOUT_PORT || 3199);
@@ -20,11 +22,12 @@ const STUB_PORT = Number(process.env.LAYOUT_STUB_PORT || 55481);
 
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/layout/global-setup.ts",
   outputDir: "./e2e/layout/results/test-output",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
-  workers: 1, // one Chromium at a time (WSL RAM budget); the whole run is ~1-2 min
+  workers: 1, // one Chromium at a time (WSL RAM budget); the whole run (88 tests) takes about 5 min
   retries: 0, // the API is mocked: a failure is a real layout change, not a flake
   reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
   use: {
