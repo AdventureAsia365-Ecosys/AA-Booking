@@ -24,11 +24,16 @@ from app.errors import Invalid, Unavailable
 
 log = logging.getLogger(__name__)
 
-# A catalog that is not there (225 not applied) or not granted reads as "unavailable", never as a 500.
+# A catalog that is not there (225 not applied), not granted, or too slow to answer reads as "unavailable", never as a
+# 500. The views are security_barrier views over CIS tables, read live: a read past the server ``statement_timeout``
+# is ``QueryCanceledError``, a read past the pool's client-side ``command_timeout`` is ``TimeoutError`` (asyncio's
+# alias since Python 3.11). Fail-closed callers answer 503, fail-soft callers drop the catalog fields.
 CATALOG_ERRORS: tuple[type[Exception], ...] = (
     asyncpg.UndefinedTableError,
     asyncpg.InvalidSchemaNameError,
     asyncpg.InsufficientPrivilegeError,
+    asyncpg.QueryCanceledError,
+    TimeoutError,
 )
 
 MAX_SEARCH = 50

@@ -93,13 +93,21 @@ async def test_with_cis_274_the_tombstone_is_joined_and_detection_is_cached() ->
 
 
 @pytest.mark.asyncio
-async def test_soft_read_survives_a_catalog_error_and_strict_raises() -> None:
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: asyncpg.UndefinedTableError("relation catalog.v_tour does not exist"),
+        lambda: asyncpg.QueryCanceledError("canceling statement due to statement timeout"),
+        TimeoutError,  # the pool's command_timeout
+    ],
+)
+async def test_soft_read_survives_a_catalog_error_and_strict_raises(make: Any) -> None:
     def boom(*_: Any) -> Exception:
-        return asyncpg.UndefinedTableError("relation catalog.v_tour does not exist")
+        return make()
 
     conn = ScriptedConn().on(VIEW_READY_FRAGMENT, True).on(STATES_FRAGMENT, boom)
     assert await liveness.states(conn, [KEY]) == {}
-    with pytest.raises(asyncpg.UndefinedTableError):
+    with pytest.raises(type(make())):
         await liveness.states(conn, [KEY], strict=True)
     assert await liveness.states(conn, []) == {}
 
