@@ -82,9 +82,13 @@ curl -s localhost:8000/booking/health
 
 ## CI / deploy
 
-- `.github/workflows/ci.yml`: Lint (ruff), Security Audit (AA-902 resource-ID check + pip-audit + gitleaks, failing), Unit
+- `.github/workflows/ci.yml`: Lint (ruff), Security Audit (AA-902 resource-ID check + pip-audit, failing), Unit
   Tests (incl. migration guard), Integration Tests (Postgres 15, applies `migrations/`), Docker
   Build Check (image starts, Trivy report, SBOM).
+- `.github/workflows/secret-scan.yml` (AA-981 follow-up): check **gitleaks** on every PR (lines the PR adds, rules and
+  baseline from the base branch) and **gitleaks full history** nightly, on push to `main` and on demand (every
+  branch, tag and pull request head). Rules in `.gitleaks.toml` (same as the root repo), reviewed findings pinned
+  in `.gitleaksignore`; a PR that changes either file needs the label `secret-scan-baseline-reviewed`.
 - `.github/workflows/deploy-dev.yml`: on push to `main` (backend changes) — OIDC role from the `dev`
   environment variable `AWS_ROLE_ARN`, ECR push with the git-SHA tag, new task definition revision,
   update service, wait stable, verify image, smoke `/booking/health` + `/booking/health/ready`.

@@ -1,5 +1,28 @@
-# gitleaks false positives (reviewed). Format: <commit>:<file>:<rule>:<line>
-# AA-972: SQL selecting the b2b_quote_valid_hours setting, not a secret.
-f7e8f237b0d0800d0a2cecdc06f96825638ca2c6:backend/tests/integration/test_bk019_schema.py:generic-api-key:34
+# gitleaks ignore list for AA-Booking (AA-981 follow-up): one finding fingerprint per line, for a single known false
+# positive that a narrow allowlist entry in .gitleaks.toml cannot express. Read by .github/workflows/secret-scan.yml.
+#
+# Fingerprint format (printed by gitleaks with --redact, never the value itself):
+#   PR / history scan:  <commit sha>:<file>:<rule id>:<line>
+#   working-tree scan:  <file>:<rule id>:<line>
+# Add a short comment above each entry: what the value is and why it is not a secret. Never write the value here.
+# A real secret is never ignored here: remove it, rotate it, then pin the old commit.
+# A change to this file needs the PR label `secret-scan-baseline-reviewed` (see the workflow header).
+
+# --- Full-history baseline (AA-981 follow-up, S248): every finding of the first full-history scan with
+# .gitleaks.toml (branches, tags and pull request heads). Each entry is pinned to its commit, so the same
+# file/line in any later commit is still reported. Triage is in the private record (Linear AA-981), not here.
+
+# CI service-container values: the throwaway Postgres of the CI job (password, DSNs on localhost).
+0d90235b13ed3720327c0302079378844aa1bd85:.github/workflows/ci.yml:credential-key-literal:116
+0d90235b13ed3720327c0302079378844aa1bd85:.github/workflows/ci.yml:uri-embedded-credentials:142
+89ad2a12bc6324e0041dc1e94399821cfccb7f9f:.github/workflows/ci.yml:uri-embedded-credentials:153
+dc842f9f51280f74fe2e3179f1a4b3920c0a0d84:.github/workflows/ci.yml:uri-embedded-credentials:153
+
 # AA-972: the setting name b2b_quote_valid_hours in the B2B quote module, not a secret.
 58a7fe661797032bee05e6e75b7cbfbf06613274:backend/app/b2b/quotes.py:generic-api-key:41
+
+# AA-972: SQL selecting the b2b_quote_valid_hours setting, not a secret.
+f7e8f237b0d0800d0a2cecdc06f96825638ca2c6:backend/tests/integration/test_bk019_schema.py:generic-api-key:34
+
+# Synthetic test value: a DSN on db.internal in a unit test.
+48795258cf99d881fc5cec5f801185efe5c82e48:backend/tests/unit/test_db_readiness.py:uri-embedded-credentials:14
