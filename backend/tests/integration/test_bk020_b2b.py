@@ -57,8 +57,11 @@ async def _clean(conn: asyncpg.Connection) -> None:
         owner = await conn.fetchval("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'booking'")
         if owner != await conn.fetchval("SELECT current_user"):
             await conn.execute(f'SET LOCAL ROLE "{owner}"')
+        await conn.execute("DELETE FROM booking.b2b_cancellations")  # AA-974 (bk-021), references holds and cases
         await conn.execute("DELETE FROM booking.b2b_hold_lines")
         await conn.execute("DELETE FROM booking.b2b_holds")
+        # AA-974: plan-specific cancellation policies reference trip plans (approvals cascade); the seed stays.
+        await conn.execute("DELETE FROM booking.cancellation_policies WHERE trip_plan_id IS NOT NULL")
         for table in LOCKED:  # approved B2B versions are locked by trigger
             await conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
         cases = "SELECT id FROM booking.trip_cases WHERE channel = 'b2b'"

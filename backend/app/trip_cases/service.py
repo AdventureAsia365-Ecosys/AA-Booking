@@ -85,7 +85,8 @@ def _case_dict(row: Any) -> dict[str, Any]:
 
 def ensure_staff_managed(case: Any) -> None:
     """A B2B case (``channel = 'b2b'``, AA-973) is opened confirmed by the partner API and has no customer: its status
-    and its proposals belong to booking.b2b.v1 (cancel: AA-974), so staff status moves, sends and approvals are 409.
+    and its proposals belong to booking.b2b.v1 (the agency cancels with POST /bookings/{id}/cancel, AA-974), so staff
+    status moves, sends and approvals are 409.
     A staff cancel here would leave the hold ``confirmed`` with its seats sold and the agency never told."""
     if case.get("channel") == "b2b":
         raise Conflict(

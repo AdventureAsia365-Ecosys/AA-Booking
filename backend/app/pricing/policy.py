@@ -85,12 +85,22 @@ POLICY_SQL = {
     " LEFT JOIN booking.policy_approvals a ON a.pricing_rule_id = p.id WHERE p.id = $1::uuid",
     "fx_rate": "SELECT p.created_by, a.id AS approval_id FROM booking.fx_rates p"
     " LEFT JOIN booking.policy_approvals a ON a.fx_rate_id = p.id WHERE p.id = $1::uuid",
+    # bk-021 (AA-974): B2B cancellation-fee policies, same maker-checker (app.b2b.cancellation).
+    "cancellation_policy": "SELECT p.created_by, a.id AS approval_id FROM booking.cancellation_policies p"
+    " LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id WHERE p.id = $1::uuid",
 }
 APPROVE_SQL = {
     "pricing_rule": "INSERT INTO booking.policy_approvals (entity_type, pricing_rule_id, approved_by)"
     " VALUES ('pricing_rule', $1::uuid, $2)",
     "fx_rate": "INSERT INTO booking.policy_approvals (entity_type, fx_rate_id, approved_by)"
     " VALUES ('fx_rate', $1::uuid, $2)",
+    "cancellation_policy": "INSERT INTO booking.policy_approvals (entity_type, cancellation_policy_id, approved_by)"
+    " VALUES ('cancellation_policy', $1::uuid, $2)",
+}
+NOT_FOUND = {
+    "pricing_rule": "rule_not_found",
+    "fx_rate": "fx_rate_not_found",
+    "cancellation_policy": "cancellation_policy_not_found",
 }
 
 
@@ -272,8 +282,9 @@ async def create_fx_rate(
     return row
 
 
-async def _approve(conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str) -> None:
-    not_found = "rule_not_found" if entity_type == "pricing_rule" else "fx_rate_not_found"
+async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str) -> None:
+    """Second-person approval of one policy row (``POLICY_SQL`` entity types); 404 / 409 / 403 ``own_row``."""
+    not_found = NOT_FOUND[entity_type]
     row = await conn.fetchrow(POLICY_SQL[entity_type], entity_id)
     if row is None:
         raise NotFound(not_found, f"no {entity_type.replace('_', ' ')} with this id")
@@ -290,7 +301,7 @@ async def _approve(conn: asyncpg.Connection, staff: Staff, entity_type: str, ent
 
 
 async def approve_rule(conn: asyncpg.Connection, staff: Staff, rule_id: str, *, today: date) -> dict[str, Any]:
-    await _approve(conn, staff, "pricing_rule", rule_id)
+    await approve_row(conn, staff, "pricing_rule", rule_id)
     row = await _rule_by_id(conn, staff, rule_id, today)
     label = f"{row['channel']} from {row['valid_from']}"
     await audit.record(
@@ -309,7 +320,7 @@ async def approve_rule(conn: asyncpg.Connection, staff: Staff, rule_id: str, *, 
 
 
 async def approve_fx_rate(conn: asyncpg.Connection, staff: Staff, fx_id: str, *, today: date) -> dict[str, Any]:
-    await _approve(conn, staff, "fx_rate", fx_id)
+    await approve_row(conn, staff, "fx_rate", fx_id)
     row = await _fx_by_id(conn, staff, fx_id, today)
     label = f"{row['currency']} {row['as_of']}"
     await audit.record(

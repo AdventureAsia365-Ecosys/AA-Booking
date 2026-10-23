@@ -63,7 +63,8 @@ Design sources, in order:
   API `/booking/b2b/v1` takes only client-credentials tokens of the Cognito M2M pool `aa-m2m-<env>` plus the agency's
   `X-AA-Tenant-Id`, checked against `booking.b2b_partners` (see "B2B API" below). The agency-facing price is
   `b2b_price`; the supplier net never leaves Booking. Fixed departures, holds and their confirmation into a **B2B
-  trip case** (no customer, the agency as `party_tenant_id`) are AA-973 (bk-020).
+  trip case** (no customer, the agency as `party_tenant_id`) are AA-973 (bk-020); VND quotes, cancellation fees, the
+  one-time hold extension and the re-hold limit are AA-974 (bk-021).
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
@@ -101,9 +102,12 @@ backend/
                            price_hash, append-only store), reads.py (products, FX rates, price parity), partners.py and
                            plan_components.py (staff admin); AA-973: departures.py (capacity, held / sold counted under a
                            departure row lock, line availability, staff departure edits), holds.py (place / read /
-                           release / confirm → B2B trip case + approved version), expiry.py (bk_b2b_hold_expire job + hook)
+                           release / confirm → B2B trip case + approved version), expiry.py (bk_b2b_hold_expire job + hook);
+                           AA-974: holds.py also extend once + re-hold limit, cancellation.py (fee policies: tiers,
+                           in force, staff admin; cancel / dry run → b2b_cancellations)
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
-                           /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973)
+                           /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
+                           /bookings/{id}/cancel (AA-974)
   app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
@@ -137,8 +141,9 @@ backend/
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day
-  app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules and
-                           /booking/pricing/fx-rates, POST …/{id}/approve (reads pricing.read, writes pricing.write)
+  app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules,
+                           /booking/pricing/fx-rates and /booking/pricing/cancellation-policies (AA-974), POST
+                           …/{id}/approve (reads pricing.read, writes pricing.write)
   app/pricing/service.py   rule + FX in force + engine, shared by quote-preview and POST …/versions/{n}/price
   app/routers/suppliers.py /booking/suppliers* (list, summary, detail, create, edit, deactivate/activate, contracts)
                            and /booking/contracts/{id} (edit a draft, publish, expire) — supply.read / supply.write
@@ -160,7 +165,8 @@ docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
-                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md)
+                           AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md,
+                           AA-974.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
@@ -280,7 +286,8 @@ send, OTP) is not built: those still write rows only.
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
   (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
-  are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair.
+  are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair; B2B
+  cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules.
   Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
@@ -317,8 +324,8 @@ send, OTP) is not built: those still write rows only.
   `rt:<room type>`, `sv:<service>`, and `tp:<plan>` for the whole plan), `POST /quotes`, `GET /fx-rates` (approved
   rates in force on a date, plain), `GET /price-parity` (the public "from" price per person from the bk-009 price hint,
   warn-only; `null` without a per-person hint or rate). **AA-973**: `GET /departures`, `POST /holds`,
-  `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). `extend`, the re-hold limit, VND and cancel are
-  AA-974; events AA-975.
+  `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). **AA-974**: VND quotes, `POST /holds/{id}/extend`,
+  the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below); events AA-975.
 - **Departures and seats (AA-973)**: a departure is a start date of a trip plan with a seat `capacity`, a status
   (`scheduled` ↔ `guaranteed`, `cancelled` final) and `auto_confirm`; staff keep them under
   `/booking/catalog/trip-plans/{source_id}/departures` (capacity never below held + sold, audited, edits touch the
@@ -347,9 +354,38 @@ send, OTP) is not built: those still write rows only.
   booking. `booking_id` = the trip case id. Staff trip-case reads LEFT JOIN customers, so B2B cases show with no
   customer (`channel`, `party_tenant_id` in the case body; list filter `source=crm`). A B2B case is owned by the
   partner API: staff status moves, send, approve and edits of pax / dates / currency are 409
-  `b2b_case_managed_by_partner_api` (notes, trip style, countries stay editable; cancel is AA-974). Confirm locks the
-  departures and judges expiry on the clock read after the locks, so a confirm that waited past `expires_at` is 410
-  and never sells seats a newer hold took.
+  `b2b_case_managed_by_partner_api` (notes, trip style, countries stay editable; the agency cancels through `POST
+  /bookings/{id}/cancel`, AA-974). Confirm locks the departures and judges expiry on the clock read after the locks,
+  so a confirm that waited past `expires_at` is 410 and never sells seats a newer hold took.
+- **Extend once (AA-974, Fix A8)**: `POST /holds/{id}/extend` (scope `hold`, `Idempotency-Key`, reason
+  `payment_claimed | client_recheck`) moves an active hold's expiry by setting `b2b_hold_extend_hours` (72), capped by
+  the earliest departure start, at most once (`extended_count` 1, `extended_at`, `extend_reason`). A retry with the
+  same key returns the hold; any other extend is 409 `extend_limit`, as is one that cannot move the expiry (the hold
+  already runs to the departure start). Expired / released → 410 `hold_expired`; confirmed → 422. It locks the hold,
+  then its departures, and judges expiry on the clock read after the locks (same race rule as confirm).
+- **Re-hold limit (AA-974, Fix A3)**: at most setting `b2b_rehold_limit_per_day` (3) re-holds per UTC day, the next
+  `POST /holds` is 429 `rehold_limit` with `retry_after_s` to 00:00 UTC, counted two ways. **Per proposal ref**
+  (design §3.4): every hold after the ref's first one is a re-hold, any version; serialised per (partner, ref) by a
+  transaction advisory lock. **Per departure** (lane brief; review round): a hold of a departure after a hold of it the
+  partner placed the same day and let go (released / expired) is a re-hold, whatever the ref, so a fresh proposal ref
+  per hold does not get around the limit; counted under the departure locks. Holds still active or confirmed do not
+  count. Idempotent answers (same key, same version) never count. Per-departure counting awaits Nghiệp's confirmation
+  (implementation notes AA-974).
+- **Cancel with fee (AA-974, ADR 0005a d4, C12)**: `POST /bookings/{booking_id}/cancel` (scope `book`,
+  `Idempotency-Key`, `reason_code`; `booking_id` = the trip case id) charges the fee of the booking's
+  **cancellation policy**: a schedule of tiers `{min_days, fee_pct}` per trip plan or the B2B default
+  (`booking.cancellation_policies`, append-only, in force once a second person approved it, staff
+  `/booking/pricing/cancellation-policies`). The policy in force on the confirm day is locked on the hold
+  (`b2b_holds.cancellation_policy_id`; bk-021 backfills the seeded default on holds confirmed before it; a hold
+  without one resolves it among the rows approved by its `confirmed_at`, so a later or backdated row never re-prices
+  it). Days before departure = trip case start − UTC day of the cancel; the tier
+  with the largest `min_days` ≤ max(days, 0); fee = quoted total × % half-up to the currency unit; refundable = total
+  − fee; a booking on a departure AA cancelled (staff status `cancelled`) costs no fee. `?dry_run=true` returns the
+  same numbers and writes nothing. The cancel writes one `b2b_cancellations` row, sets the hold lines `cancelled` (the
+  seats go back on sale at once), moves the B2B trip case `confirmed → cancelled` (status note names the client,
+  reason and fee) and audits; a repeat returns the stored result. The hold
+  itself stays `confirmed` (the contract's Hold status has no `cancelled`). Seeded default (proposed for Ms. Thư):
+  60+ days 0 %, 30–59 25 %, 15–29 50 %, 7–14 75 %, 0–6 100 %.
 - **Products sync**: `updated_since` filters on the latest of the plan row (touched by every component replace, also
   when the set is emptied), its component rows and the hotels / room types / services behind them, and then also lists
   plans that stopped being sellable (`sellable = false`, no components). A tour that leaves `catalog.v_tour` gives no
@@ -368,7 +404,10 @@ send, OTP) is not built: those still write rows only.
   `peak = false`). Each line's `b2b_price` is rounded up to the cent, the total is their exact sum. FX lock = the
   selling rate applied (rate x (1 + buffer)); `valid_until` = now + setting `b2b_quote_valid_hours` (48).
   `price_hash` = SHA-256 of a canonical JSON of currency, FX lock, rule, rounding, lines and total (not the id, time or
-  proposal ref): same request on the same data → same hash. Quote currencies = the engine's five; VND is AA-974.
+  proposal ref): same request on the same data → same hash. Quote currencies = the engine's five + **VND** (AA-974, ADR
+  0005a d3; B2B only, the engine's B2C `SELLING_CURRENCIES` is unchanged): the approved VND row in force on the UTC
+  quote day, each VND line rounded **up to 1,000 VND** (proposed default, to confirm with Ms. Thư), amounts without
+  decimals; the rounding rule (`line_ceil_1000` / `line_ceil_0.01`) is stored and hashed.
   Stored append-only in `b2b_quotes` / `b2b_quote_lines` with the net (`net_cost_usd`, `conf:commercial`) that never
   leaves Booking. No column, field or key is named `supplier_net` (unit test over the B2B OpenAPI, integration test
   over the schema).
@@ -696,6 +735,19 @@ matching timestamp required by CHECK, `expires_at`, `extended_count` 0–1 for A
 SELECT/INSERT/UPDATE, no DELETE; `b2b_quote_lines.departure_id`; `trip_cases.channel` (`b2c` default, `b2b`) +
 `party_tenant_id`, `customer_id` nullable with CHECK "b2c ⇔ customer and no agency, b2b ⇔ agency and no customer",
 `source_system` + `crm`; settings row `b2b_hold_hours` = 48. No personal data. In `REQUIRED_SCHEMA_VERSIONS` (code PR).
+
+### `bk-021` (AA-974 CRM-B2b — needs `bk-003`, `bk-005`, `bk-007`, `bk-009`, `bk-019`, `bk-020`)
+
+`cancellation_policies` (channel `b2b`, `trip_plan_id` NULL = the default, `valid_from`, `title` / `note`
+`conf:commercial`, `tiers` JSONB with a CHECK: 1–20 tiers, numbers, `min_days` 0–730 incl. 0, `fee_pct` 0–100; unique
+per channel, plan and day, NULLS NOT DISTINCT; SELECT, INSERT only) + `policy_approvals.cancellation_policy_id`
+(entity `cancellation_policy`, its own maker-checker trigger `cancellation_policy_maker_checker`; bk-007's function
+unchanged); seed default B2B policy `00000000-0000-4000-8000-0000000bc021` approved `seed:bk-021` (proposed, to confirm
+with Ms. Thư); `b2b_cancellations` (one per hold / trip case: policy, reason, Idempotency-Key, departure date, days
+before, fee %, currency, total, fee, refundable with fee + refundable = total; SELECT, INSERT only); `b2b_holds`
+`extended_at`, `extend_reason`, `extend_idempotency_key` (CHECK tied to `extended_count`), `cancellation_policy_id`,
+index `(partner_id, proposal_ref, created_at)`, backfill of the seeded policy on holds already confirmed; settings `b2b_hold_extend_hours` = 72, `b2b_rehold_limit_per_day` = 3.
+No personal data. In `REQUIRED_SCHEMA_VERSIONS` (code PR).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),

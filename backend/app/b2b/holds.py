@@ -8,16 +8,23 @@
   quote is honoured as quoted within its validity, no re-pricing). The departures of the lines are locked
   (``app.b2b.departures.lock_departures``) and counted; a line that does not fit is 422 ``sold_out`` and nothing is
   held. Length: setting ``b2b_hold_hours`` (48), capped by the earliest departure start.
+- **Re-hold limit** (AA-974, Fix A3): at most ``b2b_rehold_limit_per_day`` (3) re-holds per UTC day, the next is 429
+  ``rehold_limit``, counted two ways: per proposal ref (each hold after its first one, any version) and per departure
+  (each hold of a departure after a hold of it placed the same day was let go, whatever the proposal ref, so a fresh
+  ref per hold does not get around the limit).
+- **Extend** (AA-974, Fix A8, ``POST /holds/{id}/extend``): once per hold, + ``b2b_hold_extend_hours`` (72) capped by
+  the departure start; a second extend is 409 ``extend_limit`` (a retry with the same key returns the hold).
 - **Read / release** (``GET``, ``DELETE /holds/{id}``): another partner's hold is 404. An ``active`` hold past
   ``expires_at`` reads as ``expired`` (the expiry job writes it later, ``app.b2b.expiry``). Release: active →
-  ``released``; released / expired → no-op; confirmed → 422 (cancel the booking instead, AA-974).
+  ``released``; released / expired → no-op; confirmed → 422 (cancel the booking instead, ``app.b2b.cancellation``).
 - **Confirm** (``POST /holds/{id}/confirm``, scope ``book``; memo seam 1): the only place Booking creates a commercial
   record for B2B. Expired / released → 410 ``hold_expired``; wrong hash → 409 ``price_changed``; a cancelled
   departure → 422 ``sold_out``; already confirmed → the same booking. Otherwise, in one transaction: a **B2B trip
   case** (``channel = 'b2b'``, no customer, ``party_tenant_id`` = the agency, ``source_system = 'crm'``, status
   ``confirmed``, ``idempotency_key = b2b_hold:<id>``), **one approved version** (channel ``b2b``, the quote's total,
   currency and FX lock) with one item and one cost row per line (net from the quote, never shown to the agency), the
-  hold lines ``available`` → ``confirmed`` (``on_request`` stays for the AA-975 desk), the hold ``confirmed``.
+  hold lines ``available`` → ``confirmed`` (``on_request`` stays for the AA-975 desk), the hold ``confirmed`` with the
+  cancellation policy in force that day locked on it (AA-974).
 
 No personal data anywhere: seats and pax are counts, the proposal ref and deposit ref are opaque CRM ids.
 """
@@ -35,7 +42,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.b2b import departures
+from app.b2b import cancellation, departures
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
 
@@ -44,6 +51,30 @@ log = logging.getLogger(__name__)
 HOLD_HOURS_KEY = "b2b_hold_hours"
 DEFAULT_HOLD_HOURS = 48
 MAX_HOLD_HOURS = 720
+# AA-974 (bk-021): one extension per hold, and a daily re-hold limit per proposal ref and per departure (policy data
+# in settings).
+EXTEND_HOURS_SETTING = "b2b_hold_extend_hours"
+DEFAULT_EXTEND_HOURS = 72
+REHOLD_LIMIT_SETTING = "b2b_rehold_limit_per_day"
+DEFAULT_REHOLD_LIMIT = 3
+MAX_REHOLD_LIMIT = 100
+EXTEND_REASONS = ("payment_claimed", "client_recheck")
+REHOLD_SQL = """
+SELECT count(*) FILTER (WHERE created_at >= $3)::int AS today, min(created_at) AS first
+FROM booking.b2b_holds WHERE partner_id = $1::uuid AND proposal_ref = $2
+"""
+# Holds of this partner on one of the departures, placed today and let go (released, expired, or active past expiry):
+# each one makes the next hold of that departure a re-hold (per departure, whatever the proposal ref).
+DEPARTURE_REHOLD_SQL = """
+SELECT l.departure_id::text AS departure_id, count(DISTINCT h.id)::int AS dropped
+FROM booking.b2b_holds h
+JOIN booking.b2b_hold_lines l ON l.hold_id = h.id
+WHERE h.partner_id = $1::uuid AND l.departure_id = ANY($2::uuid[]) AND h.created_at >= $3
+  AND (h.status IN ('released', 'expired') OR (h.status = 'active' AND h.expires_at <= $4))
+GROUP BY l.departure_id
+ORDER BY dropped DESC, l.departure_id
+LIMIT 1
+"""
 CASE_KEY_PREFIX = "b2b_hold:"
 ACTOR_PREFIX = "m2m:"
 
@@ -51,7 +82,7 @@ EFFECTIVE_STATUS = "CASE WHEN h.status = 'active' AND h.expires_at <= now() THEN
 HOLD_SQL = f"""
 SELECT h.id::text AS id, h.partner_id::text AS partner_id, h.quote_id::text AS quote_id, h.proposal_ref,
        h.proposal_version, h.idempotency_key, h.status AS stored_status, {EFFECTIVE_STATUS} AS status, h.expires_at,
-       h.extended_count, h.trip_case_id::text AS trip_case_id, h.deposit_ref
+       h.extended_count, h.extend_idempotency_key, h.trip_case_id::text AS trip_case_id, h.deposit_ref
 FROM booking.b2b_holds h
 """  # noqa: S608 — constant fragment
 LINES_SQL = """
@@ -90,13 +121,90 @@ def _id(value: str) -> str | None:
         return None
 
 
-async def _hold_hours(conn: asyncpg.Connection) -> int:
-    raw = await conn.fetchval("SELECT value FROM booking.settings WHERE key = $1", HOLD_HOURS_KEY)
+async def _setting_int(conn: asyncpg.Connection, name: str, default: int, low: int, high: int) -> int:
+    raw = await conn.fetchval("SELECT value FROM booking.settings WHERE key = $1", name)
     try:
-        hours = int(json.loads(raw)) if isinstance(raw, str) else int(raw)
+        value = int(json.loads(raw)) if isinstance(raw, str) else int(raw)
     except (TypeError, ValueError):
-        return DEFAULT_HOLD_HOURS
-    return hours if 1 <= hours <= MAX_HOLD_HOURS else DEFAULT_HOLD_HOURS
+        return default
+    return value if low <= value <= high else default
+
+
+async def _hold_hours(conn: asyncpg.Connection) -> int:
+    return await _setting_int(conn, HOLD_HOURS_KEY, DEFAULT_HOLD_HOURS, 1, MAX_HOLD_HOURS)
+
+
+async def _extend_hours(conn: asyncpg.Connection) -> int:
+    return await _setting_int(conn, EXTEND_HOURS_SETTING, DEFAULT_EXTEND_HOURS, 1, MAX_HOLD_HOURS)
+
+
+async def _rehold_limit(conn: asyncpg.Connection) -> int:
+    return await _setting_int(conn, REHOLD_LIMIT_SETTING, DEFAULT_REHOLD_LIMIT, 0, MAX_REHOLD_LIMIT)
+
+
+def day_start(now: datetime) -> datetime:
+    """00:00 UTC of ``now``'s UTC day (the re-hold limit's day)."""
+    return datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), tzinfo=UTC)
+
+
+async def _lock_proposal(conn: asyncpg.Connection, caller: Caller, proposal_ref: str) -> None:
+    """Serialise the holds of one (partner, proposal ref) for the rest of the transaction (advisory lock), so two
+    concurrent re-holds cannot both pass the daily count."""
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 974))", caller.partner_id, proposal_ref
+    )
+
+
+async def _check_rehold_limit(conn: asyncpg.Connection, caller: Caller, proposal_ref: str, now: datetime) -> None:
+    """Fix A3: a proposal ref may be held again (a "re-hold": any hold after its first one, whatever its version) at
+    most ``b2b_rehold_limit_per_day`` times per UTC day; the next is 429 ``rehold_limit`` with ``retry_after_s`` until
+    00:00 UTC. Idempotent answers (same key, same version) never reach this check."""
+    start = day_start(now)
+    counts = await conn.fetchrow(REHOLD_SQL, caller.partner_id, proposal_ref, start)
+    if counts is None or counts["first"] is None:
+        return  # the proposal's first hold is not a re-hold
+    reholds_today = int(counts["today"]) - (1 if counts["first"] >= start else 0)
+    limit = await _rehold_limit(conn)
+    if reholds_today >= limit:
+        log.info("b2b_rehold_limit partner=%s reholds_today=%s limit=%s", caller.partner_id, reholds_today, limit)
+        raise _rehold_refused(
+            start, now, f"this proposal was held again {reholds_today} times today (limit {limit} a day)"
+        )
+
+
+def _rehold_refused(start: datetime, now: datetime, message: str) -> B2BError:
+    retry = max(int((start + timedelta(days=1) - now).total_seconds()), 1)
+    return B2BError("rehold_limit", f"{message}; try after 00:00 UTC", retry_after_s=retry)
+
+
+async def _check_departure_rehold_limit(
+    conn: asyncpg.Connection, caller: Caller, departure_ids: list[str], now: datetime
+) -> None:
+    """Fix A3 per departure: a hold that follows a hold of the same departure the partner placed today and let go is a
+    re-hold of that departure; once the partner let ``b2b_rehold_limit_per_day`` + 1 such holds go today (so the
+    limit's re-holds are used), the next hold of it is 429 ``rehold_limit``. Runs under the departure locks, so two
+    concurrent holds of one departure are counted one after the other."""
+    if not departure_ids:
+        return
+    start = day_start(now)
+    worst = await conn.fetchrow(DEPARTURE_REHOLD_SQL, caller.partner_id, sorted(departure_ids), start, now)
+    if worst is None:
+        return
+    limit = await _rehold_limit(conn)
+    if int(worst["dropped"]) > limit:
+        log.info(
+            "b2b_rehold_limit partner=%s departure=%s dropped_today=%s limit=%s",
+            caller.partner_id,
+            worst["departure_id"],
+            worst["dropped"],
+            limit,
+        )
+        raise _rehold_refused(
+            start,
+            now,
+            f"departure {worst['departure_id']} was held again {int(worst['dropped'])} times today"
+            f" (limit {limit} a day)",
+        )
 
 
 async def _hold_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
@@ -208,6 +316,7 @@ async def _create(
     if quote["valid_until"] <= now:
         raise B2BError("price_changed", "the quote has expired; re-quote", price_hash=quote["price_hash"])
 
+    await _lock_proposal(conn, caller, proposal_ref)
     # Write down holds of this proposal version that are already past their expiry, so they free the version.
     await conn.execute(
         "UPDATE booking.b2b_holds SET status = 'expired', expired_at = now() WHERE partner_id = $1::uuid"
@@ -232,6 +341,7 @@ async def _create(
             )
         return await _hold_out(conn, current)
 
+    await _check_rehold_limit(conn, caller, proposal_ref, now)
     lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
     asks = [
         departures.SeatAsk(
@@ -244,6 +354,7 @@ async def _create(
         for r in lines
     ]
     result, locked = await departures.lock_departures(conn, asks, today=now.date())
+    await _check_departure_rehold_limit(conn, caller, list(locked), now)
     for ask, (availability, _, why) in zip(asks, result, strict=True):
         if availability == departures.SOLD_OUT:
             raise B2BError("sold_out", f"line {ask.line_ref}: {why}")
@@ -334,6 +445,67 @@ async def release_hold(pool: asyncpg.Pool, caller: Caller, hold_id: str) -> None
     log.info("b2b_hold_released hold=%s partner=%s", hold["id"], caller.partner_id)
 
 
+# ── Extend once (AA-974, Fix A8) ─────────────────────────────────────────────
+
+
+async def extend_hold(
+    pool: asyncpg.Pool,
+    caller: Caller,
+    hold_id: str,
+    *,
+    reason: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """``POST /holds/{id}/extend`` (scope ``hold``): an active hold gains ``b2b_hold_extend_hours`` (72) on its expiry,
+    capped by the earliest departure start, **once**. A retry with the same ``Idempotency-Key`` returns the hold; any
+    other extend of an extended hold is 409 ``extend_limit``, as is an extend that would not move the expiry (the
+    hold already runs until its departure starts). Expired / released → 410 ``hold_expired``; confirmed → 422.
+
+    Like confirm, it locks the hold, then its departures, and judges expiry on the clock read after the locks: a hold
+    that expired while the extend waited is 410, so a place that already counted those seats as free keeps them."""
+    if reason not in EXTEND_REASONS:
+        raise B2BError("invalid", f"reason must be one of {', '.join(EXTEND_REASONS)}")
+    async with pool.acquire() as conn, conn.transaction():
+        hold = await _find(conn, caller, hold_id, lock=True)
+        if int(hold["extended_count"]) >= 1:
+            if hold.get("extend_idempotency_key") == idempotency_key:
+                return await _hold_out(conn, hold)
+            raise B2BError("extend_limit", "this hold was already extended; a hold is extended at most once")
+        if hold["stored_status"] == "confirmed":
+            raise B2BError("invalid", "the hold is confirmed; there is nothing to extend")
+        if hold["status"] != "active":
+            raise B2BError("hold_expired", f"the hold is {hold['status']}; place a new hold")
+        rows = await _recheck_under_lock(conn, hold, await conn.fetch(LINES_SQL, hold["id"]))
+        new_expiry = hold["expires_at"] + timedelta(hours=await _extend_hours(conn))
+        for row in rows.values():
+            new_expiry = min(new_expiry, departures.start_of(row["start_date"]))
+        if new_expiry <= hold["expires_at"]:
+            raise B2BError("extend_limit", "the hold already runs until its departure starts; it cannot be extended")
+        await conn.execute(
+            "UPDATE booking.b2b_holds SET expires_at = $2, extended_count = 1, extended_at = now(), extend_reason = $3,"
+            " extend_idempotency_key = $4 WHERE id = $1::uuid",
+            hold["id"],
+            new_expiry,
+            reason,
+            idempotency_key,
+        )
+        await audit.record(
+            conn,
+            actor_type="system",
+            actor_ref=caller.actor,
+            action="b2b_hold.extended",
+            entity_type="b2b_hold",
+            entity_id=hold["id"],
+            before={"expires_at": hold["expires_at"], "extended_count": 0},
+            after={"expires_at": new_expiry, "extended_count": 1, "reason": reason},
+            entity_label=f"hold {hold['id'][:8]}",
+            summary=f"B2B hold extended ({reason}) until {new_expiry.isoformat(timespec='minutes')}",
+        )
+        out = await _hold_out(conn, await conn.fetchrow(HOLD_SQL + " WHERE h.id = $1::uuid", hold["id"]))
+    log.info("b2b_hold_extended hold=%s partner=%s reason=%s", hold["id"], caller.partner_id, reason)
+    return out
+
+
 # ── Confirm → B2B trip case + approved version ───────────────────────────────
 
 
@@ -382,16 +554,19 @@ async def confirm_hold(
         held = await conn.fetch(LINES_SQL, hold["id"])
         await _recheck_under_lock(conn, hold, held)
         case_id, code = await _open_case(conn, caller, hold, quote, lines)
+        # AA-974: the cancellation policy in force today is locked on the hold; a later cancel charges by it.
+        policy = await cancellation.policy_for_lines(conn, lines, datetime.now(UTC).date())
         await conn.execute(
             "UPDATE booking.b2b_hold_lines SET status = 'confirmed' WHERE hold_id = $1::uuid AND held_as = 'available'",
             hold["id"],
         )
         await conn.execute(
             "UPDATE booking.b2b_holds SET status = 'confirmed', confirmed_at = now(), trip_case_id = $2::uuid,"
-            " deposit_ref = $3 WHERE id = $1::uuid",
+            " deposit_ref = $3, cancellation_policy_id = $4::uuid WHERE id = $1::uuid",
             hold["id"],
             case_id,
             deposit_ref,
+            policy.id if policy is not None else None,
         )
         await audit.record(
             conn,
@@ -416,14 +591,15 @@ async def confirm_hold(
     return out
 
 
-async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[Any]) -> None:
+async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[Any]) -> dict[str, Any]:
     """Lock the hold's departures (id order, as a place does), then judge the hold again on the wall clock read AFTER
     the locks. The first check (``_find``) used the transaction's ``now()``: a confirm that began just before
     ``expires_at`` could otherwise wait on the lock while a place that began after it counted these seats as free,
     took them and committed, and then turn the expired hold into a sale (capacity exceeded). Read after the locks, the
     clock is past any such place's start, so that hold now reads expired (410). The seats are then re-counted without
     this hold, judged at the same instant: other live holds + sold + this hold's seats must fit (defensive; a staff
-    capacity edit also locks the departure and keeps capacity >= held + sold)."""
+    capacity edit also locks the departure and keeps capacity >= held + sold). Returns the locked departure rows
+    (extend caps the new expiry by them)."""
     dep_ids = sorted({r["departure_id"] for r in held if r["departure_id"]})
     rows = {r["id"]: r for r in await conn.fetch(departures.LOCK_SQL, dep_ids)} if dep_ids else {}
     checked_at = await conn.fetchval("SELECT clock_timestamp()")
@@ -433,7 +609,7 @@ async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[An
         if row["status"] == "cancelled":
             raise B2BError("sold_out", f"departure {row['id']} was cancelled; the hold cannot be confirmed")
     if not rows:
-        return
+        return rows
     used = await departures.usage(conn, list(rows), at=checked_at, exclude_hold=hold["id"])
     mine: dict[str, int] = {}
     for line in held:
@@ -444,6 +620,7 @@ async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[An
         if others_held + sold + mine.get(dep_id, 0) > int(row["capacity"]):
             log.warning("b2b_hold_confirm_over_capacity hold=%s departure=%s", hold["id"], dep_id)
             raise B2BError("hold_expired", f"departure {dep_id} no longer has this hold's seats; place a new hold")
+    return rows
 
 
 async def _open_case(
