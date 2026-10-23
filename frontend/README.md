@@ -19,11 +19,11 @@ npm run build      # next build
 ```bash
 npx playwright install chromium   # once per machine
 npm run build                     # the check serves the production build
-npm run test:layout               # Playwright project "layout-mock", ~3 min, 60 tests
+npm run test:layout               # Playwright project "layout-mock", ~4 min, 80 tests
 LAYOUT_SHOTS_DIR=/some/dir npm run test:layout   # screenshots + measurements.{json,md} elsewhere
 ```
 
-Every staff page with a table, at 1440 x 900 light / dark and a 1280 squeeze, with the Booking API mocked
+Every staff page with a table, at 1440 x 900 light / dark, a 1280 squeeze and 390 px phones, with the Booking API mocked
 (`e2e/layout/fixtures.ts`, worst-case long names) and no sign-in: no horizontal page scroll, each table fits its
 frame at 1440 with 20 px to spare, row-menu column pinned at 1280, tab strips without a scrollbar, FX cells on one
 line, console clean. Output goes to `e2e/layout/results/` (gitignored). A new page with a table needs a `PAGES` entry

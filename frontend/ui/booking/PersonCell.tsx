@@ -27,7 +27,8 @@ export function PersonCell({
         {initialsOf(name)}
       </span>
       <span className="min-w-0">
-        <span className="flex items-center gap-1.5">
+        {/* AA-910: the chips wrap under the name when both do not fit, so a capped cell keeps the name readable. */}
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <span className="min-w-0 truncate text-[13px] font-medium text-ink" title={name || undefined}>
             {name || "Unnamed"}
           </span>

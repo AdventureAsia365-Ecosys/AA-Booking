@@ -9,6 +9,7 @@
 //   1280 x 800 — the squeeze: the page still never scrolls sideways; a table may scroll inside its own box (that is
 //                the design below 1440, AA-910 decision), and where the last column is the row menu it stays pinned
 //                (`bk-dt-sticky-end`, position: sticky) and in view.
+//   390 x 844  — phones (cards instead of tables): no horizontal page scroll, console clean.
 // The API is mocked (see playwright.config.ts for why the fake session is safe). Measurements go to
 // $LAYOUT_SHOTS_DIR/measurements.{json,md}.
 
@@ -28,6 +29,8 @@ type PageCase = {
   ready?: string;
   /** Click this once the page is ready (e.g. open an expandable row) before measuring. */
   click?: string;
+  /** On a phone the page shows its own cards instead of a kit DataTable: wait for this instead. */
+  phoneReady?: string;
   /** The page lists its rows without a kit DataTable (only the page-level checks apply). */
   noTable?: boolean;
 };
@@ -36,7 +39,7 @@ type PageCase = {
 // drawer that holds the table. Pages without a table (billing, trip checks, notifications, settings, countries,
 // destinations, calculator, forms) are out of scope.
 const PAGES: PageCase[] = [
-  { name: "dashboard", path: "/" },
+  { name: "dashboard", path: "/", phoneReady: "text=TC-000001" },
   { name: "cases", path: "/cases" },
   { name: "case-proposals", path: "/cases/TC-000001?tab=proposals" },
   { name: "proposals", path: "/proposals" },
@@ -335,6 +338,23 @@ test.describe("1280 x 800 squeeze, light", () => {
           expect(t.lastHeaderVisible, `table "${t.head}": pinned row-menu column in view`).toBe(true);
         }
       }
+    });
+  }
+});
+
+// Phones: the kit DataTable switches to cards below 768 px, so only the page-level checks apply (Linear Done-when
+// asks for 390 px too). One screenshot per page in light.
+test.describe("390 x 844 phone, light", () => {
+  test.use({ viewport: { width: 390, height: 844 }, colorScheme: "light", isMobile: true, hasTouch: true });
+  for (const pc of PAGES) {
+    test(`${pc.name} at 390: page never scrolls sideways`, async ({ page, baseURL }, testInfo) => {
+      const c = await prepare(page, baseURL!);
+      await open(page, { ...pc, ready: pc.phoneReady ?? pc.ready }, c);
+      const m = await measure(page);
+      fs.mkdirSync(OUT, { recursive: true });
+      await page.screenshot({ path: path.join(OUT, `${pc.name}-390-light.png`) });
+      save(testInfo, pc, 390, "light", m, c);
+      commonChecks({ ...pc, noTable: true }, m, c, "light");
     });
   }
 });
