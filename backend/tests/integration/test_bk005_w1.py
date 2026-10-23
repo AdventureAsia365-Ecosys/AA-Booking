@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -578,7 +578,9 @@ async def test_audit_log_read_pages_and_filters(pool: asyncpg.Pool, admin: async
     async with pool.acquire() as conn:
         first = await audit.list_logs(conn, actor="boss", entity_type="trip_case", limit=2)
         rest = await audit.list_logs(conn, actor="boss", entity_type="trip_case", limit=2, before=first["next_before"])
-        by_entity = await audit.list_logs(conn, entity_id=case["id"], date_from=date.today(), date_to=date.today())
+        # The audit date filter is in UTC days; date.today() is the host day and breaks off UTC.
+        utc_today = datetime.now(UTC).date()
+        by_entity = await audit.list_logs(conn, entity_id=case["id"], date_from=utc_today, date_to=utc_today)
     assert len(first["items"]) == 2 and len(rest["items"]) == 1 and rest["next_before"] is None
     assert first["items"][0]["entity_label"] == case["code"] and first["items"][0]["actor"]["name"] == "Boss"
     assert first["items"][0]["summary"] == "Updated notes"
@@ -661,7 +663,9 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
             settings_rows = await client.get("/booking/settings", headers=cathy)
             countries = await client.get("/booking/countries", headers=cathy)
             audit_denied = await client.get("/booking/audit-logs", headers=cathy)
-            audit_ok = await client.get(f"/booking/audit-logs?entity_type=trip_case&to={date.today()}", headers=boss)
+            audit_ok = await client.get(
+                f"/booking/audit-logs?entity_type=trip_case&to={datetime.now(UTC).date()}", headers=boss
+            )
             staff_detail = await client.get("/booking/staff/cathy", headers=boss)
             deleted = await client.delete(f"/booking/trip-cases/{code}/versions/1", headers=boss)
             gone = await client.get(f"/booking/trip-cases/{code}/versions/1", headers=boss)

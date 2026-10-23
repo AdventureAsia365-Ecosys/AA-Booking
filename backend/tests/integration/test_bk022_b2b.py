@@ -267,6 +267,10 @@ async def test_feed_desk_and_incident_end_to_end(
     await _insert(admin, "b2b_partners", tenant_id=OTHER_TENANT, agency_name="Agency 975", m2m_client_id=CRM_CLIENT)
     other = await _ok(await c.get("/b2b/v1/events", headers={**_m2m(m2m), "X-AA-Tenant-Id": OTHER_TENANT}))
     assert other == {"items": [], "next_cursor": "bk1.0"}
+    # "Ahead" is checked against the caller's own head: a cursor of the first agency is ahead for this one, so the 422
+    # reveals nothing about the global sequence.
+    foreign = {**_m2m(m2m), "X-AA-Tenant-Id": OTHER_TENANT}
+    _problem(await c.get(f"/b2b/v1/events?after={feed['next_cursor']}", headers=foreign), 422, "invalid")
     assert TENANT != OTHER_TENANT
 
     # Audit rows of the desk.

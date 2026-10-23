@@ -142,6 +142,17 @@ async def test_answer_due_counts_business_days_in_the_ops_zone(
     assert got == due.replace(tzinfo=ICT)
 
 
+async def test_answer_due_is_strict_and_capped(admin: asyncpg.Connection) -> None:
+    """A NULL argument returns NULL at once (no endless loop); more than 10 business days count as 10."""
+    start = datetime(2026, 10, 21, 10, 0, tzinfo=ICT)  # Wednesday
+    assert await admin.fetchval("SELECT booking.b2b_answer_due(NULL, 1, 'Asia/Ho_Chi_Minh')") is None
+    assert await admin.fetchval("SELECT booking.b2b_answer_due($1, NULL, 'Asia/Ho_Chi_Minh')", start) is None
+    assert await admin.fetchval("SELECT booking.b2b_answer_due($1, 1, NULL)", start) is None
+    capped = await admin.fetchval("SELECT booking.b2b_answer_due($1, 10000, 'Asia/Ho_Chi_Minh')", start)
+    assert capped == datetime(2026, 11, 4, 10, 0, tzinfo=ICT)  # 10 business days: two weeks later
+    assert await admin.fetchval("SELECT booking.b2b_answer_due($1, -3, 'Asia/Ho_Chi_Minh')", start) == start
+
+
 async def test_hold_line_checks_and_one_open_incident(admin: asyncpg.Connection) -> None:
     """declined <=> a decline code from the list; answered_by needs answered_at; one open incident per departure."""
     with pytest.raises(_Rollback):

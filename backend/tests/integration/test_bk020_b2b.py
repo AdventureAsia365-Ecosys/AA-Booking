@@ -434,7 +434,9 @@ async def test_departures_quote_hold_confirm(
     after = await _ok(await _quote(c, m2m, "PRO-3", [_plan_line("tour", plan["plan"], dep1["id"], adult=1)]), 201)
     assert after["lines"][0]["availability"] == "sold_out"
     actions = await admin.fetch(
-        "SELECT action FROM booking.audit_logs WHERE entity_type IN ('departure', 'b2b_hold') ORDER BY created_at"
+        "SELECT action FROM booking.audit_logs WHERE entity_type IN ('departure', 'b2b_hold')"
+        " AND entity_id = ANY($1::uuid[]) ORDER BY created_at",
+        [dep1["id"], dep2["id"], hold["hold_id"]],
     )
     assert [a["action"] for a in actions] == [
         "departure.created",
