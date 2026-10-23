@@ -88,8 +88,9 @@ curl -s localhost:8000/booking/health
 - `.github/workflows/secret-scan.yml` (AA-981 follow-up): check **gitleaks** on every PR (lines the PR adds, rules and
   baseline from the base branch) and **gitleaks full history** nightly, on push to `main` and on demand (every
   branch, tag and pull request head). Rules in `.gitleaks.toml` (same as the root repo), reviewed findings pinned
-  in `.gitleaksignore`; a PR that changes either file, or adds an inline `gitleaks:allow`, needs the label
-  `secret-scan-baseline-reviewed` (a later push that touches them again removes it). False positives: prefer a
+  in `.gitleaksignore`; a PR that changes either file or `secret-scan.yml`, or adds an inline `gitleaks:allow`,
+  needs the label `secret-scan-baseline-reviewed` after the last push (any later push, reopen or label change
+  removes it). Merge commits are scanned too (remerge diff). False positives: prefer a
   narrow allowlist in `.gitleaks.toml`; a commit fingerprint does not survive the squash merge (header of
   `.gitleaksignore`).
 - `.github/workflows/deploy-dev.yml`: on push to `main` (backend changes) — OIDC role from the `dev`
