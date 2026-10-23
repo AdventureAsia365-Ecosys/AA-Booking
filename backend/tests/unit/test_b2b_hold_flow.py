@@ -431,7 +431,8 @@ async def test_confirm_opens_a_b2b_case_with_an_approved_version() -> None:
     assert "2 supplier rates" in costs[0][2] and "0 supplier rates" in costs[2][2]
     assert conn.sql("SET is_approved = true")[0][1] == f"Approved by the B2B confirm of hold {HOLD}"
     assert conn.sql("UPDATE booking.b2b_hold_lines SET status = 'confirmed'") == [(HOLD,)]
-    assert conn.sql("SET status = 'confirmed', confirmed_at") == [(HOLD, CASE, "DEP-1")]
+    # No approved cancellation policy in this scripted DB: none is locked (a cancel then resolves it, AA-974).
+    assert conn.sql("SET status = 'confirmed', confirmed_at") == [(HOLD, CASE, "DEP-1", None)]
     actions = [a[3] for a in conn.sql("INSERT INTO booking.audit_logs")]
     assert actions == ["trip_case.created", "b2b_hold.confirmed"]
     # The status history names no staff member (system change) and notes the M2M client.

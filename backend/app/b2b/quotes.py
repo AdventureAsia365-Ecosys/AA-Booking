@@ -1,14 +1,15 @@
 """``POST /booking/b2b/v1/quotes``: price lines at the B2B channel rule, lock FX, hash, store (AA-972, bk-019).
 
+- **Currencies** (:data:`QUOTE_CURRENCIES`): the engine's selling currencies plus VND (AA-974, ADR 0005a d3).
 - **Rule and FX**: the approved ``b2b`` pricing rule in force on the quote day (UTC) and the approved FX row in force
   that day for the quote currency and every cost currency (``app.pricing.repository``, maker-checker rows only).
   Missing = 503 ``unavailable`` (AA-side data; the CRM shows an indicative price and allows no deposit).
 - **Formula**: the AA-810 engine's building blocks (``app.pricing.engine``): every net to USD at the plain rate, sell
   ``= net / (1 - margin - card fee)`` with the rule's margin (``peak = false``), then to the quote currency x rate x
   (1 + buffer). One formula for B2C and B2B (memo seam 7): no second engine.
-- **Rounding** (:data:`ROUNDING`): each line's ``b2b_price`` is rounded UP to the cent (never lowers the margin);
-  ``total_b2b_price`` is the exact sum of the lines. The B2C "total up to 5" rule does not apply: a B2B price is not
-  customer-facing (the agency sets its own sell price).
+- **Rounding** (:func:`round_line`): each line's ``b2b_price`` is rounded UP to the cent (never lowers the margin),
+  a VND line UP to 1,000 VND (AA-974, :data:`LINE_INCREMENTS`); ``total_b2b_price`` is the exact sum of the lines.
+  The B2C "total up to 5" rule does not apply: a B2B price is not customer-facing (the agency sets its own price).
 - **price_hash** (:func:`price_hash`): SHA-256 of a canonical JSON of the currency, the FX lock, the rule, the rounding
   rule, every line (what was asked + its price) and the total. Not the quote id, time, validity or proposal ref, so
   the same request on the same data gives the same hash, and any price change gives a new one.
@@ -41,6 +42,11 @@ log = logging.getLogger(__name__)
 
 HASH_VERSION = "booking.b2b.v1/quote/2"  # /2 (AA-973): lines carry departure_id
 ROUNDING = "line_ceil_0.01"
+# AA-974 (ADR 0005a decision 3): VND is a B2B quote currency (not yet a B2C selling currency, so the engine's
+# SELLING_CURRENCIES stays as it is). A VND line is rounded up to 1,000 VND (proposed default, to confirm with
+# Ms. Thu); every other currency to the cent. The rule is hashed, so a USD quote's hash is unchanged.
+QUOTE_CURRENCIES: frozenset[str] = engine.SELLING_CURRENCIES | {"VND"}
+LINE_INCREMENTS: dict[str, Decimal] = {"VND": Decimal("1000")}
 UNIT = "per_line"  # b2b_price is the whole line (quantity included)
 VALID_HOURS_KEY = "b2b_quote_valid_hours"  # gitleaks:allow (setting name, not a secret)
 DEFAULT_VALID_HOURS = 48
@@ -75,6 +81,20 @@ def ceil_cents(value: Decimal) -> Decimal:
     return value.quantize(engine.CENT, rounding=ROUND_CEILING)
 
 
+def rounding_rule(currency: str) -> str:
+    """The line rounding of a quote currency, as stored and hashed (``line_ceil_0.01``, ``line_ceil_1000``)."""
+    increment = LINE_INCREMENTS.get(currency)
+    return ROUNDING if increment is None else f"line_ceil_{increment}"
+
+
+def round_line(value: Decimal, currency: str) -> Decimal:
+    """A line's ``b2b_price``: up to the cent, or up to the currency's line increment (VND 1,000)."""
+    increment = LINE_INCREMENTS.get(currency)
+    if increment is None:
+        return ceil_cents(value)
+    return ((value / increment).to_integral_value(rounding=ROUND_CEILING) * increment).quantize(engine.CENT)
+
+
 # ISO 4217 exponent 0: amounts carry no decimals (contract Money: "VND amounts have no decimals"), rounded up.
 ZERO_DECIMAL_CURRENCIES = frozenset({"VND", "JPY", "KRW"})
 
@@ -97,6 +117,7 @@ def price_hash(
     margin: Decimal,
     lines: list[dict[str, Any]],
     total: Decimal,
+    rounding: str = ROUNDING,
 ) -> str:
     """Canonical JSON (sorted keys, no spaces, decimals as normalised strings) → SHA-256 hex."""
     payload = {
@@ -115,7 +136,7 @@ def price_hash(
             "card_fee_pct": decimal_text(rule.rule.card_fee_pct),
             "valid_from": rule.valid_from.isoformat(),
         },
-        "rounding": ROUNDING,
+        "rounding": rounding,
         "lines": [
             {
                 "line_ref": line["line_ref"],
@@ -182,8 +203,8 @@ async def create_quote(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Price, hash and store one quote; returns the contract ``Quote`` body. Raises B2BError."""
-    if currency not in engine.SELLING_CURRENCIES:
-        allowed = ", ".join(sorted(engine.SELLING_CURRENCIES))
+    if currency not in QUOTE_CURRENCIES:
+        allowed = ", ".join(sorted(QUOTE_CURRENCIES))
         raise B2BError("invalid", f"{currency} is not a quote currency (one of {allowed})")
     refs = [line.ask.line_ref for line in lines]
     if len(set(refs)) != len(refs):
@@ -239,13 +260,16 @@ async def create_quote(
                     "unit": UNIT,
                     "availability": availability,
                     "departure_id": departure_id,
-                    "b2b_price": ceil_cents(sell),
+                    "b2b_price": round_line(sell, currency),
                     "net_cost_usd": net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
                     "supplier_rate_ids": lc.rate_ids,
                 }
             )
         total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
-        digest = price_hash(currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total)
+        rounding = rounding_rule(currency)
+        digest = price_hash(
+            currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total, rounding=rounding
+        )
         valid_until = now + timedelta(hours=await _valid_hours(conn))
 
         async with conn.transaction():
@@ -270,7 +294,7 @@ async def create_quote(
                 rule.valid_from,
                 margin,
                 rule.rule.card_fee_pct,
-                ROUNDING,
+                rounding,
                 on,
                 total,
                 digest,

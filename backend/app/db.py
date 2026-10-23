@@ -36,6 +36,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-016",  # AA-680 Phase 2: staff_users.cognito_iss / cognito_sub (bk-014 / bk-015 change no shape this code reads)
     "bk-019",  # AA-972: b2b_partners, b2b_quotes + lines, trip_plan_components (bk-017 / bk-018: no shape read here)
     "bk-020",  # AA-973: departures, b2b_holds + lines, quote line departure_id, B2B trip case columns
+    "bk-021",  # AA-974: cancellation_policies, b2b_cancellations, b2b_holds extend + policy columns
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

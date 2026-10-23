@@ -288,7 +288,7 @@ def test_quote_refusals() -> None:
     client = _client(_conn(), m2m)
     lines = _quote_body()["lines"]
     _problem(
-        client.post("/booking/b2b/v1/quotes", json=_quote_body(currency="VND"), headers=_headers(token)), 422, "invalid"
+        client.post("/booking/b2b/v1/quotes", json=_quote_body(currency="JPY"), headers=_headers(token)), 422, "invalid"
     )
     dup = _quote_body(lines=[lines[0], {**lines[1], "line_ref": "L1"}])
     _problem(client.post("/booking/b2b/v1/quotes", json=dup, headers=_headers(token)), 422, "invalid")
@@ -463,6 +463,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/holds",
         "/booking/b2b/v1/holds/{hold_id}",
         "/booking/b2b/v1/holds/{hold_id}/confirm",
+        "/booking/b2b/v1/holds/{hold_id}/extend",
+        "/booking/b2b/v1/bookings/{booking_id}/cancel",
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -472,7 +474,16 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
             schema = resp.get("content", {}).get("application/json", {}).get("schema", {})
             if "$ref" in schema:
                 refs.add(schema["$ref"].rsplit("/", 1)[1])
-    assert refs == {"ProductPage", "Quote", "FxRates", "PriceParity", "DeparturePage", "Hold", "Booking"}
+    assert refs == {
+        "ProductPage",
+        "Quote",
+        "FxRates",
+        "PriceParity",
+        "DeparturePage",
+        "Hold",
+        "Booking",
+        "CancellationResult",
+    }
     keys: set[str] = set()
     pending, seen = list(refs), set()
     schemas = spec["components"]["schemas"]
