@@ -363,16 +363,22 @@ send, OTP) is not built: those still write rows only.
   same key returns the hold; any other extend is 409 `extend_limit`, as is one that cannot move the expiry (the hold
   already runs to the departure start). Expired / released → 410 `hold_expired`; confirmed → 422. It locks the hold,
   then its departures, and judges expiry on the clock read after the locks (same race rule as confirm).
-- **Re-hold limit (AA-974, Fix A3)**: per partner and **proposal ref** (design §3.4), every hold after the ref's
-  first one is a re-hold, any version; at most setting `b2b_rehold_limit_per_day` (3) re-holds per UTC day, the next
-  `POST /holds` is 429 `rehold_limit` with `retry_after_s` to 00:00 UTC. Idempotent answers (same key, same version)
-  never count. Serialised per (partner, ref) by a transaction advisory lock.
+- **Re-hold limit (AA-974, Fix A3)**: at most setting `b2b_rehold_limit_per_day` (3) re-holds per UTC day, the next
+  `POST /holds` is 429 `rehold_limit` with `retry_after_s` to 00:00 UTC, counted two ways. **Per proposal ref**
+  (design §3.4): every hold after the ref's first one is a re-hold, any version; serialised per (partner, ref) by a
+  transaction advisory lock. **Per departure** (lane brief; review round): a hold of a departure after a hold of it the
+  partner placed the same day and let go (released / expired) is a re-hold, whatever the ref, so a fresh proposal ref
+  per hold does not get around the limit; counted under the departure locks. Holds still active or confirmed do not
+  count. Idempotent answers (same key, same version) never count. Per-departure counting awaits Nghiệp's confirmation
+  (implementation notes AA-974).
 - **Cancel with fee (AA-974, ADR 0005a d4, C12)**: `POST /bookings/{booking_id}/cancel` (scope `book`,
   `Idempotency-Key`, `reason_code`; `booking_id` = the trip case id) charges the fee of the booking's
   **cancellation policy**: a schedule of tiers `{min_days, fee_pct}` per trip plan or the B2B default
   (`booking.cancellation_policies`, append-only, in force once a second person approved it, staff
   `/booking/pricing/cancellation-policies`). The policy in force on the confirm day is locked on the hold
-  (`b2b_holds.cancellation_policy_id`). Days before departure = trip case start − UTC day of the cancel; the tier
+  (`b2b_holds.cancellation_policy_id`; bk-021 backfills the seeded default on holds confirmed before it; a hold
+  without one resolves it among the rows approved by its `confirmed_at`, so a later or backdated row never re-prices
+  it). Days before departure = trip case start − UTC day of the cancel; the tier
   with the largest `min_days` ≤ max(days, 0); fee = quoted total × % half-up to the currency unit; refundable = total
   − fee; a booking on a departure AA cancelled (staff status `cancelled`) costs no fee. `?dry_run=true` returns the
   same numbers and writes nothing. The cancel writes one `b2b_cancellations` row, sets the hold lines `cancelled` (the
@@ -740,7 +746,7 @@ unchanged); seed default B2B policy `00000000-0000-4000-8000-0000000bc021` appro
 with Ms. Thư); `b2b_cancellations` (one per hold / trip case: policy, reason, Idempotency-Key, departure date, days
 before, fee %, currency, total, fee, refundable with fee + refundable = total; SELECT, INSERT only); `b2b_holds`
 `extended_at`, `extend_reason`, `extend_idempotency_key` (CHECK tied to `extended_count`), `cancellation_policy_id`,
-index `(partner_id, proposal_ref, created_at)`; settings `b2b_hold_extend_hours` = 72, `b2b_rehold_limit_per_day` = 3.
+index `(partner_id, proposal_ref, created_at)`, backfill of the seeded policy on holds already confirmed; settings `b2b_hold_extend_hours` = 72, `b2b_rehold_limit_per_day` = 3.
 No personal data. In `REQUIRED_SCHEMA_VERSIONS` (code PR).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,

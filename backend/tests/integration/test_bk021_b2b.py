@@ -4,9 +4,10 @@
 - Linear E: a VND quote uses the approved rate in force on the pricing day (not an older, a pending or a future row),
   lines rounded up to 1,000 VND;
 - Linear R: a second extend → 409 ``extend_limit`` (a retry with the same key → the hold);
-- Linear R: a 4th re-hold of a proposal in a day → 429 ``rehold_limit``;
+- Linear R: a 4th re-hold of a proposal, or of a departure under fresh proposal refs, in a day → 429 ``rehold_limit``;
 - Linear E: cancel inside the fee window returns the scheduled fee — dry run writes nothing, the cancel frees the seats
-  and cancels the trip case; the policy is the one locked at confirm; staff fee policies with maker-checker.
+  and cancels the trip case; the policy is the one locked at confirm (a booking without one never takes a policy
+  approved after its confirm); staff fee policies with maker-checker; the same end to end in VND.
 
 Dates are relative to today (lessons.md S245): departures start in 30 / 37 days (bk-020 module constants).
 """
@@ -392,3 +393,134 @@ async def test_two_concurrent_reholds_at_the_limit(
     assert waiting == 2
     assert sorted(r.status_code for r in results) == [201, 429]
     assert await admin.fetchval("SELECT count(*) FROM booking.b2b_holds WHERE proposal_ref = 'RH-3'") == 4
+
+
+async def _book(
+    c: httpx.AsyncClient, m2m: LocalM2M, ref: str, line: dict[str, Any], currency: str = "USD"
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    body = {"proposal_ref": ref, "proposal_version": 1, "currency": currency, "lines": [line]}
+    quote = await _ok(await c.post("/b2b/v1/quotes", json=body, headers=_m2m(m2m)), 201)
+    hold = await _ok(
+        await c.post("/b2b/v1/holds", json=_hold_body(quote, ref), headers=_m2m(m2m, f"{ref}-hold-key")), 201
+    )
+    url = f"/b2b/v1/holds/{hold['hold_id']}/confirm"
+    booking = await _ok(
+        await c.post(url, json={"price_hash": quote["price_hash"]}, headers=_m2m(m2m, f"{ref}-confirm-key")), 201
+    )
+    return quote, booking
+
+
+async def test_vnd_booking_cancel_end_to_end(client: Client, admin: asyncpg.Connection, rules: dict[str, str]) -> None:
+    """Linear E on the VND path: quote (25,000 VND/USD, lines up to 1,000 VND) → hold → confirm into a VND B2B trip
+    case → cancel dry run and for real: a whole-VND fee, refundable = total - fee, the stored row passes the CHECK."""
+    c, cis, m2m, _ = client
+    dep = await _departure(c, cis, DAY1, 4)
+    quote, booking = await _book(c, m2m, "VX-1", _plan_line("tour", rules["plan"], dep["id"]), "VND")
+    total = D(quote["total_b2b_price"]["amount"])
+    assert quote["total_b2b_price"]["currency"] == "VND" and quote["fx"]["rate_per_usd"] == "25000.00000000"
+    assert total > 0 and total % 1000 == 0 and "." not in quote["total_b2b_price"]["amount"]
+    case = await admin.fetchrow(
+        "SELECT c.currency AS case_currency, v.currency AS version_currency, v.total_price, v.channel"
+        " FROM booking.trip_cases c JOIN booking.trip_case_versions v ON v.trip_case_id = c.id"
+        " WHERE c.id = $1::uuid",
+        booking["booking_id"],
+    )
+    assert (case["case_currency"].strip(), case["version_currency"].strip(), case["channel"]) == ("VND", "VND", "b2b")
+    assert case["total_price"] == total
+
+    fee = (total * SEED_PCT / 100).quantize(D("1"), rounding=ROUND_HALF_UP)
+    expected = {
+        "booking_id": booking["booking_id"],
+        "fee": {"amount": str(fee), "currency": "VND"},
+        "refundable_b2b_amount": {"amount": str(total - fee), "currency": "VND"},
+        "fee_basis": {"policy_id": SEED, "days_before_departure": DAYS1, "fee_pct": f"{SEED_PCT:.2f}"},
+    }
+    cancel_url = f"/b2b/v1/bookings/{booking['booking_id']}/cancel"
+    reason = {"reason_code": "client_cancelled"}
+    preview = await _ok(await c.post(f"{cancel_url}?dry_run=true", json=reason, headers=_m2m(m2m, "vx-dry-1")))
+    assert preview == {**expected, "dry_run": True, "cancelled_at": None}
+    assert await admin.fetchval("SELECT count(*) FROM booking.b2b_cancellations") == 0
+    done = await _ok(await c.post(cancel_url, json=reason, headers=_m2m(m2m, "vx-key-1")))
+    assert done | {"cancelled_at": None} == {**expected, "dry_run": False, "cancelled_at": None}
+    stored = await admin.fetchrow(
+        "SELECT currency, total_b2b_price, fee_amount, refundable_amount FROM booking.b2b_cancellations"
+        " WHERE hold_id = $1::uuid",
+        booking["hold_id"],
+    )
+    assert stored["currency"] == "VND" and stored["total_b2b_price"] == total
+    assert stored["fee_amount"] == fee and stored["fee_amount"] == stored["fee_amount"].to_integral_value()
+    assert stored["fee_amount"] + stored["refundable_amount"] == total
+    status = await admin.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", booking["booking_id"])
+    assert status == "cancelled"
+    assert (await _seats(c, m2m))[DAY1] == (0, 0, 4)
+
+
+async def test_a_later_backdated_policy_never_reprices_an_unlocked_booking(
+    client: Client, admin: asyncpg.Connection, rules: dict[str, str]
+) -> None:
+    """A hold confirmed without a locked policy (the AA-973 code, after bk-021 was applied) resolves the policy among
+    the rows approved by its confirm: a plan policy approved later, even dated before the confirm, does not apply."""
+    c, cis, m2m, _ = client
+    dep = await _departure(c, cis, DAY1, 4)
+    _, booking = await _book(c, m2m, "LG-1", _plan_line("tour", rules["plan"], dep["id"]))
+    async with admin.transaction():
+        owner = await admin.fetchval("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'booking'")
+        await admin.execute(f'SET LOCAL ROLE "{owner}"')
+        await admin.execute(
+            "UPDATE booking.b2b_holds SET cancellation_policy_id = NULL WHERE id = $1::uuid", booking["hold_id"]
+        )
+    body = {
+        "title": "Backdated agency terms",
+        "source_id": SOURCE_ID,
+        "valid_from": (UTC_TODAY - timedelta(days=30)).isoformat(),
+        "tiers": [{"min_days": 0, "fee_pct": "40"}],
+    }
+    created = await _ok(await c.post("/pricing/cancellation-policies", json=body, headers=_staff(cis, MAKER)), 201)
+    await _ok(await c.post(f"/pricing/cancellation-policies/{created['id']}/approve", headers=_staff(cis, CHECKER)))
+    url = f"/b2b/v1/bookings/{booking['booking_id']}/cancel?dry_run=true"
+    reason = {"reason_code": "client_cancelled"}
+    preview = await _ok(await c.post(url, json=reason, headers=_m2m(m2m, "lg-dry-1")))
+    assert preview["fee_basis"] == {"policy_id": SEED, "days_before_departure": DAYS1, "fee_pct": f"{SEED_PCT:.2f}"}
+    # Control: had the booking been confirmed after that approval, the plan policy would apply.
+    async with admin.transaction():
+        await admin.execute(f'SET LOCAL ROLE "{owner}"')
+        await admin.execute(
+            "UPDATE booking.b2b_holds SET confirmed_at = now() + interval '1 minute' WHERE id = $1::uuid",
+            booking["hold_id"],
+        )
+    later = await _ok(await c.post(url, json=reason, headers=_m2m(m2m, "lg-dry-2")))
+    assert later["fee_basis"]["policy_id"] == created["id"] and later["fee_basis"]["fee_pct"] == "40.00"
+
+
+async def test_departure_rehold_limit_with_fresh_proposal_refs(
+    client: Client, admin: asyncpg.Connection, rules: dict[str, str]
+) -> None:
+    """Per departure: an agency that holds and lets go one departure under a new proposal ref each time is refused
+    on the 4th re-hold of that departure in a day (429); another departure, and holds still active, are not limited."""
+    c, cis, m2m, _ = client
+    dep1 = await _departure(c, cis, DAY1, 10)
+    dep2 = await _departure(c, cis, DAY2, 10)
+
+    async def hold(ref: str, dep: dict[str, Any], start: str = DAY1) -> httpx.Response:
+        quote = await _ok(await _quote(c, m2m, ref, [_plan_line("tour", rules["plan"], dep["id"], start)]), 201)
+        return await c.post("/b2b/v1/holds", json=_hold_body(quote, ref), headers=_m2m(m2m, f"{ref}-key"))
+
+    kept = await _ok(await hold("RD-0", dep1), 201)  # active all along: not a let-go hold
+    for n in (1, 2, 3, 4):  # the first hold of the cycle, then re-holds 1..3, each released
+        held = await _ok(await hold(f"RD-{n}", dep1), 201)
+        assert (await c.delete(f"/b2b/v1/holds/{held['hold_id']}", headers=_m2m(m2m))).status_code == 204
+    refused = _problem(await hold("RD-5", dep1), 429, "rehold_limit")
+    assert dep1["id"] in refused["message"] and refused["retry_after_s"] > 0
+    await _ok(await hold("RD-6", dep2, DAY2), 201)  # another departure
+    statuses = await admin.fetch(
+        "SELECT proposal_ref, status FROM booking.b2b_holds WHERE proposal_ref LIKE 'RD-%' ORDER BY proposal_ref"
+    )
+    assert [(r["proposal_ref"], r["status"]) for r in statuses] == [
+        ("RD-0", "active"),
+        ("RD-1", "released"),
+        ("RD-2", "released"),
+        ("RD-3", "released"),
+        ("RD-4", "released"),
+        ("RD-6", "active"),
+    ]
+    assert kept["status"] == "active"

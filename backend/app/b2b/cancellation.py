@@ -9,7 +9,8 @@
   Not the supplier-side terms (``supplier_contracts.cancellation_policy`` stays free text).
 - **Which policy a booking uses**: the one in force when the hold was confirmed, locked on the hold
   (``b2b_holds.cancellation_policy_id``, :func:`policy_for_lines`): the plan of the booking's first ``tp:`` line, else
-  the default. A policy approved after the booking never changes its fee.
+  the default. A policy approved after the booking never changes its fee (a hold confirmed before the policy was
+  locked resolves it among the rows approved by its confirm; bk-021 backfills the seeded default on older ones).
 - **Fee** (:func:`compute`): days before departure = the trip case start date minus the UTC day of the cancel; fee =
   the booking's quoted ``total_b2b_price`` x ``fee_pct`` / 100, half-up to the currency unit (cent; whole VND);
   refundable = total - fee. In the quote currency, never re-converted (R17). A booking on a departure AA cancelled
@@ -145,6 +146,7 @@ SELECT {POLICY_COLUMNS}
 FROM booking.cancellation_policies p
 JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id
 WHERE p.channel = $1 AND (p.trip_plan_id = $2::uuid OR p.trip_plan_id IS NULL) AND p.valid_from <= $3
+  AND ($4::timestamptz IS NULL OR a.approved_at <= $4)
 ORDER BY (p.trip_plan_id IS NULL), p.valid_from DESC
 LIMIT 1
 """  # noqa: S608 — constant fragment
@@ -161,8 +163,13 @@ def _policy(row: Any) -> Policy:
     return Policy(id=row["id"], tiers=parse_tiers(row["tiers"]))
 
 
-async def policy_in_force(conn: asyncpg.Connection, plan_id: str | None, on: date) -> Policy | None:
-    row = await conn.fetchrow(IN_FORCE_SQL, CHANNEL, plan_id, on)
+async def policy_in_force(
+    conn: asyncpg.Connection, plan_id: str | None, on: date, *, approved_by: datetime | None = None
+) -> Policy | None:
+    """The newest approved policy of the plan dated on or before ``on``, else the newest approved default. With
+    ``approved_by``, only rows approved by then count (a booking confirmed then could not have been made under a row
+    approved later, even one dated earlier)."""
+    row = await conn.fetchrow(IN_FORCE_SQL, CHANNEL, plan_id, on, approved_by)
     return _policy(row) if row is not None else None
 
 
@@ -178,9 +185,11 @@ def first_plan(lines: Sequence[Any]) -> str | None:
     return None
 
 
-async def policy_for_lines(conn: asyncpg.Connection, lines: Sequence[Any], on: date) -> Policy | None:
+async def policy_for_lines(
+    conn: asyncpg.Connection, lines: Sequence[Any], on: date, *, approved_by: datetime | None = None
+) -> Policy | None:
     """The policy a booking of these quote lines is cancelled under, as in force on ``on`` (the confirm day)."""
-    return await policy_in_force(conn, first_plan(lines), on)
+    return await policy_in_force(conn, first_plan(lines), on, approved_by=approved_by)
 
 
 # ── Cancel (POST /booking/b2b/v1/bookings/{id}/cancel) ───────────────────────
@@ -261,9 +270,16 @@ async def _booking_policy(conn: asyncpg.Connection, booking: Any) -> Policy:
         row = await conn.fetchrow(BY_ID_SQL, booking["cancellation_policy_id"])
         if row is not None:
             return _policy(row)
-    # Confirmed before bk-021's code locked a policy on the hold: the one in force on the confirm day.
-    confirmed_on = (booking["confirmed_at"] or datetime.now(UTC)).astimezone(UTC).date()
-    found = await policy_for_lines(conn, await conn.fetch(QUOTE_LINES_SQL, booking["quote_id"]), confirmed_on)
+    # No locked policy (confirmed by the AA-973 code after bk-021 was applied; bk-021 backfills the older ones): the
+    # one in force at the confirm, counting only rows approved by then, so a row approved later (even backdated)
+    # never re-prices the booking.
+    confirmed_at = booking["confirmed_at"] or datetime.now(UTC)
+    found = await policy_for_lines(
+        conn,
+        await conn.fetch(QUOTE_LINES_SQL, booking["quote_id"]),
+        confirmed_at.astimezone(UTC).date(),
+        approved_by=confirmed_at,
+    )
     if found is None:
         raise B2BError("unavailable", "no cancellation policy is in force for this booking")
     return found

@@ -8,8 +8,10 @@
   quote is honoured as quoted within its validity, no re-pricing). The departures of the lines are locked
   (``app.b2b.departures.lock_departures``) and counted; a line that does not fit is 422 ``sold_out`` and nothing is
   held. Length: setting ``b2b_hold_hours`` (48), capped by the earliest departure start.
-- **Re-hold limit** (AA-974, Fix A3): once a proposal ref has had a hold, each later hold of it (any version) is a
-  re-hold; at most ``b2b_rehold_limit_per_day`` (3) re-holds per UTC day, the next is 429 ``rehold_limit``.
+- **Re-hold limit** (AA-974, Fix A3): at most ``b2b_rehold_limit_per_day`` (3) re-holds per UTC day, the next is 429
+  ``rehold_limit``, counted two ways: per proposal ref (each hold after its first one, any version) and per departure
+  (each hold of a departure after a hold of it placed the same day was let go, whatever the proposal ref, so a fresh
+  ref per hold does not get around the limit).
 - **Extend** (AA-974, Fix A8, ``POST /holds/{id}/extend``): once per hold, + ``b2b_hold_extend_hours`` (72) capped by
   the departure start; a second extend is 409 ``extend_limit`` (a retry with the same key returns the hold).
 - **Read / release** (``GET``, ``DELETE /holds/{id}``): another partner's hold is 404. An ``active`` hold past
@@ -49,7 +51,8 @@ log = logging.getLogger(__name__)
 HOLD_HOURS_KEY = "b2b_hold_hours"
 DEFAULT_HOLD_HOURS = 48
 MAX_HOLD_HOURS = 720
-# AA-974 (bk-021): one extension per hold, and a daily re-hold limit per proposal ref (policy data in settings).
+# AA-974 (bk-021): one extension per hold, and a daily re-hold limit per proposal ref and per departure (policy data
+# in settings).
 EXTEND_HOURS_SETTING = "b2b_hold_extend_hours"
 DEFAULT_EXTEND_HOURS = 72
 REHOLD_LIMIT_SETTING = "b2b_rehold_limit_per_day"
@@ -59,6 +62,18 @@ EXTEND_REASONS = ("payment_claimed", "client_recheck")
 REHOLD_SQL = """
 SELECT count(*) FILTER (WHERE created_at >= $3)::int AS today, min(created_at) AS first
 FROM booking.b2b_holds WHERE partner_id = $1::uuid AND proposal_ref = $2
+"""
+# Holds of this partner on one of the departures, placed today and let go (released, expired, or active past expiry):
+# each one makes the next hold of that departure a re-hold (per departure, whatever the proposal ref).
+DEPARTURE_REHOLD_SQL = """
+SELECT l.departure_id::text AS departure_id, count(DISTINCT h.id)::int AS dropped
+FROM booking.b2b_holds h
+JOIN booking.b2b_hold_lines l ON l.hold_id = h.id
+WHERE h.partner_id = $1::uuid AND l.departure_id = ANY($2::uuid[]) AND h.created_at >= $3
+  AND (h.status IN ('released', 'expired') OR (h.status = 'active' AND h.expires_at <= $4))
+GROUP BY l.departure_id
+ORDER BY dropped DESC, l.departure_id
+LIMIT 1
 """
 CASE_KEY_PREFIX = "b2b_hold:"
 ACTOR_PREFIX = "m2m:"
@@ -151,12 +166,44 @@ async def _check_rehold_limit(conn: asyncpg.Connection, caller: Caller, proposal
     reholds_today = int(counts["today"]) - (1 if counts["first"] >= start else 0)
     limit = await _rehold_limit(conn)
     if reholds_today >= limit:
-        retry = max(int((start + timedelta(days=1) - now).total_seconds()), 1)
         log.info("b2b_rehold_limit partner=%s reholds_today=%s limit=%s", caller.partner_id, reholds_today, limit)
-        raise B2BError(
-            "rehold_limit",
-            f"this proposal was held again {reholds_today} times today (limit {limit} a day); try after 00:00 UTC",
-            retry_after_s=retry,
+        raise _rehold_refused(
+            start, now, f"this proposal was held again {reholds_today} times today (limit {limit} a day)"
+        )
+
+
+def _rehold_refused(start: datetime, now: datetime, message: str) -> B2BError:
+    retry = max(int((start + timedelta(days=1) - now).total_seconds()), 1)
+    return B2BError("rehold_limit", f"{message}; try after 00:00 UTC", retry_after_s=retry)
+
+
+async def _check_departure_rehold_limit(
+    conn: asyncpg.Connection, caller: Caller, departure_ids: list[str], now: datetime
+) -> None:
+    """Fix A3 per departure: a hold that follows a hold of the same departure the partner placed today and let go is a
+    re-hold of that departure; once the partner let ``b2b_rehold_limit_per_day`` + 1 such holds go today (so the
+    limit's re-holds are used), the next hold of it is 429 ``rehold_limit``. Runs under the departure locks, so two
+    concurrent holds of one departure are counted one after the other."""
+    if not departure_ids:
+        return
+    start = day_start(now)
+    worst = await conn.fetchrow(DEPARTURE_REHOLD_SQL, caller.partner_id, sorted(departure_ids), start, now)
+    if worst is None:
+        return
+    limit = await _rehold_limit(conn)
+    if int(worst["dropped"]) > limit:
+        log.info(
+            "b2b_rehold_limit partner=%s departure=%s dropped_today=%s limit=%s",
+            caller.partner_id,
+            worst["departure_id"],
+            worst["dropped"],
+            limit,
+        )
+        raise _rehold_refused(
+            start,
+            now,
+            f"departure {worst['departure_id']} was held again {int(worst['dropped'])} times today"
+            f" (limit {limit} a day)",
         )
 
 
@@ -307,6 +354,7 @@ async def _create(
         for r in lines
     ]
     result, locked = await departures.lock_departures(conn, asks, today=now.date())
+    await _check_departure_rehold_limit(conn, caller, list(locked), now)
     for ask, (availability, _, why) in zip(asks, result, strict=True):
         if availability == departures.SOLD_OUT:
             raise B2BError("sold_out", f"line {ask.line_ref}: {why}")

@@ -179,7 +179,7 @@ async def test_policy_in_force_prefers_the_plan_then_the_default() -> None:
     conn = ScriptedConn().on("FROM booking.cancellation_policies p JOIN booking.policy_approvals", None)
     assert await cancellation.policy_for_lines(conn, quote_lines(), date(2027, 2, 1)) is None
     [args] = conn.sql("FROM booking.cancellation_policies p JOIN booking.policy_approvals")
-    assert args == ("b2b", PLAN, date(2027, 2, 1))
+    assert args == ("b2b", PLAN, date(2027, 2, 1), None)  # at confirm: any approved row
     conn.on("FROM booking.cancellation_policies p JOIN", {"id": POLICY_ID, "tiers": str(STANDARD).replace("'", '"')})
     found = await cancellation.policy_in_force(conn, None, date(2027, 2, 1))
     assert found is not None and found.id == POLICY_ID and found.tiers[0] == Tier(60, D("0.00"))
@@ -302,7 +302,9 @@ async def test_cancel_without_a_locked_policy_uses_the_one_in_force_on_the_confi
     out = await cancel(conn, dry_run=True)
     assert out["fee_basis"] == {"policy_id": PLAN_POLICY, "days_before_departure": 20, "fee_pct": "10.00"}
     [args] = conn.sql("FROM booking.cancellation_policies p JOIN")
-    assert args == ("b2b", PLAN, NOW.date())
+    # Only rows approved by the confirm count: a row approved later, even backdated, never re-prices the booking.
+    assert args == ("b2b", PLAN, NOW.date(), NOW)
+    assert "a.approved_at <= $4" in next(f for f, _ in conn.calls if "FROM booking.cancellation_policies p JOIN" in f)
     with pytest.raises(B2BError) as exc:  # none in force at all
         await cancel(cancel_conn(booking), dry_run=True)
     assert exc.value.error == "unavailable"
@@ -490,6 +492,44 @@ async def test_idempotent_answers_skip_the_rehold_limit() -> None:
     conn = place_conn(replay=hold_row())
     assert (await place(conn))["hold_id"] == HOLD
     assert not conn.sql("pg_advisory_xact_lock")
+
+
+DEP_REHOLD = "count(DISTINCT h.id)::int AS dropped"
+
+
+@pytest.mark.parametrize(("dropped", "allowed"), [(None, True), (3, True), (4, False)])
+@pytest.mark.asyncio
+async def test_departure_rehold_limit(dropped: int | None, allowed: bool) -> None:
+    """Per departure: 4 holds of it let go today = 3 re-holds used, so the next (the 4th re-hold) is refused, whatever
+    the proposal ref (the per-proposal count is clean here: a fresh ref)."""
+    conn = place_conn()
+    conn.on(REHOLD, _counts(0, None))
+    conn.on(DEP_REHOLD, None if dropped is None else {"departure_id": DEP, "dropped": dropped})
+    conn.on("FROM booking.settings WHERE key", lambda name: "3" if name == holds.REHOLD_LIMIT_SETTING else "48")
+    if allowed:
+        assert (await place(conn))["hold_id"] == HOLD
+    else:
+        with pytest.raises(B2BError) as exc:
+            await place(conn)
+        assert exc.value.error == "rehold_limit" and exc.value.status_code == 429
+        assert f"departure {DEP} was held again 4 times today (limit 3 a day)" in exc.value.message
+        midnight = datetime(NOW.year, NOW.month, NOW.day, tzinfo=UTC) + timedelta(days=1)
+        assert exc.value.extra == {"retry_after_s": int((midnight - NOW).total_seconds())}
+        assert not conn.sql("INSERT INTO booking.b2b_holds")
+    [args] = conn.sql(DEP_REHOLD)
+    assert args == (PARTNER_ID, [DEP], datetime(NOW.year, NOW.month, NOW.day, tzinfo=UTC), NOW)
+    # Counted under the departure locks.
+    flats = [flat for flat, _ in conn.calls]
+    assert next(i for i, f in enumerate(flats) if "FOR UPDATE" in f and "booking.departures d" in f) < next(
+        i for i, f in enumerate(flats) if DEP_REHOLD in f
+    )
+
+
+@pytest.mark.asyncio
+async def test_departure_rehold_limit_skips_holds_without_a_departure() -> None:
+    conn = ScriptedConn()
+    await holds._check_departure_rehold_limit(conn, CALLER, [], NOW)
+    assert conn.calls == []
 
 
 def test_day_start_is_utc_midnight() -> None:
