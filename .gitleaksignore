@@ -1,0 +1,3 @@
+# gitleaks false positives (reviewed). Format: <commit>:<file>:<rule>:<line>
+# AA-972: SQL selecting the b2b_quote_valid_hours setting, not a secret.
+f7e8f237b0d0800d0a2cecdc06f96825638ca2c6:backend/tests/integration/test_bk019_schema.py:generic-api-key:34
