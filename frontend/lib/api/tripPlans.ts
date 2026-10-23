@@ -4,6 +4,7 @@
 // (catalog.v_tour / v_tour_day / v_tour_photo) and is read-only here; Booking owns only the commercial row.
 //
 //   GET  /booking/catalog/trip-plans?q=&country=&sellable=&trip_style=&sort=&limit=&offset=   (catalog.read)
+//   GET  /booking/catalog/trip-plans?orphaned=true&q=<source_id>&limit=&offset=  (AA-986 L5, catalog.read)
 //   GET  /booking/catalog/trip-plans/facets                                                     (catalog.read)
 //   GET  /booking/catalog/trip-plans/{source_id}                                                (catalog.read)
 //   PUT  /booking/catalog/trip-plans/{source_id}/commercial                                     (trip_plan.write)
@@ -13,7 +14,7 @@
 
 import { bkGet, bkSend } from "./client";
 import type { Channel } from "./proposals";
-import type { DecimalString, IsoDateTime, OffsetPage, TripCaseDetail, VersionWithItems } from "./types";
+import type { CatalogKeyState, DecimalString, IsoDateTime, OffsetPage, TripCaseDetail, VersionWithItems } from "./types";
 
 const enc = encodeURIComponent;
 
@@ -87,9 +88,29 @@ export interface TripPlanDetail extends TripPlanListItem {
   changed?: string[];
 }
 
+/** AA-986 L5 (root ADR 0015): a Booking trip plan whose tour left the CIS catalog. No CIS content is left to show:
+ *  the key, the commercial fields, the served state with its reason, and what is still attached (all kept). */
+export interface OrphanedPlanItem {
+  source_system: "cis";
+  source_id: string;
+  plan_id: string;
+  orphaned: true;
+  sellable: boolean;
+  trip_style: string | null;
+  default_channel: Channel | null;
+  price_hint: PriceHint | null;
+  updated_at: IsoDateTime;
+  catalog: CatalogKeyState;
+  open_cases: number;
+  future_departures: number;
+  confirmed_holds: number;
+}
+
 export interface TripPlanFacets {
   total: number;
   sellable: number;
+  /** AA-986 L5: trip plans whose tour is no longer in the catalog. */
+  orphaned: number;
   countries: { country: string; tours: number; sellable: number }[];
   trip_styles: string[];
 }
@@ -120,6 +141,8 @@ export type TripPlanQuery = {
 
 export const tripPlansApi = {
   list: (q: TripPlanQuery = {}) => bkGet<OffsetPage<TripPlanListItem>>("catalog/trip-plans", q),
+  orphaned: (q: { q?: string; limit?: number; offset?: number } = {}) =>
+    bkGet<OffsetPage<OrphanedPlanItem>>("catalog/trip-plans", { ...q, orphaned: true }),
   facets: () => bkGet<TripPlanFacets>("catalog/trip-plans/facets"),
   get: (sourceId: string) => bkGet<TripPlanDetail>(`catalog/trip-plans/${enc(sourceId)}`),
   saveCommercial: (sourceId: string, body: CommercialBody) =>

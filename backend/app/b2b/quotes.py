@@ -17,6 +17,8 @@
   auto-confirms, ``on_request`` without a departure or on one that does not auto-confirm, ``sold_out`` when the
   departure is full, cancelled or started. A quote reserves nothing; the hold re-checks under a lock. The line's
   ``departure_id`` is stored and hashed (hash version 2).
+- **Served tours only** (AA-986 L5, root ADR 0015): a ``tp:`` line whose tour is not served (retired, paused or not
+  in ``catalog.v_tour``) is 409 ``tour_not_served`` before anything is priced (``app.b2b.served``).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -33,7 +35,7 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import departures
+from app.b2b import departures, served
 from app.b2b.components import LineAsk, LineCost, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, repository
@@ -213,6 +215,8 @@ async def create_quote(
     on = now.date()
 
     async with pool.acquire() as conn:
+        # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
+        await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
         costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
         seats = await departures.availability(
             conn,

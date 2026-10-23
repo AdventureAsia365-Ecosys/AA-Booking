@@ -9,6 +9,9 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   "trip_case.assigned": "Case assigned",
   "trip_case.status_changed": "Status changed",
   "proposal.approved": "Proposal approved",
+  // AA-986 L5 (root ADR 0015, Q4): a CIS tour used by an open case or a trip plan left the catalog / came back.
+  "tour.retired": "Tour withdrawn",
+  "tour.reinstated": "Tour back in catalog",
 };
 
 /** Where an item leads, and the action label (one per type, spec §4.3). */
@@ -17,6 +20,15 @@ export function notificationTarget(n: StaffNotification): { href: string; label:
   if (n.entity_type === "trip_case" || n.entity_type === "trip_case_version") {
     const ref = code ?? n.entity_id;
     return ref ? { href: `/cases/${encodeURIComponent(ref)}`, label: "Open case" } : null;
+  }
+  if (n.entity_type === "trip_plan") {
+    // An orphaned plan has no detail page any more (its CIS content is gone): open the Orphaned filter.
+    const key = typeof n.data?.source_id === "string" ? n.data.source_id : "";
+    return n.type === "tour.retired"
+      ? { href: `/catalog/trip-plans?show=orphaned${key ? `&q=${encodeURIComponent(key)}` : ""}`, label: "Open orphaned plans" }
+      : key
+        ? { href: `/catalog/trip-plans/${encodeURIComponent(key)}`, label: "Open trip plan" }
+        : null;
   }
   if (n.entity_type === "customer" && n.entity_id) {
     return { href: `/customers/${encodeURIComponent(n.entity_id)}`, label: "Open customer" };

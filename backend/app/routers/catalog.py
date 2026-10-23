@@ -5,10 +5,12 @@ any active staff).
 
 Sellable trip plans (AA-679, S237 decision D4, bk-009):
 ``GET /booking/catalog/trip-plans`` lists every ``catalog.v_tour`` row with its Booking commercial state
-(``catalog.read``: every staff role). ``GET …/facets`` gives the filter options and counts. ``GET …/{source_id}``
-is one tour with its CIS days and photos plus the commercial row. ``PUT …/{source_id}/commercial`` upserts the
-commercial row (``trip_plan.write``: admin, contracting). ``POST …/{source_id}/trip-cases`` starts a trip case, or a
-new version of an existing case, from a sellable plan (``trip_case.write`` + ``version.write``: admin, sales).
+(``catalog.read``: every staff role); ``?orphaned=true`` lists instead the plans whose tour left the catalog
+(AA-986 L5, with the reason and what is still attached). ``GET …/facets`` gives the filter options and counts.
+``GET …/{source_id}`` is one tour with its CIS days and photos plus the commercial row.
+``PUT …/{source_id}/commercial`` upserts the commercial row (``trip_plan.write``: admin, contracting).
+``POST …/{source_id}/trip-cases`` starts a trip case, or a new version of an existing case, from a sellable plan
+(``trip_case.write`` + ``version.write``: admin, sales).
 ``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
 the set) keep the plan's bookable supply items (bk-019, AA-972), which ``/booking/b2b/v1/products`` lists.
 
@@ -126,8 +128,13 @@ async def list_trip_plans(
     sort: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=trip_plans.MAX_PAGE)] = 25,
     offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+    orphaned: Annotated[
+        bool, Query(description="AA-986: only the plans whose tour left the catalog (q = exact source_id)")
+    ] = False,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
+        if orphaned:
+            return await trip_plans.list_orphaned(conn, staff, q=q, limit=limit, offset=offset)
         return await trip_plans.list_plans(
             conn,
             staff,

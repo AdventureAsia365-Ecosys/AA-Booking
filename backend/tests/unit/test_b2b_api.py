@@ -19,7 +19,7 @@ from app.main import create_app
 from app.pricing import repository
 from app.pricing.engine import Channel, PricingRule
 from tests.staff_tokens import CRM_CLIENT, OTHER_M2M_CLIENT, LocalCis, LocalM2M
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import ScriptedConn, served_plan
 from tests.unit.test_pricing_api import ScriptedDatabase
 
 TENANT = "5b7d6f00-0000-4000-8000-0000000000aa"
@@ -314,6 +314,7 @@ def test_trip_plan_line_sums_its_components() -> None:
     plan = "8e000000-0000-4000-8000-0000000000d1"
     conn = _conn()
     conn.on("FROM booking.trip_plans WHERE id", [{"id": plan, "sellable": True}])
+    served_plan(conn, plan, "src-1")  # AA-986 L5: the plan's tour is in catalog.v_tour
     conn.on(
         "FROM booking.trip_plan_components WHERE trip_plan_id",
         [
@@ -342,7 +343,7 @@ def test_products_page() -> None:
     now = datetime.now(UTC)
     conn = _conn()
     conn.on(
-        "FROM booking.trip_plans p WHERE (p.sellable",
+        "WHERE (p.sellable OR $2::timestamptz IS NOT NULL)",
         [
             {
                 "trip_plan_id": plan,
@@ -375,7 +376,7 @@ def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:
     now = datetime.now(UTC)
     conn = _conn()
     conn.on(
-        "FROM booking.trip_plans p WHERE (p.sellable",
+        "WHERE (p.sellable OR $2::timestamptz IS NOT NULL)",
         [
             {
                 "trip_plan_id": gone,
@@ -396,7 +397,7 @@ def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:
     assert item["sellable"] is False and item["components"] == []
     assert item["has_fixed_departures"] is False  # an unsellable plan offers no departure either
     assert conn.sql("WHERE c.trip_plan_id = ANY") == []  # no component read for an unsellable plan
-    [args] = conn.sql("FROM booking.trip_plans p WHERE (p.sellable")
+    [args] = conn.sql("WHERE (p.sellable OR $2::timestamptz IS NOT NULL)")
     assert args[1] is not None  # the delta flag that lets unsellable plans through
 
 
