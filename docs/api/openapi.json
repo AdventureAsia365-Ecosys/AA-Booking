@@ -907,6 +907,26 @@
         "title": "CustomerPatch",
         "type": "object"
       },
+      "DeclineIn": {
+        "additionalProperties": false,
+        "properties": {
+          "decline_code": {
+            "enum": [
+              "sold_out",
+              "supplier_unavailable",
+              "minimum_not_met",
+              "other"
+            ],
+            "title": "Decline Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decline_code"
+        ],
+        "title": "DeclineIn",
+        "type": "object"
+      },
       "Departure": {
         "additionalProperties": false,
         "properties": {
@@ -1112,6 +1132,169 @@
           "exempt_kinds"
         ],
         "title": "DeployGate",
+        "type": "object"
+      },
+      "Event": {
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "cursor": {
+            "maxLength": 200,
+            "title": "Cursor",
+            "type": "string"
+          },
+          "decline_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sold_out",
+                  "supplier_unavailable",
+                  "minimum_not_met",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decline Code"
+          },
+          "departure_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Departure Id"
+          },
+          "event_id": {
+            "maxLength": 64,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "hold_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold Id"
+          },
+          "incident_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "weather",
+                  "road",
+                  "health",
+                  "political",
+                  "supplier",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Code"
+          },
+          "line_ref": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Ref"
+          },
+          "new_start_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Start Time"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "hold.expired",
+              "hold.extended",
+              "line.confirmed",
+              "line.declined",
+              "booking.cancelled",
+              "departure.guaranteed",
+              "departure.cancelled",
+              "departure.incident",
+              "departure.incident_cleared",
+              "departure.time_change"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "cursor",
+          "type",
+          "occurred_at"
+        ],
+        "title": "Event",
+        "type": "object"
+      },
+      "EventPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "maxLength": 200,
+            "title": "Next Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "EventPage",
         "type": "object"
       },
       "ExtendRequest": {
@@ -1685,6 +1868,28 @@
           }
         },
         "title": "HotelFields",
+        "type": "object"
+      },
+      "IncidentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "incident_code": {
+            "enum": [
+              "weather",
+              "road",
+              "health",
+              "political",
+              "supplier",
+              "other"
+            ],
+            "title": "Incident Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incident_code"
+        ],
+        "title": "IncidentIn",
         "type": "object"
       },
       "ItemIn": {
@@ -4984,6 +5189,476 @@
         ]
       }
     },
+    "/booking/b2b-desk/departures": {
+      "get": {
+        "operationId": "get_departures_booking_b2b_desk_departures_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Departures Booking B2B Desk Departures Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Departures",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departures/{departure_id}/incidents": {
+      "get": {
+        "operationId": "get_incidents_booking_b2b_desk_departures__departure_id__incidents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Incidents Booking B2B Desk Departures  Departure Id  Incidents Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Incidents",
+        "tags": [
+          "b2b"
+        ]
+      },
+      "post": {
+        "operationId": "flag_incident_booking_b2b_desk_departures__departure_id__incidents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Flag Incident Booking B2B Desk Departures  Departure Id  Incidents Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Flag Incident",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/incidents/{incident_id}/clear": {
+      "post": {
+        "operationId": "clear_incident_booking_b2b_desk_incidents__incident_id__clear_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Clear Incident Booking B2B Desk Incidents  Incident Id  Clear Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clear Incident",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/on-request": {
+      "get": {
+        "operationId": "get_on_request_booking_b2b_desk_on_request_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "answered",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get On Request Booking B2B Desk On Request Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get On Request",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/on-request/{hold_id}/lines/{line_ref}/accept": {
+      "post": {
+        "operationId": "accept_line_booking_b2b_desk_on_request__hold_id__lines__line_ref__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hold_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hold Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_ref",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Line Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Accept Line Booking B2B Desk On Request  Hold Id  Lines  Line Ref  Accept Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Accept Line",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/on-request/{hold_id}/lines/{line_ref}/decline": {
+      "post": {
+        "operationId": "decline_line_booking_b2b_desk_on_request__hold_id__lines__line_ref__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hold_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hold Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_ref",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Line Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decline Line Booking B2B Desk On Request  Hold Id  Lines  Line Ref  Decline Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decline Line",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/summary": {
+      "get": {
+        "operationId": "get_summary_booking_b2b_desk_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Summary Booking B2B Desk Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Summary",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
     "/booking/b2b-partners": {
       "get": {
         "operationId": "list_partners_booking_b2b_partners_get",
@@ -5322,6 +5997,91 @@
           }
         ],
         "summary": "List Departures",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/events": {
+      "get": {
+        "operationId": "list_events_booking_b2b_v1_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "List Events",
         "tags": [
           "b2b"
         ]
