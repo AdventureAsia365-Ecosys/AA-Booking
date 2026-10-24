@@ -2,10 +2,18 @@
 // app/(staff)/_parts/SavedTabs.tsx
 // AA-683 — saved-filter tabs above a list (UI spec §5 SavedFilterTabs): gold text + 2 px gold underline on
 // a 1 px baseline (design system §4 "Tabs"). The active tab is the `tab` URL key; switching resets the page.
+// AA-910 (S250): a count that is still loading (`countPending`) keeps a 2-character slot, and every count has that
+// minimum width, so the tabs do not move when the counts arrive (CLS on /cases).
 
 import { useUrlFilters } from "@/ui";
 
-export function SavedTabs({ tabs, param = "tab" }: { tabs: { key: string; label: string; count?: number }[]; param?: string }) {
+export function SavedTabs({
+  tabs,
+  param = "tab",
+}: {
+  tabs: { key: string; label: string; count?: number; countPending?: boolean }[];
+  param?: string;
+}) {
   const { get, set } = useUrlFilters();
   const active = get(param) || tabs[0]?.key;
   return (
@@ -23,7 +31,11 @@ export function SavedTabs({ tabs, param = "tab" }: { tabs: { key: string; label:
             }`}
           >
             {t.label}
-            {t.count !== undefined && <span className="ml-1.5 text-xs text-muted2">{t.count}</span>}
+            {t.count !== undefined ? (
+              <span className="ml-1.5 inline-block min-w-[2ch] text-left text-xs text-muted2">{t.count}</span>
+            ) : (
+              t.countPending && <span aria-hidden="true" className="ml-1.5 inline-block min-w-[2ch]" />
+            )}
           </button>
         );
       })}

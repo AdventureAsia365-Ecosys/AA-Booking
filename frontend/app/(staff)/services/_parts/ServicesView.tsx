@@ -95,6 +95,7 @@ export function ServicesView() {
                 label: "Country",
                 allLabel: "All countries",
                 options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
               },
               {
                 key: "sort",
@@ -140,7 +141,7 @@ export function ServicesView() {
   );
 }
 
-// AA-910: the table fits the 1084 px list frame at 1440 px. Text cells have a max width (a table cell grows to its
+// AA-910: the table fits the list frame at 1400 and 1440 px with 20 px to spare (S250: name 190 px, place 130 px). Text cells have a max width (a table cell grows to its
 // content, so `truncate` alone never cuts; the CIS marker of the place is in the column header), the pricing unit sits under the type, "Updated" sits under the status pill,
 // and the row menu column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 const COLUMNS: ColumnDef<Service, unknown>[] = [
@@ -149,7 +150,7 @@ const COLUMNS: ColumnDef<Service, unknown>[] = [
     header: "Service",
     accessorFn: (r) => r.title,
     cell: ({ row }) => (
-      <span className="flex min-w-0 max-w-[200px] flex-col">
+      <span className="flex min-w-0 max-w-[190px] flex-col">
         <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
           {row.original.title}
         </span>
@@ -175,7 +176,7 @@ const COLUMNS: ColumnDef<Service, unknown>[] = [
     cell: ({ row }) => {
       const text = row.original.destination?.name ?? row.original.country_name ?? "—";
       return (
-        <span className="flex min-w-0 items-center text-[13px] text-body md:max-w-[150px]">
+        <span className="flex min-w-0 items-center text-[13px] text-body md:max-w-[130px]">
           <span className="md:truncate" title={text}>
             {text}
           </span>

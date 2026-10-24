@@ -103,7 +103,7 @@ export function AuditLogView() {
                 allLabel: "All record types",
                 options: Object.entries(AUDIT_ENTITY_LABEL).map(([value, label]) => ({ value, label })),
               },
-              { key: "actor", label: "Staff member", allLabel: "All staff", options: staffOptions },
+              { key: "actor", label: "Staff member", allLabel: "All staff", options: staffOptions, width: 180 },
             ]}
             dateRange={{ fromKey: "from", toKey: "to", label: "Date" }}
             extraKeys={["entity_id"]}

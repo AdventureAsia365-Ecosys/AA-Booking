@@ -115,6 +115,7 @@ export function SuppliersListView() {
                 label: "Country",
                 allLabel: "All countries",
                 options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
               },
               {
                 key: "sort",
@@ -166,10 +167,10 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
     accessorFn: (r) => r.company_name,
     cell: ({ row }) => {
       const where = locationText(row.original);
-      // AA-910: 220 px on desktop (and the contact 200 px) so the list keeps 20 px to spare at 1440 when "Updated" shows
-      // a full date ("28 Sept 2026": rows older than 7 days, most of Dev).
+      // AA-910: 200 px on desktop (and the contact 180 px) so the list keeps 20 px to spare at 1400 when "Updated" shows
+      // a full date ("28 Sept 2026": rows older than 7 days, most of Dev). Full name and e-mail in the tooltips.
       return (
-        <span className="flex min-w-0 max-w-[240px] flex-col md:max-w-[220px]">
+        <span className="flex min-w-0 max-w-[240px] flex-col md:max-w-[200px]">
           <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.company_name}>
             {row.original.company_name}
           </span>
@@ -193,7 +194,7 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
     cell: ({ row }) =>
       row.original.contact_name || row.original.contact_email ? (
         <PersonCell
-          className="md:max-w-[200px]"
+          className="md:max-w-[180px]"
           name={row.original.contact_name ?? row.original.contact_email}
           sub={row.original.contact_name ? row.original.contact_email : null}
         />

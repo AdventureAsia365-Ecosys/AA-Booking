@@ -54,7 +54,7 @@ function PolicyStatusBadge({ status }: { status: PolicyStatus }) {
 function NoteText({ note }: { note: string | null }) {
   if (!note) return <span className="text-[13px] text-muted">—</span>;
   return (
-    <span title={note} className="block break-words text-[13px] text-muted md:line-clamp-2 md:min-w-[110px]">
+    <span title={note} className="block break-words text-[13px] text-muted md:line-clamp-2 md:min-w-[90px]">
       {note}
     </span>
   );
@@ -164,15 +164,16 @@ export function PricingRulesView() {
   const fxColumns: ColumnDef<FxRateRow, unknown>[] = [
     { id: "currency", header: "Currency", accessorKey: "currency", cell: ({ row }) => <span className="font-mono font-semibold text-ink">{row.original.currency}</span> },
     { id: "rate", header: "Units per 1 USD", accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{rate(row.original.rate_per_usd)}</span> },
-    { id: "buffer", header: "Selling buffer", accessorFn: (r) => Number(r.buffer_pct), cell: ({ row }) => pct(row.original.buffer_pct) },
+    { id: "buffer", header: "Buffer", accessorFn: (r) => Number(r.buffer_pct), cell: ({ row }) => pct(row.original.buffer_pct) },
     { id: "as_of", header: "As of", accessorKey: "as_of", cell: ({ row }) => <DateText value={row.original.as_of} className="whitespace-nowrap" /> },
     {
       id: "source",
       header: "Source",
       accessorKey: "source",
-      // AA-910: one line on desktop (the full text in the tooltip); it used to wrap to 3 lines at 1440 px.
+      // AA-910: one line on desktop (the full text in the tooltip); it used to wrap to 3 lines at 1440 px. S250: 140 px
+      // and the "Buffer" header (was "Selling buffer", the form keeps the long label) so the FX table fits 1400 px.
       cell: ({ row }) => (
-        <span title={row.original.source} className="block break-words text-[13px] text-muted md:max-w-[160px] md:truncate">
+        <span title={row.original.source} className="block break-words text-[13px] text-muted md:max-w-[140px] md:truncate">
           {row.original.source}
         </span>
       ),

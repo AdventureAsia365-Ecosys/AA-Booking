@@ -262,13 +262,15 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     return [];
   }
 
+  // AA-910 (S250): title 200 px, terms 120 px and "Entered by" 140 px on desktop (full text in the tooltips), so the
+  // contracts table keeps 20 px to spare at 1400 px.
   const columns: ColumnDef<SupplierContract, unknown>[] = [
     {
       id: "title",
       header: "Contract",
       accessorKey: "title",
       cell: ({ row }) => (
-        <span className="flex min-w-0 max-w-[220px] flex-col">
+        <span className="flex min-w-0 max-w-[200px] flex-col">
           <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
             {row.original.title}
           </span>
@@ -299,7 +301,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       header: "Payment terms",
       enableSorting: false,
       cell: ({ row }) => (
-        <span className="block break-words text-[13px] text-body md:max-w-[140px] md:truncate" title={row.original.payment_terms ?? undefined}>
+        <span className="block break-words text-[13px] text-body md:max-w-[120px] md:truncate" title={row.original.payment_terms ?? undefined}>
           {row.original.payment_terms ?? "—"}
         </span>
       ),
@@ -313,7 +315,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
         const entered = row.original.updated_by_name ?? row.original.created_by_name ?? "—";
         const published = row.original.published_by ? (row.original.published_by_name ?? "—") : null;
         return (
-          <span className="flex min-w-0 flex-col text-xs text-muted md:max-w-[160px]">
+          <span className="flex min-w-0 flex-col text-xs text-muted md:max-w-[140px]">
             <span className="text-[13px] text-body md:truncate" title={entered}>
               {entered}
             </span>

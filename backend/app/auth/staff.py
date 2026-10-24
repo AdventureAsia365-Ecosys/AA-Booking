@@ -21,6 +21,13 @@ is 403 ``preview_read_only`` before anything is read or written, and :meth:`Staf
 :data:`PREVIEW_PERMISSIONS` (reads; never ``staff.admin``, ``audit.read`` or any write). ``/booking/staff/me`` reports
 ``preview_viewer: true`` and the capped permission list, so the UI hides write actions.
 
+**E2E test session cap (AA-910, root ADR 0006a A10a).** The temporary WORKFORCE E2E user
+:data:`E2E_TEST_STAFF_EMAIL` holds ``booking-admin`` so a signed-in smoke can read every staff page (``/staff`` and
+``/audit-log`` included), but its sign-in codes sit in a shared test mailbox. So its session is read-only on every
+client: any request other than GET / HEAD / OPTIONS is 403 ``e2e_read_only`` before anything is read or written.
+Reads keep the admin permissions. The match is on the access token's ``email`` claim, which the WORKFORCE pre token
+trigger sets to the normalised address; lower-casing here can only cap more sessions, never fewer.
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -113,6 +120,11 @@ PREVIEW_PERMISSIONS: frozenset[str] = frozenset(
 )
 # The only methods a Preview-client session may call (RFC 9110 safe methods that routes here serve).
 PREVIEW_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+# AA-910 (root ADR 0006a A10a): the Booking E2E test user. Its session never writes (see the module docstring). A code
+# constant that mirrors the WORKFORCE trigger allow-map (AA-CIS-Infra workforce.E2E_BOOKING_TEST_STAFF_EMAIL); removed
+# with that exception.
+E2E_TEST_STAFF_EMAIL = "e2e-booking@e2e-mail.lumiguides.it.com"
 
 # last_seen_at is refreshed at most this often (one write per staff user per 5 minutes, not per request).
 LAST_SEEN_EVERY = "5 minutes"
@@ -379,6 +391,11 @@ def _bridge_claims(principal: Principal, token: str) -> BridgeClaims:
     return BridgeClaims(sub=principal.sub, email=principal.email, name=name, cis_role=cis_role)
 
 
+def is_e2e_test_principal(principal: Principal) -> bool:
+    """True for the AA-910 E2E test user (exact address after trim + lower-case; see :data:`E2E_TEST_STAFF_EMAIL`)."""
+    return isinstance(principal.email, str) and principal.email.strip().lower() == E2E_TEST_STAFF_EMAIL
+
+
 async def get_pool(request: Request) -> asyncpg.Pool:
     db = request.app.state.db
     if not db.configured:
@@ -406,6 +423,10 @@ async def current_staff(
             # AA-911 D-1: a Preview-host session never writes, whatever its groups. Refused before any DB access.
             log.info("booking_preview_write_refused method=%s path=%s", request.method, request.url.path)
             raise HTTPException(status_code=403, detail="preview_read_only")
+        if is_e2e_test_principal(principal) and request.method.upper() not in PREVIEW_METHODS:
+            # AA-910: the E2E admin's codes are readable by CI roles; it may read every page but never write.
+            log.info("booking_e2e_write_refused method=%s path=%s", request.method, request.url.path)
+            raise HTTPException(status_code=403, detail="e2e_read_only")
         role = booking_role(principal.groups)
         if role is None:
             raise HTTPException(status_code=403, detail="no_booking_role")

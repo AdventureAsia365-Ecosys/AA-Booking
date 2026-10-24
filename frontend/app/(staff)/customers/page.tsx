@@ -85,7 +85,9 @@ export default function CustomersPage() {
         )
       }
     >
-      <SavedTabs tabs={CUSTOMER_TABS.map((t, i) => ({ key: t.key, label: t.label, count: counts[i]?.data?.total }))} />
+      <SavedTabs
+        tabs={CUSTOMER_TABS.map((t, i) => ({ key: t.key, label: t.label, count: counts[i]?.data?.total, countPending: counts[i]?.isPending }))}
+      />
       <Section>
         <div className="mb-4">
           <FilterBar
@@ -137,6 +139,9 @@ export default function CustomersPage() {
   );
 }
 
+// AA-910 (S250): fits the list frame at 1400 and 1440 px with 20 px to spare: location 150 px on desktop (full text in
+// the tooltip) and the short "Cases" header; a phone keeps at least 100 px (two lines at most, not one word per line);
+// the status badges (Blocked, Merge review) wrap under each other, never cut.
 const COLUMNS: ColumnDef<CustomerSummary, unknown>[] = [
   {
     id: "customer",
@@ -144,12 +149,12 @@ const COLUMNS: ColumnDef<CustomerSummary, unknown>[] = [
     accessorFn: (r) => r.name ?? "",
     cell: ({ row }) => <PersonCell className="md:max-w-[220px]" name={row.original.name} sub={row.original.email ?? row.original.code} />,
   },
-  { id: "phone", header: "Phone", accessorFn: (r) => r.phone ?? "", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.phone ?? "—"}</span> },
+  { id: "phone", header: "Phone", accessorFn: (r) => r.phone ?? "", cell: ({ row }) => <span className="block text-[13px] text-body md:min-w-[100px]">{row.original.phone ?? "—"}</span> },
   {
     id: "address",
     header: "Location",
     accessorFn: (r) => r.address ?? "",
-    cell: ({ row }) => <span className="block max-w-[220px] truncate text-[13px] text-body" title={row.original.address ?? undefined}>{row.original.address ?? "—"}</span>,
+    cell: ({ row }) => <span className="block max-w-[220px] truncate text-[13px] text-body md:max-w-[150px]" title={row.original.address ?? undefined}>{row.original.address ?? "—"}</span>,
   },
   {
     id: "status",
@@ -163,6 +168,6 @@ const COLUMNS: ColumnDef<CustomerSummary, unknown>[] = [
       </span>
     ),
   },
-  { id: "cases", header: "Trip cases", accessorKey: "case_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.case_count}</span> },
+  { id: "cases", header: "Cases", accessorKey: "case_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.case_count}</span> },
   { id: "activity", header: "Last activity", accessorKey: "last_activity_at", cell: ({ row }) => <DateText value={row.original.last_activity_at} relative className="text-[13px] text-muted" /> },
 ];

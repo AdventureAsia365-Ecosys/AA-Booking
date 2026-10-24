@@ -14,6 +14,10 @@ export interface FilterSelect {
   /** Label of the empty value (no filter). */
   allLabel: string;
   options: { value: string; label: string }[];
+  /** Fixed width in px. Set it when the options load after the page (staff names, countries, facets): a native select
+   *  sizes itself to its longest option, so it would grow when they arrive and shift the bar and the list below it
+   *  (CLS, AA-910 S250). The open list still shows each option in full. */
+  width?: number;
 }
 
 /** Read / write list filters in the URL query. `set` removes empty values and the `page` key. */
@@ -93,7 +97,12 @@ export function FilterBar({
       {selects.map((s) => (
         <label key={s.key} className="flex flex-col gap-1">
           <span className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted">{s.label}</span>
-          <select value={get(s.key)} onChange={(e) => set(s.key, e.target.value || null)} className={inputCls}>
+          <select
+            value={get(s.key)}
+            onChange={(e) => set(s.key, e.target.value || null)}
+            className={`${inputCls} max-w-full`}
+            style={s.width ? { width: s.width } : undefined}
+          >
             <option value="">{s.allLabel}</option>
             {s.options.map((o) => (
               <option key={o.value} value={o.value}>

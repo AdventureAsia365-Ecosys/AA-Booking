@@ -864,6 +864,16 @@ photos with bucket / key / sha256 for the CIS copy), `v_supply_outbox` (stamped 
 `SET supply_version = supply_version + 1`). In `REQUIRED_SCHEMA_VERSIONS` since the upload / read-back code (AA-835 S4):
 apply bk-023 before that code deploys (readiness fails until then).
 
+### `bk-024` (AA-908 traveller identities, root ADR 0006 Phase 4 — needs `bk-002`, `bk-014`)
+
+`customer_identities` (`iss`, `sub` → `customer_id`; PRIMARY KEY `(iss, sub)`: one verified sign-in identity belongs to
+one customer, a customer may hold several; `iss` https and ≤ 300 characters, `sub` 1–128 characters; both tagged
+`pii:online_id`; FK to `customers` ON DELETE CASCADE; index on `customer_id`; role `booking`: SELECT, INSERT, UPDATE of
+`customer_id` only (re-point from an archived customer), never DELETE; nothing for `cis_app`), and
+`customers_source_chk` widened with `traveller_signin`. Filled by the inquiry intake from a signed-in hand-off
+(`inquiry.submitted` v1.4, `customer.identity`); the intake code and `REQUIRED_SCHEMA_VERSIONS += bk-024` ship in the
+AA-908 code PR, deployed after the apply.
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
 operations / money (AA-682).
@@ -971,6 +981,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   base-uri 'self'; form-action 'self'; object-src 'none'`, `Permissions-Policy`). Every preview and production
   deployment is checked by the step "Check the security headers" (`.github/scripts/check_security_headers.sh`, GET
   `/login` through `vercel curl`, which uses the project's automation-bypass token with `VERCEL_TOKEN`).
+- Signed-in smoke (AA-910, design note only, no job yet): `frontend/e2e/SIGNED-IN-SMOKE.md`. E2E staff user
+  `e2e-booking@e2e-mail.lumiguides.it.com`, group `booking-admin` only, email code read from the SES test mailbox
+  (root ADR 0006a A10a); no password, no secret. Its session is read-only on every client: non-safe methods are
+  403 `e2e_read_only` before any DB access (`app/auth/staff.py` `E2E_TEST_STAFF_EMAIL`), reads keep admin.
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

@@ -1,11 +1,12 @@
 // e2e/layout/layout.spec.ts
-// AA-910 — the staff admin tables fit a 1440 px desktop: a repeatable check that needs no staff sign-in.
+// AA-910 — the staff admin tables fit a 1400-1440 px desktop: a repeatable check that needs no staff sign-in.
 //
 // For every staff page that has a table (app/(staff)/**, kit DataTable), in light and dark:
 //   1440 x 900 — no horizontal page scroll (document and <main>); every table fits its own scroll box with the last
 //                column in view; tab strips have no scrollbar (the old 1 px one); on the FX tab the currency, rate,
 //                buffer, as-of and source cells are one line each; Poppins really loaded (widths depend on it);
 //                no console error; every API call answered by a fixture. A named screenshot per page and theme.
+//   1400 x 900 — the same checks, light only (S250: the live Dev check was made at 1400).
 //   1280 x 800 — the squeeze: the page still never scrolls sideways; a table may scroll inside its own box (that is
 //                the design below 1440, AA-910 decision), and where the last column is the row menu it stays pinned
 //                (`bk-dt-sticky-end`, position: sticky) and in view.
@@ -68,7 +69,7 @@ const PAGES: PageCase[] = [
 ];
 
 const SLACK_PX = 20;
-const FX_HEADERS = ["Currency", "Units per 1 USD", "Selling buffer", "As of", "Source"];
+const FX_HEADERS = ["Currency", "Units per 1 USD", "Buffer", "As of", "Source"];
 // 1x1 transparent PNG for CIS photos (the trip plan covers point at the CIS media host).
 const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
 
@@ -139,6 +140,8 @@ type TableM = {
   colWidths: string[];
   /** The narrowest the table can get (min-content, ignoring the kit's tableMinWidth): frame - this = the slack. */
   minContent: number;
+  /** Each column's width in that min-content layout (which column to trim when the slack is short). */
+  colMin: string[];
 };
 
 type Measure = {
@@ -198,6 +201,7 @@ async function measure(page: Page): Promise<Measure> {
         te.style.width = "0px";
         te.style.minWidth = "0px";
         const minContent = te.offsetWidth;
+        const colMin = ths.map((th, i) => `${(th.textContent ?? "").trim().slice(0, 16) || `#${i + 1}`}:${(th as HTMLElement).offsetWidth}`);
         [te.style.width, te.style.minWidth] = saved;
         return {
           head: ths
@@ -216,6 +220,7 @@ async function measure(page: Page): Promise<Measure> {
           stickyEnd: !!t.closest(".bk-dt-sticky-end"),
           lastHeaderPosition: last ? getComputedStyle(last).position : null,
           minContent,
+          colMin,
           colWidths: ths.map((th, i) => `${(th.textContent ?? "").trim().slice(0, 16) || `#${i + 1}`}:${(th as HTMLElement).offsetWidth}`),
         };
       });
@@ -309,27 +314,35 @@ function commonChecks(pc: PageCase, m: Measure, c: Collected, scheme: string) {
   }
 }
 
-for (const scheme of ["light", "dark"] as const) {
-  test.describe(`1440 x 900, ${scheme}`, () => {
-    test.use({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+// The "fits" passes: 1440 in both themes, and 1400 in light (S250: Nghiệp's live check on Dev at 1400 px; geometry does
+// not depend on the theme). Each table fits its frame with SLACK_PX to spare at both widths.
+const FIT_PASSES = [
+  { width: 1440, scheme: "light" },
+  { width: 1440, scheme: "dark" },
+  { width: 1400, scheme: "light" },
+] as const;
+
+for (const { width, scheme } of FIT_PASSES) {
+  test.describe(`${width} x 900, ${scheme}`, () => {
+    test.use({ viewport: { width, height: 900 }, colorScheme: scheme });
     for (const pc of PAGES) {
-      test(`${pc.name} fits 1440`, async ({ page, baseURL }, testInfo) => {
+      test(`${pc.name} fits ${width}`, async ({ page, baseURL }, testInfo) => {
         const c = await prepare(page, baseURL!);
         await open(page, pc, c);
         const m = await measure(page);
         fs.mkdirSync(OUT, { recursive: true });
         await bringListIntoView(page, pc, "table", "last");
-        await page.screenshot({ path: path.join(OUT, `${pc.name}-1440-${scheme}.png`) });
-        save(testInfo, pc, 1440, scheme, m, c);
+        await page.screenshot({ path: path.join(OUT, `${pc.name}-${width}-${scheme}.png`) });
+        save(testInfo, pc, width, scheme, m, c);
 
         commonChecks(pc, m, c, scheme);
         for (const t of m.tables) {
-          expect(t.boxScroll, `table "${t.head}" fits its frame at 1440 (no sideways scroll inside it)`).toBeLessThanOrEqual(t.boxClient);
+          expect(t.boxScroll, `table "${t.head}" fits its frame at ${width} (no sideways scroll inside it)`).toBeLessThanOrEqual(t.boxClient);
           expect(t.lastHeaderVisible, `table "${t.head}": last column "${t.lastHeader}" in view`).not.toBe(false);
           expect(t.boxIsMain, `table "${t.head}" scrolls in its own box, not in <main>`).toBe(false);
           // Lesson S239 (AA-683): a table that fits "by 2 px" scrolls on a browser with a wider scrollbar (Firefox on
           // Windows ~17 px vs Chromium's styled 6 px), so the content must leave room to spare.
-          expect(t.boxClient - t.minContent, `table "${t.head}": at least ${SLACK_PX} px to spare at 1440`).toBeGreaterThanOrEqual(SLACK_PX);
+          expect(t.boxClient - t.minContent, `table "${t.head}": at least ${SLACK_PX} px to spare at ${width}`).toBeGreaterThanOrEqual(SLACK_PX);
         }
         if (pc.fx) {
           expect(m.fxCells.length, "FX cells found").toBeGreaterThan(0);
@@ -338,6 +351,40 @@ for (const scheme of ["light", "dark"] as const) {
         }
       });
     }
+  });
+}
+
+// S250: /cases scored CLS 0.12 on Dev (Chrome Local metrics, 1400 px): the filter options (staff names) and the tab
+// counts arrive after the list, and a native select grows to its longest option, so the filter bar widened, wrapped and
+// pushed the table down. Here those two answers come 800 ms late and the page must not shift (layout-shift entries
+// without recent input, summed like CLS). 1400 px, and 960 px (1400 px at 150 % browser zoom, Nghiệp's real setup).
+for (const width of [1400, 960]) {
+  test.describe(`late filter data at ${width}`, () => {
+    test.use({ viewport: { width, height: 900 }, colorScheme: "light" });
+    test(`cases at ${width}: no layout shift when the filter options and tab counts arrive late`, async ({ page, baseURL }, testInfo) => {
+      await page.addInitScript(() => {
+        const w = window as unknown as { __cls: number };
+        w.__cls = 0;
+        new PerformanceObserver((list) => {
+          for (const e of list.getEntries() as unknown as { value: number; hadRecentInput: boolean }[]) {
+            if (!e.hadRecentInput) w.__cls += e.value;
+          }
+        }).observe({ type: "layout-shift", buffered: true });
+      });
+      const c = await prepare(page, baseURL!);
+      // Registered after prepare(), so it runs first; fallback() hands the request to the fixture route.
+      await page.route(/\/api\/booking\/(staff\/directory|trip-cases\/summary)(\?|$)/, async (route) => {
+        await new Promise((r) => setTimeout(r, 800));
+        await route.fallback();
+      });
+      await open(page, { name: "cases-late", path: "/cases" }, c);
+      await expect(page.locator('select:has(option:text("Unassigned")) option')).not.toHaveCount(2, { timeout: 5_000 });
+      await page.waitForTimeout(1_200);
+      const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
+      void testInfo.attach("cls", { body: String(cls), contentType: "text/plain" });
+      expect(c.unmocked, "every Booking API call has a fixture").toEqual([]);
+      expect(cls, "layout shift on /cases once the late data arrives").toBeLessThan(0.02);
+    });
   });
 }
 

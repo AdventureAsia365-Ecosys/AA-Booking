@@ -138,6 +138,7 @@ export function TripPlansView() {
                     label: "Show",
                     allLabel: "CIS catalog tours",
                     options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                    width: 190, // the facet counts load after the page (CLS)
                   },
                 ]}
               />
@@ -155,12 +156,14 @@ export function TripPlansView() {
                     label: "Show",
                     allLabel: "CIS catalog tours",
                     options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                    width: 190, // the facet counts load after the page (CLS)
                   },
                   {
                     key: "country",
                     label: "Country",
                     allLabel: "All countries",
                     options: (f?.countries ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.tours})` })),
+                    width: 180,
                   },
                   {
                     key: "sellable",
@@ -176,6 +179,7 @@ export function TripPlansView() {
                     label: "Trip style",
                     allLabel: "Any style",
                     options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
+                    width: 180,
                   },
                   { key: "sort", label: "Sort", allLabel: "Title A–Z", options: SORTS.slice(1) },
                 ]}
