@@ -1,7 +1,10 @@
 """``inquiry.submitted`` (TripPlanner → AA-Booking): validation and the normalised inquiry.
 
-Contract rule 2: a consumer accepts every minor of its major. Booking accepts version 1, 1.1, 1.2 and 1.3:
+Contract rule 2: a consumer accepts every minor of its major. Booking accepts version 1, 1.1, 1.2, 1.3 and 1.4:
 
+- ``version: 1.4`` must satisfy ``inquiry.submitted.v1.4`` (AA-908, root ADR 0006 Phase 4: ``customer.identity`` is
+  the verified sign-in identity ``{iss, sub}`` of a traveller signed in on the Cognito EXTERNAL pool, or null for a
+  guest; ``verified`` is true only together with an identity, and then ``email`` is the token's address);
 - ``version: 1.3`` must satisfy ``inquiry.submitted.v1.3`` (AA-986 L6, root ADR 0015 decision 5: every leg and day
   also says ``available`` + ``reason`` + ``reason_detail``; stops whose tour AA no longer serves come after the served
   ones with ``available: false``, so staff see why such a leg cannot be matched; the snapshot keeps the leg flags
@@ -31,7 +34,7 @@ from app.contracts import load
 
 CONTRACT = "inquiry.submitted"
 SOURCE = "tripplanner"
-SUPPORTED_VERSIONS = ("1", "1.1", "1.2", "1.3")
+SUPPORTED_VERSIONS = ("1", "1.1", "1.2", "1.3", "1.4")
 
 
 class ContractError(ValueError):
@@ -48,7 +51,7 @@ def _errors(validator: Draft202012Validator, payload: Any) -> list[str]:
 
 
 def version_label(payload: Any) -> str | None:
-    """'1', '1.1', '1.2' or '1.3' (the JSON number as a label), or None when absent / not a number."""
+    """'1', '1.1', '1.2', '1.3' or '1.4' (the JSON number as a label), or None when absent / not a number."""
     if not isinstance(payload, dict):
         return None
     v = payload.get("version")
@@ -64,7 +67,7 @@ def validate(payload: Any) -> str:
         raise ContractError(
             f"unsupported {CONTRACT} version {payload.get('version') if isinstance(payload, dict) else None!r}"
         )
-    if label in ("1.1", "1.2", "1.3"):
+    if label in ("1.1", "1.2", "1.3", "1.4"):
         errors = _errors(_validator(f"inquiry.submitted.v{label}"), payload)
     else:
         errors = _errors(_validator("inquiry.submitted.v1"), payload)
@@ -76,6 +79,14 @@ def validate(payload: Any) -> str:
 
 
 @dataclass(frozen=True)
+class Identity:
+    """v1.4: the traveller's verified sign-in identity (Cognito EXTERNAL access token); key on iss AND sub."""
+
+    iss: str
+    sub: str
+
+
+@dataclass(frozen=True)
 class Contact:
     name: str
     email: str | None
@@ -84,6 +95,14 @@ class Contact:
     consent_at: str | None
     verified: bool
     external_ref: str | None  # tripplanner.customers.id, when TripPlanner linked one
+    # v1.4 (AA-908): set for a signed-in traveller, None for a guest and for v1 - v1.3. ``verified`` is true only
+    # together with it in a v1.4 payload (schema).
+    identity: Identity | None = None
+
+    @property
+    def signed_in(self) -> bool:
+        """A verified, signed-in traveller with an email: the only contact intake links to a verified customer."""
+        return self.identity is not None and self.verified and bool(self.email)
 
 
 @dataclass(frozen=True)
@@ -129,6 +148,7 @@ def parse(payload: dict[str, Any]) -> Inquiry:
     contact = None
     if raw is not None:
         email = _clean(raw.get("email"))
+        ident = raw.get("identity")
         contact = Contact(
             name=_clean(raw.get("name")) or "",
             email=email.lower() if email else None,
@@ -137,6 +157,10 @@ def parse(payload: dict[str, Any]) -> Inquiry:
             consent_at=raw.get("consent_at"),
             verified=raw.get("verified") is True,
             external_ref=_clean(raw.get("customer_id")),
+            # Only a v1.4 payload can carry it (the customer object of v1 - v1.3 is closed); checked again here.
+            identity=Identity(str(ident["iss"]), str(ident["sub"]))
+            if version == "1.4" and isinstance(ident, dict)
+            else None,
         )
     itinerary = payload["itinerary"]
     legs = tuple(
@@ -158,7 +182,7 @@ def parse(payload: dict[str, Any]) -> Inquiry:
         "custom_days": itinerary["custom_days"],
         "contract_version": version,
     }
-    if version == "1.3":
+    if version in ("1.3", "1.4"):
         # AA-986 L6 review: the leg-level flags are kept too (trip_case_legs has no column for them until slice L5),
         # so staff and the "new inquiry" e-mail can tell which leg AA no longer serves, by position.
         snapshot["legs"] = [

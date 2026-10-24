@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from datetime import datetime
 
@@ -13,13 +14,14 @@ from app.inquiry.contract import ContractError, parse, validate, version_label
 from app.inquiry.intake import _ts
 from tests import inquiry_samples as samples
 
-# Byte copies of AA-Ecosys docs/contracts (v1 / v1.1: root commit fdab1eb; v1.2: AA-830; v1.3: AA-986 L6). Update
-# both together.
+# Byte copies of AA-Ecosys docs/contracts (v1 / v1.1: root commit fdab1eb; v1.2: AA-830; v1.3: AA-986 L6; v1.4: AA-908,
+# root #237). Update both together.
 VENDORED_SHA256 = {
     "inquiry.submitted.v1.json": "22cbb36608398322b38da93dcf814f841da91f3a307ac9a9736df90d7f93e995",
     "inquiry.submitted.v1.1.json": "148ccaac54a13316f7f3ab7ce59458534a585968edf3cb5ed2e6b23bbb369f98",
     "inquiry.submitted.v1.2.json": "4ab794659d59ad1f764f82405013c37f9a968511d1873ea8fd09d8fa4eb76a8e",
     "inquiry.submitted.v1.3.json": "6ddd01eac5e84e5068a65cfa2ae24a73ef593b192e7190bc708551df828b1074",
+    "inquiry.submitted.v1.4.json": "655c7442e0cad471555fd7731fdc5a8a93c3a22a216b4aa96d64cdc4b7ffe810",
 }
 
 
@@ -151,7 +153,7 @@ def test_rejected_v1_2_legs(payload: dict) -> None:
 
 def test_version_label_1_2() -> None:
     assert version_label({"version": 1.2}) == "1.2"
-    assert contract.SUPPORTED_VERSIONS == ("1", "1.1", "1.2", "1.3")
+    assert contract.SUPPORTED_VERSIONS == ("1", "1.1", "1.2", "1.3", "1.4")
 
 
 def test_parse_v1_2_carries_the_tour_key_per_leg() -> None:
@@ -217,3 +219,67 @@ def test_older_versions_keep_the_snapshot_shape() -> None:
 
 def test_older_versions_read_as_available() -> None:
     assert all(leg.available and leg.reason is None for leg in parse(samples.v1_2()).legs)
+
+
+# --- AA-908: v1.4 (customer.identity of a signed-in traveller) -------------------------------------------------------
+
+
+def test_v1_4_signed_in_and_guest_are_accepted() -> None:
+    assert validate(samples.v1_4()) == "1.4"
+    assert validate(samples.v1_4(signed_in=False)) == "1.4"
+
+
+def test_v1_4_verified_needs_an_identity() -> None:
+    payload = samples.v1_4()
+    payload["customer"]["identity"] = None
+    with pytest.raises(ContractError):
+        validate(payload)
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [{"iss": samples.ISS}, {"iss": samples.ISS, "sub": ""}, {"iss": samples.ISS, "sub": "s", "email": "x@y.test"}],
+    ids=["no-sub", "empty-sub", "extra-field"],
+)
+def test_v1_4_rejects_a_bad_identity(identity: dict) -> None:
+    payload = samples.v1_4()
+    payload["customer"]["identity"] = identity
+    with pytest.raises(ContractError):
+        validate(payload)
+
+
+def test_v1_4_requires_the_identity_key_and_older_versions_refuse_it() -> None:
+    payload = samples.v1_4(signed_in=False)
+    del payload["customer"]["identity"]
+    with pytest.raises(ContractError):
+        validate(payload)
+    older = samples.v1_3()
+    older["customer"]["identity"] = {"iss": samples.ISS, "sub": "s"}
+    with pytest.raises(ContractError):
+        validate(older)
+
+
+def test_parse_v1_4_signed_in_carries_the_identity() -> None:
+    payload = samples.v1_4("  Traveller@Example.TEST ", sub="sub-1")
+    inquiry = parse(payload)
+    assert inquiry.version == "1.4"
+    assert inquiry.contact is not None
+    assert inquiry.contact.identity == contract.Identity(samples.ISS, "sub-1")
+    assert inquiry.contact.verified is True and inquiry.contact.email == "traveller@example.test"
+    assert inquiry.contact.signed_in is True
+    # the identity is not copied into the trip case snapshot (it lives in booking.customer_identities)
+    assert "identity" not in str(inquiry.snapshot) and "sub-1" not in str(inquiry.snapshot)
+    assert inquiry.snapshot["legs"]  # v1.4 is additive over v1.3: the leg flags are kept
+
+
+def test_parse_v1_4_guest_is_not_signed_in() -> None:
+    contact = parse(samples.v1_4(signed_in=False)).contact
+    assert contact is not None and contact.identity is None and contact.signed_in is False
+
+
+def test_signed_in_needs_identity_verified_and_email() -> None:
+    contact = parse(samples.v1_4()).contact
+    assert contact is not None and contact.signed_in
+    for changes in ({"verified": False}, {"identity": None}, {"email": None}):
+        assert not dataclasses.replace(contact, **changes).signed_in, changes
+    assert parse(samples.v1_3()).contact.identity is None  # type: ignore[union-attr]
