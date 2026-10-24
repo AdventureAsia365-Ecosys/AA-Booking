@@ -299,7 +299,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       header: "Payment terms",
       enableSorting: false,
       cell: ({ row }) => (
-        <span className="block break-words text-[13px] text-body md:max-w-[160px] md:truncate" title={row.original.payment_terms ?? undefined}>
+        <span className="block break-words text-[13px] text-body md:max-w-[140px] md:truncate" title={row.original.payment_terms ?? undefined}>
           {row.original.payment_terms ?? "—"}
         </span>
       ),

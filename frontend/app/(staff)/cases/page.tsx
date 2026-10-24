@@ -179,6 +179,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     accessorKey: "customer_name",
     cell: ({ row }) => (
       <PersonCell
+        className="md:max-w-[190px]"
         name={row.original.customer_name}
         sub={row.original.customer_email ?? row.original.customer_phone}
         chips={
@@ -203,8 +204,10 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     header: "Trip",
     accessorKey: "trip_title",
     cell: ({ row }) => (
-      <span className="block max-w-[280px] text-[13px] text-body">
-        <span className="block truncate">{row.original.trip_title ?? "Custom trip"}</span>
+      <span className="block max-w-[280px] text-[13px] text-body md:max-w-[190px]">
+        <span className="block truncate" title={row.original.trip_title ?? undefined}>
+          {row.original.trip_title ?? "Custom trip"}
+        </span>
         {row.original.leg_count > 1 && <span className="text-xs text-muted">+{row.original.leg_count - 1} more legs</span>}
         {row.original.source_system === "tripplanner" && row.original.leg_count <= 1 && (
           <span className="text-xs text-muted">From TripPlanner</span>
@@ -213,37 +216,62 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     ),
   },
   {
+    // AA-910: pax shares this cell (line 2, "20 days · 6 pax") so the list fits 1440 px. The accessor stays the plain
+    // start date: sorting is by date (no-date rows together, as before) and the CSV column holds the date only. The kit
+    // CSV exports one value per visible column, so the list CSV no longer has a Pax column (the case page has it).
     id: "dates",
-    header: "Dates",
+    header: "Dates / pax",
     accessorKey: "start_date",
     cell: ({ row }) => {
       const r = row.original;
-      if (!r.start_date) return <span className="text-[13px] text-muted">{r.duration_days ? `${r.duration_days} days, no date` : "—"}</span>;
+      const sub = [r.duration_days ? `${r.duration_days} days` : null, r.pax ? `${r.pax} pax` : null].filter(Boolean).join(" · ");
+      if (!r.start_date) {
+        return (
+          <span className="text-[13px] text-muted">
+            {r.duration_days ? `${r.duration_days} days, no date` : "—"}
+            {r.pax ? <span className="block text-xs">{r.pax} pax</span> : null}
+          </span>
+        );
+      }
       return (
         <span className="text-[13px] text-body">
           {formatDate(r.start_date)}
           {r.trip_end_date && <> – {formatDate(r.trip_end_date)}</>}
-          {r.duration_days && <span className="block text-xs text-muted">{r.duration_days} days</span>}
+          {sub && <span className="block text-xs text-muted">{sub}</span>}
         </span>
       );
     },
   },
-  { id: "pax", header: "Pax", accessorKey: "pax", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.pax ?? "—"}</span> },
-  { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <TripCaseStatusBadge status={row.original.status} /> },
+  {
+    // AA-910: "Updated" sits under the status pill (as on /hotels and /services) so the list fits 1440 px. The
+    // accessor stays the plain status (sorting and the CSV column are the status only, as on those lists).
+    id: "status",
+    header: "Status",
+    accessorKey: "status",
+    cell: ({ row }) => (
+      <span className="flex flex-col items-start gap-1">
+        <TripCaseStatusBadge status={row.original.status} />
+        {/* AA-910: the date never breaks, but it may drop under "Updated" (a row older than 7 days shows the full date, much wider than "3 d ago"). */}
+        <span className="text-xs text-muted">
+          Updated <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
+        </span>
+      </span>
+    ),
+  },
   {
     id: "sales",
     header: "Sales",
     accessorFn: (r) => r.assignees.find((a) => a.role === "sales")?.name ?? "",
     cell: ({ row }) => {
       const sales = row.original.assignees.find((a) => a.role === "sales");
-      return <span className="text-[13px] text-body">{sales ? (sales.name ?? sales.cis_user_id) : <span className="text-muted">Unassigned</span>}</span>;
+      if (!sales) return <span className="text-[13px] text-muted">Unassigned</span>;
+      const name = sales.name ?? sales.cis_user_id;
+      return (
+        <span className="block text-[13px] text-body md:max-w-[100px] md:truncate" title={name}>
+          {name}
+        </span>
+      );
     },
-  },
-  {
-    id: "updated",
-    header: "Updated",
-    accessorKey: "updated_at",
-    cell: ({ row }) => <DateText value={row.original.updated_at} relative className="text-[13px] text-muted" />,
   },
   {
     id: "open",

@@ -5,3 +5,6 @@ out/
 .vercel
 .env*.local
 next-env.d.ts
+
+# AA-910 layout check output (screenshots, measurements, traces)
+/e2e/layout/results/

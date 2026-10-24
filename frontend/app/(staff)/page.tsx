@@ -246,6 +246,7 @@ const RECENT_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     accessorKey: "customer_name",
     cell: ({ row }) => (
       <PersonCell
+        className="md:max-w-[220px]"
         name={row.original.customer_name}
         sub={row.original.customer_email ?? row.original.customer_phone}
         chips={!row.original.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}

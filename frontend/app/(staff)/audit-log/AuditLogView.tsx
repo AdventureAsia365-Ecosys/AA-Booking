@@ -200,10 +200,10 @@ function AuditRow({
           {label &&
             (href ? (
               <Link href={href} className="min-w-0 hover:underline">
-                <Code>{label}</Code>
+                <Code wrap>{label}</Code>
               </Link>
             ) : (
-              <Code>{label}</Code>
+              <Code wrap>{label}</Code>
             ))}
         </div>
         <DateText value={row.at} withTime className="shrink-0 text-xs text-muted" />
