@@ -178,8 +178,8 @@ function OnRequestTab() {
       cell: ({ row }) => {
         const l = row.original;
         return (
-          // AA-910: capped on desktop (full text in the tooltips) so the table fits 1440 px with the action buttons.
-          <span className="flex min-w-0 flex-col md:max-w-[240px]">
+          // AA-910: capped on desktop (full text in the tooltips) so the table fits 1400 px with the action buttons.
+          <span className="flex min-w-0 flex-col md:max-w-[210px]">
             <span className="max-w-[300px] truncate text-[13.5px] font-medium text-ink" title={l.component.label ?? l.component.id}>
               {l.component.label ?? l.component.id}
             </span>

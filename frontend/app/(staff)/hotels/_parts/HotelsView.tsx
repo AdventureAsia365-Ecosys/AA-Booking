@@ -95,6 +95,7 @@ export function HotelsView() {
                 label: "Country",
                 allLabel: "All countries",
                 options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
               },
               {
                 key: "stars",
@@ -156,7 +157,7 @@ export function HotelsView() {
   );
 }
 
-// AA-910: the table fits the 1084 px list frame at 1440 px. Text cells have a max width (a table cell grows to its
+// AA-910: the table fits the list frame at 1400 and 1440 px with 20 px to spare (S250: name 190 px, place 130 px). Text cells have a max width (a table cell grows to its
 // content, so `truncate` alone never cuts; the CIS marker of the place is in the column header), the hotel style sits under the name, "Updated" sits under the status pill,
 // and the row menu column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 const COLUMNS: ColumnDef<Hotel, unknown>[] = [
@@ -165,7 +166,7 @@ const COLUMNS: ColumnDef<Hotel, unknown>[] = [
     header: "Hotel",
     accessorFn: (r) => r.name,
     cell: ({ row }) => (
-      <span className="flex min-w-0 max-w-[200px] flex-col">
+      <span className="flex min-w-0 max-w-[190px] flex-col">
         <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.name}>
           {row.original.name}
         </span>
@@ -189,7 +190,7 @@ const COLUMNS: ColumnDef<Hotel, unknown>[] = [
       const r = row.original;
       const text = r.destination ? `${r.destination.name}, ${r.country_name ?? r.destination.country}` : (r.country_name ?? "—");
       return (
-        <span className="flex min-w-0 items-center text-[13px] text-body md:max-w-[150px]">
+        <span className="flex min-w-0 items-center text-[13px] text-body md:max-w-[130px]">
           <span className="md:truncate" title={text}>
             {text}
           </span>

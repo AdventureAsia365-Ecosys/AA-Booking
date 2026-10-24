@@ -6,6 +6,9 @@
 // full pages (25 rows), long company / hotel / service / tour names, long e-mails, long contract titles, every
 // optional column filled, FX rates with six decimals and a long source. Shapes are typed against lib/api, so a
 // change in an API type that a fixture no longer satisfies fails `npm run typecheck`.
+// S250 (after Nghiệp's live check on Dev): the rows also mix in the shapes Dev really has — staff without a CIS role or
+// a name, cases without a date ("16 days" / "no date yet"), single- and multi-leg cases, two-digit pax, a customer row
+// with three badges (status + Blocked + Merge review), customers without a phone, hotels without stars or a place.
 //
 // Nothing here is real: names, codes and e-mails are invented (example.test domains).
 
@@ -70,10 +73,12 @@ function staffProfile(i: number): StaffProfile {
   return {
     cis_user_id: `u-${pad(i, 3)}`,
     email: `${PERSON_NAMES[i % 4].toLowerCase().replace(/[^a-z]+/g, ".")}${i}@long-company-mail-domain.example.test`,
-    name: `${PERSON_NAMES[i % 4]} ${i}`,
+    // A profile whose CIS account has no display name shows the e-mail as the name (Dev has such rows).
+    name: i % 7 === 6 ? null : `${PERSON_NAMES[i % 4]} ${i}`,
     role: ROLES[i % 4],
     active: i % 5 !== 0,
-    cis_role: i % 4 === 0 ? "admin" : "reviewer",
+    // Dev: seeded profiles have no CIS role ("—"); the others are admin / reviewer.
+    cis_role: i % 6 === 5 ? null : i % 4 === 0 ? "admin" : "reviewer",
     created_at: EARLIER,
     last_seen_at: i % 3 ? NOW : null,
     managed_in_directory: i % 2 === 0,
@@ -114,6 +119,10 @@ const OPEN_STATUSES: TripCaseStatus[] = [
 ];
 
 function tripCase(i: number): TripCaseListItem {
+  // Dev has cases without a date (a TripPlanner inquiry gives a length, not a day) and single-leg cases next to
+  // multi-leg ones. Dated rows use September dates, the widest en-GB month.
+  const dated = i % 6 !== 5;
+  const legs = i % 4 === 1 ? 1 : 3;
   return {
     id: uuid("c", i),
     code: `TC-${pad(i + 1)}`,
@@ -122,10 +131,10 @@ function tripCase(i: number): TripCaseListItem {
     channel: i % 7 === 3 ? "b2b" : "b2c",
     party_tenant_id: i % 7 === 3 ? "agency-tenant-with-a-long-identifier-0001" : null,
     trip_style: "Private family adventure with soft trekking",
-    start_date: "2027-01-14",
-    end_date: "2027-02-02",
-    pax: 6,
-    pax_adults: 4,
+    start_date: dated ? "2027-09-28" : null,
+    end_date: dated ? "2027-10-17" : null,
+    pax: 12,
+    pax_adults: 10,
     pax_children: 2,
     currency: "USD",
     notes: "Two children under 10; one guest needs step-free access at every hotel.",
@@ -150,10 +159,10 @@ function tripCase(i: number): TripCaseListItem {
       "Hanoi Old Quarter and Ha Long Bay overnight cruise",
       "Hoi An Ancient Town, lantern workshop and My Son sanctuary",
       "Siem Reap temples of Angkor with a private archaeologist",
-    ],
-    leg_count: 3,
-    duration_days: 20,
-    trip_end_date: "2027-02-02",
+    ].slice(0, legs),
+    leg_count: legs,
+    duration_days: dated ? 20 : 16,
+    trip_end_date: dated ? "2027-10-17" : null,
   };
 }
 
@@ -250,11 +259,12 @@ function customer(i: number): CustomerSummary {
     code: `CUS-${pad(i + 1)}`,
     name: `Alexandra Catherine Montgomery-Whitfield ${i}`,
     email: `alexandra.montgomery.whitfield.${i}@very-long-customer-domain.example.test`,
-    phone: "+44 20 7946 0958 ext 1234",
+    phone: i % 5 === 4 ? null : "+44 20 7946 0958 ext 1234",
     address: "Flat 12, 221B Long Riverside Embankment Road, Kensington and Chelsea, London SW3 5XX",
     verified: i % 2 === 0,
     is_blocked: i % 11 === 10,
-    needs_merge_review: i % 9 === 0,
+    // Rows 10 and 21 carry three badges in the status cell: their status, Blocked and Merge review.
+    needs_merge_review: i % 9 === 0 || i % 11 === 10,
     merge_candidate_id: i % 9 === 0 ? uuid("d", i + 100) : null,
     source: (["manual", "otp", "tripplanner_lead"] as const)[i % 3],
     contact_consent: i % 2 === 1,
@@ -466,7 +476,9 @@ function hotel(i: number): Hotel {
     code: `HTL-${pad(i + 1)}`,
     name: `Emerald Riverside Boutique Hotel and Spa Hoi An ${i}`,
     hotel_style: "Boutique heritage riverside resort",
-    star_rating: 3 + (i % 3),
+    // Dev has hotels without a star rating ("—") and without a CIS place (country only).
+    star_rating: i % 5 === 4 ? null : 3 + (i % 3),
+    ...(i % 6 === 5 ? { destination_id: null, destination: null } : {}),
     address: "123 Tran Hung Dao Street, Minh An Ward",
     latitude: "15.8771",
     longitude: "108.3260",
