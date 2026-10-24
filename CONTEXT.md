@@ -854,6 +854,16 @@ photos with bucket / key / sha256 for the CIS copy), `v_supply_outbox` (stamped 
 `SET supply_version = supply_version + 1`). Not yet in `REQUIRED_SCHEMA_VERSIONS`: the upload / read-back code (AA-835
 S4) adds it after the apply.
 
+### `bk-024` (AA-908 traveller identities, root ADR 0006 Phase 4 — needs `bk-002`, `bk-014`)
+
+`customer_identities` (`iss`, `sub` → `customer_id`; PRIMARY KEY `(iss, sub)`: one verified sign-in identity belongs to
+one customer, a customer may hold several; `iss` https and ≤ 300 characters, `sub` 1–128 characters; both tagged
+`pii:online_id`; FK to `customers` ON DELETE CASCADE; index on `customer_id`; role `booking`: SELECT, INSERT, UPDATE of
+`customer_id` only (re-point from an archived customer), never DELETE; nothing for `cis_app`), and
+`customers_source_chk` widened with `traveller_signin`. Filled by the inquiry intake from a signed-in hand-off
+(`inquiry.submitted` v1.4, `customer.identity`); the intake code and `REQUIRED_SCHEMA_VERSIONS += bk-024` ship in the
+AA-908 code PR, deployed after the apply.
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
 operations / money (AA-682).
