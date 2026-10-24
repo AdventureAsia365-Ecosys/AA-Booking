@@ -259,6 +259,42 @@ def test_v1_4_requires_the_identity_key_and_older_versions_refuse_it() -> None:
         validate(older)
 
 
+@pytest.mark.parametrize(
+    "iss",
+    ["http://evil.example/pool", "not a uri", "https://idp.example/ pool"],
+    ids=["http", "not-a-uri", "whitespace"],
+)
+def test_v1_4_rejects_an_issuer_the_bk024_check_would_refuse(iss: str) -> None:
+    """Review round 1: the schema's ``format: uri`` is not enforced, so the shape is checked in code (no poison
+    message: a CheckViolation in intake would be retried; a ContractError fails the inbox row once)."""
+    payload = samples.v1_4()
+    payload["customer"]["identity"]["iss"] = iss
+    with pytest.raises(ContractError, match="customer/identity/iss") as caught:
+        validate(payload)
+    assert iss not in str(caught.value)  # the reason is stored and logged: never the value (DM-6.4)
+
+
+def test_v1_4_issuer_length_limit_is_300() -> None:
+    payload = samples.v1_4()
+    payload["customer"]["identity"]["iss"] = "https://" + "a" * 292
+    assert validate(payload) == "1.4"
+    payload["customer"]["identity"]["iss"] += "a"  # 301: refused by the schema's maxLength (under customer's oneOf)
+    with pytest.raises(ContractError, match="v1.4 invalid: customer"):
+        validate(payload)
+
+
+def test_parse_pins_the_traveller_issuer() -> None:
+    payload = samples.v1_4()
+    payload["customer"]["identity"]["iss"] = samples.FOREIGN_ISS
+    assert parse(payload).contact.identity.iss == samples.FOREIGN_ISS  # type: ignore[union-attr]  # no pin given
+    with pytest.raises(ContractError, match="not the accepted traveller issuer") as caught:
+        parse(payload, traveller_issuers={samples.ISS})
+    assert samples.FOREIGN_ISS not in str(caught.value)
+    assert parse(samples.v1_4(), traveller_issuers={samples.ISS}).contact.signed_in  # type: ignore[union-attr]
+    # a guest send has no identity, so the pin does not apply
+    assert parse(samples.v1_4(signed_in=False), traveller_issuers={samples.ISS}).contact.identity is None  # type: ignore[union-attr]
+
+
 def test_parse_v1_4_signed_in_carries_the_identity() -> None:
     payload = samples.v1_4("  Traveller@Example.TEST ", sub="sub-1")
     inquiry = parse(payload)

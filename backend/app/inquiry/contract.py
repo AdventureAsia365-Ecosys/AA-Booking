@@ -4,7 +4,10 @@ Contract rule 2: a consumer accepts every minor of its major. Booking accepts ve
 
 - ``version: 1.4`` must satisfy ``inquiry.submitted.v1.4`` (AA-908, root ADR 0006 Phase 4: ``customer.identity`` is
   the verified sign-in identity ``{iss, sub}`` of a traveller signed in on the Cognito EXTERNAL pool, or null for a
-  guest; ``verified`` is true only together with an identity, and then ``email`` is the token's address);
+  guest; ``verified`` is true only together with an identity, and then ``email`` is the token's address). The schema
+  checks ``iss`` only as ``format: uri``, which the validator does not enforce, so :func:`validate` also requires an
+  ``https://`` issuer of at most 300 characters (the bk-024 ``customer_identities_shape_chk``), and :func:`parse`
+  can pin the accepted issuers (intake passes ``COGNITO_EXTERNAL_ISSUER``);
 - ``version: 1.3`` must satisfy ``inquiry.submitted.v1.3`` (AA-986 L6, root ADR 0015 decision 5: every leg and day
   also says ``available`` + ``reason`` + ``reason_detail``; stops whose tour AA no longer serves come after the served
   ones with ``available: false``, so staff see why such a leg cannot be matched; the snapshot keeps the leg flags
@@ -25,6 +28,7 @@ Anything else (unknown version, wrong shape) is a :class:`ContractError` — the
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +39,7 @@ from app.contracts import load
 CONTRACT = "inquiry.submitted"
 SOURCE = "tripplanner"
 SUPPORTED_VERSIONS = ("1", "1.1", "1.2", "1.3", "1.4")
+ISSUER_MAX_LENGTH = 300  # contract v1.4 maxLength; bk-024 customer_identities_shape_chk
 
 
 class ContractError(ValueError):
@@ -73,9 +78,24 @@ def validate(payload: Any) -> str:
         errors = _errors(_validator("inquiry.submitted.v1"), payload)
         if errors and not _errors(_validator("inquiry.submitted.v1.1"), payload):
             errors = []  # v1.1 shape labelled 1 (TripPlanner PR #69): additive, accept
+    if not errors and label == "1.4":
+        errors = _identity_errors(payload)
     if errors:
         raise ContractError(f"{CONTRACT} v{label} invalid: " + "; ".join(errors))
     return label
+
+
+def _identity_errors(payload: dict[str, Any]) -> list[str]:
+    """What the v1.4 schema states but cannot enforce: ``format: uri`` is not checked by the validator, while the
+    bk-024 shape CHECK needs an https:// issuer. Run after the schema passed. The message never echoes the value."""
+    customer = payload.get("customer")
+    ident = customer.get("identity") if isinstance(customer, dict) else None
+    if not isinstance(ident, dict):
+        return []
+    iss = ident["iss"]
+    if not iss.startswith("https://") or len(iss) > ISSUER_MAX_LENGTH or any(c.isspace() for c in iss):
+        return [f"customer/identity/iss: must be an https:// issuer URL of at most {ISSUER_MAX_LENGTH} characters"]
+    return []
 
 
 @dataclass(frozen=True)
@@ -141,8 +161,11 @@ def _clean(value: Any) -> str | None:
     return text or None
 
 
-def parse(payload: dict[str, Any]) -> Inquiry:
-    """Validate, then normalise into an :class:`Inquiry` (email lower-cased, blanks to None)."""
+def parse(payload: dict[str, Any], *, traveller_issuers: Collection[str] | None = None) -> Inquiry:
+    """Validate, then normalise into an :class:`Inquiry` (email lower-cased, blanks to None).
+
+    ``traveller_issuers``: when given, a v1.4 ``customer.identity`` from any other issuer is a :class:`ContractError`
+    (root ADR 0006: each route class pins its issuer). Intake always passes it; None only skips the pin."""
     version = validate(payload)
     raw = payload["customer"]
     contact = None
@@ -162,6 +185,15 @@ def parse(payload: dict[str, Any]) -> Inquiry:
             if version == "1.4" and isinstance(ident, dict)
             else None,
         )
+        if (
+            contact.identity is not None
+            and traveller_issuers is not None
+            and contact.identity.iss not in traveller_issuers
+        ):
+            raise ContractError(
+                f"{CONTRACT} v{version} invalid: customer/identity/iss: not the accepted traveller issuer"
+                " (COGNITO_EXTERNAL_ISSUER)"
+            )
     itinerary = payload["itinerary"]
     legs = tuple(
         Leg(

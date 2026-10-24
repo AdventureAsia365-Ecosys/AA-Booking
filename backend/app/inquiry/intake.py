@@ -29,27 +29,37 @@ the contact is a verified customer, found in this order (:func:`resolve_signed_i
   (b) else a verified live customer with the same email → that customer, and the identity is attached to it;
   (c) else a new customer, ``verified = true``, ``source = 'traveller_signin'``, with the name and the token's email
       only (no phone or other typed field is imported, ADR 0006 Phase 4).
+The identity must come from the pinned traveller issuer (``COGNITO_EXTERNAL_ISSUER``, :func:`build_handlers`); any other
+issuer, or a non-https one, fails the hand-off as a contract error instead of reaching the bk-024 shape CHECK.
+Concurrent hand-offs of one identity are serialised by a transaction advisory lock on (iss, sub), so the second one
+sees the first one's customer instead of failing on the key and waiting for a retry.
 An identity whose customer was archived is re-pointed to the customer of (b) / (c). Then every unverified live
 ``tripplanner_lead`` / ``manual`` customer with the same email and no merge candidate yet is flagged
 ``needs_merge_review`` with ``merge_candidate_id`` = the verified customer — never merged: a lead's email was typed
-by an unauthenticated guest.
+by an unauthenticated guest. A blocked customer still gets the case (staff decide); the notification says so.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Collection
 from datetime import datetime
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
+from app.auth.identity_config import DEV_EXTERNAL_ISSUER
 from app.inquiry import leg_keys
 from app.inquiry.contract import CONTRACT, SOURCE, Contact, ContractError, Inquiry, Leg, parse, version_label
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.jobs.worker import PermanentError, Recurring
+from app.jobs.worker import Handler, PermanentError, Recurring
 from app.notifications import staff_email
+
+if TYPE_CHECKING:
+    from app.settings import Settings
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +76,10 @@ PULL_BATCH = 200
 # appear. Only such rows may move safe_id.
 MAX_PRODUCER_TX_SECONDS = 300
 SAFE_AFTER_SECONDS = 2 * MAX_PRODUCER_TX_SECONDS
+
+# The traveller issuers a v1.4 identity may come from when no settings are bound (tests, HANDLERS); the worker binds
+# Settings.cognito_external_issuer through build_handlers().
+DEFAULT_TRAVELLER_ISSUERS = frozenset({DEV_EXTERNAL_ISSUER})
 
 LEAD_SOURCE = "tripplanner_lead"
 SIGNIN_SOURCE = "traveller_signin"  # bk-024 customers_source_chk
@@ -218,6 +232,10 @@ async def resolve_signed_in(conn: asyncpg.Connection, contact: Contact) -> tuple
     email (DM-6.4)."""
     identity, email = contact.identity, contact.email
     assert identity is not None and email  # noqa: S101 — Contact.signed_in, checked by the caller
+    # Two hand-offs of one new identity at the same time: the second waits here, then sees the first one's row.
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text || ' ' || $2::text, 908))", identity.iss, identity.sub
+    )
     known = await conn.fetchrow(
         """
         SELECT ci.customer_id::text AS customer_id, c.deleted_at IS NULL AS live
@@ -327,7 +345,8 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
     if contact.signed_in:
         customer_id, how, flagged = await resolve_signed_in(conn, contact)
         created_lead, review = False, False
-        signed_in = {"signed_in": how, "leads_flagged_for_review": flagged}
+        blocked = await conn.fetchval("SELECT is_blocked FROM booking.customers WHERE id = $1::uuid", customer_id)
+        signed_in = {"signed_in": how, "leads_flagged_for_review": flagged, "customer_blocked": blocked is True}
     else:
         customer_id, created_lead, review = await resolve_customer(conn, contact)
     case = await conn.fetchrow(
@@ -379,6 +398,8 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
     message = f"{contact.name or 'A traveller'} sent a trip with {len(inquiry.legs)} AA tour leg(s)."
     if signed_in:
         message += " Signed-in traveller (verified email)."
+        if signed_in["customer_blocked"]:
+            message += " Customer is blocked."
     if unavailable:
         message += " " + unavailable_note(unavailable)
     if review:
@@ -418,7 +439,9 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
     return summary
 
 
-async def process(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
+async def process(
+    pool: asyncpg.Pool, job: Job, *, traveller_issuers: Collection[str] = DEFAULT_TRAVELLER_ISSUERS
+) -> dict[str, Any]:
     event_id = job.payload.get("inbox_event_id")
     if not isinstance(event_id, str):
         raise PermanentError("payload.inbox_event_id missing")
@@ -433,7 +456,7 @@ async def process(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
         if event["status"] != "received":
             return {"outcome": "noop", "status": event["status"]}
         try:
-            inquiry = parse(json.loads(event["payload"]))
+            inquiry = parse(json.loads(event["payload"]), traveller_issuers=traveller_issuers)
         except ContractError as exc:
             await _mark(conn, event_id, "failed", str(exc)[:2000])
             log.warning("inquiry %s rejected: %s", event_id, exc)
@@ -463,3 +486,11 @@ async def process(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
 
 
 HANDLERS = {PULL_KIND: pull, PROCESS_KIND: process}
+
+
+def build_handlers(settings: Settings) -> dict[str, Handler]:
+    """The intake handlers with the traveller issuer pinned to ``COGNITO_EXTERNAL_ISSUER`` (what the worker runs)."""
+    return {
+        PULL_KIND: pull,
+        PROCESS_KIND: partial(process, traveller_issuers=frozenset({settings.cognito_external_issuer})),
+    }

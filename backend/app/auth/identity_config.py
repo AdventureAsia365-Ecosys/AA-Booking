@@ -42,6 +42,10 @@ log = logging.getLogger(__name__)
 # Public by design (every token and the JWKS URL carry it); the AA-902 resource-ID check skips this line.
 DEV_WORKFORCE_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS"  # docs-lint: ignore
 DEV_BOOKING_STAFF_CLIENT_ID = "5ifl9dgkr8a5outnmsjc8v1kt3"
+# AA-908: the Cognito EXTERNAL (traveller) pool issuer. Not a staff verifier: the inquiry intake accepts a v1.4
+# ``customer.identity`` only from this issuer (root ADR 0006: each route class pins its issuer). Public, like the line
+# above it.
+DEV_EXTERNAL_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_nKOvHan0W"  # docs-lint: ignore
 DEV_BREAKGLASS_CLIENT_ID = "2g3f3ncfuqdiuu1o5b70o4h0lq"
 # AA-911 D-1: the Preview-only booking-staff-preview client (AA-CIS-Infra identity.tf). Empty until the Infra apply
 # creates it; then the id is filled in here. Empty = no preview client accepted (fail closed).

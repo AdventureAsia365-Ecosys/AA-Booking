@@ -33,6 +33,11 @@ Cognito M2M (AA-972, root ADR 0006b decision 7; ``app.auth.m2m``): service-to-se
 pool for the B2B API ``/booking/b2b/v1`` (contract booking.b2b.v1). Set by AA-CIS-Infra ``booking.tf`` from the pool
 and the AA-Partner (CRM) app client; both empty (default) = every B2B route answers 503 ``unavailable`` (fail closed).
 
+- ``COGNITO_EXTERNAL_ISSUER``: the EXTERNAL (traveller) pool issuer (AA-908). The inquiry intake accepts a contract v1.4
+  ``customer.identity`` only from this issuer; any other one fails the hand-off. Default
+  :data:`~app.auth.identity_config.DEV_EXTERNAL_ISSUER`. Never set on Dev. It must differ from the WORKFORCE and M2M
+  issuers.
+
 - ``COGNITO_M2M_ISSUER``: the M2M pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
 - ``COGNITO_M2M_CRM_CLIENT_ID``: the AA-Partner (CRM) client-credentials app client. Required with the issuer.
 
@@ -74,6 +79,7 @@ from app.auth.identity_config import (
     DEV_BOOKING_STAFF_CLIENT_ID,
     DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
     DEV_BREAKGLASS_CLIENT_ID,
+    DEV_EXTERNAL_ISSUER,
     DEV_WORKFORCE_ISSUER,
 )
 
@@ -120,6 +126,7 @@ class Settings:
     cognito_m2m_crm_client_id: str = ""
     supply_media_bucket: str = ""
     supply_media_region: str = DEFAULT_SUPPLY_MEDIA_REGION
+    cognito_external_issuer: str = DEV_EXTERNAL_ISSUER
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
@@ -188,6 +195,17 @@ class Settings:
             )
         if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.supply_media_region):
             raise SettingsError(f"SUPPLY_MEDIA_REGION must be an AWS region, got {self.supply_media_region!r}")
+        external = self.cognito_external_issuer
+        if not external.startswith("https://") or external.endswith("/") or len(external) > 300:
+            raise SettingsError(
+                "COGNITO_EXTERNAL_ISSUER must be an https:// URL without a trailing slash, at most 300 characters,"
+                f" got {external!r}"
+            )
+        if external in (self.cognito_workforce_issuer, m2m_issuer):
+            # A staff or service identity must never pass as a signed-in traveller.
+            raise SettingsError(
+                "COGNITO_EXTERNAL_ISSUER must differ from COGNITO_WORKFORCE_ISSUER and COGNITO_M2M_ISSUER"
+            )
         if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
             raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
         if self.sentry_required and not self.sentry_dsn:
@@ -236,6 +254,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cognito_m2m_crm_client_id=(env.get("COGNITO_M2M_CRM_CLIENT_ID") or "").strip(),
         supply_media_bucket=(env.get("SUPPLY_MEDIA_BUCKET") or "").strip(),
         supply_media_region=(env.get("SUPPLY_MEDIA_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
+        cognito_external_issuer=(env.get("COGNITO_EXTERNAL_ISSUER") or "").strip() or DEV_EXTERNAL_ISSUER,
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )

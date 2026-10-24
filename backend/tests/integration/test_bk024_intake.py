@@ -7,11 +7,14 @@ Fixtures and helpers: test_bk002_intake.py."""
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import asyncpg
 import pytest
 
+from app.inquiry import intake
+from app.inquiry.contract import parse
 from tests import inquiry_samples as samples
 from tests.integration.test_bk002_intake import admin, drain, pool, publish  # noqa: F401 (fixtures)
 
@@ -136,3 +139,75 @@ async def test_guest_v1_4_and_v1_3_sends_stay_leads(
         customer = await _customer_of_case(admin, payload)
         assert (customer["verified"], customer["source"]) == (False, "tripplanner_lead")
     assert await admin.fetchval("SELECT count(*) FROM booking.customer_identities") == 0
+
+
+# ── Review round 1 ──────────────────────────────────────────────────────────
+
+
+async def test_foreign_or_http_issuer_fails_the_inbox_row_once(
+    admin: asyncpg.Connection,  # noqa: F811
+    pool: asyncpg.Pool,  # noqa: F811
+) -> None:
+    """A contract-valid issuer the bk-024 CHECK would refuse (http) or one that is not the EXTERNAL pool: the row is
+    failed once with the reason (no poison message retried by the job), and no customer or identity is written."""
+    for iss in ("http://evil.example/pool", samples.FOREIGN_ISS):
+        payload = samples.v1_4(_email())
+        payload["customer"]["identity"]["iss"] = iss
+        await publish(admin, payload)
+    await drain(pool)
+    rows = await admin.fetch("SELECT status, error FROM booking.inbox_events ORDER BY source_position")
+    assert [r["status"] for r in rows] == ["failed", "failed"]
+    assert all("customer/identity/iss" in r["error"] for r in rows)
+    assert not any(samples.FOREIGN_ISS in r["error"] for r in rows)
+    assert await admin.fetchval("SELECT count(*) FROM booking.customers") == 0
+    assert await admin.fetchval("SELECT count(*) FROM booking.customer_identities") == 0
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE status <> 'succeeded'") == 0
+
+
+async def test_concurrent_hand_offs_of_one_new_identity_make_one_customer(
+    admin: asyncpg.Connection,  # noqa: F811
+    pool: asyncpg.Pool,  # noqa: F811
+) -> None:
+    """The advisory lock in resolve_signed_in: the second transaction waits, then finds the first one's identity."""
+    email, sub = _email(), str(uuid.uuid4())
+    contact = parse(samples.v1_4(email, sub=sub)).contact
+    assert contact is not None and contact.signed_in
+    first, second = await pool.acquire(), await pool.acquire()
+    try:
+        tx1, tx2 = first.transaction(), second.transaction()
+        await tx1.start()
+        await tx2.start()
+        a = await intake.resolve_signed_in(first, contact)
+        waiting = asyncio.create_task(intake.resolve_signed_in(second, contact))
+        await asyncio.sleep(0.3)
+        assert not waiting.done()  # blocked on the lock, not failed on the key
+        await tx1.commit()
+        b = await asyncio.wait_for(waiting, 10)
+        await tx2.commit()
+    finally:
+        await pool.release(first)
+        await pool.release(second)
+    assert (a[1], b[1]) == ("created", "identity") and a[0] == b[0]
+    assert await admin.fetchval("SELECT count(*) FROM booking.customers") == 1
+
+
+async def test_blocked_customer_gets_the_case_and_staff_are_told(
+    admin: asyncpg.Connection,  # noqa: F811
+    pool: asyncpg.Pool,  # noqa: F811
+) -> None:
+    email, sub = _email(), str(uuid.uuid4())
+    first = samples.v1_4(email, sub=sub)
+    await publish(admin, first)
+    await drain(pool)
+    customer_id = (await _customer_of_case(admin, first))["id"]
+    await admin.execute("UPDATE booking.customers SET is_blocked = true WHERE id = $1", customer_id)
+
+    again = samples.v1_4(email, sub=sub)
+    await publish(admin, again)
+    await drain(pool)
+    assert (await _customer_of_case(admin, again))["id"] == customer_id
+    messages = [
+        r["message"] for r in await admin.fetch("SELECT message FROM booking.notifications ORDER BY created_at")
+    ]
+    assert len(messages) == 2
+    assert "Customer is blocked." not in messages[0] and "Customer is blocked." in messages[1]

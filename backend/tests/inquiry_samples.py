@@ -11,6 +11,8 @@ import copy
 import uuid
 from typing import Any
 
+from app.auth.identity_config import DEV_EXTERNAL_ISSUER
+
 
 def _itinerary() -> dict[str, Any]:
     tour_a, tour_b = str(uuid.uuid4()), str(uuid.uuid4())
@@ -144,7 +146,9 @@ def v1_3(email: str | None = None, *, unavailable: str | None = None) -> dict[st
     return payload
 
 
-ISS = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_TestPool1"
+# The Dev EXTERNAL issuer: the one intake accepts by default (intake.DEFAULT_TRAVELLER_ISSUERS).
+ISS = DEV_EXTERNAL_ISSUER
+FOREIGN_ISS = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_OtherPool9"
 
 
 def v1_4(email: str | None = None, *, sub: str | None = None, signed_in: bool = True) -> dict[str, Any]:

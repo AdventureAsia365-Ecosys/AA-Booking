@@ -13,6 +13,7 @@ from app.inquiry import intake
 from app.inquiry.contract import Contact, Identity, Leg
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
+from app.settings import load_settings
 from tests import inquiry_samples as samples
 from tests.unit.fakes import ScriptedConn
 
@@ -282,6 +283,11 @@ BY_EMAIL = "WHERE verified AND deleted_at IS NULL AND lower(email)"
 async def test_signed_in_known_identity_uses_its_customer() -> None:
     conn = ScriptedConn([(KNOWN, {"customer_id": "cust-i", "live": True})])
     assert await intake.resolve_signed_in(conn, SIGNED_IN) == ("cust-i", "identity", 0)
+    # the identity is locked first (concurrent hand-offs of one new identity), keyed on iss and sub
+    assert conn.calls[0] == (
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text || ' ' || $2::text, 908))",
+        ("https://idp.example/pool", "sub-1"),
+    )
     assert conn.sql("INSERT INTO booking.customers") == [] and conn.sql("INSERT INTO booking.customer_identities") == []
     assert conn.sql(BY_EMAIL) == []
     (flag,) = conn.sql("SET needs_merge_review = true")
@@ -335,9 +341,47 @@ async def test_process_v1_4_signed_in_opens_the_case_on_the_verified_customer() 
     (case,) = conn.sql("INSERT INTO booking.trip_cases")
     assert case[0] == "cust-new"
     (note,) = conn.sql("INSERT INTO booking.notifications")
-    assert "Signed-in traveller (verified email)." in note[1]
+    assert "Signed-in traveller (verified email)." in note[1] and "blocked" not in note[1]
+    assert result["customer_blocked"] is False
     (audit,) = conn.sql("INSERT INTO booking.audit_logs")
     assert "sub" not in json.loads(audit[1]) and samples.ISS not in audit[1]
+
+
+async def test_process_v1_4_foreign_issuer_fails_the_row_without_a_customer() -> None:
+    payload = samples.v1_4()
+    payload["customer"]["identity"]["iss"] = samples.FOREIGN_ISS
+    conn = conn_for(payload)
+    result = await intake.process(conn, process_job())
+    assert result["outcome"] == "failed" and "not the accepted traveller issuer" in result["error"]
+    assert samples.FOREIGN_ISS not in result["error"]
+    assert conn.sql("INSERT INTO booking.customers") == [] and conn.sql("booking.customer_identities") == []
+    ((_event, status, reason),) = conn.sql("UPDATE booking.inbox_events")
+    assert status == "failed" and samples.FOREIGN_ISS not in reason
+
+
+async def test_build_handlers_pins_the_configured_issuer() -> None:
+    settings = load_settings({"COGNITO_EXTERNAL_ISSUER": samples.FOREIGN_ISS})
+    handlers = intake.build_handlers(settings)
+    assert handlers[intake.PULL_KIND] is intake.pull
+    payload = samples.v1_4()
+    payload["customer"]["identity"]["iss"] = samples.FOREIGN_ISS
+    conn = conn_for(payload).on("INSERT INTO booking.customers", "cust-new")
+    assert (await handlers[intake.PROCESS_KIND](conn, process_job()))["outcome"] == "processed"
+    # and the default Dev issuer is then refused
+    result = await handlers[intake.PROCESS_KIND](conn_for(samples.v1_4()), process_job())
+    assert result["outcome"] == "failed"
+
+
+async def test_process_v1_4_blocked_customer_is_named_in_the_notification() -> None:
+    conn = (
+        conn_for(samples.v1_4())
+        .on(KNOWN, {"customer_id": "cust-b", "live": True})
+        .on("SELECT is_blocked FROM booking.customers", True)
+    )
+    result = await intake.process(conn, process_job())
+    assert (result["customer_id"], result["customer_blocked"]) == ("cust-b", True)
+    (note,) = conn.sql("INSERT INTO booking.notifications")
+    assert "Customer is blocked." in note[1]
 
 
 async def test_process_v1_4_guest_is_a_lead_as_before() -> None:
