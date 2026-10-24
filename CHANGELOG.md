@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.4.0...v0.5.0) (2026-10-24)
+
+
+### Features
+
+* B2B event feed, on-request desk and departure incident flag (bk-022, booking.b2b.v1 1.1) ([#80](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/80)) ([4fb0eaf](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/4fb0eaf8ba75696e69be4b2fc7ecfd20a8112047))
+* migration bk-022 (shared outbox, B2B event triggers, departure incidents, on-request desk) ([#77](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/77)) ([54e2594](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/54e2594e0cf68a37ac6389bc28ad101942200fd2))
+* OpenAPI export and breaking-change check ([#82](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/82)) ([62c5e58](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/62c5e58b4e487719d258ea0d9d45ab833b7fde88))
+
+
+### Bug Fixes
+
+* trip plan facets count country-less tours, catalog read timeouts answer 503 ([#78](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/78)) ([4b8e8e2](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/4b8e8e20f75b22a4a80ca6f1e05a8d6954ab06b5))
+
 ## [0.4.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.3.0...v0.4.0) (2026-10-23)
 
 
