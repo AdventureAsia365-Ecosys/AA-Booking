@@ -110,6 +110,7 @@ async def test_no_free_text_column_on_events_or_incidents(admin: asyncpg.Connect
         ("outbox", "line_ref"),
         ("outbox", "incident_code"),
         ("outbox", "decline_code"),
+        ("outbox", "entity_type"),  # bk-023 (AA-835): CHECKed hotel | service
         ("departure_incidents", "incident_code"),
         ("departure_incidents", "flagged_by"),
         ("departure_incidents", "cleared_by"),

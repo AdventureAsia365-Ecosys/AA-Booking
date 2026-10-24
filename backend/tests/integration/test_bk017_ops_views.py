@@ -1,7 +1,7 @@
 """bk-017 (AA-858) on a real PostgreSQL: the ops overview contract views booking.v_ops_funnel_daily and
 booking.v_ops_case_status. Shape (aggregates only, no other column), metrics from real rows written through the
-status triggers, and the reader grants: cis_app reads the two views and nothing else in schema booking, role booking
-reads them but cannot write them.
+status triggers, and the reader grants: cis_app reads the two views (plus the bk-023 supply views) and nothing else
+in schema booking, role booking reads them but cannot write them.
 
 Logged in as the non-superuser aa_cis_admin (member of bk_owner and cis_app, tests/integration/bootstrap_roles.py), as
 on RDS. Rows are written inside a transaction that is rolled back, and every assertion compares the view before and
@@ -149,7 +149,7 @@ async def test_rows_older_than_400_days_are_left_out(admin: asyncpg.Connection) 
         await tx.rollback()
 
 
-async def test_cis_app_reads_the_two_views_and_nothing_else(admin: asyncpg.Connection) -> None:
+async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.Connection) -> None:
     tx = admin.transaction()
     await tx.start()
     try:
@@ -170,6 +170,11 @@ async def test_cis_app_reads_the_two_views_and_nothing_else(admin: asyncpg.Conne
     assert {(r["relname"], r["privilege_type"]) for r in rows} == {
         ("v_ops_funnel_daily", "SELECT"),
         ("v_ops_case_status", "SELECT"),
+        # bk-023 (AA-835): the supply contract views, also views only (test_bk023_supply.py).
+        ("v_supply_hotels", "SELECT"),
+        ("v_supply_services", "SELECT"),
+        ("v_supply_media", "SELECT"),
+        ("v_supply_outbox", "SELECT"),
     }
     assert await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'USAGE')")
     assert not await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'CREATE')")

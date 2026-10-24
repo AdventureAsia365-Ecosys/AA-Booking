@@ -145,6 +145,10 @@ ALLOWLIST: dict[str, str] = {
     "covered by the supplier-contacts RoPA activity, not tagged)",
     "trip_case_version_itinerary.title": "itinerary item title (tour, hotel or service name)",
     "job.payload": "job payloads carry ids only (DM-6.3)",
+    "v_supply_hotels.name": "a hotel (business) name (bk-023 contract view of hotels.name)",
+    "v_supply_hotels.address": "a hotel (business) address (bk-023 contract view of hotels.address)",
+    "v_supply_services.working_title": "internal working title of a supplier service (bk-023 contract view of "
+    "services.title), no customer data",
 }
 
 COMMENTS_SQL = """

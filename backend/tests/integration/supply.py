@@ -33,6 +33,8 @@ async def purge_supply(conn: asyncpg.Connection) -> None:
             await conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
         # bk-019 (AA-972): plan components point at room types and services.
         await conn.execute("DELETE FROM booking.trip_plan_components")
+        # bk-023 (AA-835): supplier photos name a hotel or a service (no FK, so they would outlive them).
+        await conn.execute("DELETE FROM booking.entity_media")
         await conn.execute("DELETE FROM booking.hotel_room_types")
         await conn.execute("DELETE FROM booking.hotels")
         await conn.execute("DELETE FROM booking.services")
