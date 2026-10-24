@@ -102,7 +102,14 @@ export default function TripCasesPage() {
         </Section>
       ) : (
         <>
-          <SavedTabs tabs={CASE_TABS.map(({ key, label }) => ({ key, label, count: tabCount(key, summary.data) }))} />
+          <SavedTabs
+            tabs={CASE_TABS.map(({ key, label }) => ({
+              key,
+              label,
+              count: tabCount(key, summary.data),
+              countPending: summary.isPending && key !== "mine" && key !== "unassigned",
+            }))}
+          />
           <Section>
             <div className="mb-4">
               <FilterBar
@@ -116,6 +123,9 @@ export default function TripCasesPage() {
                       { value: "none", label: "Unassigned" },
                       ...sortStaff(directory.data?.items ?? []).map((s) => ({ value: s.cis_user_id, label: s.name ?? s.cis_user_id })),
                     ],
+                    // AA-910 (S250): the staff names load after the page; a fixed width keeps the bar from growing and
+                    // wrapping when they arrive (the /cases CLS of 0.12 on Dev).
+                    width: 170,
                   },
                   {
                     key: "source",
@@ -171,6 +181,8 @@ export default function TripCasesPage() {
   );
 }
 
+// AA-910 (S250): fits the list frame at 1400 and 1440 px with 20 px to spare: customer 180 px, trip 170 px, sales 90 px
+// on desktop (full text in the tooltips); a date never breaks inside itself, and the status pill never shrinks.
 const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   { id: "code", header: "Case", accessorKey: "code", cell: ({ row }) => <Code>{row.original.code}</Code> },
   {
@@ -179,7 +191,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     accessorKey: "customer_name",
     cell: ({ row }) => (
       <PersonCell
-        className="md:max-w-[190px]"
+        className="md:max-w-[180px]"
         name={row.original.customer_name}
         sub={row.original.customer_email ?? row.original.customer_phone}
         chips={
@@ -204,7 +216,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     header: "Trip",
     accessorKey: "trip_title",
     cell: ({ row }) => (
-      <span className="block max-w-[280px] text-[13px] text-body md:max-w-[190px]">
+      <span className="block max-w-[280px] text-[13px] text-body md:max-w-[170px]">
         <span className="block truncate" title={row.original.trip_title ?? undefined}>
           {row.original.trip_title ?? "Custom trip"}
         </span>
@@ -228,15 +240,21 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       if (!r.start_date) {
         return (
           <span className="text-[13px] text-muted">
-            {r.duration_days ? `${r.duration_days} days, no date` : "—"}
+            {r.duration_days ? <span className="whitespace-nowrap">{r.duration_days} days</span> : "—"}
+            {r.duration_days ? <span className="block text-xs">no date yet</span> : null}
             {r.pax ? <span className="block text-xs">{r.pax} pax</span> : null}
           </span>
         );
       }
       return (
         <span className="text-[13px] text-body">
-          {formatDate(r.start_date)}
-          {r.trip_end_date && <> – {formatDate(r.trip_end_date)}</>}
+          <span className="whitespace-nowrap">{formatDate(r.start_date)}</span>
+          {r.trip_end_date && (
+            <>
+              {" "}
+              – <span className="whitespace-nowrap">{formatDate(r.trip_end_date)}</span>
+            </>
+          )}
           {sub && <span className="block text-xs text-muted">{sub}</span>}
         </span>
       );
@@ -267,7 +285,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       if (!sales) return <span className="text-[13px] text-muted">Unassigned</span>;
       const name = sales.name ?? sales.cis_user_id;
       return (
-        <span className="block text-[13px] text-body md:max-w-[100px] md:truncate" title={name}>
+        <span className="block text-[13px] text-body md:max-w-[90px] md:truncate" title={name}>
           {name}
         </span>
       );
