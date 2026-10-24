@@ -33,7 +33,18 @@ import type {
   SupplierList,
   SupplierSummary,
 } from "../../lib/api/suppliers";
-import type { Hotel, HotelDetail, Page, RoomType, Service, ServiceDetail, SupplierRate } from "../../lib/api/supply";
+import type {
+  Hotel,
+  HotelDetail,
+  MediaList,
+  Page,
+  RoomType,
+  Service,
+  ServiceDetail,
+  SupplierRate,
+  SupplyContent,
+  SupplyMedia,
+} from "../../lib/api/supply";
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
@@ -459,6 +470,36 @@ function supplyBase(i: number) {
   };
 }
 
+const CIS_CONTENT: SupplyContent = {
+  content_status: "published",
+  content_version: 12,
+  description:
+    "A heritage riverside hotel a short walk from the Old Town lanes, with a saltwater pool shaded by frangipani, bicycles to borrow and a quiet garden terrace where breakfast is served until late morning.",
+  highlights: ["Riverside garden terrace and saltwater pool", "Ten minutes on foot to the Japanese Covered Bridge", "Bicycles to borrow"],
+  photo_urls: [],
+  edit_url: "/admin/supply-content/5b0d1c7e-2f4a-4c55-9a43-7f1f0c2b9e10",
+};
+
+function supplyMedia(i: number, entity: "hotel" | "service"): SupplyMedia {
+  return {
+    id: `m-${i}`,
+    entity_type: entity,
+    entity_id: HOTEL_ID,
+    content_type: "image/jpeg",
+    bytes: 2_950_000 - i * 400_000,
+    width: 4032,
+    height: 3024,
+    sha256: "0".repeat(64),
+    usage_rights: i !== 1,
+    status: "active",
+    uploaded_by: { id: "u-001", name: "Nguyen Thi Bich Ngoc Contracting" },
+    updated_by: "u-001",
+    created_at: "2026-09-28T09:30:00+00:00",
+    updated_at: "2026-09-28T09:30:00+00:00",
+    url: null,
+  };
+}
+
 function hotel(i: number): Hotel {
   return {
     ...supplyBase(i),
@@ -734,17 +775,21 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   }
   if (at(0) === "contracts" && at(2) === "rates") return ok({ items: [...range(8).map((i) => rate(i, false)), ...range(4).map((i) => rate(i, true))] });
 
+  // AA-835: supplier photos (no preview URL: no network in the check) and the CIS content panel, long text.
+  if ((at(0) === "hotels" || at(0) === "services") && at(2) === "media") {
+    return ok({ items: range(3).map((i) => supplyMedia(i, at(0) === "hotels" ? "hotel" : "service")), max_bytes: 3145728, max_active: 40 } satisfies MediaList);
+  }
   if (p === "hotels") return ok(page(range(ROWS).map(hotel), 86));
   if (at(0) === "hotels" && at(2) === "rates") return ok({ items: range(10).map((i) => rate(i, false)) });
   if (at(0) === "hotels" && seg.length === 2) {
-    const h: HotelDetail = { ...hotel(0), room_types: range(4).map(roomType), recent_activity: ACTIVITY };
+    const h: HotelDetail = { ...hotel(0), room_types: range(4).map(roomType), recent_activity: ACTIVITY, content: CIS_CONTENT };
     return ok(h);
   }
 
   if (p === "services") return ok(page(range(ROWS).map(service), 203));
   if (at(0) === "services" && at(2) === "rates") return ok({ items: range(8).map((i) => rate(i, true)) });
   if (at(0) === "services" && seg.length === 2) {
-    const s: ServiceDetail = { ...service(0), recent_activity: ACTIVITY };
+    const s: ServiceDetail = { ...service(0), recent_activity: ACTIVITY, content: { ...CIS_CONTENT, content_status: "stale", description: null, highlights: [] } };
     return ok(s);
   }
 

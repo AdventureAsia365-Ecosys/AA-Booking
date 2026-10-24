@@ -266,6 +266,12 @@ export interface VersionItemSupply {
   code: string;
   label: string;
   active: boolean;
+  /** AA-835: the hotel (of a room type) or the service whose CIS content the item carries. */
+  entity_type?: "hotel" | "service";
+  entity_id?: string;
+  /** AA-835: the description / highlights CIS **published** for it; null / [] otherwise (draft, stale, none). */
+  description?: string | null;
+  highlights?: string[];
 }
 
 export interface VersionItem {

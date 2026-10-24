@@ -23,6 +23,10 @@
   (or references one and has no cost lines) and the PUT gives no ``costs`` for it, the item takes the rate in force as
   its default net cost line (``app.supply.rates.default_cost``; ``supplier_rate_id`` keeps the provenance). The
   response's ``rate_defaults`` lists what was defaulted, or that no rate was in force.
+- **CIS content** (AA-835, root ADR 0004a): an item that books a room type or a service carries the description and
+  highlights CIS **published** for its hotel / service (``supply.description`` / ``supply.highlights``, read live from
+  ``catalog.v_supply_content``); a draft, in review, stale or unpublished entity gives null / [], and so does a
+  Booking without CIS 278 (``app.supply.content``).
 - **Price** (``POST …/versions/{n}/price``) runs the pricing engine (``app.pricing.service``, the same code as
   quote-preview) on the stored cost lines and saves the total, selling currency, channel and the selling FX rate
   on a draft. A total below the channel floor needs a reason (audited). Send then locks all of it (bk-005).
@@ -44,6 +48,7 @@ from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.notifications import service as notifications
 from app.pricing import engine
 from app.pricing import service as pricing
+from app.supply import content as supply_content
 from app.supply import rates as supply_rates
 from app.trip_cases import sql
 from app.trip_cases.service import ensure_staff_managed, is_terminal, resolve_case, set_status
@@ -76,15 +81,17 @@ ITEM_COSTS_JSON = """
                 ORDER BY c.created_at, c.id), '[]'::json)::text
      FROM booking.version_item_costs c WHERE c.version_item_id = booking.trip_case_version_itinerary.id) AS costs
 """
-# The hotel room type or service an item books, as JSON text (null when none).
+# The hotel room type or service an item books, as JSON text (null when none). ``entity_type`` / ``entity_id`` name the
+# hotel or service whose CIS content the item may carry (AA-835: a room type's content is its hotel's).
 ITEM_SUPPLY_JSON = """
     coalesce(
         (SELECT json_build_object('kind', 'room_type', 'id', t.id::text, 'code', h.code,
-                    'label', h.name || ' · ' || t.name, 'active', t.status = 'active' AND h.status = 'active')::text
+                    'label', h.name || ' · ' || t.name, 'active', t.status = 'active' AND h.status = 'active',
+                    'entity_type', 'hotel', 'entity_id', h.id::text)::text
          FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id
          WHERE t.id = booking.trip_case_version_itinerary.hotel_room_type_id),
         (SELECT json_build_object('kind', 'service', 'id', s.id::text, 'code', s.code, 'label', s.title,
-                    'active', s.status = 'active')::text
+                    'active', s.status = 'active', 'entity_type', 'service', 'entity_id', s.id::text)::text
          FROM booking.services s WHERE s.id = booking.trip_case_version_itinerary.service_id)) AS supply
 """
 
@@ -128,7 +135,9 @@ def prefill_from_legs(legs: list[Any], snapshot: dict[str, Any] | None) -> list[
     ]
 
 
-async def _items(conn: asyncpg.Connection, version_id: str) -> list[dict[str, Any]]:
+async def _items(conn: asyncpg.Connection, version_id: str, *, content: bool = False) -> list[dict[str, Any]]:
+    """The items of a version in order. ``content``: each item that books supply also carries the CIS-published
+    description and highlights of its hotel / service (AA-835; responses only, never the write-path comparisons)."""
     rows = await conn.fetch(
         f"SELECT id::text AS id, {ITEM_SELECT}, {ITEM_COSTS_JSON}, {ITEM_SUPPLY_JSON}"  # noqa: S608 — constant
         " FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid ORDER BY position",
@@ -140,6 +149,8 @@ async def _items(conn: asyncpg.Connection, version_id: str) -> list[dict[str, An
         item["costs"] = sql.loads(item.get("costs"), [])
         item["supply"] = sql.loads(item.get("supply"), None)
         out.append(item)
+    if content:
+        await supply_content.attach_to_items(conn, out)
     return out
 
 
@@ -446,7 +457,7 @@ async def create_version(
             latest["id"],
         )
     version = sql.version_dict(await _version(conn, case["id"], number))
-    version["items"] = await _items(conn, version_id)
+    version["items"] = await _items(conn, version_id, content=True)
     await audit.record(
         conn,
         actor_type="staff",
@@ -488,7 +499,7 @@ async def get_version(conn: asyncpg.Connection, ref: str, number: int) -> dict[s
 async def get_items(conn: asyncpg.Connection, ref: str, number: int) -> dict[str, Any]:
     case = await resolve_case(conn, ref)
     version = sql.version_dict(await _version(conn, case["id"], number))
-    version["items"] = await _items(conn, version["id"])
+    version["items"] = await _items(conn, version["id"], content=True)
     return version
 
 
@@ -620,7 +631,7 @@ async def replace_items(
     except asyncpg.ObjectNotInPrerequisiteStateError as exc:  # approved / sent meanwhile (DB lock triggers)
         raise Conflict("version_locked", "the version is locked") from exc
     version = sql.version_dict(await _version(conn, case["id"], number))
-    version["items"] = await _items(conn, version["id"])
+    version["items"] = await _items(conn, version["id"], content=True)
     version["rate_defaults"] = rate_defaults
     await audit.record(
         conn,

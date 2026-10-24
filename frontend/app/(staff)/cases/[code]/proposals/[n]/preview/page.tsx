@@ -8,6 +8,8 @@
 // (POST …/versions/{n}/send), which marks the version sent and locks it; it never claims an e-mail.
 // CIS day text, photos, inclusions and the map join when GET /booking/catalog/tours/{id} exists (§6.2);
 // until then the preview shows exactly what Booking stores and says what is missing. Download PDF is W2.
+// AA-835: an item that books a hotel room or a service shows the description and highlights CIS published for it
+// (the API sends them only while published; draft / stale content never reaches a proposal).
 
 import { use, useState } from "react";
 import Link from "next/link";
@@ -195,6 +197,18 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                                 {it.source_tour_id && <FromCisTag />}
                               </div>
                               {it.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-body">{it.notes}</p>}
+                              {it.supply?.description && (
+                                <div className="mt-1.5 text-[13px] leading-relaxed text-body">
+                                  <p className="whitespace-pre-line">{it.supply.description}</p>
+                                  {(it.supply.highlights?.length ?? 0) > 0 && (
+                                    <ul className="mt-1 list-disc pl-5">
+                                      {(it.supply.highlights ?? []).map((h) => (
+                                        <li key={h}>{h}</li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ))
                         )}
