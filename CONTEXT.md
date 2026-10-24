@@ -62,7 +62,10 @@ Design sources, in order:
 - **Publishes** to CIS (AA-858, contract `ops.overview.v1`, root ADR 0008 §5): two aggregate views in its own schema,
   `booking.v_ops_funnel_daily` (per UTC day, metric, source system) and `booking.v_ops_case_status` (cases per current
   status), `bk-017`, SELECT to the CIS runtime role `cis_app` (plus USAGE on schema `booking`); the CIS admin overview
-  reads them. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` → `booking.customers` 42501).
+  reads them. **Supply facts** (AA-835, root ADR 0004a, contracts `supply.hotel.v1` / `supply.service.v1`, `bk-023`):
+  the `supply` stream of `booking.outbox` read through `booking.v_supply_outbox`, and the facts-only views
+  `v_supply_hotels` / `v_supply_services` / `v_supply_media`, SELECT to `cis_app`; CIS drafts the customer content from
+  them. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` → `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
   API `/booking/b2b/v1` takes only client-credentials tokens of the Cognito M2M pool `aa-m2m-<env>` plus the agency's
   `X-AA-Tenant-Id`, checked against `booking.b2b_partners` (see "B2B API" below). The agency-facing price is
@@ -569,7 +572,7 @@ The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (A
 - **Isolation from CIS (X1 done, 19/10/2026).** The CIS runtime logs in as `cis_app` since X1 S18 and its
   task role is denied the master and `booking/*` secrets since S19, so it cannot read `booking.*` (42501;
   isolation probe cell "CIS runtime → `booking.customers` 42501" passes, 58/58 after S22). `cis_app` reads only the
-  contract views granted in bk-017. The RDS master `aa_cis_admin` still inherits `bk_owner` (rl-001; on
+  contract views granted in bk-017 and bk-023. The RDS master `aa_cis_admin` still inherits `bk_owner` (rl-001; on
   PostgreSQL 15 the grant follows the member's INHERIT, per-grant `INHERIT FALSE` needs 16), so it can read and
   alter `booking.*`, but it is break-glass only (data standards DM-8.9): no app, workflow or ECS-exec script logs
   in as the master, and the nightly probe cell `sessions.master_break_glass_only` flags any session of it.
@@ -830,6 +833,27 @@ SELECT, INSERT, UPDATE of the clear columns only); `b2b_hold_lines` `answer_due_
 older on-request lines. No personal data, no free-text column. In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-022
 before the code deploys (readiness fails until then).
 
+### `bk-023` (AA-835 supply content, root ADR 0004a — needs `bk-003`, `bk-010`, `bk-017`, `bk-022`)
+
+`outbox` stream `supply` (columns `entity_type` `hotel|service`, `entity_id`, `supply_version`; event types
+`supply.upsert` / `supply.deactivate`; CHECK `outbox_supply_chk`: a supply row names its entity and version and no b2b
+id or code, a b2b row has none of the three; index on `feed_seq` for the supply stream); `supply_version` BIGINT on
+`hotels` and `services` (1 at insert, +1 per material change of the contract facts, by the BEFORE triggers
+`hotels_supply_version` / `services_supply_version`; any write of the column is one bump, never another value; notes,
+links, source refs and audit columns are not material); a room type insert / material change bumps its hotel
+(`hotel_room_types_supply_bump`); the AFTER trigger `supply_outbox` writes one supply outbox row per insert and per new
+version (`supply.deactivate` while inactive, `supply.upsert` while active); `entity_media` (supplier photos: entity
+type + id (no FK; the bump trigger refuses a missing entity), bucket `aa-booking-<env>-supply-media-<account>`, key
+derived from the row `supply-media/<type>/<entity>/<id>.<ext>` by CHECK, JPEG/PNG/WebP ≤ 10 MB, sha256,
+`usage_rights` default false, status `active|removed` (removed is final); a photo insert, rights flip or removal bumps
+the entity; role `booking`: SELECT, INSERT, UPDATE of `usage_rights` / `status` / `updated_*`, no DELETE); views
+(`security_barrier`, facts only, SELECT to `cis_app`, read-only for `booking`): `v_supply_hotels`,
+`v_supply_services` (contract facts + id + version, room types and active photos as JSON), `v_supply_media` (active
+photos with bucket / key / sha256 for the CIS copy), `v_supply_outbox` (stamped supply events; CIS pages on
+`feed_seq`). Hotels and services that exist before bk-023 enter the stream on their next material change (or a touch
+`SET supply_version = supply_version + 1`). Not yet in `REQUIRED_SCHEMA_VERSIONS`: the upload / read-back code (AA-835
+S4) adds it after the apply.
+
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
 operations / money (AA-682).
@@ -840,8 +864,7 @@ Post-sale status edges, **customer e-mail** (proposal send writes a customer not
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix
 and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
-contract), the supply stream of the outbox / `v_supply_*` views / `supply.hotel.v1`·`supply.service.v1` contracts (ADR
-0004a, AA-835; the shared outbox `booking.outbox` exists since bk-022), supplier media (`entity_media`), contract document upload, supplier hard delete,
+contract), the supplier photo upload API and the read-back of CIS content (AA-835 S4; the schema is bk-023), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).
