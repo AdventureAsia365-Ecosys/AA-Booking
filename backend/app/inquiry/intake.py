@@ -9,7 +9,7 @@
     lower id can still commit (see :data:`SAFE_AFTER_SECONDS`).
 
 ``bk_inquiry_process`` (one per inbox row)
-    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2 / v1.3), then in ONE transaction, holding the inbox
+    Validates the payload (inquiry.submitted v1 / v1.1 / v1.2 / v1.3 / v1.4), then in ONE transaction, holding the inbox
     row lock: creates a lead customer (O6), the trip case and its legs, a staff notification (plus one
     ``bk_notify_email`` job for it, AA-811) and an audit row, and marks the inbox row ``processed``.
     Re-running it is a no-op. A legacy hand-off with ``customer: null`` (or a contact with neither
@@ -22,23 +22,44 @@ customer. It always becomes a new lead row (``verified = false``, ``source = 'tr
 when its email or phone matches an existing live customer the lead carries
 ``needs_merge_review = true`` and ``merge_candidate_id``. Only a contact marked ``verified`` whose
 email matches a verified customer is linked to that customer.
+
+Signed-in traveller (contract v1.4, AA-908, root ADR 0006 Phase 4; ``Contact.signed_in``: identity + verified + email):
+the contact is a verified customer, found in this order (:func:`resolve_signed_in`, same transaction):
+  (a) its identity ``(iss, sub)`` in ``booking.customer_identities`` → that customer (when still live);
+  (b) else a verified live customer with the same email → that customer, and the identity is attached to it;
+  (c) else a new customer, ``verified = true``, ``source = 'traveller_signin'``, with the name and the token's email
+      only (no phone or other typed field is imported, ADR 0006 Phase 4).
+The identity must come from the pinned traveller issuer (``COGNITO_EXTERNAL_ISSUER``, :func:`build_handlers`); any other
+issuer, or a non-https one, fails the hand-off as a contract error instead of reaching the bk-024 shape CHECK.
+Concurrent hand-offs of one identity are serialised by a transaction advisory lock on (iss, sub), so the second one
+sees the first one's customer instead of failing on the key and waiting for a retry.
+An identity whose customer was archived is re-pointed to the customer of (b) / (c). Then every unverified live
+``tripplanner_lead`` / ``manual`` customer with the same email and no merge candidate yet is flagged
+``needs_merge_review`` with ``merge_candidate_id`` = the verified customer — never merged: a lead's email was typed
+by an unauthenticated guest. A blocked customer still gets the case (staff decide); the notification says so.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Collection
 from datetime import datetime
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
+from app.auth.identity_config import DEV_EXTERNAL_ISSUER
 from app.inquiry import leg_keys
 from app.inquiry.contract import CONTRACT, SOURCE, Contact, ContractError, Inquiry, Leg, parse, version_label
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.jobs.worker import PermanentError, Recurring
+from app.jobs.worker import Handler, PermanentError, Recurring
 from app.notifications import staff_email
+
+if TYPE_CHECKING:
+    from app.settings import Settings
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +77,12 @@ PULL_BATCH = 200
 MAX_PRODUCER_TX_SECONDS = 300
 SAFE_AFTER_SECONDS = 2 * MAX_PRODUCER_TX_SECONDS
 
+# The traveller issuers a v1.4 identity may come from when no settings are bound (tests, HANDLERS); the worker binds
+# Settings.cognito_external_issuer through build_handlers().
+DEFAULT_TRAVELLER_ISSUERS = frozenset({DEV_EXTERNAL_ISSUER})
+
 LEAD_SOURCE = "tripplanner_lead"
+SIGNIN_SOURCE = "traveller_signin"  # bk-024 customers_source_chk
 
 RECURRING = (Recurring(PULL_KIND, PULL_EVERY_SECONDS),)
 
@@ -199,6 +225,86 @@ async def resolve_customer(conn: asyncpg.Connection, contact: Contact) -> tuple[
     return lead_id, True, candidate is not None
 
 
+async def resolve_signed_in(conn: asyncpg.Connection, contact: Contact) -> tuple[str, str, int]:
+    """Return (customer_id, how, leads_flagged) for a signed-in contact; ``how`` is identity | email | created.
+
+    Caller guarantees ``contact.signed_in``. Runs inside the intake transaction. Logs nothing about the identity or the
+    email (DM-6.4)."""
+    identity, email = contact.identity, contact.email
+    assert identity is not None and email  # noqa: S101 — Contact.signed_in, checked by the caller
+    # Two hand-offs of one new identity at the same time: the second waits here, then sees the first one's row.
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text || ' ' || $2::text, 908))", identity.iss, identity.sub
+    )
+    known = await conn.fetchrow(
+        """
+        SELECT ci.customer_id::text AS customer_id, c.deleted_at IS NULL AS live
+        FROM booking.customer_identities ci
+        JOIN booking.customers c ON c.id = ci.customer_id
+        WHERE ci.iss = $1 AND ci.sub = $2
+        FOR UPDATE OF ci
+        """,
+        identity.iss,
+        identity.sub,
+    )
+    if known is not None and known["live"]:
+        customer_id, how = known["customer_id"], "identity"
+    else:
+        customer_id = await conn.fetchval(
+            "SELECT id::text FROM booking.customers WHERE verified AND deleted_at IS NULL AND lower(email) = $1",
+            email,
+        )
+        how = "email"
+        if customer_id is None:
+            customer_id = await conn.fetchval(
+                """
+                INSERT INTO booking.customers
+                    (name, email, verified, source, external_ref, contact_consent, contact_consent_at)
+                VALUES ($1, $2, true, $3, $4, $5, $6)
+                RETURNING id::text
+                """,
+                contact.name or None,
+                email,
+                SIGNIN_SOURCE,
+                contact.external_ref,
+                contact.consent,
+                _ts(contact.consent_at),
+            )
+            how = "created"
+        if known is None:
+            await conn.execute(
+                "INSERT INTO booking.customer_identities (iss, sub, customer_id) VALUES ($1, $2, $3::uuid)",
+                identity.iss,
+                identity.sub,
+                customer_id,
+            )
+        else:  # its customer was archived: the identity now signs in as this one
+            await conn.execute(
+                "UPDATE booking.customer_identities SET customer_id = $3::uuid WHERE iss = $1 AND sub = $2",
+                identity.iss,
+                identity.sub,
+                customer_id,
+            )
+    flagged = await conn.execute(
+        """
+        UPDATE booking.customers
+        SET needs_merge_review = true, merge_candidate_id = $1::uuid
+        WHERE NOT verified AND deleted_at IS NULL AND lower(email) = $2 AND id <> $1::uuid
+          AND merge_candidate_id IS NULL AND source = ANY($3::text[])
+        """,
+        customer_id,
+        email,
+        [LEAD_SOURCE, "manual"],
+    )
+    return customer_id, how, _updated(flagged)
+
+
+def _updated(status: str) -> int:
+    """Row count of an asyncpg UPDATE status ("UPDATE 3" -> 3; anything else -> 0)."""
+    verb, _, count = (status or "").partition(" ")
+    return int(count) if verb == "UPDATE" and count.isdigit() else 0
+
+
 async def tour_keys(conn: asyncpg.Connection, legs: tuple[Leg, ...]) -> dict[int, leg_keys.TourKey]:
     """Catalog tour key per leg position: the payload's (v1.2), else ``source_tour_id`` resolved against the catalog."""
     out: dict[int, leg_keys.TourKey] = {
@@ -235,7 +341,14 @@ def unavailable_note(counts: dict[str, int]) -> str:
 async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inquiry) -> dict[str, Any]:
     contact = inquiry.contact
     assert contact is not None  # noqa: S101 — checked by the caller
-    customer_id, created_lead, review = await resolve_customer(conn, contact)
+    signed_in: dict[str, Any] = {}
+    if contact.signed_in:
+        customer_id, how, flagged = await resolve_signed_in(conn, contact)
+        created_lead, review = False, False
+        blocked = await conn.fetchval("SELECT is_blocked FROM booking.customers WHERE id = $1::uuid", customer_id)
+        signed_in = {"signed_in": how, "leads_flagged_for_review": flagged, "customer_blocked": blocked is True}
+    else:
+        customer_id, created_lead, review = await resolve_customer(conn, contact)
     case = await conn.fetchrow(
         """
         INSERT INTO booking.trip_cases
@@ -280,12 +393,22 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
         "legs_without_tour_key": len(inquiry.legs) - keyed,
         "legs_unavailable": unavailable,
         "contract_version": inquiry.version,
+        **signed_in,
     }
     message = f"{contact.name or 'A traveller'} sent a trip with {len(inquiry.legs)} AA tour leg(s)."
+    if signed_in:
+        message += " Signed-in traveller (verified email)."
+        if signed_in["customer_blocked"]:
+            message += " Customer is blocked."
     if unavailable:
         message += " " + unavailable_note(unavailable)
     if review:
         message += " The contact matches an existing customer: review before merging."
+    if signed_in.get("leads_flagged_for_review"):
+        message += (
+            f" {signed_in['leads_flagged_for_review']} earlier unverified lead(s) with the same email are marked for"
+            " merge review."
+        )
     notification_id = await conn.fetchval(
         """
         INSERT INTO booking.notifications
@@ -316,7 +439,9 @@ async def _open_trip_case(conn: asyncpg.Connection, event_id: str, inquiry: Inqu
     return summary
 
 
-async def process(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
+async def process(
+    pool: asyncpg.Pool, job: Job, *, traveller_issuers: Collection[str] = DEFAULT_TRAVELLER_ISSUERS
+) -> dict[str, Any]:
     event_id = job.payload.get("inbox_event_id")
     if not isinstance(event_id, str):
         raise PermanentError("payload.inbox_event_id missing")
@@ -331,7 +456,7 @@ async def process(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
         if event["status"] != "received":
             return {"outcome": "noop", "status": event["status"]}
         try:
-            inquiry = parse(json.loads(event["payload"]))
+            inquiry = parse(json.loads(event["payload"]), traveller_issuers=traveller_issuers)
         except ContractError as exc:
             await _mark(conn, event_id, "failed", str(exc)[:2000])
             log.warning("inquiry %s rejected: %s", event_id, exc)
@@ -361,3 +486,11 @@ async def process(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
 
 
 HANDLERS = {PULL_KIND: pull, PROCESS_KIND: process}
+
+
+def build_handlers(settings: Settings) -> dict[str, Handler]:
+    """The intake handlers with the traveller issuer pinned to ``COGNITO_EXTERNAL_ISSUER`` (what the worker runs)."""
+    return {
+        PULL_KIND: pull,
+        PROCESS_KIND: partial(process, traveller_issuers=frozenset({settings.cognito_external_issuer})),
+    }

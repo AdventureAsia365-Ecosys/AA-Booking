@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.auth.identity_config import DEV_EXTERNAL_ISSUER, DEV_WORKFORCE_ISSUER
 from app.settings import Settings, SettingsError, load_settings
 
 
@@ -108,4 +109,33 @@ def test_reads_email_settings() -> None:
 )
 def test_email_settings_are_validated(env: dict) -> None:
     with pytest.raises(SettingsError):
+        load_settings(env)
+
+
+# ── AA-908: the traveller (EXTERNAL) issuer pinned by the inquiry intake ───
+
+
+def test_external_issuer_defaults_to_dev_and_reads_the_env() -> None:
+    assert load_settings({}).cognito_external_issuer == DEV_EXTERNAL_ISSUER
+    other = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_Other1"
+    assert load_settings({"COGNITO_EXTERNAL_ISSUER": f" {other} "}).cognito_external_issuer == other
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"COGNITO_EXTERNAL_ISSUER": "http://cognito-idp.example/pool"},
+        {"COGNITO_EXTERNAL_ISSUER": "https://cognito-idp.example/pool/"},
+        {"COGNITO_EXTERNAL_ISSUER": "https://" + "a" * 293},
+        {"COGNITO_EXTERNAL_ISSUER": DEV_WORKFORCE_ISSUER},
+        {
+            "COGNITO_EXTERNAL_ISSUER": "https://m2m.example/pool",
+            "COGNITO_M2M_ISSUER": "https://m2m.example/pool",
+            "COGNITO_M2M_CRM_CLIENT_ID": "crmclient1",
+        },
+    ],
+    ids=["http", "trailing-slash", "too-long", "workforce", "m2m"],
+)
+def test_external_issuer_is_validated(env: dict) -> None:
+    with pytest.raises(SettingsError, match="COGNITO_EXTERNAL_ISSUER"):
         load_settings(env)

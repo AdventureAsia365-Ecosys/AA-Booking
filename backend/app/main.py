@@ -101,7 +101,7 @@ def create_app(
         )
         if settings.worker_enabled and db.configured:
             handlers = {
-                **intake.HANDLERS,
+                **intake.build_handlers(settings),
                 staff_email.KIND: staff_email.build_handler(settings),
                 **retention_jobs.build_handlers(),
                 **b2b_expiry.HANDLERS,

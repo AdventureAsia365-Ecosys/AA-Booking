@@ -2,7 +2,7 @@
 
 Contract rule 7: consumer tests parse samples of every accepted version. ``v1_1_as_tripplanner_sends``
 is what TripPlanner emitted before AA-805 (PR #69): the v1.1 shape still labelled ``version: 1``; ``v1_2`` is
-what it emitted from AA-830 on; ``v1_3`` what it emits from AA-986 L6 on.
+what it emitted from AA-830 on; ``v1_3`` what it emits from AA-986 L6 on; ``v1_4`` what it sends from AA-908 S4 on.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from __future__ import annotations
 import copy
 import uuid
 from typing import Any
+
+from app.auth.identity_config import DEV_EXTERNAL_ISSUER
 
 
 def _itinerary() -> dict[str, Any]:
@@ -141,6 +143,22 @@ def v1_3(email: str | None = None, *, unavailable: str | None = None) -> dict[st
             }
             | flag
         )
+    return payload
+
+
+# The Dev EXTERNAL issuer: the one intake accepts by default (intake.DEFAULT_TRAVELLER_ISSUERS).
+ISS = DEV_EXTERNAL_ISSUER
+FOREIGN_ISS = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_OtherPool9"
+
+
+def v1_4(email: str | None = None, *, sub: str | None = None, signed_in: bool = True) -> dict[str, Any]:
+    """v1.4 (AA-908): v1.3 plus ``customer.identity``. Signed in (default): the token's email, ``verified`` true and
+    ``identity`` = {iss, sub} (a fresh sub unless given); a guest send: ``verified`` false and ``identity`` null."""
+    payload = v1_3(email)
+    payload["version"] = 1.4
+    customer = payload["customer"]
+    customer["verified"] = signed_in
+    customer["identity"] = {"iss": ISS, "sub": sub or str(uuid.uuid4())} if signed_in else None
     return payload
 
 
