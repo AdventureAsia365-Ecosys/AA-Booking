@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.5.0...v0.6.0) (2026-10-24)
+
+
+### Features
+
+* accept inquiry.submitted v1.4 and link a signed-in traveller to one verified customer ([#90](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/90)) ([174a194](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/174a194c6fd80044f55c60b76084cd79b204397e))
+* migration bk-023 (outbox supply stream, supply_version, entity_media, v_supply_* views) ([#84](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/84)) ([361e356](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/361e35660162496e9a159c7393879add2955088c))
+* migration bk-024 (customer_identities, traveller_signin customer source) ([#87](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/87)) ([ae9d652](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ae9d652562e199ce611903225da3e1952618504e))
+* read-only session for the E2E staff user, plus a signed-in smoke note ([#89](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/89)) ([b1ba26b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/b1ba26b12eae35724433daeebecbd5c19dd89836))
+* supplier photo upload, CIS content read-back and published text on proposals (AA-835) ([#86](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/86)) ([f2eedbd](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f2eedbdfd281f82ffec338325330a4edb239abab))
+
+
+### Bug Fixes
+
+* staff tables fit 1400 px with real Dev data shapes, no /cases layout shift ([#88](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/88)) ([0748333](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/074833394128e01e60ca5618609f4765c02b2b10))
+
 ## [0.5.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.4.0...v0.5.0) (2026-10-24)
 
 
