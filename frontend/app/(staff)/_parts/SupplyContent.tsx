@@ -4,10 +4,11 @@
 // - CisContentPanel: the customer content CIS published for the record, read-only, with its status and an "Edit in
 //   CIS" link. The link is CIS_ADMIN_URL + the `edit_url` path CIS serves (never built from Booking ids). Hidden while
 //   the API says `content: null` (CIS 278 not served yet): the read-back turns itself on when CIS ships the view.
-// - SupplierPhotos: photos contracting received from the supplier. Upload (JPEG / PNG / WebP; a larger photo is
-//   downsized in the browser first, since the BFF and API take at most 3 MB of image), a "usage rights" switch (CIS
-//   publishes a photo only while it is on), and Remove (final; the file is kept). Writes need supply.write, so a
-//   Preview-host session (read-only) and sales only see the photos.
+// - SupplierPhotos: photos contracting received from the supplier. Upload (JPEG / PNG / WebP; every photo is
+//   re-encoded in the browser first: that strips EXIF data such as GPS, gives a type that matches the bytes even
+//   when the file name lies, and downsizes it, since the BFF and API take at most 3 MB of image), a "usage rights"
+//   switch (CIS publishes a photo only while it is on), and Remove (final; the file is kept). Writes need
+//   supply.write, so a Preview-host session (read-only) and sales only see the photos.
 
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -110,12 +111,10 @@ function encode(canvas: HTMLCanvasElement, type: string, quality: number): Promi
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
-/** The bytes to send: the file as it is when it fits, otherwise a downsized WebP (JPEG where the browser cannot encode
- *  WebP). The API reads the real type from the bytes, so `content_type` is the encoded blob's type. */
+/** The bytes to send: always a re-encoded WebP (JPEG where the browser cannot encode WebP), downsized until it fits.
+ *  Never the original file: re-encoding drops its metadata (EXIF, including GPS, never reaches S3), and `content_type`
+ *  is the encoded blob's type, so a mislabelled file (a PNG saved as .jpg) cannot fail with content_type_mismatch. */
 export async function prepareUpload(file: File, maxBytes: number): Promise<{ content_type: MediaType; data_base64: string }> {
-  if (isMediaType(file.type) && file.size <= maxBytes) {
-    return { content_type: file.type, data_base64: await toBase64(file) };
-  }
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);

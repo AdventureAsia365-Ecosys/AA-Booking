@@ -56,8 +56,8 @@ Design sources, in order:
   read-back** (AA-835 S4, root ADR 0004a decision 4, CIS migration 278): `catalog.v_supply_content`, read live
   (`app/supply/content.py`): the hotel / service detail shows what CIS published (status, text, photo URLs, the CIS
   `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. Also
-  feature-detected: until CIS 278 is applied (or when the read fails) `content` is null and the staff UI hides the
-  panel. Later: other catalog views (`v_tour_place`), CIS golden records.
+  feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
+  CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request. Later: other catalog views (`v_tour_place`), CIS golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
   (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
@@ -948,8 +948,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   item drawer can book a room type or service (its net defaults from the rate); AA-835 S4: the hotel drawer and the
   service Overview show "Customer content (From CIS)" (status, published text and photos, "Edit in CIS" = the
   `NEXT_PUBLIC_CIS_ADMIN_URL` origin + the path CIS serves; hidden while the API sends `content: null`) and "Supplier
-  photos" (upload, usage rights, remove: `supply.write`; a photo over 3 MB is downsized in the browser first, and the
-  BFF lets only that upload route carry up to 4.4 MB of body, under Vercel's 4.5 MB limit); the proposal builder and
+  photos" (upload, usage rights, remove: `supply.write`; every photo is re-encoded in the browser first (no EXIF
+  reaches S3; downsized to at most 3 MB), and the BFF lets only that upload route carry up to 4.4 MB of body, under Vercel's 4.5 MB limit); the proposal builder and
   preview show the published description under an item that books supply; the other
   wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a

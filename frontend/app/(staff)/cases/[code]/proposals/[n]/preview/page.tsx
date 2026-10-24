@@ -71,6 +71,8 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const cfg = settingsFromApi(settings.data?.values);
   const days = itemsByDay(v.items);
   const locked = v.is_sent_to_customer || v.is_approved;
+  // AA-835: supply descriptions are read live from CIS, not stored with the version (snapshot comes with e-mail / PDF).
+  const liveSupplyText = v.items.some((it) => it.supply?.description);
   const canSend = canWrite && !locked && SENDABLE_FROM.includes(c.status);
   const builderHref = `/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}`;
   const tripName = v.title ?? c.trip_title ?? "Custom trip";
@@ -133,7 +135,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
         </div>
 
         {locked && (
-          <div role="status" className="flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
+          <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved ? (
               <span>Approved by the customer: this version is locked.</span>
@@ -142,6 +144,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                 Marked as sent on <DateText value={v.sent_at} />: this version is locked. Booking does not send e-mail yet.
               </span>
             )}
+            {liveSupplyText && <span className="text-muted">Hotel and service descriptions show what CIS publishes today.</span>}
           </div>
         )}
 

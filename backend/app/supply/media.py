@@ -18,7 +18,12 @@ use it. A photo is never deleted: ``status`` goes ``active`` → ``removed`` (fi
   then the S3 put, all inside the caller's transaction: a failed put rolls the row back, so no row ever names a
   missing object. A put that succeeded before a failed commit leaves an object no row names (harmless, never served).
 - **Reads**: the list carries a presigned GET URL per photo (15 minutes, signed with the task role), so the staff UI
-  can show a private object without a public bucket or a CDN. Bucket and key never leave the API.
+  can show a private object without a public bucket or a CDN. Bucket and key are not response fields, but a presigned
+  URL necessarily names both (the bucket, which carries the account id, in its host; the key in its path), so staff
+  with ``supply.read`` see them inside that short-lived URL.
+- **S3 calls are bounded** (3 s connect, 10 s read, 2 attempts in total): the put runs inside the request
+  transaction, which holds the hotel / service row lock, so a slow S3 must fail before API Gateway's 29 s limit
+  instead of holding the lock (and answering 504 for a write that later commits).
 
 Permissions: ``supply.read`` lists, ``supply.write`` uploads and changes (admin, contracting). Every write adds one
 ``booking.audit_logs`` row (``entity_type`` ``entity_media``), shown in the hotel's / service's recent activity.
@@ -31,6 +36,7 @@ import base64
 import binascii
 import hashlib
 import logging
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -48,11 +54,16 @@ log = logging.getLogger(__name__)
 
 MAX_BYTES = 3 * 1024 * 1024
 # Base64 of MAX_BYTES (4 output characters per 3 input bytes, padded): the request model refuses a longer string
-# before anything is decoded.
+# before anything is decoded (in :func:`decode`, so the client gets the ``image_too_large`` code).
 MAX_BASE64_CHARS = 4 * ((MAX_BYTES + 2) // 3)
 MAX_DIMENSION = 20_000  # bk-023 entity_media_size_chk
 MAX_ACTIVE_PER_ENTITY = 40
 PRESIGN_SECONDS = 900
+# One S3 call (connect + a stalled read) is at most 3 + 10 s; two attempts in total (botocore ``total_max_attempts``
+# counts the first one) keep the worst case at 26 s, under API Gateway's 29 s. A 3 MB put normally takes < 1 s.
+S3_CONNECT_TIMEOUT = 3
+S3_READ_TIMEOUT = 10
+S3_TOTAL_ATTEMPTS = 2
 OBJECT_PREFIX = "supply-media"
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 CONTENT_TYPES = tuple(EXTENSIONS)
@@ -185,20 +196,26 @@ class S3MediaStore:
         self.bucket = bucket
         self.region = region
         self._client: Any = None
+        self._lock = threading.Lock()  # boto3.client() on the default session is not thread-safe
 
     def _s3(self) -> Any:
-        if self._client is None:
-            import boto3  # lazy, see the class docstring
-            from botocore.config import Config
+        with self._lock:
+            if self._client is None:
+                import boto3  # lazy, see the class docstring
+                from botocore.config import Config
 
-            self._client = boto3.client(
-                "s3",
-                region_name=self.region,
-                config=Config(
-                    signature_version="s3v4", s3={"addressing_style": "virtual"}, retries={"max_attempts": 3}
-                ),
-            )
-        return self._client
+                self._client = boto3.client(
+                    "s3",
+                    region_name=self.region,
+                    config=Config(
+                        signature_version="s3v4",
+                        s3={"addressing_style": "virtual"},
+                        connect_timeout=S3_CONNECT_TIMEOUT,
+                        read_timeout=S3_READ_TIMEOUT,
+                        retries={"total_max_attempts": S3_TOTAL_ATTEMPTS},
+                    ),
+                )
+            return self._client
 
     def _put(self, key: str, data: bytes, content_type: str, sha256: str) -> None:
         self._s3().put_object(

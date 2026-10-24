@@ -2484,8 +2484,7 @@
             "type": "string"
           },
           "data_base64": {
-            "description": "the image bytes, base64",
-            "maxLength": 4194304,
+            "description": "the image bytes, base64 (at most 4194304 characters: image_too_large)",
             "minLength": 1,
             "title": "Data Base64",
             "type": "string"

@@ -19,8 +19,8 @@ from tests.unit.fakes import VIEW_READY_FRAGMENT, ScriptedConn
 from tests.unit.test_supply import HID, SID, hotel_conn
 from tests.unit.test_trip_case_versions import case_row, version_row
 
-CONTENT_ONE = "AND c.source_id = $1 AND c.entity_type = $2"
-CONTENT_MANY = "AND c.source_id = ANY($1::text[])"
+CONTENT_ONE = "AND c.source_id::text = $1 AND c.entity_type::text = $2"
+CONTENT_MANY = "AND c.source_id::text = ANY($1::text[])"
 
 
 def content_row(status: str = "published", **kw: Any) -> dict[str, Any]:
@@ -97,6 +97,10 @@ async def test_no_row_and_odd_values() -> None:
         asyncpg.UndefinedTableError("relation catalog.v_supply_content does not exist"),
         asyncpg.InsufficientPrivilegeError("permission denied for view v_supply_content"),
         asyncpg.QueryCanceledError("canceling statement due to statement timeout"),
+        # CIS changed a column type (uuid source_id): feature detection checks names only, so this must fail soft too
+        asyncpg.UndefinedFunctionError("operator does not exist: uuid = text"),
+        asyncpg.DatatypeMismatchError("argument of WHERE must be type boolean"),
+        TimeoutError(),
     ],
 )
 @pytest.mark.asyncio
@@ -116,7 +120,7 @@ async def test_published_texts_match_type_and_id() -> None:
     conn = ready(ScriptedConn()).on(CONTENT_MANY, rows)
     out = await content.published_texts(conn, {("hotel", HID), ("hotel", SID)})
     assert out == {("hotel", HID): {"description": "A quiet garden hotel.", "highlights": ["Garden", "Pool"]}}
-    assert "content_status = 'published'" in conn.calls[-1][0]
+    assert "content_status::text = 'published'" in conn.calls[-1][0]
     assert conn.sql(CONTENT_MANY) == [([HID, SID],)]
 
 
@@ -174,3 +178,14 @@ async def test_proposal_items_without_the_view_or_supply_skip_the_catalog() -> N
     conn = items_conn([item(None)])
     await versions.get_items(conn, "TC-000001", 1)
     assert not conn.sql(VIEW_READY_FRAGMENT)
+
+
+@pytest.mark.asyncio
+async def test_a_cis_type_change_never_fails_the_proposal_items() -> None:
+    # CIS 278 changed a column type after Booking shipped: the items (also read inside replace_items and create_version
+    # write transactions) load without text instead of failing the request.
+    conn = items_conn([item({**ROOM, "entity_type": "hotel", "entity_id": HID})]).on(
+        CONTENT_MANY, asyncpg.UndefinedFunctionError("operator does not exist: uuid = text")
+    )
+    out = await versions.get_items(conn, "TC-000001", 1)
+    assert out["items"][0]["supply"]["description"] is None and out["items"][0]["supply"]["highlights"] == []

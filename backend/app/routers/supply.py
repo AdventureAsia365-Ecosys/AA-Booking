@@ -145,7 +145,12 @@ class NewMedia(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content_type: Literal["image/jpeg", "image/png", "image/webp"]
-    data_base64: str = Field(min_length=1, max_length=media.MAX_BASE64_CHARS, description="the image bytes, base64")
+    # No max_length here: app.supply.media.decode checks the length before decoding and answers ``image_too_large``,
+    # which the staff UI explains (a model limit would answer the generic validation shape). The BFF caps the body.
+    data_base64: str = Field(
+        min_length=1,
+        description=f"the image bytes, base64 (at most {media.MAX_BASE64_CHARS} characters: image_too_large)",
+    )
     usage_rights: bool = Field(default=False, description="contracting confirmed AA may publish this photo")
     filename: str | None = Field(default=None, max_length=200, description="original file name (audit only)")
 

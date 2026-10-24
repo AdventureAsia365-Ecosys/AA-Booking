@@ -304,3 +304,17 @@ async def test_read_back_and_published_text_on_proposal_items(
     await admin.execute("REVOKE SELECT ON catalog.v_supply_content FROM booking")
     liveness.reset_cache()
     assert (await _ok(await c.get(f"/hotels/{hotel['code']}", headers=sales)))["content"] is None
+
+    # CIS declares source_id as uuid: feature detection checks column names, not types, so Booking compares the keys
+    # as text and both the read-back and a proposal write keep working (review round, AA-835 S4).
+    await admin.execute("GRANT SELECT ON catalog.v_supply_content TO booking")
+    await admin.execute("ALTER TABLE catalog.v_supply_content ALTER COLUMN source_id TYPE uuid USING source_id::uuid")
+    await admin.execute(
+        "UPDATE catalog.v_supply_content SET content_status = 'published' WHERE source_id = $1::uuid", hotel["id"]
+    )
+    liveness.reset_cache()
+    assert (await _ok(await c.get(f"/hotels/{hotel['code']}", headers=sales)))["content"]["content_status"] == (
+        "published"
+    )
+    saved = await _ok(await c.put(f"{base}/items", json={"items": items}, headers=sales))
+    assert saved["items"][0]["supply"]["description"] == "A quiet garden hotel."

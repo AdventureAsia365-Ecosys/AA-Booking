@@ -339,13 +339,32 @@ def test_photo_lists_are_supply_read(path: str) -> None:
     "body",
     [
         {**UPLOAD, "content_type": "image/gif"},
-        {**UPLOAD, "data_base64": "A" * (media.MAX_BASE64_CHARS + 1)},
         {**UPLOAD, "url": "https://example.com/x.png"},  # never a free URL
         {"content_type": "image/png"},
     ],
 )
 def test_upload_body_is_checked(body: dict[str, Any]) -> None:
     assert client(ADMIN).post(f"/booking/hotels/{HID}/media", json=body).status_code == 422
+
+
+def test_oversized_upload_answers_image_too_large() -> None:
+    res = client(ADMIN).post(
+        f"/booking/hotels/{HID}/media", json={**UPLOAD, "data_base64": "A" * (media.MAX_BASE64_CHARS + 1)}
+    )
+    assert res.status_code == 422 and res.json()["detail"] == "image_too_large"
+
+
+def test_s3_client_is_bounded_under_the_api_gateway_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    import boto3
+
+    made: list[Any] = []
+    monkeypatch.setattr(boto3, "client", lambda *a, **kw: made.append(kw["config"]) or object())
+    store = media.S3MediaStore(BUCKET, "us-west-1")
+    assert store._s3() is store._s3() and len(made) == 1  # built once
+    config = made[0]
+    assert config.connect_timeout == media.S3_CONNECT_TIMEOUT and config.read_timeout == media.S3_READ_TIMEOUT
+    assert config.retries == {"total_max_attempts": media.S3_TOTAL_ATTEMPTS}
+    assert media.S3_TOTAL_ATTEMPTS * (media.S3_CONNECT_TIMEOUT + media.S3_READ_TIMEOUT) < 29
 
 
 def test_upload_without_bucket_is_503_and_patch_body_is_checked() -> None:

@@ -8,8 +8,11 @@ granted to role ``booking`` under the ``catalog.*`` contract grant). Booking nev
 
 **Off until CIS 278 is applied** (feature detection, the same mechanism as ``app.catalog.liveness``): the view must
 exist with the columns read here and role ``booking`` must be allowed to read it (checked once a minute per process,
-catalog lookups only). Until then, or when a read fails (missing grant, timeout), ``content`` is ``None`` and the
-staff UI hides the panel: the switch turns on by itself when CIS ships the view, with no Booking deploy or env change.
+catalog lookups only). Until then, or when a read fails (missing grant, timeout, or any other database error, such as
+a column type CIS changed), ``content`` is ``None`` and the staff UI hides the panel: the switch turns on by itself
+when CIS ships the view, with no Booking deploy or env change. Feature detection checks column names, not types, so
+the SQL compares and returns the key columns as text, and every read runs in a savepoint that catches any
+``asyncpg.PostgresError``: a CIS migration alone can never fail a Booking read or a proposal write.
 
 What a row says (CIS owns the meaning): ``content_status`` ``draft | in_review | published | stale | unpublished``
 (``none`` here when CIS holds no row for the entity yet); the text and ``photo_urls`` are non-null only while
@@ -26,7 +29,6 @@ from typing import Any
 
 import asyncpg
 
-from app.catalog.destinations import CATALOG_ERRORS
 from app.catalog.liveness import View, view_ready
 
 log = logging.getLogger(__name__)
@@ -52,13 +54,19 @@ PUBLISHED = "published"
 EDIT_PATH = re.compile(r"/admin/supply-content/[A-Za-z0-9_-]{1,64}")
 MAX_HIGHLIGHTS = 20
 MAX_PHOTOS = 40
+# Wider than app.catalog.destinations.CATALOG_ERRORS on purpose: CIS owns this view and may change a column's type
+# (uuid source_id, text content_version, ...), which raises e.g. UndefinedFunctionError. The read is optional, so any
+# database error turns it off for that request instead of failing it.
+READ_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, TimeoutError)
 
-# to_jsonb(...)::text: the array columns read the same whether CIS declares them text[] or jsonb.
+# to_jsonb(...)::text: the array columns read the same whether CIS declares them text[] or jsonb. The ::text casts
+# keep the keys comparable whatever type CIS gives them (text or uuid ids, text or enum statuses).
 CONTENT_SQL = """
-    SELECT c.entity_type, c.source_id, c.content_status, c.content_version, c.description,
-           to_jsonb(c.highlights)::text AS highlights, to_jsonb(c.photo_urls)::text AS photo_urls, c.edit_url
+    SELECT c.entity_type::text AS entity_type, c.source_id::text AS source_id, c.content_status::text AS content_status,
+           c.content_version, c.description::text AS description, to_jsonb(c.highlights)::text AS highlights,
+           to_jsonb(c.photo_urls)::text AS photo_urls, c.edit_url::text AS edit_url
     FROM catalog.v_supply_content c
-    WHERE c.source_system = 'booking'
+    WHERE c.source_system::text = 'booking'
 """
 
 
@@ -108,11 +116,11 @@ async def read_content(conn: asyncpg.Connection, entity_type: str, entity_id: st
     try:
         async with conn.transaction():  # a savepoint inside a caller's transaction
             row = await conn.fetchrow(
-                f"{CONTENT_SQL} AND c.source_id = $1 AND c.entity_type = $2",  # noqa: S608 — constant
+                f"{CONTENT_SQL} AND c.source_id::text = $1 AND c.entity_type::text = $2",  # noqa: S608 — constant
                 entity_id,
                 entity_type,
             )
-    except CATALOG_ERRORS as exc:
+    except READ_ERRORS as exc:
         log.warning("catalog.v_supply_content unreadable, content omitted: %s", type(exc).__name__)
         return None
     return dict(EMPTY) if row is None else _content(row)
@@ -128,10 +136,11 @@ async def published_texts(
     try:
         async with conn.transaction():
             rows = await conn.fetch(
-                f"{CONTENT_SQL} AND c.source_id = ANY($1::text[]) AND c.content_status = 'published'",  # noqa: S608
+                f"{CONTENT_SQL} AND c.source_id::text = ANY($1::text[])"  # noqa: S608 — constant
+                " AND c.content_status::text = 'published'",
                 sorted({entity_id for _, entity_id in refs}),
             )
-    except CATALOG_ERRORS as exc:
+    except READ_ERRORS as exc:
         log.warning("catalog.v_supply_content unreadable, proposal texts omitted: %s", type(exc).__name__)
         return {}
     out: dict[tuple[str, str], dict[str, Any]] = {}
