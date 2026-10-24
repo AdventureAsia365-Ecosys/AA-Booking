@@ -13,7 +13,18 @@ Status: **design note**. Nothing in this folder signs in yet, and no workflow ru
 - **No password.** Staff sign in with an email one-time code only; the code goes to the address itself, which is a
   mailbox of the SES inbound test domain (AA-CIS-Infra `e2e_mailbox.tf`): SES → S3 bucket `aa-cis-dev-e2e-mail-<acct>`,
   prefix `inbound/`, 1-day expiry. There is no secret to read.
+- **Blast radius.** `booking-admin` is Booking's full write admin: `staff.admin`, `retention.admin` (DRY RUN and live
+  delete / redaction of Booking rows), `b2b.admin`, `customer.admin` and every write. Anyone who can read a sign-in
+  code gets that role on the production client: the mailbox reader role (AA-CIS-App and AA-Partner, environment
+  `e2e`, branch `main`), the MFA admin role, and whoever controls mail for `e2e-mail.lumiguides.it.com`.
+- **Read-only session, enforced (AA-910).** The backend refuses every request other than GET / HEAD / OPTIONS from
+  this user with 403 `e2e_read_only`, on every client, before any DB access (`backend/app/auth/staff.py`,
+  `E2E_TEST_STAFF_EMAIL`). Reads keep the admin permissions, so `/staff` and `/audit-log` still load. Write buttons
+  still show in the UI; clicking one fails with that 403. The smoke must not test writes with this user.
 - The first sign-in provisions its `booking.staff_users` row (`cog:<sub>`, admin, active). It appears on `/staff`.
+- **It is assignable.** That row also appears in the StaffPicker (`staff.directory`), so real staff can assign trip
+  cases to it. If it shows up in assignment, deactivate its Booking row on `/staff` between runs (the next sign-in
+  is then 403 `staff_inactive` until it is re-activated).
 
 ## Flow to automate
 
@@ -24,7 +35,8 @@ Status: **design note**. Nothing in this folder signs in yet, and no workflow ru
 3. Snapshot the mailbox keys, type the address, ask for a code.
 4. Poll `inbound/` for a NEW message addressed to `e2e-booking@…`, pull the 6–8 digit code, type it.
 5. Back on the app: assert the shell renders and `GET /api/booking/staff/me` says `role: "admin"`,
-   `preview_viewer` false; then visit the pages under test (read-only: the smoke never writes).
+   `preview_viewer` false; then visit the pages under test (read-only: the backend refuses this user's writes with
+   403 `e2e_read_only`).
 
 ## Helpers to copy (do not import across repos)
 

@@ -958,7 +958,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `/login` through `vercel curl`, which uses the project's automation-bypass token with `VERCEL_TOKEN`).
 - Signed-in smoke (AA-910, design note only, no job yet): `frontend/e2e/SIGNED-IN-SMOKE.md`. E2E staff user
   `e2e-booking@e2e-mail.lumiguides.it.com`, group `booking-admin` only, email code read from the SES test mailbox
-  (root ADR 0006a A10a); no password, no secret.
+  (root ADR 0006a A10a); no password, no secret. Its session is read-only on every client: non-safe methods are
+  403 `e2e_read_only` before any DB access (`app/auth/staff.py` `E2E_TEST_STAFF_EMAIL`), reads keep admin.
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 
