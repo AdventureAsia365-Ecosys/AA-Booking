@@ -157,7 +157,6 @@ class Quote(Strict):
     quote_id: str = Field(max_length=64)
     currency: Currency
     fx: FxLock
-    valid_until: datetime
     price_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     lines: list[QuoteLine]
     total_b2b_price: Money

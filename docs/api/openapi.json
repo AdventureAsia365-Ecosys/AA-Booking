@@ -3422,18 +3422,12 @@
           },
           "total_b2b_price": {
             "$ref": "#/components/schemas/Money"
-          },
-          "valid_until": {
-            "format": "date-time",
-            "title": "Valid Until",
-            "type": "string"
           }
         },
         "required": [
           "quote_id",
           "currency",
           "fx",
-          "valid_until",
           "price_hash",
           "lines",
           "total_b2b_price"
