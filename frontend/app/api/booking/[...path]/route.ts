@@ -8,7 +8,9 @@
 // - Legacy CIS password session (bk_cis_session, until AA-680 PR-4): the Booking token is re-minted from the CIS
 //   session when it is missing or under 2 minutes from expiry, and once more if the API still answers 401.
 // - Neither → 401 (the page sends the user to /login).
-// - Only JSON bodies are forwarded (no uploads in Wave 1); the upstream status and body pass through.
+// - Only JSON bodies are forwarded; the upstream status and body pass through. Bodies are capped at 1 MB, except a
+//   supplier photo upload (AA-835: POST hotels|services/<ref>/media, the image as base64 JSON, at most 3 MB of image
+//   = 4 MiB of text), which gets just under Vercel's 4.5 MB function body limit.
 // - Path segments are re-encoded and `.` / `..` are refused, so a request can never leave /booking/.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -33,6 +35,8 @@ import { isSameOrigin } from "@/lib/sameOrigin";
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 1_000_000;
+const MEDIA_MAX_BODY_BYTES = 4_400_000;
+const MEDIA_UPLOAD_PATH = /^(hotels|services)\/[^/]+\/media$/;
 const PASS_HEADERS = ["content-type", "cache-control", "retry-after"];
 
 type Ctx = { params: Promise<{ path: string[] }> };
@@ -99,7 +103,8 @@ async function handler(req: NextRequest, { params }: Ctx) {
   let body: string | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
     body = await req.text();
-    if (body.length > MAX_BODY_BYTES) return json(413, "body_too_large", "Request body is too large.");
+    const limit = req.method === "POST" && MEDIA_UPLOAD_PATH.test(path.join("/")) ? MEDIA_MAX_BODY_BYTES : MAX_BODY_BYTES;
+    if (body.length > limit) return json(413, "body_too_large", "Request body is too large.");
     if (!body) body = undefined;
   }
 

@@ -67,6 +67,7 @@ from app.routers import (
     trip_cases,
 )
 from app.settings import Settings, load_settings
+from app.supply import media
 
 # On shutdown a job in flight gets this long to finish; after that the worker task is cancelled and releases the
 # job back to the queue at once (app.jobs.queue.release, AA-751), before the pool closes. ECS gives the container
@@ -80,6 +81,7 @@ def create_app(
     verifier: MultiIssuerVerifier | None = None,
     deploy_verifier: GithubDeployVerifier | None = None,
     m2m_verifier: MultiIssuerVerifier | None = None,
+    media_store: media.MediaStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
@@ -148,6 +150,8 @@ def create_app(
     app.state.staff_verifier = verifier
     app.state.deploy_verifier = deploy_verifier
     app.state.m2m_verifier = m2m_verifier
+    # AA-835: the supply-media bucket (None without SUPPLY_MEDIA_BUCKET: uploads answer 503). Tests pass a fake.
+    app.state.media_store = media_store if media_store is not None else media.store_from_settings(settings)
     app.add_exception_handler(ServiceError, service_error_handler)
     app.add_exception_handler(B2BError, b2b_error_handler)
     # B2B paths answer validation errors as the contract's Problem; every other path keeps FastAPI's default body.

@@ -718,6 +718,12 @@ function ItemCard({
           {!item.id && <span className="text-[11px] font-semibold text-warning">New</span>}
         </div>
         {item.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] text-muted">{item.notes}</p>}
+        {item.supply?.description && (
+          <p className="mt-1 line-clamp-2 text-[12.5px] text-muted" title="Published in CIS for this hotel / service">
+            <span className="font-medium text-body">From CIS: </span>
+            {item.supply.description}
+          </p>
+        )}
         {item.costs.length > 0 && (
           <p className="mt-1.5 text-xs text-muted">
             {item.costs.length} net cost line(s)

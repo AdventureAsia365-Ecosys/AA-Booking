@@ -38,6 +38,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-020",  # AA-973: departures, b2b_holds + lines, quote line departure_id, B2B trip case columns
     "bk-021",  # AA-974: cancellation_policies, b2b_cancellations, b2b_holds extend + policy columns
     "bk-022",  # AA-975: outbox + event triggers, departure_incidents, on-request desk columns
+    "bk-023",  # AA-835: entity_media (photo upload), supply_version + outbox supply stream (v_supply_* not read here)
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

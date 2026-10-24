@@ -102,7 +102,9 @@ async def view_ready(conn: asyncpg.Connection, view: View) -> bool:
         if ready:
             log.info("catalog_view_ready view=%s", view.qualified)
         else:
-            log.warning("catalog_view_unready view=%s (CIS 274 not applied, or no grant): degraded", view.qualified)
+            log.warning(
+                "catalog_view_unready view=%s (its CIS migration not applied, or no grant): degraded", view.qualified
+            )
     _ready[view.qualified] = (ready, now + CACHE_SECONDS)
     return ready
 

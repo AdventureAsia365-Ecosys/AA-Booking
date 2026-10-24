@@ -52,8 +52,12 @@ Design sources, in order:
   decision 5, contract `catalog.tour.v1.3`, CIS migration 274): `catalog.v_tour_retired` (tombstone: `retired` /
   `paused` + reason; a `restored` row of a key served again is no tombstone), read live next to `v_tour` (`app/catalog/liveness.py`), and `catalog.v_tour_lifecycle_outbox`,
   pulled by `bk_tour_lifecycle_pull` into `booking.inbox_events` (source `cis`, contract `catalog.tour`) for staff
-  notifications. Both are feature-detected: without CIS 274 Booking degrades to `v_tour` alone. Later: other catalog
-  views (`v_tour_place`), CIS golden records.
+  notifications. Both are feature-detected: without CIS 274 Booking degrades to `v_tour` alone. **Supply content
+  read-back** (AA-835 S4, root ADR 0004a decision 4, CIS migration 278): `catalog.v_supply_content`, read live
+  (`app/supply/content.py`): the hotel / service detail shows what CIS published (status, text, photo URLs, the CIS
+  `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. Also
+  feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
+  CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request. Later: other catalog views (`v_tour_place`), CIS golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
   (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
@@ -163,9 +167,12 @@ backend/
                            and /booking/contracts/{id} (edit a draft, publish, expire) — supply.read / supply.write
   app/suppliers/           supplier + contract service (bk-008): place check, maker-checker publish, audit rows
   app/routers/supply.py    /booking/hotels*, /booking/room-types/{id}, /booking/services*, /booking/contracts/{id}/rates,
-                           /booking/rates/{id}, /booking/supply/options, /booking/supply/rate-in-force (bk-010, AA-823)
+                           /booking/rates/{id}, /booking/supply/options, /booking/supply/rate-in-force (bk-010, AA-823);
+                           GET|POST /booking/{hotels|services}/{ref}/media, PATCH /booking/media/{id} (AA-835, bk-023)
   app/supply/              hotels + room types + services (records.py, one implementation for both kinds) and supplier
-                           net rates + the default net of a version item (rates.py)
+                           net rates + the default net of a version item (rates.py); AA-835 S4: supplier photos
+                           (media.py: base64 upload, type and size read from the bytes, S3 put to SUPPLY_MEDIA_BUCKET,
+                           presigned previews, usage_rights / removal) and the CIS content read-back (content.py)
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready, booking.job vs template
@@ -182,7 +189,7 @@ docs/api/                  openapi.json (generated API reference, AA-899; never 
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md,
-                           AA-974.md)
+                           AA-974.md, AA-835.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
@@ -223,6 +230,9 @@ E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inq
 (links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
 B2B API (AA-972, both set by AA-CIS-Infra `booking.tf` from the M2M pool and the AA-Partner client; empty = every
 `/booking/b2b/v1` route answers 503): `COGNITO_M2M_ISSUER`, `COGNITO_M2M_CRM_CLIENT_ID`.
+Supplier photos (AA-835 S4, set by AA-CIS-Infra `booking_media.tf` / `booking.tf`): `SUPPLY_MEDIA_BUCKET` (the
+`aa-booking-<env>-supply-media-<account>` bucket, checked against the bk-023 naming rule at start-up; empty = uploads
+answer 503 `media_storage_unavailable`) and `SUPPLY_MEDIA_REGION` (default `us-west-1`).
 Error tracking (AA-871, optional): `SENTRY_DSN` (Sentry off when empty; never logged) and `SENTRY_REQUIRED` (`true` =
 start-up fails without a DSN, the missing-DSN guard; off until Infra wires the DSN secret).
 
@@ -307,8 +317,8 @@ send, OTP) is not built: those still write rows only.
   admin, sales, contracting; new pricing rule / FX rows and their approval (`pricing.write`) = admin, contracting
   (maker-checker: the creator of a row cannot approve it, 403 `own_row`); suppliers and supplier contracts read
   (`supply.read`) = admin, sales, contracting, write (`supply.write`) = admin, contracting (maker-checker on contract
-  publish: not the draft's last writer, 403 `maker_checker`; hotels, room types, services and supplier rates use the
-  same pair, and writing a rate makes you the contract's maker); catalog reads (`catalog.read`) = every role,
+  publish: not the draft's last writer, 403 `maker_checker`; hotels, room types, services, supplier rates and supplier
+  photos (AA-835) use the same pair, and writing a rate makes you the contract's maker); catalog reads (`catalog.read`) = every role,
   content_creator included (without the price hint, channel and commercial notes, which need `pricing.read`); the
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
@@ -851,8 +861,8 @@ the entity; role `booking`: SELECT, INSERT, UPDATE of `usage_rights` / `status` 
 `v_supply_services` (contract facts + id + version, room types and active photos as JSON), `v_supply_media` (active
 photos with bucket / key / sha256 for the CIS copy), `v_supply_outbox` (stamped supply events; CIS pages on
 `feed_seq`). Hotels and services that exist before bk-023 enter the stream on their next material change (or a touch
-`SET supply_version = supply_version + 1`). Not yet in `REQUIRED_SCHEMA_VERSIONS`: the upload / read-back code (AA-835
-S4) adds it after the apply.
+`SET supply_version = supply_version + 1`). In `REQUIRED_SCHEMA_VERSIONS` since the upload / read-back code (AA-835 S4):
+apply bk-023 before that code deploys (readiness fails until then).
 
 ### `bk-024` (AA-908 traveller identities, root ADR 0006 Phase 4 — needs `bk-002`, `bk-014`)
 
@@ -874,7 +884,7 @@ Post-sale status edges, **customer e-mail** (proposal send writes a customer not
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix
 and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
-contract), the supplier photo upload API and the read-back of CIS content (AA-835 S4; the schema is bk-023), contract document upload, supplier hard delete,
+contract), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).
@@ -945,7 +955,12 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   is retired / out of the catalog and shows an alert box for them (a pause carries no staff flag, ADR 0015), and the bell labels `tour.retired` / `tour.reinstated`; AA-975: `/b2b-desk` (Operations → B2B desk: KPI tiles, an "On
   request" tab with SLA badge, Accept / Decline (reason code), and a "Departures & incidents" tab with Flag incident /
   Clear; the bell's `b2b.on_request` opens it); the proposal
-  item drawer can book a room type or service (its net defaults from the rate); the other
+  item drawer can book a room type or service (its net defaults from the rate); AA-835 S4: the hotel drawer and the
+  service Overview show "Customer content (From CIS)" (status, published text and photos, "Edit in CIS" = the
+  `NEXT_PUBLIC_CIS_ADMIN_URL` origin + the path CIS serves; hidden while the API sends `content: null`) and "Supplier
+  photos" (upload, usage rights, remove: `supply.write`; every photo is re-encoded in the browser first (no EXIF
+  reaches S3; downsized to at most 3 MB), and the BFF lets only that upload route carry up to 4.4 MB of body, under Vercel's 4.5 MB limit); the proposal builder and
+  preview show the published description under an item that books supply; the other
   wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).

@@ -1,7 +1,9 @@
 """Hotels, room types, services and supplier rates for staff (bk-010, AA-823; ADR 0004a d1, UI spec §6.3).
 
 Permissions: ``supply.read`` (admin, contracting, sales) for every GET; ``supply.write`` (admin, contracting) for every
-write. Facts only: there is no customer-facing description or photo field anywhere here (ADR 0004a d2, Q17).
+write. Facts only: there is no customer-facing description field anywhere here (ADR 0004a d2, Q17). AA-835 S4: the
+detail GETs carry ``content``, the customer content CIS published (read-only, ``app.supply.content``), and supplier
+photos are uploaded here (``…/media``, ``app.supply.media``) with a ``usage_rights`` flag CIS obeys.
 """
 
 from __future__ import annotations
@@ -12,12 +14,12 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth.staff import Staff, get_pool, require
 from app.suppliers import service as suppliers
-from app.supply import rates, records
+from app.supply import media, rates, records
 from app.supply.records import HOTEL, SERVICE
 
 router = APIRouter(prefix="/booking", tags=["supply"])
@@ -26,6 +28,7 @@ HotelRef = Annotated[str, Path(min_length=1, max_length=64, description="Hotel U
 ServiceRef = Annotated[str, Path(min_length=1, max_length=64, description="Service UUID or code (SVC-000123)")]
 RecordId = Annotated[str, Path(min_length=1, max_length=64)]
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
+MediaId = Annotated[str, Path(min_length=1, max_length=64, description="photo UUID")]
 CanRead = Annotated[Staff, Depends(require("supply.read"))]
 CanWrite = Annotated[Staff, Depends(require("supply.write"))]
 
@@ -134,6 +137,36 @@ class NewRate(RateFields):
         if (self.hotel_room_type_id is None) == (self.service_id is None):
             raise ValueError("give exactly one of hotel_room_type_id or service_id")
         return self
+
+
+class NewMedia(BaseModel):
+    """A supplier photo, as base64 JSON (API Gateway passes no binary body; see ``app.supply.media``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: Literal["image/jpeg", "image/png", "image/webp"]
+    # No max_length here: app.supply.media.decode checks the length before decoding and answers ``image_too_large``,
+    # which the staff UI explains (a model limit would answer the generic validation shape). The BFF caps the body.
+    data_base64: str = Field(
+        min_length=1,
+        description=f"the image bytes, base64 (at most {media.MAX_BASE64_CHARS} characters: image_too_large)",
+    )
+    usage_rights: bool = Field(default=False, description="contracting confirmed AA may publish this photo")
+    filename: str | None = Field(default=None, max_length=200, description="original file name (audit only)")
+
+
+class MediaPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    usage_rights: bool | None = None
+    status: Literal["removed"] | None = Field(default=None, description="removed is final")
+
+
+def media_store(request: Request) -> media.MediaStore | None:
+    return request.app.state.media_store
+
+
+Store = Annotated[media.MediaStore | None, Depends(media_store)]
 
 
 def _payload(body: BaseModel) -> dict[str, Any]:
@@ -304,6 +337,55 @@ async def service_rates(service_ref: ServiceRef, _: CanRead, pool: Pool) -> dict
     async with pool.acquire() as conn:
         service = await records.resolve(conn, SERVICE, service_ref)
         return await rates.list_rates(conn, service_id=service["id"])
+
+
+# ── Supplier photos (AA-835 S4, bk-023) ──────────────────────────────────────
+
+
+@router.get("/hotels/{hotel_ref}/media")
+async def hotel_media(
+    hotel_ref: HotelRef,
+    _: CanRead,
+    pool: Pool,
+    store: Store,
+    include_removed: Annotated[bool, Query(description="also list removed photos (no URL)")] = False,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await media.list_media(conn, store, HOTEL, hotel_ref, include_removed=include_removed)
+
+
+@router.post("/hotels/{hotel_ref}/media", status_code=201)
+async def upload_hotel_media(
+    body: NewMedia, hotel_ref: HotelRef, staff: CanWrite, pool: Pool, store: Store
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await media.upload_media(conn, store, HOTEL, staff, hotel_ref, **body.model_dump())
+
+
+@router.get("/services/{service_ref}/media")
+async def service_media(
+    service_ref: ServiceRef,
+    _: CanRead,
+    pool: Pool,
+    store: Store,
+    include_removed: Annotated[bool, Query(description="also list removed photos (no URL)")] = False,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await media.list_media(conn, store, SERVICE, service_ref, include_removed=include_removed)
+
+
+@router.post("/services/{service_ref}/media", status_code=201)
+async def upload_service_media(
+    body: NewMedia, service_ref: ServiceRef, staff: CanWrite, pool: Pool, store: Store
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await media.upload_media(conn, store, SERVICE, staff, service_ref, **body.model_dump())
+
+
+@router.patch("/media/{media_id}")
+async def patch_media(body: MediaPatch, media_id: MediaId, staff: CanWrite, pool: Pool, store: Store) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await media.update_media(conn, store, staff, media_id, body.model_dump(exclude_unset=True))
 
 
 # ── Rates (under a supplier contract) ────────────────────────────────────────

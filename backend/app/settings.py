@@ -48,6 +48,13 @@ Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` g
 - ``STAFF_ADMIN_URL``: base URL of the staff admin, for links in staff e-mail. Default: the Dev
   custom domain ``https://booking.lumiguides.it.com``. Must be ``https://`` outside ``test``/``local``.
 
+Supplier photos (AA-835 S4, ``app.supply.media``; Terraform ``accounts/aa365/booking_media.tf`` creates the bucket and
+grants the task role ``s3:PutObject`` / ``s3:GetObject`` on ``supply-media/*``):
+
+- ``SUPPLY_MEDIA_BUCKET``: the Booking supply-media bucket (``aa-booking-<env>-supply-media-<account>``, the bk-023
+  naming CHECK). Empty (default) = uploads answer 503 ``media_storage_unavailable`` and listed photos carry no URL.
+- ``SUPPLY_MEDIA_REGION``: default ``us-west-1`` (the bucket's region; presigned URLs are signed for it).
+
 Error tracking (AA-871, ``app.observability.sentry``):
 
 - ``SENTRY_DSN``: the Sentry project DSN (task definition secret). Empty (default) = Sentry off. Must be ``https://``.
@@ -59,6 +66,7 @@ Error tracking (AA-871, ``app.observability.sentry``):
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -80,6 +88,9 @@ DEFAULT_STAFF_JWT_ISSUER = "https://api-cis.lumiguides.it.com"
 DEFAULT_CIS_JWKS_URL = f"{DEFAULT_STAFF_JWT_ISSUER}/auth/.well-known/jwks.json"
 DEFAULT_SES_REGION = "us-west-1"
 DEFAULT_STAFF_ADMIN_URL = "https://booking.lumiguides.it.com"
+DEFAULT_SUPPLY_MEDIA_REGION = "us-west-1"
+# The bk-023 CHECK on booking.entity_media.s3_bucket: a wrong name fails at start-up, not on the first upload.
+SUPPLY_MEDIA_BUCKET_RE = re.compile(r"^aa-booking-[a-z0-9]+-supply-media-[0-9]{12}$")
 
 
 class SettingsError(ValueError):
@@ -107,6 +118,8 @@ class Settings:
     cognito_booking_staff_preview_client_id: str = DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID
     cognito_m2m_issuer: str = ""
     cognito_m2m_crm_client_id: str = ""
+    supply_media_bucket: str = ""
+    supply_media_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
@@ -168,6 +181,13 @@ class Settings:
         if m2m_issuer and m2m_issuer == self.cognito_workforce_issuer:
             # One verifier per route class: a staff token must never satisfy the M2M check (or the reverse).
             raise SettingsError("COGNITO_M2M_ISSUER must differ from COGNITO_WORKFORCE_ISSUER")
+        if self.supply_media_bucket and not SUPPLY_MEDIA_BUCKET_RE.fullmatch(self.supply_media_bucket):
+            raise SettingsError(
+                "SUPPLY_MEDIA_BUCKET must name the supply-media bucket (aa-booking-<env>-supply-media-<account>), "
+                f"got {self.supply_media_bucket!r}"
+            )
+        if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.supply_media_region):
+            raise SettingsError(f"SUPPLY_MEDIA_REGION must be an AWS region, got {self.supply_media_region!r}")
         if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
             raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
         if self.sentry_required and not self.sentry_dsn:
@@ -214,6 +234,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
         cognito_m2m_issuer=(env.get("COGNITO_M2M_ISSUER") or "").strip(),
         cognito_m2m_crm_client_id=(env.get("COGNITO_M2M_CRM_CLIENT_ID") or "").strip(),
+        supply_media_bucket=(env.get("SUPPLY_MEDIA_BUCKET") or "").strip(),
+        supply_media_region=(env.get("SUPPLY_MEDIA_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )

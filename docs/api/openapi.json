@@ -2085,6 +2085,37 @@
         "title": "Link",
         "type": "object"
       },
+      "MediaPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "const": "removed",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "removed is final",
+            "title": "Status"
+          },
+          "usage_rights": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Rights"
+          }
+        },
+        "title": "MediaPatch",
+        "type": "object"
+      },
       "Money": {
         "additionalProperties": false,
         "properties": {
@@ -2437,6 +2468,52 @@
           "supplier_id"
         ],
         "title": "NewHotel",
+        "type": "object"
+      },
+      "NewMedia": {
+        "additionalProperties": false,
+        "description": "A supplier photo, as base64 JSON (API Gateway passes no binary body; see ``app.supply.media``).",
+        "properties": {
+          "content_type": {
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "data_base64": {
+            "description": "the image bytes, base64 (at most 4194304 characters: image_too_large)",
+            "minLength": 1,
+            "title": "Data Base64",
+            "type": "string"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "original file name (audit only)",
+            "title": "Filename"
+          },
+          "usage_rights": {
+            "default": false,
+            "description": "contracting confirmed AA may publish this photo",
+            "title": "Usage Rights",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content_type",
+          "data_base64"
+        ],
+        "title": "NewMedia",
         "type": "object"
       },
       "NewRate": {
@@ -8696,6 +8773,132 @@
         ]
       }
     },
+    "/booking/hotels/{hotel_ref}/media": {
+      "get": {
+        "operationId": "hotel_media_booking_hotels__hotel_ref__media_get",
+        "parameters": [
+          {
+            "description": "Hotel UUID or code (HTL-000123)",
+            "in": "path",
+            "name": "hotel_ref",
+            "required": true,
+            "schema": {
+              "description": "Hotel UUID or code (HTL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Hotel Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "also list removed photos (no URL)",
+            "in": "query",
+            "name": "include_removed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "also list removed photos (no URL)",
+              "title": "Include Removed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Hotel Media Booking Hotels  Hotel Ref  Media Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Hotel Media",
+        "tags": [
+          "supply"
+        ]
+      },
+      "post": {
+        "operationId": "upload_hotel_media_booking_hotels__hotel_ref__media_post",
+        "parameters": [
+          {
+            "description": "Hotel UUID or code (HTL-000123)",
+            "in": "path",
+            "name": "hotel_ref",
+            "required": true,
+            "schema": {
+              "description": "Hotel UUID or code (HTL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Hotel Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewMedia"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Hotel Media Booking Hotels  Hotel Ref  Media Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Hotel Media",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
     "/booking/hotels/{hotel_ref}/rates": {
       "get": {
         "operationId": "hotel_rates_booking_hotels__hotel_ref__rates_get",
@@ -8807,6 +9010,69 @@
           }
         ],
         "summary": "Create Room Type",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/media/{media_id}": {
+      "patch": {
+        "operationId": "patch_media_booking_media__media_id__patch",
+        "parameters": [
+          {
+            "description": "photo UUID",
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "description": "photo UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Media Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Media Booking Media  Media Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Media",
         "tags": [
           "supply"
         ]
@@ -10320,6 +10586,132 @@
           }
         ],
         "summary": "Deactivate Service",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/services/{service_ref}/media": {
+      "get": {
+        "operationId": "service_media_booking_services__service_ref__media_get",
+        "parameters": [
+          {
+            "description": "Service UUID or code (SVC-000123)",
+            "in": "path",
+            "name": "service_ref",
+            "required": true,
+            "schema": {
+              "description": "Service UUID or code (SVC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Service Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "also list removed photos (no URL)",
+            "in": "query",
+            "name": "include_removed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "also list removed photos (no URL)",
+              "title": "Include Removed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Service Media Booking Services  Service Ref  Media Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Media",
+        "tags": [
+          "supply"
+        ]
+      },
+      "post": {
+        "operationId": "upload_service_media_booking_services__service_ref__media_post",
+        "parameters": [
+          {
+            "description": "Service UUID or code (SVC-000123)",
+            "in": "path",
+            "name": "service_ref",
+            "required": true,
+            "schema": {
+              "description": "Service UUID or code (SVC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Service Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewMedia"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Service Media Booking Services  Service Ref  Media Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Service Media",
         "tags": [
           "supply"
         ]

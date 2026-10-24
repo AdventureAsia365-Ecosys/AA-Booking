@@ -2,6 +2,8 @@
 // app/(staff)/services/_parts/ServiceDetailView.tsx — one service (W2, AA-823; Figma ACTIVITY DETAILS 07): header
 // (title, status, code, type, place), Edit / Deactivate | Activate (supply.write), tabs Overview (facts, supplier,
 // recent activity) and Rates (net rates under the supplier's contracts; written on the supplier page → Rates).
+// AA-835: Overview also shows the customer content CIS published (read-only, "Edit in CIS"; hidden until CIS serves
+// it) and the supplier photos (upload / usage rights / remove with supply.write).
 // "Used in" (proposal items booking it) arrives with the proposal reports. Reads need supply.read.
 
 import { useState } from "react";
@@ -15,6 +17,7 @@ import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } 
 import { RatesTable, SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
+import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { ServiceFormDrawer } from "./ServiceFormDrawer";
 
 export function ServiceDetailView({ refParam }: { refParam: string }) {
@@ -94,7 +97,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
             <Ban size={15} /> This service is inactive: it stays on record, but proposals cannot newly book it.
           </div>
         )}
-        {tab === "overview" && <Overview s={s} />}
+        {tab === "overview" && <Overview s={s} canWrite={status.canWrite} />}
         {tab === "rates" && <Rates s={s} />}
       </div>
       {editing && <ServiceFormDrawer service={s} onClose={() => setEditing(false)} />}
@@ -103,7 +106,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
   );
 }
 
-function Overview({ s }: { s: ServiceDetail }) {
+function Overview({ s, canWrite }: { s: ServiceDetail; canWrite: boolean }) {
   const minutes = s.duration_minutes;
   const duration = minutes == null ? "—" : minutes >= 60 ? `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}` : `${minutes} min`;
   return (
@@ -139,6 +142,8 @@ function Overview({ s }: { s: ServiceDetail }) {
             </Fact>
           </FactGrid>
         </Section>
+        <CisContentPanel content={s.content} />
+        <SupplierPhotos kind="service" recordRef={s.code} recordActive={s.status === "active"} canWrite={canWrite} />
       </div>
       <div className="flex min-w-0 flex-col gap-5">
         <Section title="Supplier">

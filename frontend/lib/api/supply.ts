@@ -1,6 +1,8 @@
 // lib/api/supply.ts
 // AA-823 (S237) — typed calls for hotels, room types, services and supplier net rates (backend routers/supply.py,
-// bk-010). Facts only: there is no customer-facing description or photo field (ADR 0004a d2, Q17); CIS writes that.
+// bk-010). Facts only: there is no customer-facing description field (ADR 0004a d2, Q17); CIS writes that.
+// AA-835 S4 (bk-023): supplier photos (upload with a usage-rights flag CIS obeys) and the read-only `content` CIS
+// published for a hotel / service (null until CIS serves catalog.v_supply_content; the panel then stays hidden).
 //
 //   GET   /booking/hotels?q=&status=&supplier=&country=&destination_id=&star_rating=&sort=&limit=&offset=  (supply.read)
 //   POST  /booking/hotels · GET/PATCH /booking/hotels/{id|HTL-code} · POST …/deactivate | activate     (write: supply.write)
@@ -11,6 +13,9 @@
 //   POST  /booking/contracts/{id}/rates · PATCH/DELETE /booking/rates/{id}       (draft contracts only: 409 contract_locked)
 //   GET   /booking/supply/options?q=&kind=&supplier_id=                            room types + services to pick
 //   GET   /booking/supply/rate-in-force?on=&hotel_room_type_id=|service_id=&pax=   the rate an item would take
+//   GET   /booking/{hotels|services}/{ref}/media?include_removed=   photos + presigned preview URLs (supply.read)
+//   POST  /booking/{hotels|services}/{ref}/media   {content_type, data_base64, usage_rights, filename}  (supply.write)
+//   PATCH /booking/media/{id}   {usage_rights} | {status: "removed"} (removed is final)                  (supply.write)
 
 import { bkGet, bkSend } from "./client";
 import type { SupplierActivity, SupplierPlace } from "./suppliers";
@@ -78,9 +83,25 @@ export interface RoomType {
   rates_in_force: number;
 }
 
+/** CIS content status (CIS owns it); `none` = CIS holds nothing for this record yet. */
+export type ContentStatus = "none" | "draft" | "in_review" | "published" | "stale" | "unpublished";
+
+/** The customer content CIS published for a hotel / service (catalog.v_supply_content, read live). Text and photos are
+ *  set only while `published`; `edit_url` is the CIS admin path, used as-is after CIS_ADMIN_URL. */
+export interface SupplyContent {
+  content_status: ContentStatus;
+  content_version: number | null;
+  description: string | null;
+  highlights: string[];
+  photo_urls: string[];
+  edit_url: string | null;
+}
+
 export interface HotelDetail extends Hotel {
   room_types: RoomType[];
   recent_activity: SupplierActivity[];
+  /** null: the CIS read-back is off (CIS 278 not served yet, or unreadable right now). */
+  content?: SupplyContent | null;
 }
 
 export interface Service extends SupplyRecord {
@@ -96,6 +117,43 @@ export interface Service extends SupplyRecord {
 
 export interface ServiceDetail extends Service {
   recent_activity: SupplierActivity[];
+  content?: SupplyContent | null;
+}
+
+export const MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+export interface SupplyMedia {
+  id: string;
+  entity_type: "hotel" | "service";
+  entity_id: string;
+  content_type: MediaType;
+  bytes: number;
+  width: number | null;
+  height: number | null;
+  sha256: string;
+  /** Contracting confirmed AA may publish the photo; CIS never uses it while false. */
+  usage_rights: boolean;
+  status: "active" | "removed";
+  uploaded_by: { id: string; name: string | null };
+  updated_by: string | null;
+  created_at: IsoDateTime;
+  updated_at: IsoDateTime;
+  /** Presigned preview URL (15 minutes); null for a removed photo or when storage is not configured. */
+  url: string | null;
+}
+
+export interface MediaList {
+  items: SupplyMedia[];
+  max_bytes: number;
+  max_active: number;
+}
+
+export interface MediaUpload {
+  content_type: MediaType;
+  data_base64: string;
+  usage_rights?: boolean;
+  filename?: string;
 }
 
 export interface Page<T> {
@@ -235,6 +293,13 @@ export const supplyApi = {
   createRate: (contractId: string, body: RateBody) => bkSend<SupplierRate>(`contracts/${enc(contractId)}/rates`, { body }),
   updateRate: (id: string, body: RateBody) => bkSend<Changed<SupplierRate>>(`rates/${enc(id)}`, { method: "PATCH", body }),
   deleteRate: (id: string) => bkSend<void>(`rates/${enc(id)}`, { method: "DELETE" }),
+
+  media: (kind: "hotel" | "service", ref: string, includeRemoved = false) =>
+    bkGet<MediaList>(`${kind}s/${enc(ref)}/media`, { include_removed: includeRemoved || undefined }),
+  uploadMedia: (kind: "hotel" | "service", ref: string, body: MediaUpload) =>
+    bkSend<SupplyMedia>(`${kind}s/${enc(ref)}/media`, { body }),
+  updateMedia: (id: string, body: { usage_rights?: boolean; status?: "removed" }) =>
+    bkSend<Changed<SupplyMedia>>(`media/${enc(id)}`, { method: "PATCH", body }),
 
   options: (q: { q?: string; kind?: string; supplier_id?: string; limit?: number }) =>
     bkGet<{ items: SupplyOption[] }>("supply/options", q),

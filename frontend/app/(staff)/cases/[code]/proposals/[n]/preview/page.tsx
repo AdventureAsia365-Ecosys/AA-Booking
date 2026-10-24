@@ -8,6 +8,8 @@
 // (POST …/versions/{n}/send), which marks the version sent and locks it; it never claims an e-mail.
 // CIS day text, photos, inclusions and the map join when GET /booking/catalog/tours/{id} exists (§6.2);
 // until then the preview shows exactly what Booking stores and says what is missing. Download PDF is W2.
+// AA-835: an item that books a hotel room or a service shows the description and highlights CIS published for it
+// (the API sends them only while published; draft / stale content never reaches a proposal).
 
 import { use, useState } from "react";
 import Link from "next/link";
@@ -69,6 +71,8 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const cfg = settingsFromApi(settings.data?.values);
   const days = itemsByDay(v.items);
   const locked = v.is_sent_to_customer || v.is_approved;
+  // AA-835: supply descriptions are read live from CIS, not stored with the version (snapshot comes with e-mail / PDF).
+  const liveSupplyText = v.items.some((it) => it.supply?.description);
   const canSend = canWrite && !locked && SENDABLE_FROM.includes(c.status);
   const builderHref = `/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}`;
   const tripName = v.title ?? c.trip_title ?? "Custom trip";
@@ -131,7 +135,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
         </div>
 
         {locked && (
-          <div role="status" className="flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
+          <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved ? (
               <span>Approved by the customer: this version is locked.</span>
@@ -140,6 +144,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                 Marked as sent on <DateText value={v.sent_at} />: this version is locked. Booking does not send e-mail yet.
               </span>
             )}
+            {liveSupplyText && <span className="text-muted">Hotel and service descriptions show what CIS publishes today.</span>}
           </div>
         )}
 
@@ -195,6 +200,18 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                                 {it.source_tour_id && <FromCisTag />}
                               </div>
                               {it.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-body">{it.notes}</p>}
+                              {it.supply?.description && (
+                                <div className="mt-1.5 text-[13px] leading-relaxed text-body">
+                                  <p className="whitespace-pre-line">{it.supply.description}</p>
+                                  {(it.supply.highlights?.length ?? 0) > 0 && (
+                                    <ul className="mt-1 list-disc pl-5">
+                                      {(it.supply.highlights ?? []).map((h) => (
+                                        <li key={h}>{h}</li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ))
                         )}

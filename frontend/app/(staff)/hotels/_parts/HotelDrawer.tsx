@@ -2,7 +2,8 @@
 // app/(staff)/hotels/_parts/HotelDrawer.tsx — one hotel in a side drawer (AA-823, bk-010; Figma HOTEL MANAGEMENT 07):
 // facts, room types (add / edit / deactivate), the net rates entered under the supplier's contracts (read here; they
 // are written on the supplier page → Rates) and recent activity. Edit / Deactivate need supply.write; sales read.
-// Customer-facing description and photos are CIS content, not edited here (ADR 0004a, Q17: none in v1).
+// Customer-facing description and photos are CIS content, not edited here (ADR 0004a): AA-835 shows what CIS published
+// (read-only, "Edit in CIS"; hidden until CIS serves it) and the supplier photos contracting uploads for CIS to use.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -14,6 +15,7 @@ import { Fact, FactGrid } from "@/app/(staff)/_parts/DetailHeader";
 import { RatesTable, Stars, supplyError } from "@/app/(staff)/_parts/supply";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
+import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { HotelFormDrawer } from "./HotelFormDrawer";
 import { RoomTypeDrawer } from "./RoomTypeDrawer";
 
@@ -63,6 +65,8 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
             </p>
           )}
           <Facts h={h} />
+          <CisContentPanel content={h.content} />
+          <SupplierPhotos kind="hotel" recordRef={h.code} recordActive={h.status === "active"} canWrite={status.canWrite} />
           <RoomTypes h={h} canWrite={status.canWrite} />
           <HotelRates h={h} />
           <Activity h={h} />
@@ -144,8 +148,8 @@ function Facts({ h }: { h: HotelDetail }) {
           <Fact label="Internal notes" wide>
             {h.internal_notes ? <span className="whitespace-pre-line">{h.internal_notes}</span> : <span className="text-muted">None</span>}
           </Fact>
-          <Fact label="Description and photos" wide>
-            <span className="text-muted">Written in CIS from these facts (not in Booking).</span>
+          <Fact label="Description" wide>
+            <span className="text-muted">Written in CIS from these facts and the rights-cleared photos (not in Booking).</span>
           </Fact>
         </FactGrid>
       </div>

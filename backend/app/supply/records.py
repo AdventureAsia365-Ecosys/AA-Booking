@@ -11,6 +11,9 @@ and ``country_code`` follows it. Records are addressed by UUID or by code (``HTL
 - **Never deleted.** ``deactivate`` / ``activate`` only; a record of an inactive supplier cannot be activated.
 - **Room types** (hotels only): name, max occupancy, bed types, internal notes, status. Rates hang off a room type.
 - A service's pricing ``unit`` cannot change once it has rates (the rates were entered per that unit).
+- **Read-back** (AA-835 S4): the detail carries ``content``, the customer content CIS published for the record
+  (``app.supply.content``; ``None`` until CIS serves ``catalog.v_supply_content``). Supplier photos are
+  ``app.supply.media``; their audit rows show in the record's recent activity.
 
 Hotels and services share one implementation, parametrised by :class:`Kind`. Every write adds one audit row.
 """
@@ -29,6 +32,7 @@ from app.auth.staff import Staff
 from app.errors import Conflict, Invalid, NotFound
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
+from app.supply import content
 
 HOTEL_RATES = (
     suppliers.RATE_ROOM_TYPE + " IN (SELECT t.id FROM booking.hotel_room_types t WHERE t.hotel_id = $1::uuid)"  # noqa: S608 — constants
@@ -372,6 +376,8 @@ async def get_record(conn: asyncpg.Connection, kind: Kind, ref: str) -> dict[str
            OR (l.entity_type = 'hotel_room_type' AND l.entity_id IN (
                SELECT t.id FROM booking.hotel_room_types t WHERE t.hotel_id = $1::uuid))
            OR (l.entity_type = 'supplier_rate' AND {rates})
+           OR (l.entity_type = 'entity_media' AND l.entity_id IN (
+               SELECT m.id FROM booking.entity_media m WHERE m.entity_type = $2 AND m.entity_id = $1::uuid))
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT 20
         """,  # noqa: S608 — constants only
@@ -385,6 +391,7 @@ async def get_record(conn: asyncpg.Connection, kind: Kind, ref: str) -> dict[str
         }
         for r in activity
     ]
+    record["content"] = await content.read_content(conn, kind.entity, record["id"])
     return record
 
 
