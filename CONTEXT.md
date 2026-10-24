@@ -169,11 +169,13 @@ backend/
   tests/job_template/      byte copies of AA-CIS-App shared/jobs/job_table_template.sql + job_table_shape.py (AA-751;
                            never edited here, drift-checked by CI "Vendored CIS copies")
   scripts/                 check_vendored_copies.py (that drift check, also for app/auth/identity_verifier.py; stdlib,
-                           GitHub contents API)
+                           GitHub contents API); export_openapi.py (writes docs/api/openapi.json, AA-899)
   Dockerfile               python:3.12-slim, port 8000, non-root, stdlib healthcheck
 migrations/NNN_*.sql       schema booking, key bk-NNN (byte-copied to AA-CIS-Infra)
 docs/adr/                  repo ADRs (0001 implements root ADR 0004)
 docs/ui-spec.md            staff admin UI spec (AA-683; routes, waves, API per route)
+docs/api/                  openapi.json (generated API reference, AA-899; never edited by hand) + README (how the
+                           breaking-change check works, the api-breaking escape hatch)
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md,
@@ -181,8 +183,11 @@ docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md,
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
-                           freshness report)
-.github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4)
+                           freshness report), api-contract.yml (AA-899: oasdiff breaking-change check of
+                           docs/api/openapi.json against the base branch)
+.github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4), openapi_breaking.sh (AA-899,
+                           byte copy of the AA-CIS-App script)
+.github/oasdiff/           severity-levels.txt (AA-899: oasdiff checks raised to error)
 tools/docs/                docs lint tools vendored from AA-Ecosys tools/docs (AA-888; README says how to keep them identical)
 docs/templates/            frontmatter.schema.json, copy of the AA-Ecosys schema the front-matter check uses
 frontend/                  staff admin (AA-683), see "Staff admin frontend" below
@@ -228,6 +233,14 @@ it; merging it tags the release. The version also lives in `backend/pyproject.to
 same PR). A release commit deploys nothing (Deploy Dev ignores those files, Vercel Deploy watches `frontend/**` only);
 the next backend deploy, or a Deploy Dev dispatch on `main`, bakes the new version, which `GET /booking/health` returns
 as `version` next to `git_sha`. Details: `docs/implementation-notes/AA-891.md`.
+
+**API reference (AA-899).** `docs/api/openapi.json` is the OpenAPI document of the code, exported by
+`backend/scripts/export_openapi.py` (no database, no secret; deterministic, no `servers`, `info.version` =
+`unreleased`). The required Unit Tests check fails when it is stale; the "API contract" workflow diffs it against the
+base branch with oasdiff and fails a PR that breaks a **public** path (`/booking/b2b/v1/*`, `/booking/health*`,
+`/booking/ops/*`) unless the PR carries the label `api-breaking` or a `type!:` title. Staff routes (only this repo's
+staff admin calls them) are reported as warnings. Each release gets the document as an asset
+(`aa-booking-openapi-vX.Y.Z.json`, stamped with the version). How-to: [`docs/api/README.md`](docs/api/README.md).
 
 ## Logs, request ids and errors (AA-871)
 
