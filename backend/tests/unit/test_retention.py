@@ -13,10 +13,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.auth.staff import PERMISSIONS
+from app.errors import Invalid
 from app.jobs.worker import PermanentError
 from app.retention import archive, jobs, redact, runner
 from app.retention.policy import ARCHIVE_BUCKET_DISPLAY, INBOX_SPEC, JOB_SPEC, KINDS, archive_bucket, spec_for
-from app.routers.retention import RunRequest
+from app.routers.retention import RunRequest, _check_override
 from tests import inquiry_samples as samples
 
 # ── Policy (data standards §7, E3) ───────────────────────────────────────────
@@ -351,3 +352,105 @@ def test_run_request_defaults_to_a_dry_run_and_a_live_run_needs_max_rows() -> No
             RunRequest(**bad)
     literal = RunRequest.model_fields["kind"].annotation.__args__
     assert set(literal) == set(KINDS)
+
+
+# ── Manual override (AA-825 reopened, S251) ──────────────────────────────────
+
+TODAY = date(2026, 10, 25)
+OVR = {"trigger": "manual_override"}
+
+
+def test_override_cutoff_is_the_utc_midnight_of_older_than() -> None:
+    cut = jobs.override_cutoff(JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, TODAY, "dev")
+    assert cut == datetime(2026, 10, 18, tzinfo=UTC)
+    assert jobs.override_cutoff(INBOX_SPEC.kind, {**OVR, "older_than": "2026-01-01"}, TODAY, " Test ") == datetime(
+        2026, 1, 1, tzinfo=UTC
+    )
+    # Any other trigger keeps the policy windows.
+    assert jobs.override_cutoff(JOB_SPEC.kind, {}, TODAY, "dev") is None
+    assert jobs.override_cutoff(JOB_SPEC.kind, {"trigger": "schedule"}, TODAY, "prod") is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "payload", "env", "message"),
+    [
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, "prod", "refused in environment 'prod'"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, "staging", "refused in environment"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-19"}, "dev", "too recent: at most 2026-10-18"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-25"}, "dev", "too recent"),
+        (JOB_SPEC.kind, OVR, "dev", "needs older_than"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "18/10/2026"}, "dev", "is not a date"),
+        (JOB_SPEC.kind, {**OVR, "older_than": 20261018}, "dev", "needs older_than"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18T00:00"}, "dev", "needs older_than"),
+        ("bk_inquiry_pull", {**OVR, "older_than": "2026-10-18"}, "dev", "does not accept a manual override"),
+        (JOB_SPEC.kind, {"older_than": "2026-10-18"}, "dev", "only accepted with trigger"),
+        (JOB_SPEC.kind, {"trigger": "schedule", "older_than": "2026-10-18"}, "dev", "only accepted with trigger"),
+    ],
+)
+def test_override_cutoff_refuses(kind: str, payload: dict[str, Any], env: str, message: str) -> None:
+    with pytest.raises(jobs.OverrideRefused, match=message):
+        jobs.override_cutoff(kind, payload, TODAY, env)
+
+
+def test_override_runs_are_dry_unless_live_with_max_rows_within_the_cap() -> None:
+    assert jobs.decide_mode(OVR, WINDOWS, 10, None)[:2] == ("dry_run", 0)
+    assert jobs.decide_mode({**OVR, "dry_run": "false", "max_rows": 5}, WINDOWS, 10, None)[0] == "dry_run"
+    mode, limit, reason = jobs.decide_mode({**OVR, "dry_run": False, "max_rows": 7}, WINDOWS, 10, None)
+    assert (mode, limit) == ("live", 7) and "manual override" in reason
+    top = jobs.decide_mode({**OVR, "dry_run": False, "max_rows": jobs.OVERRIDE_MAX_ROWS}, WINDOWS, 10, None)
+    assert top[:2] == ("live", jobs.OVERRIDE_MAX_ROWS)
+    # Refused, not capped: a bigger approved count is a mistake, never silently trimmed.
+    for bad in (None, 0, True, jobs.OVERRIDE_MAX_ROWS + 1, "5"):
+        with pytest.raises(PermanentError, match="max_rows"):
+            jobs.decide_mode({**OVR, "dry_run": False, "max_rows": bad}, WINDOWS, 10, None)
+    # A previous live run does not change an override run, and the override knows no 'held'.
+    prev = {"windows": WINDOWS, "affected_total": 1}
+    assert jobs.decide_mode({**OVR, "dry_run": False, "max_rows": 3}, WINDOWS, 10**6, prev)[:2] == ("live", 3)
+
+
+def test_override_summary_line_says_so() -> None:
+    parts = [{"part": "payload_pii", "candidates": 3, "affected": 3}]
+    base = {"action": "redact", "parts": parts, "candidates_total": 3, "affected_total": 3, "archived_total": 0}
+    ovr = {"override": {"older_than": "2026-10-18"}}
+    assert jobs.summary_line({**base, **ovr, "mode": "live"}) == "override older_than 2026-10-18: redact 3 rows " + (
+        "(payload_pii 3)"
+    )
+    assert jobs.summary_line({**base, **ovr, "mode": "dry_run"}).startswith("override older_than 2026-10-18: dry_run")
+
+
+def test_last_live_lookup_ignores_override_runs() -> None:
+    assert "manual_override" in jobs._LAST_LIVE_SQL and "<>" in jobs._LAST_LIVE_SQL
+
+
+def test_override_floor_and_cap() -> None:
+    # S251: Booking's Dev rows start 14/10/2026, so the CIS 21-day floor would leave nothing to prove the path on.
+    assert jobs.OVERRIDE_MIN_AGE_DAYS == 7 and jobs.OVERRIDE_MAX_ROWS == 1_000
+    assert jobs.OVERRIDE_KINDS == KINDS and "prod" not in jobs.OVERRIDE_ENVIRONMENTS
+
+
+def test_run_request_accepts_an_override_date() -> None:
+    req = RunRequest(kind="bk_retention_inbox_redact", older_than="2026-10-18")
+    assert req.older_than == date(2026, 10, 18) and req.dry_run is True
+    with pytest.raises(ValidationError):
+        RunRequest(kind="bk_retention_job", older_than="yesterday")
+
+
+def test_the_api_refuses_an_override_outside_dev_test_local_and_too_recent_or_too_big() -> None:
+    old = datetime.now(UTC).date().toordinal() - jobs.OVERRIDE_MIN_AGE_DAYS
+    older_than = date.fromordinal(old)
+    _check_override(RunRequest(kind="bk_retention_job", older_than=older_than), "dev")
+    _check_override(RunRequest(kind="bk_retention_job", older_than=older_than, dry_run=False, max_rows=5), "local")
+    for body, env, message in (
+        (RunRequest(kind="bk_retention_job", older_than=older_than), "prod", "environment 'prod'"),
+        (RunRequest(kind="bk_retention_job", older_than=date.fromordinal(old + 1)), "dev", "too recent"),
+        (
+            RunRequest(
+                kind="bk_retention_job", older_than=older_than, dry_run=False, max_rows=jobs.OVERRIDE_MAX_ROWS + 1
+            ),
+            "dev",
+            "max_rows",
+        ),
+    ):
+        with pytest.raises(Invalid) as err:
+            _check_override(body, env)
+        assert err.value.code == "retention_override_refused" and message in err.value.message

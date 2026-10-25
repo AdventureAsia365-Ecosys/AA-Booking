@@ -552,8 +552,14 @@ LOCKED`, 30 s statement timeout), at most 50,000 rows per run, `max_attempts = 1
 (the run keeps no progress checkpoint, so a second run could exceed the approved `max_rows`; a shutdown fails it at
 once, the next run counts afresh), one advisory lock per kind. Every run writes its counts to the job result **and** one `booking.audit_logs` row
 (`entity_type = 'retention'`, action `retention.dry_run|live|held|failed`); the last live run is read from the audit log.
-The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (AA-CIS-Infra); without it a live run of
-`bk_retention_job` with failed candidates fails before deleting them.
+The archive needs the task role to hold `s3:PutObject` on `archive/booking/*` (AA-CIS-Infra
+`booking_ecs_task_retention_archive`, S251); without it a live run of `bk_retention_job` with failed candidates fails
+before deleting them. A **manual override** run (`POST /booking/retention/runs` with `older_than`, payload `trigger:
+manual_override`, AA-825 S251, like CIS since S239) replaces every part's window by that UTC date so the delete /
+archive / redaction path can be proven on Dev before rows age: only when `ENVIRONMENT` is dev / test / local, cutoff at
+least 7 days old, DRY RUN unless `dry_run: false` with `1 <= max_rows <= 1,000` (refused, not capped; 422 from the API,
+a failed job otherwise). It is never "the last live run" (scheduled runs stay DRY RUN, the 2x rule ignores it); the
+status shows it in its own `override` bucket and the audit summary starts with `override older_than <date>`.
 
 ## Health contract (ADR 0004 decision 9)
 
