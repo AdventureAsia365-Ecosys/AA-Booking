@@ -3,8 +3,10 @@
 Two owner-run TTL job kinds on ``booking.job`` (ADR 0003a decision 5, DM-7.2):
 
 ``bk_retention_job``
-    Finished jobs: ``succeeded`` deleted 30 days after ``finished_at``; ``failed`` / ``cancelled`` archived to S3 and
-    then deleted 90 days after ``finished_at``. ``queued`` / ``running`` jobs are never touched (the status filter).
+    Finished jobs, each batch archived to S3 before it is deleted (AA-825 "archive each batch to S3 before delete";
+    review S251): ``succeeded`` 30 days after ``finished_at``, ``failed`` / ``cancelled`` 90 days after
+    ``finished_at``. A failed archive put deletes nothing (same transaction). ``queued`` / ``running`` jobs are never
+    touched (the status filter).
 
 ``bk_retention_inbox_redact``
     ``booking.inbox_events`` rows received more than 90 days ago get ``payload`` rebuilt from an allowlist of the
@@ -74,7 +76,7 @@ JOB_SPEC = Spec(
     ts_col="finished_at",
     action="delete",
     parts=(
-        Part("succeeded", 30, "t.status = 'succeeded'"),
+        Part("succeeded", 30, "t.status = 'succeeded'", archive=True),
         Part("failed", 90, "t.status IN ('failed', 'cancelled')", archive=True),
     ),
 )

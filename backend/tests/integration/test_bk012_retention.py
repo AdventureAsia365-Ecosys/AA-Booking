@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -64,6 +65,8 @@ async def pool(migrated_booking_dsn: str, admin: asyncpg.Connection) -> AsyncIte
 
 
 TEST_BUCKET = "aa-cis-bronze-test"
+# The worker's process environment with the override gate open (Dev sets both in Terraform; CI sets neither flag).
+OVERRIDE_ON = {"ENVIRONMENT": "test", jobs.OVERRIDE_FLAG: "true"}
 
 
 class StubS3:
@@ -84,11 +87,12 @@ class StubS3:
         return out
 
 
-async def run_jobs(pool: asyncpg.Pool, s3: StubS3) -> None:
+async def run_jobs(pool: asyncpg.Pool, s3: StubS3, environ: dict[str, str] | None = None) -> None:
     async def provide() -> asyncpg.Pool:
         return pool
 
-    w = Worker(provide, jobs.build_handlers(lambda: s3, lambda: TEST_BUCKET), maintenance_every=10_000)
+    handlers = jobs.build_handlers(lambda: s3, lambda: TEST_BUCKET, environ=OVERRIDE_ON if environ is None else environ)
+    w = Worker(provide, handlers, maintenance_every=10_000)
     w._ticks = 1  # no maintenance (no schedule hook here)
     for _ in range(20):
         if not await w.run_once():
@@ -137,7 +141,7 @@ async def audit_rows(admin: asyncpg.Connection, action: str | None = None) -> li
 # ── bk_retention_job ─────────────────────────────────────────────────────────
 
 
-async def test_job_retention_dry_run_then_live_archives_failed_and_never_touches_active_jobs(
+async def test_job_retention_dry_run_then_live_archives_every_deleted_job_and_never_touches_active_jobs(
     admin: asyncpg.Connection, pool: asyncpg.Pool
 ) -> None:
     keep = {
@@ -167,7 +171,7 @@ async def test_job_retention_dry_run_then_live_archives_failed_and_never_touches
 
     live = await run(pool, s3, JOB_KIND, dry_run=False, max_rows=3)
     res = result(live)
-    assert (res["mode"], res["affected_total"], res["archived_total"]) == ("live", 3, 2)
+    assert (res["mode"], res["affected_total"], res["archived_total"]) == ("live", 3, 3)
     assert (
         await admin.fetchval(
             "SELECT count(*) FROM booking.job WHERE id = ANY($1::uuid[])", [old_succeeded, *old_failed]
@@ -175,15 +179,22 @@ async def test_job_retention_dry_run_then_live_archives_failed_and_never_touches
         == 0
     )
     assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = ANY($1::uuid[])", list(keep)) == len(keep)
-    # Archive: exactly the failed / cancelled rows, whole rows, one object per UTC month.
+    # Archive: exactly the deleted rows (AA-825 "archive each batch before delete": succeeded too), whole rows, one
+    # object per part, batch and UTC month.
     archived = s3.rows()
-    assert {r["id"] for r in archived} == old_failed
-    assert {r["status"] for r in archived} == {"failed", "cancelled"} and all("payload" in r for r in archived)
-    failed_part = next(p for p in res["parts"] if p["part"] == "failed")
-    months = {r["finished_at"][:7] for r in archived}  # 'YYYY-MM' of each archived row (UTC offset +00:00)
-    assert failed_part["objects"] == len(s3.objects) == len(months)
+    assert {r["id"] for r in archived} == {old_succeeded, *old_failed}
+    assert {r["status"] for r in archived} == {"succeeded", "failed", "cancelled"} and all(
+        "payload" in r for r in archived
+    )
+    by_part = {p["part"]: p for p in res["parts"]}
+    assert (by_part["succeeded"]["archived_rows"], by_part["failed"]["archived_rows"]) == (1, 2)
+    failed_months = {r["finished_at"][:7] for r in archived if r["status"] != "succeeded"}  # 'YYYY-MM', UTC
+    assert by_part["failed"]["objects"] == len(failed_months) and by_part["succeeded"]["objects"] == 1
+    assert by_part["succeeded"]["objects"] + by_part["failed"]["objects"] == len(s3.objects)
+    months = {r["finished_at"][:7] for r in archived}
     assert {"/".join(k.split("/")[3:5]) for k in s3.objects} == {m.replace("-", "/") for m in months}
-    assert all(k.startswith("archive/booking/job/") for k in failed_part["object_keys"])
+    for part in by_part.values():
+        assert all(k.startswith("archive/booking/job/") and f"-{part['part']}-b" in k for k in part["object_keys"])
     (live_audit,) = await audit_rows(admin, "retention.live")
     assert json.loads(live_audit["after"])["affected_total"] == 3
 
@@ -195,19 +206,22 @@ async def test_job_retention_dry_run_then_live_archives_failed_and_never_touches
 async def test_a_live_run_stops_at_max_rows_oldest_first(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
     oldest = await seed_job(admin, "succeeded", 50)
     newer = await seed_job(admin, "succeeded", 40)
-    res = result(await run(pool, StubS3(), JOB_KIND, dry_run=False, max_rows=1))
-    assert (res["candidates_total"], res["affected_total"]) == (2, 1)
+    s3 = StubS3()
+    res = result(await run(pool, s3, JOB_KIND, dry_run=False, max_rows=1))
+    assert (res["candidates_total"], res["affected_total"], res["archived_total"]) == (2, 1, 1)
     remaining = {r["id"] for r in await admin.fetch("SELECT id::text AS id FROM booking.job")}
     assert oldest not in remaining and newer in remaining
+    assert [r["id"] for r in s3.rows()] == [oldest]
 
 
+@pytest.mark.parametrize("status", ["succeeded", "failed"])
 async def test_an_archive_failure_deletes_nothing_it_could_not_archive(
-    admin: asyncpg.Connection, pool: asyncpg.Pool
+    admin: asyncpg.Connection, pool: asyncpg.Pool, status: str
 ) -> None:
-    failed = await seed_job(admin, "failed", 100)
+    old = await seed_job(admin, status, 100)
     row = await run(pool, StubS3(fail=True), JOB_KIND, dry_run=False, max_rows=10)
     assert row["status"] == "failed" and "AccessDenied" in row["error"]
-    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = $1::uuid", failed) == 1
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = $1::uuid", old) == 1
     (audit_row,) = await audit_rows(admin, "retention.failed")
     after = json.loads(audit_row["after"])
     assert after["affected_total"] == 0 and "AccessDenied" in after["error"]
@@ -341,6 +355,149 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
     assert [r["action"] for r in await audit_rows(admin)] == ["retention.dry_run", "retention.live", "retention.live"]
 
 
+# ── Manual override (AA-825 reopened, S251) ──────────────────────────────────
+
+
+def _older_than(days: int) -> str:
+    return (datetime.now(UTC).date() - timedelta(days=days)).isoformat()
+
+
+async def test_override_run_deletes_young_jobs_by_an_explicit_cutoff_and_never_becomes_the_last_live_run(
+    admin: asyncpg.Connection, pool: asyncpg.Pool
+) -> None:
+    """The Dev proof run: rows 8-20 days old (inside the 30 / 90-day windows) go through the real delete + archive path
+    under an explicit cutoff; the next scheduled run still knows no live run and stays a DRY RUN."""
+    young_succeeded = await seed_job(admin, "succeeded", 12)
+    young_failed = {await seed_job(admin, "failed", 15), await seed_job(admin, "cancelled", 20)}
+    keep = {
+        await seed_job(admin, "succeeded", 5),  # newer than the override cutoff
+        await seed_job(admin, "queued", 400),
+        await seed_job(admin, "running", 400),
+    }
+    s3 = StubS3()
+    cutoff = _older_than(8)
+
+    policy = result(await run(pool, s3, JOB_KIND))
+    assert policy["candidates_total"] == 0  # under the policy windows nothing is old enough yet
+
+    dry = result(await run(pool, s3, JOB_KIND, trigger="manual_override", older_than=cutoff))
+    assert (dry["mode"], dry["trigger"], dry["candidates_total"]) == ("dry_run", "manual_override", 3)
+    assert dry["override"]["older_than"] == cutoff and dry["override"]["environment"] == "test"
+    assert dry["override"]["opt_in"] == jobs.OVERRIDE_FLAG
+    assert set(dry["override"]["policy_cutoffs"]) == {"succeeded", "failed"}
+    assert {p["cutoff"][:10] for p in dry["parts"]} == {cutoff}
+    assert dry["affected_total"] == 0 and s3.objects == {}
+
+    live_row = await run(pool, s3, JOB_KIND, trigger="manual_override", older_than=cutoff, dry_run=False, max_rows=3)
+    assert live_row["status"] == "succeeded"
+    live = result(live_row)
+    assert (live["mode"], live["affected_total"], live["archived_total"]) == ("live", 3, 3)
+    gone = [young_succeeded, *young_failed]
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = ANY($1::uuid[])", gone) == 0
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = ANY($1::uuid[])", list(keep)) == len(keep)
+    assert {r["id"] for r in s3.rows()} == set(gone)
+    (live_audit,) = await audit_rows(admin, "retention.live")
+    assert live_audit["summary"].startswith(f"override older_than {cutoff}: delete 3 rows")
+    assert json.loads(live_audit["after"])["trigger"] == "manual_override"
+
+    # Not "the last live run": the scheduled run stays a DRY RUN, and the status shows it as an override.
+    assert await jobs.last_live(pool, JOB_KIND) is None
+    sched = result(await run(pool, s3, JOB_KIND, trigger="schedule"))
+    assert sched["mode"] == "dry_run" and "first run is a DRY RUN" in sched["reason"]
+    async with pool.acquire() as conn:
+        state = await jobs.status(conn, OVERRIDE_ON)
+        closed = await jobs.status(conn, {"ENVIRONMENT": "dev"})
+    assert state["override"]["enabled"] is True and closed["override"]["enabled"] is False
+    job_state = next(k for k in state["kinds"] if k["kind"] == JOB_KIND)
+    assert job_state["scheduled_mode"] == "dry_run" and job_state["last_live"] is None
+    assert job_state["last"]["override"]["override"]["older_than"] == cutoff
+    assert job_state["override_allowed"] is True and state["override"]["min_age_days"] == jobs.OVERRIDE_MIN_AGE_DAYS
+
+
+async def test_override_redacts_young_processed_inbox_rows_only(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    for p in (samples.v1_1("override-a@example.test"), samples.v1_1("override-b@example.test")):
+        await publish(admin, p)
+    await drain(pool)
+    await admin.execute("UPDATE booking.inbox_events SET received_at = now() - interval '10 days'")
+    await publish(admin, samples.v1_1("override-recent@example.test"))  # received now: newer than the cutoff
+    await drain(pool)
+    stuck_key = "override-stuck"
+    await admin.execute(
+        "INSERT INTO booking.inbox_events (source, contract, idempotency_key, payload, received_at, status)"
+        " VALUES ('tripplanner', 'inquiry.submitted', $1, $2::jsonb, now() - interval '12 days', 'received')",
+        stuck_key,
+        json.dumps(samples.v1_1("override-stuck@example.test")),
+    )
+    s3 = StubS3()
+    cutoff = _older_than(7)
+
+    dry = result(await run(pool, s3, INBOX_KIND, trigger="manual_override", older_than=cutoff))
+    assert (dry["mode"], dry["candidates_total"], dry["skipped_unprocessed"]) == ("dry_run", 2, 1)
+
+    live = result(
+        await run(pool, s3, INBOX_KIND, trigger="manual_override", older_than=cutoff, dry_run=False, max_rows=2)
+    )
+    assert (live["mode"], live["action"], live["affected_total"], live["archived_total"]) == ("live", "redact", 2, 0)
+    rows = {r["idempotency_key"]: r for r in await admin.fetch("SELECT * FROM booking.inbox_events")}
+    redacted = [r for r in rows.values() if r["redacted_at"] is not None]
+    assert len(redacted) == 2 and all("example.test" not in r["payload"] for r in redacted)
+    assert rows[stuck_key]["redacted_at"] is None
+    recent = [r for r in rows.values() if "override-recent@example.test" in r["payload"]]
+    assert len(recent) == 1 and recent[0]["redacted_at"] is None
+    assert await jobs.last_live(pool, INBOX_KIND) is None
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"older_than": "too-new"}, "too recent"),
+        ({"dry_run": False, "max_rows": jobs.OVERRIDE_MAX_ROWS + 1}, "max_rows"),
+        ({"dry_run": False}, "max_rows"),
+    ],
+)
+async def test_refused_override_runs_fail_at_once_and_touch_nothing(
+    admin: asyncpg.Connection, pool: asyncpg.Pool, payload: dict[str, Any], message: str
+) -> None:
+    old = await seed_job(admin, "succeeded", 40)
+    body = {"trigger": "manual_override", "older_than": _older_than(10), **payload}
+    if body["older_than"] == "too-new":
+        body["older_than"] = _older_than(jobs.OVERRIDE_MIN_AGE_DAYS - 1)
+    row = await run(pool, StubS3(), JOB_KIND, **body)
+    assert row["status"] == "failed" and message in row["error"]
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = $1::uuid", old) == 1
+    assert await audit_rows(admin, "retention.live") == []
+
+
+@pytest.mark.parametrize(
+    ("environ", "message"),
+    [
+        # Fail closed (review S251): no ENVIRONMENT default, and a known Dev / test environment still needs the opt-in.
+        ({}, "ENVIRONMENT is not set"),
+        ({"ENVIRONMENT": "", jobs.OVERRIDE_FLAG: "true"}, "ENVIRONMENT is not set"),
+        ({"ENVIRONMENT": "prod", jobs.OVERRIDE_FLAG: "true"}, "refused in environment 'prod'"),
+        ({"ENVIRONMENT": "test"}, jobs.OVERRIDE_FLAG),
+        ({"ENVIRONMENT": "dev", jobs.OVERRIDE_FLAG: "false"}, jobs.OVERRIDE_FLAG),
+    ],
+)
+async def test_override_fails_closed_without_a_known_environment_and_the_opt_in(
+    admin: asyncpg.Connection, pool: asyncpg.Pool, environ: dict[str, str], message: str
+) -> None:
+    old = await seed_job(admin, "succeeded", 40)
+    s3 = StubS3()
+    job_id = await queue.enqueue(
+        pool,
+        JOB_KIND,
+        {"trigger": "manual_override", "older_than": _older_than(10), "dry_run": False, "max_rows": 5},
+        max_attempts=jobs.MAX_ATTEMPTS,
+        created_by="test",
+    )
+    await run_jobs(pool, s3, environ)
+    row = await pool.fetchrow("SELECT status, error FROM booking.job WHERE id = $1::uuid", job_id)
+    assert row["status"] == "failed" and message in row["error"]
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = $1::uuid", old) == 1
+    assert s3.objects == {} and await audit_rows(admin, "retention.live") == []
+
+
 # ── Admin API ────────────────────────────────────────────────────────────────
 
 
@@ -383,3 +540,56 @@ async def test_admin_api_queues_runs_and_reports_status(
     requested = await audit_rows(admin, "retention.requested")
     assert len(requested) == 1 and requested[0]["actor_ref"] == ADMIN_ID
     assert json.loads(requested[0]["after"]) == {"kind": JOB_KIND, "dry_run": True, "max_rows": None}
+
+
+async def test_admin_api_queues_an_override_run_and_refuses_bad_ones(
+    admin: asyncpg.Connection, pool: asyncpg.Pool, migrated_booking_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    young = await seed_job(admin, "succeeded", 10)
+    as_admin_token = LocalCis()
+    cutoff = _older_than(jobs.OVERRIDE_MIN_AGE_DAYS)
+
+    async def post(body: dict[str, Any]) -> httpx.Response:
+        settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+        db = Database(settings)
+        app = create_app(settings, db, as_admin_token.verifier())
+        headers = {"Authorization": f"Bearer {as_admin_token.token(sub=ADMIN_ID, cis_role='admin')}"}
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://booking") as c:
+                return await c.post(f"{R}/runs", json=body, headers=headers)
+        finally:
+            await db.close()
+
+    # The API reads the raw process environment (not Settings.environment): closed until both are set.
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv(jobs.OVERRIDE_FLAG, raising=False)
+    unset = await post({"kind": JOB_KIND, "older_than": cutoff})
+    assert unset.status_code == 422 and "ENVIRONMENT is not set" in unset.text
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    no_opt_in = await post({"kind": JOB_KIND, "older_than": cutoff})
+    assert no_opt_in.status_code == 422 and jobs.OVERRIDE_FLAG in no_opt_in.text
+    monkeypatch.setenv(jobs.OVERRIDE_FLAG, "true")
+
+    too_new = await post({"kind": JOB_KIND, "older_than": _older_than(jobs.OVERRIDE_MIN_AGE_DAYS - 1)})
+    assert too_new.status_code == 422 and too_new.json()["detail"] == "retention_override_refused"
+    over_cap = await post(
+        {"kind": JOB_KIND, "older_than": cutoff, "dry_run": False, "max_rows": jobs.OVERRIDE_MAX_ROWS + 1}
+    )
+    assert over_cap.status_code == 422
+    assert (await post({"kind": JOB_KIND, "older_than": "not-a-date"})).status_code == 422
+    # (ENVIRONMENT prod with the flag: unit test of _check_override; the job checks too.)
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE kind = $1", JOB_KIND) == 0
+
+    queued = await post({"kind": JOB_KIND, "older_than": cutoff, "dry_run": False, "max_rows": 1})
+    assert queued.status_code == 202
+    body = queued.json()
+    assert (body["dry_run"], body["max_rows"], body["older_than"]) == (False, 1, cutoff)
+    payload = json.loads(
+        await admin.fetchval("SELECT payload::text FROM booking.job WHERE id = $1::uuid", body["job_id"])
+    )
+    assert payload == {"trigger": "manual_override", "older_than": cutoff, "dry_run": False, "max_rows": 1}
+    await run_jobs(pool, StubS3())
+    assert await admin.fetchval("SELECT count(*) FROM booking.job WHERE id = $1::uuid", young) == 0
+    (requested,) = await audit_rows(admin, "retention.requested")
+    assert json.loads(requested["after"])["older_than"] == cutoff
+    assert requested["summary"].endswith(f"override older_than {cutoff}")

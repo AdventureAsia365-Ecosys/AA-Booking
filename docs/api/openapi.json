@@ -4325,6 +4325,18 @@
               }
             ],
             "title": "Max Rows"
+          },
+          "older_than": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Older Than"
           }
         },
         "required": [
