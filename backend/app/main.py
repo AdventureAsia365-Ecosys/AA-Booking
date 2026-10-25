@@ -103,7 +103,7 @@ def create_app(
             handlers = {
                 **intake.build_handlers(settings),
                 staff_email.KIND: staff_email.build_handler(settings),
-                **retention_jobs.build_handlers(environment=settings.environment),
+                **retention_jobs.build_handlers(),
                 **b2b_expiry.HANDLERS,
                 **tour_lifecycle.HANDLERS,
             }

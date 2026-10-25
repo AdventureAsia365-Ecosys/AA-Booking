@@ -13,10 +13,12 @@ Payload: ``{"trigger": "schedule" | "manual" | "manual_override", "dry_run": boo
   notification per active Booking admin.
 - manual_override -> an admin-only proof run with an explicit cutoff ``older_than`` (a UTC date) in place of every
   part's window, so the archive / delete / redaction path can be exercised on Dev before rows reach 30 / 90 days
-  (AA-825 reopened, S251; CIS has the same trigger since S239). Only where ``ENVIRONMENT`` is in
-  :data:`OVERRIDE_ENVIRONMENTS`, cutoff at least :data:`OVERRIDE_MIN_AGE_DAYS` days old, DRY RUN unless ``dry_run`` is
-  false, and a live run needs ``1 <= max_rows <=`` :data:`OVERRIDE_MAX_ROWS` (refused, not capped). It never counts
-  as "the last live run": scheduled runs stay DRY RUN and the 2x rule ignores it.
+  (AA-825 reopened, S251; CIS has the same trigger since S239). Fails closed (:func:`override_gate`): only when the
+  raw process environment has ``ENVIRONMENT`` in :data:`OVERRIDE_ENVIRONMENTS` **and** the explicit opt-in
+  :data:`OVERRIDE_FLAG` ``=true`` (set only on the Dev task definition by Terraform); an unset or empty value of either
+  refuses. Cutoff at least :data:`OVERRIDE_MIN_AGE_DAYS` days old, DRY RUN unless ``dry_run`` is false, and a live run
+  needs ``1 <= max_rows <=`` :data:`OVERRIDE_MAX_ROWS` (refused, not capped). It never counts as "the last live run":
+  scheduled runs stay DRY RUN and the 2x rule ignores it.
 
 Every run is capped at :data:`RUN_MAX_ROWS`; the rest waits for the next run. Every run (dry_run, live, held, and a live
 run that failed half-way) writes one ``booking.audit_logs`` row (``entity_type = 'retention'``, ``entity_id`` = the job
@@ -37,7 +39,7 @@ import functools
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -85,12 +87,19 @@ OVERRIDE_KINDS: tuple[str, ...] = KINDS
 # rows still 'received') and matches queue.prune's 7-day history for the recurring pull kind.
 OVERRIDE_MIN_AGE_DAYS = 7
 OVERRIDE_MAX_ROWS = 1_000
-# ENVIRONMENT is "dev" on the one ECS deployment (Terraform var.environment), "test" / "local" in CI and on a laptop.
-# Any other value (a future prod) refuses.
+# The override gate fails closed (review S251): a future prod also runs on acc2 with the same bronze bucket and role
+# shape, and ``Settings.environment`` defaults to "dev" when ENVIRONMENT is unset, so neither the account nor that
+# default may open it. Both must hold in the RAW process environment (no default):
+# - ENVIRONMENT is "dev" (Terraform var.environment on the one ECS deployment), "test" or "local" (CI, a laptop);
+# - OVERRIDE_FLAG is "true", an explicit opt-in that only the Dev Booking task definition sets (AA-CIS-Infra
+#   accounts/aa365/booking.tf). Unset, empty or any other value refuses.
 OVERRIDE_ENVIRONMENTS = frozenset({"dev", "test", "local"})
+OVERRIDE_FLAG = "RETENTION_OVERRIDE_ENABLED"
 
 S3Factory = Callable[[], Any]
 BucketFactory = Callable[[], str]
+# The process environment the override gate reads (``os.environ`` in the app; a dict in tests).
+Environ = Mapping[str, str]
 
 
 def default_s3() -> Any:
@@ -115,22 +124,37 @@ class OverrideRefused(ValueError):
     422)."""
 
 
-def current_environment() -> str:
-    return (os.environ.get("ENVIRONMENT") or "dev").strip().lower()
+def override_gate(environ: Environ) -> str:
+    """The environment name when this process may run a manual override; raises :class:`OverrideRefused` otherwise.
+    Reads the raw ``environ`` with no default, so a missing ENVIRONMENT or opt-in flag refuses (fail closed). Pure."""
+    env = (environ.get("ENVIRONMENT") or "").strip().lower()
+    if not env:
+        raise OverrideRefused("a manual override run is refused: ENVIRONMENT is not set")
+    if env not in OVERRIDE_ENVIRONMENTS:
+        raise OverrideRefused(f"a manual override run is refused in environment {env!r}")
+    if (environ.get(OVERRIDE_FLAG) or "").strip().lower() != "true":
+        raise OverrideRefused(f"a manual override run is refused: {OVERRIDE_FLAG} is not 'true' in this deployment")
+    return env
 
 
-def override_cutoff(kind: str, payload: dict[str, Any], today: date, environment: str) -> datetime | None:
+def override_enabled(environ: Environ) -> bool:
+    try:
+        override_gate(environ)
+    except OverrideRefused:
+        return False
+    return True
+
+
+def override_cutoff(kind: str, payload: dict[str, Any], today: date, environ: Environ) -> datetime | None:
     """The explicit cutoff of a manual_override run (UTC midnight of ``older_than``), None for any other trigger.
-    Raises :class:`OverrideRefused` for every refused shape. Pure."""
+    Raises :class:`OverrideRefused` for every refused shape and when :func:`override_gate` refuses. Pure."""
     trigger = payload.get("trigger", "manual")
     older_than = payload.get("older_than")
     if trigger != OVERRIDE_TRIGGER:
         if older_than is not None:
             raise OverrideRefused(f"older_than is only accepted with trigger {OVERRIDE_TRIGGER!r}, not {trigger!r}")
         return None
-    env = environment.strip().lower()
-    if env not in OVERRIDE_ENVIRONMENTS:
-        raise OverrideRefused(f"a manual override run is refused in environment {env!r}")
+    override_gate(environ)
     if kind not in OVERRIDE_KINDS:
         raise OverrideRefused(f"{kind} does not accept a manual override; only {list(OVERRIDE_KINDS)}")
     if not isinstance(older_than, str) or len(older_than) != 10:
@@ -273,7 +297,7 @@ async def run_spec(
     *,
     s3_factory: S3Factory = default_s3,
     bucket_factory: BucketFactory = default_bucket,
-    environment: str | None = None,
+    environ: Environ | None = None,
 ) -> dict[str, Any]:
     payload = job.payload or {}
     trigger = payload.get("trigger", "manual")
@@ -293,7 +317,7 @@ async def run_spec(
                 batch_size,
                 s3_factory,
                 bucket_factory,
-                environment if environment is not None else current_environment(),
+                environ if environ is not None else os.environ,
             )
         finally:
             await conn.fetchval(_UNLOCK_SQL, spec.kind)
@@ -309,12 +333,12 @@ async def _run_locked(
     batch_size: int,
     s3_factory: S3Factory,
     bucket_factory: BucketFactory,
-    environment: str,
+    environ: Environ,
 ) -> dict[str, Any]:
     windows = spec.windows()
     today = await conn.fetchval("SELECT (now() AT TIME ZONE 'UTC')::date")
     try:
-        forced = override_cutoff(spec.kind, payload, today, environment)
+        forced = override_cutoff(spec.kind, payload, today, environ)
     except OverrideRefused as exc:
         raise PermanentError(str(exc)) from None
     refs = await runner.fk_refs(conn, spec.table) if spec.action == "delete" else []
@@ -349,7 +373,8 @@ async def _run_locked(
             "policy_cutoffs": {k: v.isoformat() for k, v in policy_cuts.items()},
             "min_age_days": OVERRIDE_MIN_AGE_DAYS,
             "max_rows_cap": OVERRIDE_MAX_ROWS,
-            "environment": environment,
+            "environment": override_gate(environ),
+            "opt_in": OVERRIDE_FLAG,
         }
     if spec.action == "redact":
         result["skipped_unprocessed"] = await conn.fetchval(
@@ -422,14 +447,15 @@ async def _run_locked(
 def build_handlers(
     s3_factory: S3Factory = default_s3,
     bucket_factory: BucketFactory = default_bucket,
-    environment: str | None = None,
+    environ: Environ | None = None,
 ) -> dict[str, Any]:
-    """``environment`` is the process's ``Settings.environment`` (None: read ``ENVIRONMENT`` at run time)."""
+    """``environ`` is what the override gate reads (None: the process's ``os.environ`` at run time, never
+    ``Settings.environment``, whose "dev" default would open the gate)."""
 
     def make(spec: Spec) -> Any:
         async def handler(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
             return await run_spec(
-                pool, job, spec, s3_factory=s3_factory, bucket_factory=bucket_factory, environment=environment
+                pool, job, spec, s3_factory=s3_factory, bucket_factory=bucket_factory, environ=environ
             )
 
         return handler
@@ -541,9 +567,10 @@ def job_view(row: Any) -> dict[str, Any]:
     }
 
 
-async def status(conn: asyncpg.Connection) -> dict[str, Any]:
+async def status(conn: asyncpg.Connection, environ: Environ | None = None) -> dict[str, Any]:
     """Per kind: the policy, the latest active / live / dry_run / held / override / failed job, and what the next
-    scheduled run will do before counting (``scheduled_mode``; a manual_override run never makes it live)."""
+    scheduled run will do before counting (``scheduled_mode``; a manual_override run never makes it live).
+    ``override.enabled`` says whether this deployment's gate is open (``environ``, default ``os.environ``)."""
     rows = await conn.fetch(_STATUS_JOBS_SQL, list(KINDS))
     by_kind: dict[str, dict[str, Any]] = {k: {} for k in KINDS}
     for r in rows:
@@ -576,6 +603,8 @@ async def status(conn: asyncpg.Connection) -> dict[str, Any]:
             "min_age_days": OVERRIDE_MIN_AGE_DAYS,
             "max_rows": OVERRIDE_MAX_ROWS,
             "environments": sorted(OVERRIDE_ENVIRONMENTS),
+            "opt_in": OVERRIDE_FLAG,
+            "enabled": override_enabled(environ if environ is not None else os.environ),
         },
     }
 

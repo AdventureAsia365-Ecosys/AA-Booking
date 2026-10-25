@@ -5,20 +5,21 @@
 - ``POST /booking/retention/runs`` ``{kind, dry_run = true, max_rows, older_than}``: queue one manual run. ``dry_run``
   defaults to true (counts only). A live run (``dry_run: false``) needs ``max_rows``, the count approved from a DRY RUN
   (``skill/aa-cis-schema/references/destructive-ops.md``). ``older_than`` (a UTC date) makes it a ``manual_override``
-  run: that date replaces every part's window (Dev / test / local only, at least ``OVERRIDE_MIN_AGE_DAYS`` days ago,
-  a live one needs ``max_rows <= OVERRIDE_MAX_ROWS``; refused with 422 otherwise). The request itself is one audit
-  row.
+  run: that date replaces every part's window (only where the raw process environment has ``ENVIRONMENT`` dev / test /
+  local and ``RETENTION_OVERRIDE_ENABLED=true``, at least ``OVERRIDE_MIN_AGE_DAYS`` days ago, a live one needs
+  ``max_rows <= OVERRIDE_MAX_ROWS``; refused with 422 otherwise). The request itself is one audit row.
 - ``GET /booking/retention/runs/{job_id}``: the queued / finished job with its result (counts per part, archive keys).
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import audit
@@ -53,8 +54,9 @@ async def retention_status(_: CanAdmin, pool: Pool) -> dict[str, Any]:
         return await jobs.status(conn)
 
 
-def _check_override(body: RunRequest, environment: str) -> None:
-    """The same checks the job makes (it checks again with the database's date), answered at once as 422."""
+def _check_override(body: RunRequest, environ: jobs.Environ) -> None:
+    """The same checks the job makes (it checks again with the database's date), answered at once as 422. ``environ``
+    is the raw process environment (fail closed: not ``Settings.environment``, which defaults to "dev")."""
     payload: dict[str, Any] = {
         "trigger": jobs.OVERRIDE_TRIGGER,
         "older_than": body.older_than.isoformat() if body.older_than else None,
@@ -62,7 +64,7 @@ def _check_override(body: RunRequest, environment: str) -> None:
         "max_rows": body.max_rows,
     }
     try:
-        jobs.override_cutoff(body.kind, payload, datetime.now(UTC).date(), environment)
+        jobs.override_cutoff(body.kind, payload, datetime.now(UTC).date(), environ)
         if not body.dry_run:
             jobs.override_max_rows(payload)
     except jobs.OverrideRefused as exc:
@@ -70,9 +72,9 @@ def _check_override(body: RunRequest, environment: str) -> None:
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
-async def queue_run(body: RunRequest, staff: CanAdmin, pool: Pool, request: Request) -> dict[str, Any]:
+async def queue_run(body: RunRequest, staff: CanAdmin, pool: Pool) -> dict[str, Any]:
     if body.older_than is not None:
-        _check_override(body, request.app.state.settings.environment)
+        _check_override(body, os.environ)
     max_rows = None if body.dry_run else body.max_rows
     async with pool.acquire() as conn, conn.transaction():
         job_id = await jobs.enqueue_manual(

@@ -4,8 +4,10 @@ daily schedule hook and the admin request model. The database behaviour is in te
 
 from __future__ import annotations
 
+import dataclasses
 import gzip
 import json
+import os
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -25,7 +27,8 @@ from tests import inquiry_samples as samples
 
 def test_windows_match_the_approved_retention_table() -> None:
     assert JOB_SPEC.windows() == {"succeeded": 30, "failed": 90}
-    assert [p.archive for p in JOB_SPEC.parts] == [False, True]  # "Failed rows only" are archived
+    # AA-825 "archive each batch to S3 before delete": both delete parts archive (review S251, succeeded part too).
+    assert [p.archive for p in JOB_SPEC.parts] == [True, True]
     assert INBOX_SPEC.windows() == {"payload_pii": 90}
     assert INBOX_SPEC.action == "redact" and not any(p.archive for p in INBOX_SPEC.parts)
     assert KINDS == ("bk_retention_job", "bk_retention_inbox_redact")
@@ -287,7 +290,9 @@ def test_batches_lock_skip_and_use_the_keyset() -> None:
     assert "FOR UPDATE OF t SKIP LOCKED" in sql
     assert "(t.finished_at, t.id) > ($3, $4::uuid)" in sql and "ORDER BY t.finished_at, t.id" in sql
     assert "to_jsonb(t)::text AS doc" in sql  # archived part carries the whole row
-    assert "to_jsonb" not in runner.batch_sql(JOB_SPEC, succeeded, refs, after=False)
+    assert "to_jsonb(t)::text AS doc" in runner.batch_sql(JOB_SPEC, succeeded, refs, after=False)
+    unarchived = dataclasses.replace(succeeded, archive=False)  # a delete part without archive selects no row copy
+    assert "to_jsonb" not in runner.batch_sql(JOB_SPEC, unarchived, refs, after=False)
     assert 'NOT EXISTS (SELECT 1 FROM booking.job r0 WHERE r0."parent_job_id" = t.id)' in sql
     redact_sql = runner.batch_sql(INBOX_SPEC, INBOX_SPEC.parts[0], refs, after=False)
     assert "NOT EXISTS" not in redact_sql and "t.payload::text AS payload" in redact_sql
@@ -358,38 +363,94 @@ def test_run_request_defaults_to_a_dry_run_and_a_live_run_needs_max_rows() -> No
 
 TODAY = date(2026, 10, 25)
 OVR = {"trigger": "manual_override"}
+FLAG = jobs.OVERRIDE_FLAG
+
+
+def on(env: str = "dev") -> dict[str, str]:
+    """A process environment with the override gate open."""
+    return {"ENVIRONMENT": env, FLAG: "true"}
 
 
 def test_override_cutoff_is_the_utc_midnight_of_older_than() -> None:
-    cut = jobs.override_cutoff(JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, TODAY, "dev")
+    cut = jobs.override_cutoff(JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, TODAY, on())
     assert cut == datetime(2026, 10, 18, tzinfo=UTC)
-    assert jobs.override_cutoff(INBOX_SPEC.kind, {**OVR, "older_than": "2026-01-01"}, TODAY, " Test ") == datetime(
+    environ = {"ENVIRONMENT": " Test ", FLAG: " TRUE "}
+    assert jobs.override_cutoff(INBOX_SPEC.kind, {**OVR, "older_than": "2026-01-01"}, TODAY, environ) == datetime(
         2026, 1, 1, tzinfo=UTC
     )
-    # Any other trigger keeps the policy windows.
-    assert jobs.override_cutoff(JOB_SPEC.kind, {}, TODAY, "dev") is None
-    assert jobs.override_cutoff(JOB_SPEC.kind, {"trigger": "schedule"}, TODAY, "prod") is None
+    # Any other trigger keeps the policy windows, whatever the gate says.
+    assert jobs.override_cutoff(JOB_SPEC.kind, {}, TODAY, on()) is None
+    assert jobs.override_cutoff(JOB_SPEC.kind, {"trigger": "schedule"}, TODAY, {"ENVIRONMENT": "prod"}) is None
+    assert jobs.override_cutoff(JOB_SPEC.kind, {"trigger": "manual"}, TODAY, {}) is None
 
 
 @pytest.mark.parametrize(
-    ("kind", "payload", "env", "message"),
+    ("kind", "payload", "environ", "message"),
     [
-        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, "prod", "refused in environment 'prod'"),
-        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, "staging", "refused in environment"),
-        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-19"}, "dev", "too recent: at most 2026-10-18"),
-        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-25"}, "dev", "too recent"),
-        (JOB_SPEC.kind, OVR, "dev", "needs older_than"),
-        (JOB_SPEC.kind, {**OVR, "older_than": "18/10/2026"}, "dev", "is not a date"),
-        (JOB_SPEC.kind, {**OVR, "older_than": 20261018}, "dev", "needs older_than"),
-        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18T00:00"}, "dev", "needs older_than"),
-        ("bk_inquiry_pull", {**OVR, "older_than": "2026-10-18"}, "dev", "does not accept a manual override"),
-        (JOB_SPEC.kind, {"older_than": "2026-10-18"}, "dev", "only accepted with trigger"),
-        (JOB_SPEC.kind, {"trigger": "schedule", "older_than": "2026-10-18"}, "dev", "only accepted with trigger"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, on("prod"), "refused in environment 'prod'"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, on("staging"), "refused in environment"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-19"}, on(), "too recent: at most 2026-10-18"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-25"}, on(), "too recent"),
+        (JOB_SPEC.kind, OVR, on(), "needs older_than"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "18/10/2026"}, on(), "is not a date"),
+        (JOB_SPEC.kind, {**OVR, "older_than": 20261018}, on(), "needs older_than"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18T00:00"}, on(), "needs older_than"),
+        ("bk_inquiry_pull", {**OVR, "older_than": "2026-10-18"}, on(), "does not accept a manual override"),
+        (JOB_SPEC.kind, {"older_than": "2026-10-18"}, on(), "only accepted with trigger"),
+        (JOB_SPEC.kind, {"trigger": "schedule", "older_than": "2026-10-18"}, on(), "only accepted with trigger"),
+        # The gate is checked before the payload: a closed gate refuses even a well-formed request.
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, {}, "ENVIRONMENT is not set"),
+        (JOB_SPEC.kind, {**OVR, "older_than": "2026-10-18"}, {"ENVIRONMENT": "dev"}, FLAG),
     ],
 )
-def test_override_cutoff_refuses(kind: str, payload: dict[str, Any], env: str, message: str) -> None:
+def test_override_cutoff_refuses(kind: str, payload: dict[str, Any], environ: dict[str, str], message: str) -> None:
     with pytest.raises(jobs.OverrideRefused, match=message):
-        jobs.override_cutoff(kind, payload, TODAY, env)
+        jobs.override_cutoff(kind, payload, TODAY, environ)
+
+
+@pytest.mark.parametrize(
+    ("environ", "message"),
+    [
+        # Fail closed (review S251): Settings.environment defaults to "dev", the gate never does.
+        ({}, "ENVIRONMENT is not set"),
+        ({FLAG: "true"}, "ENVIRONMENT is not set"),
+        ({"ENVIRONMENT": "", FLAG: "true"}, "ENVIRONMENT is not set"),
+        ({"ENVIRONMENT": "   ", FLAG: "true"}, "ENVIRONMENT is not set"),
+        ({"ENVIRONMENT": "prod", FLAG: "true"}, "refused in environment 'prod'"),
+        ({"ENVIRONMENT": "production", FLAG: "true"}, "refused in environment 'production'"),
+        ({"ENVIRONMENT": "staging", FLAG: "true"}, "refused in environment 'staging'"),
+        # A known Dev / test / local environment still needs the explicit opt-in.
+        ({"ENVIRONMENT": "dev"}, FLAG),
+        ({"ENVIRONMENT": "dev", FLAG: ""}, FLAG),
+        ({"ENVIRONMENT": "dev", FLAG: "false"}, FLAG),
+        ({"ENVIRONMENT": "dev", FLAG: "1"}, FLAG),
+        ({"ENVIRONMENT": "dev", FLAG: "yes"}, FLAG),
+        ({"ENVIRONMENT": "test"}, FLAG),
+        ({"ENVIRONMENT": "local", FLAG: "no"}, FLAG),
+    ],
+)
+def test_the_override_gate_fails_closed(environ: dict[str, str], message: str) -> None:
+    with pytest.raises(jobs.OverrideRefused, match=message):
+        jobs.override_gate(environ)
+    assert jobs.override_enabled(environ) is False
+
+
+def test_the_override_gate_opens_only_on_a_known_environment_with_the_opt_in() -> None:
+    for env in ("dev", "test", "local", " DEV "):
+        assert jobs.override_gate({"ENVIRONMENT": env, FLAG: "true"}) == env.strip().lower()
+        assert jobs.override_enabled({"ENVIRONMENT": env, FLAG: "True"}) is True
+    assert FLAG == "RETENTION_OVERRIDE_ENABLED"
+
+
+def test_the_override_gate_reads_the_raw_process_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The app passes ``os.environ`` (never ``Settings.environment``): unset variables refuse."""
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv(FLAG, raising=False)
+    assert jobs.override_enabled(os.environ) is False
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    assert jobs.override_enabled(os.environ) is False
+    monkeypatch.setenv(FLAG, "true")
+    assert jobs.override_enabled(os.environ) is True
 
 
 def test_override_runs_are_dry_unless_live_with_max_rows_within_the_cap() -> None:
@@ -438,19 +499,24 @@ def test_run_request_accepts_an_override_date() -> None:
 def test_the_api_refuses_an_override_outside_dev_test_local_and_too_recent_or_too_big() -> None:
     old = datetime.now(UTC).date().toordinal() - jobs.OVERRIDE_MIN_AGE_DAYS
     older_than = date.fromordinal(old)
-    _check_override(RunRequest(kind="bk_retention_job", older_than=older_than), "dev")
-    _check_override(RunRequest(kind="bk_retention_job", older_than=older_than, dry_run=False, max_rows=5), "local")
-    for body, env, message in (
-        (RunRequest(kind="bk_retention_job", older_than=older_than), "prod", "environment 'prod'"),
-        (RunRequest(kind="bk_retention_job", older_than=date.fromordinal(old + 1)), "dev", "too recent"),
+    _check_override(RunRequest(kind="bk_retention_job", older_than=older_than), on())
+    _check_override(RunRequest(kind="bk_retention_job", older_than=older_than, dry_run=False, max_rows=5), on("local"))
+    plain = RunRequest(kind="bk_retention_job", older_than=older_than)
+    for body, environ, message in (
+        (plain, on("prod"), "environment 'prod'"),
+        (plain, {}, "ENVIRONMENT is not set"),
+        (plain, {"ENVIRONMENT": "", FLAG: "true"}, "ENVIRONMENT is not set"),
+        (plain, {"ENVIRONMENT": "dev"}, FLAG),
+        (plain, {"ENVIRONMENT": "dev", FLAG: "false"}, FLAG),
+        (RunRequest(kind="bk_retention_job", older_than=date.fromordinal(old + 1)), on(), "too recent"),
         (
             RunRequest(
                 kind="bk_retention_job", older_than=older_than, dry_run=False, max_rows=jobs.OVERRIDE_MAX_ROWS + 1
             ),
-            "dev",
+            on(),
             "max_rows",
         ),
     ):
         with pytest.raises(Invalid) as err:
-            _check_override(body, env)
+            _check_override(body, environ)
         assert err.value.code == "retention_override_refused" and message in err.value.message
