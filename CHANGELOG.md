@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.6.0...v0.7.0) (2026-10-25)
+
+
+### Features
+
+* Dev manual override run for the Booking retention kinds ([#91](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/91)) ([8d00c76](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/8d00c76d769087972cccbabb9591f88c3fbb5be1))
+
+
+### Bug Fixes
+
+* write gitleaks sample Google API keys without a literal key ([#93](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/93)) ([76259f7](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/76259f79cb1770dd538ce4a7f804ab65e5cd98cb))
+
 ## [0.6.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.5.0...v0.6.0) (2026-10-24)
 
 
