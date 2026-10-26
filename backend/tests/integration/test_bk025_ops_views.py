@@ -59,7 +59,8 @@ async def _totals(conn: asyncpg.Connection) -> dict[str, int]:
 
 async def test_bk025_is_registered_and_views_have_the_contract_columns(admin: asyncpg.Connection) -> None:
     assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-025'") == 1
-    assert [tuple(r) for r in await admin.fetch(COLUMNS_SQL, "v_ops_data_totals")] == [("metric", "text"), ("n", "bigint")]
+    assert [tuple(r) for r in await admin.fetch(COLUMNS_SQL, "v_ops_data_totals")] == [
+        ("metric", "text"), ("n", "bigint")]
     assert [tuple(r) for r in await admin.fetch(COLUMNS_SQL, "v_ops_trip_plan_keys")] == [
         ("source_system", "text"),
         ("source_id", "text"),
