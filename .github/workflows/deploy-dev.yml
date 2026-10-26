@@ -1,19 +1,20 @@
 name: Deploy Dev
 
 # Build → push to ECR (immutable git-SHA tag) → new task definition revision (only the image
-# swapped) → update the ECS service → wait stable → verify the running image → live smoke
-# (root ADR 0004 decision 4). Runtime resources come from AA-CIS-Infra accounts/aa365/booking.tf.
+# swapped) → update the ECS service → wait stable → post-deploy verify (root ADR 0004 decision 4).
+# Runtime resources come from AA-CIS-Infra accounts/aa365/booking.tf.
 #
 # Configuration lives in the GitHub environment `dev` as VARIABLES (none of them is a secret):
 #   AWS_ROLE_ARN          OIDC deploy role aa-booking-dev-app-deploy (output of booking.tf). Never the
-#                         broad aa-cis-dev-role. While it is unset the deploy job is skipped.
+#                         broad aa-cis-dev-role. While it is unset the run is red (AA-993: the `config` job fails,
+#                         so nothing is deployed and nothing reads as green).
 #   AWS_REGION            default us-west-1
 #   ECR_REPOSITORY        default aa-booking-dev-api
 #   ECS_CLUSTER           default aa-cis-dev-cluster
 #   ECS_SERVICE           default aa-booking-dev-api
 #   ECS_TASK_FAMILY       default aa-booking-dev-api (the Terraform task definition family)
 #   BOOKING_API_BASE_URL  default https://api-booking.lumiguides.it.com (the Dev custom domain); used by the
-#                         deploy gate and the smoke test
+#                         deploy gate and the post-deploy verify
 #
 # Job guard (AA-751 B3/B4, the `preflight` job): a deploy stops the running task, so a booking.job row that
 # is queued or running would be interrupted (released back to the queue, or re-run after the lease
@@ -36,11 +37,17 @@ name: Deploy Dev
 # the pyproject version) therefore never deploys by itself.
 #
 # Release version (AA-891): the build reads it from .release-please-manifest.json and bakes it in as APP_VERSION, the
-# same way as GIT_SHA; /booking/health returns it as "version" and the smoke test checks it.
+# same way as GIT_SHA; /booking/health returns it as "version" and the post-deploy verify checks it.
+#
+# Post-deploy verify (AA-993 V2, ADR 0016 D3): the `verify` job calls post-deploy-verify.yml (also dispatchable with
+# expected_sha; script .github/scripts/post_deploy_verify.sh, rows .github/verify/booking.rows): ECS rollout COMPLETED,
+# desired >= 1 (0 is red: this workflow never scales up), the running image = the built one, /booking/health on this
+# commit + version, /booking/health/ready on a schema >= the newest bk-NNN this commit needs. The `result` job
+# ("Deploy Dev result") is red when any job did not succeed, skipped included: read that one.
 #
 # The base task definition is the family's latest ACTIVE revision, so a redeploy of an older commit keeps
 # the latest Terraform env/secrets: revert config in Terraform. This workflow never changes the service's
-# desired count; scaling 0 → 1 is a separate step.
+# desired count; scaling 0 → 1 is a separate step (until then the verify, and so the run, is red).
 
 on:
   push:
@@ -71,25 +78,20 @@ jobs:
     name: Deploy configuration
     runs-on: ubuntu-latest
     environment: dev
-    outputs:
-      enabled: ${{ steps.check.outputs.enabled }}
     steps:
+      # AA-993: red, not a skip. It used to output enabled=false and skip every job, which GitHub shows green.
       - name: Check AWS_ROLE_ARN
-        id: check
         env:
           ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
         run: |
           if [ -z "${ROLE_ARN}" ]; then
-            echo "::warning::Variable AWS_ROLE_ARN is not set on environment 'dev' — deploy skipped (AA-CIS-Infra booking.tf not applied yet?)."
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Variable AWS_ROLE_ARN is not set on environment 'dev': nothing can be deployed or verified (AA-CIS-Infra booking.tf output)."
+            exit 1
           fi
 
   preflight:
     name: Pre-deploy job guard
     needs: config
-    if: needs.config.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment: dev
     env:
@@ -117,7 +119,6 @@ jobs:
   deploy:
     name: Deploy to ECS Dev
     needs: [config, preflight]
-    if: needs.config.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment: dev
     env:
@@ -171,7 +172,8 @@ jobs:
             --query 'services[0].serviceName' --output text | grep -qx "$ECS_SERVICE" \
             || { echo "::error::service $ECS_SERVICE not found"; exit 1; }
           aws ecs describe-task-definition --task-definition "$ECS_TASK_FAMILY" --query 'taskDefinition' --output json > /tmp/td.json
-          echo "base task definition: $(jq -r '.taskDefinitionArn' /tmp/td.json)"
+          # family:revision only: the full ARN names the AWS account (public logs).
+          echo "base task definition: $(jq -r '.taskDefinitionArn | split("/") | last' /tmp/td.json)"
           [ "$(jq '.containerDefinitions | length' /tmp/td.json)" = "1" ] || { echo "::error::expected exactly one container"; exit 1; }
           # Only the image changes; every other field stays as Terraform set it.
           jq --arg img "$DEPLOY_IMAGE" \
@@ -179,48 +181,43 @@ jobs:
             /tmp/td.json > /tmp/td_new.json
           NEW_TD=$(aws ecs register-task-definition --cli-input-json file:///tmp/td_new.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "registered: $NEW_TD"
+          echo "registered: ${NEW_TD##*/}"
           aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
             --task-definition "$NEW_TD" >/dev/null
 
       - name: Wait for the service to be stable
         run: aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
 
-      - name: Verify the running image
-        run: |
-          set -euo pipefail
-          TD=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
-            --query 'services[0].taskDefinition' --output text)
-          RUNNING=$(aws ecs describe-task-definition --task-definition "$TD" \
-            --query 'taskDefinition.containerDefinitions[0].image' --output text)
-          echo "service image: $RUNNING"
-          [ "$RUNNING" = "$DEPLOY_IMAGE" ] || { echo "::error::service runs $RUNNING, expected $DEPLOY_IMAGE"; exit 1; }
-          DESIRED=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
-            --query 'services[0].desiredCount' --output text)
-          echo "DESIRED_COUNT=$DESIRED" >> "$GITHUB_ENV"
+  # AA-993 V2 (ADR 0016 D3) — the post-deploy checks (running image, desired count, /booking/health and
+  # /booking/health/ready) moved to post-deploy-verify.yml, which is also dispatchable on its own. It runs only when
+  # `deploy` succeeded; `result` below turns a skipped or failed verify red.
+  verify:
+    name: Post-deploy verify
+    needs: deploy
+    uses: ./.github/workflows/post-deploy-verify.yml
+    with:
+      expected_sha: ${{ github.sha }}
+      from_deploy: true
 
-      - name: Smoke test (/booking/health, /booking/health/ready)
+  # AA-993 — the run's verdict. GitHub shows a skipped job grey, not red, so without this a failed config/preflight/
+  # deploy (verify then skips) could look like "nothing to verify". Every job here must succeed; skipped, failed or
+  # cancelled is red on every event (no job in this workflow is conditional).
+  result:
+    name: Deploy Dev result
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [config, preflight, deploy, verify]
+    steps:
+      - name: Every job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -uo pipefail
-          if [ "${DESIRED_COUNT}" = "0" ]; then
-            echo "::warning::desired count is 0 — no task is running, smoke skipped (scale to 1 is a separate approved step)."
-            exit 0
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          BAD=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"] | join(", ")')
+          if [ -n "$BAD" ] || [ "$(echo "$NEEDS" | jq 'length')" -lt 4 ]; then
+            echo "::error::Deploy Dev ($EVENT) is not verified: ${BAD:-a job result is missing}"
+            exit 1
           fi
-          if [ -z "${BASE_URL}" ]; then
-            echo "::warning::No base URL — smoke skipped."
-            exit 0
-          fi
-          BASE="${BASE_URL%/}"
-          fail=0
-          code=$(curl -s --max-time 20 -o /tmp/health.json -w "%{http_code}" "$BASE/booking/health")
-          cat /tmp/health.json; echo
-          if [ "$code" != "200" ] || ! jq -e --arg sha "$GITHUB_SHA" --arg ver "$APP_VERSION" \
-            '.status == "ok" and .git_sha == $sha and .version == $ver' /tmp/health.json >/dev/null; then
-            echo "::error::/booking/health -> $code (expected 200, git_sha $GITHUB_SHA, version $APP_VERSION)"; fail=1
-          fi
-          code=$(curl -s --max-time 20 -o /tmp/ready.json -w "%{http_code}" "$BASE/booking/health/ready")
-          cat /tmp/ready.json; echo
-          if [ "$code" != "200" ] || ! jq -e '.db == "ok" and (.schema_version | startswith("bk-"))' /tmp/ready.json >/dev/null; then
-            echo "::error::/booking/health/ready -> $code (expected 200, db ok, schema_version bk-NNN)"; fail=1
-          fi
-          [ "$fail" = "0" ] && echo "Smoke passed" || exit 1
+          echo "Deploy Dev ($EVENT): deployed and verified."
