@@ -1,7 +1,8 @@
 # Signed-in smoke of the staff admin (AA-910) — helper note, no CI job yet
 
 Status: **design note**. Nothing in this folder signs in yet, and no workflow runs a signed-in check. The
-`layout-mock` project (`playwright.config.ts`) stays the only Playwright project until the job below is added.
+`layout-mock` project (`playwright.config.ts`) and the signed-out `smoke-public` project (AA-993 V5, `/login` on
+the production host after each production deploy) are the only Playwright projects until the job below is added.
 
 ## The account
 

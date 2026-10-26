@@ -11,7 +11,8 @@
     "start": "next start --port 3100",
     "lint": "eslint --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "test:layout": "playwright test --project=layout-mock"
+    "test:layout": "playwright test --project=layout-mock",
+    "test:smoke-public": "SMOKE_BASE_URL=${SMOKE_BASE_URL:-https://booking.lumiguides.it.com} playwright test --project=smoke-public"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.0",

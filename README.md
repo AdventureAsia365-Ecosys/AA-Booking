@@ -106,3 +106,5 @@ curl -s localhost:8000/booking/health
 - **Frontend deploys:** CI-created via `.github/workflows/vercel-deploy.yml` (only when `frontend/**`
   changes: PR → preview, `main` → production); the Vercel Git integration is off via
   `frontend/vercel.json` (`git.deploymentEnabled: false`). Needs the repo secret `VERCEL_TOKEN`.
+  Production runs end with a public Playwright smoke of `/login` on the production host (`npm run test:smoke-public`
+  in `frontend/`, AA-993); the run is red unless deploy and smoke both succeeded.
