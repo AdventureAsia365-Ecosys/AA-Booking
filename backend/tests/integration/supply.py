@@ -19,6 +19,11 @@ async def purge_supply(conn: asyncpg.Connection) -> None:
         owner = await conn.fetchval("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'booking'")
         if owner != await conn.fetchval("SELECT current_user"):
             await conn.execute(f'SET LOCAL ROLE "{owner}"')
+        # bk-026 (AA-682): supplier bookings point at suppliers, room types, services, cases and version items.
+        if await conn.fetchval("SELECT to_regclass('booking.supplier_bookings') IS NOT NULL"):
+            await conn.execute("UPDATE booking.supplier_bookings SET voucher_file_id = NULL")
+            await conn.execute("DELETE FROM booking.ops_files")
+            await conn.execute("DELETE FROM booking.supplier_bookings")
         for table in TRIGGERED:
             await conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
         await conn.execute(
