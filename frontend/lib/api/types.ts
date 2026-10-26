@@ -233,6 +233,8 @@ export interface TripCaseDetail extends Omit<TripCaseListItem, "latest_version">
   status_history: StatusHistoryRow[];
   assignments: AssignmentRow[];
   allowed_transitions: TripCaseStatus[];
+  /** AA-682 S1 (bk-026): the supply track; state `booked` = the "Confirmed & Booked" badge. */
+  supply?: import("./supplierBookings").SupplyState;
   /** AA-986 L5: tours this case uses that AA no longer serves (kept; staff decide what to do). */
   tour_alerts?: TourAlert[];
 }

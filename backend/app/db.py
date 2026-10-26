@@ -40,6 +40,8 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-022",  # AA-975: outbox + event triggers, departure_incidents, on-request desk columns
     "bk-023",  # AA-835: entity_media (photo upload), supply_version + outbox supply stream (v_supply_* not read here)
     "bk-024",  # AA-908: customer_identities + customers.source traveller_signin
+    # bk-025 (AA-992 data coverage views) is read by CIS only.
+    "bk-026",  # AA-682 S1: supplier_bookings, ops_files, ops_transitions, post-sale edges + guard, supply state view
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

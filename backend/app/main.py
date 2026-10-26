@@ -46,6 +46,7 @@ from app.jobs.worker import Worker
 from app.notifications import staff_email
 from app.observability import setup as setup_observability
 from app.observability.request_id import RequestIdMiddleware, unhandled_error_handler
+from app.ops import files as ops_files
 from app.outbox import OutboxSequencer
 from app.retention import jobs as retention_jobs
 from app.routers import (
@@ -62,6 +63,7 @@ from app.routers import (
     reference,
     retention,
     staff,
+    supplier_bookings,
     suppliers,
     supply,
     trip_cases,
@@ -82,6 +84,7 @@ def create_app(
     deploy_verifier: GithubDeployVerifier | None = None,
     m2m_verifier: MultiIssuerVerifier | None = None,
     media_store: media.MediaStore | None = None,
+    ops_store: ops_files.OpsStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
@@ -152,6 +155,8 @@ def create_app(
     app.state.m2m_verifier = m2m_verifier
     # AA-835: the supply-media bucket (None without SUPPLY_MEDIA_BUCKET: uploads answer 503). Tests pass a fake.
     app.state.media_store = media_store if media_store is not None else media.store_from_settings(settings)
+    # AA-682 S1: the ops-docs bucket (None without OPS_DOCS_BUCKET: uploads / downloads answer 503). Tests pass a fake.
+    app.state.ops_store = ops_store if ops_store is not None else ops_files.store_from_settings(settings)
     app.add_exception_handler(ServiceError, service_error_handler)
     app.add_exception_handler(B2BError, b2b_error_handler)
     # B2B paths answer validation errors as the contract's Problem; every other path keeps FastAPI's default body.
@@ -175,6 +180,7 @@ def create_app(
     app.include_router(b2b.router)
     app.include_router(b2b_partners.router)
     app.include_router(b2b_desk.router)
+    app.include_router(supplier_bookings.router)
     return app
 
 

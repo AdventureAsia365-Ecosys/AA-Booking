@@ -3,7 +3,7 @@
 // 7): header (name, status, code, categories, location), actions Edit profile / Deactivate | Activate (supply.write),
 // tabs Profile (basic information, contact, location, recent activity from the audit log) and Contracts (draft →
 // published by a second person → expired) and Rates (net rates per contract, AA-823 bk-010; rate-sheet upload is a later
-// slice). Bookings and Bills arrive with wave 3: those tabs show their frame. Reads need supply.read.
+// slice) and Bookings (AA-682 S1, supplier bookings of sold trips). Bills arrive with AA-682 S4: that tab shows its frame. Reads need supply.read.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -17,6 +17,7 @@ import { RowMenu, type RowMenuItem } from "@/ui/booking/RowMenu";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { ContractDrawer } from "./ContractDrawer";
 import { RatesTab } from "./RatesTab";
+import { SupplierBookingsTab } from "./SupplierBookingsTab";
 import { CATEGORY_LABEL, ContractPhaseBadge, SupplierStatusBadge, locationText, supplierError, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
 
@@ -108,7 +109,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         {tab === "profile" && <Profile s={s} />}
         {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
         {tab === "rates" && <RatesTab s={s} canWrite={actions.canWrite} />}
-        {tab === "bookings" && <Later title="Supplier bookings arrive in wave 3" text="Bookings made with this supplier for confirmed trip cases will be listed here." />}
+        {tab === "bookings" && <SupplierBookingsTab s={s} />}
         {tab === "bills" && <Later title="Supplier bills arrive in wave 3" text="Bills from this supplier and their payment state will be listed here." />}
       </div>
       {actions.dialogs}

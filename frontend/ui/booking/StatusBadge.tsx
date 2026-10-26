@@ -4,6 +4,7 @@
 // Labels are Title Case; only audit actions are upper-case (spec §1.3).
 
 import type { CustomerStatus, TripCaseStatus, VersionBadge } from "@/lib/api/types";
+import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBookings";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
 
@@ -48,6 +49,40 @@ export const CUSTOMER_STATUS_META: Record<CustomerStatus, { label: string; tone:
   past: { label: "Past client", tone: "neutral" },
   blocked: { label: "Blocked", tone: "danger" },
 };
+
+/** AA-682 S1 (bk-026) supplier booking states. */
+export const SUPPLIER_BOOKING_STATUS_META: Record<SupplierBookingStatus, { label: string; tone: BookingTone }> = {
+  pending: { label: "To request", tone: "neutral" },
+  requested: { label: "Requested", tone: "warning" },
+  confirmed: { label: "Confirmed", tone: "success" },
+  declined: { label: "Declined", tone: "danger" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+};
+
+export function SupplierBookingStatusBadge({ status }: { status: SupplierBookingStatus | string }) {
+  const meta = SUPPLIER_BOOKING_STATUS_META[status as SupplierBookingStatus] ?? { label: status, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+/** The computed supply badge of a sold case (design D1): "Confirmed & Booked" when every supplier confirmed, else
+ *  "Suppliers n/m". Never a case status; nothing on a case with nothing to book. */
+export function SupplyBadge({ supply }: { supply: SupplyState | null | undefined }) {
+  if (!supply || supply.state === "none") return null;
+  if (supply.state === "booked") {
+    return (
+      <Pill tone="success" title="Every supplier booking of this trip is confirmed">
+        Confirmed &amp; Booked
+      </Pill>
+    );
+  }
+  const total = Math.max(supply.items_to_book, supply.live);
+  const done = Math.min(supply.items_booked, total);
+  return (
+    <Pill tone="warning" title={`${supply.waiting} supplier booking(s) waiting, ${supply.declined} declined`}>
+      Suppliers {done}/{total}
+    </Pill>
+  );
+}
 
 export const STAFF_STATUS_META = {
   active: { label: "Active", tone: "success" },

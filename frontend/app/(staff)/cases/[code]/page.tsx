@@ -1,7 +1,7 @@
 "use client";
 // app/(staff)/cases/[code]/page.tsx — Case workspace (W1, UI spec §4.7; Figma Assigned Trips-1 layout,
 // TRIP CASES DETAILS, USER DETAILS-3/-4/-5/-6/-7). GET /booking/trip-cases/{code} feeds the header band, the
-// 4-phase stepper and the Overview / Proposals tabs; the Activity tab reads /activity (status history merged
+// 4-phase stepper and the Overview / Proposals / Suppliers (AA-682 S1) tabs; the Activity tab reads /activity (status history merged
 // with audit rows). Billing and Checks are wave 3. CIS content (tour titles) is read-only, tagged "From CIS".
 // Writes (fe-cases lane): status actions (convert / decline / change / cancel / reopen with reason) in
 // StatusActions, Assign (AssignModal), Edit details (EditDetailsDrawer), inline internal notes (NotesCard).
@@ -24,6 +24,7 @@ import {
   Section,
   Skeleton,
   Stepper,
+  SupplyBadge,
   TRIP_CASE_STATUS_META,
   TripCaseStatusBadge,
   formatDate,
@@ -37,10 +38,12 @@ import { EditDetailsDrawer } from "./EditDetailsDrawer";
 import { NotesCard } from "./NotesCard";
 import { ProposalsTab } from "./ProposalsTab";
 import { StatusActions } from "./StatusActions";
+import { SuppliersTab } from "./SuppliersTab";
 
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "proposals", label: "Proposals" },
+  { key: "suppliers", label: "Suppliers" },
   { key: "billing", label: "Billing", wave: 3 },
   { key: "checks", label: "Checks", wave: 3 },
   { key: "activity", label: "Activity" },
@@ -94,6 +97,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="break-words font-display text-xl font-semibold text-ink sm:text-2xl">{c.trip_title ?? "Custom trip"}</h1>
                   <TripCaseStatusBadge status={c.status} />
+                  <SupplyBadge supply={c.supply} />
                   {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>TripPlanner</Pill>}
                   {c.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
                 </div>
@@ -144,6 +148,11 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                 >
                   {t.label}
                   {t.key === "proposals" && <span className="ml-1 text-xs text-muted2">{c.versions.length}</span>}
+                  {t.key === "suppliers" && c.supply && c.supply.state !== "none" && (
+                    <span className="ml-1 text-xs text-muted2">
+                      {c.supply.items_booked}/{Math.max(c.supply.items_to_book, c.supply.live)}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -154,6 +163,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
       <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-8">
         {tab === "overview" && <Overview c={c} canAssign={canAssign} onAssign={() => setPanel("assign")} />}
         {tab === "proposals" && <ProposalsTab c={c} />}
+        {tab === "suppliers" && <SuppliersTab c={c} />}
         {tab === "activity" && <Activity code={c.code} />}
       </div>
 

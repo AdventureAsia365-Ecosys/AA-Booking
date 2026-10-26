@@ -18,7 +18,9 @@
 - **Cancel** (:func:`cancel_booking`, scope ``book``): ``dry_run`` reads only and returns the same numbers. A real
   cancel, in one transaction under a lock of the hold: one ``b2b_cancellations`` row (append-only), the hold lines
   ``cancelled`` (their seats are no longer sold, so the departure gets them back at once), the B2B trip case
-  ``confirmed`` → ``cancelled`` (bk-005 edge; the status note names the client, reason and fee), an audit row. A
+  ``confirmed`` (or ``supplier_confirming`` / ``pre_departure`` once supplier bookings moved it, AA-682 critic B2) →
+  ``cancelled`` (bk-005 / bk-026 edges; pending supplier bookings cancelled, requested / confirmed ones notified to
+  staff; the status note names the client, reason and fee), an audit row. A
   repeat returns the stored cancellation (idempotent on the booking); another partner's booking is 404.
 - **Staff admin** (``/booking/pricing/cancellation-policies``, ``pricing.read`` / ``pricing.write``): list with the
   status (pending, in force, scheduled, superseded), create a pending row, approve another person's row.
@@ -42,6 +44,7 @@ from app.auth.staff import Staff
 from app.b2b.components import PREFIX_PLAN, parse_component
 from app.b2b.errors import B2BError
 from app.errors import Conflict, Invalid, NotFound
+from app.ops import supplier_bookings
 from app.pricing import policy as pricing_policy
 
 log = logging.getLogger(__name__)
@@ -53,6 +56,8 @@ HUNDRED = Decimal("100")
 PCT_PLACES = Decimal("0.01")
 REASONS = ("client_cancelled", "agency_cancelled", "departure_cancelled", "other")
 ZERO_DECIMAL_CURRENCIES = frozenset({"VND", "JPY", "KRW"})
+# Case statuses of a confirmed B2B booking (AA-682: the supply track moves it on from confirmed).
+CANCELLABLE_CASE_STATUSES = frozenset({"confirmed", "supplier_confirming", "pre_departure"})
 
 
 class TierError(ValueError):
@@ -311,7 +316,9 @@ async def cancel_booking(
         stored = await conn.fetchrow(STORED_SQL, booking["hold_id"])
         if stored is not None:
             return _stored(ident, stored)
-        if booking["hold_status"] != "confirmed" or booking["status"] != "confirmed":
+        # AA-682 (critic B2): once supplier bookings move the case along the supply track it is still the same
+        # confirmed booking for the agency, so supplier_confirming and pre_departure cancel too.
+        if booking["hold_status"] != "confirmed" or booking["status"] not in CANCELLABLE_CASE_STATUSES:
             raise B2BError("invalid", f"the booking is {booking['status']}; only a confirmed booking can be cancelled")
         if booking["start_date"] is None:
             raise B2BError("unavailable", "the booking has no departure date")
@@ -362,6 +369,10 @@ async def cancel_booking(
             f"B2B cancel by {actor} ({reason_code}); fee {fee.fee_pct}% = {fee.fee} {currency}"[:500],
         )
         await conn.execute("UPDATE booking.trip_cases SET status = 'cancelled' WHERE id = $1::uuid", ident)
+        # AA-682: pending supplier bookings are cancelled; requested / confirmed ones raise "cancel with supplier".
+        cascade = await supplier_bookings.on_case_cancelled(
+            conn, case_id=ident, case_code=booking["code"], cause=f"agency cancel ({reason_code})"
+        )
         await audit.record(
             conn,
             actor_type="system",
@@ -369,10 +380,11 @@ async def cancel_booking(
             action="b2b_booking.cancelled",
             entity_type="trip_case",
             entity_id=ident,
-            before={"status": "confirmed"},
+            before={"status": booking["status"]},
             after={
                 "status": "cancelled",
                 "hold_id": booking["hold_id"],
+                "supplier_bookings": cascade,
                 "reason_code": reason_code,
                 "policy_id": policy.id,
                 "days_before_departure": fee.days_before,

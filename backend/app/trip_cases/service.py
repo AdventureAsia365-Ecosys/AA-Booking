@@ -20,6 +20,7 @@ from app.auth.staff import Staff
 from app.catalog import liveness
 from app.errors import Conflict, Invalid, NotFound
 from app.notifications import service as notifications
+from app.ops import supplier_bookings
 from app.trip_cases import sql
 
 STATUSES = (
@@ -40,6 +41,11 @@ STATUSES = (
 TERMINAL_STATUSES = frozenset({"cancelled", "completed"})
 # confirmed is reached only by approving a sent version (versions.approve_version), never by a bare move.
 APPROVAL_ONLY_STATUSES = frozenset({"confirmed"})
+# AA-682 (bk-026, critic B1): post-sale statuses follow facts (supplier bookings, invoices, dates) and are moved only by
+# the operations service (app.ops.supplier_bookings.advance_case) and the lifecycle job; staff only cancel.
+SYSTEM_STATUSES = frozenset(
+    {"supplier_confirming", "invoice_sent", "payment_pending", "paid", "pre_departure", "on_trip", "completed"}
+)
 ASSIGNMENT_ROLES = ("sales", "contracting", "ops", "guide")
 EDITABLE_FIELDS = ("pax", "pax_adults", "pax_children", "start_date", "currency", "trip_style", "notes")
 # Staff may still annotate a B2B case (AA-973): the rest of it is what the partner API sold.
@@ -306,6 +312,8 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     case["status_history"] = [dict(r) for r in history]
     case["assignments"] = [dict(r) for r in assignments]
     case["allowed_transitions"] = await allowed_transitions(conn, case["status"])
+    # AA-682 S1: the supply track ("Confirmed & Booked" badge = state booked), computed by v_trip_case_supply_state.
+    case["supply"] = await supplier_bookings.supply_state(conn, case_id)
     return case
 
 
@@ -545,6 +553,12 @@ async def change_status(
     from_status = row["status"]
     if from_status == to_status:
         raise Conflict("status_unchanged", f"trip case is already {to_status}")
+    if to_status in SYSTEM_STATUSES:
+        raise Conflict(
+            "status_system_managed",
+            f"{to_status} follows the supplier bookings, invoices and travel dates; it is never set by hand",
+            allowed_transitions=await allowed_transitions(conn, from_status),
+        )
     allowed = await allowed_transitions(conn, from_status)
     if to_status not in allowed:
         raise Conflict(
@@ -558,7 +572,19 @@ async def change_status(
         )
     if reason_required(from_status, to_status) and not reason:
         raise Invalid("reason_required", f"a reason is required to move a trip case from {from_status} to {to_status}")
+    if from_status == "cancelled" and to_status == "new_inquiry":
+        live = await supplier_bookings.live_count(conn, row["id"])
+        if live:
+            raise Conflict(
+                "live_supplier_bookings",
+                f"cancel the case's {live} live supplier booking(s) before reopening it",
+                allowed_transitions=allowed,
+            )
     await set_status(conn, staff, row, to_status, reason)
+    if to_status == "cancelled":
+        await supplier_bookings.on_case_cancelled(
+            conn, case_id=row["id"], case_code=row["code"], cause=f"staff cancel: {reason}"
+        )
     await audit.record(
         conn,
         actor_type="staff",
