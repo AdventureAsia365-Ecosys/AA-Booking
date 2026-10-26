@@ -11,6 +11,10 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # AA-889 (merge queue): the queue tests each group on a temporary gh-readonly-queue/main/* commit and waits for
+  # every required check there. All jobs run on it, with no path filter, so no required check is left unreported.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read

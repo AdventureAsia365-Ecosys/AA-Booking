@@ -16,6 +16,9 @@ name: Docs lint
 on:
   pull_request:
     branches: [main]
+  # AA-889: the merge queue waits for the required "Docs lint" check on its temporary commit as well.
+  merge_group:
+    types: [checks_requested]
   schedule:
     - cron: "23 1 * * 1" # Mondays 01:23 UTC (08:23 in Vietnam), after the root repo's run
   workflow_dispatch:
