@@ -69,7 +69,12 @@ Design sources, in order:
   reads them. **Supply facts** (AA-835, root ADR 0004a, contracts `supply.hotel.v1` / `supply.service.v1`, `bk-023`):
   the `supply` stream of `booking.outbox` read through `booking.v_supply_outbox`, and the facts-only views
   `v_supply_hotels` / `v_supply_services` / `v_supply_media`, SELECT to `cis_app`; CIS drafts the customer content from
-  them. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` → `booking.customers` 42501).
+  them. **Data coverage** (AA-992, contract `ops.data_coverage.v1`, `bk-025`): `booking.v_ops_data_totals` (metric, n:
+  trip plans / sellable, plan components, open departures, active suppliers, published contracts, current rates, media
+  with rights, customers, B2B partners / holds; aggregates only) and `booking.v_ops_trip_plan_keys` (catalog key +
+  sellable of each plan; no plan id, no `conf:commercial` column), SELECT to `cis_app`; the CIS admin page
+  `/admin/data-coverage` reads them. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
+  `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
   API `/booking/b2b/v1` takes only client-credentials tokens of the Cognito M2M pool `aa-m2m-<env>` plus the agency's
   `X-AA-Tenant-Id`, checked against `booking.b2b_partners` (see "B2B API" below). The agency-facing price is
@@ -884,6 +889,18 @@ one customer, a customer may hold several; `iss` https and ≤ 300 characters, `
 `customers_source_chk` widened with `traveller_signin`. Filled by the inquiry intake from a signed-in hand-off
 (`inquiry.submitted` v1.4, `customer.identity`); the intake code and `REQUIRED_SCHEMA_VERSIONS += bk-024` ship in the
 AA-908 code PR, deployed after the apply (now in `REQUIRED_SCHEMA_VERSIONS`).
+
+### `bk-025` (AA-992 data coverage — needs `bk-008`, `bk-009`, `bk-017`, `bk-019`–`bk-023` and Infra `rl-001`)
+
+Two read-only views for the CIS admin page `/admin/data-coverage` (contract `ops.data_coverage.v1`, AA-Ecosys
+`docs/contracts/ops.overview.v1.md`): `v_ops_data_totals (metric, n)`, counts as of now, metrics `trip_plans`,
+`trip_plans_sellable`, `trip_plan_components`, `departures_open` (scheduled / guaranteed, start today or later),
+`suppliers_active`, `contracts_published` (published and valid today), `rates_current`, `media_active`,
+`media_active_with_rights`, `customers` (not soft-deleted), `b2b_partners_active`, `b2b_holds_active`; and
+`v_ops_trip_plan_keys (source_system, source_id, sellable)`, row-level but catalog keys only (no plan id, none of the
+`conf:commercial` columns), so CIS counts plans whose tour left the live catalogue. Owned by `bk_owner`; role
+`booking` SELECT only; `cis_app` SELECT on both. Metric names and columns are append-only. Not in
+`REQUIRED_SCHEMA_VERSIONS` (no Booking code reads them).
 
 Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
