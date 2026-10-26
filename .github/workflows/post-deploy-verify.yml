@@ -1,0 +1,116 @@
+name: Post-deploy verify
+# AA-993 V2 (ADR 0016 D3) — checks that Dev runs the commit that was just deployed: ECS rollout COMPLETED with
+# desired >= 1 on the built image (<registry>/<repo>:<sha>), /booking/health on that commit and version, and
+# /booking/health/ready on a schema at least the newest bk-NNN that commit needs (rows: .github/verify/booking.rows).
+# Red/green only; the table goes to the job summary. Script: .github/scripts/post_deploy_verify.sh (same file as
+# AA-Partner).
+#
+# Called by deploy-dev.yml after `deploy`. Also dispatchable (verify what Dev runs now, or prove that a stale
+# expected_sha goes red). A dispatch never touches the Deploy Dev concurrency group `deploy-dev`.
+# Configuration: the `dev` environment variables deploy-dev.yml reads (AWS_ROLE_ARN, AWS_REGION, ECR_REPOSITORY,
+# ECS_CLUSTER, ECS_SERVICE, BOOKING_API_BASE_URL); no secret. Desired count 0 is red: the verify never scales up.
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        description: "The commit that was deployed (full 40-character SHA)."
+        required: true
+        type: string
+      from_deploy:
+        description: "Set by deploy-dev.yml: use a concurrency group of this run only (see the job)."
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "The commit Dev should be running (full 40-character SHA)."
+        required: true
+        type: string
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  verify:
+    name: Post-deploy verify
+    runs-on: ubuntu-latest
+    # The deploy role trusts the subject ...:environment:dev; the dev variables live there too.
+    environment: dev
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    # Dispatched runs share `post-deploy-verify-booking` and queue there (never cancelled in progress). The call from
+    # Deploy Dev gets a group of its own run: GitHub cancels the older PENDING job of a group when another one
+    # queues, so a shared group would let a dispatch cancel a Deploy Dev verify (and turn that run red). Deploy Dev
+    # runs are already one at a time (group deploy-dev), so their verify jobs need nothing more.
+    concurrency:
+      group: ${{ inputs.from_deploy && format('post-deploy-verify-booking-deploy-{0}-{1}', github.run_id, github.run_attempt) || 'post-deploy-verify-booking' }}
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-1' }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'aa-booking-dev-api' }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'aa-cis-dev-cluster' }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE || 'aa-booking-dev-api' }}
+      BASE: ${{ vars.BOOKING_API_BASE_URL || 'https://api-booking.lumiguides.it.com' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: AWS_ROLE_ARN is set
+        env:
+          ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "${ROLE_ARN}" ]; then
+            echo "::error::Variable AWS_ROLE_ARN is not set on environment 'dev': nothing can be verified."
+            exit 1
+          fi
+
+      # The expected version and required schema come from the expected commit itself, not from the checked-out
+      # tree: a dispatch on main for an older SHA compares against what that SHA shipped.
+      - name: Read what the expected commit ships
+        id: expect
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::expected_sha must be a full 40-character commit SHA (value not printed)"
+            exit 1
+          fi
+          git cat-file -e "${EXPECTED_SHA}^{commit}" 2>/dev/null \
+            || git fetch --no-tags --depth 1 origin "$EXPECTED_SHA"
+          # The newest bk-NNN of the REQUIRED_SCHEMA_VERSIONS tuple (readiness needs all of them).
+          required_schema() { sed -n '/^REQUIRED_SCHEMA_VERSIONS/,/^)/p' | grep -o '"bk-[0-9]*"' | tr -d '"' | sort -t- -k2,2n | tail -n 1; }
+          VERSION=$(git show "${EXPECTED_SHA}:.release-please-manifest.json" | jq -r '."."')
+          REQUIRED=$(git show "${EXPECTED_SHA}:backend/app/db.py" | required_schema || true)
+          if [ -z "$REQUIRED" ]; then
+            echo "::error::no bk-NNN in REQUIRED_SCHEMA_VERSIONS of backend/app/db.py at ${EXPECTED_SHA}"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "required=${REQUIRED}" >> "$GITHUB_OUTPUT"
+          echo "Expected ${EXPECTED_SHA}: version ${VERSION}, newest required Booking schema ${REQUIRED}"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # Same registry string as the build in deploy-dev.yml (steps.ecr.outputs.registry); never printed.
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Verify Dev
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_VERSION: ${{ steps.expect.outputs.version }}
+          REQUIRED_SCHEMA: ${{ steps.expect.outputs.required }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          # The image the build pushes: <registry>/<repo>:<sha> (deploy-dev.yml "Build and push image").
+          export EXPECTED_IMAGE=""
+          [ -z "$REGISTRY" ] || EXPECTED_IMAGE="${REGISTRY}/${ECR_REPOSITORY}:${EXPECTED_SHA}"
+          bash .github/scripts/post_deploy_verify.sh booking

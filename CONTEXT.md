@@ -200,14 +200,17 @@ docs/api/                  openapi.json (generated API reference, AA-899; never 
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md,
-                           AA-974.md, AA-835.md, AA-682.md)
+                           AA-974.md, AA-835.md, AA-682.md, AA-993.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
+                           post-deploy-verify.yml (AA-993: called by deploy-dev.yml, also dispatchable with expected_sha),
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
                            freshness report), api-contract.yml (AA-899: oasdiff breaking-change check of
                            docs/api/openapi.json against the base branch)
 .github/scripts/           booking-deploy-preflight.sh (the Deploy Dev job guard, AA-751 B4), openapi_breaking.sh (AA-899,
-                           byte copy of the AA-CIS-App script)
+                           byte copy of the AA-CIS-App script), post_deploy_verify.sh (AA-993, same file as AA-Partner)
+.github/verify/            booking.rows (AA-993: the HTTP rows of the post-deploy verify; a PR that adds an endpoint worth
+                           guarding adds a row)
 .github/oasdiff/           severity-levels.txt (AA-899: oasdiff checks raised to error)
 tools/docs/                docs lint tools vendored from AA-Ecosys tools/docs (AA-888; README says how to keep them identical)
 docs/templates/            frontmatter.schema.json, copy of the AA-Ecosys schema the front-matter check uses
@@ -632,6 +635,11 @@ status shows it in its own `override` bucket and the audit summary starts with `
   DB answers and **every** `bk-NNN` in `REQUIRED_SCHEMA_VERSIONS` is registered (a gap, e.g. bk-005 in but
   bk-004 missing, is not ready); otherwise 503 with `db` = `ok` | `error` | `not_configured` (plus
   `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages.
+- **Post-deploy verify (AA-993 V2, ADR 0016 D3)**: after every Deploy Dev, `post-deploy-verify.yml` checks ECS rollout
+  COMPLETED with desired >= 1 and the running image = `<registry>/<repo>:<sha>`, `/booking/health` `git_sha` + `version`
+  of the deployed commit, and `/booking/health/ready` 200 with `schema_version` >= the newest `REQUIRED_SCHEMA_VERSIONS`
+  key of that commit. Red, never a warning: desired count 0 is red (no automatic scale-up), and so is an unset
+  `AWS_ROLE_ARN` (the `config` job fails). The **Deploy Dev result** job is red when any job did not succeed.
 
 ## Database rules
 
