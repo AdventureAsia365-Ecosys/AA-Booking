@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# AA-993 H1: run the CI checks locally before a push (installed by scripts/install-hooks.sh).
+# Skip once: git push --no-verify. Full mode: AA_PREPUSH=full git push.
+root="$(git rev-parse --show-toplevel)" || exit 1
+# Pushing only branch deletions: nothing to check.
+deletes_only=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  [[ "$local_sha" =~ ^0+$ ]] || deletes_only=0
+done
+[[ $deletes_only -eq 1 ]] && exit 0
+exec bash "$root/scripts/pre-push.sh" </dev/null

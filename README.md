@@ -55,6 +55,12 @@ python3.12 -m venv .venv
 .venv/bin/pytest tests/unit
 ```
 
+Pre-push hook (AA-993): `scripts/install-hooks.sh` once per clone (sets `core.hooksPath .githooks`). Each push then
+runs `scripts/pre-push.sh`: the CI checks the diff against `origin/main` needs (resource IDs, ruff with the pinned
+version, unit tests of the changed modules, docs lint, frontend lint + `tsc` when `frontend/` changed; never
+`next build`). `AA_PREPUSH=full` runs the CI unit command with coverage; `scripts/pre-push.sh --plan` lists the
+checks; skip once with `git push --no-verify`.
+
 Integration tests need a throwaway PostgreSQL 15 database whose name ends in `_test` or `_ci`. They log
 in as `aa_cis_admin` (the identity DB Migrate uses on Dev) **without superuser**, like the RDS master, so
 first give the database the RDS role shape with a superuser DSN (creates `aa_cis_admin` NOSUPERUSER
