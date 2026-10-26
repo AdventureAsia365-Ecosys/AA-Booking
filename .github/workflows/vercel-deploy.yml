@@ -334,18 +334,17 @@ jobs:
       run:
         working-directory: frontend
     steps:
+      # Production deploys run only from main, so github.sha is the deployed commit. No `ref:` and no npm
+      # cache: a cached step after checking out another ref is a cache-poisoning path (CodeQL high, #103 review).
       - name: Checkout the deployed commit
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.deploy.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Node 22
         uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -383,7 +382,7 @@ jobs:
           INPUT_TARGET: ${{ inputs.target }}
           ALIAS_ONLY_URL: ${{ inputs.alias_only_url }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           case "$EVENT" in
             push) TARGET=production ;;
             workflow_dispatch)

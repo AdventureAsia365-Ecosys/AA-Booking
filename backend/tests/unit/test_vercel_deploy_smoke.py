@@ -73,7 +73,10 @@ def test_smoke_runs_after_a_successful_production_deploy_only() -> None:
     job = _block(_jobs(), "smoke:", 2)
     assert "    needs: deploy\n" in job
     assert "    if: needs.deploy.result == 'success' && needs.deploy.outputs.target == 'production'\n" in job
-    assert "ref: ${{ needs.deploy.outputs.sha }}" in job, "smoke must check out the commit that was deployed"
+    # Production runs only from main, so the default checkout (github.sha) is the deployed commit; no ref
+    # override and no npm cache (CodeQL actions/cache-poisoning, #103 review).
+    assert "\n          ref:" not in job
+    assert 'cache: "npm"' not in job
     assert "persist-credentials: false" in job
     assert "npx playwright install --with-deps chromium" in job
     assert 'run: SMOKE_BASE_URL="https://$PRODUCTION_HOST" npm run test:smoke-public\n' in job
