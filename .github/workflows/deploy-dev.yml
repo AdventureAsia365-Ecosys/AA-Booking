@@ -172,7 +172,8 @@ jobs:
             --query 'services[0].serviceName' --output text | grep -qx "$ECS_SERVICE" \
             || { echo "::error::service $ECS_SERVICE not found"; exit 1; }
           aws ecs describe-task-definition --task-definition "$ECS_TASK_FAMILY" --query 'taskDefinition' --output json > /tmp/td.json
-          echo "base task definition: $(jq -r '.taskDefinitionArn' /tmp/td.json)"
+          # family:revision only: the full ARN names the AWS account (public logs).
+          echo "base task definition: $(jq -r '.taskDefinitionArn | split("/") | last' /tmp/td.json)"
           [ "$(jq '.containerDefinitions | length' /tmp/td.json)" = "1" ] || { echo "::error::expected exactly one container"; exit 1; }
           # Only the image changes; every other field stays as Terraform set it.
           jq --arg img "$DEPLOY_IMAGE" \
@@ -180,7 +181,7 @@ jobs:
             /tmp/td.json > /tmp/td_new.json
           NEW_TD=$(aws ecs register-task-definition --cli-input-json file:///tmp/td_new.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "registered: $NEW_TD"
+          echo "registered: ${NEW_TD##*/}"
           aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
             --task-definition "$NEW_TD" >/dev/null
 

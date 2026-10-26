@@ -62,6 +62,11 @@ retry() {  # name, function, args... — the function sets DETAIL and returns 0 
 }
 
 tag_of() { printf '%s' "${1##*:}"; }  # the image tag only: the registry names the AWS account
+sha_ok() { [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]]; }
+shown_sha() {  # a value that is not a commit SHA is never printed (inputs and logs are public)
+  if [ -z "${1:-}" ]; then printf 'unset'; elif sha_ok "$1"; then printf '%s' "$1"; else printf 'invalid'; fi
+}
+scrub() { sed -E 's/arn:aws[a-z-]*:[^ ]*/<arn>/g; s/[0-9]{12}/<acct>/g'; }  # AWS error text: no ARN, no account
 
 # ── inputs ────────────────────────────────────────────────────────────────────────────────────────────────────────
 check_inputs() {  # sets BLOCKED=1 when the ECS/HTTP checks cannot run at all
@@ -75,17 +80,16 @@ check_inputs() {  # sets BLOCKED=1 when the ECS/HTTP checks cannot run at all
   else
     record inputs PASS "commit, version, schema, image, ECS names and base URL set"
   fi
-  if [ -n "${EXPECTED_SHA:-}" ] && ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-    record expected-sha FAIL "EXPECTED_SHA must be a full 40-character commit SHA, got '${EXPECTED_SHA}'"
+  if [ -n "${EXPECTED_SHA:-}" ] && ! sha_ok "$EXPECTED_SHA"; then
+    record expected-sha FAIL "EXPECTED_SHA must be a full 40-character commit SHA (value not printed)"
+    BLOCKED=1
+  elif [ -n "${EXPECTED_IMAGE:-}" ] && [ -n "${EXPECTED_SHA:-}" ] \
+       && [ "$(tag_of "$EXPECTED_IMAGE")" != "${EXPECTED_SHA}" ]; then
+    record expected-image FAIL "EXPECTED_IMAGE tag $(shown_sha "$(tag_of "$EXPECTED_IMAGE")") is not ${EXPECTED_SHA}"
     BLOCKED=1
   fi
   if [ -n "${REQUIRED_SCHEMA:-}" ] && ! [[ "$REQUIRED_SCHEMA" =~ ^[a-z]+-[0-9]+$ ]]; then
     record required-schema FAIL "REQUIRED_SCHEMA must look like <prefix>-NNN, got '${REQUIRED_SCHEMA}'"
-    BLOCKED=1
-  fi
-  if [ -n "${EXPECTED_IMAGE:-}" ] && [ -n "${EXPECTED_SHA:-}" ] \
-     && [ "$(tag_of "$EXPECTED_IMAGE")" != "${EXPECTED_SHA}" ]; then
-    record expected-image FAIL "EXPECTED_IMAGE tag $(tag_of "$EXPECTED_IMAGE") is not ${EXPECTED_SHA}"
     BLOCKED=1
   fi
 }
@@ -99,7 +103,7 @@ describe_service() {  # -> $WORK/svc.json ({"services":[...]})
 check_rollout() {
   local f="$WORK/svc.json" status desired running ndeps rollout
   if ! describe_service; then
-    DETAIL="describe-services failed: $(head -c 200 "$WORK/svc.err")"; return 1
+    DETAIL="describe-services failed: $(scrub < "$WORK/svc.err" | head -c 200)"; return 1
   fi
   status=$(jq -r '.services[0].status // "MISSING"' "$f")
   if [ "$status" != "ACTIVE" ]; then DETAIL="service $ECS_SERVICE is $status"; return 1; fi
@@ -168,8 +172,8 @@ write_summary() {
   {
     echo "### ${APP} post-deploy verify: ${verdict}"
     echo
-    echo "Expected commit \`${EXPECTED_SHA:-unset}\`, version \`${EXPECTED_VERSION:-unset}\`," \
-         "required schema \`${REQUIRED_SCHEMA:-unset}\`, image tag \`$(tag_of "${EXPECTED_IMAGE:-unset}")\`."
+    echo "Expected commit \`$(shown_sha "${EXPECTED_SHA:-}")\`, version \`${EXPECTED_VERSION:-unset}\`," \
+         "required schema \`${REQUIRED_SCHEMA:-unset}\`, image tag \`$(shown_sha "$(tag_of "${EXPECTED_IMAGE:-}")")\`."
     echo
     echo "| Check | Result | Detail |"
     echo "|---|---|---|"

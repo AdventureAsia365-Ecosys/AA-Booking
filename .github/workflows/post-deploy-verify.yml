@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::expected_sha must be a full 40-character commit SHA, got '$EXPECTED_SHA'"
+            echo "::error::expected_sha must be a full 40-character commit SHA (value not printed)"
             exit 1
           fi
           git cat-file -e "${EXPECTED_SHA}^{commit}" 2>/dev/null \
@@ -96,6 +96,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       # Same registry string as the build in deploy-dev.yml (steps.ecr.outputs.registry); never printed.
       - name: Login to ECR

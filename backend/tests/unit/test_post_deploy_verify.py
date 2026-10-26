@@ -87,7 +87,10 @@ args = sys.argv[1:]
 def opt(name):
     return args[args.index(name) + 1]
 ecs = json.load(open(os.environ["FAKE_ECS"]))
-if args[:2] == ["ecs", "describe-services"]:
+if args[:2] == ["ecs", "describe-services"] and os.environ.get("FAKE_AWS_ERR"):
+    sys.stderr.write(os.environ["FAKE_AWS_ERR"])
+    sys.exit(255)
+elif args[:2] == ["ecs", "describe-services"]:
     svc = ecs["services"].get(opt("--services"))
     print(json.dumps({"services": [svc]} if svc else {"services": [], "failures": [{"reason": "MISSING"}]}))
 elif args[:2] == ["ecs", "describe-task-definition"]:
@@ -337,6 +340,34 @@ def test_bad_inputs_are_red_and_nothing_is_reported_green(run_verify: Run, over:
     assert r.returncode == 1, r.stdout
     assert "| checks | **FAIL** | not run" in summary
     assert "| health | PASS |" not in summary
+
+
+@needs_tools
+def test_aws_error_text_is_scrubbed_before_the_row_and_summary(run_verify: Run) -> None:
+    """Actions logs and summaries are public: an AWS error never prints an ARN or an account ID."""
+    err = (
+        "An error occurred (AccessDeniedException) when calling the DescribeServices operation: User: "
+        "arn:aws:sts::123456789012:assumed-role/x/y is not authorized (account 123456789012)"
+    )
+    r, summary = run_verify(*_good(), FAKE_AWS_ERR=err)
+    assert r.returncode == 1
+    assert {"ecs-rollout", "ecs-image"} <= _failed_rows(summary), summary
+    assert "describe-services failed: An error occurred (AccessDeniedException)" in summary
+    for leak in ("123456789012", "arn:aws"):
+        assert leak not in r.stdout + r.stderr, leak
+        assert leak not in summary, leak
+
+
+@needs_tools
+@pytest.mark.parametrize("image", [IMAGE, "registry.example.invalid/repo:not-a-sha-SENTINEL"], ids=["image", "bad-tag"])
+def test_an_invalid_expected_sha_is_red_and_never_printed(run_verify: Run, image: str) -> None:
+    r, summary = run_verify(*_good(), EXPECTED_SHA="not-a-sha-SENTINEL", EXPECTED_IMAGE=image)
+    assert r.returncode == 1
+    assert (
+        "| expected-sha | **FAIL** | EXPECTED_SHA must be a full 40-character commit SHA (value not printed)" in summary
+    )
+    assert "Expected commit `invalid`" in summary
+    assert "SENTINEL" not in r.stdout + r.stderr + summary
 
 
 @needs_tools
