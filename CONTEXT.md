@@ -1092,6 +1092,11 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   base-uri 'self'; form-action 'self'; object-src 'none'`, `Permissions-Policy`). Every preview and production
   deployment is checked by the step "Check the security headers" (`.github/scripts/check_security_headers.sh`, GET
   `/login` through `vercel curl`, which uses the project's automation-bypass token with `VERCEL_TOKEN`).
+- Public smoke (AA-993 V5): on a production run the job `smoke` of `vercel-deploy.yml` runs the Playwright project
+  `smoke-public` (`frontend/e2e/smoke-public/`) against `booking.lumiguides.it.com` after the deploy: GET `/login` 200
+  on the same host, the card and "Sign in with company email" render, no console error, no failed same-origin request,
+  every `next.config.ts` header with its value. Signed out, no secret; screenshot artifact `booking-admin-smoke-public`.
+  Job `result` is red on a production run unless deploy and smoke both succeeded; previews are not gated by it.
 - Signed-in smoke (AA-910, design note only, no job yet): `frontend/e2e/SIGNED-IN-SMOKE.md`. E2E staff user
   `e2e-booking@e2e-mail.lumiguides.it.com`, group `booking-admin` only, email code read from the SES test mailbox
   (root ADR 0006a A10a); no password, no secret. Its session is read-only on every client: non-safe methods are

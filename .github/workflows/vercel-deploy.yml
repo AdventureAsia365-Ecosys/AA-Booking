@@ -31,6 +31,13 @@ name: Vercel Deploy
 # production that stopped updating. Fork PRs and Dependabot runs (AA-903) get no secrets and are
 # skipped by the job `if:` instead.
 # The org / project ids are not secrets.
+#
+# AA-993 V5 — production only: job `smoke` runs the Playwright project `smoke-public` (frontend/e2e/smoke-public/)
+# against the public production host PRODUCTION_HOST once the deploy succeeded: /login answers 200 and renders, no
+# console error, no failed same-origin request, the next.config.ts security headers. Signed out, no secret. The
+# screenshot is uploaded as an artifact. Job `result` is the run's verdict: on a production run it is red unless
+# deploy AND smoke succeeded (a skipped smoke is red too); previews, alias-only and no-op label runs are not gated
+# by it (the deploy job's own status stands, as before).
 
 on:
   pull_request:
@@ -79,6 +86,8 @@ env:
   VERCEL_TELEMETRY_DISABLED: "1"
   # AA-911: the fixed Preview host (a Vercel domain of aa-booking-admin, a Cognito booking-staff callback).
   PREVIEW_SIGNIN_HOST: booking-preview.lumiguides.it.com
+  # AA-993 V5: the public production custom domain (`vercel deploy --prod` points it at the new deployment).
+  PRODUCTION_HOST: booking.lumiguides.it.com
 
 jobs:
   deploy:
@@ -311,6 +320,87 @@ jobs:
             echo ""
             echo "- https://$PREVIEW_SIGNIN_HOST → $URL"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── AA-993 V5: public smoke of the production staff admin ──
+  smoke:
+    name: Public smoke (production)
+    needs: deploy
+    if: needs.deploy.result == 'success' && needs.deploy.outputs.target == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      # Production deploys run only from main, so github.sha is the deployed commit. No `ref:` and no npm
+      # cache: a cached step after checking out another ref is a cache-poisoning path (CodeQL high, #103 review).
+      - name: Checkout the deployed commit
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      # Public page only: no cookie, no token, nothing written. 2 retries on CI (playwright.config.ts).
+      - name: Smoke /login on the production host
+        run: SMOKE_BASE_URL="https://$PRODUCTION_HOST" npm run test:smoke-public
+
+      - name: Upload the screenshot
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: booking-admin-smoke-public
+          path: frontend/e2e/smoke-public/results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # AA-993 V5 — the run's verdict. GitHub shows a skipped job grey, so without this a failed deploy (smoke then
+  # skips) or a skipped smoke could pass for green. Production run (push to main, or a dispatch with
+  # target=production and no alias_only_url): red unless deploy AND smoke succeeded. Anything else: not gated here.
+  result:
+    name: Vercel Deploy result
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [deploy, smoke]
+    permissions: {}
+    steps:
+      - name: Production deployed and smoke-tested
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
+          ALIAS_ONLY_URL: ${{ inputs.alias_only_url }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            push) TARGET=production ;;
+            workflow_dispatch)
+              if [ -n "$ALIAS_ONLY_URL" ]; then TARGET=alias-only; else TARGET="${INPUT_TARGET:-preview}"; fi ;;
+            *) TARGET=preview ;;
+          esac
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if [ "$TARGET" != "production" ]; then
+            echo "Vercel Deploy ($EVENT, $TARGET): not gated here; the deploy job's own status stands."
+            exit 0
+          fi
+          BAD=$(echo "$NEEDS" | jq -r '[("deploy", "smoke") as $j | (.[$j].result // "missing") as $r
+                                         | select($r != "success") | "\($j)=\($r)"] | join(", ")')
+          if [ -n "$BAD" ]; then
+            echo "::error::Production is not deployed and smoke-tested: $BAD"
+            exit 1
+          fi
+          echo "Vercel Deploy ($EVENT): production deployed and smoke-tested."
 
   # ── Post/update ONE comment on the PR (marker comment, edited in place) ──
   comment:
