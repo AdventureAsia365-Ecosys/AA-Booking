@@ -199,6 +199,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/cases/new` | Create trip case (manual) | ADD NEW TRIP 8 (03) | A S | W1 |
 | `/cases/[code]` | Case workspace, tab Overview (+ Edit details drawer) | Assigned Trips-1 (layout), TRIP CASES DETAILS, USER DETAILS-3/-4/-5 (inquiry panel), ADD NEW ACTIVITY-2 (= "Edit Trip Case" form → Edit details drawer) (03, 02, 07) | A S C(r) | W1 |
 | `/cases/[code]?tab=proposals` | Versions list | TRIP CASES DETAILS-1, Assigned Trips-1 (03) | A S C(r) | W1 |
+| `/cases/[code]?tab=suppliers` | Supplier bookings of the case (AA-682 S1, bk-026): Generate from the approved version, Request / Confirm (ref + voucher, B2C only) / Declined / Cancel / Change; computed supply badge "Confirmed & Booked"; B2B on-request lines answered here (one action with the desk) | — (not drawn) | A S C | shipped (AA-682 S1) |
 | `/cases/[code]?tab=billing` | Invoices & payments of the case | TRIP CASES DETAILS-2 (03) | A S | W3 |
 | `/cases/[code]?tab=checks` | Pre-trip tasks of the case | View Details-3 (03) | A S | W3 |
 | `/cases/[code]?tab=activity` | Status history + audit of the case | not drawn | A S C(r) | W1 |
@@ -213,7 +214,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/audit-log` | Audit log | AUDIT LOGS (01) | A | W2 (shipped early, S237) |
 | `/suppliers` | Supplier list | SUPPLIER MANAGEMENT, -1, -2, DELETE USER-1 (08, 02) | A C, S(r) | W2 |
 | `/suppliers/new`, `/suppliers/[id]/edit` | Supplier form | ADD SUPPLIER, EDIT SUPPLIER (08) | A C | W2 |
-| `/suppliers/[id]` | Supplier detail (tabs Profile / Contracts / Rates / Bookings / Bills) | SUPPLIER  DETAILS (08); tabs not drawn | A C, S(r) | W2 (Bookings/Bills W3) |
+| `/suppliers/[id]` | Supplier detail (tabs Profile / Contracts / Rates / Bookings / Bills) | SUPPLIER  DETAILS (08); tabs not drawn | A C, S(r) | W2 (Bookings: AA-682 S1, read-only list linking to the case; Bills W3) |
 | `/suppliers/rate-sheets/[id]` | Rate-sheet upload review + publish (maker-checker) | not drawn (ADR 0005 §7–8) | A C | W2 |
 | `/hotels` | Hotel grid | HOTEL MANAGEMENT, COUNTRY MANAGAMENT-2/-3, DELETE HOTEL (07, 06) | A C, S(r) | W2 |
 | `/hotels?view=[id]` / `?edit=[id]` / `?new=1` | Hotel drawer (view / edit / add) | EDIT HOTEL-1, EDIT HOTEL, ADD NEW HOTEL, HOTEL DETAILS (07) | A C, S(r) | W2 |
@@ -372,7 +373,10 @@ The layout is `Assigned Trips-1.png` (03 decision 11), extended with tabs.
   - back arrow, case title (first-leg tour title or "Custom trip"), code (mono), dates, pax, status badge;
   - actions: "Change status ▾" (the menu lists `allowed_transitions` only; `cancelled` asks for a reason), "Assign", "Edit details".
 - **Status stepper**: the 12 non-cancelled DB values. They group visually into Inquiry (new_inquiry, discovery), Proposal (building, proposal_sent), Booking (confirmed … paid) and Travel (pre_departure, on_trip, completed). It collapses to the group on narrow widths. `cancelled` shows as a red banner with the reason, never as a step.
-- **Tabs**: Overview · Proposals (n) · Billing (W3) · Checks (W3) · Activity.
+- **Tabs**: Overview · Proposals (n) · Suppliers (booked / to book, AA-682 S1) · Billing (W3) · Checks (W3) · Activity.
+- **Supply badge** (AA-682 D1): next to the status, "Suppliers n/m" (warning) while bookings wait, "Confirmed & Booked"
+  (success) once every supplier confirmed; nothing when the trip has nothing to book. Never a status: the 13 values stay.
+  Post-sale statuses are never offered in "Change status" (API 409 `status_system_managed`); staff only cancel.
 - **Overview, main column**:
   - **Inquiry panel** (cases from TripPlanner): source chip "TripPlanner", received at, and the `inquiry_snapshot` rendered read-only: route days and legs, plus message / budget / travel window when the contract carries them (v1.2, Q12).
   - **Primary actions on a `new_inquiry` case**:

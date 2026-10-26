@@ -7,7 +7,7 @@ status: active
 owner: nghiep
 audience: [engineer, agent]
 applies_to: [aa-booking-api, aa-booking-admin]
-last_reviewed: 2026-10-23
+last_reviewed: 2026-10-26
 review_every_days: 90
 related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 ---
@@ -128,6 +128,12 @@ backend/
                            /bookings/{id}/cancel (AA-974)
   app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
+  app/ops/                 AA-682 operations after the sale (bk-026): supplier_bookings.py (generate / add / edit /
+                           request / confirm / decline / cancel / re-request, supply state, case auto-advance, case-cancel
+                           cascade, B2B line tie-in), files.py (ops-docs bucket: base64 upload, attachment download)
+  app/routers/supplier_bookings.py  /booking/trip-cases/{ref}/supplier-bookings (GET, POST, …/generate),
+                           /booking/supplier-bookings (list, summary, GET/PATCH /{id}, …/request|confirm|decline|cancel|
+                           rerequest), /booking/ops-files (POST, /{id}/download, /{id}/remove) — ops.read / ops.write
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
                            versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
   app/customers/           customers over booking.v_customer_summary (status lead/active/past), leads, archive
@@ -194,7 +200,7 @@ docs/api/                  openapi.json (generated API reference, AA-899; never 
 docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md, AA-681-slice2.md, AA-681-slice3.md, AA-681-w1.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md,
-                           AA-974.md, AA-835.md)
+                           AA-974.md, AA-835.md, AA-682.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
@@ -238,6 +244,10 @@ B2B API (AA-972, both set by AA-CIS-Infra `booking.tf` from the M2M pool and the
 Supplier photos (AA-835 S4, set by AA-CIS-Infra `booking_media.tf` / `booking.tf`): `SUPPLY_MEDIA_BUCKET` (the
 `aa-booking-<env>-supply-media-<account>` bucket, checked against the bk-023 naming rule at start-up; empty = uploads
 answer 503 `media_storage_unavailable`) and `SUPPLY_MEDIA_REGION` (default `us-west-1`).
+Operations documents (AA-682 S1, set by AA-CIS-Infra with the ops-docs bucket, its SSE-KMS CMK and the task-role grants
+`s3:PutObject` / `s3:GetObject` on `ops-docs/*` + `kms:GenerateDataKey` / `kms:Decrypt`): `OPS_DOCS_BUCKET` (the
+`aa-booking-<env>-ops-docs-<account>` bucket, checked against the bk-026 naming rule at start-up; empty = uploads and
+downloads answer 503 `ops_storage_unavailable`, everything else works) and `OPS_DOCS_REGION` (default `us-west-1`).
 Signed-in travellers (AA-908, optional, never set on Dev): `COGNITO_EXTERNAL_ISSUER`, the only issuer the inquiry intake
 accepts for a v1.4 `customer.identity` (default the Dev EXTERNAL pool, `identity_config.DEV_EXTERNAL_ISSUER`; must
 differ from the WORKFORCE and M2M issuers).
@@ -333,6 +343,9 @@ send, OTP) is not built: those still write rows only.
   (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
   are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair; B2B
   cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules.
+  Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
+  contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
+  needs `b2b_desk.write`; net amounts in the responses need `pricing.read`.
   Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
@@ -464,6 +477,44 @@ send, OTP) is not built: those still write rows only.
   cancelled departure takes none (409), clear ends it; each emits `departure.incident(_cleared)` to the agencies on
   it; audited. `GET /summary` (open, overdue, due soon, open incidents), `GET /departures` (from 14 days ago to 90
   ahead: seats, agencies, open incident, CIS title). Staff page `/b2b-desk` (Operations → B2B desk).
+  AA-682 (design D13, one action both ways): a line that a live supplier booking covers is answered by that booking
+  (its confirm accepts the line, its decline declines it, through `desk.answer_line` in the same transaction); the desk
+  answers such a line 409 `answer_from_suppliers_tab` and lists the booking code (`supplier_booking`).
+
+## Supplier bookings and the supply track (AA-682 S1, bk-026; S252 design §3.1, §4, §5)
+
+- A **supplier booking** (`booking.supplier_bookings`, code `SB-000123`) books one supplier for one room type /
+  service item of the case's **approved version**, or an extra item. `POST …/supplier-bookings/generate` makes one
+  `pending` booking per supply item that has no live booking (supplier = the hotel's / service's; date = case start +
+  item day − 1; nights = item days for a room; pax = case pax; net = the sum of the item's cost rows, 409
+  `mixed_cost_currencies` when their currencies differ); idempotent, and concurrent generates are serialised by the case
+  row lock and the unique index. Life: `pending → requested → confirmed | declined`, `→ cancelled` (reason), `confirmed
+  → requested` (a change, reason; the old ref stays in the audit row). Edges in `booking.ops_transitions`, facts in
+  CHECKs and `supplier_bookings_guard` (confirm needs the supplier's ref; decline a desk code; facts fixed once confirmed;
+  notes always editable). **Live = pending / requested / confirmed**: one live booking per version item; a `declined`
+  one is replaced with another supplier (B2C).
+- **Supply state** (`booking.v_trip_case_supply_state`, in the case detail as `supply`): `none` (nothing to book),
+  `confirming`, `booked` = the **"Confirmed & Booked"** badge (design D1; never a status).
+- **Case statuses after the sale are system-managed** (critic B1): `change_status` refuses every post-sale target but
+  `cancelled` (409 `status_system_managed`); `advance_case` moves `confirmed → supplier_confirming` on the first request
+  and back when no live booking is left (empty actor, an "Auto: …" status note, a system audit row); the bk-026 guard
+  `trip_cases_post_sale_guard` checks the fact behind each post-sale status whoever writes it (money statuses wait for
+  bk-028; a B2C case reaches `pre_departure` only once paid, bk-028). A staff cancel cancels the pending bookings and
+  sends one notification `supplier_booking.cancel_with_supplier` for requested / confirmed ones; reopening is 409
+  `live_supplier_bookings` while one is live (also refused by the guard).
+- **B2B cases** (memo seams 1, 4, 10): generate links each item held `on_request` to its hold line; confirm / decline of
+  such a booking answers the line (events `line.confirmed` / `line.declined`, `booking.b2b.v1` unchanged); a line is
+  answered once, so a linked booking whose line is confirmed is never cancelled or re-requested by staff (409
+  `b2b_line_answered`; only the agency's cancel moves it) and a declined line is final (no replacement). The agency's
+  `POST /bookings/{id}/cancel` also cancels `supplier_confirming` / `pre_departure` cases (critic B2) with the same
+  cascade. No voucher or document on a B2B case (DM-6.8; 422 `document_not_allowed_b2b`, refused by bk-026 too).
+- **Documents** (`booking.ops_files`, design D10): `POST /booking/ops-files` (base64 JSON, PDF / JPEG / PNG / WebP read
+  from the bytes, at most 3 MB through the staff BFF; DB cap 10 MB), stored in the private ops-docs bucket (SSE-KMS)
+  under `ops-docs/<kind>/<id>.<ext>`; `GET …/{id}/download` = a 300 s presigned GET forcing an attachment, audited
+  `ops_file.downloaded`; `POST …/{id}/remove` (reason, final; a removed voucher leaves its booking). Kinds of bk-028 /
+  bk-029 (payment evidence, bills, payouts) answer 422 `kind_not_available` until those slices.
+- Lock order hold → case → booking on every path (the B2B cancel locks the hold, then the case), so a staff confirm and
+  an agency cancel of the same booking never deadlock (integration test).
 - **Products sync**: `updated_since` filters on the latest of the plan row (touched by every component replace, also
   when the set is emptied), its component rows, the hotels / room types / services behind them and (AA-986 L5) the
   tour's `catalog.v_tour.updated_at` (follows the Master row, CIS 273, so a restored tour is listed again), and then
@@ -905,13 +956,26 @@ Two read-only views for the CIS admin page `/admin/data-coverage` (contract `ops
 `booking` SELECT only; `cis_app` SELECT on both. Metric names and columns are append-only. Not in
 `REQUIRED_SCHEMA_VERSIONS` (no Booking code reads them).
 
-Waiting for decisions: post-sale status edges (AA-682), `trip_case_countries` / `areas` / `country_profiles` (O7,
+### `bk-026` (AA-682 S1 supplier bookings — needs `bk-003`, `bk-005`, `bk-008`, `bk-010`, `bk-022`)
+
+`ops_transitions (entity, from_status, to_status)` + `ops_check_transition()` (TG_ARGV = entity; supplier-booking edges
+now, invoice / supplier-bill edges in bk-028 / bk-029; read-only for `booking`); trip case edges `confirmed ↔
+supplier_confirming`, `confirmed / supplier_confirming → pre_departure → on_trip → completed`, cancel from
+`supplier_confirming` / `pre_departure` (money edges: bk-028) + the fact guard `trip_cases_post_sale_guard`;
+`ops_files` (kind, entity, derived key in the ops-docs bucket, type / size / sha256 / name, `active | removed` final;
+`booking`: SELECT, INSERT, UPDATE of the removal columns); `supplier_bookings` (above; unique live booking per version
+item; `booking`: SELECT, INSERT, UPDATE, never DELETE); view `v_trip_case_supply_state`; settings
+`supplier_answer_days` (2), `pre_departure_days` (14), `ops_docs_max_bytes` (10485760). Tags in the file (`net_amount`
+conf:commercial; `notes`, `cancel_reason`, `file_name`, `removed_reason` pii:free_text; `s3_key` pii:payment). In
+`REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-026 before the code deploys.
+
+Waiting for decisions: `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
-operations / money (AA-682).
+operations S2–S5 (trip checks, invoices / payments, supplier bills, My Payments: AA-682).
 
 ## Out of scope today
 
-Post-sale status edges, **customer e-mail** (proposal send writes a customer notification row only and says so; the
+Money statuses (`invoice_sent`, `payment_pending`, `paid`: AA-682 S3, bk-028), **customer e-mail** (proposal send writes a customer notification row only and says so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix
 and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
@@ -991,8 +1055,14 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `NEXT_PUBLIC_CIS_ADMIN_URL` origin + the path CIS serves; hidden while the API sends `content: null`) and "Supplier
   photos" (upload, usage rights, remove: `supply.write`; every photo is re-encoded in the browser first (no EXIF
   reaches S3; downsized to at most 3 MB), and the BFF lets only that upload route carry up to 4.4 MB of body, under Vercel's 4.5 MB limit); the proposal builder and
-  preview show the published description under an item that books supply; the other
-  wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
+  preview show the published description under an item that books supply; AA-682 S1: the case page has a
+  **Suppliers** tab (Generate from the approved version, Add booking, Mark as requested, Confirm with the supplier's ref
+  and on a B2C case a voucher / confirmation file (PDF as is, photos re-encoded; the BFF lets `POST ops-files` carry the
+  same 4.4 MB as photo uploads), Declined, Cancel, Change with supplier; documents download through a 5-minute link),
+  the header shows the supply badge ("Suppliers n/m" or "Confirmed & Booked"), "Change status" never offers a post-sale
+  status, the supplier **Bookings** tab lists its bookings (link to the case), the dashboard has a "Supplier answers
+  pending" tile, and the B2B desk links a line covered by a supplier booking to the case instead of Accept / Decline; the
+  other wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).
 - Environment (server): `BOOKING_API_URL` (default: the Dev execute-api stage), `CIS_API_URL` (default: the live CIS
