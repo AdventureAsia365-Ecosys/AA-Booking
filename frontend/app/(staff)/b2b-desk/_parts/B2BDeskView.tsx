@@ -250,7 +250,18 @@ function OnRequestTab() {
             header: "",
             enableSorting: false,
             cell: ({ row }: { row: { original: OnRequestLine } }) =>
-              row.original.status === "on_request" ? (
+              row.original.status === "on_request" && row.original.supplier_booking ? (
+                // AA-682 D13: a live supplier booking answers this line; confirm or decline it on the case.
+                <span className="flex justify-end">
+                  <a
+                    className="text-right text-xs font-medium text-accent-deep hover:underline"
+                    href={`/cases/${encodeURIComponent(row.original.trip_case.code)}?tab=suppliers`}
+                    title="Confirm or decline the supplier booking on the case's Suppliers tab; the line follows"
+                  >
+                    Answer on Suppliers tab ({row.original.supplier_booking})
+                  </a>
+                </span>
+              ) : row.original.status === "on_request" ? (
                 <span className="flex justify-end gap-2">
                   <Button
                     size="sm"

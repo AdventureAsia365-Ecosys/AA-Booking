@@ -36,7 +36,8 @@ export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 1_000_000;
 const MEDIA_MAX_BODY_BYTES = 4_400_000;
-const MEDIA_UPLOAD_PATH = /^(hotels|services)\/[^/]+\/media$/;
+// AA-682 S1: operations documents (POST ops-files, a voucher / confirmation as base64 JSON, at most 3 MB of file).
+const MEDIA_UPLOAD_PATH = /^((hotels|services)\/[^/]+\/media|ops-files)$/;
 const PASS_HEADERS = ["content-type", "cache-control", "retry-after"];
 
 type Ctx = { params: Promise<{ path: string[] }> };

@@ -18,8 +18,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, Hammer, Inbox, Lock, Send, UserCheck, UserPlus } from "lucide-react";
+import { ArrowRight, Hammer, Hotel, Inbox, Lock, Send, UserCheck, UserPlus } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
+import { supplierBookingsApi } from "@/lib/api/supplierBookings";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
 import { canSeePage } from "@/lib/rbac";
 import {
@@ -38,6 +39,7 @@ import {
   SkeletonBar,
   TripCaseStatusBadge,
   staffDisplay,
+  useCan,
   useIsPhone,
   useStaff,
 } from "@/ui";
@@ -85,6 +87,43 @@ function TileLink({ href, label, children }: { href: string; label: string; chil
     >
       {children}
     </Link>
+  );
+}
+
+/** AA-682 S1: supplier bookings waiting for the supplier's answer (requested), the late ones (past the
+ *  supplier_answer_days setting) and those not yet requested. Opens the cases in Supplier confirming. */
+function SupplierAnswers() {
+  const canOps = useCan("ops.read");
+  const q = useQuery({
+    queryKey: ["supplier-bookings", "summary"],
+    queryFn: supplierBookingsApi.summary,
+    enabled: canOps,
+    retry: retryUnlessClientError,
+  });
+  if (!canOps) return null;
+  const d = q.data;
+  return (
+    <div className="aa-kpi-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <TileLink href={casesHref(["confirmed", "supplier_confirming"])} label="Supplier answers pending: open the cases booking suppliers">
+        <KpiTile
+          label="Supplier answers pending"
+          icon={<Hotel size={16} />}
+          value={d ? d.requested : q.isError ? null : undefined}
+          hint={
+            q.isError
+              ? "Could not load supplier bookings"
+              : d
+                ? d.overdue > 0
+                  ? `${d.overdue} waiting more than ${d.answer_days} days`
+                  : d.pending > 0
+                    ? `${d.pending} still to request`
+                    : "Nothing late"
+                : undefined
+          }
+          hintTone={d && d.overdue > 0 ? "danger" : d && d.pending > 0 ? "warning" : "neutral"}
+        />
+      </TileLink>
+    </div>
   );
 }
 
@@ -185,6 +224,7 @@ function SalesDashboard({ role }: { role: string }) {
           />
         </Section>
       )}
+      <SupplierAnswers />
 
       <Section
         title="Recent trip cases"
