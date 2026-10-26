@@ -101,8 +101,8 @@ curl -s localhost:8000/booking/health
   `go.sum`, `node_modules/`, images, lock files); UTF-16 files are transcoded to UTF-8 and scanned too.
 - `.github/workflows/deploy-dev.yml`: on push to `main` (backend changes) — OIDC role from the `dev`
   environment variable `AWS_ROLE_ARN`, ECR push with the git-SHA tag, new task definition revision,
-  update service, wait stable, verify image, smoke `/booking/health` + `/booking/health/ready`.
-  Skipped until the variable is set.
+  update service, wait stable, then `post-deploy-verify.yml` (AA-993: ECS rollout + image, `/booking/health` +
+  `/booking/health/ready`; desired count 0 is red). Red, not skipped, while the variable is unset.
 - **Frontend deploys:** CI-created via `.github/workflows/vercel-deploy.yml` (only when `frontend/**`
   changes: PR → preview, `main` → production); the Vercel Git integration is off via
   `frontend/vercel.json` (`git.deploymentEnabled: false`). Needs the repo secret `VERCEL_TOKEN`.

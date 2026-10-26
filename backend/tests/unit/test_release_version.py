@@ -60,7 +60,11 @@ def test_dockerfile_and_builds_bake_the_manifest_version() -> None:
     deploy = (WORKFLOWS / "deploy-dev.yml").read_text()
     assert READ_MANIFEST + ".release-please-manifest.json" in deploy
     assert '--build-arg APP_VERSION="${APP_VERSION}"' in deploy
-    assert ".version == $ver" in deploy  # the live smoke test checks it
+    # The post-deploy verify (AA-993 V2) checks it: the version of the deployed commit's manifest, on /booking/health.
+    verify = (WORKFLOWS / "post-deploy-verify.yml").read_text()
+    assert """git show "${EXPECTED_SHA}:.release-please-manifest.json" | """ + READ_MANIFEST.strip() in verify
+    rows = (REPO / ".github" / "verify" / "booking.rows").read_text()
+    assert re.search(r"^health\|public\|GET /booking/health\|200\|.*\.version == \$version", rows, re.M)
     ci = (WORKFLOWS / "ci.yml").read_text()
     assert READ_MANIFEST + "../.release-please-manifest.json" in ci
     assert ".version == $ver" in ci
