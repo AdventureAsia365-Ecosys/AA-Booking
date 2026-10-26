@@ -60,6 +60,14 @@ grants the task role ``s3:PutObject`` / ``s3:GetObject`` on ``supply-media/*``):
   naming CHECK). Empty (default) = uploads answer 503 ``media_storage_unavailable`` and listed photos carry no URL.
 - ``SUPPLY_MEDIA_REGION``: default ``us-west-1`` (the bucket's region; presigned URLs are signed for it).
 
+Operations documents (AA-682 S1, ``app.ops.files``; Terraform creates the private ops-docs bucket with an SSE-KMS CMK
+and grants the task role ``s3:PutObject`` / ``s3:GetObject`` on ``ops-docs/*`` plus ``kms:GenerateDataKey`` /
+``kms:Decrypt`` on the CMK):
+
+- ``OPS_DOCS_BUCKET``: the Booking ops-docs bucket (``aa-booking-<env>-ops-docs-<account>``, the bk-026 naming CHECK).
+  Empty (default) = uploads answer 503 ``ops_storage_unavailable`` and downloads are unavailable.
+- ``OPS_DOCS_REGION``: default ``us-west-1``.
+
 Error tracking (AA-871, ``app.observability.sentry``):
 
 - ``SENTRY_DSN``: the Sentry project DSN (task definition secret). Empty (default) = Sentry off. Must be ``https://``.
@@ -97,6 +105,8 @@ DEFAULT_STAFF_ADMIN_URL = "https://booking.lumiguides.it.com"
 DEFAULT_SUPPLY_MEDIA_REGION = "us-west-1"
 # The bk-023 CHECK on booking.entity_media.s3_bucket: a wrong name fails at start-up, not on the first upload.
 SUPPLY_MEDIA_BUCKET_RE = re.compile(r"^aa-booking-[a-z0-9]+-supply-media-[0-9]{12}$")
+# The bk-026 CHECK on booking.ops_files.s3_bucket.
+OPS_DOCS_BUCKET_RE = re.compile(r"^aa-booking-[a-z0-9]+-ops-docs-[0-9]{12}$")
 
 
 class SettingsError(ValueError):
@@ -126,6 +136,8 @@ class Settings:
     cognito_m2m_crm_client_id: str = ""
     supply_media_bucket: str = ""
     supply_media_region: str = DEFAULT_SUPPLY_MEDIA_REGION
+    ops_docs_bucket: str = ""
+    ops_docs_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     cognito_external_issuer: str = DEV_EXTERNAL_ISSUER
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
@@ -195,6 +207,13 @@ class Settings:
             )
         if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.supply_media_region):
             raise SettingsError(f"SUPPLY_MEDIA_REGION must be an AWS region, got {self.supply_media_region!r}")
+        if self.ops_docs_bucket and not OPS_DOCS_BUCKET_RE.fullmatch(self.ops_docs_bucket):
+            raise SettingsError(
+                "OPS_DOCS_BUCKET must name the ops-docs bucket (aa-booking-<env>-ops-docs-<account>), "
+                f"got {self.ops_docs_bucket!r}"
+            )
+        if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.ops_docs_region):
+            raise SettingsError(f"OPS_DOCS_REGION must be an AWS region, got {self.ops_docs_region!r}")
         external = self.cognito_external_issuer
         if not external.startswith("https://") or external.endswith("/") or len(external) > 300:
             raise SettingsError(
@@ -254,6 +273,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cognito_m2m_crm_client_id=(env.get("COGNITO_M2M_CRM_CLIENT_ID") or "").strip(),
         supply_media_bucket=(env.get("SUPPLY_MEDIA_BUCKET") or "").strip(),
         supply_media_region=(env.get("SUPPLY_MEDIA_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
+        ops_docs_bucket=(env.get("OPS_DOCS_BUCKET") or "").strip(),
+        ops_docs_region=(env.get("OPS_DOCS_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
         cognito_external_issuer=(env.get("COGNITO_EXTERNAL_ISSUER") or "").strip() or DEV_EXTERNAL_ISSUER,
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),

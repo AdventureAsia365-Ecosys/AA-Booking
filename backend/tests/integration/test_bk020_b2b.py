@@ -58,6 +58,10 @@ async def _clean(conn: asyncpg.Connection) -> None:
         owner = await conn.fetchval("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'booking'")
         if owner != await conn.fetchval("SELECT current_user"):
             await conn.execute(f'SET LOCAL ROLE "{owner}"')
+        # AA-682 (bk-026): supplier bookings reference B2B hold lines and cases.
+        await conn.execute("UPDATE booking.supplier_bookings SET voucher_file_id = NULL")
+        await conn.execute("DELETE FROM booking.ops_files")
+        await conn.execute("DELETE FROM booking.supplier_bookings")
         await conn.execute("DELETE FROM booking.b2b_cancellations")  # AA-974 (bk-021), references holds and cases
         await conn.execute("DELETE FROM booking.b2b_hold_lines")
         await conn.execute("DELETE FROM booking.b2b_holds")

@@ -16,6 +16,20 @@ import { StaffSelect } from "../_parts/StaffSelect";
 import { friendlyError } from "../_parts/QueryError";
 import { useAssign, useChangeStatus } from "./useCaseMutations";
 
+// AA-682 (bk-026, critic B1): post-sale statuses follow supplier bookings, invoices and dates; the API answers
+// status_system_managed, so they are never offered. Confirmed is reached by approval (or by the system after a
+// supplier_confirming case loses its last live booking), never picked here once the trip is sold.
+const SYSTEM_STATUSES: readonly TripCaseStatus[] = [
+  "supplier_confirming",
+  "invoice_sent",
+  "payment_pending",
+  "paid",
+  "pre_departure",
+  "on_trip",
+  "completed",
+];
+const SOLD: readonly TripCaseStatus[] = ["confirmed", ...SYSTEM_STATUSES];
+
 const CANCEL_REASONS = ["Customer cancelled", "Customer chose another company", ...DECLINE_REASONS] as const;
 
 type Dialog =
@@ -38,7 +52,13 @@ export function StatusActions({ c }: { c: TripCaseDetail }) {
     change.reset();
     setDialog(null);
   };
-  const moves = allowed.filter((s) => s !== "cancelled" && !(c.status === "cancelled" && s === "new_inquiry"));
+  const moves = allowed.filter(
+    (s) =>
+      s !== "cancelled" &&
+      !(c.status === "cancelled" && s === "new_inquiry") &&
+      !SYSTEM_STATUSES.includes(s) &&
+      !(s === "confirmed" && SOLD.includes(c.status)),
+  );
   const isInquiry = c.status === "new_inquiry";
 
   return (

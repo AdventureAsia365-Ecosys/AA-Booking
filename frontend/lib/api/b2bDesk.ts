@@ -64,6 +64,8 @@ export interface OnRequestLine {
   pax: { adult: number; child: number; infant: number };
   seats: number;
   departure: { id: string; start_date: IsoDate } | null;
+  /** AA-682 D13: a live supplier booking covers this line; it is answered from the case's Suppliers tab. */
+  supplier_booking?: string | null;
 }
 
 export interface OnRequestPage {

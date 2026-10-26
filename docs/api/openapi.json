@@ -85,6 +85,139 @@
         "title": "Booking",
         "type": "object"
       },
+      "BookingFacts": {
+        "additionalProperties": false,
+        "properties": {
+          "hotel_room_type_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hotel Room Type Id"
+          },
+          "item_description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Description"
+          },
+          "net_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Amount"
+          },
+          "net_currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Currency"
+          },
+          "nights": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nights"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "pax": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pax"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
+          },
+          "service_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Id"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
+          }
+        },
+        "title": "BookingFacts",
+        "type": "object"
+      },
       "BookingLine": {
         "additionalProperties": false,
         "properties": {
@@ -605,6 +738,34 @@
           "kind"
         ],
         "title": "Component",
+        "type": "object"
+      },
+      "ConfirmIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_ref": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Confirmation Ref",
+            "type": "string"
+          },
+          "voucher_file_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voucher File Id"
+          }
+        },
+        "required": [
+          "confirmation_ref"
+        ],
+        "title": "ConfirmIn",
         "type": "object"
       },
       "ConfirmRequest": {
@@ -2137,6 +2298,147 @@
         "title": "Money",
         "type": "object"
       },
+      "NewBooking": {
+        "additionalProperties": false,
+        "properties": {
+          "hotel_room_type_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hotel Room Type Id"
+          },
+          "item_description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Description"
+          },
+          "net_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Amount"
+          },
+          "net_currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Currency"
+          },
+          "nights": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nights"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "pax": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pax"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
+          },
+          "service_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Id"
+          },
+          "supplier_id": {
+            "format": "uuid",
+            "title": "Supplier Id",
+            "type": "string"
+          },
+          "version_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Item Id"
+          }
+        },
+        "required": [
+          "supplier_id"
+        ],
+        "title": "NewBooking",
+        "type": "object"
+      },
       "NewContract": {
         "additionalProperties": false,
         "properties": {
@@ -2282,6 +2584,69 @@
           "name"
         ],
         "title": "NewCustomer",
+        "type": "object"
+      },
+      "NewFile": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "data_base64": {
+            "maxLength": 4194320,
+            "minLength": 1,
+            "title": "Data Base64",
+            "type": "string"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_type": {
+            "enum": [
+              "payment",
+              "supplier_booking",
+              "supplier_bill",
+              "supplier_payout"
+            ],
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "file_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "File Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "payment_evidence",
+              "supplier_voucher",
+              "supplier_confirmation",
+              "supplier_bill",
+              "payout_evidence"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "entity_type",
+          "entity_id",
+          "file_name",
+          "content_type",
+          "data_base64"
+        ],
+        "title": "NewFile",
         "type": "object"
       },
       "NewHotel": {
@@ -4047,6 +4412,22 @@
           "schema_version"
         ],
         "title": "Readiness",
+        "type": "object"
+      },
+      "ReasonIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReasonIn",
         "type": "object"
       },
       "Room": {
@@ -9259,6 +9640,168 @@
         ]
       }
     },
+    "/booking/ops-files": {
+      "post": {
+        "operationId": "upload_file_booking_ops_files_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload File Booking Ops Files Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload File",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/ops-files/{file_id}/download": {
+      "get": {
+        "operationId": "download_file_booking_ops_files__file_id__download_get",
+        "parameters": [
+          {
+            "description": "operations file UUID",
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "description": "operations file UUID",
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Download File Booking Ops Files  File Id  Download Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download File",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/ops-files/{file_id}/remove": {
+      "post": {
+        "operationId": "remove_file_booking_ops_files__file_id__remove_post",
+        "parameters": [
+          {
+            "description": "operations file UUID",
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "description": "operations file UUID",
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove File Booking Ops Files  File Id  Remove Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove File",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
     "/booking/ops/deploy-gate": {
       "get": {
         "operationId": "deploy_gate_booking_ops_deploy_gate_get",
@@ -11132,6 +11675,586 @@
         "summary": "Patch Staff",
         "tags": [
           "staff"
+        ]
+      }
+    },
+    "/booking/supplier-bookings": {
+      "get": {
+        "operationId": "list_bookings_booking_supplier_bookings_get",
+        "parameters": [
+          {
+            "description": "supplier UUID or code",
+            "in": "query",
+            "name": "supplier_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "supplier UUID or code",
+              "title": "Supplier Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "requested",
+                    "confirmed",
+                    "declined",
+                    "cancelled",
+                    "live"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Bookings Booking Supplier Bookings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Bookings",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/summary": {
+      "get": {
+        "operationId": "bookings_summary_booking_supplier_bookings_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Bookings Summary Booking Supplier Bookings Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bookings Summary",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}": {
+      "get": {
+        "operationId": "get_booking_booking_supplier_bookings__booking_id__get",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Booking Booking Supplier Bookings  Booking Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Booking",
+        "tags": [
+          "operations"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_booking_booking_supplier_bookings__booking_id__patch",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingFacts"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Booking Booking Supplier Bookings  Booking Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Booking",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}/cancel": {
+      "post": {
+        "operationId": "cancel_booking_booking_supplier_bookings__booking_id__cancel_post",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Booking Booking Supplier Bookings  Booking Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Booking",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}/confirm": {
+      "post": {
+        "operationId": "confirm_booking_booking_supplier_bookings__booking_id__confirm_post",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Confirm Booking Booking Supplier Bookings  Booking Id  Confirm Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Booking",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}/decline": {
+      "post": {
+        "operationId": "decline_booking_booking_supplier_bookings__booking_id__decline_post",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decline Booking Booking Supplier Bookings  Booking Id  Decline Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decline Booking",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}/request": {
+      "post": {
+        "operationId": "request_booking_booking_supplier_bookings__booking_id__request_post",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Request Booking Booking Supplier Bookings  Booking Id  Request Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Booking",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}/rerequest": {
+      "post": {
+        "operationId": "rerequest_booking_booking_supplier_bookings__booking_id__rerequest_post",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rerequest Booking Booking Supplier Bookings  Booking Id  Rerequest Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rerequest Booking",
+        "tags": [
+          "operations"
         ]
       }
     },
@@ -13175,6 +14298,173 @@
         "summary": "Send Version",
         "tags": [
           "trip-cases"
+        ]
+      }
+    },
+    "/booking/trip-cases/{ref}/supplier-bookings": {
+      "get": {
+        "operationId": "case_bookings_booking_trip_cases__ref__supplier_bookings_get",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Case Bookings Booking Trip Cases  Ref  Supplier Bookings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Case Bookings",
+        "tags": [
+          "operations"
+        ]
+      },
+      "post": {
+        "operationId": "create_booking_trip_cases__ref__supplier_bookings_post",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewBooking"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Booking Trip Cases  Ref  Supplier Bookings Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/trip-cases/{ref}/supplier-bookings/generate": {
+      "post": {
+        "operationId": "generate_booking_trip_cases__ref__supplier_bookings_generate_post",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Booking Trip Cases  Ref  Supplier Bookings Generate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate",
+        "tags": [
+          "operations"
         ]
       }
     },

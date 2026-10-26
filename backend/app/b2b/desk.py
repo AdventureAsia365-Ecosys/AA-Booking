@@ -141,7 +141,9 @@ l.answer_due_at, l.answered_at, l.decline_code, l.answered_by, s.name AS answere
 h.confirmed_at, h.trip_case_id::text AS trip_case_id, c.code AS trip_case_code, h.proposal_ref,
 p.id::text AS partner_id, p.agency_name, p.tenant_id::text AS tenant_id,
 q.component_id, q.component_kind, q.service_date, q.nights, q.pax_adult, q.pax_child, q.pax_infant,
-d.start_date AS departure_start
+d.start_date AS departure_start,
+(SELECT sb.code FROM booking.supplier_bookings sb WHERE sb.b2b_hold_id = l.hold_id AND sb.b2b_line_ref = l.line_ref
+   AND sb.status IN ('pending', 'requested', 'confirmed')) AS supplier_booking
 """
 LINE_FROM = """
 FROM booking.b2b_hold_lines l
@@ -253,6 +255,8 @@ def line_out(row: Any, labels: dict[str, dict[str, Any]], now: datetime) -> dict
         "departure": (
             {"id": row["departure_id"], "start_date": row["departure_start"]} if row["departure_id"] else None
         ),
+        # AA-682 D13: a live supplier booking answers this line from the case's Suppliers tab.
+        "supplier_booking": row.get("supplier_booking"),
     }
 
 
@@ -300,9 +304,14 @@ async def answer_line(
     *,
     accept: bool,
     decline_code: str | None = None,
+    via_supplier_booking: bool = False,
 ) -> dict[str, Any]:
     """Accept or decline an on-request line (call inside a transaction). The hold row is locked first, as a cancel
-    locks it (AA-974), so an answer and a cancel of the same booking run one after the other."""
+    locks it (AA-974), so an answer and a cancel of the same booking run one after the other.
+
+    AA-682 D13 (bk-026): the desk and the supplier booking are one action. A line with a live supplier booking is
+    answered from the case's Suppliers tab (its confirm / decline call this with ``via_supplier_booking``); the desk
+    route answers it 409 ``answer_from_suppliers_tab`` so the two never disagree."""
     hold = _uuid(hold_id)
     if hold is None:
         raise NotFound("line_not_found", "no such hold")
@@ -324,6 +333,19 @@ async def answer_line(
         return await _line(conn, hold, line_ref, datetime.now(UTC))  # the same answer again
     if line["status"] != "on_request":
         raise Conflict("line_answered", f"the line is already {line['status']}; it cannot be answered again")
+    if not via_supplier_booking:
+        booking = await conn.fetchval(
+            "SELECT code FROM booking.supplier_bookings WHERE b2b_hold_id = $1::uuid AND b2b_line_ref = $2"
+            " AND status IN ('pending', 'requested', 'confirmed')",
+            hold,
+            line_ref,
+        )
+        if booking is not None:
+            raise Conflict(
+                "answer_from_suppliers_tab",
+                f"supplier booking {booking} covers this line: confirm or decline it on the case's Suppliers tab",
+                supplier_booking=booking,
+            )
     await conn.execute(
         "UPDATE booking.b2b_hold_lines SET status = $3, decline_code = $4, answered_at = now(), answered_by = $5"
         " WHERE hold_id = $1::uuid AND line_ref = $2",
