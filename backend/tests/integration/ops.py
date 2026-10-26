@@ -99,7 +99,8 @@ async def supply(conn: asyncpg.Connection, name: str = "Delta") -> dict[str, str
 async def sold_case(
     conn: asyncpg.Connection, sup: dict[str, str], *, tag: str = "a", costs: tuple[str, ...] = ("USD", "USD")
 ) -> dict[str, Any]:
-    """A B2C trip case at ``confirmed`` with an approved V1: item 1 = 2 nights of the room (day 1-2, cost rows in
+    """A B2C trip case at ``confirmed`` with an approved V1: item 1 = 2 nights of the room (days 1-3: in day 1, out
+    day 3, the B2C pricing rule ``supply_rates.quantity('room_night')`` = day_to - day_from; cost rows in
     ``costs``), item 2 = the service on day 3, item 3 = a free-text item (no supply)."""
     customer = await conn.fetchval(
         "INSERT INTO booking.customers (email) VALUES ($1) RETURNING id::text", f"it-682-{tag}@example.test"
@@ -119,7 +120,7 @@ async def sold_case(
     )
     room_item = await conn.fetchval(
         "INSERT INTO booking.trip_case_version_itinerary (trip_case_version_id, position, title, day_from, day_to,"
-        " hotel_room_type_id) VALUES ($1::uuid, 1, 'Two nights', 1, 2, $2::uuid) RETURNING id::text",
+        " hotel_room_type_id) VALUES ($1::uuid, 1, 'Two nights', 1, 3, $2::uuid) RETURNING id::text",
         version,
         sup["room"],
     )

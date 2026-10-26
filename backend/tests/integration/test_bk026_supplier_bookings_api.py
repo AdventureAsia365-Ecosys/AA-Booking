@@ -1,6 +1,6 @@
 """AA-682 S1 over HTTP on a real PostgreSQL (bk-026), as role ``booking``, B2C path (B2B: ``test_bk026_b2b.py``):
 
-- generate from the approved version: one pending booking per supply item (room nights from the item days, net = the
+- generate from the approved version: one pending booking per supply item (B2C room nights = the pricing rule, net = the
   sum of the cost rows; mixed currencies → 409), idempotent, and two concurrent generates make no duplicate;
 - request → the case moves confirmed → supplier_confirming by itself; confirm with the supplier's ref (+ a voucher on
   a B2C case) → supply state ``booked`` ("Confirmed & Booked"), the case stays supplier_confirming (money is S3);

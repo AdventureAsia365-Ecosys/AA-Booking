@@ -51,6 +51,7 @@ from app.b2b import desk
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import files as ops_files
+from app.supply import rates as supply_rates
 
 log = logging.getLogger(__name__)
 
@@ -455,10 +456,24 @@ def _net(item: Any) -> tuple[Decimal | None, str | None]:
     return sum((Decimal(a) for a in amounts), Decimal("0")), currencies[0]
 
 
+def _nights(case: Any, item: Any) -> int | None:
+    """Room nights of a generated booking, on the convention the item was priced and sold on.
+
+    B2B items come from a held B2B line, where ``holds._open_case`` writes ``day_to = day_from + nights - 1``.
+    B2C items are costed per ``supply_rates.quantity('room_night')`` = max(day_to - day_from, 1), so the booking
+    asks the supplier for exactly the nights its net covers."""
+    if not item["hotel_room_type_id"]:
+        return None
+    day_from, day_to = int(item["day_from"]), int(item["day_to"])
+    if case["channel"] == "b2b":
+        return day_to - day_from + 1
+    return supply_rates.quantity("room_night", day_from=day_from, day_to=day_to, pax=None)
+
+
 def _from_item(case: Any, item: Any) -> dict[str, Any]:
     net, currency = _net(item)
     start = case["start_date"]
-    nights = (int(item["day_to"]) - int(item["day_from"]) + 1) if item["hotel_room_type_id"] else None
+    nights = _nights(case, item)
     linked = case["channel"] == "b2b" and item["b2b_hold_id"] and item["b2b_held_as"] == "on_request"
     return {
         "version_item_id": item["id"],

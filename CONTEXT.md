@@ -486,7 +486,9 @@ send, OTP) is not built: those still write rows only.
 - A **supplier booking** (`booking.supplier_bookings`, code `SB-000123`) books one supplier for one room type /
   service item of the case's **approved version**, or an extra item. `POST …/supplier-bookings/generate` makes one
   `pending` booking per supply item that has no live booking (supplier = the hotel's / service's; date = case start +
-  item day − 1; nights = item days for a room; pax = case pax; net = the sum of the item's cost rows, 409
+  item day − 1; room nights on the convention the item was sold on: B2C = the pricing rule
+  `supply_rates.quantity('room_night')` = max(day_to − day_from, 1) (check-out day = `day_to`), B2B = day_to −
+  day_from + 1 (`holds._open_case` writes day_to = day_from + nights − 1); pax = case pax; net = the sum of the item's cost rows, 409
   `mixed_cost_currencies` when their currencies differ); idempotent, and concurrent generates are serialised by the case
   row lock and the unique index. Life: `pending → requested → confirmed | declined`, `→ cancelled` (reason), `confirmed
   → requested` (a change, reason; the old ref stays in the audit row). Edges in `booking.ops_transitions`, facts in

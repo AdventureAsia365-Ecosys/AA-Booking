@@ -60,10 +60,23 @@ CASE = {"id": "case-1", "code": "TC-000001", "status": "confirmed", "channel": "
 def test_from_item_copies_dates_nights_pax_and_summed_net() -> None:
     out = sb._from_item(CASE, _item())
     assert out["service_date"] == date(2027, 3, 2)  # day 2 of a trip starting 1 March
-    assert out["nights"] == 3 and out["pax"] == 2
+    assert out["nights"] == 2 and out["pax"] == 2  # B2C days 2-4: in day 2, out day 4, as the room was costed
     assert out["net_amount"] == Decimal("400.50") and out["net_currency"] == "USD"
     assert out["item_description"] == "Delta Hotel · Deluxe"
     assert out["b2b_hold_id"] is None
+
+
+def test_room_nights_follow_the_pricing_rule_on_b2c_and_the_hold_rule_on_b2b() -> None:
+    from app.supply import rates as supply_rates
+
+    for day_from, day_to in ((1, 1), (1, 2), (2, 4), (3, 9)):
+        item = _item(day_from=day_from, day_to=day_to)
+        b2c = sb._from_item(CASE, item)["nights"]
+        # B2C: the nights the net covers (versions default_cost uses the same quantity).
+        assert b2c == supply_rates.quantity("room_night", day_from=day_from, day_to=day_to, pax=None)
+        # B2B: holds._open_case writes day_to = day_from + nights - 1.
+        assert sb._from_item({**CASE, "channel": "b2b"}, item)["nights"] == day_to - day_from + 1
+    assert sb._from_item(CASE, _item(day_from=1, day_to=1))["nights"] == 1  # a same-day item is one night, not zero
 
 
 def test_service_items_have_no_nights_and_unknown_start_has_no_date() -> None:
