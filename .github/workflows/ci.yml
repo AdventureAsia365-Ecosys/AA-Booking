@@ -95,10 +95,13 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       # Includes the static migration guard (tests/unit/test_migration_guard.py) over migrations/*.sql.
+      # AA-993 (BK-2): 4 xdist workers (pytest-xdist pinned in requirements-dev.txt). Integration Tests stays serial
+      # (one shared PostgreSQL). BK-1: the Python 3.12 sys.monitoring coverage tracer cuts worker CPU; same report.
       - name: Run unit tests
         env:
           ENVIRONMENT: test
-        run: pytest tests/unit -v --tb=short --cov=app --cov-report=term-missing --cov-fail-under=90
+          COVERAGE_CORE: sysmon
+        run: pytest tests/unit -n 4 --tb=short --cov=app --cov-report=term-missing --cov-fail-under=90
 
   # Applies migrations/*.sql in order to a real PostgreSQL 15 (the RDS major version) logged in as
   # aa_cis_admin (the DB Migrate identity), on a stub `shared` schema, exactly as
