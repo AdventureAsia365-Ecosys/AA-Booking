@@ -103,6 +103,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # role reads and answers it (no separate ops role exists); content creators do not.
     "b2b_desk.read": frozenset({"admin", "sales", "contracting"}),
     "b2b_desk.write": frozenset({"admin", "sales", "contracting"}),
+    # Operations (bk-026, AA-682 S1): supplier bookings of a sold trip and their documents. Every operational role
+    # books and chases suppliers (no separate ops role yet, design D16); content creators do not.
+    "ops.read": frozenset({"admin", "sales", "contracting"}),
+    "ops.write": frozenset({"admin", "sales", "contracting"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin
@@ -116,6 +120,7 @@ PREVIEW_PERMISSIONS: frozenset[str] = frozenset(
         "supply.read",
         "catalog.read",
         "b2b_desk.read",
+        "ops.read",
     }
 )
 # The only methods a Preview-client session may call (RFC 9110 safe methods that routes here serve).

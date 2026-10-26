@@ -1,0 +1,421 @@
+"""Operations documents (bk-026 ``booking.ops_files``; AA-682 design D10): supplier vouchers and confirmations now,
+payment evidence, supplier bills and payout evidence with bk-028 / bk-029.
+
+- **Private bucket, SSE-KMS.** The bytes go to the ops-docs bucket (``OPS_DOCS_BUCKET``, Terraform with a customer
+  managed KMS key as the bucket default) under the key bk-026 derives from the row, ``ops-docs/<kind>/<id>.<ext>``.
+  Evidence and vouchers may hold bank references and traveller names (``pii:payment``), so nothing is public: staff
+  read a file through a 300 s presigned GET that forces a download (``Content-Disposition: attachment``, the stored
+  content type), never inline in the admin, and every download writes an audit row.
+- **Upload body is JSON with the bytes in base64** (the AA-835 path, lessons S229: the Booking REST API has no
+  ``binaryMediaTypes``), capped at :data:`MAX_BYTES` (3 MiB) by the staff BFF's 4.5 MB Vercel body limit; the database
+  allows up to ``ops_docs_max_bytes`` (10 MB) for a later presigned-POST path (design Q10).
+- **The type is read from the bytes**: PDF (``%PDF-``), JPEG, PNG or WebP; the declared type must agree. PDFs are stored
+  as uploaded (no re-encode); the staff UI re-encodes photos before sending them (no EXIF).
+- **Order of a write** (as AA-835): the row and the audit row, then the S3 put, inside the caller's transaction; a
+  failed put rolls the row back.
+- **B2B cases take no document** (design D12, DM-6.8: a voucher or a supplier confirmation names travellers of an agency
+  trip, which never enter ``booking.*``): 422 ``document_not_allowed_b2b``; bk-026 refuses it too.
+
+Permissions: a file inherits the permission of its parent (supplier booking: ``ops.read`` / ``ops.write``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import binascii
+import hashlib
+import logging
+import threading
+import uuid
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+import asyncpg
+
+from app import audit
+from app.auth.staff import Staff
+from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
+from app.settings import Settings
+from app.supply import media
+
+log = logging.getLogger(__name__)
+
+# The staff BFF on Vercel takes at most 4.5 MB of body; 3 MiB of bytes is 4 MiB of base64 (same cap as AA-835).
+MAX_BYTES = 3 * 1024 * 1024
+MAX_BASE64_CHARS = 4 * ((MAX_BYTES + 2) // 3)
+PRESIGN_SECONDS = 300
+OBJECT_PREFIX = "ops-docs"
+EXTENSIONS = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+CONTENT_TYPES = tuple(EXTENSIONS)
+KINDS = ("payment_evidence", "supplier_voucher", "supplier_confirmation", "supplier_bill", "payout_evidence")
+# Kinds that have an entity today (bk-026): the others arrive with bk-028 / bk-029.
+KIND_ENTITY = {"supplier_voucher": "supplier_booking", "supplier_confirmation": "supplier_booking"}
+MAX_ACTIVE_PER_ENTITY = 20
+MAX_NAME = 200
+# Same bounds as the AA-835 photo store: a slow S3 fails before API Gateway's 29 s.
+S3_CONNECT_TIMEOUT = media.S3_CONNECT_TIMEOUT
+S3_READ_TIMEOUT = media.S3_READ_TIMEOUT
+S3_TOTAL_ATTEMPTS = media.S3_TOTAL_ATTEMPTS
+
+
+# ── Bytes ────────────────────────────────────────────────────────────────────
+
+
+def decode(data_base64: str) -> bytes:
+    """The uploaded bytes: strict base64, 1 byte to :data:`MAX_BYTES`."""
+    if len(data_base64) > MAX_BASE64_CHARS:
+        raise Invalid("file_too_large", f"a document is at most {MAX_BYTES // (1024 * 1024)} MB")
+    try:
+        data = base64.b64decode(data_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise Invalid("invalid_base64", "data_base64 is not valid base64") from exc
+    if not data:
+        raise Invalid("empty_file", "the file is empty")
+    if len(data) > MAX_BYTES:
+        raise Invalid("file_too_large", f"a document is at most {MAX_BYTES // (1024 * 1024)} MB")
+    return data
+
+
+def sniff(data: bytes) -> str:
+    """The content type read from the bytes: a PDF, or a JPEG / PNG / WebP image; 422 ``unsupported_file`` else."""
+    if data[:5] == b"%PDF-":
+        return "application/pdf"
+    try:
+        return media.sniff(data).content_type
+    except Invalid as exc:
+        if exc.code in ("unsupported_image",):
+            raise Invalid("unsupported_file", "upload a PDF, JPEG, PNG or WebP file") from exc
+        raise
+
+
+def object_key(kind: str, file_id: str, content_type: str) -> str:
+    """The key bk-026's ``ops_files_key_chk`` derives from the row."""
+    return f"{OBJECT_PREFIX}/{kind}/{file_id}.{EXTENSIONS[content_type]}"
+
+
+def clean_name(file_name: str) -> str:
+    name = " ".join((file_name or "").replace("/", " ").replace("\\", " ").split())[:MAX_NAME]
+    if not name:
+        raise Invalid("file_name_required", "the file needs a name")
+    return name
+
+
+# ── Storage ──────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Download:
+    url: str
+    expires_in: int
+
+
+class OpsStore(Protocol):
+    bucket: str
+
+    async def put(self, key: str, data: bytes, content_type: str, sha256: str) -> None: ...
+
+    async def download_url(self, key: str, file_name: str, content_type: str) -> str: ...
+
+
+def _disposition(file_name: str) -> str:
+    ascii_name = file_name.encode("ascii", "replace").decode("ascii").replace('"', "'").replace("?", "_")
+    return f'attachment; filename="{ascii_name}"'
+
+
+class S3OpsStore:
+    """The ops-docs bucket through boto3 (blocking calls in a thread; boto3 imported lazily, as the photo store)."""
+
+    def __init__(self, bucket: str, region: str) -> None:
+        self.bucket = bucket
+        self.region = region
+        self._client: Any = None
+        self._lock = threading.Lock()
+
+    def _s3(self) -> Any:
+        with self._lock:
+            if self._client is None:
+                import boto3
+                from botocore.config import Config
+
+                self._client = boto3.client(
+                    "s3",
+                    region_name=self.region,
+                    config=Config(
+                        signature_version="s3v4",
+                        s3={"addressing_style": "virtual"},
+                        connect_timeout=S3_CONNECT_TIMEOUT,
+                        read_timeout=S3_READ_TIMEOUT,
+                        retries={"total_max_attempts": S3_TOTAL_ATTEMPTS},
+                    ),
+                )
+            return self._client
+
+    def _put(self, key: str, data: bytes, content_type: str, sha256: str) -> None:
+        self._s3().put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            ServerSideEncryption="aws:kms",  # the bucket default CMK; the bucket policy refuses anything else
+            ChecksumSHA256=base64.b64encode(bytes.fromhex(sha256)).decode("ascii"),
+        )
+
+    def _url(self, key: str, file_name: str, content_type: str) -> str:
+        return self._s3().generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ResponseContentDisposition": _disposition(file_name),
+                "ResponseContentType": content_type,
+            },
+            ExpiresIn=PRESIGN_SECONDS,
+        )
+
+    async def put(self, key: str, data: bytes, content_type: str, sha256: str) -> None:
+        await asyncio.to_thread(self._put, key, data, content_type, sha256)
+
+    async def download_url(self, key: str, file_name: str, content_type: str) -> str:
+        return await asyncio.to_thread(self._url, key, file_name, content_type)
+
+
+def store_from_settings(settings: Settings) -> OpsStore | None:
+    """The bucket of ``OPS_DOCS_BUCKET``; None when it is not set (uploads and downloads then answer 503)."""
+    if not settings.ops_docs_bucket:
+        return None
+    return S3OpsStore(settings.ops_docs_bucket, settings.ops_docs_region)
+
+
+# ── Rows ─────────────────────────────────────────────────────────────────────
+
+FILE_COLUMNS = """
+    f.id::text AS id, f.kind, f.entity_type, f.entity_id::text AS entity_id, f.trip_case_id::text AS trip_case_id,
+    f.s3_key, f.content_type, f.bytes, f.sha256, f.file_name, f.status, f.removed_reason, f.removed_at,
+    f.uploaded_by, up.name AS uploaded_by_name, f.created_at
+"""
+FILE_FROM = "booking.ops_files f LEFT JOIN booking.staff_users up ON up.cis_user_id = f.uploaded_by"
+
+
+PARENT_SQL = """
+SELECT sb.id::text AS id, sb.code, sb.status, sb.trip_case_id::text AS trip_case_id,
+       sb.voucher_file_id::text AS voucher_file_id, tc.code AS case_code, tc.channel
+FROM booking.supplier_bookings sb JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
+WHERE sb.id = $1::uuid"""
+
+
+def file_out(row: Any) -> dict[str, Any]:
+    out = dict(row)
+    out.pop("s3_key", None)
+    out["uploaded_by"] = (
+        {"id": out["uploaded_by"], "name": out.pop("uploaded_by_name")}
+        if out["uploaded_by"]
+        else out.pop("uploaded_by_name")
+    )
+    return out
+
+
+async def files_of(conn: asyncpg.Connection, entity_type: str, entity_ids: list[str]) -> dict[str, list[dict]]:
+    """Active files per entity id (no URL: a download is its own audited call)."""
+    if not entity_ids:
+        return {}
+    rows = await conn.fetch(
+        f"SELECT {FILE_COLUMNS} FROM {FILE_FROM}"  # noqa: S608 — constants only
+        " WHERE f.entity_type = $1 AND f.entity_id = ANY($2::uuid[]) AND f.status = 'active'"
+        " ORDER BY f.created_at, f.id",
+        entity_type,
+        entity_ids,
+    )
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["entity_id"], []).append(file_out(r))
+    return out
+
+
+async def get_file(conn: asyncpg.Connection, file_id: str, *, lock: bool = False) -> Any:
+    try:
+        fid = str(uuid.UUID(file_id))
+    except ValueError:
+        raise NotFound("file_not_found", f"file {file_id} not found") from None
+    row = await conn.fetchrow(
+        f"SELECT {FILE_COLUMNS} FROM {FILE_FROM} WHERE f.id = $1::uuid"  # noqa: S608 — constants only
+        + (" FOR UPDATE OF f" if lock else ""),
+        fid,
+    )
+    if row is None:
+        raise NotFound("file_not_found", f"file {file_id} not found")
+    return row
+
+
+def _require(staff: Staff, entity_type: str, *, write: bool) -> None:
+    permission = {"supplier_booking": "ops.write" if write else "ops.read"}.get(entity_type)
+    if permission is None or not staff.can(permission):
+        raise Forbidden("forbidden", f"{'writing' if write else 'reading'} this file needs {permission or 'a role'}")
+
+
+async def _parent(conn: asyncpg.Connection, entity_type: str, entity_id: str, *, lock: bool) -> Any:
+    """The supplier booking a file belongs to, with its case channel (404 when it does not exist)."""
+    if entity_type != "supplier_booking":
+        raise Invalid("kind_not_available", f"files of a {entity_type} arrive with a later slice (AA-682 S3 / S4)")
+    try:
+        ident = str(uuid.UUID(entity_id))
+    except ValueError:
+        raise NotFound("supplier_booking_not_found", f"supplier booking {entity_id} not found") from None
+    row = await conn.fetchrow(PARENT_SQL + (" FOR UPDATE OF sb" if lock else ""), ident)
+    if row is None:
+        raise NotFound("supplier_booking_not_found", f"supplier booking {entity_id} not found")
+    return row
+
+
+async def upload(
+    conn: asyncpg.Connection,
+    store: OpsStore | None,
+    staff: Staff,
+    *,
+    kind: str,
+    entity_type: str,
+    entity_id: str,
+    file_name: str,
+    content_type: str,
+    data_base64: str,
+) -> dict[str, Any]:
+    """Check the bytes, write the row (+ audit), then put the object; run inside the caller's transaction."""
+    if kind not in KINDS:
+        raise Invalid("unknown_kind", f"kind must be one of {', '.join(KINDS)}")
+    if KIND_ENTITY.get(kind) is None:
+        raise Invalid("kind_not_available", f"{kind} files arrive with a later slice (AA-682 S3 / S4)")
+    if KIND_ENTITY[kind] != entity_type:
+        raise Invalid("kind_entity_mismatch", f"a {kind} file belongs to a {KIND_ENTITY[kind]}")
+    _require(staff, entity_type, write=True)
+    parent = await _parent(conn, entity_type, entity_id, lock=True)
+    if parent["channel"] == "b2b":
+        raise Invalid(
+            "document_not_allowed_b2b",
+            "a B2B trip keeps the supplier's confirmation ref only: no voucher or document (traveller data stays in the"
+            " agency's CRM)",
+        )
+    if parent["status"] in ("declined", "cancelled"):
+        raise Conflict("supplier_booking_closed", f"supplier booking {parent['code']} is {parent['status']}")
+    if store is None:
+        raise Unavailable("ops_storage_unavailable", "document storage is not configured for this environment")
+    name = clean_name(file_name)
+    data = decode(data_base64)
+    detected = sniff(data)
+    if content_type != detected:
+        raise Invalid("content_type_mismatch", f"the file is {detected}, not {content_type}", detected=detected)
+    sha256 = hashlib.sha256(data).hexdigest()
+    counts = await conn.fetchrow(
+        "SELECT count(*) AS active, count(*) FILTER (WHERE sha256 = $3) AS same FROM booking.ops_files"
+        " WHERE entity_type = $1 AND entity_id = $2::uuid AND status = 'active'",
+        entity_type,
+        parent["id"],
+        sha256,
+    )
+    if counts["same"]:
+        raise Conflict("file_exists", f"this file is already on {parent['code']}")
+    if counts["active"] >= MAX_ACTIVE_PER_ENTITY:
+        raise Conflict("too_many_files", f"{parent['code']} has {MAX_ACTIVE_PER_ENTITY} files; remove one first")
+    file_id = str(uuid.uuid4())
+    key = object_key(kind, file_id, detected)
+    try:
+        await conn.execute(
+            "INSERT INTO booking.ops_files (id, kind, entity_type, entity_id, trip_case_id, s3_bucket, s3_key,"
+            " content_type, bytes, sha256, file_name, uploaded_by)"
+            " VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11, $12)",
+            file_id,
+            kind,
+            entity_type,
+            parent["id"],
+            parent["trip_case_id"],
+            store.bucket,
+            key,
+            detected,
+            len(data),
+            sha256,
+            name,
+            staff.cis_user_id,
+        )
+    except asyncpg.UniqueViolationError as exc:  # a concurrent upload of the same bytes
+        raise Conflict("file_exists", f"this file is already on {parent['code']}") from exc
+    await audit.record(
+        conn,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        action="ops_file.uploaded",
+        entity_type="supplier_booking",
+        entity_id=parent["id"],
+        after={"file_id": file_id, "kind": kind, "content_type": detected, "bytes": len(data), "sha256": sha256},
+        entity_label=f"{parent['case_code']} {parent['code']}",
+        summary=f"Added a {kind.replace('_', ' ')} ({detected}, {len(data)} bytes)",
+    )
+    try:
+        await store.put(key, data, detected, sha256)
+    except Exception as exc:  # noqa: BLE001 — any storage failure rolls the row back (the caller's transaction)
+        log.warning("ops_file_put_failed kind=%s error=%s", kind, type(exc).__name__)
+        raise Unavailable("ops_storage_unavailable", "the file could not be stored; try again") from exc
+    return file_out(await get_file(conn, file_id))
+
+
+async def download(conn: asyncpg.Connection, store: OpsStore | None, staff: Staff, file_id: str) -> dict[str, Any]:
+    """A 300 s presigned GET (attachment) of an active file, audited ``ops_file.downloaded``."""
+    row = await get_file(conn, file_id)
+    _require(staff, row["entity_type"], write=False)
+    if row["status"] != "active":
+        raise Conflict("file_removed", "this file was removed")
+    if store is None:
+        raise Unavailable("ops_storage_unavailable", "document storage is not configured for this environment")
+    try:
+        url = await store.download_url(row["s3_key"], row["file_name"], row["content_type"])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("ops_file_presign_failed error=%s", type(exc).__name__)
+        raise Unavailable("ops_storage_unavailable", "the download link could not be made; try again") from exc
+    await audit.record(
+        conn,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        action="ops_file.downloaded",
+        entity_type=row["entity_type"],
+        entity_id=row["entity_id"],
+        after={"file_id": row["id"], "kind": row["kind"]},
+        entity_label=f"file {row['id'][:8]}",
+        summary=f"Downloaded a {row['kind'].replace('_', ' ')}",
+    )
+    return {"url": url, "expires_in": PRESIGN_SECONDS}
+
+
+async def remove(conn: asyncpg.Connection, staff: Staff, file_id: str, reason: str) -> dict[str, Any]:
+    """Remove a file (final; the object stays until retention). A removed voucher leaves its booking."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise Invalid("reason_required", "say why the file is removed")
+    row = await get_file(conn, file_id, lock=True)
+    _require(staff, row["entity_type"], write=True)
+    if row["status"] == "removed":
+        return file_out(row)
+    parent = await _parent(conn, row["entity_type"], row["entity_id"], lock=True)
+    await conn.execute(
+        "UPDATE booking.ops_files SET status = 'removed', removed_reason = $2, removed_at = now(), removed_by = $3"
+        " WHERE id = $1::uuid",
+        row["id"],
+        reason[:500],
+        staff.cis_user_id,
+    )
+    if parent["voucher_file_id"] == row["id"]:
+        await conn.execute(
+            "UPDATE booking.supplier_bookings SET voucher_file_id = NULL, updated_by = $2 WHERE id = $1::uuid",
+            parent["id"],
+            staff.cis_user_id,
+        )
+    await audit.record(
+        conn,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        action="ops_file.removed",
+        entity_type=row["entity_type"],
+        entity_id=row["entity_id"],
+        before={"file_id": row["id"], "status": "active"},
+        after={"file_id": row["id"], "status": "removed", "reason": reason[:500]},
+        entity_label=f"{parent['case_code']} {parent['code']}",
+        summary=f"Removed a {row['kind'].replace('_', ' ')}",
+    )
+    return file_out(await get_file(conn, row["id"]))

@@ -155,6 +155,8 @@ def test_returning_user_without_changes_is_read_back_and_not_audited() -> None:
         "catalog.read",
         "customer.read",
         "customer.write",
+        "ops.read",
+        "ops.write",
         "pricing.read",
         "staff.directory",
         "supply.read",
