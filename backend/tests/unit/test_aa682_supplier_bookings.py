@@ -188,9 +188,9 @@ def test_download_is_an_attachment_with_a_safe_name() -> None:
 
 
 def test_ops_docs_bucket_setting() -> None:
-    assert Settings(database_url=None, ops_docs_bucket="aa-booking-dev-ops-docs-005097885195").ops_docs_bucket
+    assert Settings(database_url=None, ops_docs_bucket="aa-booking-dev-ops-docs-000000000000").ops_docs_bucket
     with pytest.raises(SettingsError, match="OPS_DOCS_BUCKET"):
-        Settings(database_url=None, ops_docs_bucket="aa-booking-dev-supply-media-005097885195")
+        Settings(database_url=None, ops_docs_bucket="aa-booking-dev-supply-media-000000000000")
     with pytest.raises(SettingsError, match="OPS_DOCS_REGION"):
         Settings(database_url=None, ops_docs_region="nowhere")
     assert ops_files.store_from_settings(Settings(database_url=None)) is None
