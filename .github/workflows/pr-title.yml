@@ -9,12 +9,16 @@ on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
     branches: [main]
+  # AA-889 (merge queue): the queue waits for the required "PR title" check on its temporary commit. A merge group
+  # has no title or body to read (the PR run above already judged them), so there the job only reports success.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   pull-requests: read
 
 concurrency:
-  group: pr-title-${{ github.event.pull_request.number }}
+  group: pr-title-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,7 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Merge group (title checked on the PR)
+        if: github.event_name == 'merge_group'
+        run: echo "The PR title and body were checked on the pull_request run; nothing to check on a merge group."
+
       - name: Conventional title
+        if: github.event_name == 'pull_request'
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -44,6 +53,7 @@ jobs:
             "Refs AA-..." in the PR body instead.
 
       - name: No Linear closing keywords in the body
+        if: github.event_name == 'pull_request'
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
