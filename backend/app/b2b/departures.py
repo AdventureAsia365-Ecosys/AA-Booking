@@ -173,12 +173,14 @@ def _departure_ids(asks: list[SeatAsk]) -> list[str]:
 
 
 async def availability(
-    conn: asyncpg.Connection, asks: list[SeatAsk], *, today: date
+    conn: asyncpg.Connection, asks: list[SeatAsk], *, today: date, exclude_hold: str | None = None
 ) -> list[tuple[str, str | None, str | None]]:
-    """Availability for a quote (no lock: a quote reserves nothing; the hold re-checks under the lock)."""
+    """Availability for a quote (no lock: a quote reserves nothing; the hold re-checks under the lock).
+    ``exclude_hold``: leave that hold's seats out (the quote's own proposal version's live hold, which the caller
+    releases before it holds the new quote)."""
     ids = _departure_ids(asks)
     rows = {r["id"]: r for r in await conn.fetch(BY_IDS_SQL, ids)} if ids else {}
-    return evaluate(asks, rows, await usage(conn, ids), today=today)
+    return evaluate(asks, rows, await usage(conn, ids, exclude_hold=exclude_hold), today=today)
 
 
 async def lock_departures(

@@ -16,7 +16,10 @@
 - **Availability** (AA-973, ``app.b2b.departures``): per line, ``available`` on a fixed departure with seats that
   auto-confirms, ``on_request`` without a departure or on one that does not auto-confirm, ``sold_out`` when the
   departure is full, cancelled or started. A quote reserves nothing; the hold re-checks under a lock. The line's
-  ``departure_id`` is stored and hashed (hash version 2).
+  ``departure_id`` is stored and hashed (hash version 2). The seats of the live ``active`` hold of the same
+  ``(partner, proposal_ref, proposal_version)`` are not counted (AA-950, :data:`OWN_HOLD_SQL`): one version has one
+  hold set, so a new quote for it replaces that hold (the caller releases it before ``POST /holds``, which counts
+  every hold under the departure lock); counting it would answer ``sold_out`` for seats the same client holds.
 - **Served tours only** (AA-986 L5, root ADR 0015): a ``tp:`` line whose tour is not served (retired, paused or not
   in ``catalog.v_tour``) is 409 ``tour_not_served`` before anything is priced (``app.b2b.served``).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
@@ -42,6 +45,14 @@ from app.pricing import engine, repository
 
 log = logging.getLogger(__name__)
 
+# AA-950: the live active hold set of the quote's own proposal version (at most one: the version's unique set).
+OWN_HOLD_SQL = """
+SELECT id::text FROM booking.b2b_holds
+WHERE partner_id = $1::uuid AND proposal_ref = $2 AND proposal_version = $3 AND status = 'active'
+  AND expires_at > now()
+ORDER BY created_at DESC
+LIMIT 1
+"""
 HASH_VERSION = "booking.b2b.v1/quote/2"  # /2 (AA-973): lines carry departure_id
 ROUNDING = "line_ceil_0.01"
 # AA-974 (ADR 0005a decision 3): VND is a B2B quote currency (not yet a B2C selling currency, so the engine's
@@ -218,6 +229,7 @@ async def create_quote(
         # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
         await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
         costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
+        own_hold = await conn.fetchval(OWN_HOLD_SQL, partner_id, proposal_ref, proposal_version)
         seats = await departures.availability(
             conn,
             [
@@ -231,6 +243,7 @@ async def create_quote(
                 for line in lines
             ],
             today=on,
+            exclude_hold=own_hold,
         )
         currencies = {currency, *(cur for lc in costs for _, cur in lc.costs)}
         rule, rates = await _pricing_data(conn, currencies, on)

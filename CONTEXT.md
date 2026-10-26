@@ -380,6 +380,9 @@ send, OTP) is not built: those still write rows only.
   Holds lock the departure rows (`FOR UPDATE`, id order) before counting, so two holds on the last seat run one after
   the other and exactly one wins. Line availability (quotes and holds): no departure = `on_request`; a departure with
   room that auto-confirms = `available`, that does not = `on_request`; full, cancelled or started = `sold_out`. A
+  quote leaves out the seats of the live `active` hold of its own `(partner, proposal_ref, proposal_version)` (AA-950:
+  the set a new quote of that version replaces, released by the caller before `POST /holds`; the hold still counts
+  every hold under the lock), so a client is never told the seats they hold are sold out. A
   `departure_id` only belongs to the `tp:` line of its own plan on its `start_date` (else 422 `invalid`). Products
   report `has_fixed_departures`.
 - **Holds (AA-973)**: `POST /holds` (scope `hold`, `Idempotency-Key` required) holds the lines of one quote for one
