@@ -7,7 +7,8 @@
 - Linear R: capacity 0 → ``sold_out``; confirm after expiry → refused (contract: 410 ``hold_expired``);
 - Linear E: two concurrent holds on the last seat → exactly one wins; a confirm that began before expiry and waited
   while another hold took the freed seat is refused (no oversell);
-- the expiry job writes expired holds and frees nothing twice.
+- the expiry job writes expired holds and frees nothing twice;
+- AA-950: a quote leaves out the live hold of its own proposal version (the set it replaces), never anyone else's.
 
 Dates are relative to today (lessons.md S245: no hard-coded future dates): departures start in 30 / 37 days.
 """
@@ -507,6 +508,54 @@ async def test_capacity_zero_release_and_expiry(
     assert await expiry.expire_due(pool) == 0
     later = expiry.ExpirySchedule(now=lambda: minute + timedelta(minutes=5))
     assert await later(pool) is None  # nothing due: no job row
+
+
+async def test_a_quote_leaves_out_the_live_hold_of_its_own_proposal_version(
+    client: tuple[httpx.AsyncClient, LocalCis, LocalM2M, Database], admin: asyncpg.Connection, plan: dict[str, str]
+) -> None:
+    """AA-950: a proposal version has one hold set, and a new quote for that version replaces it (the CRM releases the
+    old set before it holds the new quote). The quote leaves the version's own live hold out of the seat count, so a
+    client who holds a departure's last seats and changes another pick is not told those seats are sold out. Any
+    other proposal (or version) still sees the departure full, and the hold itself still counts every hold."""
+    c, cis, m2m, _ = client
+    dep = await _departure(c, cis, DAY1, 2)
+    line = [_plan_line("tour", plan["plan"], dep["id"])]
+    first = await _ok(await _quote(c, m2m, "OWN-1", line), 201)
+    assert first["lines"][0]["availability"] == "available"
+    hold = await _ok(
+        await c.post("/b2b/v1/holds", json=_hold_body(first, "OWN-1"), headers=_m2m(m2m, "own-key-1")), 201
+    )
+    assert (await _seats(c, m2m))[DAY1] == (2, 0, 0)  # the departure is full
+
+    # The same version quoted again (the client changed another pick): its own seats are not counted.
+    again = await _ok(await _quote(c, m2m, "OWN-1", line), 201)
+    assert again["lines"][0]["availability"] == "available"
+    # Another proposal, and another version of the same proposal, still find it full.
+    other = await _ok(await _quote(c, m2m, "OWN-2", line), 201)
+    assert other["lines"][0]["availability"] == "sold_out"
+    v2 = await _ok(await _quote(c, m2m, "OWN-1", line, version=2), 201)
+    assert v2["lines"][0]["availability"] == "sold_out"
+
+    # The hold counts every hold: the new quote is refused while the old set stands, then placed once it is released.
+    _problem(
+        await c.post("/b2b/v1/holds", json=_hold_body(again, "OWN-1"), headers=_m2m(m2m, "own-key-2")), 422, "invalid"
+    )
+    assert (await c.delete(f"/b2b/v1/holds/{hold['hold_id']}", headers=_m2m(m2m))).status_code == 204
+    rehold = await _ok(
+        await c.post("/b2b/v1/holds", json=_hold_body(again, "OWN-1"), headers=_m2m(m2m, "own-key-3")), 201
+    )
+    assert rehold["status"] == "active" and rehold["hold_id"] != hold["hold_id"]
+    assert (await _seats(c, m2m))[DAY1] == (2, 0, 0)
+    _problem(
+        await c.post("/b2b/v1/holds", json=_hold_body(other, "OWN-2"), headers=_m2m(m2m, "own-key-4")), 422, "sold_out"
+    )
+    # An expired hold of the version is no longer its own live set: it frees its seats for everyone anyway.
+    await admin.execute(
+        "UPDATE booking.b2b_holds SET created_at = now() - interval '3 days', expires_at = now() - interval '1 minute'"
+        " WHERE id = $1::uuid",
+        rehold["hold_id"],
+    )
+    assert (await _ok(await _quote(c, m2m, "OWN-2", line), 201))["lines"][0]["availability"] == "available"
 
 
 async def test_two_concurrent_holds_on_the_last_seat(
