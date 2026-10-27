@@ -46,7 +46,7 @@ export function useGeoStatus() {
       danger={!target?.activate}
       title={target?.activate ? `Activate ${noun}` : `Deactivate ${noun}`}
       confirmLabel={target?.activate ? `Activate ${noun}` : `Deactivate ${noun}`}
-      reason={target?.activate ? undefined : { label: "Reason (optional)", placeholder: "e.g. no guides this season" }}
+      reason={target?.activate ? undefined : { label: "Reason (optional)", placeholder: "e.g. no guides this season", maxLength: 500 }}
       message={
         target?.activate ? (
           <>

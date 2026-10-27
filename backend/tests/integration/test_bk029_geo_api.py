@@ -154,6 +154,24 @@ async def test_countries_list_detail_and_update(
     await c.patch("/catalog/geo/countries/JP", json={"area": "North Asia"}, headers=boss)
     codes = [i["country_code"] for i in (await c.get("/catalog/geo/countries", headers=content)).json()["items"]]
     assert "JP" in codes
+    # "Add country" with the drawer defaults (nothing to change) still lists the country.
+    added = await c.patch("/catalog/geo/countries/TH", json={"status": "active"}, headers=boss)
+    assert added.status_code == 200, added.text
+    assert added.json()["changed"] == [] and added.json()["status"] == "active"
+    codes = [i["country_code"] for i in (await c.get("/catalog/geo/countries", headers=content)).json()["items"]]
+    assert "TH" in codes
+    assert (
+        await admin.fetchval(
+            "SELECT action FROM booking.audit_logs WHERE entity_type = 'country_profile' AND entity_label LIKE '%(TH)'"
+        )
+        == "country.added"
+    )
+    again = await c.patch("/catalog/geo/countries/TH", json={}, headers=boss)
+    assert again.json()["changed"] == []
+    assert await admin.fetchval("SELECT count(*) FROM booking.audit_logs WHERE entity_label LIKE '%(TH)'") == 1
+    # The ISO code matches only a two-letter query: "Laos" finds Laos, not a country whose code starts "LA".
+    found = (await c.get("/catalog/geo/countries", params={"q": "la"}, headers=content)).json()["items"]
+    assert "LA" in [i["country_code"] for i in found]
     row = await admin.fetchrow(
         "SELECT action, entity_label FROM booking.audit_logs WHERE entity_type = 'country_profile'"
         " ORDER BY created_at LIMIT 1"

@@ -121,7 +121,7 @@ export function CountriesView() {
           </ul>
         )}
       </Section>
-      {(adding || editing) && (
+      {canWrite && (adding || editing) && (
         <CountryDrawer
           key={editing || "new"}
           iso={adding ? null : editing}

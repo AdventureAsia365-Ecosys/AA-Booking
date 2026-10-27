@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { SERVICE_TYPES, supplyApi, type ServiceBody, type ServiceDetail, type ServiceType, type ServiceUnit } from "@/lib/api/supply";
-import { FormDrawer, useToast } from "@/ui";
+import { FormDrawer, useStaff, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { CATEGORY_FOR, SERVICE_TYPE_LABEL, SERVICE_UNIT_OPTIONS, SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -21,6 +21,7 @@ import { DestinationPicker, type PickedPlace } from "@/app/(staff)/suppliers/_pa
 import { CisField, CisFieldset } from "@/app/(staff)/_parts/CisFields";
 import { cisEditUrl } from "@/app/(staff)/_parts/SupplyContent";
 import { CIS_ADMIN_URL } from "@/lib/config";
+import { CIS_EDITOR_ROLES } from "@/app/(staff)/catalog/trip-plans/_parts/shared";
 
 const DEFAULT_UNIT: Record<ServiceType, ServiceUnit> = {
   activity: "person",
@@ -218,6 +219,7 @@ const CONTENT_STATUS_LABEL: Record<string, string> = {
 
 /** The customer text of the service, read-only (CIS supply content, AA-835 S4). */
 function ServiceCisContent({ service }: { service?: ServiceDetail }) {
+  const me = useStaff();
   if (!service) {
     return (
       <CisFieldset
@@ -231,8 +233,14 @@ function ServiceCisContent({ service }: { service?: ServiceDetail }) {
     return <CisFieldset title="Customer text" description="CIS content is not readable right now; it is edited in CIS." />;
   }
   const href = cisEditUrl(content.edit_url);
+  // "Edit in CIS" only for the roles that edit content in CIS (admin, content creator), as in every other CIS block.
+  const editor = CIS_EDITOR_ROLES.has(me.role);
   return (
-    <CisFieldset title="Customer text" editPath={href ? href.slice(CIS_ADMIN_URL.length) : null}>
+    <CisFieldset
+      title="Customer text"
+      editPath={editor && href ? href.slice(CIS_ADMIN_URL.length) : null}
+      description={editor ? undefined : "Ask the content team to change it in CIS."}
+    >
       <CisField label="Status">{CONTENT_STATUS_LABEL[content.content_status] ?? content.content_status}</CisField>
       <CisField label="Highlights">{content.highlights.length ? content.highlights.join(" · ") : null}</CisField>
       <CisField label="Description" multiline wide>

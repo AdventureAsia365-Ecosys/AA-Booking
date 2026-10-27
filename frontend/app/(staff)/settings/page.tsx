@@ -9,7 +9,9 @@
 //   Sign-in & security (AA-996; replaces Figma SETTINGS-2 "change password" and RESET PASSWORD) — how this person
 //                   signs in (company e-mail code through the Cognito staff sign-in; Booking holds no password, O1),
 //                   the facts of the current session from GET /api/auth/session (signed in at, session end), last
-//                   seen in Booking, and "Manage staff & invites in CIS ↗" (CIS → Platform → Staff).
+//                   seen in Booking, and "Manage staff & invites in CIS ↗" (CIS → Platform → Staff; admins only,
+//                   staff.admin: other roles cannot open that CIS page). No MFA claim beyond the facts: staff sign in
+//                   with the e-mail code only (WORKFORCE MFA is break-glass only, ADR 0006).
 //   Notifications — per-type bell toggles, GET/PUT /booking/staff/me/preferences (Figma's duplicate list tab
 //                   becomes preferences, shell C-9).
 
@@ -31,6 +33,7 @@ import {
   SkeletonBar,
   DateText,
   staffDisplay,
+  useCan,
   useStaff,
   useThemeChoice,
   useToast,
@@ -180,6 +183,8 @@ function epoch(value: number | null): Date | null {
 
 function SecurityTab() {
   const staff = useStaff();
+  // CIS → Platform → Staff is for admins; other roles would land on a CIS access-denied page.
+  const canManageStaff = useCan("staff.admin");
   const router = useRouter();
   const facts = useQuery({ queryKey: ["auth", "session"], queryFn: fetchSessionFacts, staleTime: 60_000, retry: 1 });
   const f = facts.data;
@@ -202,9 +207,9 @@ function SecurityTab() {
           </ReadOnlyField>
           <ReadOnlyField
             label="Extra verification (MFA)"
-            help="Set by the staff sign-in (managed in CIS). Booking never sees a password, a code or an MFA secret."
+            help="Staff sign in with a single code sent to the company mailbox; there is no app-based second factor. Booking never sees the code."
           >
-            Managed by the company sign-in
+            None: the one-time e-mail code is the sign-in factor
           </ReadOnlyField>
         </div>
       </Block>
@@ -244,13 +249,20 @@ function SecurityTab() {
       <Block
         title="Staff accounts and invites"
         description="Accounts, invitations, Booking roles and lost access are handled in CIS → Platform → Staff, by an owner or admin."
-        actions={<ManagedInCisLink path={CIS_STAFF_PATH} label="Manage staff & invites in CIS" />}
+        actions={canManageStaff ? <ManagedInCisLink path={CIS_STAFF_PATH} label="Manage staff & invites in CIS" /> : undefined}
       >
-        <p className="text-[13px] text-body">
-          To invite a colleague, give someone a Booking role or take access away, open CIS → Platform → Staff. The person
-          appears on Booking&apos;s Staff page after their first sign-in here. Lost access to your mailbox? Ask an admin to
-          check your account in CIS.
-        </p>
+        {canManageStaff ? (
+          <p className="text-[13px] text-body">
+            To invite a colleague, give someone a Booking role or take access away, open CIS → Platform → Staff. The person
+            appears on Booking&apos;s Staff page after their first sign-in here. Lost access to your mailbox? Ask an admin to
+            check your account in CIS.
+          </p>
+        ) : (
+          <p className="text-[13px] text-body">
+            Ask a Booking admin to invite a colleague, change a Booking role or restore access. The person appears on
+            Booking&apos;s Staff page after their first sign-in here.
+          </p>
+        )}
       </Block>
     </div>
   );

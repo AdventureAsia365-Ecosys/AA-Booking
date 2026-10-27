@@ -306,7 +306,8 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
     onSuccess: (out) => {
       qc.setQueryData(["geo", "country", picked], out);
       qc.invalidateQueries({ queryKey: ["geo"] });
-      toast.success(out.changed?.length ? `${out.name} saved.` : "Nothing changed");
+      // Add mode: the API stores the country even when the defaults are kept (it then becomes listed).
+      toast.success(!iso ? `${out.name} added.` : out.changed?.length ? `${out.name} saved.` : "Nothing changed");
       onClose();
     },
   });

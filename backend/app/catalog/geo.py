@@ -167,6 +167,7 @@ async def update_destination(
 ) -> dict[str, Any]:
     """PATCH semantics on the Booking state of one CIS place (``status``, ``status_reason``, ``internal_notes``).
     Activating clears the reason. One audit row when something changed."""
+    await _lock(conn, "booking.destination_profiles", destination_id)
     place = await get_destination(conn, destination_id)  # 404 for an id that is not a catalog place
     before = {k: place[k] for k in ("status", "status_reason", "internal_notes")}
     after = _apply(before, patch)
@@ -246,8 +247,12 @@ async def list_countries(
     args: list[Any] = []
     if q and q.strip():
         args.append(paging.contains(q))
-        where.append(f"(c.name ILIKE ${len(args)} OR c.iso2 = upper(btrim(${len(args) + 1})))")
-        args.append(q.strip()[:2])
+        term = q.strip()
+        if len(term) == 2:  # "VN" or "vn" is also an ISO code; a longer word ("Myanmar") is a name only
+            args.append(term.upper())
+            where.append(f"(c.name ILIKE ${len(args) - 1} OR c.iso2 = ${len(args)})")
+        else:
+            where.append(f"c.name ILIKE ${len(args)}")
     wanted = _status(status)
     if wanted:
         args.append(wanted)
@@ -316,14 +321,20 @@ async def get_country(conn: asyncpg.Connection, iso: str) -> dict[str, Any]:
 
 
 async def update_country(conn: asyncpg.Connection, staff: Staff, iso: str, patch: dict[str, Any]) -> dict[str, Any]:
-    """PATCH semantics on a country's Booking state (``status``, ``status_reason``, ``area``, ``internal_notes``)."""
+    """PATCH semantics on a country's Booking state (``status``, ``status_reason``, ``area``, ``internal_notes``).
+
+    "Add country": a country that is not listed yet (no CIS place, no CIS tour, no Booking state) gets its profile row
+    even when the body keeps every default, so it becomes listed; that write is audited as ``country.added``."""
     iso = iso.strip().upper()
+    await _lock(conn, "booking.country_profiles", iso)
     country = await _country_row(conn, iso)
     keys = ("status", "status_reason", "area", "internal_notes")
     before = {k: country[k] for k in keys}
     after = _apply(before, patch)
     changed = sorted(k for k in after if after[k] != before[k])
-    if not changed:
+    # profile_updated_at is NOT NULL on a stored row, so None = no Booking state yet.
+    added = country["profile_updated_at"] is None and not country["destinations"] and not country["tours"]
+    if not changed and not added:
         return {**await get_country(conn, iso), "changed": []}
     profile_id = await conn.fetchval(
         """
@@ -345,18 +356,27 @@ async def update_country(conn: asyncpg.Connection, staff: Staff, iso: str, patch
         conn,
         actor_type="staff",
         actor_ref=staff.cis_user_id,
-        action=_action("country", before, after),
+        action="country.added" if added else _action("country", before, after),
         entity_type="country_profile",
         entity_id=profile_id,
-        before={k: before[k] for k in changed},
-        after={k: after[k] for k in changed},
+        before=None if added else {k: before[k] for k in changed},
+        after=after if added else {k: after[k] for k in changed},
         entity_label=f"{country['name']} ({iso})",
-        summary=_summary(country["name"], before, after, changed),
+        summary=f"{country['name']} added to the Booking country list"
+        if added
+        else _summary(country["name"], before, after, changed),
     )
     return {**await get_country(conn, iso), "changed": changed}
 
 
 # ── Shared ──────────────────────────────────────────────────────────────────
+
+
+async def _lock(conn: asyncpg.Connection, table: str, key: str) -> None:
+    """Serialize read-merge-write of one profile row until the caller's transaction ends (the routes run inside
+    ``conn.transaction()``). An advisory lock, not ``SELECT … FOR UPDATE``, because the first write of a key has no row
+    to lock yet. Two-key form: (hash of the table, hash of the key), apart from the one-key outbox lock."""
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", table, key)
 
 
 def _text(value: Any) -> str | None:

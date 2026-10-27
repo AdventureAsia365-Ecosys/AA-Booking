@@ -66,7 +66,7 @@ export default function StaffPage() {
               <Pencil size={15} />
             </IconAction>
             <a
-              href={CIS_STAFF_URL}
+              href={`${CIS_STAFF_URL}/${encodeURIComponent(s.cis_user_id)}`}
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`Sign-in & invites in CIS for ${s.name ?? s.email ?? s.cis_user_id}`}

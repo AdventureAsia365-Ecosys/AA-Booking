@@ -32,8 +32,9 @@ export function ConfirmDialog({
   message: React.ReactNode;
   confirmLabel?: string;
   danger?: boolean;
-  /** Ask for a reason; `required` blocks the confirm button until one is typed. */
-  reason?: { label: string; required?: boolean; placeholder?: string };
+  /** Ask for a reason; `required` blocks the confirm button until one is typed; `maxLength` (default 2000) matches
+   * the API limit of the field the reason is sent to. */
+  reason?: { label: string; required?: boolean; placeholder?: string; maxLength?: number };
   busy?: boolean;
   error?: string | null;
 }) {
@@ -74,7 +75,7 @@ function ConfirmBody({
   message: React.ReactNode;
   confirmLabel: string;
   danger: boolean;
-  reason?: { label: string; required?: boolean; placeholder?: string };
+  reason?: { label: string; required?: boolean; placeholder?: string; maxLength?: number };
   busy: boolean;
   error?: string | null;
 }) {
@@ -106,7 +107,7 @@ function ConfirmBody({
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 rows={3}
-                maxLength={2000}
+                maxLength={reason.maxLength ?? 2000}
                 placeholder={reason.placeholder}
                 className="rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border"
               />

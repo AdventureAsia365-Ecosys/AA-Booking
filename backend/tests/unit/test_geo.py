@@ -146,6 +146,7 @@ async def test_update_destination_upserts_and_audits_only_changes() -> None:
     out = await geo.update_destination(conn, ADMIN, PLACE, {"status": "inactive", "status_reason": "flooded"})
     assert out["changed"] == ["status", "status_reason"]
     assert conn.sql("INSERT INTO booking.destination_profiles") == [(PLACE, "inactive", "flooded", None, "a-1")]
+    assert conn.sql("pg_advisory_xact_lock") == [("booking.destination_profiles", PLACE)]
     audit = conn.sql("INSERT INTO booking.audit_logs")
     assert len(audit) == 1 and audit[0][3] == "destination.deactivated" and audit[0][4] == "destination_profile"
 
@@ -160,7 +161,21 @@ async def test_list_countries_args_and_areas() -> None:
     out = await geo.list_countries(conn, q="viet", status="inactive", area="Indochina")
     assert out["total"] == 2 and out["areas"] == ["Indochina"] and out["unmapped"][0]["name"] == "Nowhere"
     _, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
-    assert args == ("%viet%", "vi", "inactive", "Indochina")
+    assert args == ("%viet%", "inactive", "Indochina")
+    sql, _ = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
+    assert "c.iso2 =" not in sql
+
+
+@pytest.mark.asyncio
+async def test_list_countries_matches_the_iso_code_only_for_a_two_letter_query() -> None:
+    conn = ScriptedConn()
+    await geo.list_countries(conn, q="Myanmar")  # must not also match MY (Malaysia)
+    sql, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
+    assert args == ("%Myanmar%",) and "c.iso2 =" not in sql
+    conn = ScriptedConn()
+    await geo.list_countries(conn, q=" vn ")
+    sql, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
+    assert args == ("%vn%", "VN") and "c.iso2 = $2" in sql
 
 
 @pytest.mark.asyncio
@@ -183,6 +198,40 @@ async def test_country_detail_and_update() -> None:
     assert conn.sql("INSERT INTO booking.country_profiles") == [("VN", "inactive", None, "Indochina", None, "a-1")]
     audit = conn.sql("INSERT INTO booking.audit_logs")
     assert audit[0][3] == "country.deactivated" and audit[0][8] == "Vietnam (VN)"
+    assert conn.sql("pg_advisory_xact_lock") == [("booking.country_profiles", "VN")]
+
+
+def country_conn(row: dict[str, Any]) -> ScriptedConn:
+    """A conn answering the country row; its place and tour lists are empty."""
+    return (
+        ScriptedConn()
+        .on("WHERE c.iso2 = $1", row)
+        .on("ORDER BY lower(d.name)", [])
+        .on("FROM catalog.v_tour t LEFT JOIN booking.trip_plans", [])
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_country_with_defaults_adds_an_unlisted_country_once() -> None:
+    unlisted = country_row(country_code="JP", name="Japan", destinations=0, photos=0, tours=0, active_suppliers=0)
+    conn = country_conn(unlisted).on("INSERT INTO booking.country_profiles", "c0000000-0000-4000-8000-000000000002")
+    out = await geo.update_country(conn, ADMIN, "jp", {"status": "active"})
+    assert out["changed"] == []
+    assert conn.sql("INSERT INTO booking.country_profiles") == [("JP", "active", None, None, None, "a-1")]
+    audit = conn.sql("INSERT INTO booking.audit_logs")
+    assert len(audit) == 1 and audit[0][3] == "country.added" and audit[0][6] is None
+    assert audit[0][9] == "Japan added to the Booking country list"
+
+    # Already has Booking state: a no-op body writes nothing.
+    stored = {**unlisted, "profile_updated_at": "2026-10-27T00:00:00Z"}
+    conn = country_conn(stored)
+    assert (await geo.update_country(conn, ADMIN, "JP", {}))["changed"] == []
+    assert conn.sql("INSERT INTO booking.country_profiles") == [] and conn.sql("INSERT INTO booking.audit_logs") == []
+
+    # Listed through CIS places (no profile yet): a no-op body writes nothing either.
+    conn = country_conn(country_row())
+    assert (await geo.update_country(conn, ADMIN, "VN", {}))["changed"] == []
+    assert conn.sql("INSERT INTO booking.country_profiles") == []
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────

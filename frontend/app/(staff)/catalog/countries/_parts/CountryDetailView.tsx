@@ -56,8 +56,9 @@ export function CountryDetailView({ iso }: { iso: string }) {
   const c = q.data;
   const tabs = [
     { key: "overview", label: "Overview" },
-    { key: "destinations", label: "Destinations", count: c?.destination_items.length },
-    { key: "tours", label: "Tours", count: c?.tour_items.length },
+    // The true counts (the item lists below are capped by the API: first 200 places, first 50 tours).
+    { key: "destinations", label: "Destinations", count: c?.destinations },
+    { key: "tours", label: "Tours", count: c?.tours },
   ];
   const [tab, setTab] = useDetailTab(tabs);
   const place = get("place");
@@ -144,6 +145,12 @@ export function CountryDetailView({ iso }: { iso: string }) {
         )}
         {tab === "destinations" && (
           <Section padded={false} className="p-4" title="Destinations" actions={<FromCisTag />}>
+            <FirstOf
+              shown={c.destination_items.length}
+              total={c.destinations}
+              href={`/catalog/destinations?country=${encodeURIComponent(c.country_code)}`}
+              what="destinations"
+            />
             <DataTable<DestinationItem>
               tableId="country-destinations"
               data={c.destination_items}
@@ -159,6 +166,12 @@ export function CountryDetailView({ iso }: { iso: string }) {
         )}
         {tab === "tours" && (
           <Section padded={false} className="p-4" title="Tours" actions={<FromCisTag />}>
+            <FirstOf
+              shown={c.tour_items.length}
+              total={c.tours}
+              href={`/catalog/trip-plans?country=${encodeURIComponent(c.name)}`}
+              what="trip plans"
+            />
             <DataTable<CountryTour>
               tableId="country-tours"
               data={c.tour_items}
@@ -171,9 +184,23 @@ export function CountryDetailView({ iso }: { iso: string }) {
           </Section>
         )}
       </div>
-      {get("edit") === "1" && <CountryDrawer iso={c.country_code} onClose={() => setMany({ edit: null })} />}
+      {canWrite && get("edit") === "1" && <CountryDrawer iso={c.country_code} onClose={() => setMany({ edit: null })} />}
       {place && <DestinationDrawer key={place} id={place} onClose={() => setMany({ place: null })} />}
       {status.dialogs}
     </main>
+  );
+}
+
+/** The API returns the first N items of a country's places / tours; when there are more, say so and link to the
+ * full list (server-paged and filtered by this country). */
+function FirstOf({ shown, total, href, what }: { shown: number; total: number; href: string; what: string }) {
+  if (shown >= total) return null;
+  return (
+    <p className="mb-3 text-[13px] text-muted" data-testid="country-first-of">
+      Showing the first {shown} of {total}.{" "}
+      <Link href={href} className="font-medium text-accent-deep hover:underline">
+        See all {total} {what} →
+      </Link>
+    </p>
   );
 }
