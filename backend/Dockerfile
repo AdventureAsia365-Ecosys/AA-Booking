@@ -29,4 +29,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Keep-alive must outlive the ALB idle timeout (100 s, AA-CIS-Infra modules/alb); with uvicorn's
 # 5 s default the ALB reuses a closed connection and answers 502 (CIS lesson S231, AA-741).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "105"]
+# AA-993 G4: on SIGTERM wait at most 5 s for open keep-alive connections, then run the lifespan shutdown at once
+# (the job worker releases its running job back to the queue there), well inside the ECS stopTimeout.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "105", "--timeout-graceful-shutdown", "5"]
