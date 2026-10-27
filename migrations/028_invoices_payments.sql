@@ -26,20 +26,28 @@
 --     row under READ COMMITTED), then recomputes the total from the lines and the state from the payments.
 --   * booking.invoice_items: one version_total line (the approved version's total, locked) + adjustment lines with a
 --     reason. While draft: adjustments are inserted, edited, deleted. After send: lines are only APPENDED as
---     adjustments (the amendment rule, critic B5: a trip that changes after the deposit is amended, not cancelled and
---     reissued); the total and the state follow.
+--     adjustments, and only inside an amendment (the amendment rule, critic B5: a trip that changes after the deposit
+--     is amended, not cancelled and reissued); the total and the state follow.
 --   * booking.payment_schedule: rows (seq 1-10, kind deposit / second / final / other, amount, due date). Free while
---     draft; after send a row already covered by verified payments (the waterfall, oldest due first) is frozen, the
---     others may change and new rows are added after the covered ones. Sum of the rows = the total for a sent invoice:
---     checked at send (invoices_guard) and at commit (deferred constraint triggers *_sums_check), so an amendment
---     may change lines and rows in one transaction.
+--     draft; after send it changes only inside an amendment, a row already covered by verified payments (the
+--     waterfall, oldest due first) is frozen, the others may change and new rows are added after the covered ones.
+--   * The amendment window (invoices.amending, review S253 for the Infra X1 lint): an amendment changes lines and
+--     schedule rows in one transaction, so the sum check cannot run per row. The writer sets amending = true on a
+--     sent / partially_paid / paid invoice, changes lines and rows, then sets amending = false in the same
+--     transaction. Sum of the schedule rows = the total (and at least one row) is checked IMMEDIATELY by
+--     invoices_guard whenever a sent / partially_paid / paid invoice row is written with amending = false: at send,
+--     when the window closes, and on every settle. No deferred constraint trigger and no SET CONSTRAINTS: work queued
+--     for COMMIT would run after the DB Migrate role switch's post-check (Infra run_migration.py DEFERRAL_RES, X1),
+--     so the lint refuses it. While amending, no payment is verified or voided and the invoice is not cancelled: a
+--     flag left true by a direct writer never moves money, and the window only closes with the sums right.
 --   * booking.payments (PMT-000123): receipts and refunds recorded by hand (no provider, design D6): kind, amount,
 --     method, received_on, reference (bank / receipt reference, never a card number), note, evidence file, optional
 --     received_amount / received_currency (what actually arrived, informational: critic note 4). recorded_by (maker)
 --     -> verified_by (checker, CHECK verified_by <> recorded_by); only verified, non-voided payments count; verify
 --     needs the evidence file unless the method is cash; a verified refund never takes the net paid below 0; void is
 --     final, with a reason, on a live invoice only (a cancelled invoice's payments are final), and voiding a verified
---     receipt never takes the net paid below 0 (void the refund first). Only an invoice that is sent /
+--     receipt never takes the net paid below 0 (void the refund first); no verify or void while the invoice is being
+--     amended. Only an invoice that is sent /
 --     partially_paid / paid takes a payment. Idempotency-Key unique per invoice + request_sha256. payments_settle
 --     (AFTER) settles the invoice.
 --   * booking.v_payment_schedule_status: per schedule row, the waterfall coverage of the verified payments (oldest
@@ -75,8 +83,7 @@
 -- trip_case_status_transitions / settings inserts take ROW EXCLUSIVE; the new tables are empty. lock_timeout 5s: the
 -- apply fails rather than queueing behind the job worker or a long check-board read.
 -- Re-runnable (the Integration Tests replay every file): IF NOT EXISTS everywhere, CREATE OR REPLACE for functions,
--- triggers and views (same column lists), DROP TRIGGER IF EXISTS before each CREATE CONSTRAINT TRIGGER (constraint
--- triggers take no OR REPLACE), ON CONFLICT DO NOTHING for seed rows, grants repeat.
+-- triggers and views (same column lists), ON CONFLICT DO NOTHING for seed rows, grants repeat.
 -- Undo (a later bk- file): DROP the two views, payments, payment_schedule, invoice_items, invoices, their functions,
 -- DELETE the bk-028 edges (case + invoice) and settings rows, restore the bk-026 / bk-027 bodies of
 -- trip_cases_post_sale_guard, ops_files_guard and v_trip_check_board (only while no case is in a money status).
@@ -147,6 +154,7 @@ CREATE TABLE IF NOT EXISTS booking.invoices (
     currency         CHARACTER(3) NOT NULL,
     total_amount     NUMERIC(16, 2) NOT NULL DEFAULT 0,
     status           TEXT NOT NULL DEFAULT 'draft',
+    amending         BOOLEAN NOT NULL DEFAULT false,
     issued_at        TIMESTAMPTZ,
     sent_by          TEXT REFERENCES booking.staff_users (cis_user_id),
     notes            TEXT,
@@ -169,6 +177,8 @@ CREATE TABLE IF NOT EXISTS booking.invoices (
     CONSTRAINT invoices_currency_chk CHECK (currency ~ '^[A-Z]{3}$'),
     CONSTRAINT invoices_status_chk CHECK (status IN ('draft', 'sent', 'partially_paid', 'paid', 'cancelled')),
     CONSTRAINT invoices_total_chk CHECK (total_amount >= 0 AND (status IN ('draft', 'cancelled') OR total_amount > 0)),
+    -- The amendment window opens only on a sent invoice; a draft or a cancelled invoice is never amending.
+    CONSTRAINT invoices_amending_chk CHECK (NOT amending OR status IN ('sent', 'partially_paid', 'paid')),
     -- Sent once = issued, with the bill-to snapshot; a draft is neither.
     CONSTRAINT invoices_sent_chk CHECK (
         (status = 'draft') = (issued_at IS NULL)
@@ -203,6 +213,8 @@ COMMENT ON COLUMN booking.invoices.cancel_reason IS
     'pii:free_text; why the invoice was cancelled (bk-028).';
 COMMENT ON COLUMN booking.invoices.total_amount IS
     'bk-028: always the sum of booking.invoice_items.amount (invoices_guard); changes after send only through appended adjustment lines.';
+COMMENT ON COLUMN booking.invoices.amending IS
+    'bk-028 (review S253): the amendment window. true only inside the transaction that amends a sent invoice (lines and schedule rows change only while it is true); set back to false in the same transaction, which checks that the schedule adds up to the total. No payment is verified or voided and no cancel while true.';
 COMMENT ON COLUMN booking.invoices.idempotency_key IS
     'bk-028 (critic B6): the Idempotency-Key of the create call, unique per trip case; with request_sha256 (hash of the canonical request body) a replay returns this invoice and another body is refused.';
 
@@ -256,7 +268,7 @@ CREATE TABLE IF NOT EXISTS booking.invoice_items (
 );
 
 COMMENT ON TABLE booking.invoice_items IS
-    'bk-028 (AA-682 S3, design D8 / Q24): the lines of an invoice: one version_total line (the approved version''s total, locked) and adjustment lines with a reason (unit_price may be negative). Draft: adjustments change freely; after send only appended (amendment rule, critic B5). The invoice total is their sum.';
+    'bk-028 (AA-682 S3, design D8 / Q24): the lines of an invoice: one version_total line (the approved version''s total, locked) and adjustment lines with a reason (unit_price may be negative). Draft: adjustments change freely; after send only appended, inside an amendment (invoices.amending; amendment rule, critic B5). The invoice total is their sum.';
 COMMENT ON COLUMN booking.invoice_items.description IS
     'pii:free_text; what the line is for, shown on the payment request (bk-028).';
 COMMENT ON COLUMN booking.invoice_items.reason IS
@@ -292,7 +304,7 @@ CREATE TABLE IF NOT EXISTS booking.payment_schedule (
 );
 
 COMMENT ON TABLE booking.payment_schedule IS
-    'bk-028 (AA-682 S3, design D9): when the customer pays what (deposit, second, final, other). Paid / due / overdue is derived (v_payment_schedule_status: waterfall of verified payments, oldest due first), never stored. Sum of the rows = the invoice total once sent (checked at send and at commit). After send a covered row is frozen.';
+    'bk-028 (AA-682 S3, design D9): when the customer pays what (deposit, second, final, other). Paid / due / overdue is derived (v_payment_schedule_status: waterfall of verified payments, oldest due first), never stored. Sum of the rows = the invoice total once sent (checked by invoices_guard at send and when an amendment closes). After send rows change only inside an amendment (invoices.amending) and a covered row is frozen.';
 
 CREATE UNIQUE INDEX IF NOT EXISTS payment_schedule_seq_uq ON booking.payment_schedule (invoice_id, seq);
 CREATE INDEX IF NOT EXISTS payment_schedule_due_idx ON booking.payment_schedule (due_date);
@@ -520,6 +532,16 @@ BEGIN
         RAISE EXCEPTION 'invoice %: the bill-to snapshot and issue date are fixed once sent', OLD.invoice_number
             USING ERRCODE = 'check_violation';
     END IF;
+    -- The amendment window (review S253) opens only on an invoice already sent (invoices_amending_chk keeps it off
+    -- drafts and cancelled invoices) and never in the same statement as the send or a cancel.
+    IF NEW.amending AND NOT OLD.amending AND OLD.status NOT IN ('sent', 'partially_paid', 'paid') THEN
+        RAISE EXCEPTION 'invoice %: only a sent invoice is amended (this one is %)', OLD.invoice_number, OLD.status
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.amending AND NEW.status = 'cancelled' THEN
+        RAISE EXCEPTION 'invoice %: it is being amended; finish the amendment before cancelling', OLD.invoice_number
+            USING ERRCODE = 'check_violation';
+    END IF;
     SELECT coalesce(sum(amount), 0) INTO v_lines FROM booking.invoice_items WHERE invoice_id = NEW.id;
     IF NEW.total_amount IS DISTINCT FROM v_lines THEN
         RAISE EXCEPTION 'invoice %: total_amount % is not the sum of its lines %', OLD.invoice_number,
@@ -537,6 +559,11 @@ BEGIN
                 RAISE EXCEPTION 'invoice %: the version total line is missing', OLD.invoice_number
                     USING ERRCODE = 'check_violation';
             END IF;
+        END IF;
+        -- Sum of the schedule = the total, checked now (never deferred to COMMIT: Infra X1 lint) whenever a sent
+        -- invoice is written outside the amendment window: at send, when the window closes (amending true -> false),
+        -- and on every settle. Inside the window the lines and rows are in flux; the close checks them.
+        IF NOT NEW.amending THEN
             SELECT count(*), coalesce(sum(amount), 0) INTO v_rows, v_sched
               FROM booking.payment_schedule WHERE invoice_id = NEW.id;
             IF v_rows = 0 OR v_sched <> NEW.total_amount THEN
@@ -564,7 +591,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.invoices_guard() IS
-    'bk-028 (AA-682 S3, design D5): an invoice starts as an empty draft of a B2C case, for the customer of the case, on its approved priced version, in its currency; number / case / version / customer / currency / key never change; deleted and cancelled are final; the bill-to snapshot is fixed once sent; total = sum of lines; send needs the version total line and a schedule adding up to the total; sent / partially_paid / paid must equal what the verified payments imply; cancel needs net verified paid 0 and no payment waiting for verification.';
+    'bk-028 (AA-682 S3, design D5): an invoice starts as an empty draft of a B2C case, for the customer of the case, on its approved priced version, in its currency; number / case / version / customer / currency / key never change; deleted and cancelled are final; the bill-to snapshot is fixed once sent; total = sum of lines; send needs the version total line; a sent / partially_paid / paid invoice written outside the amendment window (amending = false: at send, when the window closes, on every settle) has schedule rows adding up to its total, checked immediately (no deferred trigger, Infra X1 lint); the window opens only on a sent invoice and blocks a cancel; sent / partially_paid / paid must equal what the verified payments imply; cancel needs net verified paid 0 and no payment waiting for verification.';
 
 CREATE OR REPLACE TRIGGER invoices_guard
     BEFORE INSERT OR UPDATE ON booking.invoices
@@ -578,13 +605,14 @@ DECLARE
     v_invoice  UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.invoice_id ELSE NEW.invoice_id END;
     v_status   TEXT;
     v_deleted  TIMESTAMPTZ;
+    v_amending BOOLEAN;
     v_version  UUID;
     v_price    NUMERIC;
 BEGIN
     -- The invoice row lock comes first in the guard (review S253), the lock invoice_settle and payments_guard take:
     -- a line change and a verify on one invoice queue on the invoice row (no 40P01 from taking it late, in the AFTER
     -- settle), and the status read here cannot change before this line is written.
-    SELECT status, deleted_at, version_id INTO v_status, v_deleted, v_version
+    SELECT status, deleted_at, amending, version_id INTO v_status, v_deleted, v_amending, v_version
       FROM booking.invoices WHERE id = v_invoice FOR UPDATE;
     IF TG_OP = 'UPDATE' AND (NEW.invoice_id, NEW.kind, NEW.created_by, NEW.created_at)
                             IS DISTINCT FROM (OLD.invoice_id, OLD.kind, OLD.created_by, OLD.created_at) THEN
@@ -603,6 +631,10 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
     ELSIF v_status IN ('sent', 'partially_paid', 'paid') THEN
+        IF NOT v_amending THEN
+            RAISE EXCEPTION 'the invoice is %; its lines change only inside an amendment (set amending first)', v_status
+                USING ERRCODE = 'check_violation';
+        END IF;
         IF TG_OP <> 'INSERT' OR NEW.kind <> 'adjustment' THEN
             RAISE EXCEPTION 'once sent, invoice lines are only appended as adjustments (amendment)'
                 USING ERRCODE = 'check_violation';
@@ -618,7 +650,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.invoice_items_guard() IS
-    'bk-028 (AA-682 S3, critic B5): locks the invoice row first (FOR UPDATE, the order of invoice_settle); lines change freely while the invoice is a draft, except the version total line (inserted once with the version total, then locked); once sent, lines are only appended as adjustments; a cancelled or deleted invoice''s lines are fixed.';
+    'bk-028 (AA-682 S3, critic B5): locks the invoice row first (FOR UPDATE, the order of invoice_settle); lines change freely while the invoice is a draft, except the version total line (inserted once with the version total, then locked); once sent, lines are only appended as adjustments and only inside the amendment window (invoices.amending); a cancelled or deleted invoice''s lines are fixed.';
 
 CREATE OR REPLACE TRIGGER invoice_items_guard
     BEFORE INSERT OR UPDATE OR DELETE ON booking.invoice_items
@@ -649,6 +681,7 @@ DECLARE
     v_invoice  UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.invoice_id ELSE NEW.invoice_id END;
     v_status   TEXT;
     v_deleted  TIMESTAMPTZ;
+    v_amending BOOLEAN;
     v_net      NUMERIC;
     v_before   NUMERIC;
     v_last_due DATE;
@@ -656,7 +689,8 @@ DECLARE
 BEGIN
     -- The invoice row lock comes first (review S253): a verify locks it too (payments_guard), so the net paid read
     -- below cannot change under this check (no covered row slips through) and the order matches invoice_settle.
-    SELECT status, deleted_at INTO v_status, v_deleted FROM booking.invoices WHERE id = v_invoice FOR UPDATE;
+    SELECT status, deleted_at, amending INTO v_status, v_deleted, v_amending
+      FROM booking.invoices WHERE id = v_invoice FOR UPDATE;
     IF TG_OP = 'UPDATE' AND (NEW.invoice_id, NEW.created_by, NEW.created_at)
                             IS DISTINCT FROM (OLD.invoice_id, OLD.created_by, OLD.created_at) THEN
         RAISE EXCEPTION 'schedule row %: its invoice never changes', OLD.id USING ERRCODE = 'check_violation';
@@ -668,6 +702,10 @@ BEGIN
     END IF;
     IF v_status = 'draft' THEN
         RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    IF NOT v_amending THEN
+        RAISE EXCEPTION 'the invoice is %; its payment schedule changes only inside an amendment (set amending first)',
+            v_status USING ERRCODE = 'check_violation';
     END IF;
     v_net := booking.invoice_net_paid(v_invoice);
     IF v_net <= 0 THEN
@@ -701,61 +739,11 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.payment_schedule_guard() IS
-    'bk-028 (AA-682 S3, critic B5): locks the invoice row first (FOR UPDATE, so a concurrent verify cannot cover a row while it changes); the schedule changes freely while draft; once sent, a row the verified payments already cover (waterfall, oldest due first) is frozen and a changed or new row comes after the covered rows; a cancelled or deleted invoice''s schedule is fixed. Sum = total is checked at commit (*_sums_check).';
+    'bk-028 (AA-682 S3, critic B5): locks the invoice row first (FOR UPDATE, so a concurrent verify cannot cover a row while it changes); the schedule changes freely while draft; once sent, it changes only inside the amendment window (invoices.amending), a row the verified payments already cover (waterfall, oldest due first) is frozen and a changed or new row comes after the covered rows; a cancelled or deleted invoice''s schedule is fixed. Sum = total is checked by invoices_guard when the window closes.';
 
 CREATE OR REPLACE TRIGGER payment_schedule_guard
     BEFORE INSERT OR UPDATE OR DELETE ON booking.payment_schedule
     FOR EACH ROW EXECUTE FUNCTION booking.payment_schedule_guard();
-
--- Sum of the schedule = the total of a sent invoice, at commit (an amendment changes lines and rows in one go).
-CREATE OR REPLACE FUNCTION booking.invoice_sums_check() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path = pg_catalog
-AS $$
-DECLARE
-    v_invoice  UUID;
-    v_status   TEXT;
-    v_total    NUMERIC;
-    v_rows     INTEGER;
-    v_sched    NUMERIC;
-BEGIN
-    IF TG_TABLE_NAME = 'invoices' THEN
-        v_invoice := NEW.id;
-    ELSIF TG_OP = 'DELETE' THEN
-        v_invoice := OLD.invoice_id;
-    ELSE
-        v_invoice := NEW.invoice_id;
-    END IF;
-    SELECT status, total_amount INTO v_status, v_total FROM booking.invoices WHERE id = v_invoice;
-    IF v_status IN ('sent', 'partially_paid', 'paid') THEN
-        SELECT count(*), coalesce(sum(amount), 0) INTO v_rows, v_sched
-          FROM booking.payment_schedule WHERE invoice_id = v_invoice;
-        IF v_rows = 0 OR v_sched <> v_total THEN
-            RAISE EXCEPTION 'invoice %: the payment schedule adds up to % but the total is %', v_invoice, v_sched,
-                v_total USING ERRCODE = 'check_violation';
-        END IF;
-    END IF;
-    RETURN NULL;
-END $$;
-
-COMMENT ON FUNCTION booking.invoice_sums_check() IS
-    'bk-028 (AA-682 S3): deferred constraint trigger on invoices, invoice_items and payment_schedule: at commit, a sent invoice has schedule rows that add up to its total.';
-
-DROP TRIGGER IF EXISTS invoices_sums_check ON booking.invoices;
-CREATE CONSTRAINT TRIGGER invoices_sums_check
-    AFTER UPDATE ON booking.invoices
-    DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION booking.invoice_sums_check();
-DROP TRIGGER IF EXISTS invoice_items_sums_check ON booking.invoice_items;
-CREATE CONSTRAINT TRIGGER invoice_items_sums_check
-    AFTER INSERT OR UPDATE OR DELETE ON booking.invoice_items
-    DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION booking.invoice_sums_check();
-DROP TRIGGER IF EXISTS payment_schedule_sums_check ON booking.payment_schedule;
-CREATE CONSTRAINT TRIGGER payment_schedule_sums_check
-    AFTER INSERT OR UPDATE OR DELETE ON booking.payment_schedule
-    DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION booking.invoice_sums_check();
 
 CREATE OR REPLACE FUNCTION booking.payments_guard() RETURNS trigger
     LANGUAGE plpgsql
@@ -765,10 +753,11 @@ DECLARE
     v_status    TEXT;
     v_deleted   TIMESTAMPTZ;
     v_currency  TEXT;
+    v_amending  BOOLEAN;
     v_evidence  BOOLEAN := false;
 BEGIN
     -- Lock the invoice first (critic B4): a verify or a refund check never races another payment of the invoice.
-    SELECT status, deleted_at, currency INTO v_status, v_deleted, v_currency
+    SELECT status, deleted_at, currency, amending INTO v_status, v_deleted, v_currency, v_amending
       FROM booking.invoices WHERE id = NEW.invoice_id FOR UPDATE;
     IF TG_OP = 'INSERT' THEN
         IF v_status IS NULL OR v_deleted IS NOT NULL OR v_status NOT IN ('sent', 'partially_paid', 'paid') THEN
@@ -794,6 +783,13 @@ BEGIN
         END IF;
         IF OLD.voided_at IS NOT NULL THEN
             RAISE EXCEPTION 'payment % is voided; it is final', OLD.ref USING ERRCODE = 'check_violation';
+        END IF;
+        -- No money moves while the invoice is being amended (review S253): a verify or a void settles the invoice,
+        -- whose schedule may not add up inside the window; a window left open never moves money.
+        IF v_amending AND ((NEW.verified_at IS NOT NULL AND OLD.verified_at IS NULL)
+                           OR (NEW.voided_at IS NOT NULL AND OLD.voided_at IS NULL)) THEN
+            RAISE EXCEPTION 'payment %: its invoice is being amended; finish the amendment first', OLD.ref
+                USING ERRCODE = 'check_violation';
         END IF;
         IF OLD.verified_at IS NOT NULL
            AND (NEW.verified_at, NEW.verified_by, NEW.reference, NEW.note, NEW.evidence_file_id)
@@ -862,7 +858,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.payments_guard() IS
-    'bk-028 (AA-682 S3, design D6): a payment is recorded against a sent invoice, in its currency, unverified; its money facts never change; void is final; once verified only a void changes it; verify needs the evidence file unless cash (an active payment_evidence file of this payment, re-checked at verify and locked FOR SHARE against a concurrent removal), a live invoice, and a refund never takes the net paid below 0; a void needs a live invoice (a cancelled invoice''s payments are final) and voiding a verified receipt never takes the net paid below 0; the evidence is an active payment_evidence file of this payment.';
+    'bk-028 (AA-682 S3, design D6): a payment is recorded against a sent invoice, in its currency, unverified; its money facts never change; void is final; once verified only a void changes it; verify needs the evidence file unless cash (an active payment_evidence file of this payment, re-checked at verify and locked FOR SHARE against a concurrent removal), a live invoice, and a refund never takes the net paid below 0; a void needs a live invoice (a cancelled invoice''s payments are final) and voiding a verified receipt never takes the net paid below 0; no verify or void while the invoice is being amended (amending); the evidence is an active payment_evidence file of this payment.';
 
 CREATE OR REPLACE TRIGGER payments_guard
     BEFORE INSERT OR UPDATE ON booking.payments
@@ -1190,8 +1186,8 @@ ON CONFLICT (key) DO NOTHING;
 -- invoices: insert, then the working columns change; the money state only through the guard; never deleted.
 REVOKE ALL ON booking.invoices FROM booking;
 GRANT SELECT, INSERT ON booking.invoices TO booking;
-GRANT UPDATE (status, total_amount, issued_at, sent_by, bill_to_name, bill_to_email, bill_to_address, notes, terms,
-              cancelled_at, cancelled_by, cancel_reason, deleted_at, updated_by, updated_at)
+GRANT UPDATE (status, amending, total_amount, issued_at, sent_by, bill_to_name, bill_to_email, bill_to_address,
+              notes, terms, cancelled_at, cancelled_by, cancel_reason, deleted_at, updated_by, updated_at)
     ON booking.invoices TO booking;
 GRANT USAGE, SELECT ON SEQUENCE booking.invoice_number_seq TO booking;
 
@@ -1228,7 +1224,6 @@ GRANT EXECUTE ON FUNCTION booking.invoices_guard() TO booking;
 GRANT EXECUTE ON FUNCTION booking.invoice_items_guard() TO booking;
 GRANT EXECUTE ON FUNCTION booking.invoice_items_settle() TO booking;
 GRANT EXECUTE ON FUNCTION booking.payment_schedule_guard() TO booking;
-GRANT EXECUTE ON FUNCTION booking.invoice_sums_check() TO booking;
 GRANT EXECUTE ON FUNCTION booking.payments_guard() TO booking;
 GRANT EXECUTE ON FUNCTION booking.payments_settle() TO booking;
 GRANT EXECUTE ON FUNCTION booking.ops_files_guard() TO booking;
@@ -1262,7 +1257,7 @@ BEGIN
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-028', now(), 'AA-682 S3: invoices (proforma, one live per B2C case) + invoice_items + payment_schedule + payments (maker-checker, Idempotency-Key), money guard / settle / sums triggers, v_payment_schedule_status, v_invoice_balance, invoice + case money edges, trip_cases_post_sale_guard / ops_files_guard / v_trip_check_board replaced, settings deposit_due_days / balance_due_days_before_start / payment_due_soon_days / payment_overdue_reminder_days / invoice_issuer / payment_instructions (placeholders)')
+VALUES ('bk-028', now(), 'AA-682 S3: invoices (proforma, one live per B2C case) + invoice_items + payment_schedule + payments (maker-checker, Idempotency-Key), money guards / settle (schedule sums checked immediately, amendment window invoices.amending), v_payment_schedule_status, v_invoice_balance, invoice + case money edges, trip_cases_post_sale_guard / ops_files_guard / v_trip_check_board replaced, settings deposit_due_days / balance_due_days_before_start / payment_due_soon_days / payment_overdue_reminder_days / invoice_issuer / payment_instructions (placeholders)')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

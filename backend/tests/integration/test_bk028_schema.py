@@ -7,8 +7,9 @@ and the database rules the API stands on:
 - payments: recorded against a sent invoice only, maker-checker (verify by the recorder is refused by a CHECK),
   evidence required unless cash, one Idempotency-Key per invoice, void is final, a refund never takes the net paid
   below 0; the invoice settles (sent -> partially_paid -> paid, and back on a void);
-- the amendment rule: after send lines are only appended; the schedule must still add up at commit (deferred check);
-  a covered schedule row is frozen;
+- the amendment rule: after send, lines and schedule rows change only inside the amendment window
+  (``invoices.amending``, no deferred trigger: Infra X1 lint); lines are only appended; closing the window checks that
+  the schedule adds up to the total; a covered schedule row is frozen; no verify, void or cancel while amending;
 - the case money track: invoice_sent / payment_pending / paid must equal the invoice, never on a B2B case;
   pre_departure for B2C only once paid; reopen refused while an invoice is live;
 - two concurrent verifies on one invoice end ``paid`` (the settle locks the invoice row first, critic B4);
@@ -337,9 +338,18 @@ async def test_void_keeps_the_money_invariants(app_conn: asyncpg.Connection, sol
     assert await app_conn.fetchval(net, inv["id"]) == 0
 
 
+AMEND_ON = "UPDATE booking.invoices SET amending = true WHERE id = $1::uuid"
+AMEND_OFF = "UPDATE booking.invoices SET amending = false WHERE id = $1::uuid"
+EXTRA_LINE = (
+    "INSERT INTO booking.invoice_items (invoice_id, position, kind, description, unit_price, amount, reason)"
+    " VALUES ($1::uuid, $2, 'adjustment', 'Extra night', 100, 100, 'guest asked')"
+)
+
+
 async def test_lines_and_schedule_after_send(app_conn: asyncpg.Connection, sold: dict[str, Any]) -> None:
-    """Draft lines change freely (but the version total line); after send: append only, the schedule still adds up at
-    commit, covered rows are frozen, and an amendment can move a paid invoice back to partially_paid."""
+    """Draft lines change freely (but the version total line); after send: lines and rows change only inside the
+    amendment window, lines are append only, closing the window checks the sums, covered rows are frozen, and an
+    amendment can move a paid invoice back to partially_paid."""
     inv = await ops.draft_invoice(
         app_conn,
         sold,
@@ -372,30 +382,44 @@ async def test_lines_and_schedule_after_send(app_conn: asyncpg.Connection, sold:
         "UPDATE booking.payment_schedule SET amount = 1710 WHERE invoice_id = $1::uuid AND seq = 2", inv["id"]
     )
     await ops.send_invoice(app_conn, inv["id"], by=MAKER)
-    with pytest.raises(asyncpg.CheckViolationError, match="only appended as adjustments"):
+    # Outside the amendment window a sent invoice's lines and schedule rows do not change at all.
+    with pytest.raises(asyncpg.CheckViolationError, match="lines change only inside an amendment"):
+        await app_conn.execute(EXTRA_LINE, inv["id"], 3)
+    with pytest.raises(asyncpg.CheckViolationError, match="schedule changes only inside an amendment"):
         await app_conn.execute(
-            "DELETE FROM booking.invoice_items WHERE invoice_id = $1::uuid AND kind = 'version_total'", inv["id"]
+            "UPDATE booking.payment_schedule SET due_date = due_date + 1 WHERE invoice_id = $1::uuid AND seq = 2",
+            inv["id"],
         )
-    # An appended line without a schedule change fails at COMMIT (deferred check).
+    # Inside the window lines are still append only.
+    with pytest.raises(asyncpg.CheckViolationError, match="only appended as adjustments"):
+        async with app_conn.transaction():
+            await app_conn.execute(AMEND_ON, inv["id"])
+            await app_conn.execute(
+                "DELETE FROM booking.invoice_items WHERE invoice_id = $1::uuid AND kind = 'version_total'", inv["id"]
+            )
+    # Closing the window with an appended line and no schedule change fails right there (no deferred check).
     with pytest.raises(asyncpg.CheckViolationError, match="schedule adds up to 2400.00 but the total is 2500.00"):
         async with app_conn.transaction():
-            await app_conn.execute(
-                "INSERT INTO booking.invoice_items (invoice_id, position, kind, description, unit_price, amount,"
-                " reason) VALUES ($1::uuid, 3, 'adjustment', 'Extra night', 100, 100, 'guest asked')",
-                inv["id"],
-            )
+            await app_conn.execute(AMEND_ON, inv["id"])
+            await app_conn.execute(EXTRA_LINE, inv["id"], 3)
+            await app_conn.execute(AMEND_OFF, inv["id"])
+    assert await _invoice(app_conn, inv["id"]) == {"status": "sent", "total_amount": Decimal("2400.00")}
+    assert not await app_conn.fetchval("SELECT amending FROM booking.invoices WHERE id = $1::uuid", inv["id"])
     # Pay everything, then amend: the invoice drops back to partially_paid.
     for amount in ("690", "1710"):
         pid = await ops.record_payment(app_conn, inv["id"], amount, by=MAKER)
         await ops.verify_payment(app_conn, pid, by=CHECKER)
     assert (await _invoice(app_conn, inv["id"]))["status"] == "paid"
     with pytest.raises(asyncpg.CheckViolationError, match="covered by verified payments"):
-        await app_conn.execute(
-            "UPDATE booking.payment_schedule SET due_date = due_date + 1 WHERE invoice_id = $1::uuid AND seq = 2",
-            inv["id"],
-        )
+        async with app_conn.transaction():
+            await app_conn.execute(AMEND_ON, inv["id"])
+            await app_conn.execute(
+                "UPDATE booking.payment_schedule SET due_date = due_date + 1 WHERE invoice_id = $1::uuid AND seq = 2",
+                inv["id"],
+            )
     with pytest.raises(asyncpg.CheckViolationError, match="comes after the rows already paid"):
         async with app_conn.transaction():
+            await app_conn.execute(AMEND_ON, inv["id"])
             await app_conn.execute(
                 "INSERT INTO booking.payment_schedule (invoice_id, seq, kind, amount, due_date)"
                 " VALUES ($1::uuid, 3, 'other', 100, $2)",
@@ -403,18 +427,77 @@ async def test_lines_and_schedule_after_send(app_conn: asyncpg.Connection, sold:
                 date.today() - timedelta(days=1),
             )
     async with app_conn.transaction():
-        await app_conn.execute(
-            "INSERT INTO booking.invoice_items (invoice_id, position, kind, description, unit_price, amount, reason)"
-            " VALUES ($1::uuid, 3, 'adjustment', 'Extra night', 100, 100, 'guest asked')",
-            inv["id"],
-        )
+        await app_conn.execute(AMEND_ON, inv["id"])
+        await app_conn.execute(EXTRA_LINE, inv["id"], 3)
         await app_conn.execute(
             "INSERT INTO booking.payment_schedule (invoice_id, seq, kind, amount, due_date)"
             " VALUES ($1::uuid, 3, 'other', 100, $2)",
             inv["id"],
             ops.START,
         )
+        await app_conn.execute(AMEND_OFF, inv["id"])
     assert await _invoice(app_conn, inv["id"]) == {"status": "partially_paid", "total_amount": Decimal("2500.00")}
+    assert not await app_conn.fetchval("SELECT amending FROM booking.invoices WHERE id = $1::uuid", inv["id"])
+
+
+async def test_amendment_window(app_conn: asyncpg.Connection, sold: dict[str, Any]) -> None:
+    """The window opens only on a sent invoice; while it is open no payment is verified or voided and the invoice is not
+    cancelled (a flag left true never moves money); it closes only with the schedule adding up to the total."""
+    inv = await ops.draft_invoice(app_conn, sold, by=MAKER)
+    with pytest.raises(asyncpg.CheckViolationError, match="only a sent invoice is amended"):
+        await app_conn.execute(AMEND_ON, inv["id"])
+    # Not in the same statement as the send either (the send checks the sums, the window would skip them).
+    with pytest.raises(asyncpg.CheckViolationError, match="only a sent invoice is amended"):
+        await app_conn.execute(
+            "UPDATE booking.invoices SET status = 'sent', amending = true, issued_at = now(), sent_by = $2,"
+            " bill_to_name = 'Test Customer' WHERE id = $1::uuid",
+            inv["id"],
+            MAKER,
+        )
+    await ops.send_invoice(app_conn, inv["id"], by=MAKER)
+    # No cancel out of an open window, even in the statement that closes it (the close would skip the sums check).
+    await app_conn.execute(AMEND_ON, inv["id"])
+    with pytest.raises(asyncpg.CheckViolationError, match="finish the amendment before cancelling"):
+        await app_conn.execute(
+            "UPDATE booking.invoices SET status = 'cancelled', amending = false, cancelled_at = now(),"
+            " cancel_reason = 'x' WHERE id = $1::uuid",
+            inv["id"],
+        )
+    await app_conn.execute(AMEND_OFF, inv["id"])
+    receipt = await ops.record_payment(app_conn, inv["id"], "720", by=MAKER)
+    await ops.verify_payment(app_conn, receipt, by=CHECKER)
+    waiting = await ops.record_payment(app_conn, inv["id"], "100", by=MAKER)
+    # A window left open (committed by a direct writer, never by the API): money does not move.
+    await app_conn.execute(AMEND_ON, inv["id"])
+    with pytest.raises(asyncpg.CheckViolationError, match="being amended; finish the amendment first"):
+        await ops.verify_payment(app_conn, waiting, by=CHECKER)
+    with pytest.raises(asyncpg.CheckViolationError, match="being amended; finish the amendment first"):
+        await app_conn.execute(
+            "UPDATE booking.payments SET voided_at = now(), voided_by = $2, void_reason = 'typo' WHERE id = $1::uuid",
+            receipt,
+            CHECKER,
+        )
+    # Recording a payment moves no money, so it is still taken while the window is open.
+    await ops.record_payment(app_conn, inv["id"], "50", by=MAKER)
+    # Inside the window the sums may be off; the window does not close until they add up.
+    await app_conn.execute(EXTRA_LINE, inv["id"], 2)
+    with pytest.raises(asyncpg.CheckViolationError, match="schedule adds up to 2400.00 but the total is 2500.00"):
+        await app_conn.execute(AMEND_OFF, inv["id"])
+    await app_conn.execute(
+        "UPDATE booking.payment_schedule SET amount = amount + 100 WHERE invoice_id = $1::uuid AND seq = 2", inv["id"]
+    )
+    await app_conn.execute(AMEND_OFF, inv["id"])
+    await ops.verify_payment(app_conn, waiting, by=CHECKER)
+    assert await _invoice(app_conn, inv["id"]) == {"status": "partially_paid", "total_amount": Decimal("2500.00")}
+    # A transaction that opens the window, edits and closes it with a wrong sum fails as a whole.
+    with pytest.raises(asyncpg.CheckViolationError, match="schedule adds up to 2500.00 but the total is 2600.00"):
+        async with app_conn.transaction():
+            await app_conn.execute(AMEND_ON, inv["id"])
+            await app_conn.execute(EXTRA_LINE, inv["id"], 3)
+            await app_conn.execute(AMEND_OFF, inv["id"])
+    assert await _invoice(app_conn, inv["id"]) == {"status": "partially_paid", "total_amount": Decimal("2500.00")}
+    lines = await app_conn.fetchval("SELECT count(*) FROM booking.invoice_items WHERE invoice_id = $1::uuid", inv["id"])
+    assert lines == 2
 
 
 async def test_case_money_track(app_conn: asyncpg.Connection, sold: dict[str, Any]) -> None:
@@ -623,9 +706,10 @@ async def test_concurrent_evidence_removal_waits_for_the_verify(
 async def test_schedule_change_waits_for_a_verify_and_then_sees_the_row_covered(
     app_conn: asyncpg.Connection, sold: dict[str, Any], migrated_booking_dsn: str
 ) -> None:
-    """Review S253: payment_schedule_guard locks the invoice row first. A schedule change started while a verify is
-    open waits for it, then reads the committed net paid: the row the verify covered stays frozen (without the lock it
-    read net 0 and changed a row that was being paid)."""
+    """Review S253: payment_schedule_guard locks the invoice row first. A schedule change (inside an amendment) started
+    while a verify is open waits for it, then reads the committed net paid: the row the verify covered stays frozen
+    (without the lock it read net 0 and changed a row that was being paid). Opening the window waits on the same row
+    lock, so the order is the same whichever statement comes first."""
     inv = await ops.draft_invoice(app_conn, sold, by=MAKER)
     await ops.send_invoice(app_conn, inv["id"], by=MAKER)
     deposit = await ops.record_payment(app_conn, inv["id"], "720", by=MAKER)
@@ -636,23 +720,29 @@ async def test_schedule_change_waits_for_a_verify_and_then_sees_the_row_covered(
         await tx1.start()
         await tx2.start()
         await ops.verify_payment(first, deposit, by=CHECKER)  # holds the invoice row
-        blocked = asyncio.create_task(second.execute(move, inv["id"]))
+        blocked = asyncio.create_task(second.execute(AMEND_ON, inv["id"]))
         await asyncio.sleep(0.3)
-        assert not blocked.done()  # payment_schedule_guard waits for the invoice row
+        assert not blocked.done()  # opening the window waits for the invoice row
         await tx1.commit()
+        await blocked
         with pytest.raises(asyncpg.CheckViolationError, match="covered by verified payments"):
-            await blocked
+            await second.execute(move, inv["id"])
         await tx2.rollback()
     finally:
         await first.close()
         await second.close()
     # Sequentially too: the covered deposit row stays frozen, the uncovered final row may still move.
     with pytest.raises(asyncpg.CheckViolationError, match="covered by verified payments"):
-        await app_conn.execute(move, inv["id"])
-    await app_conn.execute(
-        "UPDATE booking.payment_schedule SET due_date = due_date + 1 WHERE invoice_id = $1::uuid AND seq = 2",
-        inv["id"],
-    )
+        async with app_conn.transaction():
+            await app_conn.execute(AMEND_ON, inv["id"])
+            await app_conn.execute(move, inv["id"])
+    async with app_conn.transaction():
+        await app_conn.execute(AMEND_ON, inv["id"])
+        await app_conn.execute(
+            "UPDATE booking.payment_schedule SET due_date = due_date + 1 WHERE invoice_id = $1::uuid AND seq = 2",
+            inv["id"],
+        )
+        await app_conn.execute(AMEND_OFF, inv["id"])
 
 
 async def test_python_line_amount_matches_postgres_round(app_conn: asyncpg.Connection) -> None:
