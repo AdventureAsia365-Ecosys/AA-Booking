@@ -4,13 +4,17 @@
 // /booking/catalog/trip-plans/{source_id}/commercial with EVERY field (a cleared field is saved as empty). The
 // price hint is a guide for sales, never a quote: proposals are priced from their cost lines (ADR 0005). Supplier
 // and the season × pax band price matrix come in a later slice.
+// AA-996: the Figma CREATE / EDIT TEMPLATE form shows the tour content too; here it is the read-only "From CIS" block
+// (title, SKU, country, duration, days, summary) with "Edit in CIS ↗" for the roles that edit content in CIS.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
-import { FormDrawer, useToast } from "@/ui";
+import { FormDrawer, useStaff, useToast } from "@/ui";
+import { CisField, CisFieldset } from "../../../_parts/CisFields";
+import { CIS_EDITOR_ROLES } from "./shared";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 
 const textareaCls =
@@ -43,6 +47,7 @@ const AMOUNT_RE = /^\d{1,10}(\.\d{1,2})?$/;
 export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const me = useStaff();
   const [start] = useState(() => initial(plan));
   const [form, setForm] = useState<FormState>(start);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -94,6 +99,22 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         Booking-owned fields of <span className="font-medium text-ink">{plan.title}</span>. The tour itself (title, days,
         photos) is edited in CIS.
       </p>
+      <CisFieldset
+        title="Tour content"
+        editPath={CIS_EDITOR_ROLES.has(me.role) ? `/admin/master-content?tour=${encodeURIComponent(plan.tour_id)}` : null}
+        description={CIS_EDITOR_ROLES.has(me.role) ? undefined : "Ask the content team to change it in CIS."}
+      >
+        <CisField label="Title" wide>
+          {plan.title}
+        </CisField>
+        <CisField label="SKU">{plan.sku}</CisField>
+        <CisField label="Country">{plan.country}</CisField>
+        <CisField label="Duration">{plan.duration_raw || (plan.duration_days ? `${plan.duration_days} days` : null)}</CisField>
+        <CisField label="Days in CIS">{plan.days.length ? `${plan.days.length} days, ${plan.photos.length} photos` : null}</CisField>
+        <CisField label="Summary" multiline wide>
+          {plan.summary || plan.description}
+        </CisField>
+      </CisFieldset>
       <label className="flex items-start gap-3 rounded-md border border-line bg-panel px-3 py-3">
         <input
           type="checkbox"

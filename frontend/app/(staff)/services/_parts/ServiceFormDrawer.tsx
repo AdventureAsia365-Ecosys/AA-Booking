@@ -4,6 +4,9 @@
 // type, internal title, pricing unit of its rates (fixed once it has rates), CIS place, an optional CIS catalog
 // reference, max group size, duration, inclusions and internal notes. The title is a working name for staff: the
 // customer-facing text is CIS content (O7).
+// AA-996 (Figma ADD NEW ACTIVITY / EDIT ACTIVITY): the form also shows that customer text, read-only "From CIS": on
+// edit the content CIS published for this service (status, description, highlights) with "Edit in CIS ↗" (the
+// CIS-served edit_url path); on add a note that CIS drafts it from these facts after the save.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +18,9 @@ import { CATEGORY_FOR, SERVICE_TYPE_LABEL, SERVICE_UNIT_OPTIONS, SupplierSelect,
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { DestinationPicker, type PickedPlace } from "@/app/(staff)/suppliers/_parts/DestinationPicker";
+import { CisField, CisFieldset } from "@/app/(staff)/_parts/CisFields";
+import { cisEditUrl } from "@/app/(staff)/_parts/SupplyContent";
+import { CIS_ADMIN_URL } from "@/lib/config";
 
 const DEFAULT_UNIT: Record<ServiceType, ServiceUnit> = {
   activity: "person",
@@ -109,6 +115,7 @@ export function ServiceFormDrawer({
       <p className="text-[13px] text-muted">
         What Booking buys from the supplier. The title is for staff; the text customers read is written in CIS.
       </p>
+      <ServiceCisContent service={service} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Type" required error={errorFor(fe, "service_type")}>
           <select
@@ -197,5 +204,40 @@ export function ServiceFormDrawer({
         <textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
+  );
+}
+
+const CONTENT_STATUS_LABEL: Record<string, string> = {
+  none: "Not drafted yet",
+  draft: "Draft in CIS",
+  in_review: "In review in CIS",
+  published: "Published",
+  stale: "Needs update in CIS",
+  unpublished: "Unpublished",
+};
+
+/** The customer text of the service, read-only (CIS supply content, AA-835 S4). */
+function ServiceCisContent({ service }: { service?: ServiceDetail }) {
+  if (!service) {
+    return (
+      <CisFieldset
+        title="Customer text"
+        description="After you add the service, CIS drafts the description customers read from these facts; it is reviewed and edited in CIS."
+      />
+    );
+  }
+  const content = service.content;
+  if (!content) {
+    return <CisFieldset title="Customer text" description="CIS content is not readable right now; it is edited in CIS." />;
+  }
+  const href = cisEditUrl(content.edit_url);
+  return (
+    <CisFieldset title="Customer text" editPath={href ? href.slice(CIS_ADMIN_URL.length) : null}>
+      <CisField label="Status">{CONTENT_STATUS_LABEL[content.content_status] ?? content.content_status}</CisField>
+      <CisField label="Highlights">{content.highlights.length ? content.highlights.join(" · ") : null}</CisField>
+      <CisField label="Description" multiline wide>
+        {content.description}
+      </CisField>
+    </CisFieldset>
   );
 }
