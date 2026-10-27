@@ -326,7 +326,8 @@ jobs:
     name: Public smoke (production)
     needs: deploy
     if: needs.deploy.result == 'success' && needs.deploy.outputs.target == 'production'
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became Ubuntu 26.04 (19/10/2026), where Playwright has no chromium build (S253).
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
