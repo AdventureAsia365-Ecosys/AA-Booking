@@ -1,8 +1,9 @@
 "use client";
 // app/(staff)/catalog/countries/_parts/CountriesView.tsx — Catalog → Countries (AA-996; UI spec §3 / §7; Figma COUNTRY
 // MANAGAMENT, -1, ADD / EDIT / DELETE / UNPUBLISHED COUNTRY, module 06). The countries the CIS catalog has places or
-// tours in (plus any country Booking keeps state for), as the Figma card grid: name, ISO code, Booking status, CIS
-// counts (places, tours, place photos) and active suppliers. Filters (search, status, area) run on the server; the list
+// tours in (plus any country Booking keeps state for), as the Figma card grid: CIS cover photo with an image-count
+// chip (a neutral tile with the ISO code when CIS has no photo there), name, ISO code, Booking status, CIS counts
+// (places, tours, photos) and active suppliers. Filters (search, status, area) run on the server; the list
 // is short, so it is not paged. Row menu: View details, Edit country, Deactivate / Activate (admin). "Add country"
 // stores Booking state for an ISO country not listed yet: countries and their content are never created in Booking.
 
@@ -12,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Eye, Globe, ImageIcon, MapPin, Pencil, Plus, Power, Store } from "lucide-react";
 import { geoApi, type CountryItem, type GeoStatus } from "@/lib/api/geo";
-import { Button, EmptyState, ErrorState, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters } from "@/ui";
+import { Button, CisPhoto, EmptyState, ErrorState, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters } from "@/ui";
 import { RowMenu } from "@/ui/booking/RowMenu";
 import { CIS_PLACES_PATH, CountryDrawer, GeoStatusBadge } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
@@ -84,7 +85,7 @@ export function CountriesView() {
         {list.isLoading ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
             {[0, 1, 2].map((i) => (
-              <SkeletonBar key={i} h={150} r={12} />
+              <SkeletonBar key={i} h={290} r={12} />
             ))}
           </div>
         ) : list.isError ? (
@@ -139,27 +140,36 @@ export function CountriesView() {
 
 function CountryCard({ c, menu }: { c: CountryItem; menu: React.ReactNode }) {
   return (
-    <li className="flex min-w-0 flex-col gap-3 rounded-lg border border-line bg-card p-4">
-      <div className="flex items-start justify-between gap-2">
-        <Link href={`/catalog/countries/${c.country_code}`} className="min-w-0 hover:underline">
-          <span className="block truncate text-[15px] font-semibold text-ink">{c.name}</span>
-          <span className="font-mono text-xs text-muted">{c.country_code}</span>
-        </Link>
-        <span className="flex shrink-0 items-center gap-2">
-          <GeoStatusBadge status={c.status} />
-          {menu}
+    <li className="flex min-w-0 flex-col rounded-lg border border-line bg-card">
+      {/* The cover repeats the title link for the pointer; keyboard and screen readers use the name link below. */}
+      <Link href={`/catalog/countries/${c.country_code}`} className="relative block overflow-hidden rounded-t-lg" tabIndex={-1} aria-hidden="true">
+        <CisPhoto path={c.cover_photo_path} alt="" fallbackLabel={c.country_code} className="aspect-[16/7] w-full" />
+        <span className="bk-tabular absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[11.5px] font-medium text-white">
+          <ImageIcon size={12} /> {c.photos === 1 ? "1 image" : `${c.photos} images`}
         </span>
+      </Link>
+      <div className="flex min-w-0 flex-col gap-3 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <Link href={`/catalog/countries/${c.country_code}`} className="min-w-0 hover:underline">
+            <span className="block truncate text-[15px] font-semibold text-ink">{c.name}</span>
+            <span className="font-mono text-xs text-muted">{c.country_code}</span>
+          </Link>
+          <span className="flex shrink-0 items-center gap-2">
+            <GeoStatusBadge status={c.status} />
+            {menu}
+          </span>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
+          <Count icon={<MapPin size={13} />} label="Destinations" value={c.destinations} />
+          <Count icon={<Globe size={13} />} label="Tours" value={c.tours} />
+          <Count icon={<ImageIcon size={13} />} label="Images" value={c.photos} />
+          <Count icon={<Store size={13} />} label="Suppliers" value={c.active_suppliers} />
+        </dl>
+        <p className="truncate text-xs text-muted">
+          {c.area ? `Area: ${c.area}` : "No area"}
+          {c.status_reason ? ` · ${c.status_reason}` : ""}
+        </p>
       </div>
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
-        <Count icon={<MapPin size={13} />} label="Destinations" value={c.destinations} />
-        <Count icon={<Globe size={13} />} label="Tours" value={c.tours} />
-        <Count icon={<ImageIcon size={13} />} label="Images" value={c.photos} />
-        <Count icon={<Store size={13} />} label="Suppliers" value={c.active_suppliers} />
-      </dl>
-      <p className="truncate text-xs text-muted">
-        {c.area ? `Area: ${c.area}` : "No area"}
-        {c.status_reason ? ` · ${c.status_reason}` : ""}
-      </p>
     </li>
   );
 }

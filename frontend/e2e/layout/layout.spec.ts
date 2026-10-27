@@ -62,6 +62,8 @@ const PAGES: PageCase[] = [
   { name: "destination-drawer", path: "/catalog/destinations?place=dddd-0000-4000-8000-000000000005", ready: '[role="dialog"]', noTable: true },
   { name: "countries", path: "/catalog/countries", ready: "text=Area: Indochina", noTable: true },
   { name: "country-destinations", path: "/catalog/countries/LA?tab=destinations" },
+  // AA-996 slice 3: cover hero + "Photos · From CIS" gallery (24 tiles) on the country overview.
+  { name: "country-overview", path: "/catalog/countries/LA", ready: '[data-testid="country-photos"]', noTable: true },
   { name: "settings-security", path: "/settings?tab=security", ready: "text=Company e-mail, one-time code", noTable: true },
   { name: "suppliers", path: "/suppliers" },
   { name: "supplier-contracts", path: "/suppliers/SUP-000001?tab=contracts" },

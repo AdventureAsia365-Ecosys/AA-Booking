@@ -25,6 +25,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 HANOI = "d0000000-0000-4000-8000-000000000001"
 LUANG_PRABANG = "d0000000-0000-4000-8000-000000000002"
 HOI_AN = "d0000000-0000-4000-8000-000000000003"
+ATLANTIS = "d0000000-0000-4000-8000-000000000004"  # stub_catalog.sql: a place CIS could not give a country
 LAHORE = "d0000000-0000-4000-8000-000000000005"  # stub_catalog.sql: a Pakistani place (PK: bk-031)
 UNKNOWN = "d0000000-0000-4000-8000-0000000000ff"
 TOUR_VN = "aa996000-0000-4000-8000-00000000000a"
@@ -60,7 +61,8 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
         [(TOUR_VN, "VN-7D", "Northern Vietnam", "Vietnam", 7), (TOUR_LA, "LA-5D", "Mekong Slow Boat", "Laos", 5)],
     )
     # Photos (CIS 290: copies of one file share one path). VN: a and b at its places, c and a again on its tour = 3.
-    # LA: d on its tour; b is tied to Hanoi, so it counts for Vietnam, not for the Lao tour that carries it.
+    # LA: d on its tour; b is tied to Hanoi, so it counts for Vietnam, not for the Lao tour that carries it; e is tied
+    # to Atlantis, a place without a country, so it counts for the tour's country (else it would count nowhere).
     await conn.executemany(
         "INSERT INTO catalog.v_destination_photo (destination_id, path, position) VALUES ($1::uuid, $2, $3)",
         [(HANOI, "/content/photos/a", 1), (HOI_AN, "/content/photos/a", 1), (HANOI, "/content/photos/b", 2)],
@@ -72,6 +74,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
             (TOUR_VN, "/content/photos/a", None, 2),
             (TOUR_LA, "/content/photos/b", HANOI, 1),
             (TOUR_LA, "/content/photos/d", None, 2),
+            (TOUR_LA, "/content/photos/e", ATLANTIS, 3),
         ],
     )
     try:
@@ -157,7 +160,10 @@ async def test_countries_list_detail_and_update(
     assert by_code["VN"]["destinations"] == 2 and by_code["VN"]["tours"] == 1 and by_code["VN"]["status"] == "active"
     assert listing["unmapped"] == [{"name": "Nowhere", "destinations": 1}]
     # Images: distinct CIS photo paths of the country's places + its tours' photos not tied to a place.
-    assert by_code["VN"]["photos"] == 3 and by_code["LA"]["photos"] == 1 and by_code["PK"]["photos"] == 0
+    assert by_code["VN"]["photos"] == 3 and by_code["LA"]["photos"] == 2 and by_code["PK"]["photos"] == 0
+    # Cover: first photo of the best-covered place (Hanoi: a, b), else of the best-covered tour; none without photos.
+    assert by_code["VN"]["cover_photo_path"] == "/content/photos/a"
+    assert by_code["LA"]["cover_photo_path"] == "/content/photos/d" and by_code["PK"]["cover_photo_path"] is None
     # Pakistan was outside Booking's reference list until bk-031 (read-only on Dev); it now takes Booking state.
     pk = by_code["PK"]
     assert pk["name"] == "Pakistan" and pk["destinations"] == 1 and pk["booking_reference"] is True
@@ -173,6 +179,16 @@ async def test_countries_list_detail_and_update(
 
     vn = (await c.get("/catalog/geo/countries/vn", headers=content)).json()
     assert [d["name"] for d in vn["destination_items"]] == ["Hanoi", "Hoi An"] and vn["photos"] == 3
+    # Gallery: each path once, cover first (places by coverage, then tours), captioned by place or tour.
+    assert vn["cover_photo_path"] == "/content/photos/a"
+    assert vn["photo_items"] == [
+        {"path": "/content/photos/a", "caption": "Hanoi", "destination_id": HANOI},
+        {"path": "/content/photos/b", "caption": "Hanoi", "destination_id": HANOI},
+        {"path": "/content/photos/c", "caption": "Northern Vietnam", "destination_id": None},
+    ]
+    la_detail = (await c.get("/catalog/geo/countries/LA", headers=content)).json()
+    assert [p["path"] for p in la_detail["photo_items"]] == ["/content/photos/d", "/content/photos/e"]
+    assert pk_detail["photo_items"] == [] and pk_detail["cover_photo_path"] is None
     assert [t["source_id"] for t in vn["tour_items"]] == [TOUR_VN]
     assert (await c.get("/catalog/geo/countries/ZZ", headers=content)).status_code == 404
 
