@@ -9,8 +9,9 @@ Values are generous upper bounds for a healthy run on Dev, not averages: a pull 
 one e-mail is one SES call, a retention run is at most 50 batches of 1,000 rows under a 30 s statement timeout.
 
 ``DEPLOY_BLOCKING_KINDS`` (AA-993 G5, design D1.4): the deploy gate is unsafe only while a row of one of these
-kinds is RUNNING. Queued and running rows of every other kind are reported but no longer block: the worker releases a
-running job on shutdown and the new task re-claims it (G4).
+kinds is RUNNING, or QUEUED and due within ``DEPLOY_BLOCKING_HORIZON_SECONDS``. Queued and running rows of every
+other kind are reported but no longer block: the worker releases a running job on shutdown and the new task re-claims
+it (G4).
 
 ``DEPLOY_GATE_EXEMPT``: kinds the deploy gate leaves out of its ``active`` / ``by_status`` / ``by_kind`` counts
 (information only since G5). Before G5 these counts decided the deploy; the reasons below date from then.
@@ -35,6 +36,12 @@ DEPLOY_GATE_EXEMPT: frozenset[str] = frozenset({"bk_inquiry_pull", "bk_noop_slee
 # run would end a run an approval capped; checkpointing them is a follow-up (design Q3). Every other kind is released on
 # shutdown and re-claimed by the new task (G4), so its queued / running rows no longer block.
 DEPLOY_BLOCKING_KINDS: frozenset[str] = frozenset({"bk_retention_job", "bk_retention_inbox_redact"})
+
+# AA-993 G5 review: a QUEUED row of a deploy-blocking kind due within this window blocks too. The preflight runs before
+# the image build + push and the old task keeps claiming until its SIGTERM minutes later, so it would claim the row and
+# be stopped mid-run (a retention run is then failed, the approved run lost). 15 min covers build + push + roll; the
+# retention kinds are enqueued due at once (daily schedule, manual run), MAX_ATTEMPTS 1, so a row due later is rare.
+DEPLOY_BLOCKING_HORIZON_SECONDS = 900
 
 # Test-only kinds (AA-993 G4 proof), registered only when JOB_TEST_KINDS is on (app.jobs.noop_sleep).
 TEST_KINDS: frozenset[str] = frozenset({"bk_noop_sleep"})

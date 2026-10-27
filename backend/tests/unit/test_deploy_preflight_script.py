@@ -60,6 +60,7 @@ ACTIVE_SAFE = {
     "safe_to_deploy": True,
     "exempt_kinds": ["bk_inquiry_pull"],
     "blocking_running": {},
+    "blocking_due": {},
     "blocked_by": [],
 }
 BUSY = {
@@ -69,6 +70,7 @@ BUSY = {
     "safe_to_deploy": False,
     "exempt_kinds": ["bk_inquiry_pull"],
     "blocking_running": {"bk_retention_job": 1},
+    "blocking_due": {},
     "blocked_by": ["1 bk_retention_job job(s) running (deploy-blocking kind)"],
 }
 
@@ -262,14 +264,14 @@ def test_unsafe_gate_without_reasons_still_blocks(tmp_path: Path) -> None:
     """An older API (no ``blocked_by``) answering unsafe still blocks, with a generic reason."""
     r = run(tmp_path, gate_body=json.dumps({"active": 2, "by_status": {"running": 2}, "safe_to_deploy": False}))
     assert r.code == 1
-    assert "::error::Deploy blocked: a deploy-blocking job is running (all active: 2)" in r.out
+    assert "::error::Deploy blocked: a deploy-blocking job is running or due (all active: 2)" in r.out
 
 
 def test_queued_and_running_jobs_pass_when_the_gate_is_safe(tmp_path: Path) -> None:
     """AA-993 G5: ordinary queued / running jobs no longer block; they are released and re-claimed."""
     r = run(tmp_path, gate_body=json.dumps(ACTIVE_SAFE))
     assert r.code == 0
-    assert "No deploy-blocking job running — safe to deploy. 3 queued/running booking.job row(s)" in r.out
+    assert "No deploy-blocking job running or due — safe to deploy. 3 queued/running booking.job row(s)" in r.out
     assert "::error::" not in r.out
 
 

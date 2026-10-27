@@ -722,9 +722,12 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   alarms `<booking prefix>-jobs-queue-age` (> 900 s), `-jobs-overdue-running` (> 0) and `-jobs-sampling-stopped` (no
   sample for 45 min, which also fires while the service is scaled to 0 or `WORKER_ENABLED` is off).
 - **Deploy gate (AA-751 B3/B4; meaning changed by AA-993 G5, design D1.4).** `GET /booking/ops/deploy-gate`
-  returns `{active, by_status, by_kind, safe_to_deploy, exempt_kinds, blocking_kinds, blocking_running, blocked_by}`.
+  returns `{active, by_status, by_kind, safe_to_deploy, exempt_kinds, blocking_kinds, blocking_running, blocking_due,
+  blocked_by}`.
   `safe_to_deploy` is false only while a row of a kind in `DEPLOY_BLOCKING_KINDS` (`app/jobs/kinds.py`: the retention
-  kinds, which keep no checkpoint and are failed instead of released on shutdown) is **running**. Queued / running rows
+  kinds, which keep no checkpoint and are failed instead of released on shutdown) is **running**, or **queued and due
+  within 15 min** (`blocking_due`, `DEPLOY_BLOCKING_HORIZON_SECONDS`: the preflight runs before the image build, and the
+  old task would claim it before its SIGTERM). Queued / running rows
   of every other kind no longer block (the worker releases a running job on shutdown, the new task re-claims it); they
   stay in `active` / `by_status` / `by_kind` as information, kinds in `DEPLOY_GATE_EXEMPT` (`bk_inquiry_pull`, the
   always-queued pull; `bk_noop_sleep`, test-only) not counted there. Booking does not read CIS rerun waves. The

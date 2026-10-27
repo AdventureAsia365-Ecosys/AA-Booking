@@ -257,19 +257,28 @@ async def active_count(pool: asyncpg.Pool, exempt_kinds: Iterable[str] = ()) -> 
     return {"active": sum(by_status.values()), "by_status": by_status, "by_kind": dict(sorted(by_kind.items()))}
 
 
-async def running_count(pool: asyncpg.Pool, kinds: Iterable[str]) -> dict[str, int]:
-    """``running`` rows of ``kinds``, per kind (AA-993 G5: the deploy-blocking kinds the deploy gate checks). A queued
-    row is not counted: no work has started, and whichever task is live claims it. One GROUP BY query."""
+async def blocking_count(pool: asyncpg.Pool, kinds: Iterable[str], horizon_seconds: int) -> dict[str, dict[str, int]]:
+    """Rows of ``kinds`` that block a deploy, per kind (AA-993 G5: the deploy-blocking kinds the deploy gate checks):
+    ``running`` ones, and ``due`` ones (``queued``, ``run_after`` within ``horizon_seconds``). A due queued row counts
+    because the preflight runs before the image build and the old task keeps claiming until its SIGTERM minutes later:
+    it would claim the row and be stopped mid-run. A queued row due later waits for whichever task is live then. One
+    GROUP BY query."""
     rows = await pool.fetch(
         """
-        SELECT kind, count(*)::int AS n
+        SELECT CASE WHEN status = 'running' THEN 'running' ELSE 'due' END AS what, kind, count(*)::int AS n
         FROM booking.job
-        WHERE status = 'running' AND kind = ANY($1::text[])
-        GROUP BY kind
+        WHERE kind = ANY($1::text[])
+          AND (status = 'running' OR (status = 'queued' AND run_after <= now() + make_interval(secs => $2)))
+        GROUP BY 1, 2
         """,
         sorted(kinds),
+        horizon_seconds,
     )
-    return {r["kind"]: r["n"] for r in sorted(rows, key=lambda r: r["kind"]) if r["n"]}
+    out: dict[str, dict[str, int]] = {"running": {}, "due": {}}
+    for r in sorted(rows, key=lambda r: r["kind"]):
+        if r["n"]:
+            out[r["what"]][r["kind"]] = r["n"]
+    return out
 
 
 async def prune(pool: asyncpg.Pool, kind: str, keep_days: int) -> int:
