@@ -699,6 +699,15 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
         "ops_docs_max_bytes": 10485760,
         "trip_check_reminder_days": 3,  # bk-027 (AA-682 S2)
         "emergency_contact_keep_days": 90,
+        "deposit_due_days": 3,  # bk-028 (AA-682 S3)
+        "balance_due_days_before_start": 30,
+        "payment_due_soon_days": 7,
+        "payment_overdue_reminder_days": [1, 7],
+        "invoice_issuer": {
+            "name": "Adventure Asia (legal name to be set)",
+            "address": "(registered address to be set)",
+        },
+        "payment_instructions": "Payment details will be confirmed by your trip consultant.",
     }
     assert {"iso2": "VN", "name": "Vietnam"} in countries.json()["items"]
     assert audit_denied.status_code == 403 and audit_ok.status_code == 200 and audit_ok.json()["items"]

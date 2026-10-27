@@ -1,7 +1,8 @@
-"""Shared set-up and clean-up of the AA-682 S1 integration tests (bk-026): a sold B2C trip case with an approved
-version of two supply items (a room type and a service of one supplier, with cost rows), and the purge of every
-supplier booking / operations file so the other modules' clean-ups (which delete cases, hotels and suppliers) never
-meet a row that points at them."""
+"""Shared set-up and clean-up of the AA-682 integration tests (bk-026 .. bk-028): a sold B2C trip case with an approved
+version of two supply items (a room type and a service of one supplier, with cost rows), helpers for a sent invoice
+(bk-028, in SQL as the service writes it), and the purge of every supplier booking / operations file / invoice /
+payment so the other modules' clean-ups (which delete cases, hotels and suppliers) never meet a row that points at
+them."""
 
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ async def purge_ops(conn: asyncpg.Connection) -> None:
         await conn.execute(
             "UPDATE booking.supplier_bookings SET voucher_file_id = NULL WHERE voucher_file_id IS NOT NULL"
         )
+        await purge_billing(conn)
         await conn.execute("DELETE FROM booking.ops_files")
         await conn.execute("DELETE FROM booking.supplier_bookings")
         await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type IN ('supplier_booking', 'ops_file')")
@@ -67,6 +69,26 @@ async def purge_ops(conn: asyncpg.Connection) -> None:
             " (SELECT id FROM booking.suppliers WHERE company_name LIKE 'it-682 %')"
         )
         await conn.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-682 %'")
+
+
+BILLING = ("booking.payments", "booking.payment_schedule", "booking.invoice_items", "booking.invoices")
+
+
+async def purge_billing(conn: asyncpg.Connection) -> None:
+    """Every bk-028 row (payments, schedules, lines, invoices) with their guards off: verified payments and sent
+    invoices are never deleted by the app. Runs inside :func:`purge_ops`'s owner transaction (or alone)."""
+    if await conn.fetchval("SELECT to_regclass('booking.invoices')") is None:
+        return
+    await conn.execute("DELETE FROM booking.notifications WHERE type LIKE 'invoice.%' OR type LIKE 'payment.%'")
+    await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type IN ('invoice', 'payment')")
+    for table in BILLING:
+        await conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
+    try:
+        for table in BILLING:
+            await conn.execute(f"DELETE FROM {table}")  # noqa: S608 — constant names
+    finally:
+        for table in BILLING:
+            await conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
 
 
 async def staff(conn: asyncpg.Connection, *rows: tuple[str, str]) -> None:
@@ -193,3 +215,105 @@ async def b2c_case(
         f"{NOTE}-{tag}",
     )
     return dict(row)
+
+
+# ── Invoices (bk-028), written in SQL the way app.ops.billing writes them ────────
+
+
+def key(tag: str) -> str:
+    """An Idempotency-Key and the request hash that goes with it (any 64 hex chars in SQL-level tests)."""
+    return f"it-682-{tag}".ljust(8, "x")
+
+
+SHA = "0" * 64
+
+
+async def draft_invoice(
+    conn: asyncpg.Connection,
+    case: dict[str, Any],
+    *,
+    by: str,
+    schedule: tuple[tuple[str, str, date], ...] | None = None,
+    adjustments: tuple[tuple[str, str], ...] = (),
+    tag: str = "inv",
+) -> dict[str, Any]:
+    """A draft invoice of a sold B2C case (``sold_case``: V1 2400 USD): the version total line, the adjustments
+    ``(description, unit_price)`` and the schedule rows ``(kind, amount, due_date)`` (default 30 / 70)."""
+    customer = await conn.fetchval("SELECT customer_id::text FROM booking.trip_cases WHERE id = $1::uuid", case["id"])
+    inv = await conn.fetchrow(
+        "INSERT INTO booking.invoices (trip_case_id, version_id, customer_id, currency, idempotency_key,"
+        " request_sha256, created_by, updated_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'USD', $4, $5, $6, $6)"
+        " RETURNING id::text AS id, invoice_number",
+        case["id"],
+        case["version"],
+        customer,
+        key(tag),
+        SHA,
+        by,
+    )
+    await conn.execute(
+        "INSERT INTO booking.invoice_items (invoice_id, position, kind, description, quantity, unit_price, amount)"
+        " VALUES ($1::uuid, 1, 'version_total', 'Trip price', 1, 2400, 2400)",
+        inv["id"],
+    )
+    for i, (description, unit) in enumerate(adjustments, start=2):
+        await conn.execute(
+            "INSERT INTO booking.invoice_items (invoice_id, position, kind, description, quantity, unit_price, amount,"
+            " reason) VALUES ($1::uuid, $2, 'adjustment', $3, 1, $4::numeric, $4::numeric, 'test')",
+            inv["id"],
+            i,
+            description,
+            unit,
+        )
+    due = START - timedelta(days=30)
+    rows = schedule or (("deposit", "720.00", date.today() + timedelta(days=3)), ("final", "1680.00", due))
+    for seq, (kind, amount, when) in enumerate(rows, start=1):
+        await conn.execute(
+            "INSERT INTO booking.payment_schedule (invoice_id, seq, kind, amount, due_date)"
+            " VALUES ($1::uuid, $2, $3, $4::numeric, $5)",
+            inv["id"],
+            seq,
+            kind,
+            amount,
+            when,
+        )
+    return dict(inv)
+
+
+async def send_invoice(conn: asyncpg.Connection, invoice_id: str, *, by: str) -> None:
+    await conn.execute(
+        "UPDATE booking.invoices SET status = 'sent', issued_at = now(), sent_by = $2, bill_to_name = 'Test Customer',"
+        " bill_to_email = 'it-682@example.test' WHERE id = $1::uuid",
+        invoice_id,
+        by,
+    )
+
+
+async def record_payment(
+    conn: asyncpg.Connection,
+    invoice_id: str,
+    amount: str,
+    *,
+    by: str,
+    kind: str = "receipt",
+    method: str = "cash",
+    tag: str | None = None,
+) -> str:
+    return await conn.fetchval(
+        "INSERT INTO booking.payments (invoice_id, kind, amount, currency, method, received_on, idempotency_key,"
+        " request_sha256, recorded_by) VALUES ($1::uuid, $2, $3::numeric, 'USD', $4, current_date, $5, $6, $7)"
+        " RETURNING id::text",
+        invoice_id,
+        kind,
+        amount,
+        method,
+        key(tag or f"{kind}-{amount}-{by}"),
+        SHA,
+        by,
+    )
+
+
+async def verify_payment(conn: asyncpg.Connection, payment_id: str, *, by: str) -> None:
+    await conn.execute(
+        "UPDATE booking.payments SET verified_by = $2, verified_at = now() WHERE id = $1::uuid", payment_id, by
+    )

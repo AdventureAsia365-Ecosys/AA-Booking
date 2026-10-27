@@ -8,6 +8,7 @@ DM-6.1 tags in the same file. The HTTP flows are in ``test_bk026_supplier_bookin
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -20,6 +21,7 @@ import pytest
 import pytest_asyncio
 
 from tests.integration import ops
+from tests.integration.conftest import apply_migrations
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -99,6 +101,9 @@ async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> No
         await admin.execute(MIGRATION.read_text(encoding="utf-8"))  # a second run is a no-op
     finally:
         await admin.execute("RESET ROLE")
+    # The re-run put back the bk-026 bodies of functions later files replace (bk-028: trip_cases_post_sale_guard,
+    # ops_files_guard): replay those files too, as DB Migrate's order would leave them.
+    await apply_migrations(admin, only=range(27, 1000))
     assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-026'") == 1
     assert await admin.fetchval("SELECT count(*) FROM booking.ops_transitions WHERE entity = 'supplier_booking'") == 7
     for rel in ("ops_transitions", "ops_files", "supplier_bookings", "v_trip_case_supply_state"):
@@ -124,8 +129,10 @@ async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> No
         ("supplier_confirming", "confirmed"),
         ("on_trip", "completed"),
     } <= edges
-    # Critic B1: no money edge before bk-028.
-    assert not {e for e in edges if "invoice_sent" in e or "paid" in e or "payment_pending" in e}
+    # Critic B1: bk-026 seeds no money edge (they ship with bk-028).
+    seeded = MIGRATION.read_text(encoding="utf-8").split("INSERT INTO booking.trip_case_status_transitions", 1)[1]
+    seeded = seeded.split(";", 1)[0]
+    assert not re.search(r"invoice_sent|payment_pending|'paid'", seeded)
     settings = {r["key"] for r in await admin.fetch("SELECT key FROM booking.settings")}
     assert {"supplier_answer_days", "pre_departure_days", "ops_docs_max_bytes"} <= settings
 
@@ -232,10 +239,10 @@ async def test_post_sale_fact_guard(
     # Back to confirmed only without a live booking.
     with pytest.raises(asyncpg.CheckViolationError, match="no live supplier booking"):
         await _case_status(app_conn, case, "confirmed")
-    # A B2C case never reaches pre_departure before bk-028 (needs a paid invoice); money statuses have no edge yet.
+    # A B2C case reaches pre_departure only with a paid invoice, and a money status only from its invoice (bk-028).
     with pytest.raises(asyncpg.CheckViolationError):
         await _case_status(app_conn, case, "pre_departure")
-    with pytest.raises(asyncpg.CheckViolationError, match="illegal trip case status transition"):
+    with pytest.raises(asyncpg.CheckViolationError, match="must be what its invoice says"):
         await _case_status(app_conn, case, "invoice_sent")
     # Cancel, then reopen refused while a live booking exists (critic B9).
     await app_conn.execute("SELECT set_config('booking.status_note', 'it', false)")
