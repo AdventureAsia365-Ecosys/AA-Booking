@@ -8,12 +8,14 @@
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CalendarDays, Globe, Store, Unlink } from "lucide-react";
+import { CalendarDays, Eye, EyeOff, Globe, Store, Unlink } from "lucide-react";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, Money, PageFrame, Pill, Section, useCan, useUrlFilters } from "@/ui";
 import { OrphanedPlansTable } from "./OrphanedPlans";
 import { SellableBadge, priceBasisLabel } from "./shared";
+import { useSellableToggle } from "./useSellableToggle";
+import { RowMenu } from "@/ui/booking/RowMenu";
 
 const SORTS = [
   { value: "title", label: "Title A–Z" },
@@ -28,6 +30,7 @@ export function TripPlansView() {
   const { get } = useUrlFilters();
   const paging = useOffsetPage();
   const canPrice = useCan("pricing.read");
+  const sellableToggle = useSellableToggle();
 
   // AA-986 L5: "show=orphaned" switches the table to the plans whose tour left the CIS catalog.
   const orphanedView = get("show") === "orphaned";
@@ -98,6 +101,26 @@ export function TripPlansView() {
           } satisfies ColumnDef<TripPlanListItem, unknown>,
         ]
       : []),
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <RowMenu
+          label={`Actions for ${row.original.title}`}
+          items={[
+            { label: "View details", icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}`) },
+            ...(sellableToggle.canWrite
+              ? [
+                  row.original.sellable
+                    ? { label: "Make not sellable", icon: <EyeOff size={14} />, danger: true, divider: true, onSelect: () => sellableToggle.ask(row.original) }
+                    : { label: "Make sellable", icon: <Store size={14} />, divider: true, onSelect: () => sellableToggle.ask(row.original) },
+                ]
+              : []),
+          ]}
+        />
+      ),
+    },
   ];
 
   const f = facets.data;
@@ -216,6 +239,7 @@ export function TripPlansView() {
           </>
         )}
       </Section>
+      {sellableToggle.dialogs}
     </PageFrame>
   );
 }

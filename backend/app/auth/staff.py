@@ -93,6 +93,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "catalog.read": frozenset({"admin", "sales", "contracting", "content_creator"}),
     # Commercial row of a catalog tour (sellable, trip style, price hint, notes; bk-009): contracting + admin.
     "trip_plan.write": frozenset({"admin", "contracting"}),
+    # Booking state of CIS countries and destinations (bk-029, AA-996): status, area, notes. Admin only (UI spec §3).
+    "catalog.admin": frozenset({"admin"}),
     "staff.admin": frozenset({"admin"}),
     "audit.read": frozenset({"admin"}),
     # Retention runs and their status (AA-825): DRY RUN / live delete and redaction of Booking rows.

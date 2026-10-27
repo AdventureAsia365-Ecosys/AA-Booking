@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Briefcase, CalendarDays, Globe, Hash, Pencil } from "lucide-react";
+import { Briefcase, CalendarDays, EyeOff, Globe, Hash, Pencil, Store } from "lucide-react";
 import { CHANNELS } from "@/lib/api/proposals";
 import { tripPlansApi } from "@/lib/api/tripPlans";
 import { Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, useCan, useStaff } from "@/ui";
@@ -16,6 +16,7 @@ import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "../../../_
 import { CommercialDrawer } from "./CommercialDrawer";
 import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
 import { UseForTripCaseModal } from "./UseForTripCaseModal";
+import { useSellableToggle } from "./useSellableToggle";
 
 const CHANNEL_LABEL: Record<string, string> = Object.fromEntries(CHANNELS.map((c) => [c.value, c.label]));
 
@@ -37,6 +38,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
   const canPrice = useCan("pricing.read");
   const [editing, setEditing] = useState(editOnOpen && canEdit);
   const [using, setUsing] = useState(false);
+  const sellableToggle = useSellableToggle();
 
   const plan = useQuery({ queryKey: ["trip-plans", "detail", sourceId], queryFn: () => tripPlansApi.get(sourceId) });
   const p = plan.data;
@@ -72,6 +74,11 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
         actions={
           <>
             {CIS_EDITOR_ROLES.has(me.role) && <ManagedInCisLink path={`/admin/master-content?tour=${encodeURIComponent(p.tour_id)}`} />}
+            {sellableToggle.canWrite && (
+              <Button variant={p.sellable ? "danger" : "secondary"} onClick={() => sellableToggle.ask(p)}>
+                {p.sellable ? <EyeOff size={15} /> : <Store size={15} />} {p.sellable ? "Make not sellable" : "Make sellable"}
+              </Button>
+            )}
             {canUse && (
               <Button variant="primary" onClick={() => setUsing(true)} disabled={!p.sellable} title={p.sellable ? undefined : "Mark the plan sellable first"}>
                 <Briefcase size={15} /> Use for trip case
@@ -223,6 +230,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
       </div>
       {editing && <CommercialDrawer plan={p} onClose={() => setEditing(false)} />}
       {using && <UseForTripCaseModal plan={p} onClose={() => setUsing(false)} />}
+      {sellableToggle.dialogs}
     </main>
   );
 }
