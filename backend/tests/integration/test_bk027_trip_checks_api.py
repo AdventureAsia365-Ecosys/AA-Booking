@@ -1,7 +1,7 @@
 """AA-682 S2 over HTTP on a real PostgreSQL (bk-027), as role ``booking``:
 
 - a sold B2C case shows its three seeded checks (standard order), the board and the derived checks (suppliers
-  confirming → open, payment not available until bk-028);
+  confirming → open, payment open: no paid invoice, bk-028);
 - the emergency contact check is done only with a name and a phone; the audit row names the fields, never the values;
   done → not applicable in one call (two edges); reopen clears done_by / done_at;
 - custom checks: add (201), rename; a standard check keeps its title (422);
@@ -91,7 +91,8 @@ async def test_case_checks_flow(client: Client, admin: asyncpg.Connection) -> No
         "open",
         "confirming",
     )
-    assert payment["available"] is False
+    # bk-028: a B2C case's payment check reads its invoice (none yet: open).
+    assert (payment["available"], payment["status"]) == (True, "open")
     contact = next(i for i in out["items"] if i["code"] == "emergency_contact")
     assert contact["contact_allowed"] is True
     insurance = next(i for i in out["items"] if i["code"] == "insurance")

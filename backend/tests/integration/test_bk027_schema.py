@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from tests.integration import ops
+from tests.integration.conftest import apply_migrations
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -69,6 +70,8 @@ async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> No
         await admin.execute(MIGRATION.read_text(encoding="utf-8"))  # a second run is a no-op
     finally:
         await admin.execute("RESET ROLE")
+    # The re-run put back the bk-027 body of v_trip_check_board, which bk-028 replaces: replay the later files.
+    await apply_migrations(admin, only=range(28, 1000))
     assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-027'") == 1
     for rel in ("trip_case_checks", "v_trip_check_board"):
         owner = await admin.fetchval(
@@ -267,6 +270,7 @@ async def test_backfill_seeds_sold_cases_only(admin: asyncpg.Connection, app_con
     )
     await app_conn.execute("UPDATE booking.trip_cases SET status = 'pre_departure' WHERE id = $1::uuid", started["id"])
     await _as_owner(admin, MIGRATION.read_text(encoding="utf-8"))
+    await apply_migrations(admin, only=range(28, 1000))  # bk-028 replaces v_trip_check_board again
     assert len(await _checks(app_conn, sold["id"])) == 3
     b2b = await _checks(app_conn, started["id"])
     assert len(b2b) == 3 and b2b["emergency_contact"]["status"] == "not_applicable"
@@ -293,7 +297,7 @@ async def test_board_view(app_conn: asyncpg.Connection) -> None:
     a, b = rows[sold["id"]], rows[b2b["id"]]
     assert (a["checks_total"], a["checks_open"], a["checks_overdue"]) == (3, 3, 1)
     assert a["supply_state"] == "confirming" and a["suppliers_confirmed"] is False
-    assert a["payment_verified"] is None
+    assert a["payment_verified"] is False  # bk-028: B2C reads its invoice (none paid); B2B stays NULL
     assert a["next_due_date"] == await app_conn.fetchval("SELECT current_date - 1")
     assert (b["checks_open"], b["checks_not_applicable"]) == (2, 1)
     assert b["supply_state"] == "none" and b["suppliers_confirmed"] is True
