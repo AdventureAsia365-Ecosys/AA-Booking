@@ -109,11 +109,20 @@ export async function bkGet<T>(path: string, query?: Query): Promise<T> {
 
 export async function bkSend<T>(
   path: string,
-  { method = "POST", body }: { method?: "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown } = {},
+  {
+    method = "POST",
+    body,
+    idempotencyKey,
+  }: { method?: "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown; idempotencyKey?: string } = {},
 ): Promise<T> {
   const res = await fetch(`${BFF_BASE}/${path.replace(/^\/+/, "")}`, {
     method,
-    headers: { Accept: "application/json", ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+    headers: {
+      Accept: "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      // AA-682 S3: money writes carry one key per user action, so a retry (double click, timeout) is not a second write.
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   return parse<T>(res);

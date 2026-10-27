@@ -132,7 +132,15 @@ backend/
                            request / confirm / decline / cancel / re-request, supply state, case auto-advance, case-cancel
                            cascade, B2B line tie-in), files.py (ops-docs bucket: base64 upload, attachment download);
                            S2 (bk-027): trip_checks.py (list / case / custom / patch, derived checks, B2C-only emergency
-                           contact), lifecycle.py (bk_case_lifecycle + bk_ops_reminders, OpsDailySchedule hook)
+                           contact), lifecycle.py (bk_case_lifecycle + bk_ops_reminders, OpsDailySchedule hook);
+                           S3 (bk-028): invoices.py (create / edit draft / send / cancel / amend / remind, case Billing
+                           tab, KPIs, case cancel cascade), payments.py (record / edit / verify / void, maker-checker),
+                           money.py (Decimal amounts, default schedule, waterfall, request hash, card refusal),
+                           track.py (case auto-advance over the supply and money tracks)
+  app/routers/billing.py   /booking/invoices (GET, GET/PATCH/DELETE /{number}, …/send|cancel|amend|remind|payments),
+                           /booking/trip-cases/{ref}/billing (GET), /booking/trip-cases/{ref}/invoices (POST),
+                           /booking/payments (GET, GET/PATCH /{ref}, …/verify|void), /booking/billing/summary —
+                           billing.read / billing.write / payment.verify (AA-682 S3)
   app/routers/supplier_bookings.py  /booking/trip-cases/{ref}/supplier-bookings (GET, POST, …/generate),
                            /booking/supplier-bookings (list, summary, GET/PATCH /{id}, …/request|confirm|decline|cancel|
                            rerequest), /booking/ops-files (POST, /{id}/download, /{id}/remove) — ops.read / ops.write
@@ -354,6 +362,10 @@ send, OTP) is not built: those still write rows only.
   contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
   needs `b2b_desk.write`; net amounts in the responses need `pricing.read`. Trip checks and the lifecycle runs (AA-682
   S2, bk-027) use the same `ops.read` / `ops.write`; the customer name in the check list also needs `customer.read`.
+  Billing (AA-682 S3, bk-028): invoices and payments `billing.read` / `billing.write` = admin, sales (contracting sees
+  no customer money; the case detail hides its `money` badge without `billing.read`); verifying a payment
+  `payment.verify` = admin and never the person who recorded it (403 `maker_checker`); voiding a verified payment needs
+  `payment.verify` too. None of the three is in the preview cap (critic note 8: bill-to snapshots, payment refs).
   Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
@@ -497,14 +509,14 @@ send, OTP) is not built: those still write rows only.
   pre_departure_days` (their due date follows the start date while open); staff add **custom** checks (title). Life
   `open → done | not_applicable → open` (done ⇔ `done_at`; done ↔ not applicable goes through open in one call).
   **Derived** checks (`v_trip_check_board`, never stored): `suppliers_confirmed` (supply `booked` / `none`) and
-  `payment_verified` (NULL until bk-028).
+  `payment_verified` (B2C: the invoice is paid by verified payments, bk-028; NULL on B2B).
 - **Emergency contact = B2C only** (DM-6.8): on a B2B case the row stays `not_applicable` without contact fields (DB
   guard; the API answers 422 `contact_not_allowed_b2b`). A B2C contact check is done only with name + phone. Contact
   fields and notes are cleared at trip end + `emergency_contact_keep_days` (90) by `bk_case_lifecycle` (`cleared_at`,
   final). Audit rows of a check name the changed fields, never the values.
 - **Case lifecycle after the sale** (job `bk_case_lifecycle`, daily): `→ pre_departure` at `start_date -
-  pre_departure_days` when supply is `booked` / `none` and (B2C) the case is `paid` (money: bk-028; until then B2C
-  cases are reported blocked `not_paid`), `→ on_trip` on the start date, `→ completed` the day after the end date;
+  pre_departure_days` when supply is `booked` / `none` and (B2C) the case is `paid` (its invoice paid by verified
+  payments, bk-028; otherwise reported blocked `not_paid`), `→ on_trip` on the start date, `→ completed` the day after the end date;
   moves chain in one run, each a system UPDATE re-checked by the bk-026 guard. A due but blocked gate raises one staff
   notification `trip_case.gate_blocked` per case, target and reasons. Open checks never block a move. "Today" is the
   date in the ops time zone (`b2b_ops_timezone`, Asia/Ho_Chi_Minh) and the job's transactions run in that zone, so
@@ -584,6 +596,55 @@ send, OTP) is not built: those still write rows only.
   leaves Booking. No column, field or key is named `supplier_net` (unit test over the B2B OpenAPI, integration test
   over the schema).
 
+## Invoices and manual payments (AA-682 S3, bk-028; S252 design §3.3, §4, §5, critic B4–B6, B9)
+
+- An **invoice** (`booking.invoices`, `INV-000123`) is a **proforma payment request** (design D7: prices tax-inclusive,
+  no tax line; the legal VAT e-invoice stays outside Booking) for the customer of a **B2C** case, in the currency of
+  the approved version, **one live per case**. Created from the case's approved, priced version (409
+  `no_approved_version` / `version_not_priced` / `b2b_no_invoice` / `invoice_exists` / `case_not_invoiceable`, the
+  last when the case is not `confirmed` / `supplier_confirming`). Lines: the version total (locked) + adjustments with
+  a reason. Schedule: given rows that add up to the total (422 `schedule_mismatch`), or the default from settings:
+  `deposit_pct` due `deposit_due_days` after the issue day + the rest `balance_due_days_before_start` before the trip,
+  one payment when the trip is too close; amounts in the currency's minor units, the remainder on the last row.
+- Life: `draft` (edit, soft-delete) → `sent` (bill-to snapshot, one customer notification row, case → `invoice_sent`)
+  → `partially_paid` ⇄ `paid`; `sent` → `cancelled` (reason; only with net verified paid 0 and nothing waiting: 409
+  `invoice_has_payments`; a partially paid invoice is refunded back to `sent` first). **The money states are derived by the database** from verified payments (`invoice_settle`,
+  guarded by `invoices_guard`): no route, script or app bug can mark an invoice paid without verified money.
+  **Amendment** (`POST …/amend`, critic B5): a sent invoice takes appended adjustment lines; rows the verified payments
+  already cover stay, the rest is re-planned (or the difference goes on the last unpaid row); a paid invoice may drop
+  to partially paid; the customer feed says "updated". It runs in the **amendment window**: one transaction sets
+  `invoices.amending = true`, writes lines and rows, then sets it back to false, which is where the database checks
+  that the schedule adds up to the new total (409 `invalid_amendment`). Outside the window the database refuses any
+  change to a sent invoice's lines or schedule, and while it is open no payment is verified or voided. `POST …/remind` writes one customer row a day.
+- A **payment** (`booking.payments`, `PMT-000123`) is recorded by hand (no provider, D6): receipt or refund, amount,
+  method, `received_on`, bank / receipt reference (a card-like number is 422 `card_number_not_allowed`), note,
+  optional amount that arrived in another currency (informational). **Maker-checker**: an admin who did not record it
+  verifies it (403 `maker_checker`; CHECK in the DB), with the evidence file unless cash (422 `evidence_required`;
+  `POST /booking/ops-files` kind `payment_evidence`, entity the payment, which becomes its `evidence_file_id`; bk-028
+  re-checks at verify that it is still an active file, and removing the attached evidence of a recorded payment
+  detaches it first). Only verified, non-voided payments count. Void = reason, final; a verified one needs `payment.verify`. A refund never
+  takes the net paid below 0 (409 `refund_exceeds_paid`). Same method + reference again = 409 `duplicate_reference`
+  unless `allow_duplicate_reference`.
+- **Idempotency-Key** (8–200 chars) on `POST …/invoices` (unique per case) and `POST …/payments` (unique per invoice):
+  same key + same body → the stored row (200, `replayed: true`); other body → 409 `idempotency_conflict`; missing →
+  422 `idempotency_key_required`. The staff BFF forwards the header; the UI makes one key per opening of a form.
+- **Case money track** (`app.ops.track.advance_case`, one function for both tracks): a B2C case follows its sent
+  invoice (`sent` → `invoice_sent`, `partially_paid` → `payment_pending`, `paid` → `paid`), forward on a verify, back
+  on a void / amendment, back to `supplier_confirming` / `confirmed` when the invoice is cancelled; the bk-028 guard
+  refuses any other money status. B2C reaches `pre_departure` (lifecycle job) only once paid. Travel statuses never
+  step back: a void after departure raises `invoice.balance_reopened` for staff instead (critic note 12). Lock order
+  everywhere: case → invoice → payment (the settle trigger locks the invoice first, critic B4).
+- **Case cancel / reopen** (critic B9): a staff cancel deletes a draft invoice and, for a sent one, raises
+  `invoice.case_cancelled` (refund, then cancel it); reopening is 409 `live_invoice` while an invoice is not cancelled
+  or a payment waits (the guard refuses it too).
+- Settings (policy data; Ms. Thư's answers change values by migration or run-script): `deposit_pct` (bk-005),
+  `deposit_due_days`, `balance_due_days_before_start`, `payment_due_soon_days`, `payment_overdue_reminder_days`;
+  `invoice_issuer` and `payment_instructions` are **placeholders** in the public migration, set for real by a DB
+  Migrate run-script (never in Git).
+- KPIs (`GET /booking/billing/summary`): left to pay, overdue, received this month (verified, net of refunds),
+  waiting for verification, per currency plus a USD total at each version's locked FX (`fx_rate_locked`, critic note
+  5: the rate the quote was sold at, ADR 0005 d5).
+
 ## Deferred work (`booking.job`, O3/O9)
 
 Booking owns its job table `booking.job` (same shape and semantics as CIS `shared.job`, ADR 0003 / 0003a), so
@@ -632,7 +693,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
 | `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). |
-| `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Staff notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). Payment (S3) and supplier bill (S4) reminders join it later. Never writes money. Not deploy-gate exempt. |
+| `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). S3 (bk-028): `payment.due_soon` (a schedule row of a sent invoice due within `payment_due_soon_days`) and `invoice.overdue` (past due, at the steps of `payment_overdue_reminder_days` [1, 7], the highest step reached), each one staff row (the case's sales owner, else the shared queue) + one customer My Trips row (no e-mail); read in the ops time zone. Supplier bill reminders (S4) join it later. Never writes money. Not deploy-gate exempt. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
@@ -1021,13 +1082,37 @@ settings `trip_check_reminder_days` (3), `emergency_contact_keep_days` (90). Tag
 pii:emergency_contact + name, `emergency_contact_phone` pii:emergency_contact + contact, `note`, `title`
 pii:free_text). In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-027 before the code deploys.
 
+### `bk-028` (AA-682 S3 invoices and payments — needs `bk-003`, `bk-005`, `bk-026`, `bk-027`)
+
+`invoices` (INV- code, proforma, one live per B2C case, bill-to snapshot at send, `idempotency_key` + `request_sha256`
+unique per case, soft delete of a draft; `booking`: SELECT, INSERT, column UPDATEs, never DELETE) + `invoices_guard`
+(empty draft of a B2C case on its approved priced version in its currency; fixed facts; total = Σ lines; send needs
+the version line and a schedule adding up; money states equal the verified payments; cancel only with net 0) + edges
+in `ops_transitions`; `invoice_items` (version total locked, adjustments with a reason; after send append only;
+`booking` may DELETE draft rows, the guard refuses the rest); `payment_schedule` (seq 1–10, kind, amount, due; covered
+rows frozen after send); the amendment window `invoices.amending` (after send, lines and schedule rows change only
+while it is true; `invoices_guard` checks Σ schedule = total immediately whenever a sent invoice is written with it
+false: at send, when the window closes, on every settle; no verify / void / cancel while it is true; no deferred
+constraint trigger, which the AA-CIS-Infra X1 lint refuses under the owner-role switch); `payments` (PMT-
+code, receipt / refund, method, `received_on`, reference, evidence, maker-checker CHECK, void final, Idempotency-Key
+unique per invoice; `booking`: SELECT, INSERT, column UPDATEs) + `payments_guard` + `payments_settle`;
+`invoice_net_paid` / `invoice_money_state` / `invoice_settle` (locks the invoice first); views
+`v_payment_schedule_status` (waterfall, scheduled / due / overdue / paid) and `v_invoice_balance`; the money edges of
+`trip_case_status_transitions`; replaced `trip_cases_post_sale_guard` (money statuses equal the invoice, never B2B; B2C
+pre_departure only once paid; reopen refused while an invoice / payment is live), `ops_files_guard` (payment
+evidence) and `v_trip_check_board` (`payment_verified`); settings above. Tags in the file (`bill_to_name` pii:name,
+`bill_to_email` pii:contact, `bill_to_address` pii:address, `reference` pii:payment, notes / terms / reasons
+pii:free_text). In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-028 before the code deploys.
+
 Waiting for decisions: `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
-operations S3–S5 (invoices / payments, supplier bills, My Payments: AA-682).
+operations S4–S5 (supplier bills, My Payments: AA-682).
 
 ## Out of scope today
 
-Money statuses (`invoice_sent`, `payment_pending`, `paid`: AA-682 S3, bk-028), **customer e-mail** (proposal send writes a customer notification row only and says so; the
+A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice (proforma only, D7),
+agency settlement (B2B cases have no customer invoice, CRM O-10), the customer My Payments routes (AA-682 S5),
+**customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix
 and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft

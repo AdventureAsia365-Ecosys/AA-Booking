@@ -43,6 +43,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     # bk-025 (AA-992 data coverage views) is read by CIS only.
     "bk-026",  # AA-682 S1: supplier_bookings, ops_files, ops_transitions, post-sale edges + guard, supply state view
     "bk-027",  # AA-682 S2: trip_case_checks + seeding trigger, v_trip_check_board, notifications_reminder_uq
+    "bk-028",  # AA-682 S3: invoices, invoice_items, payment_schedule, payments, money guards, balance views
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

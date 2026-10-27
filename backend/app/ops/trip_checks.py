@@ -162,12 +162,12 @@ def derived_checks(board: dict[str, Any] | None) -> list[dict[str, Any]]:
         },
         {
             "code": "payment_verified",
-            "title": "Payment verified",
+            "title": "Paid in full (verified payments)",
             "status": None
             if board is None or board["payment_verified"] is None
             else ("done" if board["payment_verified"] else "open"),
             "detail": None,
-            # Invoices and payments arrive with bk-028 (AA-682 S3): until then the board says NULL.
+            # bk-028 (AA-682 S3): the B2C invoice is paid by verified payments; NULL on B2B (no customer invoice).
             "available": board is not None and board["payment_verified"] is not None,
         },
     ]

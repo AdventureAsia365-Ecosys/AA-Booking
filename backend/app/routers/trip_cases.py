@@ -238,9 +238,12 @@ async def trip_case_summary(staff: CanRead, pool: Pool) -> dict[str, Any]:
 
 
 @router.get("/trip-cases/{case_ref}")
-async def get_trip_case(case_ref: CaseRef, _: CanRead, pool: Pool) -> dict[str, Any]:
+async def get_trip_case(case_ref: CaseRef, staff: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await service.get_case(conn, case_ref)
+        case = await service.get_case(conn, case_ref)
+    if not staff.can("billing.read"):
+        case["money"] = None  # AA-682 S3: customer money is billing data (contracting, preview sessions)
+    return case
 
 
 @router.get("/trip-cases/{case_ref}/activity")

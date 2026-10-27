@@ -11,9 +11,10 @@ declined one can be replaced by a booking with another supplier, critic B3).
 **Supply state** (``booking.v_trip_case_supply_state``): ``none`` (nothing to book), ``confirming`` or ``booked`` —
 the computed **"Confirmed & Booked"** badge (design D1); never a case status.
 
-**Case auto-advance** (design D2, :func:`advance_case`): the first supplier booking requested moves a ``confirmed``
-case to ``supplier_confirming``; a ``supplier_confirming`` case with no live booking left goes back to ``confirmed``.
-System moves (empty actor, a status note naming the cause), checked again by the bk-026 guard. Staff never pick these
+**Case auto-advance** (design D2, :func:`advance_case` = :func:`app.ops.track.advance_case`): the first supplier
+booking requested moves a ``confirmed`` case to ``supplier_confirming``; a ``supplier_confirming`` case with no live
+booking left goes back to ``confirmed``; a B2C case with a sent invoice follows its invoice instead (bk-028). System
+moves (empty actor, a status note naming the cause), checked again by the bk-026 / bk-028 guard. Staff never pick these
 statuses (``app.trip_cases.service.change_status``: 409 ``status_system_managed``).
 
 **B2B tie-in, one action both ways** (design D13, memo seams 4, 8, 10). Generating for a B2B case links each item held
@@ -51,6 +52,7 @@ from app.b2b import desk
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import files as ops_files
+from app.ops import track
 from app.supply import rates as supply_rates
 
 log = logging.getLogger(__name__)
@@ -279,44 +281,9 @@ def _ensure_open(case: Any) -> None:
 
 
 async def advance_case(conn: asyncpg.Connection, case: Any, *, cause: str) -> str | None:
-    """Move a locked case along the supply track when the facts say so; returns the new status or None.
-
-    confirmed → supplier_confirming once a booking is requested or confirmed; supplier_confirming → confirmed when no
-    live booking is left. A system move: empty ``booking.actor``, the cause in the status note and the audit row."""
-    counts = await conn.fetchrow(
-        "SELECT count(*) FILTER (WHERE status IN ('pending', 'requested', 'confirmed')) AS live,"
-        " count(*) FILTER (WHERE status IN ('requested', 'confirmed')) AS asked"
-        " FROM booking.supplier_bookings WHERE trip_case_id = $1::uuid",
-        case["id"],
-    )
-    status = await conn.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", case["id"])
-    target = None
-    if status == "confirmed" and counts["asked"] > 0:
-        target = "supplier_confirming"
-    elif status == "supplier_confirming" and counts["live"] == 0:
-        target = "confirmed"
-    if target is None:
-        return None
-    note = f"Auto: {cause}"[:500]
-    await conn.execute(
-        "SELECT set_config('booking.actor', '', true), set_config('booking.status_note', $1, true)", note
-    )
-    await conn.execute("UPDATE booking.trip_cases SET status = $2 WHERE id = $1::uuid", case["id"], target)
-    await conn.execute("SELECT set_config('booking.status_note', '', true)")
-    await audit.record(
-        conn,
-        actor_type="system",
-        actor_ref="aa682:advance_case",
-        action="trip_case.status_changed",
-        entity_type="trip_case",
-        entity_id=case["id"],
-        before={"status": status},
-        after={"status": target, "cause": cause[:200]},
-        entity_label=case["code"],
-        summary=f"{status} -> {target} (automatic: {cause})"[:500],
-    )
-    log.info("trip_case_auto_advanced case=%s %s->%s", case["code"], status, target)
-    return target
+    """Move a locked case along the supply track (and, bk-028, the money track) when the facts say so; returns the new
+    status or None. One function for both tracks: :func:`app.ops.track.advance_case`."""
+    return await track.advance_case(conn, case, cause=cause)
 
 
 # ── Reads ────────────────────────────────────────────────────────────────────

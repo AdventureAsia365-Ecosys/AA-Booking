@@ -38,7 +38,14 @@ run); each case in a savepoint, so one refusal never undoes another case's move.
 - ``trip_check.due``: an open check of an open sold case due within ``trip_check_reminder_days`` (or overdue), to its
   assignee (or the shared queue); key ``…:<check>:<due date>`` so a new due date reminds again.
 
-The payment (S3) and supplier bill (S4) reminders join this kind later. No job here ever writes money.
+- ``payment.due_soon`` (S3, bk-028): a schedule row of a sent invoice due within ``payment_due_soon_days`` and not
+  covered by verified payments, to the case's sales owner (or the shared queue) **and** a customer feed row (My Trips;
+  no e-mail, design D15); key ``…:<row>:<due date>``;
+- ``invoice.overdue`` (S3): such a row past its due date, at the steps of ``payment_overdue_reminder_days`` ([1, 7]),
+  the highest step reached only, staff + customer rows; key ``…:<row>:<due date>:d<step>``.
+
+The schedule state is read in the ops time zone (the transaction's ``TimeZone``). Supplier bill reminders (S4) join this
+kind later. No job here ever writes money (design §9): reminders only.
 """
 
 from __future__ import annotations
@@ -75,6 +82,9 @@ MAX_LISTED = 50
 GATE_TYPE = "trip_case.gate_blocked"
 WAITING_TYPE = "supplier_booking.waiting"
 CHECK_DUE_TYPE = "trip_check.due"
+DUE_SOON_TYPE = "payment.due_soon"
+OVERDUE_TYPE = "invoice.overdue"
+DEFAULT_OVERDUE_STEPS = (1, 7)
 DEFAULT_TZ = "Asia/Ho_Chi_Minh"
 TZ_SETTING = "b2b_ops_timezone"
 DEFAULTS = {
@@ -543,11 +553,106 @@ SELECT k.id::text AS id, k.code, k.title, k.due_date, k.assignee_ref, (st.active
  ORDER BY k.due_date, k.id
  LIMIT $3
 """
+PAYMENTS_DUE_SQL = """
+SELECT s.schedule_id::text AS id, s.seq, s.kind, s.remaining_amount, s.due_date, s.state, s.days_overdue,
+       i.id::text AS invoice_id, i.invoice_number, i.currency, i.customer_id::text AS customer_id,
+       tc.id::text AS case_id, tc.code AS case_code,
+       (SELECT a.staff_user_id FROM booking.staff_assignments a
+          JOIN booking.staff_users su ON su.cis_user_id = a.staff_user_id
+         WHERE a.trip_case_id = tc.id AND a.role = 'sales' AND a.unassigned_at IS NULL AND su.active
+         ORDER BY a.assigned_at DESC LIMIT 1) AS owner
+  FROM booking.v_payment_schedule_status s
+  JOIN booking.invoices i ON i.id = s.invoice_id
+  JOIN booking.trip_cases tc ON tc.id = i.trip_case_id
+ WHERE s.state IN ('due', 'overdue') AND i.deleted_at IS NULL AND i.status IN ('sent', 'partially_paid', 'paid')
+   AND i.customer_id IS NOT NULL AND tc.deleted_at IS NULL AND tc.status <> 'cancelled'
+ ORDER BY s.due_date, s.seq
+ LIMIT $1
+"""
 CHECK_LABEL = {
     "pre_trip_recheck": "Re-check bookings",
     "emergency_contact": "Emergency contact",
     "insurance": "Insurance",
 }
+
+
+def overdue_step(days_overdue: int | None, steps: tuple[int, ...]) -> int | None:
+    """The highest reminder step an overdue row has reached (None before the first)."""
+    if days_overdue is None:
+        return None
+    reached = [s for s in steps if days_overdue >= s]
+    return max(reached) if reached else None
+
+
+def overdue_steps(raw: Any) -> tuple[int, ...]:
+    """``payment_overdue_reminder_days``: a list of 1..365 day counts; the default [1, 7] on a bad value."""
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        value = None
+    if (
+        isinstance(value, list)
+        and value
+        and all(isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365 for v in value)
+    ):
+        return tuple(sorted(set(value)))
+    return DEFAULT_OVERDUE_STEPS
+
+
+async def _payment_reminders(conn: asyncpg.Connection, limit: int) -> dict[str, int]:
+    """S3: due-soon and overdue schedule rows -> one staff and one customer row each (deduped by reminder key)."""
+    steps = overdue_steps(
+        await conn.fetchval("SELECT value FROM booking.settings WHERE key = 'payment_overdue_reminder_days'")
+    )
+    rows = await conn.fetch(PAYMENTS_DUE_SQL, limit)
+    counts = {"payments_due_soon": 0, "payments_overdue": 0, "payments_notified": 0, "customer_rows": 0}
+    for r in rows:
+        amount = f"{r['remaining_amount']} {r['currency'].strip()}"
+        when = r["due_date"].isoformat()
+        if r["state"] == "due":
+            counts["payments_due_soon"] += 1
+            kind, key = DUE_SOON_TYPE, f"{DUE_SOON_TYPE}:{r['id']}:{when}"
+            staff_title = f"{r['case_code']}: {amount} due {when} on {r['invoice_number']}"
+            customer_title = f"Payment due {when}"
+            customer_message = f"{amount} is due on {when} for payment request {r['invoice_number']}."
+        else:
+            step = overdue_step(r["days_overdue"], steps)
+            if step is None:
+                continue
+            counts["payments_overdue"] += 1
+            kind, key = OVERDUE_TYPE, f"{OVERDUE_TYPE}:{r['id']}:{when}:d{step}"
+            staff_title = f"{r['case_code']}: {amount} overdue since {when} on {r['invoice_number']}"
+            customer_title = "Payment overdue"
+            customer_message = (
+                f"{amount} for payment request {r['invoice_number']} was due on {when}. Please contact your trip"
+                " consultant if it is already on its way."
+            )
+        data = {"invoice_number": r["invoice_number"], "case_code": r["case_code"], "seq": r["seq"], "due_date": when}
+        if await notifications.notify_staff_once(
+            conn,
+            type=kind,
+            title=staff_title[:200],
+            message="Remind the customer or record the payment on the invoice.",
+            entity_type="invoice",
+            entity_id=r["invoice_id"],
+            reminder_key=key,
+            data={**data, "case_id": r["case_id"]},
+            recipient_ref=r["owner"],
+        ):
+            counts["payments_notified"] += 1
+        if await notifications.notify_customer_once(
+            conn,
+            customer_id=r["customer_id"],
+            type=kind,
+            title=customer_title,
+            message=customer_message,
+            entity_type="invoice",
+            entity_id=r["invoice_id"],
+            reminder_key=key,
+            data=data,
+        ):
+            counts["customer_rows"] += 1
+    return counts
 
 
 async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit: int = 1000) -> dict[str, Any]:
@@ -558,6 +663,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
             today = await ops_today(conn, tz)
     waiting = due = 0
     async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT set_config('TimeZone', $1, true)", tz)
         rows = await conn.fetch(WAITING_SQL, rules["supplier_answer_days"], limit)
         for r in rows:
             asked = r["requested_at"].astimezone(UTC)
@@ -591,6 +697,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
                 recipient_ref=k["assignee_ref"] if k["assignee_active"] else None,
             ):
                 due += 1
+        payments = await _payment_reminders(conn, limit)
     return {
         "today": today.isoformat(),
         "timezone": tz,
@@ -598,6 +705,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
         "supplier_waiting_notified": waiting,
         "checks_due": len(checks),
         "checks_due_notified": due,
+        **payments,
     }
 
 
@@ -605,7 +713,11 @@ async def handle_reminders(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
     result = await run_reminders(pool)
     result["trigger"] = (job.payload or {}).get("trigger", "manual")
     log.info(
-        "ops_reminders waiting=%s checks_due=%s", result["supplier_waiting_notified"], result["checks_due_notified"]
+        "ops_reminders waiting=%s checks_due=%s payments=%s customer_rows=%s",
+        result["supplier_waiting_notified"],
+        result["checks_due_notified"],
+        result["payments_notified"],
+        result["customer_rows"],
     )
     return result
 

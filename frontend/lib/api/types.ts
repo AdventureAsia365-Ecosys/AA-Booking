@@ -235,6 +235,17 @@ export interface TripCaseDetail extends Omit<TripCaseListItem, "latest_version">
   allowed_transitions: TripCaseStatus[];
   /** AA-682 S1 (bk-026): the supply track; state `booked` = the "Confirmed & Booked" badge. */
   supply?: import("./supplierBookings").SupplyState;
+  /** AA-682 S3: the live invoice (null without one, or without billing.read). */
+  money?: {
+    invoice_number: string;
+    status: string;
+    currency: string;
+    total_amount: DecimalString;
+    net_paid: DecimalString;
+    balance: DecimalString | null;
+    overdue_amount: DecimalString;
+    unverified_count: number;
+  } | null;
   /** AA-986 L5: tours this case uses that AA no longer serves (kept; staff decide what to do). */
   tour_alerts?: TourAlert[];
 }

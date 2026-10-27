@@ -1,7 +1,7 @@
 "use client";
 // app/(staff)/cases/[code]/ChecksTab.tsx
 // AA-682 S2 (bk-027, S252 design §6) — the Checks tab of the case workspace: the derived checks (every supplier booking
-// confirmed, from the Suppliers tab; payment verified, from invoices in a later release) and the stored checks (three
+// confirmed, from the Suppliers tab; paid in full, from the Billing tab: verified payments only) and the stored checks (three
 // standard ones added when the trip was confirmed, plus custom ones). A row opens the check drawer; "Add check" adds a
 // custom one. GET /booking/trip-cases/{ref}/checks (ops.read); writes need ops.write and an open trip.
 
@@ -163,7 +163,21 @@ function DerivedRow({ d, code }: { d: DerivedCheck; code: string }) {
         </>
       );
   } else {
-    detail = d.available ? (d.status === "done" ? "Payment received and verified." : "Payment not verified yet.") : "Shown once invoices and payments are recorded in Booking.";
+    detail = d.available ? (
+      d.status === "done" ? (
+        "Paid in full: every payment verified."
+      ) : (
+        <>
+          Not paid in full yet:{" "}
+          <Link href={`/cases/${encodeURIComponent(code)}?tab=billing`} className="font-medium text-accent-deep hover:underline">
+            Billing tab
+          </Link>
+          .
+        </>
+      )
+    ) : (
+      "A B2B trip has no customer invoice: the agency settles outside Booking."
+    );
   }
   return (
     <li className="flex items-start gap-3 rounded-md border border-line px-3 py-2.5">

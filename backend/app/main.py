@@ -54,6 +54,7 @@ from app.routers import (
     b2b,
     b2b_desk,
     b2b_partners,
+    billing,
     catalog,
     customers,
     docs,
@@ -187,6 +188,7 @@ def create_app(
     app.include_router(b2b_desk.router)
     app.include_router(supplier_bookings.router)
     app.include_router(trip_checks.router)
+    app.include_router(billing.router)
     return app
 
 
