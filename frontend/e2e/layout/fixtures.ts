@@ -53,6 +53,8 @@ import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../l
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
 import type { BillingSummary, InvoiceStatus, InvoiceSummary, Kpi, Page as BillingPage, Payment } from "../../lib/api/billing";
+import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
+import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
 import staffMeJson from "./staff-me.json";
 
 /** The browser clock during the check (layout.spec.ts freezes it with page.clock.setFixedTime): the run gives the same
@@ -916,6 +918,56 @@ const BILLING_SUMMARY: BillingSummary = {
 };
 const billingPage = <T,>(items: T[], total: number): BillingPage<T> => ({ items, total, limit: ROWS, offset: 0 });
 
+// ── Trip checks (AA-996 audit slice 1: the list must fit 1440 px with its Status column in view) ─────────────────────
+// Worst case for width: long custom check titles, long customer names, a B2B row, overdue and done checks, owners with
+// long names and owners without a name.
+const CHECK_CODES = ["pre_trip_recheck", "emergency_contact", "insurance", "custom"] as const;
+function tripCheck(i: number): TripCheck {
+  const code = CHECK_CODES[i % 4];
+  const b2b = i % 7 === 3;
+  return {
+    id: uuid("e", i),
+    code,
+    title: code === "custom" ? "Confirm the private boat transfer and the river-side picnic permit with the harbour office" : "",
+    status: i % 5 === 4 ? "done" : "open",
+    due_date: i % 6 === 5 ? null : "2026-09-28",
+    assignee_ref: i % 3 === 0 ? null : `u-${pad(i % 4, 3)}`,
+    assignee: i % 3 === 0 ? null : { id: `u-${pad(i % 4, 3)}`, name: i % 8 === 7 ? null : `${PERSON_NAMES[i % 4]} ${i}` },
+    done_by: null,
+    done_at: null,
+    note: null,
+    emergency_contact_name: null,
+    emergency_contact_phone: null,
+    cleared_at: null,
+    created_by: null,
+    created_at: EARLIER,
+    updated_at: NOW,
+    standard: code !== "custom",
+    contact_allowed: !b2b,
+    trip_case: {
+      id: uuid("8", i),
+      code: `TC-${pad(i + 1)}`,
+      status: "supplier_confirming",
+      channel: b2b ? "b2b" : "b2c",
+      start_date: "2026-09-28",
+      end_date: "2026-10-17",
+      customer_name: b2b ? null : `Alexandra Catherine Montgomery-Whitfield ${i}`,
+    },
+  };
+}
+const LIFECYCLE_RUNS: LifecycleRun[] = range(3).map((i) => ({
+  id: uuid("f", i),
+  kind: i % 2 ? "bk_ops_reminders" : "bk_case_lifecycle",
+  status: "succeeded",
+  created_by: null,
+  created_at: EARLIER,
+  started_at: EARLIER,
+  finished_at: EARLIER,
+  attempt: 1,
+  result: i % 2 ? { checks_due_notified: 4, supplier_waiting_notified: 2, payments_notified: 1 } : { mode: "live", moves: { pre_departure: 2 }, blocked: 0 },
+  error: null,
+}));
+
 export type FixtureAnswer = { status: number; body: unknown };
 
 const ok = (body: unknown): FixtureAnswer => ({ status: 200, body });
@@ -1000,6 +1052,9 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (at(0) === "catalog" && at(1) === "geo" && at(2) === "countries" && seg.length === 4) return ok(countryDetail(at(3)));
 
   if (p === "billing/summary") return ok(BILLING_SUMMARY);
+  if (p === "trip-checks") return ok({ items: range(ROWS).map(tripCheck), total: 73, limit: ROWS, offset: 0 } satisfies TripCheckPage);
+  if (p === "case-lifecycle/runs") return ok({ items: LIFECYCLE_RUNS, scheduled_mode: "live", schedule_utc_hour: 1 });
+  if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
   if (p === "invoices") return ok(billingPage(range(ROWS).map(invoice), 31));
   if (p === "payments") return ok(billingPage(range(ROWS).map(payment), 58));
 

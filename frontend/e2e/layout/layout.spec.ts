@@ -47,8 +47,9 @@ type PageCase = {
 };
 
 // Every route under app/(staff) whose view renders a kit DataTable (grep DataTable app/(staff)), with the tab or
-// drawer that holds the table. Pages without a table (billing, trip checks, notifications, settings, calculator, forms)
-// are out of scope; the Countries card grid (AA-996) is measured with `noTable`.
+// drawer that holds the table. Pages without a table (notifications, settings, calculator, forms) are out of scope; the
+// Countries card grid (AA-996) is measured with `noTable`. AA-996 audit slice 1 added the billing tabs and Trip checks
+// (the Figma audit found the Trip checks Status column cut at 1440 px).
 const PAGES: PageCase[] = [
   { name: "dashboard", path: "/", phoneReady: "text=TC-000001" },
   { name: "cases", path: "/cases" },
@@ -74,6 +75,9 @@ const PAGES: PageCase[] = [
   { name: "service-rates", path: "/services/SVC-000001?tab=rates" },
   { name: "pricing-rules", path: "/pricing/rules" },
   { name: "pricing-fx", path: "/pricing/rules?tab=fx", fx: true },
+  { name: "billing-invoices", path: "/billing" },
+  { name: "billing-payments", path: "/billing?tab=payments" },
+  { name: "trip-checks", path: "/trip-checks" },
   { name: "b2b-desk-on-request", path: "/b2b-desk" },
   { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },
   { name: "staff", path: "/staff" },
@@ -473,16 +477,18 @@ for (const { width, scheme } of COMPACT_PASSES) {
 
 test.describe("compact 960: the folded columns open in the row's details drawer", () => {
   test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
-  test("billing invoices: Issued, Total and Paid are in the details drawer", async ({ page, baseURL }) => {
+  // AA-996 audit slice 1: the amount paid is a line under the total (column "Total / paid"), so it folds with it.
+  test("billing invoices: Issued and Total / paid are in the details drawer", async ({ page, baseURL }) => {
     const c = await prepare(page, baseURL!);
     await open(page, { name: "billing-invoices", path: "/billing" }, c);
     const heads = await page.locator("main table thead th").allInnerTexts();
-    for (const folded of ["ISSUED", "TOTAL", "PAID"]) expect(heads.map((h) => h.trim().toUpperCase()), `${folded} left the table`).not.toContain(folded);
+    for (const folded of ["ISSUED", "TOTAL / PAID"]) expect(heads.map((h) => h.trim().toUpperCase()), `${folded} left the table`).not.toContain(folded);
     await page.locator('[data-testid="bk-dt-details"]').first().click();
     const drawer = page.locator('[data-testid="bk-dt-details-drawer"]');
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText("INV-000001");
-    for (const label of ["Issued", "Total", "Paid"]) await expect(drawer.locator("dt", { hasText: new RegExp(`^${label}$`, "i") })).toHaveCount(1);
+    for (const label of ["Issued", "Total / paid"]) await expect(drawer.locator("dt", { hasText: new RegExp(`^${label}$`, "i") })).toHaveCount(1);
+    await expect(drawer, "the amount paid shows under the total").toContainText("paid");
     await page.waitForTimeout(300); // the kit drawer slides in (0.18 s): shoot it settled
     await page.screenshot({ path: path.join(OUT, "billing-invoices-details-960-light.png") });
     // Opening the details does not follow the row link (the button stops the row click).
@@ -549,6 +555,148 @@ test.describe("compact 960: the details drawer and the sidebar key", () => {
     // Control: the key still works from 1200 px.
     await page.keyboard.press("[");
     await expect.poll(() => sidebarWidth(page)).toBe(68);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+});
+
+// AA-996 audit slice 1 (Figma visual audit, deviations 4, 5, 8, 9, 10): the shared list pieces.
+//   - Filters and the table tools (Columns, CSV) share ONE row at 1440 px, and every filter bar has "Reset filters".
+//   - Export CSV on every list (the Countries grid has it in the filter bar's tools slot).
+//   - Dates: no browser date input shows its locale text; the en-GB DateField reads day-first input.
+//   - Billing invoices: codes and dates never wrap mid-value.
+type ListCase = { name: string; path: string; filters: boolean };
+const LIST_PAGES: ListCase[] = [
+  { name: "cases", path: "/cases", filters: true },
+  { name: "customers", path: "/customers", filters: true },
+  { name: "proposals", path: "/proposals", filters: true },
+  { name: "case-proposals", path: "/cases/TC-000001?tab=proposals", filters: false },
+  { name: "trip-plans", path: "/catalog/trip-plans", filters: true },
+  { name: "destinations", path: "/catalog/destinations", filters: true },
+  { name: "suppliers", path: "/suppliers", filters: true },
+  { name: "hotels", path: "/hotels", filters: true },
+  { name: "services", path: "/services", filters: true },
+  { name: "billing-invoices", path: "/billing", filters: true },
+  { name: "billing-payments", path: "/billing?tab=payments", filters: true },
+  { name: "trip-checks", path: "/trip-checks", filters: true },
+  { name: "staff", path: "/staff", filters: true },
+];
+
+/** The Figma shape of the list toolbar (ui/booking/FilterBar.tsx): row 1 = search box + table tools (Columns, CSV),
+ *  row 2 = every filter + "Reset filters". Vertical centres of each part, to check each row is one line. */
+async function toolbarRows(page: Page) {
+  return page.evaluate(() => {
+    const bar = document.querySelector('main [data-testid="bk-filterbar"]');
+    const toolbar = bar?.closest(".bk-dt-filters")?.parentElement ?? null;
+    const box = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return { text: (el.textContent ?? "").trim().slice(0, 20) || el.tagName, mid: Math.round(r.top + r.height / 2), top: Math.round(r.top) };
+    };
+    const search = bar?.querySelector(':scope > [data-bk-filter-row="1"]');
+    const tools = toolbar ? Array.from(toolbar.querySelectorAll(":scope > div:not(.bk-dt-filters) > button, :scope > button")).map(box) : [];
+    const row2 = bar?.querySelector(':scope > [data-bk-filter-row="2"]');
+    return {
+      inToolbar: !!toolbar,
+      row1: [...(search ? [box(search)] : []), ...tools],
+      row2: row2 ? Array.from(row2.children).map(box) : [],
+    };
+  });
+}
+
+test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV on every list", () => {
+  test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+  for (const lc of LIST_PAGES) {
+    test(`${lc.name}: ${lc.filters ? "one filter row with Reset filters and the tools, " : ""}CSV export`, async ({ page, baseURL }, testInfo) => {
+      const c = await prepare(page, baseURL!);
+      await open(page, { name: lc.name, path: lc.path }, c);
+      const csv = page.locator("main").getByRole("button", { name: "CSV", exact: true }).first();
+      await expect(csv, "the list has an Export CSV button").toBeVisible();
+      if (lc.filters) {
+        const row = await toolbarRows(page);
+        void testInfo.attach("toolbar-rows", { body: JSON.stringify(row, null, 1), contentType: "application/json" });
+        expect(row.inToolbar, "the FilterBar is in the table toolbar (DataTable `filters`)").toBe(true);
+        await expect(page.locator('main [data-testid="bk-filter-reset"]').first(), "Reset filters is on the bar").toBeVisible();
+        const spread = (xs: { mid: number }[]) => Math.max(...xs.map((x) => x.mid)) - Math.min(...xs.map((x) => x.mid));
+        expect(row.row1.length, "row 1 has the search box and the tools").toBeGreaterThanOrEqual(3);
+        expect(spread(row.row1), `search box and Columns / CSV on one line: ${JSON.stringify(row.row1)}`).toBeLessThanOrEqual(4);
+        expect(spread(row.row2), `every filter and Reset filters on one line: ${JSON.stringify(row.row2)}`).toBeLessThanOrEqual(4);
+        expect(Math.min(...row.row2.map((x) => x.top)), "the filter row is under the search row").toBeGreaterThan(Math.max(...row.row1.map((x) => x.top)));
+        fs.mkdirSync(OUT, { recursive: true });
+        await page.screenshot({ path: path.join(OUT, `slice1-toolbar-${lc.name}-1440-light.png`) });
+      }
+      const [download] = await Promise.all([page.waitForEvent("download"), csv.click()]);
+      const text = fs.readFileSync((await download.path())!, "utf8").replace(/^﻿/, "");
+      const [head, first] = text.split("\n");
+      expect(head.split(",").length, "the CSV has columns").toBeGreaterThan(2);
+      expect(first?.replace(/,/g, "").trim().length ?? 0, "the first CSV row has values").toBeGreaterThan(0);
+      expect(c.unmocked, "every Booking API call has a fixture").toEqual([]);
+      expect(c.consoleErrors, "console is clean").toEqual([]);
+    });
+  }
+
+  test("countries: CSV in the filter bar's tools slot, one row", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "countries", path: "/catalog/countries", ready: "text=Area: Indochina" }, c);
+    const bar = page.locator('main [data-testid="bk-filterbar"]');
+    const csv = bar.locator('[data-testid="bk-export-csv"]');
+    await expect(csv).toBeVisible();
+    const rows = await bar.evaluate((el) =>
+      Array.from(el.querySelectorAll(':scope > [data-bk-filter-row="1"], :scope > [data-bk-filter-row="2"] > *')).map((x) => {
+        const r = x.getBoundingClientRect();
+        return { row: x.closest('[data-bk-filter-row="2"]') ? 2 : 1, mid: Math.round(r.top + r.height / 2) };
+      }),
+    );
+    for (const n of [1, 2]) {
+      const mids = rows.filter((r) => r.row === n).map((r) => r.mid);
+      expect(Math.max(...mids) - Math.min(...mids), `row ${n} is one line`).toBeLessThanOrEqual(4);
+    }
+    const [download] = await Promise.all([page.waitForEvent("download"), csv.click()]);
+    const text = fs.readFileSync((await download.path())!, "utf8").replace(/^﻿/, "");
+    expect(text.split("\n")[0]).toBe("Country,ISO code,Status,Area,Places (CIS),Tours (CIS),Photos (CIS),Active suppliers,In Booking");
+    expect(text.split("\n").length, "one line per country card").toBeGreaterThan(1);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+
+  test("billing invoices: codes and dates never wrap mid-value", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "billing-invoices", path: "/billing" }, c);
+    const wrapped = await page.evaluate(() => {
+      const table = document.querySelector("main table");
+      if (!table) return ["no table"];
+      const heads = Array.from(table.querySelectorAll("thead th")).map((th) => (th.textContent ?? "").trim().toUpperCase());
+      const bad: string[] = [];
+      for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
+        Array.from(tr.children).forEach((td, i) => {
+          if (!["INVOICE", "TRIP CASE / CUSTOMER", "ISSUED", "NEXT DUE", "TOTAL / PAID", "LEFT TO PAY"].includes(heads[i])) return;
+          // Each code / date element is one line box: its height is one line of text.
+          for (const el of Array.from(td.querySelectorAll("a, time, .bk-tabular, td > span > span:first-child"))) {
+            const r = (el as HTMLElement).getClientRects();
+            if (r.length > 1) bad.push(`${heads[i]}: ${(el.textContent ?? "").trim()}`);
+          }
+        });
+      }
+      return bad;
+    });
+    expect(wrapped, "invoice number, trip case, dates and amounts are one line each").toEqual([]);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+
+  test("dates: the en-GB field reads day-first input and no browser date input text shows", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "cases", path: "/cases" }, c);
+    const visibleNative = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('input[type="date"], input[type="time"]')).filter((el) => getComputedStyle(el).opacity !== "0" && (el as HTMLElement).offsetWidth > 1).length,
+    );
+    expect(visibleNative, "no native date / time input is visible").toBe(0);
+    const from = page.getByRole("textbox", { name: "Created from" });
+    await expect(from).toHaveAttribute("placeholder", "From");
+    await from.fill("10/11/2026");
+    await from.press("Enter");
+    await expect.poll(() => new URL(page.url()).searchParams.get("from"), { message: "day first: 10 November" }).toBe("2026-11-10");
+    await expect(from).toHaveValue("10 Nov 2026");
+    await expect(page.locator('main [data-testid="bk-filter-reset"]').first()).toBeEnabled();
+    await page.locator('main [data-testid="bk-filter-reset"]').first().click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBeNull();
+    await expect(from).toHaveValue("");
     expect(c.consoleErrors, "console is clean").toEqual([]);
   });
 });

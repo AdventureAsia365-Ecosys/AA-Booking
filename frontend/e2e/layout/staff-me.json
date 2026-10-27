@@ -18,6 +18,7 @@
     "customer.admin",
     "customer.read",
     "customer.write",
+    "ops.read",
     "pricing.read",
     "pricing.write",
     "retention.admin",
