@@ -3,14 +3,17 @@
 Every public path is under ``/booking``: the shared ALB forwards ``/booking/*`` to this service and
 the Booking REST API proxies ``/booking/{proxy+}`` (root ADR 0004 decision 5).
 
-Staff routes (everything under ``/booking`` except ``/booking/health*`` and ``/booking/ops/*``) verify a Cognito
-WORKFORCE access token (clients booking-staff / breakglass) or, during the transition, the CIS bridge token, with the
-multi-issuer verifier (``app.auth.identity_config``, AA-680 Phase 2), and require an active ``booking.staff_users``
-row. The lifespan prefetches both issuers' JWKS in the background. The one machine
-route, ``/booking/ops/deploy-gate``, accepts only the Deploy Dev workflow's GitHub OIDC token (``app.auth.ci``).
+Staff routes (everything under ``/booking`` except ``/booking/health*``, ``/booking/ops/*``, ``/booking/b2b/v1`` and
+``/booking/customer/v1``) verify a Cognito WORKFORCE access token (clients booking-staff / breakglass) or, during the
+transition, the CIS bridge token, with the multi-issuer verifier (``app.auth.identity_config``, AA-680 Phase 2), and
+require an active ``booking.staff_users`` row. The lifespan prefetches both issuers' JWKS in the background. The one
+machine route, ``/booking/ops/deploy-gate``, accepts only the Deploy Dev workflow's GitHub OIDC token (``app.auth.ci``).
 The B2B API ``/booking/b2b/v1`` (AA-972, contract booking.b2b.v1) accepts only aa-m2m client-credentials tokens
 (``app.auth.m2m``, its own verifier; none when the M2M settings are unset, then every B2B route answers 503) and
 answers errors in the contract's Problem shape (``app.b2b.errors``).
+The customer routes ``/booking/customer/v1`` (AA-682 S5, contract booking.customer.v1: My Payments, read only) accept
+only a Cognito EXTERNAL access token of the tripplanner / booking-customer clients (``app.auth.customer``, its own
+verifier, keys prefetched in the background like the others).
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
 (``app.jobs.worker``) as one background task of this process — never from a request path — and, next to it, the
@@ -32,6 +35,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from app.auth import customer as customer_auth
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
@@ -56,6 +60,7 @@ from app.routers import (
     b2b_partners,
     billing,
     catalog,
+    customer,
     customers,
     docs,
     health,
@@ -89,12 +94,14 @@ def create_app(
     m2m_verifier: MultiIssuerVerifier | None = None,
     media_store: media.MediaStore | None = None,
     ops_store: ops_files.OpsStore | None = None,
+    customer_verifier: MultiIssuerVerifier | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
     verifier = verifier or identity_config.build_staff_verifier(settings)
     deploy_verifier = deploy_verifier or GithubDeployVerifier.default()
     m2m_verifier = m2m_verifier or m2m.build_m2m_verifier(settings)
+    customer_verifier = customer_verifier or customer_auth.build_customer_verifier(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -106,6 +113,8 @@ def create_app(
         m2m_prefetch_task = (
             identity_config.start_staff_jwks_prefetch(m2m_verifier, settings) if m2m_verifier is not None else None
         )
+        # AA-682 S5: the EXTERNAL pool's keys for the customer routes, same background prefetch.
+        customer_prefetch_task = identity_config.start_staff_jwks_prefetch(customer_verifier, settings)
         if settings.worker_enabled and db.configured:
             handlers = {
                 **intake.build_handlers(settings),
@@ -137,6 +146,7 @@ def create_app(
         stop.set()
         await identity_config.stop_staff_jwks_prefetch(prefetch_task)
         await identity_config.stop_staff_jwks_prefetch(m2m_prefetch_task)
+        await identity_config.stop_staff_jwks_prefetch(customer_prefetch_task)
         if sampler_task is not None:
             # Cancelled at once (a sample in flight is simply lost), before the pool closes.
             sampler_task.cancel()
@@ -160,6 +170,7 @@ def create_app(
     app.state.staff_verifier = verifier
     app.state.deploy_verifier = deploy_verifier
     app.state.m2m_verifier = m2m_verifier
+    app.state.customer_verifier = customer_verifier
     # AA-835: the supply-media bucket (None without SUPPLY_MEDIA_BUCKET: uploads answer 503). Tests pass a fake.
     app.state.media_store = media_store if media_store is not None else media.store_from_settings(settings)
     # AA-682 S1: the ops-docs bucket (None without OPS_DOCS_BUCKET: uploads / downloads answer 503). Tests pass a fake.
@@ -191,6 +202,7 @@ def create_app(
     app.include_router(trip_checks.router)
     app.include_router(billing.router)
     app.include_router(supplier_bills.router)
+    app.include_router(customer.router)
     return app
 
 

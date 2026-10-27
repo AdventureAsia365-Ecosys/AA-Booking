@@ -13,7 +13,7 @@ from typing import Any
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app.auth import identity_config, m2m
+from app.auth import customer, identity_config, m2m
 from app.auth.identity_verifier import MultiIssuerVerifier
 from app.settings import Settings
 
@@ -210,3 +210,73 @@ class LocalM2M:
         built = m2m.build_m2m_verifier(self.settings(), self.fetch)
         assert built is not None  # noqa: S101
         return built
+
+
+# ── Cognito EXTERNAL pool stand-in (AA-682 S5, app.auth.customer) ────────────
+
+EXTERNAL_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_TESTEXT"
+TRIPPLANNER_CLIENT = "tripplannerclient000000001"
+BOOKING_CUSTOMER_CLIENT = "bookingcustomerclient00001"
+CIS_PORTAL_CLIENT = "cisportalclient00000000001"
+TRAVELLER_SUB = "7d2e1f00-0000-4000-8000-00000000beef"
+
+
+class LocalExternal:
+    """Traveller access tokens of the EXTERNAL pool: sub = the user, client_id = the app client, token_use = access."""
+
+    def __init__(self, kid: str = "e1") -> None:
+        self.kid = kid
+        self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.fetches = 0
+        self.fail = False
+
+    def jwks(self) -> dict[str, Any]:
+        return {"keys": [_jwk(self.private_key, self.kid)]}
+
+    async def fetch(self, url: str) -> dict[str, Any]:
+        self.fetches += 1
+        if self.fail:
+            raise OSError("JWKS down")
+        if url == f"{EXTERNAL_ISSUER}/.well-known/jwks.json":
+            return self.jwks()
+        raise OSError(f"unexpected JWKS URL {url}")
+
+    def token(
+        self,
+        *,
+        sub: str = TRAVELLER_SUB,
+        client_id: str = TRIPPLANNER_CLIENT,
+        token_use: str = "access",  # noqa: S107 — a claim value, not a password
+        iss: str = EXTERNAL_ISSUER,
+        exp_in: int = 900,
+        key: Any = None,
+        **extra: Any,
+    ) -> str:
+        now = int(time.time())
+        claims: dict[str, Any] = {
+            "sub": sub,
+            "iss": iss,
+            "client_id": client_id,
+            "token_use": token_use,
+            "username": sub,
+            "iat": now,
+            "exp": now + exp_in,
+            "email": "traveller@example.test",
+            "email_verified": True,
+            **extra,
+        }
+        return jwt.encode(claims, key or self.private_key, algorithm="RS256", headers={"kid": self.kid})
+
+    def settings(self, **overrides: Any) -> Settings:
+        values: dict[str, Any] = {
+            "database_url": None,
+            "environment": "test",
+            "cognito_external_issuer": EXTERNAL_ISSUER,
+            "cognito_tripplanner_client_id": TRIPPLANNER_CLIENT,
+            "cognito_booking_customer_client_id": BOOKING_CUSTOMER_CLIENT,
+            **overrides,
+        }
+        return Settings(**values)
+
+    def verifier(self) -> MultiIssuerVerifier:
+        return customer.build_customer_verifier(self.settings(), self.fetch)

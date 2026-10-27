@@ -38,7 +38,8 @@ Commit the result in the same PR. The script needs no database, network or secre
 | Breaking change | `API contract` / `OpenAPI breaking changes` (`.github/workflows/api-contract.yml`) | oasdiff finds an error-level change on a **public** path between the base branch's file and the PR's file |
 
 **Public paths** are the ones a client outside this repo calls: `/booking/b2b/v1/*` (AA-Partner, contract
-`booking.b2b.v1`), `/booking/health*` (ALB, deploy smoke test) and `/booking/ops/*` (the Deploy Dev workflow). Staff
+`booking.b2b.v1`), `/booking/customer/v1/*` (the TripPlanner BFF, contract `booking.customer.v1`, AA-682 S5),
+`/booking/health*` (ALB, deploy smoke test) and `/booking/ops/*` (the Deploy Dev workflow). Staff
 routes are called only by this repo's staff admin (`frontend/`), which changes in the same PR: their breaking changes
 are listed as warnings and in the job summary, never failing. Every change, breaking or not, is listed in the job
 summary (oasdiff changelog).
@@ -74,7 +75,7 @@ Each GitHub release carries `aa-booking-openapi-vX.Y.Z.json`: the document of th
 
 ```bash
 git show origin/main:docs/api/openapi.json > /tmp/base-openapi.json
-BASE_SPEC=/tmp/base-openapi.json HEAD_SPEC=docs/api/openapi.json PUBLIC_PATHS='^/booking/(b2b/|health|ops/)' SEVERITY_LEVELS=.github/oasdiff/severity-levels.txt bash .github/scripts/openapi_breaking.sh
+BASE_SPEC=/tmp/base-openapi.json HEAD_SPEC=docs/api/openapi.json PUBLIC_PATHS='^/booking/(b2b/|customer/|health|ops/)' SEVERITY_LEVELS=.github/oasdiff/severity-levels.txt bash .github/scripts/openapi_breaking.sh
 ```
 
 It needs `oasdiff` on the PATH (the version and checksum the workflow pins).

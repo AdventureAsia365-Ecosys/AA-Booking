@@ -46,6 +46,12 @@ DEV_BOOKING_STAFF_CLIENT_ID = "5ifl9dgkr8a5outnmsjc8v1kt3"
 # ``customer.identity`` only from this issuer (root ADR 0006: each route class pins its issuer). Public, like the line
 # above it.
 DEV_EXTERNAL_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_nKOvHan0W"  # docs-lint: ignore
+# AA-682 S5: the two public EXTERNAL clients whose access tokens the customer routes (/booking/customer/v1, app.auth.
+# customer) accept: aa-external-dev-tripplanner (the TripPlanner BFF forwards the traveller's token) and
+# aa-external-dev-booking-customer (root ADR 0006 client table). Public values (AA-CIS-Infra output
+# identity_external_client_ids; TripPlanner pins the first one too).
+DEV_TRIPPLANNER_CLIENT_ID = "2fqmuij0lf47qpf1phjfcgseds"
+DEV_BOOKING_CUSTOMER_CLIENT_ID = "52nhgjvest60ont12fo2lr2vc8"
 DEV_BREAKGLASS_CLIENT_ID = "2g3f3ncfuqdiuu1o5b70o4h0lq"
 # AA-911 D-1: the Preview-only booking-staff-preview client (AA-CIS-Infra identity.tf). Empty until the Infra apply
 # creates it; then the id is filled in here. Empty = no preview client accepted (fail closed).

@@ -18,7 +18,7 @@ export = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export)
 
 # Same rule as PUBLIC_PATHS in .github/workflows/api-contract.yml.
-PUBLIC_PATHS = re.compile(r"^/booking/(b2b/|health|ops/)")
+PUBLIC_PATHS = re.compile(r"^/booking/(b2b/|customer/|health|ops/)")
 
 
 def test_committed_document_is_current() -> None:

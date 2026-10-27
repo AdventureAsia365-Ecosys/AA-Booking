@@ -3,7 +3,8 @@ name: API contract
 # The document itself is kept current by the "Unit Tests" check (tests/unit/test_openapi_export.py fails when it is
 # stale), so this job needs no Python install: it reads two committed files and runs oasdiff (pinned, checksum).
 #
-# Public paths (clients outside this repo: AA-Partner on /booking/b2b/v1, the ALB and the deploy smoke test on
+# Public paths (clients outside this repo: AA-Partner on /booking/b2b/v1, the TripPlanner BFF on /booking/customer/v1
+# (AA-682 S5), the ALB and the deploy smoke test on
 # /booking/health*, the Deploy Dev workflow on /booking/ops/*) fail the check on a breaking change. Staff routes
 # (only this repo's staff admin calls them) are listed as warnings. Escape hatch: the PR label "api-breaking" or a
 # conventional breaking title ("feat!: ..."), see docs/api/README.md. Labelling re-runs this job by itself.
@@ -54,7 +55,7 @@ jobs:
           OASDIFF: ${{ runner.temp }}/bin/oasdiff
           BASE_SPEC: ${{ runner.temp }}/base-openapi.json
           HEAD_SPEC: docs/api/openapi.json
-          PUBLIC_PATHS: "^/booking/(b2b/|health|ops/)"
+          PUBLIC_PATHS: "^/booking/(b2b/|customer/|health|ops/)"
           SEVERITY_LEVELS: .github/oasdiff/severity-levels.txt
           ALLOW_BREAKING: >-
             ${{ contains(github.event.pull_request.labels.*.name, 'api-breaking')
