@@ -8,3 +8,5 @@ next-env.d.ts
 
 # AA-910 layout check output (screenshots, measurements, traces)
 /e2e/layout/results/
+# AA-993 V5 public smoke output (screenshot, traces)
+/e2e/smoke-public/results/
