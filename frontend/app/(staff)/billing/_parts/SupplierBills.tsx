@@ -74,11 +74,14 @@ export function SupplierBillsList({
     overdue: get("bill_due") === "overdue" ? true : undefined,
     q: get("q") || undefined,
     supplier_id: supplier?.id,
+    // ?case=TC-… (from a case's Cost vs billed panel): the bills of that case, or with a line of it.
+    case: get("case") || undefined,
     limit: paging.limit,
     offset: paging.offset,
   };
   const list = useQuery({ queryKey: ["supplier-bills", "list", query], queryFn: () => supplierBillsApi.list(query), enabled: canRead });
   const openBill = get("bill");
+  const caseFilter = get("case");
 
   const columns: ColumnDef<SupplierBill, unknown>[] = [
     {
@@ -151,8 +154,19 @@ export function SupplierBillsList({
         ) : null
       }
     >
+      {caseFilter && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px] text-body">
+          <span>
+            Bills of trip case <strong className="text-ink">{caseFilter}</strong> (its own bills and bills with a line of it)
+          </span>
+          <button type="button" className="text-xs font-semibold text-accent-deep hover:underline" onClick={() => setMany({ case: null })}>
+            Show all
+          </button>
+        </div>
+      )}
       <div className="mb-4">
         <FilterBar
+          extraKeys={["case"]}
           search={{ placeholder: supplier ? "Search bill or trip case" : "Search bill, supplier or trip case" }}
           selects={[
             {
@@ -197,6 +211,7 @@ export function SupplierBillsList({
         <BillForm
           open
           supplier={supplier ?? null}
+          tripCase={caseFilter || undefined}
           onClose={() => setEntering(false)}
           onSaved={(b) => {
             qc.invalidateQueries({ queryKey: ["supplier-bills"] });

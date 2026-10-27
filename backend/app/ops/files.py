@@ -493,6 +493,15 @@ async def download(conn: asyncpg.Connection, store: OpsStore | None, staff: Staf
     return {"url": url, "expires_in": PRESIGN_SECONDS}
 
 
+# Parents whose status is final: their current-file pointer is never written again (the DB refuses it), so removing
+# their file leaves the pointer. Every other parent (a supplier booking in any status, cancelled included) detaches.
+FINAL_PARENT: dict[str, tuple[str, ...]] = {
+    "payment": ("voided",),
+    "supplier_payout": ("voided",),
+    "supplier_bill": ("cancelled",),
+}
+
+
 async def remove(conn: asyncpg.Connection, staff: Staff, file_id: str, reason: str) -> dict[str, Any]:
     """Remove a file (final; the object stays until retention). A removed voucher or payment evidence leaves its
     parent first.
@@ -521,7 +530,7 @@ async def remove(conn: asyncpg.Connection, staff: Staff, file_id: str, reason: s
         raise Conflict(
             "evidence_locked", f"this file is the evidence of payout {parent['code']}; upload a replacement first"
         )
-    if current and parent["status"] not in ("voided", "cancelled"):  # a voided payment / cancelled bill is final
+    if current and parent["status"] not in FINAL_PARENT.get(row["entity_type"], ()):
         table = CURRENT_FILE.get(row["entity_type"], "supplier_bookings SET voucher_file_id")
         await conn.execute(
             f"UPDATE booking.{table} = NULL, updated_by = $2 WHERE id = $1::uuid",  # noqa: S608 — fixed names

@@ -3,15 +3,19 @@
 // AA-682 S4 (bk-030, S252 design §2 / §6) — the case's cost vs billed panel on its Suppliers tab: per supplier booking
 // the expected net (from the approved version's costs) next to what suppliers billed (lines of bills not cancelled)
 // and the variance, totals per currency. Net amounts are commercial: shown only with pricing.read (and bill.read).
-// No FX conversion: a bill in another currency than the net is flagged, not converted.
+// No FX conversion: a bill in another currency than the net is flagged, not converted. "Supplier bills" opens the bill
+// list filtered to this case (?case=); "Enter bill" (bill.write) opens the bill form with this case filled in.
 
+import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BillForm } from "@/app/(staff)/billing/_parts/BillDrawer";
 import { ApiError } from "@/lib/api/client";
 import type { ColumnDef } from "@tanstack/react-table";
 import { supplierBillsApi, type CaseCostLine } from "@/lib/api/supplierBills";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { DataTable, Money, Pill, Section, formatMoney, useCan } from "@/ui";
+import { Button, DataTable, Money, Pill, Section, formatMoney, useCan } from "@/ui";
 
 function tone(variance: string | null): string {
   if (variance === null) return "text-muted";
@@ -87,18 +91,29 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
 export function CostVsBilled({ c }: { c: TripCaseDetail }) {
   const canBills = useCan("bill.read");
   const canPricing = useCan("pricing.read");
+  const canWrite = useCan("bill.write");
   const canSee = canBills && canPricing;
+  const qc = useQueryClient();
+  const [entering, setEntering] = useState(false);
   const q = useQuery({ queryKey: ["supplier-costs", c.code], queryFn: () => supplierBillsApi.caseCosts(c.code), enabled: canSee });
   if (!canSee) return null;
   const data = q.data;
+  const billsHref = `/billing?tab=supplier-bills&case=${encodeURIComponent(c.code)}`;
   return (
     <Section
       title="Cost vs billed"
       description="Expected supplier net of each booking next to what the suppliers billed (bills not cancelled). A positive variance means a supplier billed more than costed."
       actions={
-        <Link href="/billing?tab=supplier-bills" className="text-[13px] font-semibold text-accent-deep hover:underline">
-          Supplier bills
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link href={billsHref} className="text-[13px] font-semibold text-accent-deep hover:underline">
+            Bills of this case
+          </Link>
+          {canWrite && (
+            <Button size="sm" onClick={() => setEntering(true)}>
+              <Plus size={13} /> Enter bill
+            </Button>
+          )}
+        </div>
       }
     >
       {q.isLoading && <p className="text-[13px] text-muted">Loading…</p>}
@@ -118,11 +133,23 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
             {data.totals.map((t) => (
               <span key={t.currency}>
                 <span className="text-muted">{t.currency}:</span> net {formatMoney(t.net, t.currency)} · billed {formatMoney(t.billed, t.currency)} ·{" "}
-                <span className={tone(t.variance)}>variance {formatMoney(t.variance, t.currency)}</span>
+                <span className={tone(t.variance)}>variance {t.variance === null ? "—" : formatMoney(t.variance, t.currency)}</span>
               </span>
             ))}
           </div>
         </div>
+      )}
+      {entering && (
+        <BillForm
+          open
+          supplier={null}
+          tripCase={c.code}
+          onClose={() => setEntering(false)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["supplier-costs", c.code] });
+            qc.invalidateQueries({ queryKey: ["supplier-bills"] });
+          }}
+        />
       )}
     </Section>
   );

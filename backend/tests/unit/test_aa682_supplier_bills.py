@@ -59,6 +59,7 @@ STATUS_AFTER = "SELECT status FROM booking.supplier_bills WHERE id"
 
 
 def bill_row(**over: Any) -> dict[str, Any]:
+    creator = over.get("created_by", CONTRACTING.cis_user_id)
     return {
         "id": BILL_ID,
         "code": "BIL-000001",
@@ -77,6 +78,8 @@ def bill_row(**over: Any) -> dict[str, Any]:
         "document_file_id": None,
         "created_by": CONTRACTING.cis_user_id,
         "created_by_name": "Contracting One",
+        "facts_edited_by": creator,
+        "facts_edited_by_name": None,
         "approved_by": None,
         "approved_by_name": None,
         "approved_at": None,
@@ -225,12 +228,23 @@ def test_actions_and_approve_blockers() -> None:
     assert mine["approve_blockers"] == ["maker_checker", "lines_mismatch"] and not mine["actions"]["approve"]
     assert bills.bill_out(bill_row(line_count=0), SALES)["approve_blockers"] == ["permission", "no_lines"]
     approved = bills.bill_out(bill_row(status="approved", live_payouts=1, balance="280.00"), ADMIN)
-    assert approved["actions"] == {"edit": False, "attach": False, "approve": False, "cancel": False, "pay": True}
+    # Edit stays on for an approved bill: the form edits its notes only (review S4).
+    assert approved["actions"] == {"edit": True, "attach": False, "approve": False, "cancel": False, "pay": True}
+    assert bills.bill_out(bill_row(status="cancelled"), ADMIN)["actions"]["edit"] is False
+    assert bills.bill_out(bill_row(status="approved"), SALES)["actions"]["edit"] is False
     assert approved["supplier"] == {"id": SUP_ID, "name": "Delta Hotels"}
     assert approved["created_by"] == {"id": CONTRACTING.cis_user_id, "name": "Contracting One"}
     assert approved["approved_by"] is None and approved["trip_case"]["code"] == "TC-000001"
     paid_by_creator = bills.bill_out(bill_row(status="approved", created_by=ADMIN.cis_user_id), ADMIN)
     assert paid_by_creator["actions"]["pay"] is False
+    # Maker-checker follows the last editor of the money facts too (review S4: B edits A's bill, then approves it).
+    edited = bill_row(facts_edited_by=CHECKER.cis_user_id, facts_edited_by_name="Contracting Two")
+    by_editor = bills.bill_out(edited, CHECKER)
+    assert by_editor["approve_blockers"] == ["maker_checker"] and not by_editor["actions"]["approve"]
+    assert by_editor["facts_edited_by"] == {"id": CHECKER.cis_user_id, "name": "Contracting Two"}
+    assert bills.bill_out(edited, ADMIN)["approve_blockers"] == []
+    paid_by_editor = bill_row(status="approved", facts_edited_by=ADMIN.cis_user_id)
+    assert bills.bill_out(paid_by_editor, ADMIN)["actions"]["pay"] is False
     statement = bills.bill_out(bill_row(trip_case_id=None, trip_case_code=None, trip_case_channel=None), SALES)
     assert statement["trip_case"] is None and statement["actions"]["cancel"] is False
     p = bills.payout_out(payout_row(), ADMIN)
@@ -410,6 +424,18 @@ async def test_case_costs_variance() -> None:
             "supplier_name": "Delta",
             "billed": [{"currency": "VND", "amount": "2000000", "bills": ["BIL-2"]}],
         },
+        {  # confirmed with a net but not billed yet: no variance, its net stays out of the total variance (review S4)
+            "id": "sb-4",
+            "code": "SB-4",
+            "status": "confirmed",
+            "item_description": "Boat",
+            "service_date": None,
+            "net_amount": Decimal("150.00"),
+            "net_currency": "USD",
+            "supplier_id": SUP_ID,
+            "supplier_name": "Delta",
+            "billed": "[]",
+        },
         {  # not billed yet
             "id": "sb-3",
             "code": "SB-3",
@@ -430,13 +456,15 @@ async def test_case_costs_variance() -> None:
         ]
     )
     out = await bills.case_costs(conn, CONTRACTING, "tc-1")
-    first, second, third = out["lines"]
+    first, second, unbilled_net, third = out["lines"]
     assert first["variance"] == "20.00" and not first["currency_mismatch"] and not first["unbilled"]
     assert second["variance"] is None and second["currency_mismatch"] is True
+    assert unbilled_net["variance"] is None and unbilled_net["unbilled"] is True
+    assert not unbilled_net["currency_mismatch"]
     assert third["unbilled"] is True and third["variance"] is None
     assert out["totals"] == [
-        {"currency": "USD", "net": "380.00", "billed": "320.00", "variance": "-60.00"},
-        {"currency": "VND", "net": "0", "billed": "2000000", "variance": "2000000"},
+        {"currency": "USD", "net": "530.00", "billed": "320.00", "variance": "20.00"},
+        {"currency": "VND", "net": "0", "billed": "2000000", "variance": None},
     ]
     with pytest.raises(Forbidden):
         await bills.case_costs(ScriptedConn(), CONTENT, "TC-1")
@@ -520,6 +548,12 @@ async def test_update_received_bill_fields_and_lines() -> None:
     assert out["changed"] == ["amount", "bill_number", "due_date", "notes", "lines"]
     (upd,) = conn.sql("UPDATE booking.supplier_bills SET")
     assert upd[2:] == (Decimal("400.00"), "D-43", TODAY + timedelta(days=30), "x")
+    # The editor of the money facts is recorded (maker-checker), before the lines are replaced.
+    sql = next(c[0] for c in conn.calls if "UPDATE booking.supplier_bills SET" in c[0])
+    assert "facts_edited_by = $2" in sql
+    order = [c[0] for c in conn.calls]
+    first_update = next(i for i, q in enumerate(order) if "UPDATE booking.supplier_bills SET" in q)
+    assert first_update < next(i for i, q in enumerate(order) if "DELETE FROM booking.supplier_bill_items" in q)
     assert conn.sql("DELETE FROM booking.supplier_bill_items") == [(BILL_ID,)]
     assert audits(conn) == ["supplier_bill.updated"]
     assert conn.sql(LOCK)  # the bill row is locked first
@@ -528,6 +562,19 @@ async def test_update_received_bill_fields_and_lines() -> None:
     assert out["changed"] == [] and audits(same) == [] and same.sql("DELETE FROM") == []
     switched = await bills.update(conn_for(), CONTRACTING, BILL_ID, {"currency": "EUR"})
     assert switched["changed"] == ["currency"]
+    # Lines only: the bill is marked edited by this person first (the DB checks it on every line insert).
+    lines_only = conn_for(**{LINES: old_lines})
+    out = await bills.update(
+        lines_only, CHECKER, BILL_ID, {"lines": [{"supplier_booking_id": SB2_ID, "amount": "380"}]}
+    )
+    assert out["changed"] == ["lines"]
+    (mark,) = lines_only.sql("UPDATE booking.supplier_bills SET")
+    assert mark == (BILL_ID, CHECKER.cis_user_id)
+    # Notes only: not a money fact, so the editor of the facts stays.
+    notes_only = conn_for()
+    await bills.update(notes_only, CHECKER, BILL_ID, {"notes": "checked"})
+    sql = next(c[0] for c in notes_only.calls if "UPDATE booking.supplier_bills SET" in c[0])
+    assert "facts_edited_by" not in sql
 
 
 @pytest.mark.asyncio
@@ -570,6 +617,12 @@ async def test_approve_maker_checker_and_lines() -> None:
     with pytest.raises(Forbidden) as exc:
         await bills.approve(conn_for(), CONTRACTING, BILL_ID)
     assert exc.value.code == "maker_checker"
+    # B changed A's amounts, so B cannot approve them (review S4); a third person can.
+    edited = bill_row(facts_edited_by=CHECKER.cis_user_id)
+    with pytest.raises(Forbidden) as exc:
+        await bills.approve(conn_for(edited), CHECKER, BILL_ID)
+    assert exc.value.code == "maker_checker" and "last changed" in exc.value.message
+    await bills.approve(conn_for(edited), ADMIN, BILL_ID)
     for row in (bill_row(line_count=0), bill_row(lines_amount="1.00")):
         with pytest.raises(Conflict) as exc:
             await bills.approve(conn_for(row), CHECKER, BILL_ID)
@@ -651,6 +704,7 @@ async def test_record_payout_replay_and_refusals() -> None:
         (None, {STORED_PAYOUT: {"id": PAYOUT_ID, "request_sha256": "0" * 64}}, {}, Conflict, "idempotency_conflict"),
         (bill_row(status="received"), {}, {}, Conflict, "bill_not_payable"),
         (bill_row(status="approved", created_by=ADMIN.cis_user_id), {}, {}, Forbidden, "maker_checker"),
+        (bill_row(status="approved", facts_edited_by=ADMIN.cis_user_id), {}, {}, Forbidden, "maker_checker"),
         (None, {}, {"method": "crypto"}, Invalid, "invalid_payout"),
         (None, {}, {"amount": Decimal("0")}, Invalid, "invalid_amount"),
         (None, {}, {"amount": Decimal("380.01")}, Conflict, "payout_exceeds_balance"),

@@ -1,8 +1,8 @@
 // lib/api/supplierBills.ts
 // AA-682 S4 (bk-030) — typed calls for supplier bills and payouts (backend routers/supplier_bills.py,
 // app/ops/supplier_bills.py). Read bill.read (admin, sales, contracting); enter / edit / cancel bill.write and approve
-// bill.approve (admin, contracting; never the person who entered the bill); payouts payout.write (admin; never on a
-// bill they entered). Money is a decimal string, never a float.
+// bill.approve (admin, contracting; never the person who entered the bill nor the one who last changed its amounts or
+// lines, facts_edited_by); payouts payout.write (admin; never on a bill they entered or last changed). Money is a decimal string, never a float.
 //
 //   GET    /booking/supplier-bills?status&supplier_id&case&overdue&due_before&q&limit&offset
 //   GET    /booking/supplier-bills/summary                                  KPIs
@@ -30,7 +30,7 @@ export type ApproveBlocker = "not_received" | "permission" | "maker_checker" | "
 export const APPROVE_BLOCKER_LABEL: Record<ApproveBlocker, string> = {
   not_received: "Only a received bill is approved.",
   permission: "Approving needs the contracting or admin role.",
-  maker_checker: "You entered this bill: another person approves it.",
+  maker_checker: "You entered this bill or last changed its amounts or lines: another person approves it.",
   no_lines: "Match the bill to at least one confirmed supplier booking first.",
   lines_mismatch: "The lines do not add up to the bill amount yet.",
 };
@@ -49,6 +49,8 @@ export interface SupplierBill {
   notes: string | null;
   document_file_id: string | null;
   created_by: Person | null;
+  /** The last person who set the money facts or the lines; never the approver nor the payout recorder. */
+  facts_edited_by: Person | null;
   approved_by: Person | null;
   approved_at: IsoDateTime | null;
   paid_at: IsoDateTime | null;
@@ -158,7 +160,8 @@ export interface CaseCostLine {
 export interface CaseCosts {
   trip_case: { id: string; code: string; channel: "b2c" | "b2b" };
   lines: CaseCostLine[];
-  totals: { currency: string; net: DecimalString; billed: DecimalString; variance: DecimalString }[];
+  /** variance = the sum of the line variances in that currency (billed bookings only); null when none compares. */
+  totals: { currency: string; net: DecimalString; billed: DecimalString; variance: DecimalString | null }[];
 }
 
 export interface BillLineIn {

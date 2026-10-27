@@ -1,9 +1,10 @@
 """Staff supplier bills and payouts (bk-030; AA-682 slice S4, ``app.ops.supplier_bills``).
 
 Read ``bill.read`` (admin, sales, contracting); enter / edit / cancel ``bill.write`` and approve ``bill.approve``
-(admin, contracting; never the person who entered the bill: 403 ``maker_checker``); record / void a payout
-``payout.write`` (admin; never on a bill they entered). Staff tokens only (never M2M); preview sessions do not get
-bills at all and the E2E session stays read-only (global rule in ``app.auth.staff``). Entering a bill and recording a
+(admin, contracting; never the person who entered the bill nor the one who last changed its amounts or lines: 403
+``maker_checker``); record / void a payout ``payout.write`` (admin; never on a bill they entered or last changed).
+Staff tokens only (never M2M); preview sessions do not get bills at all and the E2E session stays read-only (global
+rule in ``app.auth.staff``). Entering a bill and recording a
 payout need an ``Idempotency-Key`` header (8-200 characters): the same key with the same body returns the stored row
 (200, ``replayed``), another body is 409 ``idempotency_conflict``. No payment provider: payouts are recorded by hand.
 

@@ -376,8 +376,8 @@ send, OTP) is not built: those still write rows only.
   `payment.verify` = admin and never the person who recorded it (403 `maker_checker`); voiding a verified payment needs
   `payment.verify` too. None of the three is in the preview cap (critic note 8: bill-to snapshots, payment refs).
   Supplier bills (AA-682 S4, bk-030): `bill.read` = admin, sales, contracting; `bill.write` / `bill.approve` = admin,
-  contracting (never approving a bill they entered: 403 `maker_checker`); `payout.write` = admin (never on a bill they
-  entered). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
+  contracting (never approving a bill they entered or whose amounts / lines they last changed, `facts_edited_by`: 403
+  `maker_checker`); `payout.write` = admin (never on a bill they entered or last changed). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
   Catalog geo state (AA-996, bk-029): the Booking status, reason, area and notes of a CIS country or place
   `catalog.admin` = admin only (UI spec §3 "A edit status"); reading Countries / Destinations is `catalog.read`.
   Notifications,
@@ -666,17 +666,22 @@ send, OTP) is not built: those still write rows only.
   statement bill spans several), the supplier's document (`POST /booking/ops-files` kind `supplier_bill`, entity the
   bill, while received; never on a bill that touches a B2B case, DM-6.8), and **lines**
   (`supplier_bill_items`, one per CONFIRMED supplier booking of that supplier, and of the bill's case when it has one).
-- Life: `received` (working draft: facts, lines and document change freely) → `approved` by **another person** (≥ 1
-  line, lines = amount; checked at once by `supplier_bills_guard`, no deferred trigger) → `paid`, **derived by the
+- Life: `received` (working draft: facts, lines and document change freely) → `approved` by **another person** than
+  the creator and than `facts_edited_by` (the last person who changed the money facts or the lines; set by the guard,
+  checked on every line insert, CHECK + guard at approval) (≥ 1 line, lines = amount; checked at once by `supplier_bills_guard`, no deferred trigger) → `paid`, **derived by the
   database** from the live payouts (`supplier_bill_settle`, locks the bill first); `received` / `approved` →
   `cancelled` (reason, final; an approved bill only with no live payout: 409 `bill_has_payouts`). No case status moves.
 - A **payout** (`booking.supplier_payouts`, `SPO-000123`) records money AA sent against an approved bill: amount in the
   bill currency, never above the balance (409 `payout_exceeds_balance`), method, `paid_on`, bank reference (no card
   numbers), note, bank slip (`payout_evidence`, replaced but never removed while the payout is live). It counts at once
-  (no verify step); the recorder is never the bill's creator; a mistake is voided (reason, final) and the bill steps
+  (no verify step); the recorder is never the bill's creator nor its `facts_edited_by`; a mistake is voided (reason, final) and the bill steps
   back to `approved`. `Idempotency-Key` on `POST /booking/supplier-bills` (unique) and `…/payouts` (unique per bill).
 - **Cost vs billed** (`GET /booking/trip-cases/{ref}/supplier-costs`): per supplier booking the expected net next to
-  the bill lines (bills not cancelled) and the variance per currency (no FX conversion; another currency is flagged).
+  the bill lines (bills not cancelled) and the variance once the booking is billed (no FX conversion; another currency
+  is flagged; per currency the sum of the line variances, so unbilled nets stay out of it). The panel links to the
+  bills of the case (`/billing?tab=supplier-bills&case=TC-…`) and enters a bill for it (`bill.write`).
+- Notifications `supplier_bill.due` / `supplier_bill.approved` open the bill drawer
+  (`/billing?tab=supplier-bills&bill=BIL-…`).
 - `bk_ops_reminders` writes `supplier_bill.due` (to approve / to pay, due within `supplier_bill_due_soon_days`, then
   once more when overdue) to the shared staff queue. Staff UI: `/billing?tab=supplier-bills`, the supplier Bills tab,
   the bill drawer and payout modal, the case Suppliers tab's cost vs billed panel.

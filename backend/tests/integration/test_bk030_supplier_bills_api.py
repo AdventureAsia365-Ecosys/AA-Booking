@@ -2,7 +2,8 @@
 
 - a bill matched to two confirmed supplier bookings is entered (Idempotency-Key replay returns the same bill, another
   body is 409), its document uploaded;
-- approve by the person who entered it → 403 ``maker_checker``; by another with lines ≠ amount → 409
+- approve by the person who entered it, or by the person who last changed its amounts or lines → 403
+  ``maker_checker``; by another with lines ≠ amount → 409
   ``bill_not_ready``; fixed while received, then approved; its facts are then locked (notes stay editable);
 - a payout = the balance → ``paid`` (a partial one first leaves it ``approved``); the same Idempotency-Key twice → one
   payout; above the balance → 409; card-like references refused; the bill's creator never pays it (403);
@@ -358,6 +359,53 @@ async def test_maker_checker_on_payouts_and_cancel(client: Client, world: dict[s
         409,
         "bill_not_payable",
     )
+
+
+async def test_maker_checker_follows_the_last_editor(client: Client, world: dict[str, Any]) -> None:
+    """Review S4: contracting A enters 380 USD; contracting B changes the amount and a line to 5000 USD, then approves
+    → 403 ``maker_checker``. A third person (an admin) approves; B's numbers are checked by someone else."""
+    c, cis = client
+    body = _bill_body(world, bill_number="GAMMA-EDIT-1")
+    bill = await _ok(await c.post("/supplier-bills", json=body, headers=_as(cis, ENTERER, "bill-edit-1")), 201)
+    assert bill["facts_edited_by"]["id"] == ENTERER
+    checker = _as(cis, CHECKER)
+    noted = await _ok(await c.patch(f"/supplier-bills/{bill['id']}", json={"notes": "seen"}, headers=checker))
+    assert noted["facts_edited_by"]["id"] == ENTERER and noted["approve_blockers"] == []  # notes are not money
+    edited = await _ok(
+        await c.patch(
+            f"/supplier-bills/{bill['id']}",
+            json={
+                "amount": "5000.00",
+                "lines": [
+                    {"supplier_booking_id": world["room"], "amount": "4920.00"},
+                    {"supplier_booking_id": world["kayak"], "amount": "80.00"},
+                ],
+            },
+            headers=checker,
+        )
+    )
+    assert edited["changed"] == ["amount", "lines"] and edited["facts_edited_by"]["id"] == CHECKER
+    assert edited["approve_blockers"] == ["maker_checker"] and edited["actions"]["approve"] is False
+    _err(await c.post(f"/supplier-bills/{bill['id']}/approve", headers=checker), 403, "maker_checker")
+    # A lines-only edit by the enterer makes the enterer the last editor again; the checker may then approve.
+    back = await _ok(
+        await c.patch(
+            f"/supplier-bills/{bill['id']}",
+            json={
+                "lines": [
+                    {"supplier_booking_id": world["room"], "amount": "4900.00"},
+                    {"supplier_booking_id": world["kayak"], "amount": "100.00"},
+                ]
+            },
+            headers=_as(cis, ENTERER),
+        )
+    )
+    assert back["changed"] == ["lines"] and back["facts_edited_by"]["id"] == ENTERER
+    _err(await c.post(f"/supplier-bills/{bill['id']}/approve", headers=_as(cis, ENTERER)), 403, "maker_checker")
+    approved = await _ok(await c.post(f"/supplier-bills/{bill['id']}/approve", headers=checker))
+    assert approved["status"] == "approved" and approved["approved_by"]["id"] == CHECKER
+    # An approved bill still offers Edit (its notes only).
+    assert approved["actions"]["edit"] is True
 
 
 async def test_lines_permissions_lists_and_summary(

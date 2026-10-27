@@ -325,6 +325,14 @@ async def test_remove_a_voucher_unlinks_it_from_its_booking() -> None:
 
 
 @pytest.mark.asyncio
+async def test_remove_the_voucher_of_a_cancelled_booking_still_unlinks_it() -> None:
+    """Review S4: "cancelled" is final for a supplier bill only; a cancelled supplier booking detaches its voucher."""
+    conn = ScriptedConn([(GET_FILE, file_row()), (PARENT, parent_row(status="cancelled", voucher_file_id=FILE_ID))])
+    await ops_files.remove(conn, SALES, FILE_ID, "wrong hotel")
+    assert conn.sql(UNLINK_VOUCHER) == [(SB_ID, "u-1")] and len(conn.sql(REMOVE)) == 1
+
+
+@pytest.mark.asyncio
 async def test_remove_another_file_keeps_the_voucher_and_removing_twice_is_a_no_op() -> None:
     other = "00000000-0000-4000-8000-000000010002"
     conn = ScriptedConn([(GET_FILE, file_row()), (PARENT, parent_row(voucher_file_id=other))])

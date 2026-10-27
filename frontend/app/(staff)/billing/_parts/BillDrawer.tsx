@@ -2,9 +2,9 @@
 // app/(staff)/billing/_parts/BillDrawer.tsx
 // AA-682 S4 (bk-030, S252 design §6) — the supplier bill drawer (facts, lines matched to confirmed supplier bookings,
 // the supplier's document, payouts), the Enter / Edit bill form (one Idempotency-Key per opening; lines picked from the
-// supplier's confirmed bookings), Approve (another person: the one who entered it gets "maker_checker"), Cancel with a
-// reason (never "Delete", Q23), and the Record payout modal (Idempotency-Key, bank slip uploaded right after; an admin,
-// never the person who entered the bill). "Paid" is never set by hand: the database derives it from the payouts.
+// supplier's confirmed bookings), Approve (another person: the one who entered it, or last changed its amounts or lines,
+// gets "maker_checker"), Cancel with a reason (never "Delete", Q23), and the Record payout modal (Idempotency-Key, bank
+// slip uploaded right after; an admin, never the person who entered the bill or last changed its amounts). "Paid" is never set by hand: the database derives it from the payouts.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -79,16 +79,19 @@ function Files({
     onSuccess: (r) => window.open(r.url, "_blank", "noopener"),
     onError: (e) => toast.error(errorText(e)),
   });
+  // Removal is final (bk-026) and goes into the audit log with the reason the user types (as Cancel / Void).
+  const [removing, setRemoving] = useState<OpsFile | null>(null);
   const remove = useMutation({
-    mutationFn: (f: OpsFile) => supplierBillsApi.removeFile(f.id, "Replaced or uploaded by mistake"),
+    mutationFn: ({ f, reason }: { f: OpsFile; reason: string }) => supplierBillsApi.removeFile(f.id, reason),
     onSuccess: () => {
       toast.success("File removed");
+      setRemoving(null);
       onChanged();
     },
-    onError: (e) => toast.error(errorText(e)),
   });
   if (files.length === 0) return <p className="text-[13px] text-muted">No file yet.</p>;
   return (
+    <>
     <ul className="flex flex-col gap-1">
       {files.map((f) => (
         <li key={f.id} className="flex min-w-0 items-center gap-2">
@@ -103,13 +106,29 @@ function Files({
             {f.id === current && <span className="text-xs text-muted">(current)</span>}
           </button>
           {canRemove && f.id !== current && (
-            <button type="button" className="text-xs text-muted hover:text-danger" onClick={() => remove.mutate(f)} disabled={remove.isPending}>
+            <button type="button" className="text-xs text-muted hover:text-danger" onClick={() => setRemoving(f)} disabled={remove.isPending}>
               Remove
             </button>
           )}
         </li>
       ))}
     </ul>
+    <ConfirmDialog
+      open={!!removing}
+      onClose={() => {
+        setRemoving(null);
+        remove.reset();
+      }}
+      onConfirm={(reason) => removing && remove.mutate({ f: removing, reason })}
+      title={removing ? `Remove ${removing.file_name}` : "Remove file"}
+      confirmLabel="Remove file"
+      danger
+      busy={remove.isPending}
+      error={remove.isError ? errorText(remove.error) : null}
+      reason={{ label: "Why is it removed?", required: true, placeholder: "e.g. wrong file, replaced by a clearer scan" }}
+      message="The file leaves this record for good (a removal is final); the reason goes into the audit log."
+    />
+    </>
   );
 }
 
@@ -239,6 +258,9 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
               <DateText value={b.due_date} className={b.overdue ? "font-semibold text-danger" : ""} />
             </Fact>
             <Fact label="Entered by">{b.created_by?.name ?? b.created_by?.id ?? "—"}</Fact>
+            {b.facts_edited_by && b.facts_edited_by.id !== b.created_by?.id && (
+              <Fact label="Amounts last changed by">{b.facts_edited_by.name ?? b.facts_edited_by.id}</Fact>
+            )}
             {b.approved_by && <Fact label="Approved by">{b.approved_by.name ?? b.approved_by.id}</Fact>}
             {b.cancel_reason && <Fact label="Cancelled because">{b.cancel_reason}</Fact>}
           </dl>
@@ -274,7 +296,7 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
             </ul>
           )}
           {b.status === "approved" && !b.actions.pay && (
-            <p className="text-xs text-muted">An admin who did not enter this bill records the payout.</p>
+            <p className="text-xs text-muted">An admin who did not enter this bill or change its amounts records the payout.</p>
           )}
 
           <section className="flex flex-col gap-2">
@@ -358,7 +380,11 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
               <>
                 You checked the supplier&apos;s bill <strong>{b.bill_number}</strong> against the confirmed bookings: AA owes{" "}
                 <strong>{formatMoney(b.amount, b.currency)}</strong> to {b.supplier.name}, due {b.due_date}. Entered by{" "}
-                {b.created_by?.name ?? "someone else"}.
+                {b.created_by?.name ?? "someone else"}
+                {b.facts_edited_by && b.facts_edited_by.id !== b.created_by?.id
+                  ? `; amounts last changed by ${b.facts_edited_by.name ?? "someone else"}`
+                  : ""}
+                .
               </>
             }
           />

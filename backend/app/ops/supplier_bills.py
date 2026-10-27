@@ -6,20 +6,22 @@ amount, an issue and a due date, optionally one trip case, a document (the suppl
 amount in the bill currency).
 
 Life: ``received`` (the working draft: facts, lines and document change freely and need not add up yet) →
-``approved`` by ANOTHER person (``bill.approve``; the creator gets 403 ``maker_checker``, the database refuses it
-too), only with at least one line and the lines adding up to the amount → ``paid``, DERIVED by the database from the
-live payouts (paid when they reach the amount; a voided payout steps the bill back to ``approved``).
+``approved`` by ANOTHER person (``bill.approve``; the creator, and whoever last changed the bill's money facts or
+lines (``facts_edited_by``), get 403 ``maker_checker``, the database refuses it too), only with at least one line and
+the lines adding up to the amount → ``paid``, DERIVED by the database from the live payouts (paid when they reach
+the amount; a voided payout steps the bill back to ``approved``).
 ``received`` / ``approved`` → ``cancelled`` with a reason (never "Delete", design Q23), an approved bill only while no
 payout is live (void them first). Cancelled is final.
 
 A **payout** (``SPO-000123``) records money AA sent the supplier against an approved bill (``payout.write``, admin;
-never the person who entered the bill: 403 ``maker_checker``): amount in the bill currency (never above the balance:
-409 ``payout_exceeds_balance``), method, the day it was paid, the bank reference (never a card number: 422
-``card_number_not_allowed``), a note; the evidence (bank slip) is uploaded right after (``POST /ops-files`` kind
-``payout_evidence``, the payout as entity). A payout counts at once (no verify step); a mistake is **voided** (final,
-with a reason) and recorded again. Creating a bill and recording a payout take an ``Idempotency-Key`` (bills: unique
-globally; payouts: unique per bill) and the hash of the business body: a replay returns the stored row (200,
-``replayed``), another body is 409 ``idempotency_conflict``. Lock order: the bill, then the payout (critic B4).
+never the person who entered the bill or last changed its money facts: 403 ``maker_checker``): amount in the bill
+currency (never above the balance: 409 ``payout_exceeds_balance``), method, the day it was paid, the bank reference
+(never a card number: 422 ``card_number_not_allowed``), a note; the evidence (bank slip) is uploaded right after
+(``POST /ops-files`` kind ``payout_evidence``, the payout as entity). A payout counts at once (no verify step); a
+mistake is **voided** (final, with a reason) and recorded again. Creating a bill and recording a payout take an
+``Idempotency-Key`` (bills: unique globally; payouts: unique per bill) and the hash of the business body: a replay
+returns the stored row (200, ``replayed``), another body is 409 ``idempotency_conflict``. Lock order: the bill, then
+the payout (critic B4).
 
 **Cost vs billed** (:func:`case_costs`): per supplier booking of a case, the expected net (``supplier_bookings``,
 ``pricing.read``) next to what suppliers billed (lines of bills not cancelled) and the variance.
@@ -61,7 +63,8 @@ BILL_COLUMNS = """
     b.id::text AS id, b.code, b.supplier_id::text AS supplier_id, s.company_name AS supplier_name,
     b.trip_case_id::text AS trip_case_id, tc.code AS trip_case_code, tc.channel AS trip_case_channel,
     b.bill_number, b.currency, b.amount::text AS amount, b.issue_date, b.due_date, b.status, b.notes,
-    b.document_file_id::text AS document_file_id, b.created_by, cr.name AS created_by_name, b.approved_by,
+    b.document_file_id::text AS document_file_id, b.created_by, cr.name AS created_by_name, b.facts_edited_by,
+    fe.name AS facts_edited_by_name, b.approved_by,
     ap.name AS approved_by_name, b.approved_at, b.paid_at, b.cancelled_by, ca.name AS cancelled_by_name,
     b.cancelled_at, b.cancel_reason, b.created_at, b.updated_at, bal.paid_amount::text AS paid_amount,
     bal.balance::text AS balance, bal.live_payouts, bal.line_count, bal.lines_amount::text AS lines_amount,
@@ -73,6 +76,7 @@ JOIN booking.suppliers s ON s.id = b.supplier_id
 JOIN booking.v_supplier_bill_balance bal ON bal.bill_id = b.id
 LEFT JOIN booking.trip_cases tc ON tc.id = b.trip_case_id
 LEFT JOIN booking.staff_users cr ON cr.cis_user_id = b.created_by
+LEFT JOIN booking.staff_users fe ON fe.cis_user_id = b.facts_edited_by
 LEFT JOIN booking.staff_users ap ON ap.cis_user_id = b.approved_by
 LEFT JOIN booking.staff_users ca ON ca.cis_user_id = b.cancelled_by
 """
@@ -150,7 +154,7 @@ def approve_blockers(row: dict[str, Any], staff: Staff) -> list[str]:
         out.append("not_received")
     if not staff.can("bill.approve"):
         out.append("permission")
-    if staff.cis_user_id == row["created_by"]:
+    if staff.cis_user_id in (row["created_by"], row["facts_edited_by"]):
         out.append("maker_checker")
     if not row["line_count"]:
         out.append("no_lines")
@@ -161,24 +165,25 @@ def approve_blockers(row: dict[str, Any], staff: Staff) -> list[str]:
 
 def bill_out(row: Any, staff: Staff) -> dict[str, Any]:
     out = dict(row)
-    creator = out["created_by"]
-    for who in ("created_by", "approved_by", "cancelled_by"):
+    creator, editor = out["created_by"], out["facts_edited_by"]
+    for who in ("created_by", "facts_edited_by", "approved_by", "cancelled_by"):
         out[who] = _person(out[who], out.pop(f"{who}_name"))
     out["supplier"] = {"id": out.pop("supplier_id"), "name": out.pop("supplier_name")}
     case_id, case_code, channel = out.pop("trip_case_id"), out.pop("trip_case_code"), out.pop("trip_case_channel")
     out["trip_case"] = {"id": case_id, "code": case_code, "channel": channel} if case_id else None
     status = out["status"]
-    blockers = approve_blockers({**dict(row), "created_by": creator}, staff)
+    blockers = approve_blockers({**dict(row), "created_by": creator, "facts_edited_by": editor}, staff)
     out["approve_blockers"] = blockers
     out["actions"] = {
-        "edit": status == "received" and staff.can("bill.write"),
+        # Received: everything; approved / paid: the notes only (the form's locked mode).
+        "edit": status != "cancelled" and staff.can("bill.write"),
         "attach": status == "received" and staff.can("bill.write"),
         "approve": not blockers,
         "cancel": staff.can("bill.write")
         and (status == "received" or (status == "approved" and not out["live_payouts"])),
         "pay": status == "approved"
         and staff.can("payout.write")
-        and staff.cis_user_id != creator
+        and staff.cis_user_id not in (creator, editor)
         and Decimal(out["balance"]) > 0,
     }
     return out
@@ -422,13 +427,18 @@ async def billable(
     return jsonable({"items": items})
 
 
+def _total() -> dict[str, Any]:
+    return {"net": Decimal(0), "billed": Decimal(0), "variance": None}
+
+
 def _json(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
 async def case_costs(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[str, Any]:
     """The case's cost vs billed panel: per supplier booking (live, or with a bill line), the expected net next to the
-    sum of bill lines of bills not cancelled, per currency, and the variance (billed - net) when the currencies agree.
+    sum of bill lines of bills not cancelled, per currency, and the variance (billed - net) once the booking is billed
+    and the currencies agree. Totals per currency: net, billed, and the sum of the line variances (null when none).
     Needs ``pricing.read`` (net amounts; design §2 S4) on top of ``bill.read``."""
     if not staff.can("pricing.read"):
         raise Forbidden("forbidden", "the cost panel shows net amounts: it needs pricing.read")
@@ -470,12 +480,16 @@ async def case_costs(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[s
         variance = None
         if net is not None and net_cur:
             same = [b for b in billed if b["currency"] == net_cur]
-            if len(billed) == len(same):
-                variance = (same[0]["amount"] if same else Decimal(0)) - net
-            t = totals.setdefault(net_cur, {"net": Decimal(0), "billed": Decimal(0)})
+            # A variance only once the booking is billed, in its net currency only (nothing billed yet is not "billed
+            # less than costed").
+            if billed and len(billed) == len(same):
+                variance = same[0]["amount"] - net
+            t = totals.setdefault(net_cur, _total())
             t["net"] += net
+            if variance is not None:
+                t["variance"] = (t["variance"] or Decimal(0)) + variance
         for b in billed:
-            t = totals.setdefault(b["currency"], {"net": Decimal(0), "billed": Decimal(0)})
+            t = totals.setdefault(b["currency"], _total())
             t["billed"] += b["amount"]
         lines.append(
             {
@@ -491,8 +505,10 @@ async def case_costs(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[s
                 "unbilled": not billed and r["status"] == "confirmed",
             }
         )
+    # Variance per currency: the sum of the line variances (bookings billed in their net currency); unbilled nets stay
+    # in ``net`` but out of the variance, and a currency with no comparable line has none (null).
     by_currency = [
-        {"currency": c, "net": t["net"], "billed": t["billed"], "variance": t["billed"] - t["net"]}
+        {"currency": c, "net": t["net"], "billed": t["billed"], "variance": t["variance"]}
         for c, t in sorted(totals.items())
     ]
     return jsonable({"trip_case": dict(case), "lines": lines, "totals": by_currency})
@@ -617,8 +633,9 @@ async def create(
         async with conn.transaction():
             row = await conn.fetchrow(
                 "INSERT INTO booking.supplier_bills (supplier_id, trip_case_id, bill_number, currency, amount,"
-                " issue_date, due_date, notes, idempotency_key, request_sha256, created_by, updated_by)"
-                " VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11) RETURNING id::text, code",
+                " issue_date, due_date, notes, idempotency_key, request_sha256, created_by, facts_edited_by,"
+                " updated_by) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11)"
+                " RETURNING id::text, code",
                 supplier["id"],
                 case_id,
                 number,
@@ -662,7 +679,8 @@ async def create(
 
 async def update(conn: asyncpg.Connection, staff: Staff, ident: str, changes: dict[str, Any]) -> dict[str, Any]:
     """Edit a received bill (number, currency, amount, dates, notes, lines = the whole new set); notes only on an
-    approved or paid one."""
+    approved or paid one. Whoever changes a money fact or the lines becomes the bill's ``facts_edited_by`` and can then
+    neither approve it nor record its payout (maker-checker: another person checks the numbers as they stand)."""
     row = await _find(conn, ident, lock=True)
     status = row["status"]
     if status == "cancelled":
@@ -691,8 +709,20 @@ async def update(conn: asyncpg.Connection, staff: Staff, ident: str, changes: di
     if "notes" in changes:
         new["notes"] = _note(changes["notes"])
     changed = sorted(k for k, v in new.items() if v != (Decimal(row[k]) if k == "amount" else row[k]))
-    if changed:
-        sets = ", ".join(f"{k} = ${i + 3}" for i, k in enumerate(changed))
+    lines: list[dict[str, Any]] | None = None
+    if "lines" in changes and changes["lines"] is not None:
+        lines = _lines(changes["lines"], currency)
+        old = {r["supplier_booking_id"]: Decimal(r["amount"]) for r in await conn.fetch(LINES_SQL, row["id"])}
+        if old == {x["supplier_booking_id"]: x["amount"] for x in lines}:
+            lines = None
+    lines_changed = lines is not None
+    facts_changed = lines_changed or any(k != "notes" for k in changed)
+    if changed or lines_changed:
+        # The DB guard sets facts_edited_by itself on a fact change; a lines-only change marks it here, before the
+        # lines are replaced (supplier_bill_items_guard checks it).
+        sets = ", ".join(
+            [f"{k} = ${i + 3}" for i, k in enumerate(changed)] + (["facts_edited_by = $2"] if facts_changed else [])
+        )
         try:
             await conn.execute(
                 f"UPDATE booking.supplier_bills SET {sets}, updated_by = $2 WHERE id = $1::uuid",  # noqa: S608
@@ -704,14 +734,9 @@ async def update(conn: asyncpg.Connection, staff: Staff, ident: str, changes: di
             raise Conflict("duplicate_bill_number", "this supplier already has a bill with that number") from exc
         except asyncpg.CheckViolationError as exc:
             raise Conflict("invalid_supplier_bill", str(exc).split("\n")[0]) from exc
-    lines_changed = False
-    if "lines" in changes and changes["lines"] is not None:
-        lines = _lines(changes["lines"], currency)
-        old = {r["supplier_booking_id"]: Decimal(r["amount"]) for r in await conn.fetch(LINES_SQL, row["id"])}
-        if old != {x["supplier_booking_id"]: x["amount"] for x in lines}:
-            await conn.execute("DELETE FROM booking.supplier_bill_items WHERE bill_id = $1::uuid", row["id"])
-            await _insert_lines(conn, staff, row["id"], lines)
-            lines_changed = True
+    if lines is not None:
+        await conn.execute("DELETE FROM booking.supplier_bill_items WHERE bill_id = $1::uuid", row["id"])
+        await _insert_lines(conn, staff, row["id"], lines)
     if changed or lines_changed:
         after = {k: ("(set)" if k == "notes" and new[k] else new[k]) for k in changed}
         if lines_changed:
@@ -739,6 +764,8 @@ async def approve(conn: asyncpg.Connection, staff: Staff, ident: str) -> dict[st
         raise Conflict("supplier_bill_closed", f"{row['code']} is cancelled")
     if row["created_by"] == staff.cis_user_id:
         raise Forbidden("maker_checker", f"you entered {row['code']}: another person approves it")
+    if row["facts_edited_by"] == staff.cis_user_id:
+        raise Forbidden("maker_checker", f"you last changed the amounts of {row['code']}: another person approves it")
     if not row["line_count"]:
         raise Conflict("bill_not_ready", "match the bill to at least one confirmed supplier booking first")
     if Decimal(row["lines_amount"]) != Decimal(row["amount"]):
@@ -851,6 +878,10 @@ async def record_payout(
         raise Conflict("bill_not_payable", f"{bill['code']} is {bill['status']}: payouts go on an approved bill")
     if bill["created_by"] == staff.cis_user_id:
         raise Forbidden("maker_checker", f"you entered {bill['code']}: another admin records its payout")
+    if bill["facts_edited_by"] == staff.cis_user_id:
+        raise Forbidden(
+            "maker_checker", f"you last changed the amounts of {bill['code']}: another admin records its payout"
+        )
     method = body.get("method")
     if method not in METHODS:
         raise Invalid("invalid_payout", "unknown method")
