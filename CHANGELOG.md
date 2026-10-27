@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.7.0...v0.8.0) (2026-10-27)
+
+
+### Features
+
+* bk-025 count-only ops views for the CIS data coverage page ([#94](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/94)) ([172ffc7](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/172ffc7b22c4f774e1e4977e22b75fea99ffca62))
+* bk-026 supplier bookings, ops files and the post-sale case guard (migration only) ([#99](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/99)) ([7880edb](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/7880edb9b1a6b2c4263511eed65b28e8e904a27d))
+* bk-027 trip checks, seeding trigger and check board (migration) ([#106](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/106)) ([3a74ac0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/3a74ac0aaa03c15438cba0d887c5e761c509ca98))
+* bk-028 invoices, payment schedule and manual payments (migration) ([#111](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/111)) ([75f200b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/75f200befedd58d8203ac064138fdacd10633736))
+* invoices, payment schedule and manual payments: API, reminders, staff UI ([#114](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/114)) ([ac540fc](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ac540fc9b758fa72680330379179464f2f74c6c9))
+* supplier bookings (AA-682 S1): API, case supply track, B2B desk tie-in, staff UI ([#100](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/100)) ([f6526f4](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f6526f40676d52461d9de5e7ac2e5811f2348f8f))
+* trip checks and case lifecycle: API, daily jobs, staff UI ([#107](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/107)) ([988e0a6](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/988e0a66f7d3a8f8f40fe08d340d7ba688df0c48))
+
+
+### Bug Fixes
+
+* B2B quote leaves out the live hold of its own proposal version ([#97](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/97)) ([5569f2b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/5569f2bb4eec46b5ac181cb6a7b80502671ba17c))
+* bk-028 amendment window instead of deferred sums triggers (migration) ([#113](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/113)) ([10fd7ee](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/10fd7eef7cbed936c6beb683ee514abbd9311cd8))
+* run the production smoke on ubuntu-24.04 ([#108](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/108)) ([740ac71](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/740ac714115a28922a274528a196f44bf4e8baec))
+* trip checks board keeps the due date on one line ([#109](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/109)) ([c0a8095](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c0a80957b65be9ec6a366004843c00c6f6c784d5))
+
 ## [0.7.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.6.0...v0.7.0) (2026-10-25)
 
 
