@@ -14,7 +14,11 @@ import { CisPhoto, FromCisTag, ManagedInCisLink, Modal, Section } from "@/ui";
 export const CIS_PHOTOS_PATH = "/admin/photos";
 
 export function CountryHero({ c }: { c: CountryDetail }) {
-  const coverCaption = c.photo_items.find((p) => p.path === c.cover_photo_path)?.caption;
+  // The cover path that failed to load: the caption then says there is no photo instead of naming one not on screen.
+  // Kept per path (like CisPhoto), so a new cover after a refetch is described again without an effect.
+  const [failedCover, setFailedCover] = useState<string | null>(null);
+  const cover = c.cover_photo_path && failedCover !== c.cover_photo_path ? c.cover_photo_path : null;
+  const coverCaption = cover ? c.photo_items.find((p) => p.path === cover)?.caption : undefined;
   return (
     <figure className="flex flex-col gap-1.5">
       <CisPhoto
@@ -22,10 +26,11 @@ export function CountryHero({ c }: { c: CountryDetail }) {
         size="large"
         alt={`${c.name} cover photo`}
         fallbackLabel={c.country_code}
+        onLoadError={() => setFailedCover(c.cover_photo_path)}
         className="aspect-[16/5] max-h-[280px] w-full rounded-lg border border-line"
       />
-      <figcaption className="text-xs text-muted">
-        {c.cover_photo_path ? `${coverCaption ? `${coverCaption} · ` : ""}Cover from CIS` : `CIS has no photo for ${c.name} yet.`}
+      <figcaption className="text-xs text-muted" data-testid="country-hero-caption">
+        {cover ? `${coverCaption ? `${coverCaption} · ` : ""}Cover from CIS` : `CIS has no photo for ${c.name} yet.`}
       </figcaption>
     </figure>
   );
@@ -126,7 +131,8 @@ function Lightbox({
             size="large"
             alt={p.caption ? `${p.caption}, ${name}` : `${name} photo ${index + 1}`}
             fallbackLabel="No photo"
-            className="max-h-[70vh] w-full rounded-md object-contain"
+            fit="contain"
+            className="max-h-[70vh] min-h-[240px] w-full rounded-md"
           />
           {many && (
             <>

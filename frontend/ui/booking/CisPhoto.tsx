@@ -7,6 +7,10 @@
 // AA-996 (Figma audit items 2 and 3): no photo, or a photo that fails to load, renders the same neutral tile of the
 // same box (a soft panel with an optional short label such as an ISO code), never the browser's broken-image glyph or
 // an "image off" icon.
+// `fit` sets object-fit on the image ("contain" for a lightbox that must show the whole photo); it is a prop rather
+// than a caller class because Tailwind emits `.object-cover` after `.object-contain`, so a caller's `object-contain`
+// next to a hard-coded `object-cover` would lose. `onLoadError` lets a caller react when the photo it asked for is not
+// shown (e.g. switch a caption that describes it).
 
 import { useState } from "react";
 import { CIS_MEDIA_URL } from "@/lib/config";
@@ -21,6 +25,8 @@ export function CisPhoto({
   size = "small",
   className = "",
   fallbackLabel,
+  fit = "cover",
+  onLoadError,
 }: {
   path: string | null | undefined;
   alt: string;
@@ -28,6 +34,10 @@ export function CisPhoto({
   className?: string;
   /** Short text on the neutral tile when there is no photo (an ISO code, "No photo"); empty tile when omitted. */
   fallbackLabel?: string;
+  /** object-fit of the image: "cover" (default) crops to the box, "contain" shows the whole photo. */
+  fit?: "cover" | "contain";
+  /** Called once when the image fails to load and the neutral tile replaces it. */
+  onLoadError?: () => void;
 }) {
   // The path that failed to load, so a new path (a re-render with another photo) is tried again without an effect.
   const [failed, setFailed] = useState<string | null>(null);
@@ -51,8 +61,11 @@ export function CisPhoto({
       alt={alt}
       loading="lazy"
       decoding="async"
-      onError={() => setFailed(path)}
-      className={`bg-panel object-cover ${className}`}
+      onError={() => {
+        setFailed(path);
+        onLoadError?.();
+      }}
+      className={`bg-panel ${fit === "contain" ? "object-contain" : "object-cover"} ${className}`}
     />
   );
 }

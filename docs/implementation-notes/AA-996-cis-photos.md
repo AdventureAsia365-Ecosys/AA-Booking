@@ -39,6 +39,13 @@ and photo-less rows drew a broken-image glyph. Session S254, agent Claude Code (
   browser's broken-image glyph. This alone fixes the trip-plan list thumbnails (audit item 2): the list already
   returns `cover_photo_path`; rows were the `ImageOff` glyph only because those tours have no CIS photo.
 
+- **Review follow-up (same PR): `CisPhoto` gains `fit` and `onLoadError` props** instead of callers fighting its
+  classes. `fit="contain"` replaces a caller's `object-contain` class, which never won: CisPhoto hard-coded
+  `object-cover` on the same `<img>` and Tailwind emits `.object-cover` after `.object-contain`, so the lightbox
+  cropped portrait photos to a middle band. `onLoadError` lets the country hero switch its caption to "CIS has no
+  photo for <country> yet." when the cover fails, instead of naming a photo that is not on screen (failure remembered
+  per path, like CisPhoto itself, so no effect and no stale state after a refetch).
+
 ## Changed
 
 - Backend `app/catalog/geo.py`: `COUNTRY_PHOTOS` returns `cover_photo_path` next to `photos`; new
@@ -55,6 +62,8 @@ and photo-less rows drew a broken-image glyph. Session S254, agent Claude Code (
     lightbox (`Modal`, previous / next buttons and arrow keys, "Open destination" for a place photo, which opens the
     destination drawer). "Open CIS photos ↗" (CIS `/admin/photos`) for CIS editor roles. Destinations and Tours tabs
     gain a cover thumbnail per row.
+  - Lightbox photo: `fit="contain"` plus `min-h-[240px]`, so a tall photo shows whole (up to 70vh) and a photo that
+    fails to load keeps a 240 px neutral tile under the previous / next buttons instead of collapsing to one text line.
   - Drawers (`GeoDrawers.tsx`): `PhotoStrip` (6 square thumbnails, "+N" on the last) in the country edit / add drawer
     and the destination edit drawer, under the read-only CIS fields.
   - Types in `lib/api/geo.ts` (`CountryItem.cover_photo_path`, `CountryPhoto`, `CountryDetail.photo_items`), layout
@@ -74,6 +83,11 @@ and photo-less rows drew a broken-image glyph. Session S254, agent Claude Code (
   `/countries/{iso}/photos` can come later if staff need every photo of a country here (they have CIS Photos).
 
 ## Should know
+
+- Review fixes checked with a throwaway Playwright spec on the layout-mock build (not committed): portrait 300x900 photo
+  in the lightbox renders `object-fit: contain` at 630 px (70vh of 900); with every image 404 the lightbox tile is
+  240 px tall and the hero caption reads "CIS has no photo for Laos yet.". `CisPhoto` callers that pass no `fit` keep
+  `object-cover`, unchanged.
 
 - Live check after deploy (orchestrator): `GET /booking/catalog/geo/countries` — BT, LK, CN, KR, MN, TW, PH carry a
   `cover_photo_path` and `photos` > 0; VN, JP, IN show `photos: 0`, `cover_photo_path: null`. To confirm the
