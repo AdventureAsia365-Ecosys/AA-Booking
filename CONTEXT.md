@@ -116,6 +116,8 @@ backend/
                            deploy workflow GitHub OIDC verifier (ci.py, AA-751) over the single-issuer cache (tokens.py)
   app/auth/m2m.py          aa-m2m client-credentials tokens for the B2B API (AA-972): IssuerConfig over the vendored
                            verifier (scope claim as groups), 401 / 403 split, scope constants
+  app/auth/customer.py     signed-in travellers for the customer routes (AA-682 S5): EXTERNAL issuer x {tripplanner,
+                           booking-customer} over the vendored verifier, 401 sign_in_required / 503 auth_unavailable
   app/b2b/                 booking.b2b.v1 (AA-972): access.py (scope + partner check), errors.py (contract Problem),
                            components.py (component ids, net cost of a line from rates in force), quotes.py (price,
                            price_hash, append-only store), reads.py (products, FX rates, price parity), partners.py and
@@ -144,6 +146,8 @@ backend/
                            /booking/trip-cases/{ref}/billing (GET), /booking/trip-cases/{ref}/invoices (POST),
                            /booking/payments (GET, GET/PATCH /{ref}, …/verify|void), /booking/billing/summary —
                            billing.read / billing.write / payment.verify (AA-682 S3)
+  app/routers/customer.py  /booking/customer/v1/payments, /booking/customer/v1/invoices/{number} — My Payments for a
+                           signed-in traveller (AA-682 S5, contract booking.customer.v1; scope in app/ops/my_payments.py)
   app/routers/supplier_bookings.py  /booking/trip-cases/{ref}/supplier-bookings (GET, POST, …/generate),
                            /booking/supplier-bookings (list, summary, GET/PATCH /{id}, …/request|confirm|decline|cancel|
                            rerequest), /booking/ops-files (POST, /{id}/download, /{id}/remove) — ops.read / ops.write
@@ -279,7 +283,9 @@ Operations documents (AA-682 S1, set by AA-CIS-Infra with the ops-docs bucket, i
 downloads answer 503 `ops_storage_unavailable`, everything else works) and `OPS_DOCS_REGION` (default `us-west-1`).
 Signed-in travellers (AA-908, optional, never set on Dev): `COGNITO_EXTERNAL_ISSUER`, the only issuer the inquiry intake
 accepts for a v1.4 `customer.identity` (default the Dev EXTERNAL pool, `identity_config.DEV_EXTERNAL_ISSUER`; must
-differ from the WORKFORCE and M2M issuers).
+differ from the WORKFORCE and M2M issuers); since AA-682 S5 also the issuer of the customer routes, with the two
+traveller clients `COGNITO_TRIPPLANNER_CLIENT_ID` / `COGNITO_BOOKING_CUSTOMER_CLIENT_ID` (defaults the Dev clients in
+`identity_config`, never set on Dev; letters and digits, never a staff or M2M client).
 Error tracking (AA-871, optional): `SENTRY_DSN` (Sentry off when empty; never logged) and `SENTRY_REQUIRED` (`true` =
 start-up fails without a DSN, the missing-DSN guard; off until Infra wires the DSN secret).
 
@@ -690,6 +696,29 @@ send, OTP) is not built: those still write rows only.
 - `bk_ops_reminders` writes `supplier_bill.due` (to approve / to pay, due within `supplier_bill_due_soon_days`, then
   once more when overdue) to the shared staff queue. Staff UI: `/billing?tab=supplier-bills`, the supplier Bills tab,
   the bill drawer and payout modal, the case Suppliers tab's cost vs billed panel.
+
+## My Payments: customer routes (AA-682 S5; S252 design §5, §7, §8, critic note 10; contract `booking.customer.v1`)
+
+- **Route class**: `/booking/customer/v1/*` accepts only a Cognito EXTERNAL access token of the `tripplanner` or
+  `booking-customer` client (`app.auth.customer`, its own verifier over the vendored module, keys prefetched in the
+  lifespan like the staff and M2M ones). Anything else (no token, a staff WORKFORCE or bridge token, an M2M token, an ID
+  token, the `cis-portal` client, a client-credentials shape) is 401 `sign_in_required`; keys never loaded is 503
+  `auth_unavailable`. A traveller token never opens a staff route (unknown issuer for the staff verifier). The caller
+  today is the TripPlanner BFF (`/api/me/payments`), which forwards the traveller's token; no gateway change (the REST
+  API proxies `/booking/{proxy+}` with no auth, the app authenticates).
+- **Scope** (`app.ops.my_payments`, all in SQL): `(iss, sub)` → `customer_identities` → a live customer; that
+  customer's B2C cases (`trip_cases.customer_id`, so a merge that re-points the case carries its invoices); invoices
+  not deleted and not `draft`. Everything else is 404 `invoice_not_found` (another customer's number, a draft, a
+  malformed number); an unlinked sign-in (a guest lead is never linked) gets an empty list.
+- **Fields** (allow-list = the router's response models, `extra="forbid"`): number, status, proforma, currency,
+  total, paid (verified receipts - refunds), balance, next due, overdue amount, issue time; the trip's code, dates and
+  TripPlanner trip id (`source_id` of a `tripplanner` case); schedule rows with the customer chip state
+  (`scheduled`, `due_soon`, `paid`, `overdue`, `cancelled`); **verified, non-voided** payments (ref, kind, amount,
+  currency, method, received date); `payment_instructions` only while money is owed (`sent`, `partially_paid`). Never
+  a staff member, evidence, bank reference, note, reason, bill-to snapshot, internal id, net cost or supplier field
+  (unit + integration tests walk every key; the root contract checker enforces the same policy on the contract and
+  its samples). Read only, `Cache-Control: no-store` on every answer (401/404/503 included), nothing about the
+  identity logged.
 
 ## Deferred work (`booking.job`, O3/O9)
 
@@ -1180,7 +1209,8 @@ operations S5 (My Payments: AA-682).
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice (proforma only, D7),
-agency settlement (B2B cases have no customer invoice, CRM O-10), the customer My Payments routes (AA-682 S5),
+agency settlement (B2B cases have no customer invoice, CRM O-10), a customer notifications feed (the customer rows
+of AA-682 are written but `booking.customer.v1` serves payments only; critic note 11),
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix

@@ -36,7 +36,12 @@ and the AA-Partner (CRM) app client; both empty (default) = every B2B route answ
 - ``COGNITO_EXTERNAL_ISSUER``: the EXTERNAL (traveller) pool issuer (AA-908). The inquiry intake accepts a contract v1.4
   ``customer.identity`` only from this issuer; any other one fails the hand-off. Default
   :data:`~app.auth.identity_config.DEV_EXTERNAL_ISSUER`. Never set on Dev. It must differ from the WORKFORCE and M2M
-  issuers.
+  issuers. Since AA-682 S5 it is also the issuer of the customer routes ``/booking/customer/v1``
+  (``app.auth.customer``).
+- ``COGNITO_TRIPPLANNER_CLIENT_ID`` / ``COGNITO_BOOKING_CUSTOMER_CLIENT_ID``: the two EXTERNAL clients the customer
+  routes accept (AA-682 S5). Defaults :data:`~app.auth.identity_config.DEV_TRIPPLANNER_CLIENT_ID` /
+  :data:`~app.auth.identity_config.DEV_BOOKING_CUSTOMER_CLIENT_ID`; never set on Dev. Letters and digits, and never a
+  staff or M2M client.
 
 - ``COGNITO_M2M_ISSUER``: the M2M pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
 - ``COGNITO_M2M_CRM_CLIENT_ID``: the AA-Partner (CRM) client-credentials app client. Required with the issuer.
@@ -84,10 +89,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from app.auth.identity_config import (
+    DEV_BOOKING_CUSTOMER_CLIENT_ID,
     DEV_BOOKING_STAFF_CLIENT_ID,
     DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
     DEV_BREAKGLASS_CLIENT_ID,
     DEV_EXTERNAL_ISSUER,
+    DEV_TRIPPLANNER_CLIENT_ID,
     DEV_WORKFORCE_ISSUER,
 )
 
@@ -142,6 +149,8 @@ class Settings:
     ops_docs_bucket: str = ""
     ops_docs_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     cognito_external_issuer: str = DEV_EXTERNAL_ISSUER
+    cognito_tripplanner_client_id: str = DEV_TRIPPLANNER_CLIENT_ID
+    cognito_booking_customer_client_id: str = DEV_BOOKING_CUSTOMER_CLIENT_ID
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
@@ -228,6 +237,21 @@ class Settings:
             raise SettingsError(
                 "COGNITO_EXTERNAL_ISSUER must differ from COGNITO_WORKFORCE_ISSUER and COGNITO_M2M_ISSUER"
             )
+        customer_clients = (
+            ("COGNITO_TRIPPLANNER_CLIENT_ID", self.cognito_tripplanner_client_id),
+            ("COGNITO_BOOKING_CUSTOMER_CLIENT_ID", self.cognito_booking_customer_client_id),
+        )
+        for name, client_id in customer_clients:
+            if not client_id or not client_id.isalnum():
+                raise SettingsError(f"{name} must be a Cognito app client id (letters and digits), got {client_id!r}")
+            if client_id in (
+                self.cognito_booking_staff_client_id,
+                self.cognito_breakglass_client_id,
+                self.cognito_booking_staff_preview_client_id,
+                m2m_client,
+            ):
+                # One client, one route class: a traveller client never doubles as a staff or service client.
+                raise SettingsError(f"{name} must differ from the staff and M2M clients")
         if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
             raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
         if self.sentry_required and not self.sentry_dsn:
@@ -280,6 +304,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ops_docs_bucket=(env.get("OPS_DOCS_BUCKET") or "").strip(),
         ops_docs_region=(env.get("OPS_DOCS_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
         cognito_external_issuer=(env.get("COGNITO_EXTERNAL_ISSUER") or "").strip() or DEV_EXTERNAL_ISSUER,
+        cognito_tripplanner_client_id=(env.get("COGNITO_TRIPPLANNER_CLIENT_ID") or "").strip()
+        or DEV_TRIPPLANNER_CLIENT_ID,
+        cognito_booking_customer_client_id=(env.get("COGNITO_BOOKING_CUSTOMER_CLIENT_ID") or "").strip()
+        or DEV_BOOKING_CUSTOMER_CLIENT_ID,
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )

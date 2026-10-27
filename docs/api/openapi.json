@@ -2473,6 +2473,140 @@
         "title": "IncidentIn",
         "type": "object"
       },
+      "Invoice": {
+        "additionalProperties": false,
+        "properties": {
+          "balance": {
+            "anyOf": [
+              {
+                "description": "Decimal string, 2 places",
+                "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total minus paid; negative = overpaid; null when cancelled",
+            "title": "Balance"
+          },
+          "currency": {
+            "description": "ISO 4217",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "document_type": {
+            "const": "proforma",
+            "title": "Document Type",
+            "type": "string"
+          },
+          "invoice_number": {
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "next_due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due Date"
+          },
+          "overdue_amount": {
+            "description": "Decimal string, 2 places",
+            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+            "title": "Overdue Amount",
+            "type": "string"
+          },
+          "paid_amount": {
+            "description": "Verified receipts minus verified refunds",
+            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+            "title": "Paid Amount",
+            "type": "string"
+          },
+          "payment_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How to pay; only while money is owed",
+            "title": "Payment Instructions"
+          },
+          "payments": {
+            "description": "Verified payments only",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            },
+            "title": "Payments",
+            "type": "array"
+          },
+          "schedule": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRow"
+            },
+            "title": "Schedule",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "sent",
+              "partially_paid",
+              "paid",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_amount": {
+            "description": "Decimal string, 2 places",
+            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+            "title": "Total Amount",
+            "type": "string"
+          },
+          "trip": {
+            "$ref": "#/components/schemas/TripRef"
+          }
+        },
+        "required": [
+          "invoice_number",
+          "status",
+          "document_type",
+          "currency",
+          "total_amount",
+          "paid_amount",
+          "balance",
+          "next_due_date",
+          "overdue_amount",
+          "issued_at",
+          "trip",
+          "schedule",
+          "payments",
+          "payment_instructions"
+        ],
+        "title": "Invoice",
+        "type": "object"
+      },
       "InvoiceChanges": {
         "additionalProperties": false,
         "properties": {
@@ -4435,6 +4569,61 @@
         "title": "Pax",
         "type": "object"
       },
+      "Payment": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "Decimal string, 2 places",
+            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "description": "ISO 4217",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "receipt",
+              "refund"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "bank_transfer",
+              "card_offline",
+              "cash",
+              "other"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "received_on": {
+            "format": "date",
+            "title": "Received On",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Payment reference (PMT-000123)",
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "kind",
+          "amount",
+          "currency",
+          "method",
+          "received_on"
+        ],
+        "title": "Payment",
+        "type": "object"
+      },
       "PaymentChanges": {
         "additionalProperties": false,
         "properties": {
@@ -4464,6 +4653,23 @@
           }
         },
         "title": "PaymentChanges",
+        "type": "object"
+      },
+      "Payments": {
+        "additionalProperties": false,
+        "properties": {
+          "invoices": {
+            "items": {
+              "$ref": "#/components/schemas/Invoice"
+            },
+            "title": "Invoices",
+            "type": "array"
+          }
+        },
+        "required": [
+          "invoices"
+        ],
+        "title": "Payments",
         "type": "object"
       },
       "PlanComponentIn": {
@@ -5647,6 +5853,63 @@
         "title": "RunRequest",
         "type": "object"
       },
+      "ScheduleRow": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "Decimal string, 2 places",
+            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date",
+            "title": "Due Date",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "deposit",
+              "second",
+              "final",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "remaining_amount": {
+            "description": "Decimal string, 2 places",
+            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
+            "title": "Remaining Amount",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "scheduled",
+              "due_soon",
+              "paid",
+              "overdue",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "kind",
+          "amount",
+          "due_date",
+          "remaining_amount",
+          "state"
+        ],
+        "title": "ScheduleRow",
+        "type": "object"
+      },
       "ScheduleRowIn": {
         "additionalProperties": false,
         "properties": {
@@ -6188,6 +6451,60 @@
         "title": "TourKey",
         "type": "object"
       },
+      "TripRef": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Booking trip reference (TC-000123)",
+            "title": "Code",
+            "type": "string"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "planner_trip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The TripPlanner trip this booking came from, if any",
+            "title": "Planner Trip Id"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          }
+        },
+        "required": [
+          "code",
+          "planner_trip_id",
+          "start_date",
+          "end_date"
+        ],
+        "title": "TripRef",
+        "type": "object"
+      },
       "UseForTripCase": {
         "additionalProperties": false,
         "description": "``trip_case`` (a case UUID or code) adds a version to that case; otherwise a new case is created for\n``customer_id`` or ``new_customer`` (same fields as ``POST /booking/trip-cases``).",
@@ -6448,6 +6765,11 @@
       },
       "m2m": {
         "description": "Cognito aa-m2m client-credentials access token (booking.b2b.v1)",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "traveller": {
+        "description": "Cognito EXTERNAL access token of a signed-in traveller (clients tripplanner, booking-customer)",
         "scheme": "bearer",
         "type": "http"
       }
@@ -9759,6 +10081,82 @@
         "summary": "List Countries",
         "tags": [
           "reference"
+        ]
+      }
+    },
+    "/booking/customer/v1/invoices/{number}": {
+      "get": {
+        "operationId": "getMyInvoice",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123)",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123)",
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invoice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "traveller": []
+          }
+        ],
+        "summary": "Get My Invoice",
+        "tags": [
+          "customer"
+        ]
+      }
+    },
+    "/booking/customer/v1/payments": {
+      "get": {
+        "operationId": "listMyPayments",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Payments"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "traveller": []
+          }
+        ],
+        "summary": "List My Payments",
+        "tags": [
+          "customer"
         ]
       }
     },
