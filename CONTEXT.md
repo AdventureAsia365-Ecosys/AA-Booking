@@ -47,7 +47,8 @@ Design sources, in order:
   (`inquiry.submitted` v1 / v1.1 / v1.2 / v1.3 / v1.4, contract in `AA-Ecosys/docs/contracts/`, grant = TripPlanner `tp-009`) —
   pattern outbox → pull job → `booking.inbox_events`. CIS catalog read model (contract `catalog.tour.v1`, CIS
   migration 225 grant to role `booking`), **read live** at request time (no copy, no outbox consumer):
-  `catalog.v_destination` (supplier place picker and check, AA-822) and `catalog.v_tour` / `v_tour_day` /
+  `catalog.v_destination` (supplier place picker and check, AA-822; Catalog → Destinations / Countries, AA-996, with
+  `v_destination_photo` feature-detected) and `catalog.v_tour` / `v_tour_day` /
   `v_tour_photo` (trip plan endpoints, AA-679, S237 decision D4). **Tour liveness** (AA-986 L5, root ADR 0015
   decision 5, contract `catalog.tour.v1.3`, CIS migration 274): `catalog.v_tour_retired` (tombstone: `retired` /
   `paused` + reason; a `restored` row of a key served again is no tombstone), read live next to `v_tour` (`app/catalog/liveness.py`), and `catalog.v_tour_lifecycle_outbox`,
@@ -173,7 +174,13 @@ backend/
   app/routers/catalog.py   GET /booking/catalog/destinations (place picker, any active staff, AA-822);
                            GET /booking/catalog/trip-plans (+ /facets, /{source_id}), PUT …/{source_id}/commercial,
                            POST …/{source_id}/trip-cases (AA-679, bk-009); GET|PUT …/{source_id}/components (AA-972);
-                           GET|POST …/{source_id}/departures, PATCH /booking/catalog/departures/{id} (AA-973)
+                           GET|POST …/{source_id}/departures, PATCH /booking/catalog/departures/{id} (AA-973);
+                           GET /booking/catalog/geo/destinations[/{id}], GET /booking/catalog/geo/countries[/{iso}]
+                           (catalog.read), PATCH of both (catalog.admin) (AA-996, bk-029)
+  app/catalog/geo.py       AA-996: Catalog → Countries / Destinations: CIS places (v_destination, v_destination_photo
+                           when served) and countries derived from v_destination / v_tour names through booking.countries,
+                           joined to the Booking state of bk-029 (country_profiles / destination_profiles: status
+                           active | inactive, reason, area, internal notes; soft, audited, no row = active)
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day;
@@ -366,6 +373,8 @@ send, OTP) is not built: those still write rows only.
   no customer money; the case detail hides its `money` badge without `billing.read`); verifying a payment
   `payment.verify` = admin and never the person who recorded it (403 `maker_checker`); voiding a verified payment needs
   `payment.verify` too. None of the three is in the preview cap (critic note 8: bill-to snapshots, payment refs).
+  Catalog geo state (AA-996, bk-029): the Booking status, reason, area and notes of a CIS country or place
+  `catalog.admin` = admin only (UI spec §3 "A edit status"); reading Countries / Destinations is `catalog.read`.
   Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.

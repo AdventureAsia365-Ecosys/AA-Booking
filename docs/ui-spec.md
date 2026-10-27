@@ -196,6 +196,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/` | Dashboard: KPIs + recent cases + my queue | OVERVIEW, OVERVIEW-1 (01) | A S C CC (widgets by role) | W1 |
 | `/notifications` | All notifications | NOTIFICATION, SETTINGS-1 (01) | all | W1 |
 | `/settings` | Profile (read-only, from CIS), theme, notification preferences | SETTINGS, SETTINGS-1 (as preferences), EDIT PROFILE (part) (01) | all | W1 |
+| `/settings?tab=security` | Sign-in & security: sign-in method (company e-mail code), session facts (`GET /api/auth/session`: signed in, session end), last seen, "Manage staff & invites in CIS ↗" | SETTINGS-2, RESET PASSWORD (replaced) (01) | all | shipped (AA-996) |
 | `/cases` | Trip case list (+ saved filter "Inquiries" = `status=new_inquiry`) | TRIP CASES MANAGEMENT, TRIP PLAN MANAGEMENT (03, 05) | A S C(r) | W1 |
 | `/cases/new` | Create trip case (manual) | ADD NEW TRIP 8 (03) | A S | W1 |
 | `/cases/[code]` | Case workspace, tab Overview (+ Edit details drawer) | Assigned Trips-1 (layout), TRIP CASES DETAILS, USER DETAILS-3/-4/-5 (inquiry panel), ADD NEW ACTIVITY-2 (= "Edit Trip Case" form → Edit details drawer) (03, 02, 07) | A S C(r) | W1 |
@@ -210,7 +211,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/customers` | Customer directory (tabs All / Leads / Active / Past) | USER MANAGEMENT, -1…-4, DELETE USER (02) | A S | W1 |
 | `/customers/[id]` | Customer detail (tabs Overview / Trip cases / Inquiries) | USER  DETAILS, -1, -2 (02) | A S | W1 |
 | `/pricing/calculator` | Stand-alone quote preview | not drawn (ADR 0005) | A S C | W1 |
-| `/staff` | Staff list (Booking profiles of CIS users) | ADMINS, USER, BLOCK ADMIN, RESET PASSWORD (bg) (02, 01) | A | W1 |
+| `/staff` | Staff list (Booking profiles of CIS users); "Manage staff & invites in CIS ↗" + per-row sign-in / invite link to CIS (AA-996) | ADMINS, USER, BLOCK ADMIN, RESET PASSWORD (bg) (02, 01) | A | W1 |
 | `/staff/[cisUserId]` | Staff detail (tabs Overview / Assigned cases / Activity) | USER DETAILS, Activity Log, Assigned Trips, EDIT PROFILE (02, 01, 03) | A (self: read) | W1 |
 | `/audit-log` | Audit log | AUDIT LOGS (01) | A | W2 (shipped early, S237) |
 | `/suppliers` | Supplier list | SUPPLIER MANAGEMENT, -1, -2, DELETE USER-1 (08, 02) | A C, S(r) | W2 |
@@ -224,14 +225,17 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/catalog/trip-plans` | Sellable trip plans over `catalog.v_tour` | TRIP TEMPLATES, -1, TRIP PLAN TEMPLATES, -1, TEMPLATE MANAGEMENT, -1, UNPUBLISH TEMPLATE (05) | all (A C edit commercial) | W2 |
 | `/catalog/trip-plans/[sourceId]` | Trip plan detail (CIS content + commercial panel) + "Use for trip case" modal | TRIP TEMPLATE DETAILS, -1 (modal), -2 (05) | all | W2 |
 | `/catalog/trip-plans/[sourceId]/commercial` | Commercial edit (sellable, supplier, price matrix, trip style) | CREATE NEW TEMPLATE, -1, -2, EDIT TEMPLATE, -1, -2 (only the commercial parts) (05) | A C | W2 |
-| `/catalog/destinations` | Destinations (CIS) + Booking status | DESTINATION MANAGEMENT, -1, DESTINATION DETAILS, ADD/EDIT/DELETE DESTINATION (as "attach / detach") (06) | all (A edit status) | W2 |
-| `/catalog/countries`, `/catalog/countries/[iso]` | Countries derived from CIS places + Booking status | COUNTRY MANAGAMENT, -1, COUNTRY DETAILS, -1, ADD/EDIT/DELETE/UNPUBLISHED COUNTRY (as status only) (06) | all (A edit status) | W2 |
+| `/catalog/destinations` (`?place=<id>` drawer, `&edit=1`) | Destinations: every CIS place (`catalog.v_destination`, server paging and filters) + Booking status / reason / notes (bk-029 `destination_profiles`); drawer view + edit; "Add destination" picks an existing CIS place | DESTINATION MANAGEMENT, -1, DESTINATION DETAILS, ADD/EDIT DESTINATION (CIS fields read-only), DELETE DESTINATION (→ deactivate) (06) | all (A edit status) | shipped (AA-996) |
+| `/catalog/countries` (`?edit=<iso>` drawer), `/catalog/countries/[iso]` | Countries derived from CIS places and tours (card grid) + Booking status / area / notes (bk-029 `country_profiles`); country page with Overview / Destinations / Tours | COUNTRY MANAGAMENT, -1, COUNTRY DETAILS, -1, ADD/EDIT COUNTRY (CIS fields read-only), DELETE / UNPUBLISHED COUNTRY (→ deactivate) (06) | all (A edit status) | shipped (AA-996) |
 | `/billing` | Invoices / Payments tabs + 4 KPIs (left to pay, overdue, received this month = verified net of refunds, waiting for verification) | PAYMENT & INVOICE, -1, -2, -3, PAYMENT MANAGEMENt, DELETE (09, 02) | A S | shipped (AA-682 S3) |
 | `/billing/invoices/[number]` | Invoice detail: send / edit / delete a draft, record payment, verify, void, amend, remind, cancel | View Details, -1, -2 (03), CANCEL INVOICE (09) | A S | shipped (AA-682 S3) |
 | `/billing/payments/[ref]` | Payment detail: evidence files, edit reference / note before verify, verify (admin, never the recorder), void | PAYMENT DETAILS, EDIT PAYMENT (09) | A S (sales record, edit and void unverified payments; only an admin verifies or voids a verified one, critic note 13) | shipped (AA-682 S3) |
 | `/trip-checks` | Trip checks across the open sold cases (AA-682 S2): filters status / due / owner / check / search, soonest due first, check drawer; the latest daily lifecycle runs under the table | TRIP CHECKS, View Details-3 (03) | A S C | shipped (AA-682 S2) |
 
-Modals and drawers that are not routes:
+Modals and drawers that are not routes. Every confirm of a soft delete uses the Figma dialog layout (round icon, title,
+message with the record name in bold, Cancel + action; `ui/booking/ConfirmDialog.tsx`, AA-996). The content forms
+(trip plan commercial drawer, service form, country and destination drawers) show the CIS-owned fields read-only in a
+"From CIS" block (`app/(staff)/_parts/CisFields.tsx`) with "Edit in CIS ↗" for admin and content creators (AA-996).
 
 | Modal / drawer | Figma | Where it opens | Wave |
 |---|---|---|---|
@@ -251,22 +255,30 @@ Modals and drawers that are not routes:
 | Edit case details (drawer) | ADD NEW ACTIVITY-2 ("Edit Trip Case"; customer locked) | case workspace | W1 |
 | Archive customer | DELETE USER (as soft delete) | customers list / detail | W1 |
 | Use trip plan for a trip case | TRIP TEMPLATE DETAILS-1 | trip plan detail | W2 |
-| Make not sellable | UNPUBLISH TEMPLATE | trip plans list / detail | W2 |
+| Make not sellable / Make sellable (soft: `sellable=false` through PUT …/commercial) | UNPUBLISH TEMPLATE, DELETE TRIP | trip plans row menu / detail | shipped (AA-996) |
 | Deactivate supplier | DELETE USER-1 | suppliers list / detail | W2 |
+| Deactivate / Activate country (reason optional) | DELETE COUNTRY, UNPUBLISHED COUNTRY | countries grid, country page | shipped (AA-996) |
+| Deactivate / Activate destination (reason optional) | DELETE DESTINATION | destinations row menu, destination drawer | shipped (AA-996) |
+| Country drawer (add / edit Booking state; CIS fields read-only) | ADD COUNTRY, EDIT COUNTRY | countries, country page | shipped (AA-996) |
+| Destination drawer (view; edit Booking state with CIS fields read-only) | DESTINATION DETAILS, ADD DESTINATION, EDIT DESTINATION | destinations, country page | shipped (AA-996) |
 | Deactivate hotel / service | DELETE HOTEL, EDIT HOTEL (Delete button), DELETE ACTIVITY, UNPUBLISH ACTIVITY, ACTIVITY DETAILS-1/-2 | hotels, services | W2 |
 | Approve pricing rule / FX row (second person) | not drawn (Q19) | pricing rules | W2 |
 | Trip check details (drawer) | View Details-3 | trip checks, case Checks tab | W3 |
 | Edit payment / Void payment | EDIT PAYMENT, DELETE (as void) | payment detail, invoice | shipped (AA-682 S3) |
 
-**Figma screens deliberately not built:**
+**Figma coverage (AA-996, S254).** Every Figma export is covered: [`docs/figma-coverage.md`](figma-coverage.md) maps
+each of the 120 PNGs to its route or dialog (built, new, replaced-by or duplicate). The screens that used to be "not
+built" now have a working Booking equivalent:
 
-| Screen | Why not |
-|---|---|
-| SETTINGS-2 (change password), RESET PASSWORD, the Invite part of USER.png | O1: passwords and invites belong to CIS. A "Manage sign-in in CIS ↗" link replaces them. |
-| Content editors in ADD COUNTRY, EDIT COUNTRY, ADD DESTINATION, EDIT DESTINATION, ADD NEW ACTIVITY, CREATE NEW TEMPLATE | O7: content is written in CIS. |
-| Hard-delete dialogs (DELETE COUNTRY, DELETE TRIP, …) | Replaced by deactivate, cancel or soft-delete. |
-| DELETE SUPPLIER.png | It is a mislabelled user dialog. |
-| SEND REMAINDER.png | It duplicates CANCEL INVOICE. |
+- SETTINGS-2 (change password), RESET PASSWORD and the Invite part of USER.png → **Sign-in & security** tab of
+  `/settings` (sign-in method, session facts from `GET /api/auth/session`, "Manage staff & invites in CIS ↗") and the
+  CIS links on `/staff`. Booking still holds no password (O1).
+- The content editors of ADD / EDIT COUNTRY, ADD / EDIT DESTINATION, ADD NEW / EDIT ACTIVITY and CREATE NEW / EDIT
+  TEMPLATE → the same Figma forms with the CIS fields read-only ("From CIS", "Edit in CIS ↗") next to the editable
+  Booking fields (O7).
+- Hard-delete dialogs → soft equivalents in the Figma dialog layout (`ConfirmDialog`): deactivate, archive, cancel,
+  void, delete draft, make not sellable.
+- DELETE SUPPLIER.png and SEND REMAINDER.png are misnamed exports (Delete User on customers; the Cancel invoice frame).
 
 ---
 
@@ -626,13 +638,13 @@ Permissions in bk-681 (code matrix): `trip_case.read` = A S C; `trip_case.write`
 | `GET /booking/catalog/trip-plans?q=&sellable=&country=&style=` | `catalog.v_tour` LEFT JOIN `booking.trip_plans` → `{source_id, title, sku, country, duration_days, cover, sellable, trip_style, from_price{amount,currency}?}` | `/catalog/trip-plans` |
 | `PUT /booking/catalog/trip-plans/{source_id}/commercial` | `{sellable, supplier_id?, trip_style?, commercial_notes?}` → upserts `trip_plans` (`source_system='cis'`) | commercial edit |
 | `GET/PUT /booking/catalog/trip-plans/{source_id}/prices` | season × pax band × currency × validity matrix (`trip_plan_prices`) | price matrix |
-| `GET /booking/catalog/destinations?q=&country=&status=` / `PUT …/{destination_id}/profile` `{status, notes}` | `catalog.v_destination` + `destination_profiles` | `/catalog/destinations` |
-| `GET /booking/catalog/countries` / `PUT …/{iso}/profile` `{status, area_id}` | distinct countries from `v_destination` / `v_tour` + `country_profiles` + counts | `/catalog/countries` |
+| As built (AA-996, bk-029): `GET /booking/catalog/geo/destinations?q=&country=&status=&sort=&limit=&offset=` (+ `summary`), `PATCH /booking/catalog/geo/destinations/{destination_id}` `{status?, status_reason?, internal_notes?}` (`catalog.admin`) | `catalog.v_destination` + `destination_profiles` | `/catalog/destinations` |
+| As built (AA-996, bk-029): `GET /booking/catalog/geo/countries?q=&status=&area=` (+ `areas`, `unmapped`), `PATCH /booking/catalog/geo/countries/{iso}` `{status?, status_reason?, area?, internal_notes?}` (`catalog.admin`; `area` is free text, no `area_id`) | countries from `v_destination` / `v_tour` mapped through `booking.countries` + `country_profiles` + counts | `/catalog/countries` |
 | `GET /booking/rate-sheets?status=validating\|ready\|published\|rejected&uploaded_by=` → `{items:[{id, supplier{id,name}, file_name, status, rows_ok, error_count, uploaded_by, uploaded_at}]}` | list for the contracting dashboard tile and the supplier Rates tab (critic pass) | dashboard, `/suppliers/[id]` |
 | `POST /booking/pricing/rules/{id}/approve`, `POST /booking/pricing/fx-rates/{id}/approve` (403 if `created_by == me`) | maker-checker for rules and FX (Q19); a row is in force only when approved (critic pass) | `/pricing/rules` |
 | `GET /booking/catalog/trip-plans/{source_id}` → v_tour summary + `trip_plans` commercial row + `prices[]` | detail page commercial panel (critic pass) | `/catalog/trip-plans/[sourceId]` |
 | `POST /booking/catalog/trip-plans/{source_id}/trip-cases` `{customer_id \| new_customer, start_date, pax_adults, pax_children, notes?}` → 201 case (V1 from the plan's CIS days) | "Use for trip case" modal, TRIP TEMPLATE DETAILS-1 (critic pass) | trip plan detail |
-| `GET /booking/catalog/countries/{iso}`, `GET /booking/catalog/destinations/{destination_id}` | detail = row + profile + destinations / tours / photos (critic pass) | country detail page, destination drawer |
+| As built (AA-996): `GET /booking/catalog/geo/countries/{iso}` (+ `destination_items`, `tour_items`), `GET /booking/catalog/geo/destinations/{destination_id}` (+ `photos` from `v_destination_photo` when served, active suppliers / hotels / services at the place) | detail = row + profile + destinations / tours / photos (critic pass) | country detail page, destination drawer |
 | `GET /booking/audit-logs` (+ export `?format=csv`) | as W1, all actors | `/audit-log` |
 | `POST /booking/trip-cases/{ref}/versions/{n}/pdf` → `{media_id, url}` | rendered proposal PDF | Download PDF |
 | `GET /booking/v_from_prices` (internal) / view `booking.v_from_prices` | contract `price.from.v1` for TripPlanner and CIS | not UI; listed for completeness |
