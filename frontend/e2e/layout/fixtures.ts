@@ -781,6 +781,7 @@ function countryItem(i: number): CountryItem {
     tours: 30 + i * 9,
     active_suppliers: 4 + i,
     area: i % 2 ? "Indochina and the Mekong region" : null,
+    booking_reference: true,
     status: i === 3 ? "inactive" : "active",
     status_reason: i === 3 ? "Paused while the new DMC contract is signed" : null,
     internal_notes: null,

@@ -86,7 +86,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
         actions={
           <>
             {CIS_EDITOR_ROLES.has(me.role) && <ManagedInCisLink path={CIS_PLACES_PATH} label="Open in CIS" />}
-            {canWrite && (
+            {canWrite && c.booking_reference && (
               <Button
                 variant={c.status === "active" ? "danger" : "secondary"}
                 onClick={() => status.ask("country", { id: c.country_code, name: c.name }, c.status !== "active")}
@@ -94,7 +94,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
                 {c.status === "active" ? <Power size={15} /> : <CheckCircle2 size={15} />} {c.status === "active" ? "Deactivate" : "Activate"}
               </Button>
             )}
-            {canWrite && (
+            {canWrite && c.booking_reference && (
               <Button variant="primary" onClick={() => setMany({ edit: "1" })}>
                 <Pencil size={15} /> Edit country
               </Button>
@@ -111,7 +111,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <KpiTile label="Destinations" value={c.destinations} icon={<MapPin size={16} />} hint={<FromCisTag />} />
               <KpiTile label="Tours" value={c.tours} icon={<Globe size={16} />} hint={<FromCisTag />} />
-              <KpiTile label="Images" value={c.photos} icon={<ImageIcon size={16} />} hint="photos of its places" />
+              <KpiTile label="Images" value={c.photos} icon={<ImageIcon size={16} />} hint="CIS photos of its places and tours" />
               <KpiTile label="Active suppliers" value={c.active_suppliers} icon={<Store size={16} />} hint="in Booking" />
             </div>
             <Section title="Booking state" description="Owned by Booking; an admin changes it.">
