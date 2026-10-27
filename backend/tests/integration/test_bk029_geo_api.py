@@ -116,7 +116,10 @@ async def test_destinations_list_detail_and_soft_deactivate(
 
     detail = await c.get(f"/catalog/geo/destinations/{HANOI}", headers=content)
     assert detail.status_code == 200, detail.text
-    assert detail.json()["photos"] == [] and detail.json()["active_suppliers"] == 0
+    # Photos come from the v_destination_photo stub, which other tests in this module may fill (order-independent).
+    photos = detail.json()["photos"]
+    assert isinstance(photos, list) and all(p.get("photo_id") for p in photos)
+    assert detail.json()["active_suppliers"] == 0
     assert (await c.get(f"/catalog/geo/destinations/{UNKNOWN}", headers=content)).status_code == 404
 
     body = {"status": "inactive", "status_reason": "Closed for the monsoon"}
