@@ -190,7 +190,8 @@ backend/
                            v_destination.country_iso2, tours by v_tour.country = v_country.name), joined to the Booking
                            state of bk-029 (country_profiles / destination_profiles: status active | inactive, reason,
                            area, internal notes; soft, audited, no row = active). A country outside booking.countries
-                           is listed read-only (booking_reference false; PATCH 409). Images = distinct CIS photo paths
+                           is listed read-only (booking_reference false; PATCH 409; bk-031 added the AA tour countries
+                           KG / PK / TW / UZ, so only a non-AA cross-border country is left there). Images = distinct CIS photo paths
                            of its places + its place-less tour photos (v_destination_photo, v_tour_photo; fail soft)
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
@@ -1201,6 +1202,14 @@ only, bill currency, recorder ≠ bill creator, never above the amount, void fin
 `ops_files_guard` (bill documents, payout evidence); setting `supplier_bill_due_soon_days`. Tags in the file
 (amounts, bill number, payout reference conf:commercial; notes / reasons pii:free_text). bk-029 is AA-996's geo
 profiles. In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-030 before the code deploys.
+
+### `bk-031` (AA-996 CIS tour countries in `countries` — needs `bk-005`)
+
+Data only: `countries` gains `KG` Kyrgyzstan, `PK` Pakistan, `TW` Taiwan, `UZ` Uzbekistan (active, CIS
+`shared.countries.name` spelling), so every AA tour country of CIS (CIS 279 list) is in Booking's reference list and
+Catalog → Countries can keep state for them (`booking_reference` true by itself, no code change). `ON CONFLICT DO
+NOTHING`; grants unchanged (`booking` reads only). Not in `REQUIRED_SCHEMA_VERSIONS`: the code works before and after
+it (those countries are read-only until it is applied).
 
 Waiting for decisions: `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
