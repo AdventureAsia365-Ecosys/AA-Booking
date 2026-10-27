@@ -2,8 +2,9 @@
 ``catalog.v_destination`` / ``v_tour``, role ``booking``): the destination list (filters, summary over the whole
 catalog), detail (Booking supply at the place; photos fail soft without ``v_destination_photo``), deactivate /
 activate (soft, audited, admin only), and the country list / detail / update derived from CIS places and tours: grouped
-by CIS's ISO code (``v_country`` / ``v_destination.country_iso2``), including a country outside ``booking.countries``
-(read-only there), with images = distinct CIS photo paths of its places and its place-less tour photos."""
+by CIS's ISO code (``v_country`` / ``v_destination.country_iso2``), including Pakistan (in ``booking.countries`` since
+bk-031) and a country still outside it (read-only there), with images = distinct CIS photo paths of its places and its
+place-less tour photos."""
 
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 HANOI = "d0000000-0000-4000-8000-000000000001"
 LUANG_PRABANG = "d0000000-0000-4000-8000-000000000002"
 HOI_AN = "d0000000-0000-4000-8000-000000000003"
-LAHORE = "d0000000-0000-4000-8000-000000000005"  # stub_catalog.sql: a Pakistani place (PK is not in booking.countries)
+LAHORE = "d0000000-0000-4000-8000-000000000005"  # stub_catalog.sql: a Pakistani place (PK: bk-031)
 UNKNOWN = "d0000000-0000-4000-8000-0000000000ff"
 TOUR_VN = "aa996000-0000-4000-8000-00000000000a"
 TOUR_LA = "aa996000-0000-4000-8000-00000000000b"
@@ -157,13 +158,16 @@ async def test_countries_list_detail_and_update(
     assert listing["unmapped"] == [{"name": "Nowhere", "destinations": 1}]
     # Images: distinct CIS photo paths of the country's places + its tours' photos not tied to a place.
     assert by_code["VN"]["photos"] == 3 and by_code["LA"]["photos"] == 1 and by_code["PK"]["photos"] == 0
-    # A CIS country outside Booking's reference list is listed and readable, but Booking cannot keep state for it.
+    # Pakistan was outside Booking's reference list until bk-031 (read-only on Dev); it now takes Booking state.
     pk = by_code["PK"]
-    assert pk["name"] == "Pakistan" and pk["destinations"] == 1 and pk["booking_reference"] is False
+    assert pk["name"] == "Pakistan" and pk["destinations"] == 1 and pk["booking_reference"] is True
     assert by_code["VN"]["booking_reference"] is True
     pk_detail = (await c.get("/catalog/geo/countries/pk", headers=content)).json()
     assert [d["destination_id"] for d in pk_detail["destination_items"]] == [LAHORE]
-    refused = await c.patch("/catalog/geo/countries/PK", json={"status": "inactive"}, headers=boss)
+    # A CIS country still outside the list (stub: Kazakhstan) is readable, but Booking cannot keep state for it.
+    kz_detail = await c.get("/catalog/geo/countries/KZ", headers=content)
+    assert kz_detail.status_code == 200 and kz_detail.json()["booking_reference"] is False
+    refused = await c.patch("/catalog/geo/countries/KZ", json={"status": "inactive"}, headers=boss)
     assert refused.status_code == 409 and refused.json()["detail"] == "country_not_in_booking"
     assert await admin.fetchval("SELECT count(*) FROM booking.country_profiles") == 0
 
@@ -210,3 +214,7 @@ async def test_countries_list_detail_and_update(
         " ORDER BY created_at LIMIT 1"
     )
     assert row["action"] == "country.deactivated" and row["entity_label"] == "Laos (LA)"
+    # bk-031: Pakistan takes Booking state now (it answered 409 country_not_in_booking before).
+    pk_edit = await c.patch("/catalog/geo/countries/PK", json={"area": "South Asia"}, headers=boss)
+    assert pk_edit.status_code == 200, pk_edit.text
+    assert pk_edit.json()["area"] == "South Asia" and pk_edit.json()["booking_reference"] is True

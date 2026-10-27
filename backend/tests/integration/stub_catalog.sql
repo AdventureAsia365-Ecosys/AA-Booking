@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS catalog.v_destination_photo (
 );
 
 -- CIS 279: catalog.v_country (every ISO 3166-1 entry; a few rows here) and v_destination.country_iso2 (CIS resolves a
--- place's country text; NULL when it cannot). Pakistan is a CIS country outside booking.countries (bk-005 / bk-008).
+-- place's country text; NULL when it cannot). Kazakhstan is a CIS country outside booking.countries (bk-005 / bk-008 /
+-- bk-031: Pakistan, Taiwan and Kyrgyzstan joined it in bk-031).
 CREATE TABLE IF NOT EXISTS catalog.v_country (
     iso2          CHAR(2) PRIMARY KEY,
     iso3          CHAR(3),
@@ -89,7 +90,9 @@ INSERT INTO catalog.v_country (iso2, iso3, numeric_code, name, iso_name) VALUES
     ('BT', 'BTN', '064', 'Bhutan', 'Bhutan'),
     ('PK', 'PAK', '586', 'Pakistan', 'Pakistan'),
     ('TW', 'TWN', '158', 'Taiwan', 'Taiwan, Province of China'),
-    ('KG', 'KGZ', '417', 'Kyrgyzstan', 'Kyrgyzstan')
+    ('KG', 'KGZ', '417', 'Kyrgyzstan', 'Kyrgyzstan'),
+    ('UZ', 'UZB', '860', 'Uzbekistan', 'Uzbekistan'),
+    ('KZ', 'KAZ', '398', 'Kazakhstan', 'Kazakhstan')
 ON CONFLICT (iso2) DO NOTHING;
 
 CREATE OR REPLACE VIEW catalog.v_destination AS
