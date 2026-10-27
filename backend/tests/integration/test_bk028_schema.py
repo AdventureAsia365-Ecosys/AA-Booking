@@ -37,6 +37,7 @@ import pytest_asyncio
 
 from app.ops import money
 from tests.integration import ops
+from tests.integration.conftest import apply_migrations
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -105,6 +106,8 @@ async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> No
         await admin.execute(MIGRATION.read_text(encoding="utf-8"))  # a second run is a no-op
     finally:
         await admin.execute("RESET ROLE")
+    # The re-run put back the bk-028 body of ops_files_guard, which bk-030 replaces: replay the later files too.
+    await apply_migrations(admin, only=range(29, 1000))
     assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-028'") == 1
     rels = (
         "invoices",

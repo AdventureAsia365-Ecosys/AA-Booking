@@ -1,8 +1,8 @@
-"""Shared set-up and clean-up of the AA-682 integration tests (bk-026 .. bk-028): a sold B2C trip case with an approved
+"""Shared set-up and clean-up of the AA-682 integration tests (bk-026 .. bk-030): a sold B2C trip case with an approved
 version of two supply items (a room type and a service of one supplier, with cost rows), helpers for a sent invoice
-(bk-028, in SQL as the service writes it), and the purge of every supplier booking / operations file / invoice /
-payment so the other modules' clean-ups (which delete cases, hotels and suppliers) never meet a row that points at
-them."""
+(bk-028) and a supplier bill / payout (bk-030), in SQL as the services write them, and the purge of every supplier
+booking / operations file / invoice / payment / supplier bill / payout so the other modules' clean-ups (which delete
+cases, hotels and suppliers) never meet a row that points at them."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ async def purge_ops(conn: asyncpg.Connection) -> None:
             "UPDATE booking.supplier_bookings SET voucher_file_id = NULL WHERE voucher_file_id IS NOT NULL"
         )
         await purge_billing(conn)
+        await purge_bills(conn)
         await conn.execute("DELETE FROM booking.ops_files")
         await conn.execute("DELETE FROM booking.supplier_bookings")
         await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type IN ('supplier_booking', 'ops_file')")
@@ -88,6 +89,26 @@ async def purge_billing(conn: asyncpg.Connection) -> None:
             await conn.execute(f"DELETE FROM {table}")  # noqa: S608 — constant names
     finally:
         for table in BILLING:
+            await conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
+
+
+BILLS = ("booking.supplier_payouts", "booking.supplier_bill_items", "booking.supplier_bills")
+
+
+async def purge_bills(conn: asyncpg.Connection) -> None:
+    """Every bk-030 row (payouts, lines, bills) with their guards off: paid bills and payouts are never deleted by the
+    app. Runs inside :func:`purge_ops`'s owner transaction (or alone)."""
+    if await conn.fetchval("SELECT to_regclass('booking.supplier_bills')") is None:
+        return
+    await conn.execute("DELETE FROM booking.notifications WHERE type LIKE 'supplier_bill.%'")
+    await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type IN ('supplier_bill', 'supplier_payout')")
+    for table in BILLS:
+        await conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
+    try:
+        for table in BILLS:
+            await conn.execute(f"DELETE FROM {table}")  # noqa: S608 — constant names
+    finally:
+        for table in BILLS:
             await conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
 
 
@@ -316,4 +337,101 @@ async def record_payment(
 async def verify_payment(conn: asyncpg.Connection, payment_id: str, *, by: str) -> None:
     await conn.execute(
         "UPDATE booking.payments SET verified_by = $2, verified_at = now() WHERE id = $1::uuid", payment_id, by
+    )
+
+
+# ── Supplier bills (bk-030), written in SQL the way app.ops.supplier_bills writes them ─────
+
+
+async def confirmed_booking(
+    conn: asyncpg.Connection, case: dict[str, Any], supplier_id: str, *, item: str | None = None, net: str = "300.00"
+) -> str:
+    """A supplier booking of ``case`` moved pending -> requested -> confirmed (as the S1 service does)."""
+    booking = await conn.fetchval(
+        "INSERT INTO booking.supplier_bookings (trip_case_id, version_item_id, supplier_id, item_description,"
+        " net_amount, net_currency) VALUES ($1::uuid, $2::uuid, $3::uuid, 'Two nights', $4::numeric, 'USD')"
+        " RETURNING id::text",
+        case["id"],
+        item,
+        supplier_id,
+        net,
+    )
+    await conn.execute(
+        "UPDATE booking.supplier_bookings SET status = 'requested', requested_at = now() WHERE id = $1::uuid", booking
+    )
+    await conn.execute(
+        "UPDATE booking.supplier_bookings SET status = 'confirmed', confirmed_at = now(), confirmation_ref = 'CONF-1'"
+        " WHERE id = $1::uuid",
+        booking,
+    )
+    return booking
+
+
+async def bill(
+    conn: asyncpg.Connection,
+    supplier_id: str,
+    *,
+    by: str,
+    amount: str = "400.00",
+    number: str = "SUP-001",
+    case_id: str | None = None,
+    lines: tuple[tuple[str, str], ...] = (),
+    tag: str | None = None,
+    due: date | None = None,
+) -> dict[str, Any]:
+    """A received supplier bill with its ``lines`` ``(supplier booking id, amount)``."""
+    row = await conn.fetchrow(
+        "INSERT INTO booking.supplier_bills (supplier_id, trip_case_id, bill_number, currency, amount, issue_date,"
+        " due_date, idempotency_key, request_sha256, created_by, updated_by)"
+        " VALUES ($1::uuid, $2::uuid, $3, 'USD', $4::numeric, current_date, $5, $6, $7, $8, $8)"
+        " RETURNING id::text AS id, code",
+        supplier_id,
+        case_id,
+        number,
+        amount,
+        due or date.today() + timedelta(days=14),
+        key(tag or f"bill-{number}"),
+        SHA,
+        by,
+    )
+    for booking, value in lines:
+        await conn.execute(
+            "INSERT INTO booking.supplier_bill_items (bill_id, supplier_booking_id, amount, created_by)"
+            " VALUES ($1::uuid, $2::uuid, $3::numeric, $4)",
+            row["id"],
+            booking,
+            value,
+            by,
+        )
+    return dict(row)
+
+
+async def approve_bill(conn: asyncpg.Connection, bill_id: str, *, by: str) -> None:
+    await conn.execute(
+        "UPDATE booking.supplier_bills SET status = 'approved', approved_by = $2, approved_at = now()"
+        " WHERE id = $1::uuid",
+        bill_id,
+        by,
+    )
+
+
+async def payout(
+    conn: asyncpg.Connection,
+    bill_id: str,
+    amount: str,
+    *,
+    by: str,
+    tag: str | None = None,
+    method: str = "bank_transfer",
+) -> str:
+    return await conn.fetchval(
+        "INSERT INTO booking.supplier_payouts (bill_id, amount, currency, method, paid_on, idempotency_key,"
+        " request_sha256, recorded_by) VALUES ($1::uuid, $2::numeric, 'USD', $3, current_date, $4, $5, $6)"
+        " RETURNING id::text",
+        bill_id,
+        amount,
+        method,
+        key(tag or f"payout-{amount}-{by}"),
+        SHA,
+        by,
     )
