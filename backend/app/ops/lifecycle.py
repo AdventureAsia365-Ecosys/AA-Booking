@@ -44,8 +44,12 @@ run); each case in a savepoint, so one refusal never undoes another case's move.
 - ``invoice.overdue`` (S3): such a row past its due date, at the steps of ``payment_overdue_reminder_days`` ([1, 7]),
   the highest step reached only, staff + customer rows; key ``…:<row>:<due date>:d<step>``.
 
-The schedule state is read in the ops time zone (the transaction's ``TimeZone``). Supplier bill reminders (S4) join this
-kind later. No job here ever writes money (design §9): reminders only.
+- ``supplier_bill.due`` (S4, bk-030): a supplier bill still ``received`` (to approve) or ``approved`` (to pay) whose
+  due date is within ``supplier_bill_due_soon_days`` (key ``…:<bill>:<due date>:soon``) or passed (``…:overdue``),
+  to the shared staff queue (approvers and payers are a group, not one person); one row per step.
+
+The schedule state is read in the ops time zone (the transaction's ``TimeZone``). No job here ever writes money
+(design §9): reminders only.
 """
 
 from __future__ import annotations
@@ -84,6 +88,7 @@ WAITING_TYPE = "supplier_booking.waiting"
 CHECK_DUE_TYPE = "trip_check.due"
 DUE_SOON_TYPE = "payment.due_soon"
 OVERDUE_TYPE = "invoice.overdue"
+BILL_DUE_TYPE = "supplier_bill.due"
 DEFAULT_OVERDUE_STEPS = (1, 7)
 DEFAULT_TZ = "Asia/Ho_Chi_Minh"
 TZ_SETTING = "b2b_ops_timezone"
@@ -92,12 +97,14 @@ DEFAULTS = {
     "emergency_contact_keep_days": 90,
     "supplier_answer_days": 2,
     "trip_check_reminder_days": 3,
+    "supplier_bill_due_soon_days": 3,
 }
 LIMITS = {
     "pre_departure_days": (0, 120),
     "emergency_contact_keep_days": (0, 3650),
     "supplier_answer_days": (1, 60),
     "trip_check_reminder_days": (0, 60),
+    "supplier_bill_due_soon_days": (0, 60),
 }
 # Statuses a case leaves for pre_departure (bk-026 edges: B2B from confirmed / supplier_confirming, B2C from paid
 # once bk-028 adds that edge); the money statuses are listed so a B2C case waiting for its money shows as blocked.
@@ -569,6 +576,15 @@ SELECT s.schedule_id::text AS id, s.seq, s.kind, s.remaining_amount, s.due_date,
  ORDER BY s.due_date, s.seq
  LIMIT $1
 """
+BILLS_DUE_SQL = """
+SELECT b.id::text AS id, b.code, b.status, b.due_date, b.currency, bal.balance, s.company_name AS supplier_name
+  FROM booking.supplier_bills b
+  JOIN booking.v_supplier_bill_balance bal ON bal.bill_id = b.id
+  JOIN booking.suppliers s ON s.id = b.supplier_id
+ WHERE b.status IN ('received', 'approved') AND b.due_date <= $1::date
+ ORDER BY b.due_date, b.code
+ LIMIT $2
+"""
 CHECK_LABEL = {
     "pre_trip_recheck": "Re-check bookings",
     "emergency_contact": "Emergency contact",
@@ -655,6 +671,43 @@ async def _payment_reminders(conn: asyncpg.Connection, limit: int) -> dict[str, 
     return counts
 
 
+def bill_reminder(row: Any, today: date) -> tuple[str, str, str]:
+    """(reminder key, title, message) of a due supplier bill: ``soon`` before its due date, ``overdue`` after."""
+    when = row["due_date"].isoformat()
+    late = row["due_date"] < today
+    step = "overdue" if late else "soon"
+    amount = f"{row['balance']} {row['currency'].strip()}"
+    if row["status"] == "received":
+        what = "approve" if not late else "approve (overdue)"
+        message = f"Due {when}. Check the lines and the document, then another person approves it."
+    else:
+        what = "pay" if not late else "pay (overdue)"
+        message = f"Due {when}. An admin records the payout with the bank slip."
+    title = f"{row['code']}: {what} {amount} to {row['supplier_name']}"[:200]
+    return f"{BILL_DUE_TYPE}:{row['id']}:{when}:{step}", title, message
+
+
+async def _bill_reminders(conn: asyncpg.Connection, today: date, soon_days: int, limit: int) -> dict[str, int]:
+    """S4: supplier bills to approve or to pay that are due soon or overdue -> one staff row per step (shared queue)."""
+    rows = await conn.fetch(BILLS_DUE_SQL, today + timedelta(days=soon_days), limit)
+    notified = 0
+    for r in rows:
+        key, title, message = bill_reminder(r, today)
+        if await notifications.notify_staff_once(
+            conn,
+            type=BILL_DUE_TYPE,
+            title=title,
+            message=message,
+            entity_type="supplier_bill",
+            entity_id=r["id"],
+            reminder_key=key,
+            data={"code": r["code"], "due_date": r["due_date"].isoformat(), "status": r["status"]},
+            recipient_ref=None,
+        ):
+            notified += 1
+    return {"bills_due": len(rows), "bills_notified": notified}
+
+
 async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit: int = 1000) -> dict[str, Any]:
     async with pool.acquire() as conn:
         tz = await ops_timezone(conn)
@@ -698,6 +751,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
             ):
                 due += 1
         payments = await _payment_reminders(conn, limit)
+        bills = await _bill_reminders(conn, today, rules["supplier_bill_due_soon_days"], limit)
     return {
         "today": today.isoformat(),
         "timezone": tz,
@@ -706,6 +760,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
         "checks_due": len(checks),
         "checks_due_notified": due,
         **payments,
+        **bills,
     }
 
 
@@ -713,11 +768,12 @@ async def handle_reminders(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
     result = await run_reminders(pool)
     result["trigger"] = (job.payload or {}).get("trigger", "manual")
     log.info(
-        "ops_reminders waiting=%s checks_due=%s payments=%s customer_rows=%s",
+        "ops_reminders waiting=%s checks_due=%s payments=%s customer_rows=%s bills=%s",
         result["supplier_waiting_notified"],
         result["checks_due_notified"],
         result["payments_notified"],
         result["customer_rows"],
+        result["bills_notified"],
     )
     return result
 

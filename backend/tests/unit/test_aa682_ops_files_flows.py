@@ -176,7 +176,7 @@ def test_files_inherit_the_permission_of_their_parent() -> None:
     ops_files._require(SALES, "supplier_booking", write=True)
     ops_files._require(SALES, "supplier_booking", write=False)
     for staff, entity_type, write in ((CONTENT, "supplier_booking", False), (CONTENT, "supplier_booking", True),
-                                      (ADMIN, "supplier_bill", False)):  # fmt: skip
+                                      (SALES, "supplier_bill", True), (SALES, "supplier_payout", True)):  # fmt: skip
         with pytest.raises(Forbidden):
             ops_files._require(staff, entity_type, write=write)
 
@@ -185,8 +185,15 @@ def test_files_inherit_the_permission_of_their_parent() -> None:
 async def test_parent_kinds_ids_and_not_found() -> None:
     conn = ScriptedConn()
     with pytest.raises(Invalid) as exc:
-        await ops_files._parent(conn, "supplier_bill", SB_ID, lock=False)  # bk-029
-    assert exc.value.code == "kind_not_available"
+        await ops_files._parent(conn, "trip_case", SB_ID, lock=False)
+    assert exc.value.code == "unknown_entity"
+    for entity_type, code in (
+        ("supplier_bill", "supplier_bill_not_found"),
+        ("supplier_payout", "supplier_payout_not_found"),
+    ):
+        with pytest.raises(NotFound) as exc:  # bk-030
+            await ops_files._parent(conn, entity_type, SB_ID, lock=True)
+        assert exc.value.code == code
     with pytest.raises(NotFound) as exc:  # bk-028: payments take evidence files
         await ops_files._parent(conn, "payment", SB_ID, lock=False)
     assert exc.value.code == "payment_not_found"
@@ -228,7 +235,7 @@ async def test_upload_writes_the_row_and_audit_then_puts_the_object() -> None:
     ("staff", "rules", "args", "error", "code"),
     [
         (SALES, {}, {"kind": "invoice"}, Invalid, "unknown_kind"),
-        (SALES, {}, {"kind": "supplier_bill"}, Invalid, "kind_not_available"),
+        (SALES, {}, {"kind": "supplier_bill"}, Invalid, "kind_entity_mismatch"),
         (SALES, {}, {"kind": "payment_evidence"}, Invalid, "kind_entity_mismatch"),
         (SALES, {}, {"entity_type": "trip_case"}, Invalid, "kind_entity_mismatch"),
         (CONTENT, {}, {}, Forbidden, "forbidden"),
@@ -315,6 +322,14 @@ async def test_remove_a_voucher_unlinks_it_from_its_booking() -> None:
     assert row["action"] == "ops_file.removed" and row["entity_label"] == "TC-000001 SB-000001"
     assert row["before"] == {"file_id": FILE_ID, "status": "active"}
     assert row["after"]["status"] == "removed"
+
+
+@pytest.mark.asyncio
+async def test_remove_the_voucher_of_a_cancelled_booking_still_unlinks_it() -> None:
+    """Review S4: "cancelled" is final for a supplier bill only; a cancelled supplier booking detaches its voucher."""
+    conn = ScriptedConn([(GET_FILE, file_row()), (PARENT, parent_row(status="cancelled", voucher_file_id=FILE_ID))])
+    await ops_files.remove(conn, SALES, FILE_ID, "wrong hotel")
+    assert conn.sql(UNLINK_VOUCHER) == [(SB_ID, "u-1")] and len(conn.sql(REMOVE)) == 1
 
 
 @pytest.mark.asyncio

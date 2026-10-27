@@ -7,6 +7,7 @@ import type { CustomerStatus, TripCaseStatus, VersionBadge } from "@/lib/api/typ
 import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBookings";
 import type { TripCheckStatus } from "@/lib/api/tripChecks";
 import type { InvoiceStatus, PaymentState, ScheduleState } from "@/lib/api/billing";
+import type { PayoutState, SupplierBillStatus } from "@/lib/api/supplierBills";
 import { formatMoney } from "./Money";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
@@ -137,6 +138,30 @@ export const SCHEDULE_STATE_META: Record<ScheduleState, { label: string; tone: B
 
 export function ScheduleStateBadge({ state }: { state: ScheduleState | string }) {
   const meta = SCHEDULE_STATE_META[state as ScheduleState] ?? { label: state, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+/** AA-682 S4 (bk-030) supplier bill states. "Paid" is derived from the payouts only (never set by hand). */
+export const SUPPLIER_BILL_STATUS_META: Record<SupplierBillStatus, { label: string; tone: BookingTone }> = {
+  received: { label: "To approve", tone: "warning" },
+  approved: { label: "To pay", tone: "orange" },
+  paid: { label: "Paid", tone: "success" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+};
+
+export function SupplierBillStatusBadge({ status, overdue = false }: { status: SupplierBillStatus | string; overdue?: boolean }) {
+  if (overdue && (status === "received" || status === "approved")) return <Pill tone="danger">Overdue</Pill>;
+  const meta = SUPPLIER_BILL_STATUS_META[status as SupplierBillStatus] ?? { label: status, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+export const PAYOUT_STATE_META: Record<PayoutState, { label: string; tone: BookingTone }> = {
+  live: { label: "Paid out", tone: "success" },
+  voided: { label: "Voided", tone: "neutral" },
+};
+
+export function PayoutStateBadge({ state }: { state: PayoutState | string }) {
+  const meta = PAYOUT_STATE_META[state as PayoutState] ?? { label: state, tone: "neutral" as const };
   return <Pill tone={meta.tone}>{meta.label}</Pill>;
 }
 

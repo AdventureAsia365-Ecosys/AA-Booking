@@ -7,6 +7,7 @@
 // B2B cases: a booking of an on-request line IS the desk answer (one action, design D13): confirm accepts the line and
 // declining declines it, the agency sees it on its event feed; no voucher or document is stored (DM-6.8).
 // The case status follows by itself (confirmed → Supplier confirming on the first request); staff never pick it.
+// AA-682 S4: below the bookings, the cost vs billed panel (bill.read + pricing.read; CostVsBilled.tsx).
 
 import { useState } from "react";
 import Link from "next/link";
@@ -27,6 +28,7 @@ import {
   type UnbookedItem,
 } from "@/lib/api/supplierBookings";
 import type { TripCaseDetail } from "@/lib/api/types";
+import { CostVsBilled } from "./CostVsBilled";
 import {
   Button,
   ConfirmDialog,
@@ -312,6 +314,8 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
           </ul>
         </Section>
       )}
+
+      <CostVsBilled c={c} />
 
       {dialog?.kind === "confirm" && <ConfirmBooking b={dialog.b} documents={!!data?.documents_allowed} onClose={close} onDone={refresh} />}
       {dialog?.kind === "decline" && <DeclineBooking b={dialog.b} onClose={close} onDone={refresh} />}

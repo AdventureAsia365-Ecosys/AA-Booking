@@ -115,6 +115,13 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "billing.read": frozenset({"admin", "sales"}),
     "billing.write": frozenset({"admin", "sales"}),
     "payment.verify": frozenset({"admin"}),
+    # Supplier bills and payouts (bk-030, AA-682 S4, design §5): every operational role reads them; contracting (who
+    # books suppliers) and admin enter and approve bills, never their own (maker-checker); only an admin records a
+    # payout, never on a bill they entered. Not in preview sessions (payout references are bank references).
+    "bill.read": frozenset({"admin", "sales", "contracting"}),
+    "bill.write": frozenset({"admin", "contracting"}),
+    "bill.approve": frozenset({"admin", "contracting"}),
+    "payout.write": frozenset({"admin"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin

@@ -14,6 +14,10 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   "tour.reinstated": "Tour back in catalog",
   // AA-975: a confirmed B2B booking has on-request lines for the B2B desk.
   "b2b.on_request": "B2B on request",
+  // AA-682 S4 (bk-030): bk_ops_reminders announces a supplier bill to approve / pay that is due; approving one asks an
+  // admin to pay it.
+  "supplier_bill.due": "Supplier bill due",
+  "supplier_bill.approved": "Bill approved: pay it",
 };
 
 /** Where an item leads, and the action label (one per type, spec §4.3). */
@@ -35,6 +39,11 @@ export function notificationTarget(n: StaffNotification): { href: string; label:
   }
   if (n.entity_type === "customer" && n.entity_id) {
     return { href: `/customers/${encodeURIComponent(n.entity_id)}`, label: "Open customer" };
+  }
+  if (n.entity_type === "supplier_bill") {
+    // The bill drawer opens by URL on the Supplier bills tab of /billing (code BIL-…, or the id).
+    const ref = code ?? n.entity_id;
+    return ref ? { href: `/billing?tab=supplier-bills&bill=${encodeURIComponent(ref)}`, label: "Open bill" } : null;
   }
   return null;
 }

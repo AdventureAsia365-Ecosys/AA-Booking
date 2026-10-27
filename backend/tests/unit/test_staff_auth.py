@@ -152,6 +152,7 @@ def test_returning_user_without_changes_is_read_back_and_not_audited() -> None:
     assert r.json()["permissions"] == [
         "b2b_desk.read",
         "b2b_desk.write",
+        "bill.read",
         "billing.read",
         "billing.write",
         "catalog.read",
