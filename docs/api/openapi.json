@@ -627,6 +627,103 @@
         "title": "Channel",
         "type": "string"
       },
+      "CheckChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Ref"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "emergency_contact_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Contact Name"
+          },
+          "emergency_contact_phone": {
+            "anyOf": [
+              {
+                "pattern": "^\\+?[0-9][0-9 ().-]{3,38}[0-9]$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Contact Phone"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "done",
+                  "not_applicable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "CheckChanges",
+        "type": "object"
+      },
       "CommercialBody": {
         "additionalProperties": false,
         "description": "Every commercial field (PUT): a field left out is cleared.",
@@ -2437,6 +2534,59 @@
           "supplier_id"
         ],
         "title": "NewBooking",
+        "type": "object"
+      },
+      "NewCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Ref"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "NewCheck",
         "type": "object"
       },
       "NewContract": {
@@ -7241,6 +7391,58 @@
         "summary": "Create Quote",
         "tags": [
           "b2b"
+        ]
+      }
+    },
+    "/booking/case-lifecycle/runs": {
+      "get": {
+        "operationId": "lifecycle_runs_booking_case_lifecycle_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Lifecycle Runs Booking Case Lifecycle Runs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Lifecycle Runs",
+        "tags": [
+          "operations"
         ]
       }
     },
@@ -14301,6 +14503,120 @@
         ]
       }
     },
+    "/booking/trip-cases/{ref}/checks": {
+      "get": {
+        "operationId": "case_checks_booking_trip_cases__ref__checks_get",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Case Checks Booking Trip Cases  Ref  Checks Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Case Checks",
+        "tags": [
+          "operations"
+        ]
+      },
+      "post": {
+        "operationId": "add_check_booking_trip_cases__ref__checks_post",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Check Booking Trip Cases  Ref  Checks Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Check",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
     "/booking/trip-cases/{ref}/supplier-bookings": {
       "get": {
         "operationId": "case_bookings_booking_trip_cases__ref__supplier_bookings_get",
@@ -14463,6 +14779,245 @@
           }
         ],
         "summary": "Generate",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/trip-checks": {
+      "get": {
+        "operationId": "list_checks_booking_trip_checks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "done",
+                "not_applicable",
+                "all"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "due on or before this date",
+            "in": "query",
+            "name": "due_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "due on or before this date",
+              "title": "Due Before"
+            }
+          },
+          {
+            "description": "staff key, me or none",
+            "in": "query",
+            "name": "assignee",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "staff key, me or none",
+              "title": "Assignee"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pre_trip_recheck",
+                    "emergency_contact",
+                    "insurance",
+                    "custom"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "description": "trip case code or UUID",
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "trip case code or UUID",
+              "title": "Case"
+            }
+          },
+          {
+            "description": "case code or check title",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "case code or check title",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Checks Booking Trip Checks Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Checks",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/trip-checks/{check_id}": {
+      "patch": {
+        "operationId": "patch_check_booking_trip_checks__check_id__patch",
+        "parameters": [
+          {
+            "description": "trip check UUID",
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "description": "trip check UUID",
+              "format": "uuid",
+              "title": "Check Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Check Booking Trip Checks  Check Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Check",
         "tags": [
           "operations"
         ]

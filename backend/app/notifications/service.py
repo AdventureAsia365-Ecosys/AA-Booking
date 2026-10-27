@@ -70,6 +70,40 @@ async def notify_staff(
     )
 
 
+async def notify_staff_once(
+    conn: asyncpg.Connection,
+    *,
+    type: str,  # noqa: A002 — the column name
+    title: str,
+    message: str | None,
+    entity_type: str,
+    entity_id: str,
+    reminder_key: str,
+    data: dict[str, Any] | None = None,
+    recipient_ref: str | None = None,
+) -> bool:
+    """A reminder written at most once per ``(type, entity_id, reminder_key)`` (bk-027 ``notifications_reminder_uq``,
+    AA-682 critic B7). A duplicate is skipped with ON CONFLICT DO NOTHING, so it never aborts the caller's (job)
+    transaction. True when the row was written."""
+    written = await conn.fetchval(
+        """
+        INSERT INTO booking.notifications
+            (recipient_type, recipient_id, recipient_ref, type, title, message, entity_type, entity_id, data)
+        VALUES ('staff', NULL, $1, $2, $3, $4, $5, $6::uuid, $7::jsonb)
+        ON CONFLICT DO NOTHING
+        RETURNING id::text
+        """,
+        recipient_ref,
+        type,
+        title,
+        message,
+        entity_type,
+        entity_id,
+        json.dumps({**(data or {}), "reminder_key": reminder_key}, default=str),
+    )
+    return written is not None
+
+
 async def notify_customer(
     conn: asyncpg.Connection,
     *,

@@ -1,8 +1,8 @@
 "use client";
 // app/(staff)/cases/[code]/page.tsx — Case workspace (W1, UI spec §4.7; Figma Assigned Trips-1 layout,
 // TRIP CASES DETAILS, USER DETAILS-3/-4/-5/-6/-7). GET /booking/trip-cases/{code} feeds the header band, the
-// 4-phase stepper and the Overview / Proposals / Suppliers (AA-682 S1) tabs; the Activity tab reads /activity (status history merged
-// with audit rows). Billing and Checks are wave 3. CIS content (tour titles) is read-only, tagged "From CIS".
+// 4-phase stepper and the Overview / Proposals / Suppliers (AA-682 S1) / Checks (AA-682 S2) tabs; the Activity tab reads
+// /activity (status history merged with audit rows). Billing is wave 3. CIS content (tour titles) is read-only, tagged "From CIS".
 // Writes (fe-cases lane): status actions (convert / decline / change / cancel / reopen with reason) in
 // StatusActions, Assign (AssignModal), Edit details (EditDetailsDrawer), inline internal notes (NotesCard).
 
@@ -34,6 +34,7 @@ import {
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
 import { AssignModal } from "./AssignModal";
+import { ChecksTab } from "./ChecksTab";
 import { EditDetailsDrawer } from "./EditDetailsDrawer";
 import { NotesCard } from "./NotesCard";
 import { ProposalsTab } from "./ProposalsTab";
@@ -45,7 +46,7 @@ const TABS = [
   { key: "proposals", label: "Proposals" },
   { key: "suppliers", label: "Suppliers" },
   { key: "billing", label: "Billing", wave: 3 },
-  { key: "checks", label: "Checks", wave: 3 },
+  { key: "checks", label: "Checks" },
   { key: "activity", label: "Activity" },
 ] as const;
 
@@ -164,6 +165,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
         {tab === "overview" && <Overview c={c} canAssign={canAssign} onAssign={() => setPanel("assign")} />}
         {tab === "proposals" && <ProposalsTab c={c} />}
         {tab === "suppliers" && <SuppliersTab c={c} />}
+        {tab === "checks" && <ChecksTab c={c} />}
         {tab === "activity" && <Activity code={c.code} />}
       </div>
 

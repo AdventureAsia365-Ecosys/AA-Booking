@@ -32,6 +32,9 @@ EXPECTED_SECONDS: dict[str, int] = {
     "bk_retention_inbox_redact": 900,
     "bk_b2b_hold_expire": 120,
     "bk_tour_lifecycle_pull": 120,
+    # AA-682 S2 (bk-027): daily, batches of 200 cases / reminders; not exempt (a run takes seconds).
+    "bk_case_lifecycle": 300,
+    "bk_ops_reminders": 120,
 }
 
 

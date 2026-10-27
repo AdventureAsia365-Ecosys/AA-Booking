@@ -7,7 +7,7 @@ status: active
 owner: nghiep
 audience: [engineer, agent]
 applies_to: [aa-booking-api, aa-booking-admin]
-last_reviewed: 2026-10-26
+last_reviewed: 2026-10-27
 review_every_days: 90
 related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 ---
@@ -130,10 +130,14 @@ backend/
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/ops/                 AA-682 operations after the sale (bk-026): supplier_bookings.py (generate / add / edit /
                            request / confirm / decline / cancel / re-request, supply state, case auto-advance, case-cancel
-                           cascade, B2B line tie-in), files.py (ops-docs bucket: base64 upload, attachment download)
+                           cascade, B2B line tie-in), files.py (ops-docs bucket: base64 upload, attachment download);
+                           S2 (bk-027): trip_checks.py (list / case / custom / patch, derived checks, B2C-only emergency
+                           contact), lifecycle.py (bk_case_lifecycle + bk_ops_reminders, OpsDailySchedule hook)
   app/routers/supplier_bookings.py  /booking/trip-cases/{ref}/supplier-bookings (GET, POST, …/generate),
                            /booking/supplier-bookings (list, summary, GET/PATCH /{id}, …/request|confirm|decline|cancel|
                            rerequest), /booking/ops-files (POST, /{id}/download, /{id}/remove) — ops.read / ops.write
+  app/routers/trip_checks.py  /booking/trip-checks (GET, PATCH /{id}), /booking/trip-cases/{ref}/checks (GET, POST),
+                           /booking/case-lifecycle/runs (GET) — ops.read / ops.write (AA-682 S2)
   app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
                            versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
   app/customers/           customers over booking.v_customer_summary (status lead/active/past), leads, archive
@@ -348,7 +352,8 @@ send, OTP) is not built: those still write rows only.
   cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules.
   Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
   contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
-  needs `b2b_desk.write`; net amounts in the responses need `pricing.read`.
+  needs `b2b_desk.write`; net amounts in the responses need `pricing.read`. Trip checks and the lifecycle runs (AA-682
+  S2, bk-027) use the same `ops.read` / `ops.write`; the customer name in the check list also needs `customer.read`.
   Notifications,
   settings, countries, the catalog place picker (`/booking/catalog/destinations`), own preferences and own staff
   detail = any active staff.
@@ -484,6 +489,28 @@ send, OTP) is not built: those still write rows only.
   (its confirm accepts the line, its decline declines it, through `desk.answer_line` in the same transaction); the desk
   answers such a line 409 `answer_from_suppliers_tab` and lists the booking code (`supplier_booking`).
 
+## Trip checks and the case lifecycle (AA-682 S2, bk-027; S252 design §3.2, §4, §9)
+
+- A **trip check** (`booking.trip_case_checks`) is one thing to do before departure. Entering `confirmed` (the B2C
+  version approval, or the B2B confirm that inserts the case at `confirmed`) seeds three **standard** checks through
+  the DB trigger `trip_cases_seed_checks`: `pre_trip_recheck`, `emergency_contact`, `insurance`, due `start_date -
+  pre_departure_days` (their due date follows the start date while open); staff add **custom** checks (title). Life
+  `open → done | not_applicable → open` (done ⇔ `done_at`; done ↔ not applicable goes through open in one call).
+  **Derived** checks (`v_trip_check_board`, never stored): `suppliers_confirmed` (supply `booked` / `none`) and
+  `payment_verified` (NULL until bk-028).
+- **Emergency contact = B2C only** (DM-6.8): on a B2B case the row stays `not_applicable` without contact fields (DB
+  guard; the API answers 422 `contact_not_allowed_b2b`). A B2C contact check is done only with name + phone. Contact
+  fields and notes are cleared at trip end + `emergency_contact_keep_days` (90) by `bk_case_lifecycle` (`cleared_at`,
+  final). Audit rows of a check name the changed fields, never the values.
+- **Case lifecycle after the sale** (job `bk_case_lifecycle`, daily): `→ pre_departure` at `start_date -
+  pre_departure_days` when supply is `booked` / `none` and (B2C) the case is `paid` (money: bk-028; until then B2C
+  cases are reported blocked `not_paid`), `→ on_trip` on the start date, `→ completed` the day after the end date;
+  moves chain in one run, each a system UPDATE re-checked by the bk-026 guard. A due but blocked gate raises one staff
+  notification `trip_case.gate_blocked` per case, target and reasons. Open checks never block a move. "Today" is the
+  date in the ops time zone (`b2b_ops_timezone`, Asia/Ho_Chi_Minh) and the job's transactions run in that zone, so
+  the guard's `current_date` agrees. First runs are a DRY RUN (see Jobs).
+- Writes on a cancelled / completed case are 409 `case_closed`; an inactive assignee is 422 `staff_not_assignable`.
+
 ## Supplier bookings and the supply track (AA-682 S1, bk-026; S252 design §3.1, §4, §5)
 
 - A **supplier booking** (`booking.supplier_bookings`, code `SB-000123`) books one supplier for one room type /
@@ -604,6 +631,8 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d; every batch of both parts archived to S3 first (`s3://aa-cis-bronze-<acc2>/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per part, batch and UTC month; a failed put deletes nothing); `queued` / `running` never. Rows referenced by a FK are never deleted. |
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
+| `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). |
+| `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Staff notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). Payment (S3) and supplier bill (S4) reminders join it later. Never writes money. Not deploy-gate exempt. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 
@@ -979,9 +1008,22 @@ item; `booking`: SELECT, INSERT, UPDATE, never DELETE); view `v_trip_case_supply
 conf:commercial; `notes`, `cancel_reason`, `file_name`, `removed_reason` pii:free_text; `s3_key` pii:payment). In
 `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-026 before the code deploys.
 
+### `bk-027` (AA-682 S2 trip checks — needs `bk-003`, `bk-005`, `bk-026`)
+
+`trip_case_checks` (code `pre_trip_recheck | emergency_contact | insurance | custom`, one standard row of each per case,
+title, status `open | done | not_applicable`, due, assignee, done by / at, note, emergency contact name / phone on the
+emergency row only, `cleared_at`; FK to the case ON DELETE CASCADE; `booking`: SELECT, INSERT, UPDATE of the working
+columns, never DELETE) + guard `trip_case_checks_guard` (edges, fixed code / standard title, no emergency contact on a
+B2B case, cleared final); trigger `trip_cases_seed_checks` on `trip_cases` (seed on entering `confirmed`, due dates
+follow the start date) + one backfill of the open sold cases; view `v_trip_check_board` (stored counts + derived
+`suppliers_confirmed` / `payment_verified`); index `notifications_reminder_uq` (moved forward from the bk-028 plan);
+settings `trip_check_reminder_days` (3), `emergency_contact_keep_days` (90). Tags in the file (`emergency_contact_name`
+pii:emergency_contact + name, `emergency_contact_phone` pii:emergency_contact + contact, `note`, `title`
+pii:free_text). In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-027 before the code deploys.
+
 Waiting for decisions: `trip_case_countries` / `areas` / `country_profiles` (O7,
 ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
-operations S2–S5 (trip checks, invoices / payments, supplier bills, My Payments: AA-682).
+operations S3–S5 (invoices / payments, supplier bills, My Payments: AA-682).
 
 ## Out of scope today
 
@@ -1071,7 +1113,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   same 4.4 MB as photo uploads), Declined, Cancel, Change with supplier; documents download through a 5-minute link),
   the header shows the supply badge ("Suppliers n/m" or "Confirmed & Booked"), "Change status" never offers a post-sale
   status, the supplier **Bookings** tab lists its bookings (link to the case), the dashboard has a "Supplier answers
-  pending" tile, and the B2B desk links a line covered by a supplier booking to the case instead of Accept / Decline; the
+  pending" tile, and the B2B desk links a line covered by a supplier booking to the case instead of Accept / Decline;
+  AA-682 S2: **/trip-checks** (checks across the open sold cases, filters status / due / owner / check / search, the
+  check drawer, the latest daily lifecycle runs) and the case **Checks** tab (derived checks, standard + custom checks,
+  Add check, the same drawer; emergency contact fields on a B2C trip only); the
   other wave 2/3 pages render their layout frame with "Coming in wave N". Each nav entry in
   `frontend/ui/nav.tsx` carries its own `shipped` flag (set it when that page reads the API), so pages ship one at a
   time. The UI spec lives in `docs/ui-spec.md` (AA-683).

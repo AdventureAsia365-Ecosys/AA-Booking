@@ -65,7 +65,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   // Operations (W3)
   { pattern: "/billing", roles: [A, S] },
   { pattern: "/billing/*", roles: [A, S] },
-  { pattern: "/trip-checks", roles: [A, S] },
+  // Trip checks (AA-682 S2): every operational role (API ops.read / ops.write).
+  { pattern: "/trip-checks", roles: [A, S, C] },
   // B2B desk (AA-975): on-request lines and departure incidents; every operational role (API b2b_desk.*).
   { pattern: "/b2b-desk", roles: [A, S, C] },
 ];
