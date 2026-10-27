@@ -65,6 +65,7 @@ from app.routers import (
     reference,
     retention,
     staff,
+    supplier_bills,
     supplier_bookings,
     suppliers,
     supply,
@@ -189,6 +190,7 @@ def create_app(
     app.include_router(supplier_bookings.router)
     app.include_router(trip_checks.router)
     app.include_router(billing.router)
+    app.include_router(supplier_bills.router)
     return app
 
 

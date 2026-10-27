@@ -136,6 +136,106 @@
         "title": "AssignBody",
         "type": "object"
       },
+      "BillChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "bill_number": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Number"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "issue_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Date"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LineIn"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the whole new set",
+            "title": "Lines"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "title": "BillChanges",
+        "type": "object"
+      },
       "Booking": {
         "additionalProperties": false,
         "properties": {
@@ -2531,6 +2631,35 @@
         "title": "ItemsPut",
         "type": "object"
       },
+      "LineIn": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "supplier_booking_id": {
+            "format": "uuid",
+            "title": "Supplier Booking Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supplier_booking_id",
+          "amount"
+        ],
+        "title": "LineIn",
+        "type": "object"
+      },
       "LineOut": {
         "properties": {
           "net_amount": {
@@ -2646,6 +2775,94 @@
           "currency"
         ],
         "title": "Money",
+        "type": "object"
+      },
+      "NewBill": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "bill_number": {
+            "description": "the supplier's own bill number",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Bill Number",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date",
+            "title": "Due Date",
+            "type": "string"
+          },
+          "issue_date": {
+            "format": "date",
+            "title": "Issue Date",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LineIn"
+            },
+            "maxItems": 50,
+            "title": "Lines",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "supplier_id": {
+            "format": "uuid",
+            "title": "Supplier Id",
+            "type": "string"
+          },
+          "trip_case": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "trip case code or UUID, when one",
+            "title": "Trip Case"
+          }
+        },
+        "required": [
+          "supplier_id",
+          "bill_number",
+          "currency",
+          "amount",
+          "issue_date",
+          "due_date"
+        ],
+        "title": "NewBill",
         "type": "object"
       },
       "NewBooking": {
@@ -3450,6 +3667,76 @@
           "received_on"
         ],
         "title": "NewPayment",
+        "type": "object"
+      },
+      "NewPayout": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_duplicate_reference": {
+            "default": false,
+            "title": "Allow Duplicate Reference",
+            "type": "boolean"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "method": {
+            "enum": [
+              "bank_transfer",
+              "card_offline",
+              "cash",
+              "other"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "paid_on": {
+            "format": "date",
+            "title": "Paid On",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "bank or receipt reference, never a card",
+            "title": "Reference"
+          }
+        },
+        "required": [
+          "amount",
+          "method",
+          "paid_on"
+        ],
+        "title": "NewPayout",
         "type": "object"
       },
       "NewRate": {
@@ -13950,6 +14237,672 @@
         ]
       }
     },
+    "/booking/supplier-bills": {
+      "get": {
+        "operationId": "list_bills_booking_supplier_bills_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "received",
+                    "approved",
+                    "paid",
+                    "cancelled",
+                    "open",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "supplier_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Supplier Id"
+            }
+          },
+          {
+            "description": "trip case code or UUID",
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "trip case code or UUID",
+              "title": "Case"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "due_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Due Before"
+            }
+          },
+          {
+            "description": "bill code, supplier bill number, supplier, case",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bill code, supplier bill number, supplier, case",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Bills Booking Supplier Bills Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Bills",
+        "tags": [
+          "supplier-bills"
+        ]
+      },
+      "post": {
+        "operationId": "create_bill_booking_supplier_bills_post",
+        "parameters": [
+          {
+            "description": "8-200 characters, one per request",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "8-200 characters, one per request",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewBill"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Bill Booking Supplier Bills Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Bill",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-bills/billable": {
+      "get": {
+        "operationId": "billable_booking_supplier_bills_billable_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Billable Booking Supplier Bills Billable Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Billable",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-bills/summary": {
+      "get": {
+        "operationId": "bills_summary_booking_supplier_bills_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Bills Summary Booking Supplier Bills Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bills Summary",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-bills/{bill}": {
+      "get": {
+        "operationId": "get_bill_booking_supplier_bills__bill__get",
+        "parameters": [
+          {
+            "description": "Supplier bill UUID or code (BIL-000123)",
+            "in": "path",
+            "name": "bill",
+            "required": true,
+            "schema": {
+              "description": "Supplier bill UUID or code (BIL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Bill",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Bill Booking Supplier Bills  Bill  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bill",
+        "tags": [
+          "supplier-bills"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_bill_booking_supplier_bills__bill__patch",
+        "parameters": [
+          {
+            "description": "Supplier bill UUID or code (BIL-000123)",
+            "in": "path",
+            "name": "bill",
+            "required": true,
+            "schema": {
+              "description": "Supplier bill UUID or code (BIL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Bill",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Bill Booking Supplier Bills  Bill  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Bill",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-bills/{bill}/approve": {
+      "post": {
+        "operationId": "approve_bill_booking_supplier_bills__bill__approve_post",
+        "parameters": [
+          {
+            "description": "Supplier bill UUID or code (BIL-000123)",
+            "in": "path",
+            "name": "bill",
+            "required": true,
+            "schema": {
+              "description": "Supplier bill UUID or code (BIL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Bill",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Bill Booking Supplier Bills  Bill  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Bill",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-bills/{bill}/cancel": {
+      "post": {
+        "operationId": "cancel_bill_booking_supplier_bills__bill__cancel_post",
+        "parameters": [
+          {
+            "description": "Supplier bill UUID or code (BIL-000123)",
+            "in": "path",
+            "name": "bill",
+            "required": true,
+            "schema": {
+              "description": "Supplier bill UUID or code (BIL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Bill",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Bill Booking Supplier Bills  Bill  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Bill",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-bills/{bill}/payouts": {
+      "post": {
+        "operationId": "record_payout_booking_supplier_bills__bill__payouts_post",
+        "parameters": [
+          {
+            "description": "Supplier bill UUID or code (BIL-000123)",
+            "in": "path",
+            "name": "bill",
+            "required": true,
+            "schema": {
+              "description": "Supplier bill UUID or code (BIL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Bill",
+              "type": "string"
+            }
+          },
+          {
+            "description": "8-200 characters, one per request",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "8-200 characters, one per request",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPayout"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Payout Booking Supplier Bills  Bill  Payouts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Payout",
+        "tags": [
+          "supplier-bills"
+        ]
+      }
+    },
     "/booking/supplier-bookings": {
       "get": {
         "operationId": "list_bookings_booking_supplier_bookings_get",
@@ -14527,6 +15480,69 @@
         "summary": "Rerequest Booking",
         "tags": [
           "operations"
+        ]
+      }
+    },
+    "/booking/supplier-payouts/{payout}/void": {
+      "post": {
+        "operationId": "void_payout_booking_supplier_payouts__payout__void_post",
+        "parameters": [
+          {
+            "description": "Payout UUID or code (SPO-000123)",
+            "in": "path",
+            "name": "payout",
+            "required": true,
+            "schema": {
+              "description": "Payout UUID or code (SPO-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Payout",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Void Payout Booking Supplier Payouts  Payout  Void Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Void Payout",
+        "tags": [
+          "supplier-bills"
         ]
       }
     },
@@ -16986,6 +18002,59 @@
         "summary": "Generate",
         "tags": [
           "operations"
+        ]
+      }
+    },
+    "/booking/trip-cases/{ref}/supplier-costs": {
+      "get": {
+        "operationId": "case_costs_booking_trip_cases__ref__supplier_costs_get",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Case Costs Booking Trip Cases  Ref  Supplier Costs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Case Costs",
+        "tags": [
+          "supplier-bills"
         ]
       }
     },
