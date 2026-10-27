@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# AA-993 H1: run the CI checks locally before a push (installed by scripts/install-hooks.sh).
+# Skip once: git push --no-verify. Full mode: AA_PREPUSH=full git push.
+root="$(git rev-parse --show-toplevel)" || exit 1
+head="$(git rev-parse HEAD 2>/dev/null)" || head=""
+# The checks read HEAD and the working tree, so every pushed commit must be HEAD. Branch deletions (all-zero sha)
+# need no check; an annotated tag is compared through the commit it points to.
+other=""
+pushed=0
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  [[ "$local_sha" =~ ^0+$ ]] && continue
+  pushed=1
+  commit="$(git rev-parse -q --verify "$local_sha^{commit}" 2>/dev/null)" || commit="$local_sha"
+  [[ "$commit" == "$head" ]] || other="$local_ref ($local_sha)"
+done
+if [[ -n "$other" ]]; then
+  echo "pre-push: checks run on HEAD (${head:-none}), not the pushed $other; check out that branch and push again, or git push --no-verify" >&2
+  exit 1
+fi
+# Only branch deletions: nothing to check.
+[[ $pushed -eq 0 || -z "$head" ]] && exit 0
+exec bash "$root/scripts/pre-push.sh" </dev/null
