@@ -1,22 +1,12 @@
-// app/(staff)/catalog/countries/[iso]/page.tsx: Country (wave 2, UI spec §3; Figma COUNTRY DETAILS (06)).
-// Registered now (Nghiệp S236 decision 3); renders its layout frame and "Coming in wave 2" until built.
+// app/(staff)/catalog/countries/[iso]/page.tsx: Country (UI spec §3; Figma COUNTRY DETAILS, -1 (06); AA-996).
+// `iso` is the ISO 3166-1 alpha-2 code. Server shell; the page is the client view in _parts.
 
 import type { Metadata } from "next";
-import { WaveFrame } from "@/ui/booking/WaveFrame";
+import { CountryDetailView } from "../_parts/CountryDetailView";
 
 export const metadata: Metadata = { title: "Country" };
 
-export default function CatalogCountriesIsoPage() {
-  return (
-    <WaveFrame
-      wave={2}
-      title="Country"
-      layout="detail"
-      description="One country: its destinations and tours from CIS, and its Booking status."
-      purpose="Destinations, tours and photos from CIS with the Booking status of the country."
-      tabs={["Overview", "Destinations", "Tours"]}
-      sections={["Overview", "Booking status"]}
-      breadcrumbs={[{"label": "Countries", "href": "/catalog/countries"}, {"label": "Country"}]}
-    />
-  );
+export default async function CatalogCountryPage({ params }: { params: Promise<{ iso: string }> }) {
+  const { iso } = await params;
+  return <CountryDetailView iso={decodeURIComponent(iso)} />;
 }

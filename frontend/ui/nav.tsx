@@ -86,8 +86,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Catalog (from CIS)",
     items: [
       { href: "/catalog/trip-plans", label: "Trip Plans", icon: <CalendarDays size={ICON} />, wave: 2, shipped: true },
-      { href: "/catalog/destinations", label: "Destinations", icon: <MapPin size={ICON} />, wave: 2, shipped: false },
-      { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2, shipped: false },
+      { href: "/catalog/destinations", label: "Destinations", icon: <MapPin size={ICON} />, wave: 2, shipped: true },
+      { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2, shipped: true },
     ],
   },
   {

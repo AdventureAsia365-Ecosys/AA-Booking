@@ -3,7 +3,7 @@
 // Tabs in the URL (?tab=): General | Sign-in & security | Notifications. Figma's two-column layout: a left column with
 // the section title + description, a card on the right.
 //   General       — profile read-only from the staff session (CIS owns name, e-mail and password: O1, so
-//                   there is no Security tab and no photo upload), appearance (theme, per browser), and the
+//                   there is no password form and no photo upload), appearance (theme, per browser), and the
 //                   Booking-wide commercial defaults read-only from GET /booking/settings (deposit_pct,
 //                   quote_validity_days; Nghiệp S236 decision 4).
 //   Sign-in & security (AA-996; replaces Figma SETTINGS-2 "change password" and RESET PASSWORD) — how this person
