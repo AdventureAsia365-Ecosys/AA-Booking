@@ -17,18 +17,22 @@
 --     status received -> approved -> paid, received / approved -> cancelled (with a reason; an approved bill only while
 --     no payout is live), paid -> approved (a payout voided). While received the bill is a working draft: its facts,
 --     its lines and its document change freely and need not add up. APPROVE is the check (the "amendment window" of
---     bk-028 without a flag: the received state is the window): approved_by <> created_by (maker-checker, CHECK and
---     guard), at least one line, the lines add up to the amount; from then on facts, lines and document are fixed.
+--     bk-028 without a flag: the received state is the window): approved_by <> created_by and <> facts_edited_by (the
+--     last person who changed the money facts or the lines: maker-checker, CHECK and guard), at least one line, the
+--     lines add up to the amount; from then on facts, lines and document are fixed.
 --     paid is DERIVED: approved / paid must equal what the live payouts imply (paid <=> live payouts = amount), so the
 --     application cannot mark a bill paid without recorded payouts. idempotency_key + request_sha256 (critic B6
 --     rule of bk-028): a replayed create returns the stored bill, another body is a 409.
 --   * booking.supplier_bill_items: the lines of a bill, one per supplier booking (PK bill + booking), amount in the
 --     bill currency. A line names a CONFIRMED booking of the bill's supplier (and of the bill's case when the bill has
 --     one), inserted or deleted only while the bill is received; never updated (the app deletes and inserts). A
---     booking may sit on several bills (a supplier deposit, then the balance).
+--     booking may sit on several bills (a supplier deposit, then the balance). A line is inserted by the bill's
+--     facts_edited_by (the app marks the bill edited by the person replacing its lines first), so a second person
+--     cannot change the lines and then approve them.
 --   * booking.supplier_payouts (SPO-000123): money AA paid a supplier against an APPROVED bill, recorded by hand: amount
 --     in the bill currency, method, paid_on, reference (never a card number: the API refuses one), note, evidence file.
---     The recorder is never the person who entered the bill (maker-checker, guard). The live payouts never exceed the
+--     The recorder is never the person who entered the bill nor the last one who changed its money facts
+--     (maker-checker, guard). The live payouts never exceed the
 --     bill amount. Idempotency-Key unique per bill + request_sha256. Void is final, with a reason; the money facts
 --     never change. supplier_payouts_settle (AFTER) settles the bill.
 --   * booking.supplier_bill_settle(): locks the bill row FOR UPDATE FIRST (critic B4: two concurrent payouts would
@@ -102,6 +106,9 @@ CREATE TABLE IF NOT EXISTS booking.supplier_bills (
     idempotency_key   TEXT NOT NULL,
     request_sha256    TEXT NOT NULL,
     created_by        TEXT NOT NULL REFERENCES booking.staff_users (cis_user_id),
+    -- Set by supplier_bills_guard: created_by at insert, updated_by when the money facts change; the app sets it to
+    -- the editor before it replaces the lines (supplier_bill_items_guard checks it).
+    facts_edited_by   TEXT NOT NULL REFERENCES booking.staff_users (cis_user_id),
     approved_by       TEXT REFERENCES booking.staff_users (cis_user_id),
     approved_at       TIMESTAMPTZ,
     paid_at           TIMESTAMPTZ,
@@ -125,8 +132,10 @@ CREATE TABLE IF NOT EXISTS booking.supplier_bills (
         (approved_by IS NULL) = (approved_at IS NULL)
         AND (status <> 'received' OR approved_at IS NULL)
         AND (status NOT IN ('approved', 'paid') OR approved_at IS NOT NULL)),
-    -- Maker-checker (design §5 bill.approve): the person who approves is never the person who entered the bill.
-    CONSTRAINT supplier_bills_maker_checker_chk CHECK (approved_by IS NULL OR approved_by <> created_by),
+    -- Maker-checker (design §5 bill.approve): the person who approves is never the person who entered the bill, nor
+    -- the last person who changed its money facts or lines (review of S4: B edits A's bill, then B approves it).
+    CONSTRAINT supplier_bills_maker_checker_chk CHECK (
+        approved_by IS NULL OR (approved_by <> created_by AND approved_by <> facts_edited_by)),
     CONSTRAINT supplier_bills_paid_chk CHECK ((status = 'paid') = (paid_at IS NOT NULL)),
     CONSTRAINT supplier_bills_cancel_chk CHECK (
         (status = 'cancelled') = (cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL AND cancelled_by IS NOT NULL)
@@ -145,6 +154,8 @@ COMMENT ON COLUMN booking.supplier_bills.cancel_reason IS
     'pii:free_text; why the bill was cancelled (bk-030).';
 COMMENT ON COLUMN booking.supplier_bills.trip_case_id IS
     'bk-030: the trip case the bill is for, when it is for one (a supplier''s monthly statement covers several); its lines then come from that case only.';
+COMMENT ON COLUMN booking.supplier_bills.facts_edited_by IS
+    'bk-030: the last staff user who set the money facts (bill number, currency, amount, dates, supplier, case) or the lines; never the approver nor the payout recorder (maker-checker). Set by supplier_bills_guard.';
 COMMENT ON COLUMN booking.supplier_bills.idempotency_key IS
     'bk-030 (bk-028 critic B6 rule): the Idempotency-Key of the create call; with request_sha256 a replay returns this bill and another body is refused.';
 
@@ -162,6 +173,7 @@ CREATE INDEX IF NOT EXISTS supplier_bills_trip_case_idx
 CREATE INDEX IF NOT EXISTS supplier_bills_document_idx
     ON booking.supplier_bills (document_file_id) WHERE document_file_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS supplier_bills_created_by_idx ON booking.supplier_bills (created_by);
+CREATE INDEX IF NOT EXISTS supplier_bills_facts_edited_by_idx ON booking.supplier_bills (facts_edited_by);
 CREATE INDEX IF NOT EXISTS supplier_bills_approved_by_idx
     ON booking.supplier_bills (approved_by) WHERE approved_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS supplier_bills_cancelled_by_idx
@@ -335,6 +347,7 @@ BEGIN
             RAISE EXCEPTION 'a supplier bill gets its document after it exists (upload with the bill as entity)'
                 USING ERRCODE = 'check_violation';
         END IF;
+        NEW.facts_edited_by := NEW.created_by;  -- whoever enters the bill set its facts
         RETURN NEW;
     END IF;
     IF (NEW.code, NEW.created_by, NEW.created_at, NEW.idempotency_key, NEW.request_sha256)
@@ -354,6 +367,22 @@ BEGIN
             OLD.document_file_id) THEN
         RAISE EXCEPTION 'supplier bill %: its facts and document change only while it is received', OLD.code
             USING ERRCODE = 'check_violation';
+    END IF;
+    -- Maker-checker input: who last set the money facts. A fact change records its author (updated_by); otherwise
+    -- the app may only mark the editor of the lines (itself, while received) before it replaces them.
+    IF (NEW.supplier_id, NEW.trip_case_id, NEW.bill_number, NEW.currency, NEW.amount, NEW.issue_date, NEW.due_date)
+       IS DISTINCT FROM
+       (OLD.supplier_id, OLD.trip_case_id, OLD.bill_number, OLD.currency, OLD.amount, OLD.issue_date, OLD.due_date) THEN
+        IF NEW.updated_by IS NULL THEN
+            RAISE EXCEPTION 'supplier bill %: say who changes its facts (updated_by)', OLD.code
+                USING ERRCODE = 'check_violation';
+        END IF;
+        NEW.facts_edited_by := NEW.updated_by;
+    ELSIF NEW.facts_edited_by IS DISTINCT FROM OLD.facts_edited_by
+          AND (OLD.status <> 'received' OR NEW.status <> 'received'
+               OR NEW.facts_edited_by IS DISTINCT FROM NEW.updated_by) THEN
+        RAISE EXCEPTION 'supplier bill %: facts_edited_by names the person editing a received bill (updated_by)',
+            OLD.code USING ERRCODE = 'check_violation';
     END IF;
     -- The lines were checked against the supplier and the case when they were added: those two stay while lines exist.
     IF (NEW.supplier_id, NEW.trip_case_id) IS DISTINCT FROM (OLD.supplier_id, OLD.trip_case_id)
@@ -376,6 +405,10 @@ BEGIN
         IF NEW.approved_by IS NOT DISTINCT FROM NEW.created_by THEN
             RAISE EXCEPTION 'supplier bill %: maker-checker, the person who entered it cannot approve it', OLD.code
                 USING ERRCODE = 'check_violation';
+        END IF;
+        IF NEW.approved_by IS NOT DISTINCT FROM NEW.facts_edited_by THEN
+            RAISE EXCEPTION 'supplier bill %: maker-checker, the person who last changed its amounts cannot approve it',
+                OLD.code USING ERRCODE = 'check_violation';
         END IF;
         SELECT count(*), coalesce(sum(amount), 0) INTO v_lines, v_sum
           FROM booking.supplier_bill_items WHERE bill_id = OLD.id;
@@ -412,7 +445,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.supplier_bills_guard() IS
-    'bk-030 (AA-682 S4): a bill starts received with no document; code / creator / key never change; cancelled is final; facts and document change only while received (supplier and case stay while lines exist); the document is an active supplier_bill file of this bill; approve needs another person, >= 1 line and lines = amount; approved / paid equal the live payouts (paid <=> payouts = amount); cancel needs no live payout.';
+    'bk-030 (AA-682 S4): a bill starts received with no document; code / creator / key never change; cancelled is final; facts and document change only while received (supplier and case stay while lines exist); the document is an active supplier_bill file of this bill; facts_edited_by follows the author of a fact change (or the app marks the editor of the lines while received); approve needs another person than created_by and facts_edited_by, >= 1 line and lines = amount; approved / paid equal the live payouts (paid <=> payouts = amount); cancel needs no live payout.';
 
 CREATE OR REPLACE TRIGGER supplier_bills_guard
     BEFORE INSERT OR UPDATE ON booking.supplier_bills
@@ -439,6 +472,12 @@ BEGIN
     END IF;
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
+    END IF;
+    -- Maker-checker: the person adding a line is the bill's last editor (the app marks the bill first), so whoever
+    -- changes the lines can never approve them.
+    IF NEW.created_by IS NULL OR NEW.created_by IS DISTINCT FROM v_bill.facts_edited_by THEN
+        RAISE EXCEPTION 'supplier bill %: a line is added by the person editing the bill (set facts_edited_by first)',
+            v_bill.code USING ERRCODE = 'check_violation';
     END IF;
     SELECT sb.code, sb.status, sb.supplier_id, sb.trip_case_id, tc.channel INTO v_booking
       FROM booking.supplier_bookings sb JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
@@ -468,7 +507,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.supplier_bill_items_guard() IS
-    'bk-030 (AA-682 S4): lines change (insert / delete, never update) only while the bill is received, after locking the bill row; a line names a confirmed booking of the bill''s supplier (and case); a bill with a document never covers a B2B booking (DM-6.8).';
+    'bk-030 (AA-682 S4): lines change (insert / delete, never update) only while the bill is received, after locking the bill row; a line is added by the bill''s facts_edited_by (maker-checker); a line names a confirmed booking of the bill''s supplier (and case); a bill with a document never covers a B2B booking (DM-6.8).';
 
 CREATE OR REPLACE TRIGGER supplier_bill_items_guard
     BEFORE INSERT OR UPDATE OR DELETE ON booking.supplier_bill_items
@@ -494,9 +533,9 @@ BEGIN
         IF NEW.voided_at IS NOT NULL THEN
             RAISE EXCEPTION 'a payout starts live (not voided)' USING ERRCODE = 'check_violation';
         END IF;
-        IF NEW.recorded_by = v_bill.created_by THEN
-            RAISE EXCEPTION 'bill %: maker-checker, the person who entered the bill does not pay it', v_bill.code
-                USING ERRCODE = 'check_violation';
+        IF NEW.recorded_by = v_bill.created_by OR NEW.recorded_by = v_bill.facts_edited_by THEN
+            RAISE EXCEPTION 'bill %: maker-checker, the person who entered the bill or set its amounts does not pay it',
+                v_bill.code USING ERRCODE = 'check_violation';
         END IF;
         IF booking.supplier_bill_paid(NEW.bill_id) + NEW.amount > v_bill.amount THEN
             RAISE EXCEPTION 'bill %: the payouts would exceed the bill amount % (already paid %)', v_bill.code,
@@ -537,7 +576,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.supplier_payouts_guard() IS
-    'bk-030 (AA-682 S4): lock the bill first; a payout goes on an approved bill, in its currency, by someone other than the bill''s creator, and the live payouts never exceed the amount; its money facts never change; void is final and needs a live bill; the evidence of a live payout is replaced, never removed, and is an active payout_evidence file of this payout.';
+    'bk-030 (AA-682 S4): lock the bill first; a payout goes on an approved bill, in its currency, by someone other than the bill''s creator and its facts_edited_by, and the live payouts never exceed the amount; its money facts never change; void is final and needs a live bill; the evidence of a live payout is replaced, never removed, and is an active payout_evidence file of this payout.';
 
 CREATE OR REPLACE TRIGGER supplier_payouts_guard
     BEFORE INSERT OR UPDATE ON booking.supplier_payouts
@@ -733,7 +772,7 @@ ON CONFLICT (key) DO NOTHING;
 REVOKE ALL ON booking.supplier_bills FROM booking;
 GRANT SELECT, INSERT ON booking.supplier_bills TO booking;
 GRANT UPDATE (supplier_id, trip_case_id, bill_number, currency, amount, issue_date, due_date, document_file_id, status,
-              notes, approved_by, approved_at, paid_at, cancelled_by, cancelled_at, cancel_reason, updated_by,
+              notes, facts_edited_by, approved_by, approved_at, paid_at, cancelled_by, cancelled_at, cancel_reason, updated_by,
               updated_at)
     ON booking.supplier_bills TO booking;
 GRANT USAGE, SELECT ON SEQUENCE booking.supplier_bill_code_seq TO booking;

@@ -3,10 +3,12 @@ grants (no DELETE on bills / payouts, lines insert + delete only, column UPDATE 
 DM-6.1 tags in the same file, and the database rules the API stands on:
 
 - a bill starts received; its lines name CONFIRMED bookings of the bill's supplier (and case); facts, lines and
-  document change only while received; approve needs another person (maker-checker), >= 1 line and lines = amount;
+  document change only while received; approve needs another person than the creator and than the last editor of
+  the money facts or lines (``facts_edited_by``, maker-checker), >= 1 line and lines = amount;
 - paid is derived: a direct ``UPDATE supplier_bills SET status = 'paid'`` is refused; payouts go on an approved bill,
-  in its currency, by someone other than the bill's creator, never above the amount; they settle the bill (paid when
-  they reach the amount, back to approved on a void); a bill with a live payout is not cancelled; cancelled is final;
+  in its currency, by someone other than the bill's creator and its facts_edited_by, never above the amount; they
+  settle the bill (paid when they reach the amount, back to approved on a void); a bill with a live payout is not
+  cancelled; cancelled is final;
 - one Idempotency-Key per bill for payouts; one bill number per supplier among bills not cancelled;
 - files (ops_files_guard replaced): bill documents only while received and never on a bill touching a B2B case (and a
   bill with a document takes no B2B line), the document of an approved bill stays; payout evidence allowed on B2B,
@@ -36,6 +38,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "030_supplier_bills_payouts.sql"
 MAKER, CHECKER, PAYER = "it-682-maker", "it-682-checker", "it-682-payer"
+EDITOR = "it-682-editor"
 BUCKET = "aa-booking-dev-ops-docs-000000000000"
 
 
@@ -43,7 +46,7 @@ BUCKET = "aa-booking-dev-ops-docs-000000000000"
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await ops.purge_ops(conn)
-    await ops.staff(conn, (MAKER, "contracting"), (CHECKER, "contracting"), (PAYER, "admin"))
+    await ops.staff(conn, (MAKER, "contracting"), (CHECKER, "contracting"), (PAYER, "admin"), (EDITOR, "admin"))
     try:
         yield conn
     finally:
@@ -125,6 +128,7 @@ async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> No
         ("supplier_bills", "status", True),
         ("supplier_bills", "amount", True),  # while received (guard)
         ("supplier_bills", "created_by", False),
+        ("supplier_bills", "facts_edited_by", True),  # only to the editor of a received bill (guard)
         ("supplier_bills", "idempotency_key", False),
         ("supplier_payouts", "voided_at", True),
         ("supplier_payouts", "evidence_file_id", True),
@@ -245,6 +249,68 @@ async def test_approve_is_maker_checker_and_checks_the_lines(
         await app_conn.execute("UPDATE booking.supplier_bills SET approved_by = $2 WHERE id = $1::uuid", b["id"], PAYER)
     # Notes stay editable on a live bill.
     await app_conn.execute("UPDATE booking.supplier_bills SET notes = 'checked' WHERE id = $1::uuid", b["id"])
+
+
+async def test_maker_checker_follows_the_last_editor_of_the_money_facts(
+    app_conn: asyncpg.Connection, world: dict[str, Any]
+) -> None:
+    """Review S4: B changes A's amount and lines, then B approves → refused; B never pays it either."""
+    sup = world["sup"]["supplier"]
+    b = await ops.bill(app_conn, sup, by=MAKER, amount="370.00", lines=((world["room"], "300"), (world["kayak"], "70")))
+    edited_by = "SELECT facts_edited_by FROM booking.supplier_bills WHERE id = $1::uuid"
+    assert await app_conn.fetchval(edited_by, b["id"]) == MAKER  # set at insert, whatever the app sends
+    # Notes and the document are not money facts.
+    await app_conn.execute(
+        "UPDATE booking.supplier_bills SET notes = 'seen', updated_by = $2 WHERE id = $1::uuid", b["id"], CHECKER
+    )
+    assert await app_conn.fetchval(edited_by, b["id"]) == MAKER
+    # A line added by someone who is not the bill's last editor is refused; the app marks the editor first.
+    add = (
+        "INSERT INTO booking.supplier_bill_items (bill_id, supplier_booking_id, amount, created_by)"
+        " VALUES ($1::uuid, $2::uuid, $3::numeric, $4)"
+    )
+    await app_conn.execute("DELETE FROM booking.supplier_bill_items WHERE bill_id = $1::uuid", b["id"])
+    with pytest.raises(asyncpg.CheckViolationError, match="added by the person editing"):
+        await app_conn.execute(add, b["id"], world["room"], "5000", CHECKER)
+    with pytest.raises(asyncpg.CheckViolationError, match="added by the person editing"):
+        await app_conn.execute(add, b["id"], world["room"], "5000", None)
+    # Naming someone else than the person editing (updated_by) is refused.
+    with pytest.raises(asyncpg.CheckViolationError, match="facts_edited_by names the person editing"):
+        await app_conn.execute(
+            "UPDATE booking.supplier_bills SET facts_edited_by = $2, updated_by = $3 WHERE id = $1::uuid",
+            b["id"],
+            EDITOR,
+            CHECKER,
+        )
+    await app_conn.execute(
+        "UPDATE booking.supplier_bills SET facts_edited_by = $2, updated_by = $2 WHERE id = $1::uuid", b["id"], CHECKER
+    )
+    await app_conn.execute(add, b["id"], world["room"], "5000", CHECKER)
+    # A fact change records its author (updated_by), whatever facts_edited_by the statement sends.
+    await app_conn.execute(
+        "UPDATE booking.supplier_bills SET amount = 5000, facts_edited_by = $3, updated_by = $2 WHERE id = $1::uuid",
+        b["id"],
+        CHECKER,
+        MAKER,
+    )
+    assert await app_conn.fetchval(edited_by, b["id"]) == CHECKER
+    with pytest.raises(asyncpg.CheckViolationError, match="last changed its amounts"):
+        await ops.approve_bill(app_conn, b["id"], by=CHECKER)
+    check = await app_conn.fetchval(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'supplier_bills_maker_checker_chk'"
+    )
+    assert "approved_by <> facts_edited_by" in check  # the CHECK holds it too, past the guard
+    # A third person approves; the editor of the amounts does not pay it.
+    await ops.approve_bill(app_conn, b["id"], by=PAYER)
+    with pytest.raises(asyncpg.CheckViolationError, match="set its amounts does not pay it"):
+        await ops.payout(app_conn, b["id"], "100", by=CHECKER)
+    with pytest.raises(asyncpg.CheckViolationError, match="facts_edited_by names the person editing"):
+        await app_conn.execute(
+            "UPDATE booking.supplier_bills SET facts_edited_by = $2, updated_by = $2 WHERE id = $1::uuid",
+            b["id"],
+            EDITOR,
+        )
+    await ops.payout(app_conn, b["id"], "100", by=EDITOR)
 
 
 async def test_paid_is_derived_from_payouts(
@@ -403,10 +469,11 @@ async def test_bill_documents_and_payout_evidence(
     await _file(app_conn, "supplier_bill", "supplier_bill", plain["id"], None)
     with pytest.raises(asyncpg.CheckViolationError, match="DM-6.8"):
         await app_conn.execute(
-            "INSERT INTO booking.supplier_bill_items (bill_id, supplier_booking_id, amount) VALUES ($1::uuid,"
-            " $2::uuid, 50)",
+            "INSERT INTO booking.supplier_bill_items (bill_id, supplier_booking_id, amount, created_by) VALUES"
+            " ($1::uuid, $2::uuid, 50, $3)",
             plain["id"],
             agency,
+            MAKER,
         )
     await ops.approve_bill(app_conn, statement["id"], by=CHECKER)
     b2b_payout = await ops.payout(app_conn, statement["id"], "50", by=PAYER)
