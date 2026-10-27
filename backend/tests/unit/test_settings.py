@@ -139,3 +139,23 @@ def test_external_issuer_defaults_to_dev_and_reads_the_env() -> None:
 def test_external_issuer_is_validated(env: dict) -> None:
     with pytest.raises(SettingsError, match="COGNITO_EXTERNAL_ISSUER"):
         load_settings(env)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, False),
+        ("", False),
+        ("0", False),
+        ("false", False),
+        ("maybe", False),
+        ("1", True),
+        (" TRUE ", True),
+        ("yes", True),
+        ("on", True),
+    ],
+)
+def test_job_test_kinds_flag(raw: str | None, expected: bool) -> None:
+    """AA-993 G4 proof: JOB_TEST_KINDS turns the Dev-only test kind on; any other value is off, never an error."""
+    env = {} if raw is None else {"JOB_TEST_KINDS": raw}
+    assert load_settings(env).job_test_kinds is expected

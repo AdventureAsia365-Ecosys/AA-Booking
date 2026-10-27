@@ -162,7 +162,9 @@ backend/
                            redaction (scrub.py), Sentry init + before_send (sentry.py); set up once by main.build_app()
   app/settings.py          environment → Settings
   app/jobs/                booking.job queue (claim/lease/reap/backoff/release) + Worker loop (O3, maintenance hooks,
-                           release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind, DEPLOY_GATE_EXEMPT) +
+                           release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind, DEPLOY_GATE_EXEMPT,
+                           DEPLOY_BLOCKING_KINDS, TEST_KINDS); noop_sleep.py (Dev-only test kind bk_noop_sleep, only
+                           with JOB_TEST_KINDS, AA-993 G4 proof) +
                            metrics.py (backlog metrics sampler, AA/Jobs/Booking to CloudWatch, AA-751)
   app/retention/           AA-825 retention kinds bk_retention_job / bk_retention_inbox_redact: policy (windows),
                            redact (inbox payload PII), archive (S3 JSONL.gz), runner (batched count/delete/redact),
@@ -719,13 +721,21 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   before the pool closes. AA-CIS-Infra owns the IAM grant (task role, namespace `AA/Jobs/Booking` only) and the three
   alarms `<booking prefix>-jobs-queue-age` (> 900 s), `-jobs-overdue-running` (> 0) and `-jobs-sampling-stopped` (no
   sample for 45 min, which also fires while the service is scaled to 0 or `WORKER_ENABLED` is off).
-- **Deploy gate (AA-751 B3/B4).** `GET /booking/ops/deploy-gate` returns `{active, by_status, by_kind, safe_to_deploy,
-  exempt_kinds}`: `queued` + `running` rows with no time filter, kinds in `DEPLOY_GATE_EXEMPT` (`app/jobs/kinds.py`,
-  today `bk_inquiry_pull`, the always-queued pull) not counted. The `preflight` job of `deploy-dev.yml` (logic in
+- **Deploy gate (AA-751 B3/B4; meaning changed by AA-993 G5, design D1.4).** `GET /booking/ops/deploy-gate`
+  returns `{active, by_status, by_kind, safe_to_deploy, exempt_kinds, blocking_kinds, blocking_running, blocking_due,
+  blocked_by}`.
+  `safe_to_deploy` is false only while a row of a kind in `DEPLOY_BLOCKING_KINDS` (`app/jobs/kinds.py`: the retention
+  kinds, which keep no checkpoint and are failed instead of released on shutdown) is **running**, or **queued and due
+  within 15 min** (`blocking_due`, `DEPLOY_BLOCKING_HORIZON_SECONDS`: the preflight runs before the image build, and the
+  old task would claim it before its SIGTERM). Queued / running rows
+  of every other kind no longer block (the worker releases a running job on shutdown, the new task re-claims it); they
+  stay in `active` / `by_status` / `by_kind` as information, kinds in `DEPLOY_GATE_EXEMPT` (`bk_inquiry_pull`, the
+  always-queued pull; `bk_noop_sleep`, test-only) not counted there. Booking does not read CIS rerun waves. The
+  `preflight` job of `deploy-dev.yml` (logic in
   `.github/scripts/booking-deploy-preflight.sh`, tested with stub `aws`/`curl` by
   `backend/tests/unit/test_deploy_preflight_script.py`) skips the gate only when the service has no task running,
   pending or desired; a task that is starting (none running, one pending or desired) blocks; otherwise it blocks the
-  deploy unless `safe_to_deploy`. Every block can be lifted by a `workflow_dispatch` `override_running_jobs` reason;
+  deploy unless `safe_to_deploy` (the error names `blocked_by`). Every block can be lifted by a `workflow_dispatch` `override_running_jobs` reason;
   an unreachable gate blocks too. Pushes that only touch `backend/tests/**`
   do not deploy.
 
@@ -738,6 +748,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
 | `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). |
 | `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). S3 (bk-028): `payment.due_soon` (a schedule row of a sent invoice due within `payment_due_soon_days`) and `invoice.overdue` (past due, at the steps of `payment_overdue_reminder_days` [1, 7], the highest step reached), each one staff row (the case's sales owner, else the shared queue) + one customer My Trips row (no e-mail); read in the ops time zone. S4 (bk-030): `supplier_bill.due` (a received or approved bill due within `supplier_bill_due_soon_days`, then once more when overdue; shared staff queue). Never writes money. Not deploy-gate exempt. |
+| `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
 

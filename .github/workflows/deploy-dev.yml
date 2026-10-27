@@ -16,9 +16,11 @@ name: Deploy Dev
 #   BOOKING_API_BASE_URL  default https://api-booking.lumiguides.it.com (the Dev custom domain); used by the
 #                         deploy gate and the post-deploy verify
 #
-# Job guard (AA-751 B3/B4, the `preflight` job): a deploy stops the running task, so a booking.job row that
-# is queued or running would be interrupted (released back to the queue, or re-run after the lease
-# expires: a staff e-mail could go out twice). Before building, preflight:
+# Job guard (AA-751 B3/B4, the `preflight` job; meaning changed by AA-993 G5, design D1.4): since G5 the guard
+# blocks only while a row of a DEPLOY_BLOCKING_KINDS kind (app/jobs/kinds.py: the retention kinds, which keep no
+# checkpoint) is running, or queued and due within 15 min (this job runs before the build, so the old task would
+# claim it before its SIGTERM). Any other running job is released on shutdown and re-claimed by the new task, and
+# other queued jobs wait for whichever task is live (AA-993 G4/G5). Before building, preflight:
 #   1. reads the service's running/pending/desired task counts with the deploy role. All 0 → nothing can be
 #      interrupted: pass. None running but one pending or desired (a task starting: crash replacement, a fresh
 #      0 → 1 scale) → blocked, since that task would claim queued jobs during the build and then be replaced.
@@ -26,7 +28,8 @@ name: Deploy Dev
 #      `id-token: write` and `environment: dev`) and calls GET <BASE_URL>/booking/ops/deploy-gate.
 #      Booking accepts only a token from this workflow file on main, environment dev, event push or
 #      workflow_dispatch (app/auth/ci.py). No secret is involved.
-#   3. safe_to_deploy true → pass. Kinds in DEPLOY_GATE_EXEMPT (bk_inquiry_pull, always queued) never count.
+#   3. safe_to_deploy true → pass (the gate's blocked_by is empty). The other queued/running counts are information
+#      only; kinds in DEPLOY_GATE_EXEMPT (bk_inquiry_pull, always queued; bk_noop_sleep, test-only) are left out.
 #   4. not safe, or the gate is unreachable / not JSON (fail closed) → the deploy is blocked, unless a
 #      workflow_dispatch run gives `override_running_jobs` (Nghiệp only, with the reason): then a warning
 #      names the reason and the count, and the deploy goes on.
@@ -61,7 +64,7 @@ on:
   workflow_dispatch:
     inputs:
       override_running_jobs:
-        description: "Nghiệp only — reason to deploy anyway while booking.job has queued/running jobs. Leave empty to respect the guard."
+        description: "Nghiệp only — reason to deploy anyway while a deploy-blocking booking.job row runs or is due (AA-993 G5). Leave empty to respect the guard."
         required: false
         type: string
 
@@ -110,7 +113,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Check for queued/running booking.job rows
+      - name: Check for a running or due deploy-blocking booking.job row
         env:
           OVERRIDE: ${{ inputs.override_running_jobs }}
           GATE_AUDIENCE: aa-booking-deploy-gate

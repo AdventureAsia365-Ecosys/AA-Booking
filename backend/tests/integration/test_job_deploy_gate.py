@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 
 from app.jobs import queue
-from app.jobs.kinds import DEPLOY_GATE_EXEMPT
+from app.jobs.kinds import DEPLOY_BLOCKING_HORIZON_SECONDS, DEPLOY_BLOCKING_KINDS, DEPLOY_GATE_EXEMPT
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -85,3 +85,23 @@ async def test_without_exemptions_the_pull_counts(admin: asyncpg.Connection, poo
     await job(admin, "bk_inquiry_pull")
     counts = await queue.active_count(pool)
     assert counts == {"active": 1, "by_status": {"queued": 1}, "by_kind": {"bk_inquiry_pull": 1}}
+
+
+async def test_only_running_and_due_rows_of_the_blocking_kinds_count(
+    admin: asyncpg.Connection, pool: asyncpg.Pool
+) -> None:
+    """AA-993 G5: the gate's blocker query: running retention rows and queued ones due within the horizon count; a
+    queued one due later, a finished one and ordinary kinds do not."""
+    await job(admin, "bk_retention_job", run_after="1 hour")
+    await job(admin, "bk_notify_email", "running")
+    await job(admin, "bk_notify_email")
+    await job(admin, "bk_retention_inbox_redact", "succeeded")
+    empty: dict[str, dict[str, int]] = {"running": {}, "due": {}}
+    assert await queue.blocking_count(pool, DEPLOY_BLOCKING_KINDS, DEPLOY_BLOCKING_HORIZON_SECONDS) == empty
+    await job(admin, "bk_retention_job", "running")
+    await job(admin, "bk_retention_inbox_redact", "running")
+    await job(admin, "bk_retention_job", run_after="5 minutes")
+    assert await queue.blocking_count(pool, DEPLOY_BLOCKING_KINDS, DEPLOY_BLOCKING_HORIZON_SECONDS) == {
+        "running": {"bk_retention_inbox_redact": 1, "bk_retention_job": 1},
+        "due": {"bk_retention_job": 1},
+    }

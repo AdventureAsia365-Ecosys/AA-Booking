@@ -16,7 +16,12 @@ from app.auth.ci import DEPLOY_GATE_AUDIENCE, GITHUB_JWKS_URL, GITHUB_OIDC_ISSUE
 from app.auth.tokens import AuthUnavailable, InvalidToken, JwksCache
 from app.db import Database
 from app.jobs import queue
-from app.jobs.kinds import DEPLOY_GATE_EXEMPT, EXPECTED_SECONDS
+from app.jobs.kinds import (
+    DEPLOY_BLOCKING_HORIZON_SECONDS,
+    DEPLOY_BLOCKING_KINDS,
+    DEPLOY_GATE_EXEMPT,
+    EXPECTED_SECONDS,
+)
 from app.main import create_app
 from app.settings import Settings
 from tests.staff_tokens import LocalCis
@@ -232,8 +237,40 @@ async def test_active_count_empty_queue() -> None:
 
 
 def test_exempt_kinds_are_real_kinds() -> None:
-    assert DEPLOY_GATE_EXEMPT == frozenset({"bk_inquiry_pull"})
+    assert DEPLOY_GATE_EXEMPT == frozenset({"bk_inquiry_pull", "bk_noop_sleep"})
     assert DEPLOY_GATE_EXEMPT <= EXPECTED_SECONDS.keys()
+
+
+def test_deploy_blocking_kinds_are_the_unreleased_retention_kinds() -> None:
+    """AA-993 G5: exactly the kinds the worker fails instead of releasing on shutdown (no progress checkpoint)."""
+    from app.retention.jobs import NOT_RELEASED
+
+    assert DEPLOY_BLOCKING_KINDS == NOT_RELEASED == frozenset({"bk_retention_job", "bk_retention_inbox_redact"})
+    assert DEPLOY_BLOCKING_KINDS <= EXPECTED_SECONDS.keys()
+    assert not DEPLOY_BLOCKING_KINDS & DEPLOY_GATE_EXEMPT
+
+
+BLOCKING_SQL = "OR (status = 'queued' AND run_after <= now() + make_interval(secs => $2))"
+
+
+@pytest.mark.asyncio
+async def test_blocking_count_counts_running_and_due_queued_rows_of_the_given_kinds() -> None:
+    conn = ScriptedConn().on(
+        BLOCKING_SQL,
+        [
+            {"what": "running", "kind": "bk_retention_job", "n": 1},
+            {"what": "running", "kind": "bk_retention_inbox_redact", "n": 2},
+            {"what": "due", "kind": "bk_retention_job", "n": 1},
+        ],
+    )
+    out = await queue.blocking_count(conn, DEPLOY_BLOCKING_KINDS, DEPLOY_BLOCKING_HORIZON_SECONDS)
+    assert out == {
+        "running": {"bk_retention_inbox_redact": 2, "bk_retention_job": 1},
+        "due": {"bk_retention_job": 1},
+    }
+    (sql, args), *_ = conn.calls
+    assert "kind = ANY($1::text[])" in sql and "status = 'running'" in sql and "GROUP BY 1, 2" in sql
+    assert args == (["bk_retention_inbox_redact", "bk_retention_job"], 900)
 
 
 # ── GET /booking/ops/deploy-gate ─────────────────────────────────────────────
@@ -273,22 +310,79 @@ def test_gate_safe_when_only_exempt_kinds_are_active() -> None:
         "by_status": {},
         "by_kind": {},
         "safe_to_deploy": True,
-        "exempt_kinds": ["bk_inquiry_pull"],
+        "exempt_kinds": ["bk_inquiry_pull", "bk_noop_sleep"],
+        "blocking_kinds": ["bk_retention_inbox_redact", "bk_retention_job"],
+        "blocking_running": {},
+        "blocking_due": {},
+        "blocked_by": [],
     }
-    assert conn.sql("FROM booking.job") == [(["bk_inquiry_pull"],)]
+    assert conn.sql("status IN ('queued', 'running')") == [(["bk_inquiry_pull", "bk_noop_sleep"],)]
+    assert conn.sql(BLOCKING_SQL) == [(["bk_retention_inbox_redact", "bk_retention_job"], 900)]
 
 
-def test_gate_not_safe_with_active_jobs() -> None:
+def _active(*rows: dict[str, Any]) -> ScriptedConn:
+    """A pool answering the active count with ``rows`` and the blocking count with nothing (rules added later win)."""
+    return ScriptedConn().on("status IN ('queued', 'running')", list(rows)).on(BLOCKING_SQL, [])
+
+
+def test_gate_safe_with_queued_and_running_ordinary_jobs() -> None:
+    """AA-993 G5: queued / running rows of ordinary kinds no longer block; they are reported as information."""
     gh = LocalGithub()
-    conn = ScriptedConn().on("FROM booking.job", [{"status": "queued", "kind": "bk_x6_probe", "n": 1}])
+    conn = _active(
+        {"status": "queued", "kind": "bk_x6_probe", "n": 1},
+        {"status": "running", "kind": "bk_notify_email", "n": 1},
+    )
     with client(conn, gh) as c:
         r = c.get("/booking/ops/deploy-gate", headers=auth(gh.token(event_name="workflow_dispatch")))
     assert r.status_code == 200
     body = r.json()
+    assert body["safe_to_deploy"] is True and body["blocked_by"] == []
+    assert body["active"] == 2
+    assert body["by_status"] == {"queued": 1, "running": 1}
+    assert body["by_kind"] == {"bk_notify_email": 1, "bk_x6_probe": 1}
+
+
+def test_gate_not_safe_while_a_blocking_kind_runs() -> None:
+    gh = LocalGithub()
+    conn = (
+        ScriptedConn()
+        .on("status IN ('queued', 'running')", [{"status": "running", "kind": "bk_retention_job", "n": 1}])
+        .on(BLOCKING_SQL, [{"what": "running", "kind": "bk_retention_job", "n": 1}])
+    )
+    with client(conn, gh) as c:
+        r = c.get("/booking/ops/deploy-gate", headers=auth(gh.token()))
+    assert r.status_code == 200
+    body = r.json()
     assert body["safe_to_deploy"] is False
-    assert body["active"] == 1
-    assert body["by_status"] == {"queued": 1}
-    assert body["by_kind"] == {"bk_x6_probe": 1}
+    assert body["blocking_running"] == {"bk_retention_job": 1}
+    assert body["blocked_by"] == ["1 bk_retention_job job(s) running (deploy-blocking kind)"]
+    assert body["blocking_due"] == {}
+
+
+def test_gate_not_safe_while_a_blocking_kind_is_queued_and_due() -> None:
+    """AA-993 G5 review: the preflight runs before the image build; the old task would claim a due queued retention
+    row before its SIGTERM and be stopped mid-run, so it blocks too (the SQL leaves out one due past the horizon)."""
+    gh = LocalGithub()
+    conn = (
+        ScriptedConn()
+        .on("status IN ('queued', 'running')", [{"status": "queued", "kind": "bk_retention_job", "n": 1}])
+        .on(BLOCKING_SQL, [{"what": "due", "kind": "bk_retention_job", "n": 1}])
+    )
+    with client(conn, gh) as c:
+        r = c.get("/booking/ops/deploy-gate", headers=auth(gh.token()))
+    body = r.json()
+    assert body["safe_to_deploy"] is False
+    assert body["blocking_running"] == {} and body["blocking_due"] == {"bk_retention_job": 1}
+    assert body["blocked_by"] == ["1 bk_retention_job job(s) due (deploy-blocking kind, queued to start within 15 min)"]
+
+
+def test_gate_safe_with_a_queued_blocking_kind_due_later() -> None:
+    """A retention row queued past the horizon (the blocker query leaves it out) waits for whichever task is live."""
+    gh = LocalGithub()
+    conn = _active({"status": "queued", "kind": "bk_retention_job", "n": 1})
+    with client(conn, gh) as c:
+        r = c.get("/booking/ops/deploy-gate", headers=auth(gh.token()))
+    assert r.json()["safe_to_deploy"] is True
 
 
 def test_gate_without_token_is_401_and_never_reads_the_db() -> None:
