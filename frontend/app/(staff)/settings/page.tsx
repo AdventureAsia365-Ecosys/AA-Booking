@@ -94,8 +94,10 @@ function Block({ title, description, actions, children }: { title: string; descr
 }
 
 function ReadOnlyField({ label, help, children }: { label: string; help?: React.ReactNode; children: React.ReactNode }) {
+  // min-w-0: a grid item defaults to its min-content width, which made the one-line value push the card 40 px past a
+  // 390 px phone (layout check, S254); the value truncates instead (full text in the field on wider screens).
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[13px] font-medium text-ink">{label}</span>
       <span
         aria-readonly="true"

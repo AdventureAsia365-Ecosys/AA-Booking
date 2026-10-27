@@ -114,6 +114,18 @@ Figma sizes are taken at the 1920 px frame and **scaled to kit density**: the ki
 
 The CIS admin already runs at this density on the same laptops. Q1f asks whether to keep the Figma size instead.
 
+**Compact density (AA-996, S254)** for zoomed laptops: from 768 px to 1199 px CSS wide (a 1440 px laptop at 125–150 %
+browser zoom; 150 % ≈ 960 px) the staff admin tightens itself; at 1200 px and wider nothing changes.
+
+- Table cells use 8–9 × 10 px paddings and the page gutter is 20 px.
+- The sidebar is the 68 px icon rail (labels in the tooltips; the collapse toggle is hidden there).
+- In list tables, columns marked `meta.compact = "drawer"` (FX / money detail, audit facts such as Updated or
+  Recorded by, secondary counts) leave the table. They open in the row's **details drawer** (a details button before
+  the row menu).
+- Built once, in `ui/booking/DataTable.tsx` (the `DataTable` every page imports) and `app/globals.css`, so a new list
+  only marks its columns. The layout check (`frontend/e2e/layout`) holds the widest lists to "no column cut off, 20 px
+  to spare" at 960 and 1100 px.
+
 ### 1.3 Status tones (Booking `StatusBadge` maps)
 
 The CIS `StatusBadge` map is job-runner specific. Booking adds its own maps, all on the kit `Tone` set plus the Booking-local `orange`.
@@ -531,7 +543,7 @@ Kit components are copied unchanged. **Booking** components are new, in `ui/book
 | `PageHeader` | kit | all | supports back + code + badge + actions (detail band) |
 | `Button` (primary / secondary / danger / ghost; sm / md / lg) | kit | all | pill radius unless Q1e says otherwise |
 | `Badge`, `StatusBadge` | kit + Booking maps | all lists | Booking adds `orange` tone and the per-entity maps of §1.3 |
-| `DataTable` | kit | every list | server pagination / sort; CSV export; saved views per user (`cis_user_id`) |
+| `DataTable` | kit + Booking wrapper | every list | server pagination / sort; CSV export; saved views per user (`cis_user_id`); compact density 768–1199 px (§1.2): `meta.compact = "drawer"` columns move to a row details drawer |
 | `FilterBar` | Booking | lists | search + selects + date-range + "Reset filters"; state in the URL; composes into `DataTable.toolbarExtra` |
 | `SavedFilterTabs` | Booking (kit `Tabs`) | cases, customers, billing | tabs with counts that set filter presets |
 | `Tabs` | kit | detail pages | `?tab=` in the URL |

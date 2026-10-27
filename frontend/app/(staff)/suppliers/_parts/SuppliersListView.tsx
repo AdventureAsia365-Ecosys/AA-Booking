@@ -205,9 +205,10 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
   {
     id: "contracts",
     header: "Contracts",
+    meta: { compact: "drawer" }, // AA-996: a count, in the details drawer below 1200 px (with Updated)
     accessorKey: "contracts_in_force",
     cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.contracts_in_force}</span>,
   },
   { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <SupplierStatusBadge status={row.original.status} /> },
-  { id: "updated", header: "Updated", accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="whitespace-nowrap text-[13px] text-muted" /> },
+  { id: "updated", header: "Updated", meta: { compact: "drawer" }, accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="whitespace-nowrap text-[13px] text-muted" /> },
 ];
