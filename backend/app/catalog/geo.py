@@ -1,10 +1,16 @@
 """Catalog → Countries and Destinations: CIS places read live plus Booking's own state (AA-996, bk-029).
 
-- **Content is CIS's** (ADR 0002, O7): a destination is a row of ``catalog.v_destination`` (name, country name,
-  coordinates, cover, photo count) and its photos come from ``catalog.v_destination_photo`` when CIS serves it
-  (feature-detected: without it the photo list is empty). A country is derived: the ISO reference row
-  (``booking.countries``) that a CIS place or tour names (``v_destination.country`` / ``v_tour.country`` are country
-  names, mapped through ``booking.countries.name``). Nothing is copied into Booking.
+- **Content is CIS's** (ADR 0002, O7): a destination is a row of ``catalog.v_destination`` (name, country name, ISO
+  code, coordinates, cover, photo count) and its photos come from ``catalog.v_destination_photo`` when CIS serves it
+  (feature-detected: without it the photo list is empty). A country is a row of ``catalog.v_country`` (CIS 279, every
+  ISO 3166-1 entry) that a CIS place or tour is in: a place by its ``v_destination.country_iso2`` (CIS resolves it), a
+  tour by its ``v_tour.country`` name (since CIS 288 always a ``v_country.name``). Nothing is copied into Booking.
+- **Booking's reference list** ``booking.countries`` (bk-005, read-only for role booking) is only the set of countries
+  Booking can hold state for (profiles, suppliers, trip cases reference it). A CIS country outside it is listed and
+  counted but cannot be edited yet (``booking_reference = false``; a PATCH is 409 ``country_not_in_booking``).
+- **Images** of a country = distinct photo paths (CIS 290 points every copy of one file at one path) of its places
+  (``v_destination_photo``) plus the photos of its tours that are not tied to a place (``v_tour_photo``); the count
+  fails soft (0, logged) when CIS does not serve those views.
 - **Booking state** (bk-029): ``booking.destination_profiles`` and ``booking.country_profiles`` hold the status
   (``active`` | ``inactive``), area (countries), internal notes and the deactivation reason. No row = active.
   Deactivate / Activate is the soft replacement of the Figma "Delete / Unpublish" dialogs: nothing is ever deleted.
@@ -27,7 +33,7 @@ from app import audit, paging
 from app.auth.staff import Staff
 from app.catalog.destinations import CATALOG_ERRORS
 from app.catalog.trip_plans import catalog_reads
-from app.errors import Invalid, NotFound
+from app.errors import Conflict, Invalid, NotFound
 
 log = logging.getLogger(__name__)
 
@@ -49,14 +55,13 @@ SUPPLY_AT_PLACE = """
 """
 
 DEST_COLUMNS = """
-    d.destination_id::text AS destination_id, d.name, d.country, c.iso2::text AS country_code,
+    d.destination_id::text AS destination_id, d.name, d.country, d.country_iso2::text AS country_code,
     d.lat::float8 AS lat, d.lng::float8 AS lng, d.cover_photo_path, d.cover_image_url, d.photo_count,
     coalesce(p.status, 'active') AS status, p.status_reason, p.internal_notes, p.updated_at AS profile_updated_at,
     p.updated_by AS profile_updated_by, ub.name AS profile_updated_by_name
 """
 DEST_FROM = """
     FROM catalog.v_destination d
-    LEFT JOIN booking.countries c ON lower(c.name) = lower(d.country)
     LEFT JOIN booking.destination_profiles p ON p.destination_id = d.destination_id
     LEFT JOIN booking.staff_users ub ON ub.cis_user_id = p.updated_by
 """
@@ -96,7 +101,7 @@ async def list_destinations(
     if q and q.strip():
         add("d.name ILIKE {p}", paging.contains(q))
     if country and country.strip():
-        add("c.iso2 = {p}", country.strip().upper())
+        add("d.country_iso2 = {p}", country.strip().upper())
     wanted = _status(status)
     if wanted:
         add("coalesce(p.status, 'active') = {p}", wanted)
@@ -121,7 +126,7 @@ async def list_destinations(
             SELECT count(*) AS total,
                    count(*) FILTER (WHERE coalesce(p.status, 'active') = 'active') AS active,
                    count(*) FILTER (WHERE p.status = 'inactive') AS inactive,
-                   count(DISTINCT lower(d.country)) AS countries
+                   count(DISTINCT d.country_iso2) AS countries
             FROM catalog.v_destination d
             LEFT JOIN booking.destination_profiles p ON p.destination_id = d.destination_id
             """
@@ -207,12 +212,12 @@ async def update_destination(
 
 COUNTRY_CTE = """
 WITH dest AS (
-    SELECT c.iso2, count(*) AS destinations, coalesce(sum(d.photo_count), 0) AS photos
-    FROM catalog.v_destination d JOIN booking.countries c ON lower(c.name) = lower(d.country)
-    GROUP BY c.iso2
+    SELECT d.country_iso2 AS iso2, count(*) AS destinations
+    FROM catalog.v_destination d WHERE d.country_iso2 IS NOT NULL
+    GROUP BY d.country_iso2
 ), tours AS (
     SELECT c.iso2, count(*) AS tours
-    FROM catalog.v_tour t JOIN booking.countries c ON lower(c.name) = lower(t.country)
+    FROM catalog.v_tour t JOIN catalog.v_country c ON lower(c.name) = lower(t.country)
     GROUP BY c.iso2
 ), supply AS (
     SELECT country_code AS iso2, count(*) AS active_suppliers FROM booking.suppliers
@@ -221,13 +226,14 @@ WITH dest AS (
 """
 COUNTRY_COLUMNS = """
     c.iso2::text AS country_code, c.name, coalesce(dest.destinations, 0) AS destinations,
-    coalesce(dest.photos, 0)::bigint AS photos, coalesce(tours.tours, 0) AS tours,
+    coalesce(tours.tours, 0) AS tours, (bc.iso2 IS NOT NULL) AS booking_reference,
     coalesce(supply.active_suppliers, 0) AS active_suppliers,
     coalesce(p.status, 'active') AS status, p.area, p.status_reason, p.internal_notes,
     p.updated_at AS profile_updated_at, p.updated_by AS profile_updated_by, ub.name AS profile_updated_by_name
 """
 COUNTRY_FROM = """
-    FROM booking.countries c
+    FROM catalog.v_country c
+    LEFT JOIN booking.countries bc ON bc.iso2 = c.iso2
     LEFT JOIN dest ON dest.iso2 = c.iso2
     LEFT JOIN tours ON tours.iso2 = c.iso2
     LEFT JOIN supply ON supply.iso2 = c.iso2
@@ -237,12 +243,48 @@ COUNTRY_FROM = """
 # A country is listed when CIS has a place or a tour there, or Booking already keeps state for it.
 COUNTRY_LISTED = "(dest.iso2 IS NOT NULL OR tours.iso2 IS NOT NULL OR p.country_code IS NOT NULL)"
 
+# Distinct photo files per country: its places' photos, plus its tours' photos that are not tied to a place (a photo
+# tied to a place counts for the place's country, so a cross-border place is not counted twice). ``{only}`` narrows it
+# to one country (``AND iso2 = $1``) or is empty.
+COUNTRY_PHOTOS = """
+SELECT iso2::text AS iso2, count(DISTINCT path) AS photos FROM (
+    SELECT d.country_iso2 AS iso2, dp.path
+    FROM catalog.v_destination_photo dp JOIN catalog.v_destination d ON d.destination_id = dp.destination_id
+    UNION ALL
+    SELECT c.iso2, tp.path
+    FROM catalog.v_tour_photo tp
+    JOIN catalog.v_tour t ON t.source_system = tp.source_system AND t.source_id = tp.source_id
+    JOIN catalog.v_country c ON lower(c.name) = lower(t.country)
+    WHERE tp.destination_id IS NULL
+) ph
+WHERE iso2 IS NOT NULL AND path IS NOT NULL {only}
+GROUP BY iso2
+"""
+
+
+async def _country_photos(conn: asyncpg.Connection, iso: str | None = None) -> dict[str, int]:
+    """``{iso2: distinct photo count}``; ``{}`` (every country 0) when CIS does not serve the photo views."""
+    try:
+        async with conn.transaction():
+            if iso is None:
+                rows = await conn.fetch(COUNTRY_PHOTOS.format(only=""))
+            else:
+                rows = await conn.fetch(COUNTRY_PHOTOS.format(only="AND iso2 = $1"), iso)
+    except (*CATALOG_ERRORS, asyncpg.UndefinedColumnError) as exc:
+        log.warning("catalog photo views unreadable, country photo counts omitted: %s", type(exc).__name__)
+        return {}
+    return {r["iso2"]: r["photos"] for r in rows}
+
+
+def _with_photos(row: dict[str, Any], photos: dict[str, int]) -> dict[str, Any]:
+    return {**row, "photos": photos.get(row["country_code"], 0)}
+
 
 async def list_countries(
     conn: asyncpg.Connection, *, q: str | None = None, status: str | None = None, area: str | None = None
 ) -> dict[str, Any]:
     """Countries of the CIS catalog with their Booking state (a short list: no paging). ``unmapped`` names the CIS
-    country names that have no ISO row in ``booking.countries`` (their places cannot be grouped by country)."""
+    place country texts CIS could not resolve to an ISO code (``country_iso2`` NULL: they cannot be grouped)."""
     where = [COUNTRY_LISTED]
     args: list[Any] = []
     if q and q.strip():
@@ -269,12 +311,12 @@ async def list_countries(
         unmapped = await conn.fetch(
             """
             SELECT d.country AS name, count(*) AS destinations FROM catalog.v_destination d
-            WHERE d.country IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM booking.countries c WHERE lower(c.name) = lower(d.country))
+            WHERE d.country IS NOT NULL AND d.country_iso2 IS NULL
             GROUP BY d.country ORDER BY d.country LIMIT 50
             """
         )
-    items = [dict(r) for r in rows]
+    photos = await _country_photos(conn)
+    items = [_with_photos(dict(r), photos) for r in rows]
     areas = sorted({i["area"] for i in items if i["area"]})
     return {"items": items, "total": len(items), "areas": areas, "unmapped": [dict(r) for r in unmapped]}
 
@@ -287,7 +329,7 @@ async def _country_row(conn: asyncpg.Connection, iso: str) -> dict[str, Any]:
         )
     if row is None:
         raise NotFound("country_not_found", f"country {iso} is not in the ISO reference list")
-    return dict(row)
+    return _with_photos(dict(row), await _country_photos(conn, iso))
 
 
 async def get_country(conn: asyncpg.Connection, iso: str) -> dict[str, Any]:
@@ -296,7 +338,7 @@ async def get_country(conn: asyncpg.Connection, iso: str) -> dict[str, Any]:
     country = await _country_row(conn, iso)
     async with catalog_reads():
         destinations = await conn.fetch(
-            f"SELECT {DEST_COLUMNS} {DEST_FROM} WHERE c.iso2 = $1"  # noqa: S608 — fixed fragments
+            f"SELECT {DEST_COLUMNS} {DEST_FROM} WHERE d.country_iso2 = $1"  # noqa: S608 — fixed fragments
             " ORDER BY lower(d.name), d.destination_id LIMIT $2",
             iso,
             MAX_COUNTRY_DESTINATIONS,
@@ -328,6 +370,12 @@ async def update_country(conn: asyncpg.Connection, staff: Staff, iso: str, patch
     iso = iso.strip().upper()
     await _lock(conn, "booking.country_profiles", iso)
     country = await _country_row(conn, iso)
+    if not country["booking_reference"]:
+        # booking.country_profiles references booking.countries (bk-005, read-only for role booking).
+        raise Conflict(
+            "country_not_in_booking",
+            f"{country['name']} ({iso}) is not in Booking's country list yet, so Booking cannot keep state for it",
+        )
     keys = ("status", "status_reason", "area", "internal_notes")
     before = {k: country[k] for k in keys}
     after = _apply(before, patch)

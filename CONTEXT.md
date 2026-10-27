@@ -178,9 +178,12 @@ backend/
                            GET /booking/catalog/geo/destinations[/{id}], GET /booking/catalog/geo/countries[/{iso}]
                            (catalog.read), PATCH of both (catalog.admin) (AA-996, bk-029)
   app/catalog/geo.py       AA-996: Catalog → Countries / Destinations: CIS places (v_destination, v_destination_photo
-                           when served) and countries derived from v_destination / v_tour names through booking.countries,
-                           joined to the Booking state of bk-029 (country_profiles / destination_profiles: status
-                           active | inactive, reason, area, internal notes; soft, audited, no row = active)
+                           when served) and countries from CIS ISO codes (catalog.v_country; places by
+                           v_destination.country_iso2, tours by v_tour.country = v_country.name), joined to the Booking
+                           state of bk-029 (country_profiles / destination_profiles: status active | inactive, reason,
+                           area, internal notes; soft, audited, no row = active). A country outside booking.countries
+                           is listed read-only (booking_reference false; PATCH 409). Images = distinct CIS photo paths
+                           of its places + its place-less tour photos (v_destination_photo, v_tour_photo; fail soft)
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day;

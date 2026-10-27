@@ -79,10 +79,13 @@ export interface CountryItem extends GeoState {
   country_code: string;
   name: string;
   destinations: number;
+  /** Distinct CIS photo files of its places and of its tours' place-less photos. */
   photos: number;
   tours: number;
   active_suppliers: number;
   area: string | null;
+  /** In Booking's own country list (booking.countries): only then can Booking keep state (status, area, notes). */
+  booking_reference: boolean;
 }
 
 export interface CountryTour {
@@ -104,7 +107,7 @@ export interface CountryList {
   items: CountryItem[];
   total: number;
   areas: string[];
-  /** CIS country names with no ISO row in Booking (their places cannot be grouped). */
+  /** CIS place country texts that CIS could not resolve to an ISO code (their places cannot be grouped). */
   unmapped: { name: string; destinations: number }[];
 }
 

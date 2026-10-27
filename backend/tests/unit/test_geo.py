@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.staff import Staff, current_staff, get_pool
 from app.catalog import geo
-from app.errors import Invalid, NotFound, Unavailable
+from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.main import create_app
 from app.settings import Settings
 from tests.unit.fakes import ScriptedConn
@@ -52,8 +52,8 @@ def country_row(**over: Any) -> dict[str, Any]:
         "country_code": "VN",
         "name": "Vietnam",
         "destinations": 12,
-        "photos": 40,
         "tours": 30,
+        "booking_reference": True,
         "active_suppliers": 5,
         "status": "active",
         "area": None,
@@ -100,9 +100,9 @@ def test_action_and_summary() -> None:
 async def test_list_destinations_filters_bind_values_and_sorts() -> None:
     conn = (
         ScriptedConn()
-        .on("SELECT count(*) FROM catalog.v_destination d LEFT JOIN booking.countries", 1)
+        .on("SELECT count(*) FROM catalog.v_destination d LEFT JOIN booking.destination_profiles", 1)
         .on("ORDER BY", [place_row()])
-        .on("count(DISTINCT lower(d.country))", {"total": 3, "active": 2, "inactive": 1, "countries": 2})
+        .on("count(DISTINCT d.country_iso2)", {"total": 3, "active": 2, "inactive": 1, "countries": 2})
     )
     out = await geo.list_destinations(conn, q="ha_noi", country="vn", status="Inactive", sort="-photos", limit=500)
     assert out["total"] == 1 and out["limit"] == geo.MAX_PAGE
@@ -110,6 +110,7 @@ async def test_list_destinations_filters_bind_values_and_sorts() -> None:
     page_sql, page_args = next((s, a) for s, a in conn.calls if "ORDER BY" in s)
     assert "d.photo_count DESC" in page_sql
     assert page_args[:3] == ("%ha\\_noi%", "VN", "inactive")
+    assert "d.country_iso2 = $2" in page_sql and "booking.countries" not in page_sql  # CIS's ISO code, no name match
     with pytest.raises(Invalid):
         await geo.list_destinations(ScriptedConn(), sort="password")
     with pytest.raises(Invalid):
@@ -156,14 +157,16 @@ async def test_list_countries_args_and_areas() -> None:
     conn = (
         ScriptedConn()
         .on("ORDER BY c.name", [country_row(area="Indochina"), country_row(country_code="KH", name="Cambodia")])
-        .on("NOT EXISTS (SELECT 1 FROM booking.countries", [{"name": "Nowhere", "destinations": 1}])
+        .on("d.country_iso2 IS NULL GROUP BY d.country", [{"name": "Nowhere", "destinations": 1}])
+        .on("count(DISTINCT path) AS photos", [{"iso2": "VN", "photos": 7}])
     )
     out = await geo.list_countries(conn, q="viet", status="inactive", area="Indochina")
     assert out["total"] == 2 and out["areas"] == ["Indochina"] and out["unmapped"][0]["name"] == "Nowhere"
+    assert [(i["country_code"], i["photos"]) for i in out["items"]] == [("VN", 7), ("KH", 0)]
     _, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
     assert args == ("%viet%", "inactive", "Indochina")
     sql, _ = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
-    assert "c.iso2 =" not in sql
+    assert "c.iso2 = $" not in sql
 
 
 @pytest.mark.asyncio
@@ -171,7 +174,7 @@ async def test_list_countries_matches_the_iso_code_only_for_a_two_letter_query()
     conn = ScriptedConn()
     await geo.list_countries(conn, q="Myanmar")  # must not also match MY (Malaysia)
     sql, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
-    assert args == ("%Myanmar%",) and "c.iso2 =" not in sql
+    assert args == ("%Myanmar%",) and "c.iso2 = $" not in sql
     conn = ScriptedConn()
     await geo.list_countries(conn, q=" vn ")
     sql, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
@@ -185,7 +188,7 @@ async def test_country_detail_and_update() -> None:
     conn = (
         ScriptedConn()
         .on("WHERE c.iso2 = $1", country_row())
-        .on("WHERE c.iso2 = $1 ORDER BY lower(d.name)", [place_row()])
+        .on("WHERE d.country_iso2 = $1 ORDER BY lower(d.name)", [place_row()])
         .on(
             "FROM catalog.v_tour t LEFT JOIN booking.trip_plans", [{"source_id": "s-1", "title": "T", "sellable": True}]
         )
@@ -232,6 +235,59 @@ async def test_update_country_with_defaults_adds_an_unlisted_country_once() -> N
     conn = country_conn(country_row())
     assert (await geo.update_country(conn, ADMIN, "VN", {}))["changed"] == []
     assert conn.sql("INSERT INTO booking.country_profiles") == []
+
+
+# ── AA-996 fix: countries from CIS ISO codes, images from CIS photos ─────────────
+
+
+@pytest.mark.asyncio
+async def test_countries_come_from_cis_iso_codes_not_booking_country_names() -> None:
+    """Pakistan / Taiwan / Kyrgyzstan were missing: the list started from booking.countries (16 markets) and matched
+    place country names to it. It now starts from catalog.v_country and groups places by CIS's country_iso2."""
+    pk = country_row(country_code="PK", name="Pakistan", booking_reference=False)
+    conn = ScriptedConn().on("ORDER BY c.name", [country_row(), pk])
+    out = await geo.list_countries(conn)
+    assert [i["country_code"] for i in out["items"]] == ["VN", "PK"]
+    sql, _ = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
+    assert "FROM catalog.v_country c" in sql and "LEFT JOIN booking.countries bc ON bc.iso2 = c.iso2" in sql
+    assert "d.country_iso2 AS iso2" in sql and "lower(d.country)" not in sql
+    assert "FROM catalog.v_tour t JOIN catalog.v_country c ON lower(c.name) = lower(t.country)" in sql
+    # "Places without a country" = places CIS could not resolve, not places outside Booking's own list.
+    unmapped_sql = next(s for s, _ in conn.calls if "GROUP BY d.country ORDER BY" in s)
+    assert "d.country_iso2 IS NULL" in unmapped_sql and "booking.countries" not in unmapped_sql
+
+
+@pytest.mark.asyncio
+async def test_country_images_count_distinct_cis_photo_paths_of_places_and_tours() -> None:
+    conn = country_conn(country_row(country_code="BT", name="Bhutan")).on(
+        "count(DISTINCT path) AS photos", [{"iso2": "BT", "photos": 12}]
+    )
+    out = await geo.get_country(conn, "bt")
+    assert out["photos"] == 12
+    sql, args = next((s, a) for s, a in conn.calls if "count(DISTINCT path)" in s)
+    assert args == ("BT",) and "AND iso2 = $1" in sql
+    assert "FROM catalog.v_destination_photo dp JOIN catalog.v_destination d" in sql
+    assert "FROM catalog.v_tour_photo tp" in sql and "WHERE tp.destination_id IS NULL" in sql
+    # The CIS photo views missing or not granted: the country still loads, its image count is 0.
+    conn = country_conn(country_row(country_code="BT", name="Bhutan")).on(
+        "count(DISTINCT path) AS photos", asyncpg.UndefinedTableError("no view")
+    )
+    assert (await geo.get_country(conn, "BT"))["photos"] == 0
+    conn = (
+        ScriptedConn()
+        .on("ORDER BY c.name", [country_row()])
+        .on("count(DISTINCT path) AS photos", asyncpg.InsufficientPrivilegeError("no grant"))
+    )
+    assert (await geo.list_countries(conn))["items"][0]["photos"] == 0
+
+
+@pytest.mark.asyncio
+async def test_update_country_outside_booking_reference_is_409_and_writes_nothing() -> None:
+    conn = country_conn(country_row(country_code="TW", name="Taiwan", booking_reference=False))
+    with pytest.raises(Conflict) as err:
+        await geo.update_country(conn, ADMIN, "tw", {"status": "inactive"})
+    assert err.value.code == "country_not_in_booking"
+    assert conn.sql("INSERT INTO booking.country_profiles") == [] and conn.sql("INSERT INTO booking.audit_logs") == []
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────

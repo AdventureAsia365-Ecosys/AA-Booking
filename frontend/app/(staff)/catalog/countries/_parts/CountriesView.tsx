@@ -105,7 +105,7 @@ export function CountriesView() {
                     label={`Actions for ${c.name}`}
                     items={[
                       { label: "View details", icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/countries/${c.country_code}`) },
-                      ...(canWrite
+                      ...(canWrite && c.booking_reference
                         ? [
                             { label: "Edit country", icon: <Pencil size={14} />, onSelect: () => setMany({ edit: c.country_code }) },
                             c.status === "active"
