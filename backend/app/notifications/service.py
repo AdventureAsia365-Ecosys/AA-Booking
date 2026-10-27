@@ -33,7 +33,19 @@ STAFF_TYPES = (
     # AA-975: a confirmed B2B booking has on-request lines for the desk to accept or decline (app.b2b.desk).
     "b2b.on_request",
 )
-CUSTOMER_TYPES = ("proposal.sent",)
+# The operations rows (AA-682: supplier_booking.*, trip_check.*, trip_case.gate_blocked; S3 payment.recorded,
+# payment.due_soon, invoice.overdue / overpaid / balance_reopened / case_cancelled) are work items, not preferences:
+# they are not listed here, so a staff member cannot switch them off.
+# Customer feed rows (My Trips, O8); never an e-mail (design D15).
+CUSTOMER_TYPES = (
+    "proposal.sent",
+    "invoice.sent",
+    "invoice.updated",
+    "invoice.cancelled",
+    "payment.reminder",
+    "payment.due_soon",
+    "invoice.overdue",
+)
 MAX_PAGE = 100
 
 VISIBLE = (
@@ -130,6 +142,40 @@ async def notify_customer(
         entity_id,
         json.dumps(data, default=str),
     )
+
+
+async def notify_customer_once(
+    conn: asyncpg.Connection,
+    *,
+    customer_id: str,
+    type: str,  # noqa: A002
+    title: str,
+    message: str | None,
+    entity_type: str,
+    entity_id: str,
+    reminder_key: str,
+    data: dict[str, Any] | None = None,
+) -> bool:
+    """A customer reminder written at most once per ``(type, entity_id, reminder_key)`` (``notifications_reminder_uq``
+    includes ``recipient_type``, so the staff row of the same reminder never collides; critic B7). ON CONFLICT DO
+    NOTHING keeps a duplicate from aborting the caller's (job) transaction. True when the row was written."""
+    written = await conn.fetchval(
+        """
+        INSERT INTO booking.notifications
+            (recipient_type, recipient_id, type, title, message, entity_type, entity_id, data)
+        VALUES ('customer', $1::uuid, $2, $3, $4, $5, $6::uuid, $7::jsonb)
+        ON CONFLICT DO NOTHING
+        RETURNING id::text
+        """,
+        customer_id,
+        type,
+        title,
+        message,
+        entity_type,
+        entity_id,
+        json.dumps({**(data or {}), "reminder_key": reminder_key}, default=str),
+    )
+    return written is not None
 
 
 async def unread_count(conn: asyncpg.Connection, staff: Staff) -> int:

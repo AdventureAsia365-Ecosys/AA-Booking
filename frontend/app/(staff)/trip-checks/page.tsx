@@ -248,7 +248,7 @@ function LifecycleRuns() {
 function runSummary(r: LifecycleRun): string {
   const res = (r.result ?? {}) as Record<string, unknown>;
   if (r.kind === "bk_ops_reminders") {
-    return `Reminders: ${Number(res.checks_due_notified ?? 0)} check(s) due, ${Number(res.supplier_waiting_notified ?? 0)} supplier answer(s) waiting`;
+    return `Reminders: ${Number(res.checks_due_notified ?? 0)} check(s) due, ${Number(res.supplier_waiting_notified ?? 0)} supplier answer(s) waiting, ${Number(res.payments_notified ?? 0)} payment(s) due or overdue`;
   }
   const moves = (res.moves ?? {}) as Record<string, number>;
   const total = Object.values(moves).reduce((a, b) => a + Number(b || 0), 0);

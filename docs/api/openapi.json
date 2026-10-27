@@ -1,6 +1,92 @@
 {
   "components": {
     "schemas": {
+      "AdjustmentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 9999.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,4}|(?=[\\d.]{1,7}0*$)\\d{0,4}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "1",
+            "title": "Quantity"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "description",
+          "unit_price",
+          "reason"
+        ],
+        "title": "AdjustmentIn",
+        "type": "object"
+      },
+      "Amendment": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/AdjustmentIn"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Adjustments",
+            "type": "array"
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ScheduleRowIn"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the new rows after the covered ones; omit to move the difference",
+            "title": "Schedule"
+          }
+        },
+        "required": [
+          "adjustments"
+        ],
+        "title": "Amendment",
+        "type": "object"
+      },
       "ApproveBody": {
         "additionalProperties": false,
         "properties": {
@@ -2150,6 +2236,68 @@
         "title": "IncidentIn",
         "type": "object"
       },
+      "InvoiceChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AdjustmentIn"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustments"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ScheduleRowIn"
+                },
+                "maxItems": 10,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule"
+          },
+          "terms": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms"
+          }
+        },
+        "title": "InvoiceChanges",
+        "type": "object"
+      },
       "ItemIn": {
         "additionalProperties": false,
         "properties": {
@@ -2985,6 +3133,66 @@
         "title": "NewHotel",
         "type": "object"
       },
+      "NewInvoice": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/AdjustmentIn"
+            },
+            "maxItems": 20,
+            "title": "Adjustments",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ScheduleRowIn"
+                },
+                "maxItems": 10,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule"
+          },
+          "send_now": {
+            "default": false,
+            "title": "Send Now",
+            "type": "boolean"
+          },
+          "terms": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms"
+          }
+        },
+        "title": "NewInvoice",
+        "type": "object"
+      },
       "NewMedia": {
         "additionalProperties": false,
         "description": "A supplier photo, as base64 JSON (API Gateway passes no binary body; see ``app.supply.media``).",
@@ -3029,6 +3237,114 @@
           "data_base64"
         ],
         "title": "NewMedia",
+        "type": "object"
+      },
+      "NewPayment": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_duplicate_reference": {
+            "default": false,
+            "title": "Allow Duplicate Reference",
+            "type": "boolean"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "kind": {
+            "default": "receipt",
+            "enum": [
+              "receipt",
+              "refund"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "bank_transfer",
+              "card_offline",
+              "cash",
+              "other"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "received_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "what arrived, when another currency",
+            "title": "Received Amount"
+          },
+          "received_currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received Currency"
+          },
+          "received_on": {
+            "format": "date",
+            "title": "Received On",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "bank or receipt reference, never a card",
+            "title": "Reference"
+          }
+        },
+        "required": [
+          "amount",
+          "method",
+          "received_on"
+        ],
+        "title": "NewPayment",
         "type": "object"
       },
       "NewRate": {
@@ -3693,6 +4009,37 @@
           "adult"
         ],
         "title": "Pax",
+        "type": "object"
+      },
+      "PaymentChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          }
+        },
+        "title": "PaymentChanges",
         "type": "object"
       },
       "PlanComponentIn": {
@@ -4874,6 +5221,46 @@
           "kind"
         ],
         "title": "RunRequest",
+        "type": "object"
+      },
+      "ScheduleRowIn": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "due_date": {
+            "format": "date",
+            "title": "Due Date",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "deposit",
+              "second",
+              "final",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "due_date"
+        ],
+        "title": "ScheduleRowIn",
         "type": "object"
       },
       "SendBody": {
@@ -7394,6 +7781,34 @@
         ]
       }
     },
+    "/booking/billing/summary": {
+      "get": {
+        "operationId": "billing_summary_booking_billing_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Billing Summary Booking Billing Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Billing Summary",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
     "/booking/case-lifecycle/runs": {
       "get": {
         "operationId": "lifecycle_runs_booking_case_lifecycle_runs_get",
@@ -9610,6 +10025,661 @@
         ]
       }
     },
+    "/booking/invoices": {
+      "get": {
+        "operationId": "list_invoices_booking_invoices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "sent",
+                    "partially_paid",
+                    "paid",
+                    "cancelled",
+                    "open",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Overdue"
+            }
+          },
+          {
+            "description": "trip case code or UUID",
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "trip case code or UUID",
+              "title": "Case"
+            }
+          },
+          {
+            "description": "invoice number, case code or customer name",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "invoice number, case code or customer name",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Invoices Booking Invoices Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Invoices",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/invoices/{number}": {
+      "delete": {
+        "operationId": "delete_invoice_booking_invoices__number__delete",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Invoice Booking Invoices  Number  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Invoice",
+        "tags": [
+          "billing"
+        ]
+      },
+      "get": {
+        "operationId": "get_invoice_booking_invoices__number__get",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Invoice Booking Invoices  Number  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Invoice",
+        "tags": [
+          "billing"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_invoice_booking_invoices__number__patch",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Invoice Booking Invoices  Number  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Invoice",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/invoices/{number}/amend": {
+      "post": {
+        "operationId": "amend_invoice_booking_invoices__number__amend_post",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Amendment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Amend Invoice Booking Invoices  Number  Amend Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Amend Invoice",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/invoices/{number}/cancel": {
+      "post": {
+        "operationId": "cancel_invoice_booking_invoices__number__cancel_post",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Invoice Booking Invoices  Number  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Invoice",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/invoices/{number}/payments": {
+      "post": {
+        "operationId": "record_payment_booking_invoices__number__payments_post",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          },
+          {
+            "description": "8-200 characters, one per request",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "8-200 characters, one per request",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPayment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Payment Booking Invoices  Number  Payments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Payment",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/invoices/{number}/remind": {
+      "post": {
+        "operationId": "remind_invoice_booking_invoices__number__remind_post",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remind Invoice Booking Invoices  Number  Remind Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remind Invoice",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/invoices/{number}/send": {
+      "post": {
+        "operationId": "send_invoice_booking_invoices__number__send_post",
+        "parameters": [
+          {
+            "description": "Invoice number (INV-000123) or UUID",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Invoice number (INV-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Send Invoice Booking Invoices  Number  Send Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Invoice",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
     "/booking/media/{media_id}": {
       "patch": {
         "operationId": "patch_media_booking_media__media_id__patch",
@@ -10027,6 +11097,449 @@
         "summary": "Deploy Gate",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/booking/payments": {
+      "get": {
+        "operationId": "list_payments_booking_payments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "recorded",
+                    "verified",
+                    "voided"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "receipt",
+                    "refund"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "bank_transfer",
+                    "card_offline",
+                    "cash",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Method"
+            }
+          },
+          {
+            "in": "query",
+            "name": "invoice",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Invoice"
+            }
+          },
+          {
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case"
+            }
+          },
+          {
+            "description": "payment ref, invoice number, case code, reference",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "payment ref, invoice number, case code, reference",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Payments Booking Payments Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Payments",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/payments/{ref}": {
+      "get": {
+        "operationId": "get_payment_booking_payments__ref__get",
+        "parameters": [
+          {
+            "description": "Payment ref (PMT-000123) or UUID",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Payment ref (PMT-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Payment Booking Payments  Ref  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Payment",
+        "tags": [
+          "billing"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_payment_booking_payments__ref__patch",
+        "parameters": [
+          {
+            "description": "Payment ref (PMT-000123) or UUID",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Payment ref (PMT-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Payment Booking Payments  Ref  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Payment",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/payments/{ref}/verify": {
+      "post": {
+        "operationId": "verify_payment_booking_payments__ref__verify_post",
+        "parameters": [
+          {
+            "description": "Payment ref (PMT-000123) or UUID",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Payment ref (PMT-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verify Payment Booking Payments  Ref  Verify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Verify Payment",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/booking/payments/{ref}/void": {
+      "post": {
+        "operationId": "void_payment_booking_payments__ref__void_post",
+        "parameters": [
+          {
+            "description": "Payment ref (PMT-000123) or UUID",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Payment ref (PMT-000123) or UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Void Payment Booking Payments  Ref  Void Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Void Payment",
+        "tags": [
+          "billing"
         ]
       }
     },
@@ -14503,6 +16016,59 @@
         ]
       }
     },
+    "/booking/trip-cases/{ref}/billing": {
+      "get": {
+        "operationId": "case_billing_booking_trip_cases__ref__billing_get",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Case Billing Booking Trip Cases  Ref  Billing Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Case Billing",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
     "/booking/trip-cases/{ref}/checks": {
       "get": {
         "operationId": "case_checks_booking_trip_cases__ref__checks_get",
@@ -14614,6 +16180,88 @@
         "summary": "Add Check",
         "tags": [
           "operations"
+        ]
+      }
+    },
+    "/booking/trip-cases/{ref}/invoices": {
+      "post": {
+        "operationId": "create_invoice_booking_trip_cases__ref__invoices_post",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "8-200 characters, one per request",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "8-200 characters, one per request",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewInvoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Invoice Booking Trip Cases  Ref  Invoices Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Invoice",
+        "tags": [
+          "billing"
         ]
       }
     },

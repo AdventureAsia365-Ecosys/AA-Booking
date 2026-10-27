@@ -126,8 +126,9 @@ The CIS `StatusBadge` map is job-runner specific. Booking adds its own maps, all
 | Staff | active → Active → success · inactive (`active=false`) → Inactive → neutral |
 | Record (supplier, hotel, profile) | active → Active → success · inactive → Inactive → neutral |
 | Trip plan (W2) | published → Sellable → success · draft → Not for sale → neutral |
-| Invoice (W3) | draft → Draft → neutral · sent → Sent → orange · partially_paid → Partially paid → warning · paid → Paid → success · cancelled → Cancelled → neutral · overdue (derived from schedule) → Overdue → danger |
-| Payment (W3) | received → Received → success · voided → Voided → neutral (pending/failed/refunded only once a gateway exists, Q22) |
+| Invoice (shipped, AA-682 S3) | draft → Draft → neutral · sent → Sent → orange · partially_paid → Partially paid → warning · paid → Paid → success · cancelled → Cancelled → danger · overdue (derived from the schedule, sent / partially paid only) → Overdue → danger. Paid / partially paid are derived from **verified** payments (bk-028), never set by hand |
+| Payment (shipped, AA-682 S3) | recorded → To verify → warning · verified → Verified → success · voided → Voided → neutral (critic note 13: a payment is recorded by one person and verified by another; only verified money counts; pending/failed only once a gateway exists, Q22) |
+| Schedule row (shipped, AA-682 S3) | scheduled → Scheduled → neutral · due (within `payment_due_soon_days`) → Due soon → warning · overdue → Overdue → danger · paid → Paid → success · cancelled → Cancelled → neutral |
 | Audit action | CREATE → success · UPDATE → info · STATUS → warning · DELETE/BLOCK → danger. Upper-case labels, the only upper-case badges. |
 
 ---
@@ -157,7 +158,7 @@ Figma groups (OVERVIEW / CONTENT & INVENTORY / TRIP OPERATIONS & SALES) put Trip
 | 3 | Sales | Proposals | `Map` | `/proposals` | admin, sales, contracting | W1 |
 | 4 | Sales | Customers | `Users` | `/customers` | admin, sales | W1 |
 | 5 | Sales | Pricing calculator | `Calculator` | `/pricing/calculator` | admin, sales, contracting | W1 |
-| 6 | Operations | Payments & Invoices | `CreditCard` | `/billing` | admin, sales | W3 |
+| 6 | Operations | Payments & Invoices | `CreditCard` | `/billing` | admin, sales | shipped (AA-682 S3) |
 | 7 | Operations | Trip Checks | `SquareCheck` | `/trip-checks` | admin, sales, contracting | shipped (AA-682 S2) |
 | 8 | Supply | Suppliers | `Store` | `/suppliers` | admin, contracting (sales read) | W2 |
 | 9 | Supply | Hotels | `Building` | `/hotels` | admin, contracting (sales read) | W2 |
@@ -200,7 +201,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/cases/[code]` | Case workspace, tab Overview (+ Edit details drawer) | Assigned Trips-1 (layout), TRIP CASES DETAILS, USER DETAILS-3/-4/-5 (inquiry panel), ADD NEW ACTIVITY-2 (= "Edit Trip Case" form → Edit details drawer) (03, 02, 07) | A S C(r) | W1 |
 | `/cases/[code]?tab=proposals` | Versions list | TRIP CASES DETAILS-1, Assigned Trips-1 (03) | A S C(r) | W1 |
 | `/cases/[code]?tab=suppliers` | Supplier bookings of the case (AA-682 S1, bk-026): Generate from the approved version, Request / Confirm (ref + voucher, B2C only) / Declined / Cancel / Change; computed supply badge "Confirmed & Booked"; B2B on-request lines answered here (one action with the desk) | — (not drawn) | A S C | shipped (AA-682 S1) |
-| `/cases/[code]?tab=billing` | Invoices & payments of the case | TRIP CASES DETAILS-2 (03) | A S | W3 |
+| `/cases/[code]?tab=billing` | Invoices & payments of the case (AA-682 S3, bk-028): the live invoice (money, lines, schedule, payments, actions) or why the trip cannot be invoiced yet + **Create invoice** stepper; cancelled invoices below; header money badge | TRIP CASES DETAILS-2 (03) | A S | shipped (AA-682 S3) |
 | `/cases/[code]?tab=checks` | Trip checks of the case (AA-682 S2, bk-027): derived checks (every supplier booking confirmed; payment verified once invoices exist, S3), the three standard checks seeded on confirm (re-check bookings, emergency contact (B2C only), insurance) + custom checks; check drawer (status, due, owner, note, emergency contact) | View Details-3 (03) | A S C | shipped (AA-682 S2) |
 | `/cases/[code]?tab=activity` | Status history + audit of the case | not drawn | A S C(r) | W1 |
 | `/cases/[code]/proposals/[n]` | Version builder | ITINERARY BUILDER-3, ITINERARY BUILDER-4 (04) | A S (C: cost lines) | W1 |
@@ -225,9 +226,9 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/catalog/trip-plans/[sourceId]/commercial` | Commercial edit (sellable, supplier, price matrix, trip style) | CREATE NEW TEMPLATE, -1, -2, EDIT TEMPLATE, -1, -2 (only the commercial parts) (05) | A C | W2 |
 | `/catalog/destinations` | Destinations (CIS) + Booking status | DESTINATION MANAGEMENT, -1, DESTINATION DETAILS, ADD/EDIT/DELETE DESTINATION (as "attach / detach") (06) | all (A edit status) | W2 |
 | `/catalog/countries`, `/catalog/countries/[iso]` | Countries derived from CIS places + Booking status | COUNTRY MANAGAMENT, -1, COUNTRY DETAILS, -1, ADD/EDIT/DELETE/UNPUBLISHED COUNTRY (as status only) (06) | all (A edit status) | W2 |
-| `/billing` | Invoices / Payments tabs | PAYMENT & INVOICE, -1, -2, -3, PAYMENT MANAGEMENt, DELETE (09, 02) | A S | W3 |
-| `/billing/invoices/[number]` | Invoice detail | View Details, -1, -2 (03), CANCEL INVOICE (09) | A S | W3 |
-| `/billing/payments/[ref]` | Payment detail | PAYMENT DETAILS, EDIT PAYMENT (09) | A S(r) | W3 |
+| `/billing` | Invoices / Payments tabs + 4 KPIs (left to pay, overdue, received this month = verified net of refunds, waiting for verification) | PAYMENT & INVOICE, -1, -2, -3, PAYMENT MANAGEMENt, DELETE (09, 02) | A S | shipped (AA-682 S3) |
+| `/billing/invoices/[number]` | Invoice detail: send / edit / delete a draft, record payment, verify, void, amend, remind, cancel | View Details, -1, -2 (03), CANCEL INVOICE (09) | A S | shipped (AA-682 S3) |
+| `/billing/payments/[ref]` | Payment detail: evidence files, edit reference / note before verify, verify (admin, never the recorder), void | PAYMENT DETAILS, EDIT PAYMENT (09) | A S (sales record, edit and void unverified payments; only an admin verifies or voids a verified one, critic note 13) | shipped (AA-682 S3) |
 | `/trip-checks` | Trip checks across the open sold cases (AA-682 S2): filters status / due / owner / check / search, soonest due first, check drawer; the latest daily lifecycle runs under the table | TRIP CHECKS, View Details-3 (03) | A S C | shipped (AA-682 S2) |
 
 Modals and drawers that are not routes:
@@ -242,10 +243,11 @@ Modals and drawers that are not routes:
 | Send proposal | ITINERARY BUILDER-2 | builder, preview | W1 |
 | Delete draft version | DELETE ITINERARY BUILDER | proposals list, builder | W1 |
 | Staff role / activation | EDIT PROFILE, BLOCK ADMIN | staff list, staff detail | W1 |
-| Create invoice | CREATE INVOICE | billing | W3 |
-| Record payment | RECORD PAYMENT | billing | W3 |
-| Send reminder | SEND REMAINDER (no screen drawn) | billing | W3 |
-| Cancel invoice | CANCEL INVOICE | billing | W3 |
+| Create invoice (4-step: approved version → adjustments → schedule → review; also edits a draft and amends a sent invoice) | CREATE INVOICE | case Billing tab | shipped (AA-682 S3) |
+| Record payment (receipt or refund, evidence upload, one Idempotency-Key per opening) | RECORD PAYMENT | invoice | shipped (AA-682 S3) |
+| Send reminder (one customer My Trips row a day; no e-mail) | SEND REMAINDER (no screen drawn) | invoice | shipped (AA-682 S3) |
+| Cancel invoice (reason; only with nothing paid) | CANCEL INVOICE | invoice | shipped (AA-682 S3) |
+| Verify payment (a second admin) | none drawn | invoice, payment | shipped (AA-682 S3) |
 | Edit case details (drawer) | ADD NEW ACTIVITY-2 ("Edit Trip Case"; customer locked) | case workspace | W1 |
 | Archive customer | DELETE USER (as soft delete) | customers list / detail | W1 |
 | Use trip plan for a trip case | TRIP TEMPLATE DETAILS-1 | trip plan detail | W2 |
@@ -254,7 +256,7 @@ Modals and drawers that are not routes:
 | Deactivate hotel / service | DELETE HOTEL, EDIT HOTEL (Delete button), DELETE ACTIVITY, UNPUBLISH ACTIVITY, ACTIVITY DETAILS-1/-2 | hotels, services | W2 |
 | Approve pricing rule / FX row (second person) | not drawn (Q19) | pricing rules | W2 |
 | Trip check details (drawer) | View Details-3 | trip checks, case Checks tab | W3 |
-| Edit payment / Void payment | EDIT PAYMENT, DELETE (as void) | payment detail, billing | W3 |
+| Edit payment / Void payment | EDIT PAYMENT, DELETE (as void) | payment detail, invoice | shipped (AA-682 S3) |
 
 **Figma screens deliberately not built:**
 
@@ -373,7 +375,7 @@ The layout is `Assigned Trips-1.png` (03 decision 11), extended with tabs.
   - back arrow, case title (first-leg tour title or "Custom trip"), code (mono), dates, pax, status badge;
   - actions: "Change status ▾" (the menu lists `allowed_transitions` only; `cancelled` asks for a reason), "Assign", "Edit details".
 - **Status stepper**: the 12 non-cancelled DB values. They group visually into Inquiry (new_inquiry, discovery), Proposal (building, proposal_sent), Booking (confirmed … paid) and Travel (pre_departure, on_trip, completed). It collapses to the group on narrow widths. `cancelled` shows as a red banner with the reason, never as a step.
-- **Tabs**: Overview · Proposals (n) · Suppliers (booked / to book, AA-682 S1) · Billing (W3) · Checks (W3) · Activity.
+- **Tabs**: Overview · Proposals (n) · Suppliers (booked / to book, AA-682 S1) · Billing (AA-682 S3) · Checks (AA-682 S2) · Activity. The header carries the supply badge and the money badge (Invoice draft / To pay n / Overdue n / Paid in full; billing.read only).
 - **Supply badge** (AA-682 D1): next to the status, "Suppliers n/m" (warning) while bookings wait, "Confirmed & Booked"
   (success) once every supplier confirmed; nothing when the trip has nothing to book. Never a status: the 13 values stay.
   Post-sale statuses are never offered in "Change status" (API 409 `status_system_managed`); staff only cancel.
@@ -636,6 +638,12 @@ Permissions in bk-681 (code matrix): `trip_case.read` = A S C; `trip_case.write`
 | `GET /booking/v_from_prices` (internal) / view `booking.v_from_prices` | contract `price.from.v1` for TripPlanner and CIS | not UI; listed for completeness |
 
 ### 6.4 New endpoints: W3 (money, operations)
+
+> **Shipped shape (AA-682 S3, bk-028)** supersedes the W3 rows below where they differ: no tax lines (proforma,
+> design D7); `received_on` (a day) instead of `received_at`; payments `recorded → verified | voided` with
+> maker-checker; `Idempotency-Key` on create invoice / record payment; `POST …/amend` (append lines to a sent invoice);
+> `GET /booking/trip-cases/{ref}/billing` for the case tab; KPIs per currency + USD at each version's locked FX.
+> The OpenAPI document (`docs/api/openapi.json`) is the contract.
 
 | Method + path | Request → response (sketch) | For |
 |---|---|---|

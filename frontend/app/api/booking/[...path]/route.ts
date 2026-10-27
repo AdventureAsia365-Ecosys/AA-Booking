@@ -11,6 +11,8 @@
 // - Only JSON bodies are forwarded; the upstream status and body pass through. Bodies are capped at 1 MB, except a
 //   supplier photo upload (AA-835: POST hotels|services/<ref>/media, the image as base64 JSON, at most 3 MB of image
 //   = 4 MiB of text), which gets just under Vercel's 4.5 MB function body limit.
+// - The only request header passed on besides the token is `Idempotency-Key` (AA-682 S3: invoices and payments), checked
+//   to 8-200 printable ASCII characters.
 // - Path segments are re-encoded and `.` / `..` are refused, so a request can never leave /booking/.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -110,6 +112,8 @@ async function handler(req: NextRequest, { params }: Ctx) {
   }
 
   const url = `${bookingApiUrl()}/booking/${path.map(encodeURIComponent).join("/")}${req.nextUrl.search}`;
+  const idempotencyKey = req.headers.get("idempotency-key");
+  const forwardKey = idempotencyKey && /^[\x21-\x7e]{8,200}$/.test(idempotencyKey) ? idempotencyKey : null;
   const send = () =>
     fetch(url, {
       method: req.method,
@@ -117,6 +121,7 @@ async function handler(req: NextRequest, { params }: Ctx) {
         Authorization: `Bearer ${access}`,
         Accept: "application/json",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(forwardKey ? { "Idempotency-Key": forwardKey } : {}),
       },
       body,
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),

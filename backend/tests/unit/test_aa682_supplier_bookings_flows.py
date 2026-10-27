@@ -260,7 +260,8 @@ async def test_supply_state_defaults_to_none_without_a_view_row() -> None:
         ("confirmed", 2, 0, None),  # only pending bookings: nothing asked yet
         ("supplier_confirming", 0, 0, "confirmed"),  # the last live booking left
         ("supplier_confirming", 1, 1, None),
-        ("paid", 0, 0, None),  # later statuses never move back
+        ("pre_departure", 0, 0, None),  # travel statuses never move back
+        ("invoice_sent", 0, 0, "confirmed"),  # bk-028: its invoice was cancelled (no sent invoice left)
     ],
 )
 async def test_advance_case(status: str, live: int, asked: int, target: str | None) -> None:

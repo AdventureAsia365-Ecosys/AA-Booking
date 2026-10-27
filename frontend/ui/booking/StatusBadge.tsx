@@ -6,6 +6,8 @@
 import type { CustomerStatus, TripCaseStatus, VersionBadge } from "@/lib/api/types";
 import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBookings";
 import type { TripCheckStatus } from "@/lib/api/tripChecks";
+import type { InvoiceStatus, PaymentState, ScheduleState } from "@/lib/api/billing";
+import { formatMoney } from "./Money";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
 
@@ -94,6 +96,63 @@ export function SupplyBadge({ supply }: { supply: SupplyState | null | undefined
   return (
     <Pill tone="warning" title={`${supply.waiting} supplier booking(s) waiting, ${supply.declined} declined`}>
       Suppliers {done}/{total}
+    </Pill>
+  );
+}
+
+/** AA-682 S3 (bk-028) invoice states. "Paid" is derived from verified payments only (never set by hand). */
+export const INVOICE_STATUS_META: Record<InvoiceStatus, { label: string; tone: BookingTone }> = {
+  draft: { label: "Draft", tone: "neutral" },
+  sent: { label: "Sent", tone: "orange" },
+  partially_paid: { label: "Partially paid", tone: "warning" },
+  paid: { label: "Paid", tone: "success" },
+  cancelled: { label: "Cancelled", tone: "danger" },
+};
+
+export function InvoiceStatusBadge({ status, overdue = false }: { status: InvoiceStatus | string; overdue?: boolean }) {
+  if (overdue && (status === "sent" || status === "partially_paid")) return <Pill tone="danger">Overdue</Pill>;
+  const meta = INVOICE_STATUS_META[status as InvoiceStatus] ?? { label: status, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+/** AA-682 S3 payment states: recorded (waiting for a second person), verified (counts), voided (final). */
+export const PAYMENT_STATE_META: Record<PaymentState, { label: string; tone: BookingTone }> = {
+  recorded: { label: "To verify", tone: "warning" },
+  verified: { label: "Verified", tone: "success" },
+  voided: { label: "Voided", tone: "neutral" },
+};
+
+export function PaymentStateBadge({ state }: { state: PaymentState | string }) {
+  const meta = PAYMENT_STATE_META[state as PaymentState] ?? { label: state, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+export const SCHEDULE_STATE_META: Record<ScheduleState, { label: string; tone: BookingTone }> = {
+  scheduled: { label: "Scheduled", tone: "neutral" },
+  due: { label: "Due soon", tone: "warning" },
+  overdue: { label: "Overdue", tone: "danger" },
+  paid: { label: "Paid", tone: "success" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+};
+
+export function ScheduleStateBadge({ state }: { state: ScheduleState | string }) {
+  const meta = SCHEDULE_STATE_META[state as ScheduleState] ?? { label: state, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+/** The case header money badge (design §6): the live invoice's state and what is left to pay. */
+export function MoneyBadge({
+  money,
+}: {
+  money: { invoice_number: string; status: string; currency: string; balance: string | null; overdue_amount: string } | null | undefined;
+}) {
+  if (!money) return null;
+  if (money.status === "draft") return <Pill tone="neutral" title={`${money.invoice_number} is a draft`}>Invoice draft</Pill>;
+  if (money.status === "paid") return <Pill tone="success" title={`${money.invoice_number} paid in full (verified)`}>Paid in full</Pill>;
+  const overdue = Number(money.overdue_amount) > 0;
+  return (
+    <Pill tone={overdue ? "danger" : "warning"} title={`${money.invoice_number}: ${INVOICE_STATUS_META[money.status as InvoiceStatus]?.label ?? money.status}`}>
+      {overdue ? "Overdue" : "To pay"} {formatMoney(money.balance, money.currency)}
     </Pill>
   );
 }

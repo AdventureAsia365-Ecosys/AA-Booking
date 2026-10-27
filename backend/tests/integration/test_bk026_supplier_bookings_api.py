@@ -309,8 +309,8 @@ async def test_documents_upload_download_remove(client: Client, admin: asyncpg.C
          "content_type_mismatch")  # fmt: skip
     _err(await c.post("/ops-files", json={**body, "data_base64": base64.b64encode(b"MZ...").decode()}, headers=sales),
          422, "unsupported_file")  # fmt: skip
-    _err(await c.post("/ops-files", json={**body, "kind": "payment_evidence", "entity_type": "payment"}, headers=sales),
-         422, "kind_not_available")  # fmt: skip
+    _err(await c.post("/ops-files", json={**body, "kind": "supplier_bill", "entity_type": "supplier_bill"},
+                      headers=sales), 422, "kind_not_available")  # fmt: skip
     up = await _ok(await c.post("/ops-files", json=body, headers=sales), 201)
     assert up["content_type"] == "application/pdf" and up["bytes"] == len(PDF) and "s3_key" not in up
     key = f"ops-docs/supplier_voucher/{up['id']}.pdf"

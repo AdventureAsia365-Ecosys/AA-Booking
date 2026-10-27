@@ -20,7 +20,7 @@ from app.auth.staff import Staff
 from app.catalog import liveness
 from app.errors import Conflict, Invalid, NotFound
 from app.notifications import service as notifications
-from app.ops import supplier_bookings
+from app.ops import invoices, supplier_bookings
 from app.trip_cases import sql
 
 STATUSES = (
@@ -314,6 +314,8 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     case["allowed_transitions"] = await allowed_transitions(conn, case["status"])
     # AA-682 S1: the supply track ("Confirmed & Booked" badge = state booked), computed by v_trip_case_supply_state.
     case["supply"] = await supplier_bookings.supply_state(conn, case_id)
+    # AA-682 S3: the money badge (live invoice, state, balance); the router hides it without billing.read.
+    case["money"] = await invoices.money_badge(conn, case_id)
     return case
 
 
@@ -580,11 +582,19 @@ async def change_status(
                 f"cancel the case's {live} live supplier booking(s) before reopening it",
                 allowed_transitions=allowed,
             )
+        blocking = await invoices.blocks_reopen(conn, row["id"])
+        if blocking:
+            raise Conflict(
+                "live_invoice",
+                f"{blocking} is still open: refund and cancel the invoice (and settle its payments) before reopening",
+                allowed_transitions=allowed,
+            )
     await set_status(conn, staff, row, to_status, reason)
     if to_status == "cancelled":
         await supplier_bookings.on_case_cancelled(
             conn, case_id=row["id"], case_code=row["code"], cause=f"staff cancel: {reason}"
         )
+        await invoices.on_case_cancelled(conn, case_id=row["id"], case_code=row["code"])
     await audit.record(
         conn,
         actor_type="staff",
