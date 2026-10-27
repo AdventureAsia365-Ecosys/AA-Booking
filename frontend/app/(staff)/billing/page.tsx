@@ -4,6 +4,8 @@
 // verification), then two tabs: Invoices (GET /booking/invoices) and Payments (GET /booking/payments), paged on the
 // server, filters in the URL. Invoices are created from a trip case's Billing tab (they start from its approved
 // proposal); payments are recorded on an invoice. billing.read (admin, sales); never in a preview session.
+// AA-682 S4 (bk-030): a third tab, Supplier bills (?tab=supplier-bills; bill.read = admin, sales, contracting), with its
+// own four KPIs (to approve, to pay, overdue, paid out this month) and the bill drawer. Contracting sees only that tab.
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +13,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ApiError } from "@/lib/api/client";
 import { billingApi, PAYMENT_METHOD_LABEL, type InvoiceSummary, type Kpi, type Payment } from "@/lib/api/billing";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
+import { SupplierBillKpis, SupplierBillsList } from "./_parts/SupplierBills";
 import {
   DataTable,
   DateText,
@@ -151,15 +154,40 @@ function kpiHint(k: Kpi | undefined, noun: string): string | undefined {
 
 export default function BillingPage() {
   const canRead = useCan("billing.read");
-  const { get, set } = useUrlFilters();
-  const tab = get("tab") === "payments" ? "payments" : "invoices";
+  const canBills = useCan("bill.read");
+  const { get, setMany } = useUrlFilters();
+  const asked = get("tab");
+  const tab =
+    asked === "supplier-bills" && canBills
+      ? "supplier-bills"
+      : !canRead && canBills
+        ? "supplier-bills"
+        : asked === "payments"
+          ? "payments"
+          : "invoices";
   const summary = useQuery({ queryKey: ["billing", "summary"], queryFn: billingApi.summary, enabled: canRead });
   const s = summary.data;
+  const tabs = [
+    ...(canRead || !canBills
+      ? [
+          { key: "invoices", label: "Invoices" },
+          { key: "payments", label: "Payments" },
+        ]
+      : []),
+    ...(canBills ? [{ key: "supplier-bills", label: "Supplier bills" }] : []),
+  ];
   return (
     <PageFrame
       title="Payments & invoices"
-      description="Payment requests sent to customers and the money recorded against them. Payments are marked by hand and count once a second admin verifies them."
+      description={
+        tab === "supplier-bills"
+          ? "Bills suppliers sent AA, matched to confirmed supplier bookings. Another person approves each bill; an admin records the payouts."
+          : "Payment requests sent to customers and the money recorded against them. Payments are marked by hand and count once a second admin verifies them."
+      }
     >
+      {tab === "supplier-bills" ? (
+        <SupplierBillKpis />
+      ) : (
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiTile label="Left to pay" value={canRead ? kpiValue(s?.outstanding) : null} hint={kpiHint(s?.outstanding, "invoice(s)")} />
         <KpiTile
@@ -176,15 +204,15 @@ export default function BillingPage() {
           hintTone={s && s.awaiting_verification.count ? "warning" : "neutral"}
         />
       </div>
+      )}
       <Tabs
-        tabs={[
-          { key: "invoices", label: "Invoices" },
-          { key: "payments", label: "Payments" },
-        ]}
+        tabs={tabs}
         active={tab}
-        onChange={(k) => set("tab", k === "invoices" ? null : k)}
+        onChange={(k) => setMany({ tab: k === "invoices" ? null : k, q: null, bill: null })}
       />
-      {tab === "invoices" ? <InvoicesTab canRead={canRead} /> : <PaymentsTab canRead={canRead} />}
+      {tab === "invoices" && <InvoicesTab canRead={canRead} />}
+      {tab === "payments" && <PaymentsTab canRead={canRead} />}
+      {tab === "supplier-bills" && <SupplierBillsList />}
     </PageFrame>
   );
 }

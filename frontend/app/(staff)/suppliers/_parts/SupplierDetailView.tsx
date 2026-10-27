@@ -3,13 +3,14 @@
 // 7): header (name, status, code, categories, location), actions Edit profile / Deactivate | Activate (supply.write),
 // tabs Profile (basic information, contact, location, recent activity from the audit log) and Contracts (draft →
 // published by a second person → expired) and Rates (net rates per contract, AA-823 bk-010; rate-sheet upload is a later
-// slice) and Bookings (AA-682 S1, supplier bookings of sold trips). Bills arrive with AA-682 S4: that tab shows its frame. Reads need supply.read.
+// slice) and Bookings (AA-682 S1, supplier bookings of sold trips) and Bills (AA-682 S4, bk-030: this supplier's bills,
+// the bill drawer and payouts; bill.read). Reads need supply.read.
 
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Ban, CalendarDays, CheckCircle2, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag, Timer } from "lucide-react";
+import { Ban, CalendarDays, CheckCircle2, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
 import { Button, Code, ConfirmDialog, DataTable, DateText, EmptyState, ErrorState, FromCisTag, Section, useStaff, useToast } from "@/ui";
@@ -18,6 +19,7 @@ import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } 
 import { ContractDrawer } from "./ContractDrawer";
 import { RatesTab } from "./RatesTab";
 import { SupplierBookingsTab } from "./SupplierBookingsTab";
+import { SupplierBillsList } from "@/app/(staff)/billing/_parts/SupplierBills";
 import { CATEGORY_LABEL, ContractPhaseBadge, SupplierStatusBadge, locationText, supplierError, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
 
@@ -110,18 +112,16 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
         {tab === "rates" && <RatesTab s={s} canWrite={actions.canWrite} />}
         {tab === "bookings" && <SupplierBookingsTab s={s} />}
-        {tab === "bills" && <Later title="Supplier bills arrive in wave 3" text="Bills from this supplier and their payment state will be listed here." />}
+        {tab === "bills" && (
+          <SupplierBillsList
+            supplier={{ id: s.id, name: s.company_name }}
+            title="Bills from this supplier"
+            description="Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin."
+          />
+        )}
       </div>
       {actions.dialogs}
     </main>
-  );
-}
-
-function Later({ title, text }: { title: string; text: string }) {
-  return (
-    <Section>
-      <EmptyState icon={<Timer size={30} />} title={title} description={text} />
-    </Section>
   );
 }
 

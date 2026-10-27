@@ -40,7 +40,7 @@ function toBase64(blob: Blob): Promise<string> {
 }
 
 /** A PDF is sent as it is (≤ 3 MB); a photo of a slip is re-encoded in the browser first (no EXIF reaches S3). */
-async function prepareEvidence(file: File): Promise<{ content_type: string; data_base64: string }> {
+export async function prepareEvidence(file: File): Promise<{ content_type: string; data_base64: string }> {
   if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
     if (file.size > MAX_FILE_BYTES) throw new Error("A PDF is at most 3 MB here. Save a smaller copy or a photo of it.");
     return { content_type: "application/pdf", data_base64: await toBase64(file) };
@@ -53,7 +53,7 @@ export async function uploadEvidence(paymentId: string, file: File): Promise<Ops
   return billingApi.uploadEvidence({ entity_id: paymentId, file_name: file.name, ...doc });
 }
 
-function today(): string {
+export function today(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

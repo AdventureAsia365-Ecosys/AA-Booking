@@ -63,7 +63,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/catalog/trip-plans/:id/commercial", roles: [A, C] },
   { pattern: "/catalog/*", roles: ALL },
   // Operations (W3)
-  { pattern: "/billing", roles: [A, S] },
+  // AA-682 S4: contracting opens /billing for its Supplier bills tab only (API bill.*; invoices stay billing.read).
+  { pattern: "/billing", roles: [A, S, C] },
   { pattern: "/billing/*", roles: [A, S] },
   // Trip checks (AA-682 S2): every operational role (API ops.read / ops.write).
   { pattern: "/trip-checks", roles: [A, S, C] },

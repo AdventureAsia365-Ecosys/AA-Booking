@@ -105,7 +105,7 @@ updates its rows.
 | `SETTINGS-1.png` | `/settings?tab=notifications` | built | Figma's notification list becomes per-type preferences. |
 | `SETTINGS-2.png` | `/settings?tab=security` Sign-in & security | replaced-by (new (AA-996)) | Change password → sign-in facts (company e-mail code, session) + "Manage staff & invites in CIS ↗". Booking holds no password. |
 | `SETTINGS.png` | `/settings?tab=general` | built | Profile is read-only (CIS owns name, e-mail). |
-| `SUPPLIER  DETAILS.png` | `/suppliers/[id]` | built |  |
+| `SUPPLIER  DETAILS.png` | `/suppliers/[id]` | built | Tabs not drawn; the Bills tab (AA-682 S4, bk-030) is built without a frame. No Figma export draws a supplier bill or payout: `/billing?tab=supplier-bills` follows the PAYMENT & INVOICE layout (KPI row, filters, table, drawer). |
 | `SUPPLIER MANAGEMENT-1.png` | `/suppliers` | built |  |
 | `SUPPLIER MANAGEMENT-2.png` | `/suppliers` | built |  |
 | `SUPPLIER MANAGEMENT.png` | `/suppliers` | built |  |
