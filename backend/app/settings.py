@@ -121,6 +121,9 @@ class Settings:
     git_sha: str = "unknown"
     app_version: str = "unknown"
     worker_enabled: bool = False
+    # AA-993 G4 proof: JOB_TEST_KINDS registers the Dev-only test kind bk_noop_sleep (app.jobs.noop_sleep). Like the
+    # CIS env of the same name, any value other than 1/true/yes/on means off (never a start-up error).
+    job_test_kinds: bool = False
     cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
     staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
     staff_notify_email: str = ""
@@ -255,6 +258,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         worker_enabled=_flag(
             env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
         ),
+        job_test_kinds=(env.get("JOB_TEST_KINDS") or "").strip().lower() in TRUE_VALUES,
         cis_jwks_url=(env.get("CIS_JWKS_URL") or DEFAULT_CIS_JWKS_URL).strip(),
         staff_jwt_issuer=(env.get("STAFF_JWT_ISSUER") or DEFAULT_STAFF_JWT_ISSUER).strip(),
         staff_notify_email=(env.get("STAFF_NOTIFY_EMAIL") or "").strip(),

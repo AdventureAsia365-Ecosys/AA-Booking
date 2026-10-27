@@ -1594,11 +1594,32 @@
         "type": "object"
       },
       "DeployGate": {
-        "description": "Read by ``.github/scripts/booking-deploy-preflight.sh``. ``by_status`` / ``by_kind`` count active jobs.",
+        "description": "Read by ``.github/scripts/booking-deploy-preflight.sh``. ``by_status`` / ``by_kind`` count active jobs\n(information); ``blocking_running`` counts the running rows of the deploy-blocking kinds, which decide\n``safe_to_deploy``.",
         "properties": {
           "active": {
             "title": "Active",
             "type": "integer"
+          },
+          "blocked_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked By",
+            "type": "array"
+          },
+          "blocking_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Kinds",
+            "type": "array"
+          },
+          "blocking_running": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Blocking Running",
+            "type": "object"
           },
           "by_kind": {
             "additionalProperties": {
@@ -1631,7 +1652,10 @@
           "by_status",
           "by_kind",
           "safe_to_deploy",
-          "exempt_kinds"
+          "exempt_kinds",
+          "blocking_kinds",
+          "blocking_running",
+          "blocked_by"
         ],
         "title": "DeployGate",
         "type": "object"

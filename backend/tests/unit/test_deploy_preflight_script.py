@@ -52,12 +52,24 @@ exit "${STUB_MINT_EXIT:-0}"
 """
 
 SAFE = {"active": 0, "by_status": {}, "by_kind": {}, "safe_to_deploy": True, "exempt_kinds": ["bk_inquiry_pull"]}
-BUSY = {
+# AA-993 G5: queued / running ordinary jobs, nothing blocking -> safe.
+ACTIVE_SAFE = {
     "active": 3,
     "by_status": {"queued": 2, "running": 1},
     "by_kind": {"bk_notify_email": 3},
+    "safe_to_deploy": True,
+    "exempt_kinds": ["bk_inquiry_pull"],
+    "blocking_running": {},
+    "blocked_by": [],
+}
+BUSY = {
+    "active": 3,
+    "by_status": {"queued": 2, "running": 1},
+    "by_kind": {"bk_notify_email": 2, "bk_retention_job": 1},
     "safe_to_deploy": False,
     "exempt_kinds": ["bk_inquiry_pull"],
+    "blocking_running": {"bk_retention_job": 1},
+    "blocked_by": ["1 bk_retention_job job(s) running (deploy-blocking kind)"],
 }
 
 
@@ -237,16 +249,34 @@ def test_network_failure_reports_code_000(tmp_path: Path) -> None:
     assert "(HTTP 000)" in r.out
 
 
-def test_busy_gate_blocks_with_the_counts(tmp_path: Path) -> None:
+def test_busy_gate_blocks_with_the_reason(tmp_path: Path) -> None:
     r = run(tmp_path, gate_body=json.dumps(BUSY))
     assert r.code == 1
-    assert "::error::Deploy blocked: 3 job(s) queued/running (2 queued, 1 running; by kind: bk_notify_email=3)" in r.out
+    assert (
+        "::error::Deploy blocked: 1 bk_retention_job job(s) running (deploy-blocking kind)"
+        " (all active: 3; by kind: bk_notify_email=2, bk_retention_job=1)" in r.out
+    )
+
+
+def test_unsafe_gate_without_reasons_still_blocks(tmp_path: Path) -> None:
+    """An older API (no ``blocked_by``) answering unsafe still blocks, with a generic reason."""
+    r = run(tmp_path, gate_body=json.dumps({"active": 2, "by_status": {"running": 2}, "safe_to_deploy": False}))
+    assert r.code == 1
+    assert "::error::Deploy blocked: a deploy-blocking job is running (all active: 2)" in r.out
+
+
+def test_queued_and_running_jobs_pass_when_the_gate_is_safe(tmp_path: Path) -> None:
+    """AA-993 G5: ordinary queued / running jobs no longer block; they are released and re-claimed."""
+    r = run(tmp_path, gate_body=json.dumps(ACTIVE_SAFE))
+    assert r.code == 0
+    assert "No deploy-blocking job running — safe to deploy. 3 queued/running booking.job row(s)" in r.out
+    assert "::error::" not in r.out
 
 
 def test_busy_gate_with_override_passes_with_a_warning(tmp_path: Path) -> None:
     r = run(tmp_path, gate_body=json.dumps(BUSY), override="  urgent fix\n")
     assert r.code == 0
-    assert "::warning::Deploy guard OVERRIDDEN (3 job(s) queued/running" in r.out
+    assert "::warning::Deploy guard OVERRIDDEN (1 bk_retention_job job(s) running" in r.out
     assert "Reason: urgent fix" in r.out
     assert "::error::" not in r.out
 

@@ -2,9 +2,11 @@
 # Booking Deploy Dev job guard (AA-751 B4), run by the `preflight` job of .github/workflows/deploy-dev.yml.
 # Tested by backend/tests/unit/test_deploy_preflight_script.py with stub `aws` and `curl` on PATH.
 #
-# Exit 0 = the deploy may go on; exit 1 = blocked. Every path that cannot prove "nothing can be interrupted"
-# blocks (fail closed), unless OVERRIDE carries a non-blank reason (workflow_dispatch input, Nghiệp only): then a
-# ::warning:: names the reason and the deploy goes on.
+# Exit 0 = the deploy may go on; exit 1 = blocked. Since AA-993 G5 (design D1.4) the gate's safe_to_deploy is
+# false only while a deploy-blocking kind (the retention runs) is RUNNING; other queued/running jobs are released on
+# shutdown and re-claimed by the new task. Every path that cannot read the gate blocks (fail closed), unless OVERRIDE
+# carries a non-blank reason (workflow_dispatch input, Nghiệp only): then a ::warning:: names the reason and the
+# deploy goes on.
 #
 # Environment:
 #   ECS_CLUSTER, ECS_SERVICE   the Booking service (AWS credentials already configured)
@@ -25,7 +27,7 @@ block() {
     echo "::warning::Deploy guard OVERRIDDEN ($1). Reason: ${OVERRIDE}"
     exit 0
   fi
-  echo "::error::Deploy blocked: $1. Wait for the jobs to finish, or re-run via workflow_dispatch with an 'override_running_jobs' reason (Nghiệp only)."
+  echo "::error::Deploy blocked: $1. Wait for the deploy-blocking job to finish, or re-run via workflow_dispatch with an 'override_running_jobs' reason (Nghiệp only)."
   exit 1
 }
 
@@ -73,10 +75,10 @@ if [ "$CODE" != "200" ] || ! jq -e '(.safe_to_deploy | type) == "boolean" and (.
 fi
 
 ACTIVE=$(jq -r '.active' "$WORK/gate.json")
+BY_KIND=$(jq -r '.by_kind // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' "$WORK/gate.json")
 if [ "$(jq -r '.safe_to_deploy' "$WORK/gate.json")" = "true" ]; then
-  echo "No queued/running booking.job rows (exempt: $(jq -r '.exempt_kinds // [] | join(", ")' "$WORK/gate.json")) — safe to deploy."
+  echo "No deploy-blocking job running — safe to deploy. ${ACTIVE} queued/running booking.job row(s) are released and re-claimed by the new task${BY_KIND:+ (by kind: ${BY_KIND})} (exempt: $(jq -r '.exempt_kinds // [] | join(", ")' "$WORK/gate.json"))."
   exit 0
 fi
-BY_STATUS=$(jq -r '.by_status // {} | to_entries | map("\(.value) \(.key)") | join(", ")' "$WORK/gate.json")
-BY_KIND=$(jq -r '.by_kind // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' "$WORK/gate.json")
-block "${ACTIVE} job(s) queued/running (${BY_STATUS}; by kind: ${BY_KIND})"
+REASONS=$(jq -r '(.blocked_by // []) | join("; ")' "$WORK/gate.json")
+block "${REASONS:-a deploy-blocking job is running} (all active: ${ACTIVE}${BY_KIND:+; by kind: ${BY_KIND}})"

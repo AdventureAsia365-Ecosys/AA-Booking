@@ -100,14 +100,18 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
     assert sampler.started and sampler.cancelled
 
 
-def test_every_handled_kind_has_an_expected_run_time() -> None:
-    """app/jobs/kinds.py EXPECTED_SECONDS lists exactly the kinds the worker handles (overdue-running metric)."""
-    from app.jobs.kinds import EXPECTED_SECONDS
+@pytest.mark.parametrize("test_kinds", [False, True])
+def test_every_handled_kind_has_an_expected_run_time(test_kinds: bool) -> None:
+    """app/jobs/kinds.py EXPECTED_SECONDS lists exactly the kinds the worker handles (overdue-running metric); the
+    test-only kinds (AA-993 G4 proof) only when JOB_TEST_KINDS is on."""
+    from app.jobs.kinds import EXPECTED_SECONDS, TEST_KINDS
 
-    with TestClient(_app(worker_enabled=True)):
+    with TestClient(_app(worker_enabled=True, job_test_kinds=test_kinds)):
         pass
     (worker,) = FakeWorker.instances
-    assert set(EXPECTED_SECONDS) == set(worker.handlers)
+    expected = set(EXPECTED_SECONDS) if test_kinds else set(EXPECTED_SECONDS) - TEST_KINDS
+    assert set(worker.handlers) == expected
+    assert ("bk_noop_sleep" in worker.handlers) is test_kinds
 
 
 @pytest.mark.parametrize("kw", [{"worker_enabled": False}, {"worker_enabled": True, "database_url": None}])

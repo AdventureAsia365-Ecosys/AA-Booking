@@ -41,6 +41,7 @@ from app.catalog import lifecycle as tour_lifecycle
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
 from app.inquiry import intake
+from app.jobs import noop_sleep
 from app.jobs.metrics import JobMetricsSampler
 from app.jobs.worker import Worker
 from app.notifications import staff_email
@@ -114,6 +115,8 @@ def create_app(
                 **b2b_expiry.HANDLERS,
                 **tour_lifecycle.HANDLERS,
                 **ops_lifecycle.HANDLERS,
+                # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
+                **noop_sleep.build_handlers(settings.job_test_kinds),
             }
             worker = Worker(
                 db.pool,

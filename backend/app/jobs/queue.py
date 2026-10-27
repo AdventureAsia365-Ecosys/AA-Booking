@@ -257,6 +257,21 @@ async def active_count(pool: asyncpg.Pool, exempt_kinds: Iterable[str] = ()) -> 
     return {"active": sum(by_status.values()), "by_status": by_status, "by_kind": dict(sorted(by_kind.items()))}
 
 
+async def running_count(pool: asyncpg.Pool, kinds: Iterable[str]) -> dict[str, int]:
+    """``running`` rows of ``kinds``, per kind (AA-993 G5: the deploy-blocking kinds the deploy gate checks). A queued
+    row is not counted: no work has started, and whichever task is live claims it. One GROUP BY query."""
+    rows = await pool.fetch(
+        """
+        SELECT kind, count(*)::int AS n
+        FROM booking.job
+        WHERE status = 'running' AND kind = ANY($1::text[])
+        GROUP BY kind
+        """,
+        sorted(kinds),
+    )
+    return {r["kind"]: r["n"] for r in sorted(rows, key=lambda r: r["kind"]) if r["n"]}
+
+
 async def prune(pool: asyncpg.Pool, kind: str, keep_days: int) -> int:
     """Delete finished jobs of a recurring kind older than ``keep_days`` (the pull runs every
     minute; its history is only useful for recent debugging)."""
