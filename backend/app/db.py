@@ -44,7 +44,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-026",  # AA-682 S1: supplier_bookings, ops_files, ops_transitions, post-sale edges + guard, supply state view
     "bk-027",  # AA-682 S2: trip_case_checks + seeding trigger, v_trip_check_board, notifications_reminder_uq
     "bk-028",  # AA-682 S3: invoices, invoice_items, payment_schedule, payments, money guards, balance views
-    # bk-029 (AA-996 country / destination profiles) is not listed on this branch (AA-996 decides).
+    # bk-029 (AA-996 country / destination profiles) is not listed by AA-996 (its call, see its notes).
     "bk-030",  # AA-682 S4: supplier_bills, supplier_bill_items, supplier_payouts, settle, v_supplier_bill_balance
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
