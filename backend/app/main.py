@@ -47,6 +47,7 @@ from app.notifications import staff_email
 from app.observability import setup as setup_observability
 from app.observability.request_id import RequestIdMiddleware, unhandled_error_handler
 from app.ops import files as ops_files
+from app.ops import lifecycle as ops_lifecycle
 from app.outbox import OutboxSequencer
 from app.retention import jobs as retention_jobs
 from app.routers import (
@@ -67,6 +68,7 @@ from app.routers import (
     suppliers,
     supply,
     trip_cases,
+    trip_checks,
 )
 from app.settings import Settings, load_settings
 from app.supply import media
@@ -109,6 +111,7 @@ def create_app(
                 **retention_jobs.build_handlers(),
                 **b2b_expiry.HANDLERS,
                 **tour_lifecycle.HANDLERS,
+                **ops_lifecycle.HANDLERS,
             }
             worker = Worker(
                 db.pool,
@@ -118,6 +121,8 @@ def create_app(
                     retention_jobs.DailySchedule(),
                     b2b_expiry.ExpirySchedule(),
                     tour_lifecycle.PullSchedule(),
+                    # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
+                    ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.
                     OutboxSequencer(),
                 ),
@@ -181,6 +186,7 @@ def create_app(
     app.include_router(b2b_partners.router)
     app.include_router(b2b_desk.router)
     app.include_router(supplier_bookings.router)
+    app.include_router(trip_checks.router)
     return app
 
 

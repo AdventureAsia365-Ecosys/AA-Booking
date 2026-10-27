@@ -5,6 +5,7 @@
 
 import type { CustomerStatus, TripCaseStatus, VersionBadge } from "@/lib/api/types";
 import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBookings";
+import type { TripCheckStatus } from "@/lib/api/tripChecks";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
 
@@ -61,6 +62,19 @@ export const SUPPLIER_BOOKING_STATUS_META: Record<SupplierBookingStatus, { label
 
 export function SupplierBookingStatusBadge({ status }: { status: SupplierBookingStatus | string }) {
   const meta = SUPPLIER_BOOKING_STATUS_META[status as SupplierBookingStatus] ?? { label: status, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
+/** AA-682 S2 (bk-027) trip check states; "Overdue" is shown for an open check past its due date. */
+export const TRIP_CHECK_STATUS_META: Record<TripCheckStatus, { label: string; tone: BookingTone }> = {
+  open: { label: "Open", tone: "warning" },
+  done: { label: "Done", tone: "success" },
+  not_applicable: { label: "Not applicable", tone: "neutral" },
+};
+
+export function TripCheckStatusBadge({ status, overdue = false }: { status: TripCheckStatus | string; overdue?: boolean }) {
+  if (status === "open" && overdue) return <Pill tone="danger">Overdue</Pill>;
+  const meta = TRIP_CHECK_STATUS_META[status as TripCheckStatus] ?? { label: status, tone: "neutral" as const };
   return <Pill tone={meta.tone}>{meta.label}</Pill>;
 }
 

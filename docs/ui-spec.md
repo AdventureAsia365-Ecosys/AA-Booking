@@ -158,7 +158,7 @@ Figma groups (OVERVIEW / CONTENT & INVENTORY / TRIP OPERATIONS & SALES) put Trip
 | 4 | Sales | Customers | `Users` | `/customers` | admin, sales | W1 |
 | 5 | Sales | Pricing calculator | `Calculator` | `/pricing/calculator` | admin, sales, contracting | W1 |
 | 6 | Operations | Payments & Invoices | `CreditCard` | `/billing` | admin, sales | W3 |
-| 7 | Operations | Trip Checks | `SquareCheck` | `/trip-checks` | admin, sales | W3 |
+| 7 | Operations | Trip Checks | `SquareCheck` | `/trip-checks` | admin, sales, contracting | shipped (AA-682 S2) |
 | 8 | Supply | Suppliers | `Store` | `/suppliers` | admin, contracting (sales read) | W2 |
 | 9 | Supply | Hotels | `Building` | `/hotels` | admin, contracting (sales read) | W2 |
 | 10 | Supply | Services | `Activity` | `/services` | admin, contracting (sales read) | W2 |
@@ -201,7 +201,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/cases/[code]?tab=proposals` | Versions list | TRIP CASES DETAILS-1, Assigned Trips-1 (03) | A S C(r) | W1 |
 | `/cases/[code]?tab=suppliers` | Supplier bookings of the case (AA-682 S1, bk-026): Generate from the approved version, Request / Confirm (ref + voucher, B2C only) / Declined / Cancel / Change; computed supply badge "Confirmed & Booked"; B2B on-request lines answered here (one action with the desk) | — (not drawn) | A S C | shipped (AA-682 S1) |
 | `/cases/[code]?tab=billing` | Invoices & payments of the case | TRIP CASES DETAILS-2 (03) | A S | W3 |
-| `/cases/[code]?tab=checks` | Pre-trip tasks of the case | View Details-3 (03) | A S | W3 |
+| `/cases/[code]?tab=checks` | Trip checks of the case (AA-682 S2, bk-027): derived checks (every supplier booking confirmed; payment verified once invoices exist, S3), the three standard checks seeded on confirm (re-check bookings, emergency contact (B2C only), insurance) + custom checks; check drawer (status, due, owner, note, emergency contact) | View Details-3 (03) | A S C | shipped (AA-682 S2) |
 | `/cases/[code]?tab=activity` | Status history + audit of the case | not drawn | A S C(r) | W1 |
 | `/cases/[code]/proposals/[n]` | Version builder | ITINERARY BUILDER-3, ITINERARY BUILDER-4 (04) | A S (C: cost lines) | W1 |
 | `/cases/[code]/proposals/[n]/preview` | Customer-style preview + send | ITINERARY PREVIEW, ITINERARY BUILDER-2 (send modal) (04) | A S C(r) | W1 |
@@ -228,7 +228,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/billing` | Invoices / Payments tabs | PAYMENT & INVOICE, -1, -2, -3, PAYMENT MANAGEMENt, DELETE (09, 02) | A S | W3 |
 | `/billing/invoices/[number]` | Invoice detail | View Details, -1, -2 (03), CANCEL INVOICE (09) | A S | W3 |
 | `/billing/payments/[ref]` | Payment detail | PAYMENT DETAILS, EDIT PAYMENT (09) | A S(r) | W3 |
-| `/trip-checks` | Pre-trip tasks across cases | TRIP CHECKS, View Details-3 (03) | A S | W3 |
+| `/trip-checks` | Trip checks across the open sold cases (AA-682 S2): filters status / due / owner / check / search, soonest due first, check drawer; the latest daily lifecycle runs under the table | TRIP CHECKS, View Details-3 (03) | A S C | shipped (AA-682 S2) |
 
 Modals and drawers that are not routes:
 
@@ -647,7 +647,7 @@ Permissions in bk-681 (code matrix): `trip_case.read` = A S C; `trip_case.write`
 | `PATCH /booking/payments/{ref}` (note, reference only) / `POST …/void {reason}` | no hard delete (09 C2) | Edit / Void |
 | `POST /booking/media/upload-url` → `{media_id, put_url}` | evidence, vouchers, bills | `FileDropzone` |
 | `GET /booking/billing/summary` | revenue YTD (USD equivalent), outstanding, overdue, invoices sent this month | KPIs |
-| `GET /booking/trip-checks?status=&assignee=`, `GET/PUT /booking/trip-cases/{ref}/tasks`, `PATCH /booking/tasks/{id}` | task list (title, due, assignee, done_at); seeded per case from a template | `/trip-checks`, Checks tab |
+| `GET /booking/trip-checks?status=&due_before=&assignee=&code=&case=&q=`, `GET/POST /booking/trip-cases/{ref}/checks`, `PATCH /booking/trip-checks/{id}`, `GET /booking/case-lifecycle/runs` (AA-682 S2, shipped) | rows of `booking.trip_case_checks` (code, title, status open / done / not_applicable, due, assignee, note, emergency contact B2C only); three standard checks seeded by a DB trigger on confirm; derived checks from `v_trip_check_board` | `/trip-checks`, Checks tab |
 | supplier bookings / bills: `GET/POST /booking/trip-cases/{ref}/supplier-bookings`, `GET /booking/supplier-bookings?supplier_id=` (supplier Bookings tab, critic pass), `PATCH /booking/supplier-bookings/{id}`, `GET/POST /booking/supplier-bills?supplier_id=` | ERD v2 tables | supplier Bookings / Bills tabs, case ops |
 | post-sale transitions | migration rows for confirmed → … → completed | status menu |
 

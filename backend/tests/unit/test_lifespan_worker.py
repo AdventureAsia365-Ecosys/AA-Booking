@@ -79,14 +79,18 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "bk_retention_inbox_redact",
         "bk_b2b_hold_expire",
         "bk_tour_lifecycle_pull",
+        "bk_case_lifecycle",  # AA-682 S2
+        "bk_ops_reminders",
     }
     assert [r.kind for r in worker.recurring] == ["bk_inquiry_pull"]
     # AA-825 daily retention runs; AA-973 B2B hold expiry when a hold is due; AA-986 L5 the CIS lifecycle outbox pull
-    # when the outbox has a new row; AA-975 the stamping of the Booking outbox feed order.
+    # when the outbox has a new row; AA-682 S2 the daily case lifecycle + operations reminders; AA-975 the stamping of
+    # the Booking outbox feed order.
     assert [type(h).__name__ for h in worker.hooks] == [
         "DailySchedule",
         "ExpirySchedule",
         "PullSchedule",
+        "OpsDailySchedule",
         "OutboxSequencer",
     ]
     # AA-751: retention runs keep no progress checkpoint, so a shutdown fails them instead of releasing them.
