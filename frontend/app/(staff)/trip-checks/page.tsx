@@ -93,7 +93,7 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
     accessorFn: (r) => r.due_date ?? "",
     cell: ({ row }) =>
       row.original.due_date ? (
-        <DateText value={row.original.due_date} className={`text-[13px] ${isOverdue(row.original) ? "font-semibold text-danger" : ""}`} />
+        <DateText value={row.original.due_date} className={`whitespace-nowrap text-[13px] ${isOverdue(row.original) ? "font-semibold text-danger" : ""}`} />
       ) : (
         <span className="text-muted">—</span>
       ),
