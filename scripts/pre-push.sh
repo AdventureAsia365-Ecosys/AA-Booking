@@ -41,6 +41,13 @@ classify_file() {
     frontend/*) groups+=" fe" ;;
     .trivyignore) groups+=" trivyignore" ;;
     tools/docs/*) groups+=" docs docs_tools" ;;
+    scripts/pre-push.sh | scripts/install-hooks.sh | .githooks/*) groups+=" hook" ;;
+    # Unit tests read these files (deploy/verify scripts, workflows, release config, the Dockerfile, the OpenAPI
+    # export); name or import matching never reaches them, select_unit_tests matches them by file name.
+    .github/workflows/* | .github/scripts/* | .github/verify/* | .release-please-manifest.json | \
+      release-please-config.json | backend/Dockerfile | docs/api/openapi.json) groups+=" unit" ;;
+    # Marker (not a path): the diff deletes or renames a file, which can break a Markdown link.
+    :deleted-or-renamed) groups+=" links" ;;
   esac
   case "$f" in
     *.md | docs/*) groups+=" docs" ;;
@@ -49,11 +56,13 @@ classify_file() {
 }
 
 # plan_checks <mode> [files...] -> one check id per line, in run order. mode: fast | full | ci
+# Fast mode never plans unit-full (the whole suite with coverage, ~3 min in CI): a shared fixture or dependency change
+# plans unit-changed and main() prints a warning (see unit_all_files).
 plan_checks() {
   local mode="$1"; shift
   local g all=" " f
   if [[ "$mode" != "fast" ]]; then
-    all=" py deps unit_full migrations fe trivyignore docs docs_tools "
+    all=" hook py deps unit_full migrations fe trivyignore docs docs_tools "
   else
     for f in "$@"; do
       [[ -z "$f" ]] && continue
@@ -61,11 +70,10 @@ plan_checks() {
         [[ "$all" == *" $g "* ]] || all+="$g "
       done
     done
-    # A shared fixture or the dependency set changed: the targeted selection is not enough, run the CI command.
-    if [[ "$all" == *" unit_all "* ]]; then all="${all/ unit / }"; all+="unit_full "; fi
-    if [[ "$all" == *" migrations "* && "$all" != *" unit_full "* && "$all" != *" unit "* ]]; then all+="unit "; fi
+    if [[ "$all" == *" unit_all "* || "$all" == *" migrations "* ]] && [[ "$all" != *" unit "* ]]; then all+="unit "; fi
   fi
   echo "resource-ids"
+  [[ "$all" == *" hook "* ]] && echo "hook-self-test"
   [[ "$all" == *" trivyignore "* ]] && echo "trivyignore"
   if [[ "$all" == *" py "* ]]; then echo "ruff-check"; echo "ruff-format"; fi
   [[ "$all" == *" deps "* ]] && echo "pip-audit"
@@ -74,19 +82,51 @@ plan_checks() {
   if [[ "$all" == *" docs "* ]]; then
     [[ "$all" == *" docs_tools "* ]] && echo "docs-tools-tests"
     echo "docs-frontmatter"; echo "docs-adr"; echo "docs-aws-multiline"; echo "docs-links"
+  elif [[ "$all" == *" links "* ]]; then
+    echo "docs-links"
   fi
   if [[ "$all" == *" fe "* ]]; then echo "fe-lint"; echo "fe-typecheck"; fi
   return 0
 }
 
+# unit_all_files [files...] -> the changed files that a targeted unit selection cannot cover (shared fixtures, the
+# dependency set, pytest config), one per line.
+unit_all_files() {
+  local f
+  for f in "$@"; do
+    [[ "$(classify_file "$f")" == *" unit_all"* ]] && echo "$f"
+  done
+  return 0
+}
+
+# changed_files <repo root> <base> -> NUL-separated paths changed on HEAD since the merge base, unquoted (non-ASCII
+# names stay as they are). Fails (non-zero) when git cannot compute the diff, e.g. no merge base.
+changed_files() {
+  git -C "$1" -c core.quotePath=false diff --name-only -z "$2...HEAD"
+}
+
+# deletes_or_renames <repo root> <base> -> exit 0 when the diff deletes or renames a file.
+deletes_or_renames() {
+  [[ "$(git -C "$1" diff --name-only -z --diff-filter=DR "$2...HEAD" | head -c 1 | wc -c)" -gt 0 ]]
+}
+
 # select_unit_tests <backend dir> [files...] -> test files under tests/unit (relative to backend/), one per line.
 # Changed test files, tests named after a changed module (test_<stem>.py, test_<stem>_*.py), tests importing it,
-# and the migration guard when migrations/ changed.
+# tests naming a changed file (a workflow, a script loaded by path), the migration guard when migrations/ changed,
+# and the OpenAPI export test when any backend/app file changed (a stale docs/api/openapi.json fails CI Unit).
 select_unit_tests() {
   local bdir="$1"; shift
-  local f rel stem mod pkg leaf t
+  local f rel stem mod pkg leaf t base
   {
     for f in "$@"; do
+      [[ -z "$f" ]] && continue
+      base="$(basename "$f")"
+      if [[ "$base" != "__init__.py" && -d "$bdir/tests/unit" ]]; then
+        grep -lF -- "$base" "$bdir"/tests/unit/test_*.py 2>/dev/null | sed "s#^$bdir/##"
+      fi
+      if [[ "$f" == backend/app/* && -f "$bdir/tests/unit/test_openapi_export.py" ]]; then
+        echo "tests/unit/test_openapi_export.py"
+      fi
       case "$f" in
         migrations/*) [[ -f "$bdir/tests/unit/test_migration_guard.py" ]] && echo "tests/unit/test_migration_guard.py" ;;
         backend/tests/unit/test_*.py) rel="${f#backend/}"; [[ -f "$bdir/$rel" ]] && echo "$rel" ;;
@@ -117,23 +157,36 @@ self_test() {
     if [[ "$got" == "$want" ]]; then echo "ok   $name"; else echo "FAIL $name"; echo "     want: $want"; echo "     got:  $got"; fails=$((fails + 1)); fi
   }
   local DOCS="docs-frontmatter docs-adr docs-aws-multiline docs-links"
-  local ALL="resource-ids trivyignore ruff-check ruff-format pip-audit unit-full docs-tools-tests $DOCS fe-lint fe-typecheck"
+  local ALL="resource-ids hook-self-test trivyignore ruff-check ruff-format pip-audit unit-full docs-tools-tests $DOCS fe-lint fe-typecheck"
   expect "empty diff: resource IDs only" "resource-ids" fast
   expect "app module" "resource-ids ruff-check ruff-format unit-changed" fast backend/app/routers/cases.py
   expect "test file" "resource-ids ruff-check ruff-format unit-changed" fast backend/tests/unit/test_health.py
-  expect "unit conftest -> full unit command" "resource-ids ruff-check ruff-format unit-full" fast backend/tests/unit/conftest.py
-  expect "pyproject -> full unit command" "resource-ids ruff-check ruff-format unit-full" fast backend/pyproject.toml
-  expect "requirements -> pip-audit + full unit" "resource-ids ruff-check ruff-format pip-audit unit-full" fast backend/requirements-dev.txt
+  expect "unit conftest -> targeted unit + warning (never the full suite in fast mode)" \
+    "resource-ids ruff-check ruff-format unit-changed" fast backend/tests/unit/conftest.py
+  expect "pyproject -> targeted unit + warning" "resource-ids ruff-check ruff-format unit-changed" fast backend/pyproject.toml
+  expect "requirements -> pip-audit + targeted unit + warning" "resource-ids ruff-check ruff-format pip-audit unit-changed" \
+    fast backend/requirements-dev.txt
   expect "migration -> migration guard only" "resource-ids unit-changed" fast migrations/026_example.sql
   expect "frontend -> lint + tsc, never build" "resource-ids fe-lint fe-typecheck" fast frontend/app/cases/page.tsx
   expect "markdown -> docs lint" "resource-ids $DOCS" fast CONTEXT.md
+  expect "markdown with a space in the name" "resource-ids $DOCS" fast "docs/a b.md"
+  expect "non-ASCII markdown name" "resource-ids $DOCS" fast "docs/Tài liệu.md"
   expect "docs tools -> their unit tests too" "resource-ids docs-tools-tests $DOCS" fast tools/docs/check_frontmatter.py
   expect ".trivyignore" "resource-ids trivyignore" fast .trivyignore
-  expect "workflow only" "resource-ids" fast .github/workflows/ci.yml
+  expect "workflow only -> the unit tests that read it" "resource-ids unit-changed" fast .github/workflows/ci.yml
+  expect "release config -> unit tests" "resource-ids unit-changed" fast .release-please-manifest.json
+  expect "hook files -> hook self-test" "resource-ids hook-self-test" fast scripts/pre-push.sh .githooks/pre-push
+  expect "delete or rename -> link check" "resource-ids docs-links" fast :deleted-or-renamed
   expect "mixed diff" "resource-ids ruff-check ruff-format unit-changed $DOCS fe-lint fe-typecheck" fast \
     backend/app/db.py docs/implementation-notes/AA-993.md frontend/lib/config.ts migrations/026_x.sql
   expect "--full ignores the diff" "$ALL" full
   expect "--ci never skips by diff" "$ALL" ci README.md
+
+  local got
+  got="$(unit_all_files backend/app/db.py backend/tests/conftest.py backend/requirements.txt | tr '\n' ' ' | sed 's/ $//')"
+  n=$((n + 1))
+  if [[ "$got" == "backend/tests/conftest.py backend/requirements.txt" ]]; then echo "ok   unit_all warning files"
+  else echo "FAIL unit_all warning files"; echo "     got:  $got"; fails=$((fails + 1)); fi
 
   # Unit test selection on a fixture tree (no pytest run).
   local tmp; tmp="$(mktemp -d)"
@@ -142,6 +195,8 @@ self_test() {
   echo "from app.supply.content import read_content" >"$tmp/tests/unit/test_supply_detail.py"
   echo "from app.supply import content" >"$tmp/tests/unit/test_supply_other.py"
   echo "import app.supply.contentx" >"$tmp/tests/unit/test_not_this.py"
+  echo 'WORKFLOW = ROOT / ".github/workflows/deploy-dev.yml"' >"$tmp/tests/unit/test_deploy_wf.py"
+  echo 'spec_from_file_location("x", ROOT / "scripts/export_openapi.py")' >"$tmp/tests/unit/test_openapi_export.py"
   sel() { select_unit_tests "$tmp" "$@" | tr '\n' ' ' | sed 's/ $//'; }
   check_sel() { # check_sel <name> <want> [files...]
     local name="$1" want="$2"; shift 2
@@ -149,13 +204,41 @@ self_test() {
     n=$((n + 1))
     if [[ "$got" == "$want" ]]; then echo "ok   $name"; else echo "FAIL $name"; echo "     want: $want"; echo "     got:  $got"; fails=$((fails + 1)); fi
   }
-  check_sel "select: tests named after the module" "tests/unit/test_cases.py tests/unit/test_cases_flows.py" backend/app/routers/cases.py
-  check_sel "select: tests importing the module" "tests/unit/test_supply_detail.py tests/unit/test_supply_other.py" backend/app/supply/content.py
+  local OA="tests/unit/test_openapi_export.py"
+  check_sel "select: tests named after the module" "tests/unit/test_cases.py tests/unit/test_cases_flows.py $OA" backend/app/routers/cases.py
+  check_sel "select: tests importing the module" "$OA tests/unit/test_supply_detail.py tests/unit/test_supply_other.py" backend/app/supply/content.py
   check_sel "select: migration guard" "tests/unit/test_migration_guard.py" migrations/026_x.sql
   check_sel "select: changed test file" "tests/unit/test_cases.py" backend/tests/unit/test_cases.py
-  check_sel "select: nothing matches" "" backend/app/nothing_here.py
+  check_sel "select: app module without tests -> OpenAPI export test only" "$OA" backend/app/nothing_here.py
+  check_sel "select: workflow named in a test" "tests/unit/test_deploy_wf.py" .github/workflows/deploy-dev.yml
+  check_sel "select: script loaded by path" "$OA" backend/scripts/export_openapi.py
+  check_sel "select: __init__.py is not matched by file name" "" backend/tests/__init__.py
   echo "from tests.migration_guard import check" >"$tmp/tests/unit/test_guard_rules.py"
   check_sel "select: shared test helper (by import and by name)" "tests/unit/test_guard_rules.py tests/unit/test_migration_guard.py" backend/tests/migration_guard.py
+  rm -rf "$tmp"
+
+  # The diff reader on a scratch repo: unquoted non-ASCII and spaced names, a failing diff is reported.
+  tmp="$(mktemp -d)"
+  local g=(git -C "$tmp" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null)
+  local files=()
+  if "${g[@]}" init -q -b main 2>/dev/null && "${g[@]}" commit -q --allow-empty -m base &&
+    mkdir -p "$tmp/docs" && : >"$tmp/docs/a b.md" && : >"$tmp/docs/Tài.md" && "${g[@]}" add -A &&
+    "${g[@]}" commit -q -m docs; then
+    mapfile -d '' -t files < <(changed_files "$tmp" main~1)
+    got="$(plan_checks fast "${files[@]}" | tr '\n' ' ' | sed 's/ $//')"
+    n=$((n + 1))
+    if [[ ${#files[@]} -eq 2 && "$got" == "resource-ids $DOCS" ]]; then echo "ok   diff reader: non-ASCII and spaced names"
+    else echo "FAIL diff reader: non-ASCII and spaced names"; echo "     files: ${files[*]}"; echo "     got:  $got"; fails=$((fails + 1)); fi
+    n=$((n + 1))
+    if changed_files "$tmp" no-such-ref >/dev/null 2>&1; then echo "FAIL diff reader: a bad base must fail"; fails=$((fails + 1))
+    else echo "ok   diff reader: a bad base fails"; fi
+    n=$((n + 1))
+    "${g[@]}" mv "docs/a b.md" docs/c.md && "${g[@]}" commit -q -m mv
+    if deletes_or_renames "$tmp" main~1 && ! deletes_or_renames "$tmp" main~2; then echo "ok   diff reader: deletes/renames"
+    else echo "FAIL diff reader: deletes/renames"; fails=$((fails + 1)); fi
+  else
+    n=$((n + 1)); echo "FAIL diff reader: could not build the scratch repo"; fails=$((fails + 1))
+  fi
   rm -rf "$tmp"
 
   echo "self-test: $((n - fails))/$n passed"
@@ -180,6 +263,29 @@ resolve_backend_python() {
   return 1
 }
 
+# last_failed_unit_files <backend dir> -> unit test files recorded as failed in pytest's cache that still exist,
+# relative to backend/, one per line. Entries outside tests/unit/ (integration runs) and stale ones are dropped.
+last_failed_unit_files() {
+  [[ -n "${BACKEND_PY:-}" && -s "$1/.pytest_cache/v/cache/lastfailed" ]] || return 0
+  "$BACKEND_PY" - "$1" <<'PYEOF' 2>/dev/null || true
+import json, os, sys
+root = sys.argv[1]
+try:
+    with open(os.path.join(root, ".pytest_cache/v/cache/lastfailed"), encoding="utf-8") as fh:
+        data = json.load(fh)
+except (OSError, ValueError):
+    sys.exit(0)
+seen = set()
+for key in data if isinstance(data, dict) else ():
+    if not isinstance(key, str) or not key.startswith("tests/unit/"):
+        continue
+    path = key.split("::", 1)[0]
+    if path.endswith(".py") and path not in seen and os.path.isfile(os.path.join(root, path)):
+        seen.add(path)
+        print(path)
+PYEOF
+}
+
 # Python for tools/docs (needs tools/docs/requirements.txt: jsonschema, PyYAML).
 resolve_docs_python() {
   local cand
@@ -195,6 +301,7 @@ resolve_docs_python() {
 # ---------------------------------------------------------------------------------------------------------------
 FAILED=()
 WARNED=()
+LYCHEE_HINT="install lychee v0.24.2 (the version lychee-action v2.9.0 runs in CI): a release binary from https://github.com/lycheeverse/lychee/releases, or cargo install lychee --version 0.24.2"
 
 # run_step <check id> <dir relative to repo root> <ci reference> <display command> -- <argv...>
 run_step() {
@@ -248,8 +355,8 @@ run_check() {
         run_step "$id" backend "ci.yml / Lint / ruff format --check" "ruff format --check ." -- "$BACKEND_PY" -m ruff format --check .
       fi ;;
     pip-audit)
-      local want; want="pip-audit==2.10.1"
-      if [[ -z "$BACKEND_PY" ]] || ! "$BACKEND_PY" -m pip_audit --version 2>/dev/null | grep -q "${want#*==}"; then
+      local want ver; want="pip-audit==2.10.1"; ver="${want#*==}"
+      if [[ -z "$BACKEND_PY" ]] || ! "$BACKEND_PY" -m pip_audit --version 2>/dev/null | grep -qE "(^| )${ver//./\\.}\$"; then
         fail_setup "$id" "ci.yml / Security Audit / pip-audit" "$want not installed in the backend env" \
           "${BACKEND_PY:-python3} -m pip install $want"
         return
@@ -264,6 +371,11 @@ run_check() {
         return
       fi
       if [[ "$id" == "unit-full" ]]; then
+        if ! "$BACKEND_PY" -c "import xdist, pytest_cov" >/dev/null 2>&1; then
+          fail_setup "$id" "ci.yml / Unit Tests" "pytest-xdist / pytest-cov missing in $BACKEND_PY (the CI command uses -n 4 --cov)" \
+            "$BACKEND_PY -m pip install -r backend/requirements-dev.txt"
+          return
+        fi
         run_step "$id" backend "ci.yml / Unit Tests / Run unit tests" \
           "ENVIRONMENT=test COVERAGE_CORE=sysmon pytest tests/unit -n 4 --tb=short --cov=app --cov-report=term-missing --cov-fail-under=90" -- \
           env ENVIRONMENT=test COVERAGE_CORE=sysmon "$BACKEND_PY" -m pytest tests/unit -n 4 --tb=short --cov=app \
@@ -272,11 +384,13 @@ run_check() {
       fi
       local tests=()
       mapfile -t tests < <(select_unit_tests "$REPO_ROOT/backend" "${CHANGED[@]}")
-      local lf="$REPO_ROOT/backend/.pytest_cache/v/cache/lastfailed"
-      if [[ -s "$lf" ]] && [[ "$(tr -d ' \n' <"$lf")" != "{}" ]]; then
-        run_step "unit-last-failed" backend "ci.yml / Unit Tests (tests that failed last time)" \
-          "ENVIRONMENT=test pytest tests/unit --lf --lfnf=none -q --tb=short" -- \
-          bash -c '"$0" -m pytest tests/unit --lf --lfnf=none -q --tb=short; rc=$?; [ $rc -eq 5 ] && rc=0; exit $rc' "$BACKEND_PY"
+      # Plus the unit test files that failed last time and still exist (pytest's cache), in the same run. Not --lf:
+      # with only stale or non-unit entries in the cache, --lf deselects nothing and runs the whole suite serially.
+      local last=()
+      mapfile -t last < <(last_failed_unit_files "$REPO_ROOT/backend")
+      if [[ ${#last[@]} -gt 0 ]]; then
+        echo "    + ${#last[@]} test file(s) that failed last time"
+        mapfile -t tests < <(printf '%s\n' "${tests[@]}" "${last[@]}" | sed '/^$/d' | sort -u)
       fi
       if [[ ${#tests[@]} -eq 0 ]]; then
         echo
@@ -287,13 +401,19 @@ run_check() {
         "ENVIRONMENT=test pytest ${tests[*]} -q --tb=short" -- \
         env ENVIRONMENT=test "$BACKEND_PY" -m pytest "${tests[@]}" -q --tb=short ;;
     docs-tools-tests | docs-frontmatter | docs-adr | docs-aws-multiline)
+      # check_frontmatter.py (and the tools' tests, which import it) need jsonschema + PyYAML; the ADR and AWS text
+      # checks are stdlib only and run on any python3.
       local dpy=""
-      if [[ "$id" == "docs-frontmatter" ]] && ! dpy="$(resolve_docs_python)"; then
-        fail_setup "$id" "docs-lint.yml / Front-matter schema" "no Python with jsonschema + PyYAML" \
+      if [[ "$id" == "docs-frontmatter" || "$id" == "docs-tools-tests" ]] && ! dpy="$(resolve_docs_python)"; then
+        fail_setup "$id" "docs-lint.yml" "no Python with jsonschema + PyYAML" \
           "python3 -m pip install -r tools/docs/requirements.txt"
         return
       fi
       [[ -z "$dpy" ]] && dpy="$(resolve_docs_python || command -v python3)"
+      if [[ -z "$dpy" ]]; then
+        fail_setup "$id" "docs-lint.yml" "no python3 on PATH" "install Python 3.12, then python3 -m pip install -r tools/docs/requirements.txt"
+        return
+      fi
       case "$id" in
         docs-tools-tests) run_step "$id" "" "docs-lint.yml / Unit tests of the lint tools" \
           "python -m unittest discover -s tools/docs -p 'test_*.py'" -- "$dpy" -m unittest discover -s tools/docs -p 'test_*.py' ;;
@@ -307,15 +427,21 @@ run_check() {
     docs-links)
       if ! command -v lychee >/dev/null 2>&1; then
         if [[ "$MODE" == "ci" ]]; then
-          fail_setup "$id" "docs-lint.yml / Internal links (offline)" "lychee not installed" "install lychee (CI: lychee-action v2.9.0)"
+          fail_setup "$id" "docs-lint.yml / Internal links (offline)" "lychee not installed" "$LYCHEE_HINT"
         else
           echo; echo "==> [$id] skipped: lychee not installed (CI checks internal links)"
-          WARNED+=("$id: lychee not installed")
+          WARNED+=("$id: lychee not installed; $LYCHEE_HINT")
         fi
         return
       fi
+      # The tracked pages only (what the CI checkout has): a local './**/*.md' would also walk frontend/node_modules
+      # and backend/.venv.
       run_step "$id" "" "docs-lint.yml / Internal links (offline)" \
-        "lychee --config tools/docs/lychee.toml './**/*.md'" -- lychee --config tools/docs/lychee.toml './**/*.md' ;;
+        "git ls-files -z '*.md' | xargs -0 -r lychee --config tools/docs/lychee.toml" -- \
+        bash -c 'git ls-files -z "*.md" | xargs -0 -r lychee --config tools/docs/lychee.toml' ;;
+    hook-self-test)
+      run_step "$id" "" "this hook's own decision tests (not a CI step)" \
+        "bash scripts/pre-push.sh --self-test" -- bash scripts/pre-push.sh --self-test ;;
     fe-lint | fe-typecheck)
       if [[ ! -d "$REPO_ROOT/frontend/node_modules" ]]; then
         fail_setup "$id" "ci.yml / Frontend Build" "frontend/node_modules missing" "(cd frontend && npm ci)"
@@ -350,16 +476,31 @@ done
 
 BASE="${AA_PREPUSH_BASE:-origin/main}"
 CHANGED=()
+PLAN_INPUT=()
 if [[ "$MODE" == "fast" ]]; then
-  if git -C "$REPO_ROOT" rev-parse --verify -q "$BASE" >/dev/null; then
-    mapfile -t CHANGED < <(git -C "$REPO_ROOT" diff --name-only "$BASE...HEAD")
-  else
+  if ! git -C "$REPO_ROOT" rev-parse --verify -q "$BASE" >/dev/null; then
     echo "pre-push: $BASE not found (git fetch origin?), running every check"
     MODE="full"
+  else
+    # A failing diff (no merge base: shallow clone, rewritten main) must not look like an empty diff.
+    diff_out="$(mktemp)"
+    if changed_files "$REPO_ROOT" "$BASE" >"$diff_out"; then
+      mapfile -d '' -t CHANGED <"$diff_out"
+      PLAN_INPUT=("${CHANGED[@]}")
+      deletes_or_renames "$REPO_ROOT" "$BASE" && PLAN_INPUT+=(":deleted-or-renamed")
+      mapfile -t unit_all < <(unit_all_files "${CHANGED[@]}")
+      if [[ ${#unit_all[@]} -gt 0 ]]; then
+        WARNED+=("shared fixture/deps changed (${unit_all[*]}): CI runs the whole unit suite; run AA_PREPUSH=full git push to run it locally")
+      fi
+    else
+      echo "pre-push: cannot diff $BASE...HEAD, running every check"
+      MODE="full"
+    fi
+    rm -f "$diff_out"
   fi
 fi
 
-mapfile -t CHECKS < <(plan_checks "$MODE" "${CHANGED[@]}")
+mapfile -t CHECKS < <(plan_checks "$MODE" "${PLAN_INPUT[@]}")
 echo "pre-push ($MODE mode): ${#CHANGED[@]} file(s) changed vs $BASE; checks: ${CHECKS[*]}"
 [[ $PLAN_ONLY -eq 1 ]] && exit 0
 if [[ "$MODE" == "fast" && -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" ]]; then
