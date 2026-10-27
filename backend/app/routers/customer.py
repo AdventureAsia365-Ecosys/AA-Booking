@@ -10,23 +10,57 @@ Read only (no pay button, no upload; design D14). Auth: a Cognito EXTERNAL acces
 while the pool's keys cannot be loaded. The TripPlanner BFF calls these routes with the traveller's token; staff and
 M2M tokens are refused. Scope and field policy: ``app.ops.my_payments``. The response models below are the field
 allow-list: FastAPI serialises only the declared fields, so a column added to the SQL never leaks by accident.
-Every answer is ``Cache-Control: no-store``.
+Every answer is ``Cache-Control: no-store``, refusals included: :class:`_NoStoreRoute` stamps it on the 200, on the
+401/503 the auth dependency raises and on the 404 ``invoice_not_found`` (answered here, not by the app-wide
+``service_error_handler``, which would drop the header).
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Annotated, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.customer import Traveller, current_traveller
 from app.auth.staff import get_pool
+from app.errors import ServiceError
 from app.ops import my_payments
 
-router = APIRouter(prefix="/booking/customer/v1", tags=["customer"])
+NO_STORE = {"Cache-Control": "no-store"}
+
+
+class _NoStoreRoute(APIRoute):
+    """Every answer of this router is ``Cache-Control: no-store`` (contract ``booking.customer.v1``).
+
+    The dependencies (the traveller's token, the pool) run inside the handler this wraps, so their 401/503
+    ``HTTPException`` passes through here and gets the header before the app's handler renders it. A
+    ``ServiceError`` (404 ``invoice_not_found``) is rendered here with the same body ``service_error_handler`` gives.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        handler = super().get_route_handler()
+
+        async def no_store_handler(request: Request) -> Response:
+            try:
+                response = await handler(request)
+            except HTTPException as exc:
+                exc.headers = {**(exc.headers or {}), **NO_STORE}
+                raise
+            except ServiceError as exc:
+                return JSONResponse(status_code=exc.status_code, content=exc.body(), headers=NO_STORE)
+            response.headers.update(NO_STORE)
+            return response
+
+        return no_store_handler
+
+
+router = APIRouter(prefix="/booking/customer/v1", tags=["customer"], route_class=_NoStoreRoute)
 
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 SignedIn = Annotated[Traveller, Depends(current_traveller)]
@@ -84,13 +118,8 @@ class Payments(_Out):
     invoices: list[Invoice]
 
 
-def _no_store(response: Response) -> None:
-    response.headers["Cache-Control"] = "no-store"
-
-
 @router.get("/payments", response_model=Payments, operation_id="listMyPayments")
-async def list_my_payments(traveller: SignedIn, pool: Pool, response: Response) -> Payments:
-    _no_store(response)
+async def list_my_payments(traveller: SignedIn, pool: Pool) -> Payments:
     async with pool.acquire() as conn:
         return Payments.model_validate(await my_payments.list_payments(conn, traveller))
 
@@ -99,9 +128,9 @@ async def list_my_payments(traveller: SignedIn, pool: Pool, response: Response) 
 async def get_my_invoice(
     traveller: SignedIn,
     pool: Pool,
-    response: Response,
-    number: Annotated[str, Path(min_length=1, max_length=64, description="Invoice number (INV-000123)")],
+    # No max_length: an over-long number must be the contract's 404 invoice_not_found, not a 422 validation array
+    # (my_payments.get_invoice refuses anything that is not NUMBER_RE without a read).
+    number: Annotated[str, Path(min_length=1, description="Invoice number (INV-000123)")],
 ) -> Invoice:
-    _no_store(response)
     async with pool.acquire() as conn:
         return Invoice.model_validate(await my_payments.get_invoice(conn, traveller, number))

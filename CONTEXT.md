@@ -715,7 +715,8 @@ send, OTP) is not built: those still write rows only.
   currency, method, received date); `payment_instructions` only while money is owed (`sent`, `partially_paid`). Never
   a staff member, evidence, bank reference, note, reason, bill-to snapshot, internal id, net cost or supplier field
   (unit + integration tests walk every key; the root contract checker enforces the same policy on the contract and
-  its samples). Read only, `Cache-Control: no-store`, nothing about the identity logged.
+  its samples). Read only, `Cache-Control: no-store` on every answer (401/404/503 included), nothing about the
+  identity logged.
 
 ## Deferred work (`booking.job`, O3/O9)
 

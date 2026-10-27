@@ -209,6 +209,8 @@ def test_routes_answer_401_without_an_accepted_token() -> None:
             r = c.get(path, headers=headers)
             assert r.status_code == 401, (path, r.text)
             assert r.json() == {"detail": "sign_in_required"}
+            assert r.headers["cache-control"] == "no-store"
+            assert r.headers["www-authenticate"] == "Bearer"
     assert conn.calls == []  # nothing was read before authentication
 
 
@@ -217,6 +219,7 @@ def test_routes_answer_503_while_the_pool_keys_cannot_load() -> None:
     ext.fail = True
     r = client(scripted(), ext).get("/booking/customer/v1/payments", headers=bearer(ext.token()))
     assert r.status_code == 503 and r.json()["detail"] == "auth_unavailable"
+    assert r.headers["cache-control"] == "no-store"
 
 
 # ── Reads ────────────────────────────────────────────────────────────────────
@@ -260,15 +263,20 @@ def test_invoice_by_number_is_scoped_and_normalised() -> None:
     ext, conn = LocalExternal(), scripted()
     r = client(conn, ext).get("/booking/customer/v1/invoices/inv-000003", headers=bearer(ext.token()))
     assert r.status_code == 200, r.text
+    assert r.headers["cache-control"] == "no-store"
     assert conn.sql(ONE) == [(CUSTOMER_ID, "INV-000003")]
     assert tuple(r.json()) == my_payments.INVOICE_KEYS
 
 
-@pytest.mark.parametrize("number", ["INV-000099", "TC-000022", "00000000-0000-4000-8000-0000000d0001", "INV-1"])
+@pytest.mark.parametrize(
+    "number",
+    ["INV-000099", "TC-000022", "00000000-0000-4000-8000-0000000d0001", "INV-1", "INV-" + "0" * 70, "INV-000003%00"],
+)
 def test_anything_not_visible_is_404(number: str) -> None:
     ext, conn = LocalExternal(), scripted(rows=[])
     r = client(conn, ext).get(f"/booking/customer/v1/invoices/{number}", headers=bearer(ext.token()))
-    assert r.status_code == 404 and r.json()["detail"] == "invoice_not_found"
+    assert r.status_code == 404 and r.json() == {"detail": "invoice_not_found", "message": "invoice not found"}
+    assert r.headers["cache-control"] == "no-store"
     if number != "INV-000099":
         assert conn.sql(ONE) == [] and conn.sql(IDENTITY) == []  # malformed: no read at all
 

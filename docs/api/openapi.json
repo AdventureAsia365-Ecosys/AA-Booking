@@ -10063,7 +10063,6 @@
             "required": true,
             "schema": {
               "description": "Invoice number (INV-000123)",
-              "maxLength": 64,
               "minLength": 1,
               "title": "Number",
               "type": "string"
