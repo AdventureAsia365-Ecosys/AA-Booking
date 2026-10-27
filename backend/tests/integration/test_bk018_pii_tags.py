@@ -24,9 +24,21 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 BK018 = 18
 
-# Data standards DM-6.1 classes.
+# Data standards DM-6.1 classes (v1.3 added government_id, health and emergency_contact; bk-027 uses the last one).
 CLASSES = {
-    "pii": {"contact", "name", "address", "profile", "online_id", "free_text", "travel", "payment"},
+    "pii": {
+        "contact",
+        "name",
+        "address",
+        "profile",
+        "online_id",
+        "free_text",
+        "travel",
+        "payment",
+        "government_id",
+        "health",
+        "emergency_contact",
+    },
     "conf": {"commercial", "credential"},
 }
 TAG_RE = re.compile(r"^((?:pii|conf):[a-z_]+)(?=;|\s+[—–-]\s|$)")

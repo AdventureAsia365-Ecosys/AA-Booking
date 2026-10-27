@@ -23,10 +23,15 @@ async def _as_owner(conn: asyncpg.Connection) -> None:
 
 
 async def purge_ops(conn: asyncpg.Connection) -> None:
-    """Every bk-026 row, plus the B2C cases, versions, customers and supply of these tests."""
+    """Every bk-026 row, plus the B2C cases, versions, customers and supply of these tests (bk-027 trip checks go
+    with their case: ON DELETE CASCADE)."""
     async with conn.transaction():
         await _as_owner(conn)
-        await conn.execute("DELETE FROM booking.notifications WHERE type LIKE 'supplier_booking.%'")
+        await conn.execute(
+            "DELETE FROM booking.notifications WHERE type LIKE 'supplier_booking.%' OR type LIKE 'trip_check.%'"
+            " OR type = 'trip_case.gate_blocked'"
+        )
+        await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type = 'trip_case_check'")
         await conn.execute(
             "UPDATE booking.supplier_bookings SET voucher_file_id = NULL WHERE voucher_file_id IS NOT NULL"
         )
@@ -152,3 +157,39 @@ async def sold_case(
         "UPDATE booking.trip_case_versions SET is_approved = true, approved_at = now() WHERE id = $1::uuid", version
     )
     return {**dict(case), "version": version, "room_item": room_item, "service_item": service_item}
+
+
+async def b2b_case(
+    conn: asyncpg.Connection, *, tag: str = "b2b", status: str = "confirmed", start: date | None = START, days: int = 4
+) -> dict[str, Any]:
+    """A B2B trip case (no customer, an agency tenant) inserted at ``status``, the way ``holds._open_case`` inserts a
+    confirmed one; no version (nothing to book: supply state ``none``)."""
+    row = await conn.fetchrow(
+        "INSERT INTO booking.trip_cases (channel, party_tenant_id, status, start_date, end_date, pax, currency,"
+        " source_system, notes) VALUES ('b2b', gen_random_uuid(), $1, $2, $3, 2, 'USD', 'crm', $4)"
+        " RETURNING id::text AS id, code",
+        status,
+        start,
+        start + timedelta(days=days) if start else None,
+        f"{NOTE}-{tag}",
+    )
+    return dict(row)
+
+
+async def b2c_case(
+    conn: asyncpg.Connection, *, tag: str = "b2c", status: str = "proposal_sent", start: date | None = START
+) -> dict[str, Any]:
+    """A B2C trip case of a fresh customer inserted at ``status`` (no version)."""
+    customer = await conn.fetchval(
+        "INSERT INTO booking.customers (email) VALUES ($1) RETURNING id::text", f"it-682-{tag}@example.test"
+    )
+    row = await conn.fetchrow(
+        "INSERT INTO booking.trip_cases (customer_id, status, start_date, end_date, pax, currency, notes)"
+        " VALUES ($1::uuid, $2, $3, $4, 2, 'USD', $5) RETURNING id::text AS id, code",
+        customer,
+        status,
+        start,
+        start + timedelta(days=4) if start else None,
+        f"{NOTE}-{tag}",
+    )
+    return dict(row)
