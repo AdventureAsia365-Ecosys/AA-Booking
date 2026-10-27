@@ -1,21 +1,11 @@
-// app/(staff)/catalog/destinations/page.tsx: Destinations (wave 2, UI spec §3; Figma DESTINATION MANAGEMENT (06)).
-// Registered now (Nghiệp S236 decision 3); renders its layout frame and "Coming in wave 2" until built.
+// app/(staff)/catalog/destinations/page.tsx: Destinations (UI spec §3; Figma DESTINATION MANAGEMENT (06); AA-996).
+// Server shell for the metadata; the list is the client view in _parts (CIS places read live + bk-029 Booking state).
 
 import type { Metadata } from "next";
-import { WaveFrame } from "@/ui/booking/WaveFrame";
+import { DestinationsView } from "./_parts/DestinationsView";
 
 export const metadata: Metadata = { title: "Destinations" };
 
 export default function CatalogDestinationsPage() {
-  return (
-    <WaveFrame
-      wave={2}
-      title="Destinations"
-      layout="list"
-      description="Places from CIS and whether Booking sells them."
-      purpose="CIS destinations (read-only) with their Booking status and internal notes."
-      filters={["Search destination", "Country", "Booking status"]}
-      columns={["Destination", "Country", "Photos", "Tours", "Booking status"]}
-    />
-  );
+  return <DestinationsView />;
 }

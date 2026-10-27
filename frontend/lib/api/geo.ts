@@ -1,0 +1,127 @@
+// lib/api/geo.ts
+// AA-996 — typed calls for Catalog → Countries / Destinations (backend routers/catalog.py + app/catalog/geo.py,
+// bk-029). Place content (name, country, coordinates, photos) is the CIS catalog read live (catalog.v_destination,
+// v_destination_photo, v_tour) and is read-only here; Booking owns only the status, area and internal notes.
+//
+//   GET   /booking/catalog/geo/destinations?q=&country=&status=&sort=&limit=&offset=   (catalog.read)
+//   GET   /booking/catalog/geo/destinations/{destination_id}                          (catalog.read)
+//   PATCH /booking/catalog/geo/destinations/{destination_id}                          (catalog.admin: admin)
+//   GET   /booking/catalog/geo/countries?q=&status=&area=                             (catalog.read)
+//   GET   /booking/catalog/geo/countries/{iso}                                        (catalog.read)
+//   PATCH /booking/catalog/geo/countries/{iso}                                        (catalog.admin: admin)
+
+import { bkGet, bkSend } from "./client";
+import type { IsoDateTime, OffsetPage } from "./types";
+
+const enc = encodeURIComponent;
+
+export type GeoStatus = "active" | "inactive";
+
+/** Booking state, shared by countries and destinations. */
+export interface GeoState {
+  status: GeoStatus;
+  status_reason: string | null;
+  internal_notes: string | null;
+  profile_updated_at: IsoDateTime | null;
+  profile_updated_by: string | null;
+  profile_updated_by_name: string | null;
+}
+
+export interface DestinationItem extends GeoState {
+  destination_id: string;
+  name: string;
+  /** CIS country name (text, not ISO). */
+  country: string | null;
+  /** ISO-2 when the name maps to Booking's country list. */
+  country_code: string | null;
+  lat: number | null;
+  lng: number | null;
+  cover_photo_path: string | null;
+  cover_image_url: string | null;
+  photo_count: number;
+}
+
+export interface DestinationPhoto {
+  photo_id: string;
+  path: string;
+  position: number | null;
+}
+
+export interface DestinationDetail extends DestinationItem {
+  active_suppliers: number;
+  active_hotels: number;
+  active_services: number;
+  photos: DestinationPhoto[];
+  changed?: string[];
+}
+
+export interface DestinationSummary {
+  total: number;
+  active: number;
+  inactive: number;
+  countries: number;
+}
+
+export interface DestinationPage extends OffsetPage<DestinationItem> {
+  summary: DestinationSummary;
+}
+
+export interface DestinationQuery {
+  q?: string;
+  country?: string;
+  status?: GeoStatus;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface CountryItem extends GeoState {
+  country_code: string;
+  name: string;
+  destinations: number;
+  photos: number;
+  tours: number;
+  active_suppliers: number;
+  area: string | null;
+}
+
+export interface CountryTour {
+  source_id: string;
+  title: string | null;
+  sku: string | null;
+  duration_days: number | null;
+  cover_photo_path: string | null;
+  sellable: boolean;
+}
+
+export interface CountryDetail extends CountryItem {
+  destination_items: DestinationItem[];
+  tour_items: CountryTour[];
+  changed?: string[];
+}
+
+export interface CountryList {
+  items: CountryItem[];
+  total: number;
+  areas: string[];
+  /** CIS country names with no ISO row in Booking (their places cannot be grouped). */
+  unmapped: { name: string; destinations: number }[];
+}
+
+export interface GeoPatch {
+  status?: GeoStatus;
+  status_reason?: string | null;
+  internal_notes?: string | null;
+  area?: string | null;
+}
+
+export const geoApi = {
+  destinations: (q: DestinationQuery = {}) => bkGet<DestinationPage>("catalog/geo/destinations", { ...q }),
+  destination: (id: string) => bkGet<DestinationDetail>(`catalog/geo/destinations/${enc(id)}`),
+  updateDestination: (id: string, body: Omit<GeoPatch, "area">) =>
+    bkSend<DestinationDetail>(`catalog/geo/destinations/${enc(id)}`, { method: "PATCH", body }),
+  countries: (q: { q?: string; status?: GeoStatus; area?: string } = {}) => bkGet<CountryList>("catalog/geo/countries", { ...q }),
+  country: (iso: string) => bkGet<CountryDetail>(`catalog/geo/countries/${enc(iso)}`),
+  updateCountry: (iso: string, body: GeoPatch) =>
+    bkSend<CountryDetail>(`catalog/geo/countries/${enc(iso)}`, { method: "PATCH", body }),
+};

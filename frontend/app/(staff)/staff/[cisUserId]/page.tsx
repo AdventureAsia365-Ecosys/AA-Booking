@@ -112,7 +112,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
                 </Button>
               )}
               {managed ? (
-                <ManagedInCisLink path={CIS_STAFF_PATH} label="Role is set in CIS → Platform → Staff" />
+                <ManagedInCisLink path={`${CIS_STAFF_PATH}/${encodeURIComponent(id)}`} label="Role is set in CIS → Platform → Staff" />
               ) : (
                 <Button variant="primary" onClick={() => actions.changeRole(s)}>
                   <Pencil size={14} /> Change role
@@ -167,7 +167,7 @@ function Overview({ s, roleLabel }: { s: StaffDetail; roleLabel: string }) {
           </span>
         }
         description="The account, its company e-mail sign-in and the Booking role are managed in CIS → Platform → Staff."
-        actions={<ManagedInCisLink path={CIS_STAFF_PATH} label="Open CIS → Platform → Staff" />}
+        actions={<ManagedInCisLink path={`${CIS_STAFF_PATH}/${encodeURIComponent(s.cis_user_id)}`} label="Open CIS → Platform → Staff" />}
       >
         <FactGrid>
           <Fact label="Name">{s.name ?? "—"}</Fact>

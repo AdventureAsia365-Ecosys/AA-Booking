@@ -40,8 +40,8 @@ type PageCase = {
 };
 
 // Every route under app/(staff) whose view renders a kit DataTable (grep DataTable app/(staff)), with the tab or
-// drawer that holds the table. Pages without a table (billing, trip checks, notifications, settings, countries,
-// destinations, calculator, forms) are out of scope.
+// drawer that holds the table. Pages without a table (billing, trip checks, notifications, settings, calculator, forms)
+// are out of scope; the Countries card grid (AA-996) is measured with `noTable`.
 const PAGES: PageCase[] = [
   { name: "dashboard", path: "/", phoneReady: "text=TC-000001" },
   { name: "cases", path: "/cases" },
@@ -51,6 +51,11 @@ const PAGES: PageCase[] = [
   { name: "customer-cases", path: "/customers/CUS-000001?tab=cases" },
   { name: "trip-plans", path: "/catalog/trip-plans" },
   { name: "trip-plans-orphaned", path: "/catalog/trip-plans?show=orphaned" },
+  { name: "destinations", path: "/catalog/destinations" },
+  { name: "destination-drawer", path: "/catalog/destinations?place=dddd-0000-4000-8000-000000000005", ready: '[role="dialog"]', noTable: true },
+  { name: "countries", path: "/catalog/countries", ready: "text=Area: Indochina", noTable: true },
+  { name: "country-destinations", path: "/catalog/countries/LA?tab=destinations" },
+  { name: "settings-security", path: "/settings?tab=security", ready: "text=Company e-mail, one-time code", noTable: true },
   { name: "suppliers", path: "/suppliers" },
   { name: "supplier-contracts", path: "/suppliers/SUP-000001?tab=contracts" },
   { name: "supplier-rates", path: "/suppliers/SUP-000001?tab=rates" },

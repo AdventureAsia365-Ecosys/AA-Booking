@@ -1,18 +1,27 @@
 "use client";
 // app/(staff)/settings/page.tsx — Settings (W1, UI spec §4.4; Figma SETTINGS, SETTINGS-1 as preferences).
-// Tabs in the URL (?tab=): General | Notifications. Figma's two-column layout: a left column with the
-// section title + description, a card on the right.
+// Tabs in the URL (?tab=): General | Sign-in & security | Notifications. Figma's two-column layout: a left column with
+// the section title + description, a card on the right.
 //   General       — profile read-only from the staff session (CIS owns name, e-mail and password: O1, so
-//                   there is no Security tab and no photo upload), appearance (theme, per browser), and the
+//                   there is no password form and no photo upload), appearance (theme, per browser), and the
 //                   Booking-wide commercial defaults read-only from GET /booking/settings (deposit_pct,
 //                   quote_validity_days; Nghiệp S236 decision 4).
+//   Sign-in & security (AA-996; replaces Figma SETTINGS-2 "change password" and RESET PASSWORD) — how this person
+//                   signs in (company e-mail code through the Cognito staff sign-in; Booking holds no password, O1),
+//                   the facts of the current session from GET /api/auth/session (signed in at, session end), last
+//                   seen in Booking, and "Manage staff & invites in CIS ↗" (CIS → Platform → Staff; admins only,
+//                   staff.admin: other roles cannot open that CIS page). No MFA claim beyond the facts: staff sign in
+//                   with the e-mail code only (WORKFORCE MFA is break-glass only, ADR 0006).
 //   Notifications — per-type bell toggles, GET/PUT /booking/staff/me/preferences (Figma's duplicate list tab
 //                   becomes preferences, shell C-9).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock, Monitor, Moon, Sun } from "lucide-react";
+import { Lock, LogOut, Monitor, Moon, Sun } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { ApiError, api } from "@/lib/api/client";
 import { QUOTE_VALIDITY_RANGE_DAYS } from "@/lib/bookingConfig";
+import { CIS_STAFF_PATH } from "@/lib/config";
+import type { SessionFacts } from "@/lib/sessionFacts";
 import type { SettingsResponse, StaffPreferences } from "@/lib/api/types";
 import {
   EmptyState,
@@ -24,17 +33,20 @@ import {
   SkeletonBar,
   DateText,
   staffDisplay,
+  useCan,
   useStaff,
   useThemeChoice,
   useToast,
   useUrlFilters,
 } from "@/ui";
 import type { ThemeChoice } from "@/ui/theme";
+import { signOut } from "@/ui/signOut";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 
 const TABS = [
   { key: "general", label: "General" },
+  { key: "security", label: "Sign-in & security" },
   { key: "notifications", label: "Notifications" },
 ];
 
@@ -62,7 +74,7 @@ export default function SettingsPage() {
   return (
     <PageFrame title="Settings" description="Your profile, how Booking looks for you, and what you are notified about.">
       <SavedTabs tabs={TABS} />
-      {tab === "general" ? <GeneralTab /> : <NotificationsTab />}
+      {tab === "general" ? <GeneralTab /> : tab === "security" ? <SecurityTab /> : <NotificationsTab />}
     </PageFrame>
   );
 }
@@ -148,6 +160,109 @@ function GeneralTab() {
         description="Booking-wide values every proposal and invoice uses. Read-only here; an admin changes them in booking.settings."
       >
         <CommercialDefaults />
+      </Block>
+    </div>
+  );
+}
+
+async function fetchSessionFacts(): Promise<SessionFacts> {
+  const res = await fetch("/api/auth/session", { cache: "no-store" });
+  if (!res.ok && res.status !== 401) throw new Error(`Session facts unavailable (HTTP ${res.status})`);
+  return (await res.json()) as SessionFacts;
+}
+
+const SIGN_IN_METHOD: Record<SessionFacts["kind"], string> = {
+  company_email: "Company e-mail, one-time code",
+  cis_password: "CIS password (legacy bridge)",
+  none: "Not signed in",
+};
+
+function epoch(value: number | null): Date | null {
+  return value == null ? null : new Date(value * 1000);
+}
+
+function SecurityTab() {
+  const staff = useStaff();
+  // CIS → Platform → Staff is for admins; other roles would land on a CIS access-denied page.
+  const canManageStaff = useCan("staff.admin");
+  const router = useRouter();
+  const facts = useQuery({ queryKey: ["auth", "session"], queryFn: fetchSessionFacts, staleTime: 60_000, retry: 1 });
+  const f = facts.data;
+  return (
+    <div className="flex flex-col gap-8">
+      <Block
+        title="Sign-in method"
+        description="Booking never stores a password. Staff sign in with their company e-mail on the Adventure Asia staff sign-in page, which sends a one-time code."
+      >
+        <div className="grid gap-4">
+          <ReadOnlyField
+            label="How you sign in"
+            help={
+              f?.kind === "cis_password"
+                ? "This session still uses the old CIS password bridge. Sign out and choose the company e-mail sign-in."
+                : "Each sign-in sends a fresh code to your company mailbox; there is no Booking password to change or reset."
+            }
+          >
+            {facts.isLoading ? "…" : SIGN_IN_METHOD[f?.kind ?? "none"]}
+          </ReadOnlyField>
+          <ReadOnlyField
+            label="Extra verification (MFA)"
+            help="Staff sign in with a single code sent to the company mailbox; there is no app-based second factor. Booking never sees the code."
+          >
+            None: the one-time e-mail code is the sign-in factor
+          </ReadOnlyField>
+        </div>
+      </Block>
+
+      <Block
+        title="This session"
+        description="Your access renews by itself every few minutes until the session ends; then you sign in again."
+        actions={
+          <button
+            type="button"
+            onClick={() => void signOut(router)}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-[13px] font-medium text-ink hover:border-accent-border"
+          >
+            <LogOut size={14} /> Sign out
+          </button>
+        }
+      >
+        {facts.isError ? (
+          <ErrorState message={(facts.error as Error).message} onRetry={() => facts.refetch()} />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ReadOnlyField label="Signed in">{f ? <DateText value={epoch(f.signed_in_at)} withTime /> : "…"}</ReadOnlyField>
+            <ReadOnlyField label="Session ends">{f ? <DateText value={epoch(f.session_ends_at)} withTime /> : "…"}</ReadOnlyField>
+            <ReadOnlyField label="Last seen in Booking" help="Updated at most every 5 minutes.">
+              <DateText value={staff.last_seen_at} withTime />
+            </ReadOnlyField>
+            <ReadOnlyField
+              label="Access"
+              help={staff.preview_viewer ? "Preview host: this session can read but not change anything." : undefined}
+            >
+              {staff.preview_viewer ? "Read-only (preview)" : "Full, by your Booking role"}
+            </ReadOnlyField>
+          </div>
+        )}
+      </Block>
+
+      <Block
+        title="Staff accounts and invites"
+        description="Accounts, invitations, Booking roles and lost access are handled in CIS → Platform → Staff, by an owner or admin."
+        actions={canManageStaff ? <ManagedInCisLink path={CIS_STAFF_PATH} label="Manage staff & invites in CIS" /> : undefined}
+      >
+        {canManageStaff ? (
+          <p className="text-[13px] text-body">
+            To invite a colleague, give someone a Booking role or take access away, open CIS → Platform → Staff. The person
+            appears on Booking&apos;s Staff page after their first sign-in here. Lost access to your mailbox? Ask an admin to
+            check your account in CIS.
+          </p>
+        ) : (
+          <p className="text-[13px] text-body">
+            Ask a Booking admin to invite a colleague, change a Booking role or restore access. The person appears on
+            Booking&apos;s Staff page after their first sign-in here.
+          </p>
+        )}
       </Block>
     </div>
   );

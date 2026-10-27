@@ -14,6 +14,12 @@ Sellable trip plans (AA-679, S237 decision D4, bk-009):
 ``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
 the set) keep the plan's bookable supply items (bk-019, AA-972), which ``/booking/b2b/v1/products`` lists.
 
+Countries and destinations (AA-996, bk-029; ``app/catalog/geo.py``): ``GET /booking/catalog/geo/destinations`` (paged
+CIS places + Booking status + summary), ``GET …/destinations/{destination_id}`` (+ photos and active supply at the
+place), ``GET /booking/catalog/geo/countries`` (countries of the catalog + Booking state), ``GET …/countries/{iso}``
+(+ its places and tours) — ``catalog.read``; ``PATCH …/destinations/{destination_id}`` and ``PATCH …/countries/{iso}``
+change only the Booking state (status, reason, area, notes; soft, nothing is deleted) — ``catalog.admin`` (admin).
+
 ``source_id`` is the stable CIS catalog key of contract catalog.tour.v1 (a uuid string), never the CIS ``tour_id``.
 """
 
@@ -31,7 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app import catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import departures, plan_components
-from app.catalog import trip_plans
+from app.catalog import geo, trip_plans
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
 from app.trip_cases import service
@@ -44,6 +50,9 @@ CanRead = Annotated[Staff, Depends(require("catalog.read"))]
 CanWritePlans = Annotated[Staff, Depends(require("trip_plan.write"))]
 CanStartCase = Annotated[Staff, Depends(require("trip_case.write"))]
 CanReadSupply = Annotated[Staff, Depends(require("supply.read"))]
+CanAdminCatalog = Annotated[Staff, Depends(require("catalog.admin"))]
+IsoCode = Annotated[str, Path(pattern=r"^[A-Za-z]{2}$", description="ISO 3166-1 alpha-2 country code")]
+GeoStatus = Literal["active", "inactive"]
 
 
 def _source_id(source_id: Annotated[uuid.UUID, Path(description="CIS catalog source_id (catalog.tour.v1)")]) -> str:
@@ -71,6 +80,27 @@ class CommercialBody(BaseModel):
     default_channel: engine.Channel | None = None
     price_hint: PriceHint | None = None
     commercial_notes: str | None = Field(default=None, max_length=5_000)
+
+
+class DestinationPatch(BaseModel):
+    """Booking state of one CIS place; a field left out keeps its value. ``status = active`` clears the reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: GeoStatus | None = None
+    status_reason: str | None = Field(default=None, max_length=500)
+    internal_notes: str | None = Field(default=None, max_length=5_000)
+
+
+class CountryPatch(DestinationPatch):
+    area: str | None = Field(default=None, max_length=60)
+
+
+def _patch(body: BaseModel) -> dict[str, Any]:
+    data = body.model_dump(exclude_unset=True)
+    if data.get("status", "") is None:
+        data.pop("status")
+    return data
 
 
 class UseForTripCase(BaseModel):
@@ -115,6 +145,61 @@ async def search_destinations(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await catalog.search_destinations(conn, q=q, country=country, limit=limit)
+
+
+@router.get("/geo/destinations")
+async def list_geo_destinations(
+    _: CanRead,
+    pool: Pool,
+    q: Annotated[str | None, Query(max_length=120)] = None,
+    country: Annotated[str | None, Query(min_length=2, max_length=2, description="ISO-2 country code")] = None,
+    status: GeoStatus | None = None,
+    sort: Annotated[str | None, Query(max_length=40)] = None,
+    limit: Annotated[int, Query(ge=1, le=geo.MAX_PAGE)] = 25,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await geo.list_destinations(
+            conn, q=q, country=country, status=status, sort=sort, limit=limit, offset=offset
+        )
+
+
+@router.get("/geo/destinations/{destination_id}")
+async def get_geo_destination(destination_id: uuid.UUID, _: CanRead, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await geo.get_destination(conn, str(destination_id))
+
+
+@router.patch("/geo/destinations/{destination_id}")
+async def patch_geo_destination(
+    body: DestinationPatch, destination_id: uuid.UUID, staff: CanAdminCatalog, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await geo.update_destination(conn, staff, str(destination_id), _patch(body))
+
+
+@router.get("/geo/countries")
+async def list_geo_countries(
+    _: CanRead,
+    pool: Pool,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    status: GeoStatus | None = None,
+    area: Annotated[str | None, Query(max_length=60)] = None,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await geo.list_countries(conn, q=q, status=status, area=area)
+
+
+@router.get("/geo/countries/{iso}")
+async def get_geo_country(iso: IsoCode, _: CanRead, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await geo.get_country(conn, iso)
+
+
+@router.patch("/geo/countries/{iso}")
+async def patch_geo_country(body: CountryPatch, iso: IsoCode, staff: CanAdminCatalog, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await geo.update_country(conn, staff, iso, _patch(body))
 
 
 @router.get("/trip-plans")

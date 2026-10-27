@@ -4,16 +4,18 @@
 // user with a Booking role and an active flag. KPI tiles, search + role / status filters (client-side: the
 // endpoint returns every profile, one row per CIS user who signed in), per-row View / Change role /
 // Activate or Deactivate (PATCH /booking/staff/{cis_user_id}).
+// AA-996 (Figma USER.png "Invite User", RESET PASSWORD): invites and sign-in recovery live in CIS → Platform → Staff
+// (O1): the page action "Manage staff & invites in CIS ↗" and a per-row "Sign-in & invites in CIS ↗" link replace them.
 
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Ban, CheckCircle2, Eye, Pencil } from "lucide-react";
+import { Ban, CheckCircle2, Eye, KeyRound, Pencil } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
 import { ROLE_LABEL, STAFF_ROLES, isStaffRole } from "@/lib/rbac";
-import { CIS_STAFF_PATH } from "@/lib/config";
+import { CIS_STAFF_PATH, CIS_STAFF_URL } from "@/lib/config";
 import { DataTable, DateText, FilterBar, KpiTile, ManagedInCisLink, PageFrame, PersonCell, Pill, Section, StatusBadge, useUrlFilters } from "@/ui";
 import { useStaffActions } from "./_parts/useStaffActions";
 
@@ -63,6 +65,16 @@ export default function StaffPage() {
             >
               <Pencil size={15} />
             </IconAction>
+            <a
+              href={`${CIS_STAFF_URL}/${encodeURIComponent(s.cis_user_id)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Sign-in & invites in CIS for ${s.name ?? s.email ?? s.cis_user_id}`}
+              title="Sign-in & invites in CIS ↗ (no password exists in Booking)"
+              className="grid h-8 w-8 place-items-center rounded-md border border-line bg-card text-muted hover:border-accent-border hover:text-ink"
+            >
+              <KeyRound size={15} />
+            </a>
             {s.active ? (
               <IconAction label={self ? "You cannot deactivate yourself" : "Deactivate"} danger disabled={self} onClick={() => actions.deactivate(s)}>
                 <Ban size={15} />
@@ -79,11 +91,15 @@ export default function StaffPage() {
   ];
 
   return (
-    <PageFrame title="Staff" description="Booking profiles of CIS staff accounts: their Booking role and whether they can use Booking.">
+    <PageFrame
+      title="Staff"
+      description="Booking profiles of CIS staff accounts: their Booking role and whether they can use Booking."
+      actions={<ManagedInCisLink path={CIS_STAFF_PATH} label="Manage staff & invites in CIS" />}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
         <span>
-          Staff accounts and Booking roles are managed in CIS → Platform → Staff (company e-mail sign-in). A person appears here
-          after their first sign-in to Booking.
+          Staff accounts, invites and Booking roles are managed in CIS → Platform → Staff (company e-mail sign-in, no
+          password). A person appears here after their first sign-in to Booking.
         </span>
         <ManagedInCisLink path={CIS_STAFF_PATH} label="Open CIS → Platform → Staff" />
       </div>

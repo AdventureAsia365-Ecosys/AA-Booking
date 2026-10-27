@@ -51,6 +51,7 @@ import type {
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
+import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
 import staffMeJson from "./staff-me.json";
 
 /** The browser clock during the check (layout.spec.ts freezes it with page.clock.setFixedTime): the run gives the same
@@ -737,6 +738,81 @@ function deskDepartures(): DeskDepartures {
   };
 }
 
+// ── AA-996: Catalog → Destinations / Countries (long names, every optional field filled) ─────────────────────────
+const PLACE_NAMES = ["Ha Long Bay (Lan Ha Bay and Cat Ba Archipelago)", "Luang Prabang", "Siem Reap", "Chiang Mai Old City"];
+const GEO_COUNTRIES = ["Vietnam", "Laos", "Cambodia", "Thailand", "Myanmar", "Bhutan", "Nepal", "Indonesia"];
+const GEO_ISO = ["VN", "LA", "KH", "TH", "MM", "BT", "NP", "ID"];
+
+function destination(i: number): DestinationItem {
+  const inactive = i % 6 === 5;
+  return {
+    destination_id: uuid("d", i),
+    name: `${PLACE_NAMES[i % PLACE_NAMES.length]}${i > 3 ? ` ${i}` : ""}`,
+    country: GEO_COUNTRIES[i % GEO_COUNTRIES.length],
+    country_code: GEO_ISO[i % GEO_ISO.length],
+    lat: -8.4095 + i * 1.111111,
+    lng: 115.1889 - i * 0.733333,
+    cover_photo_path: null,
+    cover_image_url: null,
+    photo_count: (i * 7) % 130,
+    status: inactive ? "inactive" : "active",
+    status_reason: inactive ? "No contracted guides for the 2026-27 season after the operator closed" : null,
+    internal_notes: inactive ? "Check again with the DMC in March." : null,
+    profile_updated_at: inactive ? NOW : null,
+    profile_updated_by: inactive ? "u-001" : null,
+    profile_updated_by_name: inactive ? "Alexandra Montgomery-Whitfield" : null,
+  };
+}
+
+function destinationPage(): DestinationPage {
+  return { ...page(range(ROWS).map(destination), 1872), summary: { total: 1872, active: 1790, inactive: 82, countries: 14 } };
+}
+
+function destinationDetail(id: string): DestinationDetail {
+  return { ...destination(5), destination_id: id, active_suppliers: 12, active_hotels: 34, active_services: 120, photos: [] };
+}
+
+function countryItem(i: number): CountryItem {
+  return {
+    country_code: GEO_ISO[i % GEO_ISO.length],
+    name: GEO_COUNTRIES[i % GEO_COUNTRIES.length],
+    destinations: 120 + i * 37,
+    photos: 1400 + i * 211,
+    tours: 30 + i * 9,
+    active_suppliers: 4 + i,
+    area: i % 2 ? "Indochina and the Mekong region" : null,
+    status: i === 3 ? "inactive" : "active",
+    status_reason: i === 3 ? "Paused while the new DMC contract is signed" : null,
+    internal_notes: null,
+    profile_updated_at: i === 3 ? NOW : null,
+    profile_updated_by: null,
+    profile_updated_by_name: null,
+  };
+}
+
+const COUNTRY_LIST: CountryList = {
+  items: range(GEO_ISO.length).map(countryItem),
+  total: GEO_ISO.length,
+  areas: ["Indochina and the Mekong region"],
+  unmapped: [{ name: "Tibet Autonomous Region", destinations: 3 }],
+};
+
+function countryDetail(iso: string): CountryDetail {
+  return {
+    ...countryItem(1),
+    country_code: iso.toUpperCase(),
+    destination_items: range(ROWS).map(destination),
+    tour_items: range(12).map((i) => ({
+      source_id: uuid("t", i),
+      title: `Classic Mekong Discovery from Huay Xai to Luang Prabang by Slow Boat ${i}`,
+      sku: `LA-${10 + i}D`,
+      duration_days: 10 + i,
+      cover_photo_path: null,
+      sellable: i % 3 === 0,
+    })),
+  };
+}
+
 // ── Router ───────────────────────────────────────────────────────────────────
 export type FixtureAnswer = { status: number; body: unknown };
 
@@ -815,6 +891,11 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   }
   if (p === "b2b-desk/departures") return ok(deskDepartures());
   if (at(0) === "b2b-desk" && at(1) === "departures" && at(3) === "incidents") return ok({ items: [] });
+
+  if (p === "catalog/geo/destinations") return ok(destinationPage());
+  if (at(0) === "catalog" && at(1) === "geo" && at(2) === "destinations" && seg.length === 4) return ok(destinationDetail(at(3)));
+  if (p === "catalog/geo/countries") return ok(COUNTRY_LIST);
+  if (at(0) === "catalog" && at(1) === "geo" && at(2) === "countries" && seg.length === 4) return ok(countryDetail(at(3)));
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (p === "catalog/trip-plans") {
