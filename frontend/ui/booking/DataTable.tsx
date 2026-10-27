@@ -13,14 +13,18 @@
 //     column placed before the row menu / open column (or last). Every value stays one click away.
 //   - The page's `tableMinWidth` (sized for 1400-1440 px) is replaced by `compactMinWidth` (default none: the table
 //     takes its frame and its columns share it).
-// In compact density the CSV export and the Columns menu cover the columns the table shows (the kit reads them from the
-// table); at 1200 px and wider they are unchanged.
+//   - The CSV export does not depend on the density (review fix): when columns are folded, the kit's own CSV button is
+//     replaced by the wrapper's, which exports every column of the page (the kit's header / accessor rule) over the
+//     rows the page passes, so a file exported at 960 px equals the one exported at 1440 px. The Columns menu lists the
+//     columns the table shows (the folded ones are in the drawer).
 
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowData } from "@tanstack/react-table";
-import { PanelRightOpen } from "lucide-react";
+import { Download, PanelRightOpen } from "lucide-react";
 import { useMemo, useState } from "react";
+import { downloadCsv, toCsv } from "../csv";
 import { DataTable as KitDataTable, type DataTableProps } from "../DataTable";
 import { Drawer } from "../Drawer";
+import { K, RADIUS, sans } from "../tokens";
 import { useMediaQuery } from "../useMediaQuery";
 
 declare module "@tanstack/react-table" {
@@ -51,30 +55,101 @@ export type BookingDataTableProps<T> = DataTableProps<T> & {
 
 export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, ...rest }: BookingDataTableProps<T>) {
   const compact = useIsCompact();
-  const [details, setDetails] = useState<{ row: T } | null>(null);
+  const { data, getRowId, enableCsv = false, csvFilename = "export", toolbarExtra } = rest;
+  // The open drawer's row, by id: resolved from the current `data` at render, so a refetch or a mutation shows fresh
+  // values, and a row that left the data (page, filter, delete) closes the drawer.
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  // Leaving the compact window closes the drawer for good (otherwise it would reopen unasked when the window narrows
+  // or the zoom comes back). Render-time state adjustment, React's documented alternative to an effect.
+  if (!compact && detailsId !== null) setDetailsId(null);
   const folded = useMemo(() => columns.filter((c) => c.meta?.compact === "drawer"), [columns]);
+  const folding = compact && folded.length > 0;
   const shown = useMemo(() => {
-    if (!compact || folded.length === 0) return columns;
+    if (!folding) return columns;
     const kept = columns.filter((c) => c.meta?.compact !== "drawer");
     const button: ColumnDef<T, unknown> = {
       id: DETAILS_ID,
       header: "",
       enableSorting: false,
       enableHiding: false,
-      cell: ({ row }) => <DetailsButton label={folded.map(headerText).join(", ")} onOpen={() => setDetails({ row: row.original })} />,
+      cell: ({ row }) => <DetailsButton label={folded.map(headerText).join(", ")} onOpen={() => setDetailsId(getRowId(row.original))} />,
     };
     const last = kept[kept.length - 1];
     const trailing = last && (TRAILING_IDS.has(last.id ?? "") || last.header === "");
     return trailing ? [...kept.slice(0, -1), button, last] : [...kept, button];
-  }, [columns, compact, folded]);
+  }, [columns, folding, folded, getRowId]);
+  const detailsRow = folding && detailsId !== null ? data.find((r) => getRowId(r) === detailsId) : undefined;
+  // While columns are folded the kit's CSV would export only the shown columns: the wrapper's button exports them all.
+  const ownCsv = folding && enableCsv;
 
   return (
     <div className="bk-dt">
-      <KitDataTable<T> {...rest} columns={shown} tableMinWidth={compact ? compactMinWidth : tableMinWidth} />
-      {compact && details && folded.length > 0 && (
-        <RowDetails row={details.row} title={columns.find((c) => c.meta?.compact !== "drawer")} folded={folded} onClose={() => setDetails(null)} />
+      <KitDataTable<T>
+        {...rest}
+        columns={shown}
+        tableMinWidth={compact ? compactMinWidth : tableMinWidth}
+        enableCsv={ownCsv ? false : enableCsv}
+        toolbarExtra={
+          ownCsv ? (
+            <>
+              {toolbarExtra}
+              <CsvButton onClick={() => downloadCsv(csvFilename, toCsv(data, csvColumns(columns)))} />
+            </>
+          ) : (
+            toolbarExtra
+          )
+        }
+      />
+      {detailsRow !== undefined && (
+        <RowDetails row={detailsRow} title={columns.find((c) => c.meta?.compact !== "drawer")} folded={folded} onClose={() => setDetailsId(null)} />
       )}
     </div>
+  );
+}
+
+/** The kit's CSV column rule (ui/DataTable.tsx `exportCsv`: header text or column id; accessorFn, else accessorKey,
+ *  else empty), applied to every column of the page, so the file is the one the kit exports at 1200 px and wider. */
+export function csvColumns<T>(columns: ColumnDef<T, unknown>[]): { header: string; value: (row: T) => unknown }[] {
+  return columns
+    .filter((c) => c.id !== "__select")
+    .map((c) => {
+      const def = c as { accessorFn?: (r: T, i: number) => unknown; accessorKey?: string };
+      return {
+        header: typeof c.header === "string" ? c.header : (c.id ?? def.accessorKey ?? ""),
+        value: (row: T) => {
+          if (def.accessorFn) return def.accessorFn(row, 0);
+          if (def.accessorKey) return (row as Record<string, unknown>)[def.accessorKey];
+          return "";
+        },
+      };
+    });
+}
+
+/** Same look as the kit's CSV button; `order: 1` puts it last in the toolbar, where the kit draws its own. */
+function CsvButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="bk-dt-csv"
+      onClick={onClick}
+      style={{
+        order: 1,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "7px 12px",
+        borderRadius: RADIUS.pill,
+        border: `1px solid ${K.line}`,
+        background: K.card,
+        color: K.ink3,
+        fontSize: 12,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: sans,
+      }}
+    >
+      <Download size={13} /> CSV
+    </button>
   );
 }
 

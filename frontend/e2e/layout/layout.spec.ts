@@ -16,6 +16,8 @@
 //                destinations) fit their frame with no clipped column, in light and dark at 960; the sidebar is the
 //                68 px rail; the folded FX / audit columns open in the row's details drawer. Every page at 960: the page
 //                never scrolls sideways. At 1280 the sidebar is still the stored (expanded) width: nothing changed there.
+//                Review fixes: a CSV exported at 960 equals the one at 1400 (folded columns included); the details drawer
+//                closes for good when the window leaves 768-1199 px; the `[` key is ignored at 960.
 // The browser clock is frozen at fixtures.ts CLOCK and every fixture timestamp is older than 7 days, so relative dates
 // render as the (widest) absolute date on any day the check runs.
 // The API is mocked (see playwright.config.ts for why the fake session is safe). Measurements go to
@@ -484,6 +486,67 @@ test.describe("compact 960: the folded columns open in the row's details drawer"
     // Opening the details does not follow the row link (the button stops the row click).
     expect(new URL(page.url()).pathname).toBe("/billing");
     expect(c.unmocked, "every Booking API call has a fixture").toEqual([]);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+});
+
+// AA-996 review fixes: the CSV does not depend on the density, the details drawer does not outlive the compact window,
+// and the `[` key does not flip the hidden sidebar preference there.
+async function csvText(page: Page): Promise<string> {
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "CSV", exact: true }).click()]);
+  return fs.readFileSync((await download.path())!, "utf8");
+}
+const sidebarWidth = (page: Page) =>
+  page.evaluate(() => (document.querySelector('[data-testid="admin-sidebar"]') as HTMLElement | null)?.offsetWidth ?? null);
+
+test.describe("compact 960: the CSV export keeps every column", () => {
+  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
+  for (const pc of [
+    { name: "cases", path: "/cases", folded: ["Sales"] },
+    { name: "trip-plans", path: "/catalog/trip-plans", folded: ["Trip style", "Price hint"] },
+    { name: "destinations", path: "/catalog/destinations", folded: ["Coordinates", "Media"] },
+  ]) {
+    test(`${pc.name}: the file at 960 equals the file at 1400`, async ({ page, baseURL }) => {
+      const c = await prepare(page, baseURL!);
+      await open(page, pc, c);
+      const compactCsv = await csvText(page);
+      const header = compactCsv.replace(/^\uFEFF/, "").split("\n")[0].split(",");
+      for (const h of pc.folded) expect(header, `${h} is in the CSV at 960`).toContain(h);
+      expect(header, "the details button column is not exported").not.toContain("__details");
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.waitForTimeout(300);
+      expect(await csvText(page), "same file at 960 and 1400").toBe(compactCsv);
+      expect(c.consoleErrors, "console is clean").toEqual([]);
+    });
+  }
+});
+
+test.describe("compact 960: the details drawer and the sidebar key", () => {
+  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
+  test("the drawer closes when the window leaves the compact range and does not come back", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "billing-invoices", path: "/billing" }, c);
+    await page.locator('[data-testid="bk-dt-details"]').first().click();
+    const drawer = page.locator('[data-testid="bk-dt-details-drawer"]');
+    await expect(drawer).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(drawer).toHaveCount(0);
+    await page.setViewportSize({ width: 960, height: 900 });
+    await page.waitForTimeout(300);
+    await expect(drawer, "back in the compact window the drawer stays closed").toHaveCount(0);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+  test("the [ key does nothing at 960 (the stored sidebar width applies again at 1280)", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "cases", path: "/cases" }, c);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("[");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(300);
+    expect(await sidebarWidth(page), "the preference was not flipped at 960: expanded at 1280").toBe(248);
+    // Control: the key still works from 1200 px.
+    await page.keyboard.press("[");
+    await expect.poll(() => sidebarWidth(page)).toBe(68);
     expect(c.consoleErrors, "console is clean").toEqual([]);
   });
 });

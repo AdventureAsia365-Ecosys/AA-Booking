@@ -5,7 +5,8 @@
 // phone drawer). Booking changes (UI spec §2.1–2.2, 01-shell §0.5):
 //   - nav model from ui/nav.tsx (role- and wave-filtered), logo label "Booking";
 //   - active item = `--aa-side-panel` pill with gold icon + text (Figma; spec §1.2 row "Sidebar active pill");
-//   - footer = staff card (initials, name, Booking role) with a sign-out button, then Settings + collapse.
+//   - footer = staff card (initials, name, Booking role) with a sign-out button, then Settings + collapse;
+//   - AA-996: the `[` key does nothing in the compact density window (the sidebar is the forced icon rail there).
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -16,6 +17,7 @@ import { SETTINGS_ENTRY, navActive, visibleGroups, type NavEntry } from "./nav";
 import { useSidebarCollapsed } from "./useSidebar";
 import { staffDisplay, useStaff } from "./StaffContext";
 import { signOut } from "./signOut";
+import { COMPACT_QUERY } from "./booking/DataTable";
 
 export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () => void; drawerOpen?: boolean }) {
   const router = useRouter();
@@ -25,10 +27,13 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const groups = visibleGroups(staff.role);
 
-  // `[` toggles collapse, ignored while typing.
+  // `[` toggles collapse, ignored while typing. AA-996: also ignored in the compact density window (768-1199 px), where
+  // the sidebar is forced to its icon rail and the toggle button is hidden (app/globals.css): a toggle there would change
+  // nothing visible but flip the stored preference used from 1200 px.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "[" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (window.matchMedia?.(COMPACT_QUERY).matches) return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
