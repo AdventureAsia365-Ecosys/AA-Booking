@@ -15,6 +15,7 @@ import type { StaffNotification } from "@/lib/api/types";
 import { DateText } from "./DateText";
 import { NOTIFICATION_TYPE_LABEL, notificationTarget } from "./notifications";
 import { NotificationIcon, NotificationMessage } from "./NotificationItem";
+import { localizeIsoDates } from "./dates";
 
 export const NOTIFICATIONS_KEY = ["notifications", "popover"] as const;
 
@@ -118,7 +119,7 @@ export function NotificationPopover() {
                   <NotificationIcon type={n.type} read={n.read} size={36} />
                   <span className="min-w-0 flex-1">
                     <span className={`block text-[13px] text-ink ${n.read ? "font-normal" : "font-semibold"}`}>
-                      {n.title || NOTIFICATION_TYPE_LABEL[n.type] || n.type}
+                      {n.title ? localizeIsoDates(n.title) : NOTIFICATION_TYPE_LABEL[n.type] || n.type}
                     </span>
                     {n.message && (
                       <NotificationMessage text={n.message} className="mt-0.5 block text-xs text-body line-clamp-2" />

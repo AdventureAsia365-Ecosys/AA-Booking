@@ -11,6 +11,7 @@ import { CHANNELS, type Channel } from "@/lib/api/proposals";
 import { pricingPolicyApi } from "@/lib/api/pricingPolicy";
 import { FormDrawer, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
+import { DateField } from "@/ui/booking/DateField";
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -140,7 +141,7 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
         </FormField>
       </div>
       <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
-        <input type="date" className={inputCls} value={form.valid_from} onChange={(e) => set("valid_from")(e.target.value)} />
+        <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
       </FormField>
       <FormField label="Note" hint="Why the change, or who confirmed it (for example Ms. Thư, 14/10)." error={errorFor(fe, "note")}>
         <input className={inputCls} maxLength={500} value={form.note} onChange={(e) => set("note")(e.target.value)} />
@@ -224,7 +225,7 @@ export function NewFxRateDrawer({ onClose }: { onClose: () => void }) {
           <PercentInput value={form.buffer} onChange={set("buffer")} />
         </FormField>
         <FormField label="As of" required hint="The market date of the rate." error={errorFor(fe, "as_of")}>
-          <input type="date" className={inputCls} value={form.as_of} onChange={(e) => set("as_of")(e.target.value)} />
+          <DateField className={inputCls} value={form.as_of} onChange={(v) => set("as_of")(v)} />
         </FormField>
       </div>
       <FormField label="Source" required hint="Where the rate comes from: bank, ECB, or manual-dev for a Dev placeholder." error={errorFor(fe, "source")}>

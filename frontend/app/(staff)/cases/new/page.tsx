@@ -17,6 +17,7 @@ import { CountryPicker } from "../_parts/CountryPicker";
 import { StaffSelect } from "../_parts/StaffSelect";
 import { QueryError } from "../_parts/QueryError";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "./CustomerPicker";
+import { DateField } from "@/ui/booking/DateField";
 
 export default function NewTripCasePage() {
   const router = useRouter();
@@ -134,7 +135,7 @@ export default function NewTripCasePage() {
         <Section title="Trip details" description="The rough shape of the trip. Everything here can change later in the case.">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Start date" hint="Optional">
-              <input className={inputCls} type="date" value={trip.start_date} onChange={(e) => setTrip({ ...trip, start_date: e.target.value })} />
+              <DateField className={inputCls} value={trip.start_date} onChange={(v) => setTrip({ ...trip, start_date: v })} />
             </Field>
             <Field label="Adults" required error={tried ? pax.adults : null}>
               <input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={trip.pax_adults} onChange={(e) => setTrip({ ...trip, pax_adults: e.target.value })} />

@@ -123,6 +123,13 @@ body {
   }
 }
 
+/* AA-996 (audit slice 1) — a FilterBar passed to the Booking DataTable (`filters`) joins the kit table toolbar: its root
+   steps out of the box tree, so its search box sits on the toolbar line next to Columns / CSV and its filter row
+   (order 2, full width) wraps under them. ui/booking/FilterBar.tsx, ui/booking/DataTable.tsx. */
+.bk-dt-filters > .bk-filterbar {
+  display: contents;
+}
+
 /* AA-996 — compact density for zoomed laptops: 768-1199 px CSS wide (a 1440 px laptop at 125-150 % zoom; 150 % is
    about 960 px). Keep the window in step with COMPACT_QUERY in ui/booking/DataTable.tsx, which folds the columns marked
    `meta.compact = "drawer"` into the row's details drawer. Pure CSS (no flash after hydration, no layout shift); the

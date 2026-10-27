@@ -7,7 +7,7 @@
 import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { CaseVersion, TripCaseDetail } from "@/lib/api/types";
-import { DataTable, DateText, Money, Section, VersionBadgePill } from "@/ui";
+import { DataTable, DateText, Money, Section, VersionBadgePill, csvMoney } from "@/ui";
 
 export function ProposalsTab({ c }: { c: TripCaseDetail }) {
   const columns: ColumnDef<CaseVersion, unknown>[] = [
@@ -21,17 +21,19 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         </Link>
       ),
     },
-    { id: "title", header: "Title / notes", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.title ?? row.original.notes ?? "—"}</span> },
+    { id: "title", header: "Title / notes", accessorFn: (r) => r.title ?? r.notes ?? "", enableSorting: false, cell: ({ row }) => <span className="text-[13px] text-body">{row.original.title ?? row.original.notes ?? "—"}</span> },
     { id: "badge", header: "Status", accessorKey: "badge", cell: ({ row }) => <VersionBadgePill badge={row.original.badge} /> },
     { id: "items", header: "Items", accessorKey: "item_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.item_count}</span> },
-    { id: "total", header: "Total", cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} /> },
-    { id: "sent", header: "Sent", cell: ({ row }) => <DateText value={row.original.sent_at} className="text-[13px] text-muted" /> },
-    { id: "updated", header: "Updated", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="text-[13px] text-muted" /> },
+    { id: "total", header: "Total", accessorFn: (r) => csvMoney(r.total_price, r.currency), enableSorting: false, cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} /> },
+    { id: "sent", header: "Sent", accessorFn: (r) => r.sent_at ?? "", enableSorting: false, cell: ({ row }) => <DateText value={row.original.sent_at} className="text-[13px] text-muted" /> },
+    { id: "updated", header: "Updated", accessorFn: (r) => r.updated_at, enableSorting: false, cell: ({ row }) => <DateText value={row.original.updated_at} relative className="text-[13px] text-muted" /> },
   ];
   return (
     <Section title="Proposal versions" description="Each version is a full itinerary and price. A sent version is locked.">
       <DataTable<CaseVersion>
         tableId="case-versions"
+        enableCsv
+        csvFilename={`${c.code}-proposals.csv`}
         data={c.versions}
         columns={columns}
         getRowId={(r) => r.id}

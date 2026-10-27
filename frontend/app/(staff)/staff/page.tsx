@@ -109,16 +109,16 @@ export default function StaffPage() {
         <KpiTile label="Pending activation" value={value(pending)} hint={pending > 0 ? "Waiting for an admin to activate" : undefined} hintTone="warning" />
       </div>
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search name or e-mail" }}
-            selects={[
-              { key: "status", label: "Status", allLabel: "All statuses", options: [{ value: "active", label: "Active" }, { value: "inactive", label: "Pending / inactive" }] },
-              { key: "role", label: "Role", allLabel: "All roles", options: STAFF_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] })) },
-            ]}
-          />
-        </div>
         <DataTable<StaffProfile>
+          filters={
+            <FilterBar
+              search={{ placeholder: "Search name or e-mail" }}
+              selects={[
+                { key: "status", label: "Status", allLabel: "All statuses", options: [{ value: "active", label: "Active" }, { value: "inactive", label: "Pending / inactive" }] },
+                { key: "role", label: "Role", allLabel: "All roles", options: STAFF_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] })) },
+              ]}
+            />
+          }
           tableId="staff"
           data={rows}
           columns={columns}

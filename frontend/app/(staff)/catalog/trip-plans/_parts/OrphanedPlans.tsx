@@ -13,7 +13,8 @@ import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { DataTable, DateText, Pill, useUrlFilters } from "@/ui";
 import { SellableBadge } from "./shared";
 
-export function OrphanedPlansTable() {
+/** `filters`: the page's FilterBar, drawn in the table toolbar (AA-996 audit slice 1). */
+export function OrphanedPlansTable({ filters }: { filters?: React.ReactNode }) {
   const { get } = useUrlFilters();
   const paging = useOffsetPage();
   const query = { q: get("q").trim() || undefined, limit: paging.limit, offset: paging.offset };
@@ -71,6 +72,7 @@ export function OrphanedPlansTable() {
   return (
     <>
       <DataTable<OrphanedPlanItem>
+        filters={filters}
         searchable={false}
         tableId="trip-plans-orphaned"
         data={list.data?.items ?? []}

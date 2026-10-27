@@ -5,6 +5,7 @@
 // by pattern, so no markup is ever trusted from the database.
 
 import { BadgeCheck, Bell, Handshake, Inbox, Repeat, UserCheck } from "lucide-react";
+import { localizeIsoDates } from "./dates";
 
 const TYPE_ICON: Record<string, React.ComponentType<{ size?: number }>> = {
   "trip_case.new_inquiry": Inbox,
@@ -33,7 +34,8 @@ export function NotificationIcon({ type, read, size = 40 }: { type: string; read
 const CODE_RE = /\b((?:TC|CUS)-\d{3,})\b/g;
 
 export function NotificationMessage({ text, className = "" }: { text: string; className?: string }) {
-  const parts = text.split(CODE_RE);
+  // AA-996: the API stores dates in the text as ISO ("next due 2026-11-06"); show them like every other date.
+  const parts = localizeIsoDates(text).split(CODE_RE);
   return (
     <span className={className}>
       {parts.map((part, i) =>

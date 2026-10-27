@@ -13,6 +13,7 @@ import { FormDrawer, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { UNIT_LABEL, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
+import { DateField } from "@/ui/booking/DateField";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
 const MEAL_LABEL: Record<MealPlan, string> = { RO: "Room only", BB: "Bed & breakfast", HB: "Half board", FB: "Full board", AI: "All inclusive" };
@@ -141,10 +142,10 @@ export function RateDrawer({
           <input className={inputCls} maxLength={80} value={form.season} onChange={(e) => set("season")(e.target.value)} />
         </FormField>
         <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
-          <input type="date" className={inputCls} value={form.valid_from} min={contract.valid_from} max={contract.valid_to ?? undefined} onChange={(e) => set("valid_from")(e.target.value)} />
+          <DateField className={inputCls} value={form.valid_from} min={contract.valid_from} max={contract.valid_to ?? undefined} onChange={(v) => set("valid_from")(v)} />
         </FormField>
         <FormField label="Valid to" hint={contract.valid_to ? "Inside the contract." : "Empty = open-ended."} error={errorFor(fe, "valid_to")}>
-          <input type="date" className={inputCls} value={form.valid_to} min={form.valid_from} max={contract.valid_to ?? undefined} onChange={(e) => set("valid_to")(e.target.value)} />
+          <DateField className={inputCls} value={form.valid_to} min={form.valid_from} max={contract.valid_to ?? undefined} onChange={(v) => set("valid_to")(v)} />
         </FormField>
         <FormField label="Pax from" hint="Empty = any." error={errorFor(fe, "pax_min")}>
           <input type="number" min={1} max={999} className={inputCls} value={form.pax_min} onChange={(e) => set("pax_min")(e.target.value)} />

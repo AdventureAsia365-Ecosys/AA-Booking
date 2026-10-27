@@ -1287,6 +1287,15 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `ui/booking/DataTable.tsx` around the kit copy. From 768 to 1199 px CSS wide (zoomed laptops) cells are tighter, the
   sidebar is the icon rail, the page gutter is 20 px (`app/globals.css`, pure CSS) and columns marked
   `meta: { compact: "drawer" }` move into a row details drawer; at 1200 px and wider nothing changes.
+- List and date pieces (AA-996 audit slice 1, S254): a list page passes its `FilterBar` to the table through the
+  DataTable `filters` prop, which gives every list the Figma shape: row 1 search box + the table's Columns / CSV, row 2
+  the filters (labels inline) + "Reset filters" (always drawn, disabled at the defaults). Every list exports CSV
+  (`enableCsv`; a display-only column gets an `accessorFn` with sorting off; `csv` on the wrapper when a cell groups two
+  facts; the Countries grid uses `ExportCsvButton` in the bar's `tools` slot). Dates are typed and shown en-GB through
+  `ui/booking/DateField.tsx` (`DateField` "28 Oct 2026", day-first input; `TimeField` 24 h) instead of the browser's
+  locale inputs; date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,
+  `DateText`), and ISO dates inside notification text are localised (`localizeIsoDates`). `npm run test:unit` runs the
+  pure helpers' tests.
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.

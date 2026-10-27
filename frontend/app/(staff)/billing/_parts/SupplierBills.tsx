@@ -21,6 +21,7 @@ import {
   Money,
   Section,
   SupplierBillStatusBadge,
+  formatDay,
   formatMoney,
   useCan,
   useUrlFilters,
@@ -47,7 +48,7 @@ export function SupplierBillKpis() {
         hint={s ? `${s.overdue.count} bill(s) past their due date` : undefined}
         hintTone={s && s.overdue.count ? "danger" : "neutral"}
       />
-      <KpiTile label="Paid out this month" value={canRead ? kpiValue(s?.paid_this_month) : null} hint={s ? `${s.paid_this_month.count} payout(s) since ${s.month_start}` : undefined} />
+      <KpiTile label="Paid out this month" value={canRead ? kpiValue(s?.paid_this_month) : null} hint={s ? `${s.paid_this_month.count} payout(s) since ${formatDay(s.month_start)}` : undefined} />
     </div>
   );
 }
@@ -164,29 +165,29 @@ export function SupplierBillsList({
           </button>
         </div>
       )}
-      <div className="mb-4">
-        <FilterBar
-          extraKeys={["case"]}
-          search={{ placeholder: supplier ? "Search bill or trip case" : "Search bill, supplier or trip case" }}
-          selects={[
-            {
-              key: "bill_status",
-              label: "Status",
-              allLabel: "All statuses",
-              options: [
-                { value: "open", label: "Open (to approve, to pay)" },
-                { value: "received", label: "To approve" },
-                { value: "approved", label: "To pay" },
-                { value: "paid", label: "Paid" },
-                { value: "cancelled", label: "Cancelled" },
-              ],
-              width: 200,
-            },
-            { key: "bill_due", label: "Due", allLabel: "Any", options: [{ value: "overdue", label: "Overdue" }], width: 120 },
-          ]}
-        />
-      </div>
       <DataTable<SupplierBill>
+        filters={
+          <FilterBar
+            extraKeys={["case"]}
+            search={{ placeholder: supplier ? "Search bill or trip case" : "Search bill, supplier or trip case" }}
+            selects={[
+              {
+                key: "bill_status",
+                label: "Status",
+                allLabel: "All statuses",
+                options: [
+                  { value: "open", label: "Open (to approve, to pay)" },
+                  { value: "received", label: "To approve" },
+                  { value: "approved", label: "To pay" },
+                  { value: "paid", label: "Paid" },
+                  { value: "cancelled", label: "Cancelled" },
+                ],
+                width: 200,
+              },
+              { key: "bill_due", label: "Due", allLabel: "Any", options: [{ value: "overdue", label: "Overdue" }], width: 120 },
+            ]}
+          />
+        }
         searchable={false}
         tableId={supplier ? "supplier-bills-of-supplier" : "supplier-bills"}
         data={list.data?.items ?? []}

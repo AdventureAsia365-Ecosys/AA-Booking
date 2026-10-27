@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Eye, Globe, ImageIcon, MapPin, Pencil, Plus, Power, Store } from "lucide-react";
 import { geoApi, type CountryItem, type GeoStatus } from "@/lib/api/geo";
-import { Button, CisPhoto, EmptyState, ErrorState, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters } from "@/ui";
+import { Button, CisPhoto, EmptyState, ErrorState, ExportCsvButton, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters } from "@/ui";
 import { RowMenu } from "@/ui/booking/RowMenu";
 import { CIS_PLACES_PATH, CountryDrawer, GeoStatusBadge } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
@@ -80,6 +80,7 @@ export function CountriesView() {
               },
               { key: "area", label: "Area", allLabel: "All areas", options: (all.data?.areas ?? []).map((a) => ({ value: a, label: a })) },
             ]}
+            tools={<ExportCsvButton rows={items} columns={COUNTRY_CSV} filename="countries.csv" disabled={list.isLoading} />}
           />
         </div>
         {list.isLoading ? (
@@ -184,3 +185,16 @@ function Count({ icon, label, value }: { icon: React.ReactNode; label: string; v
     </div>
   );
 }
+
+/** AA-996 (audit slice 1): the Countries CSV, the cards' facts (the filtered list, as shown). */
+const COUNTRY_CSV: { header: string; value: (c: CountryItem) => unknown }[] = [
+  { header: "Country", value: (c) => c.name },
+  { header: "ISO code", value: (c) => c.country_code },
+  { header: "Status", value: (c) => c.status },
+  { header: "Area", value: (c) => c.area ?? "" },
+  { header: "Places (CIS)", value: (c) => c.destinations },
+  { header: "Tours (CIS)", value: (c) => c.tours },
+  { header: "Photos (CIS)", value: (c) => c.photos },
+  { header: "Active suppliers", value: (c) => c.active_suppliers },
+  { header: "In Booking", value: (c) => (c.booking_reference ? "yes" : "no") },
+];

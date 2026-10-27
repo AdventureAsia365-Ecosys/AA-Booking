@@ -89,7 +89,7 @@ export function DestinationsView() {
     { id: "photos", header: "Media", meta: { compact: "drawer" }, accessorKey: "photo_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.photo_count} files</span> },
     {
       id: "actions",
-      header: "",
+      header: "Actions", // AA-996 audit: the column header was blank
       enableSorting: false,
       cell: ({ row }) => {
         const d = row.original;
@@ -136,31 +136,31 @@ export function DestinationsView() {
         <KpiTile label="Countries covered" value={s?.countries} icon={<Globe size={16} />} />
       </div>
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search destinations" }}
-            selects={[
-              {
-                key: "country",
-                label: "Country",
-                allLabel: "All countries",
-                options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
-                width: 170,
-              },
-              {
-                key: "status",
-                label: "Status",
-                allLabel: "All statuses",
-                options: [
-                  { value: "active", label: "Active" },
-                  { value: "inactive", label: "Inactive" },
-                ],
-              },
-              { key: "sort", label: "Sort", allLabel: "Name A–Z", options: SORTS },
-            ]}
-          />
-        </div>
         <DataTable<DestinationItem>
+          filters={
+            <FilterBar
+              search={{ placeholder: "Search destinations" }}
+              selects={[
+                {
+                  key: "country",
+                  label: "Country",
+                  allLabel: "All countries",
+                  options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                  width: 170,
+                },
+                {
+                  key: "status",
+                  label: "Status",
+                  allLabel: "All statuses",
+                  options: [
+                    { value: "active", label: "Active" },
+                    { value: "inactive", label: "Inactive" },
+                  ],
+                },
+                { key: "sort", label: "Sort", allLabel: "Name A–Z", options: SORTS },
+              ]}
+            />
+          }
           searchable={false}
           tableId="destinations"
           data={list.data?.items ?? []}

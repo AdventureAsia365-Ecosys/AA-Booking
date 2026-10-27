@@ -12,7 +12,9 @@ export * from "./Toast";
 // itself stays a byte-comparable CIS copy.
 export type { DataTableProps, ColumnDef } from "./DataTable";
 export { createColumnHelper } from "./DataTable";
-export { DataTable, COMPACT_QUERY, useIsCompact, type BookingDataTableProps } from "./booking/DataTable";
+export { DataTable, COMPACT_QUERY, useIsCompact, csvMoney, type BookingDataTableProps, type CsvColumn } from "./booking/DataTable";
+export * from "./booking/DateField";
+export * from "./booking/dates";
 export * from "./csv";
 export * from "./savedViews";
 export { Providers } from "./Providers";
@@ -34,6 +36,7 @@ export * from "./booking/Stepper";
 export * from "./booking/ConfirmDialog";
 export * from "./booking/FormDrawer";
 export * from "./booking/FilterBar";
+export * from "./booking/ExportCsvButton";
 export * from "./booking/KpiTile";
 export * from "./booking/Section";
 export * from "./booking/PageFrame";

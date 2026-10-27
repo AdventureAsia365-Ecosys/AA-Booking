@@ -76,44 +76,46 @@ export function ServicesView() {
       }
     >
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search title, SVC- code or supplier" }}
-            selects={[
-              { key: "type", label: "Type", allLabel: "All types", options: SERVICE_TYPES.map((t) => ({ value: t, label: SERVICE_TYPE_LABEL[t] })) },
-              {
-                key: "status",
-                label: "Status",
-                allLabel: "All statuses",
-                options: [
-                  { value: "active", label: "Active" },
-                  { value: "inactive", label: "Inactive" },
-                ],
-              },
-              {
-                key: "country",
-                label: "Country",
-                allLabel: "All countries",
-                options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
-                width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
-              },
-              {
-                key: "sort",
-                label: "Sort",
-                allLabel: "Title A–Z",
-                options: [
-                  { value: "-updated_at", label: "Recently updated" },
-                  { value: "-created_at", label: "Newest first" },
-                  { value: "service_type", label: "Type" },
-                ],
-              },
-            ]}
-          />
-        </div>
         <div className="bk-dt-sticky-end">
           <DataTable<Service>
+            filters={
+              <FilterBar
+                search={{ placeholder: "Search title, SVC- code or supplier" }}
+                selects={[
+                  { key: "type", label: "Type", allLabel: "All types", options: SERVICE_TYPES.map((t) => ({ value: t, label: SERVICE_TYPE_LABEL[t] })) },
+                  {
+                    key: "status",
+                    label: "Status",
+                    allLabel: "All statuses",
+                    options: [
+                      { value: "active", label: "Active" },
+                      { value: "inactive", label: "Inactive" },
+                    ],
+                  },
+                  {
+                    key: "country",
+                    label: "Country",
+                    allLabel: "All countries",
+                    options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                    width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
+                  },
+                  {
+                    key: "sort",
+                    label: "Sort",
+                    allLabel: "Title A–Z",
+                    options: [
+                      { value: "-updated_at", label: "Recently updated" },
+                      { value: "-created_at", label: "Newest first" },
+                      { value: "service_type", label: "Type" },
+                    ],
+                  },
+                ]}
+              />
+            }
             searchable={false}
             tableId="services"
+            enableCsv
+            csvFilename="services.csv"
             data={list.data?.items ?? []}
             columns={columns}
             getRowId={(r) => r.id}

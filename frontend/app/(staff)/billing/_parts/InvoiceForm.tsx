@@ -22,6 +22,8 @@ import {
 import { Button, Modal, Money, formatMoney, useToast } from "@/ui";
 import { errorText, fieldCls } from "./PaymentDialogs";
 import { fromCents, lineCents, sumCents, toCents } from "./money";
+import { DateField } from "@/ui/booking/DateField";
+import { formatDay } from "@/ui/booking/dates";
 
 type Mode = { kind: "create"; billing: CaseBilling } | { kind: "edit"; invoice: InvoiceDetail } | { kind: "amend"; invoice: InvoiceDetail };
 
@@ -190,7 +192,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       {frozen.length > 0 && (
         <div className="rounded-md bg-line2 px-3 py-2 text-xs text-body">
           Already covered by verified payments and kept:{" "}
-          {frozen.map((r) => `${SCHEDULE_KIND_LABEL[r.kind]} ${formatMoney(r.amount, currency)} (${r.due_date})`).join(", ")}.
+          {frozen.map((r) => `${SCHEDULE_KIND_LABEL[r.kind]} ${formatMoney(r.amount, currency)} (${formatDay(r.due_date)})`).join(", ")}.
         </div>
       )}
       <label className="flex items-center gap-2 text-[13px] text-body">
@@ -211,7 +213,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
                 ))}
               </select>
               <input className={fieldCls} inputMode="decimal" aria-label="Amount" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} />
-              <input type="date" className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(e) => setRow(i, { due_date: e.target.value })} />
+              <DateField className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(v) => setRow(i, { due_date: v })} />
               <Button variant="ghost" size="sm" ariaLabel="Remove payment" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>
                 <Trash2 size={14} />
               </Button>
@@ -232,7 +234,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
         <ul className="text-[13px] text-body">
           {mode.billing.defaults.schedule.map((r) => (
             <li key={r.seq}>
-              {SCHEDULE_KIND_LABEL[r.kind]}: {total === base ? formatMoney(r.amount, currency) : "recomputed on the new total"} due {r.due_date}
+              {SCHEDULE_KIND_LABEL[r.kind]}: {total === base ? formatMoney(r.amount, currency) : "recomputed on the new total"} due {formatDay(r.due_date)}
             </li>
           ))}
         </ul>

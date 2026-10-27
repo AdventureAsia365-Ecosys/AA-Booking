@@ -12,6 +12,7 @@ import { FormDrawer, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { supplierError } from "./shared";
+import { DateField } from "@/ui/booking/DateField";
 
 export function ContractDrawer({
   supplierRef,
@@ -97,10 +98,10 @@ export function ContractDrawer({
       </FormField>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
-          <input type="date" className={inputCls} value={form.valid_from} onChange={(e) => set("valid_from")(e.target.value)} />
+          <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
         </FormField>
         <FormField label="Valid to" hint="Empty = open-ended." error={errorFor(fe, "valid_to")}>
-          <input type="date" className={inputCls} value={form.valid_to} onChange={(e) => set("valid_to")(e.target.value)} />
+          <DateField className={inputCls} value={form.valid_to} onChange={(v) => set("valid_to")(v)} />
         </FormField>
         <FormField label="Currency" required hint="The supplier's currency." error={errorFor(fe, "currency")}>
           <input

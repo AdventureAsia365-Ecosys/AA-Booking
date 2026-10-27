@@ -21,6 +21,8 @@ import {
 import type { OpsFile } from "@/lib/api/supplierBookings";
 import { Button, ConfirmDialog, Modal, Money, formatMoney, useToast } from "@/ui";
 import { prepareUpload } from "../../_parts/SupplyContent";
+import { DateField } from "@/ui/booking/DateField";
+import { formatDay } from "@/ui/booking/dates";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 export const fieldCls =
@@ -171,7 +173,7 @@ function RecordBody({
           <span className="text-xs font-semibold text-muted">
             Day the money moved <span className="text-danger">*</span>
           </span>
-          <input type="date" className={fieldCls} value={receivedOn} onChange={(e) => setReceivedOn(e.target.value)} />
+          <DateField className={fieldCls} value={receivedOn} onChange={(v) => setReceivedOn(v)} />
         </label>
       </div>
       <label className="flex flex-col gap-1">
@@ -250,7 +252,7 @@ export function VerifyPaymentDialog({ payment, onClose, onDone }: { payment: Pay
             <strong>
               {formatMoney(payment.amount, payment.currency)} {payment.kind === "refund" ? "was paid back" : "arrived"}
             </strong>{" "}
-            ({PAYMENT_METHOD_LABEL[payment.method]}, {payment.received_on}
+            ({PAYMENT_METHOD_LABEL[payment.method]}, {formatDay(payment.received_on)}
             {payment.reference ? `, ref ${payment.reference}` : ""}), as the evidence shows. Recorded by{" "}
             {payment.recorded_by?.name ?? payment.recorded_by?.id ?? "someone else"}.
           </>

@@ -42,6 +42,7 @@ import {
   type BookingTone,
 } from "@/ui";
 import { SavedTabs } from "../../_parts/SavedTabs";
+import { formatDay } from "@/ui/booking/dates";
 
 const SLA_META: Record<Sla, { label: string; tone: BookingTone; help: string }> = {
   overdue: { label: "Overdue", tone: "danger", help: "Past the 1 business day answer deadline" },
@@ -469,7 +470,7 @@ function DeparturesTab() {
                       Clear incident
                     </Button>
                   ) : (
-                    <Button size="sm" variant="danger" onClick={() => setFlagging(d)} ariaLabel={`Flag incident on departure ${d.start_date}`}>
+                    <Button size="sm" variant="danger" onClick={() => setFlagging(d)} ariaLabel={`Flag incident on departure ${formatDay(d.start_date)}`}>
                       Flag incident
                     </Button>
                   )}

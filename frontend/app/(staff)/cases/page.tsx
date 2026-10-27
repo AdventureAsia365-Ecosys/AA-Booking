@@ -81,6 +81,43 @@ export default function TripCasesPage() {
 
   const forbidden = isForbidden(list.error);
 
+  // AA-996 (audit slice 1): drawn in the table toolbar, so the filters and the Columns / CSV tools share one row.
+  const filterBar = (
+    <FilterBar
+      search={{ placeholder: "Search case code, customer name or e-mail" }}
+      selects={[
+        {
+          key: "sales",
+          label: "Sales rep",
+          allLabel: "All reps",
+          options: [
+            { value: "none", label: "Unassigned" },
+            ...sortStaff(directory.data?.items ?? []).map((s) => ({ value: s.cis_user_id, label: s.name ?? s.cis_user_id })),
+          ],
+          // AA-910 (S250): the staff names load after the page; a fixed width keeps the bar from growing and
+          // wrapping when they arrive (the /cases CLS of 0.12 on Dev). AA-996: 150, so every filter fits one row at 1440.
+          width: 150,
+        },
+        {
+          key: "source",
+          label: "Source",
+          allLabel: "All sources",
+          options: [
+            { value: "tripplanner", label: "TripPlanner" },
+            { value: "manual", label: "Manual" },
+            { value: "cis", label: "CIS trip plan" },
+            { value: "crm", label: "B2B agency (CRM)" },
+          ],
+          width: 150,
+        },
+      ]}
+      dateRange={{ fromKey: "from", toKey: "to", label: "Created" }}
+      extraKeys={["status"]}
+    >
+      <StatusMultiSelect value={pickedStatus} onChange={(next) => set("status", next.length ? next.join(",") : null)} />
+    </FilterBar>
+  );
+
   return (
     <PageFrame
       title="Trip cases"
@@ -111,44 +148,14 @@ export default function TripCasesPage() {
             }))}
           />
           <Section>
-            <div className="mb-4">
-              <FilterBar
-                search={{ placeholder: "Search case code, customer name or e-mail" }}
-                selects={[
-                  {
-                    key: "sales",
-                    label: "Sales rep",
-                    allLabel: "All reps",
-                    options: [
-                      { value: "none", label: "Unassigned" },
-                      ...sortStaff(directory.data?.items ?? []).map((s) => ({ value: s.cis_user_id, label: s.name ?? s.cis_user_id })),
-                    ],
-                    // AA-910 (S250): the staff names load after the page; a fixed width keeps the bar from growing and
-                    // wrapping when they arrive (the /cases CLS of 0.12 on Dev).
-                    width: 170,
-                  },
-                  {
-                    key: "source",
-                    label: "Source",
-                    allLabel: "All sources",
-                    options: [
-                      { value: "tripplanner", label: "TripPlanner" },
-                      { value: "manual", label: "Manual" },
-                      { value: "cis", label: "CIS trip plan" },
-                      { value: "crm", label: "B2B agency (CRM)" },
-                    ],
-                  },
-                ]}
-                dateRange={{ fromKey: "from", toKey: "to", label: "Created" }}
-                extraKeys={["status"]}
-              >
-                <StatusMultiSelect value={pickedStatus} onChange={(next) => set("status", next.length ? next.join(",") : null)} />
-              </FilterBar>
-            </div>
             {list.isError ? (
-              <QueryError error={list.error} onRetry={() => list.refetch()} what="trip cases" />
+              <>
+                <div className="mb-4">{filterBar}</div>
+                <QueryError error={list.error} onRetry={() => list.refetch()} what="trip cases" />
+              </>
             ) : (
               <DataTable<TripCaseListItem>
+                filters={filterBar}
                 searchable={false}
                 tableId="trip-cases"
                 data={list.data?.items ?? []}

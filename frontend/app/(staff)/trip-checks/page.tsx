@@ -37,13 +37,15 @@ function dueBefore(key: string): string | undefined {
   return d.toISOString().slice(0, 10);
 }
 
+// AA-996 (Figma audit, deviation 8): the list fits 1440 px with its Status column in view (it was cut at the card edge):
+// the free-text cells (check, customer, owner) truncate with the full text in the tooltip.
 const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
   {
     id: "task",
     header: "Check",
     accessorFn: (r) => checkTitle(r),
     cell: ({ row }) => (
-      <span className="flex min-w-0 flex-col md:max-w-[300px]">
+      <span className="flex min-w-0 flex-col md:max-w-[170px]">
         <span className="truncate text-[13.5px] font-medium text-ink" title={checkTitle(row.original)}>
           {checkTitle(row.original)}
         </span>
@@ -74,10 +76,16 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
   {
     id: "customer",
     header: "Customer",
+    accessorFn: (r) => (r.trip_case.channel === "b2b" ? "B2B agency" : (r.trip_case.customer_name ?? "")),
+    enableSorting: false,
     cell: ({ row }) => {
       const t = row.original.trip_case;
       if (t.channel === "b2b") return <Pill tone="accent" dot={false}>B2B agency</Pill>;
-      return <span className="block max-w-[180px] truncate text-[13px] text-body">{t.customer_name ?? "—"}</span>;
+      return (
+        <span className="block max-w-[180px] truncate text-[13px] text-body md:max-w-[110px]" title={t.customer_name ?? undefined}>
+          {t.customer_name ?? "—"}
+        </span>
+      );
     },
   },
   {
@@ -85,7 +93,7 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
     header: "Trip starts",
     accessorFn: (r) => r.trip_case.start_date ?? "",
     cell: ({ row }) =>
-      row.original.trip_case.start_date ? <DateText value={row.original.trip_case.start_date} className="text-[13px]" /> : <span className="text-muted">—</span>,
+      row.original.trip_case.start_date ? <DateText value={row.original.trip_case.start_date} className="whitespace-nowrap text-[13px]" /> : <span className="text-muted">—</span>,
   },
   {
     id: "due",
@@ -101,7 +109,16 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
   {
     id: "owner",
     header: "Owner",
-    cell: ({ row }) => <span className="text-[13px] text-body">{row.original.assignee ? (row.original.assignee.name ?? row.original.assignee.id) : "Anyone"}</span>,
+    accessorFn: (r) => (r.assignee ? (r.assignee.name ?? r.assignee.id) : "Anyone"),
+    enableSorting: false,
+    cell: ({ row }) => {
+      const name = row.original.assignee ? (row.original.assignee.name ?? row.original.assignee.id) : "Anyone";
+      return (
+        <span className="block max-w-[180px] truncate text-[13px] text-body md:max-w-[100px]" title={name}>
+          {name}
+        </span>
+      );
+    },
   },
   {
     id: "status",
@@ -135,56 +152,58 @@ export default function TripChecksPage() {
       description="Pre-departure checks across sold trips: re-check bookings, emergency contact, insurance and your own checks. Soonest due first."
     >
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search case code or check" }}
-            selects={[
-              {
-                key: "status",
-                label: "Status",
-                allLabel: "Open",
-                options: [
-                  { value: "done", label: "Done" },
-                  { value: "not_applicable", label: "Not applicable" },
-                  { value: "all", label: "All statuses" },
-                ],
-                width: 150,
-              },
-              {
-                key: "due",
-                label: "Due",
-                allLabel: "Any time",
-                options: [
-                  { value: "overdue", label: "Overdue" },
-                  { value: "7d", label: "Within 7 days" },
-                  { value: "14d", label: "Within 14 days" },
-                  { value: "30d", label: "Within 30 days" },
-                ],
-                width: 150,
-              },
-              {
-                key: "owner",
-                label: "Owner",
-                allLabel: "Anyone",
-                options: [
-                  { value: "me", label: "Mine" },
-                  { value: "none", label: "No owner" },
-                ],
-                width: 130,
-              },
-              {
-                key: "check",
-                label: "Check",
-                allLabel: "All checks",
-                options: Object.entries(TRIP_CHECK_CODE_LABEL).map(([value, label]) => ({ value, label })),
-                width: 170,
-              },
-            ]}
-          />
-        </div>
         <DataTable<TripCheck>
+          filters={
+            <FilterBar
+              search={{ placeholder: "Search case code or check" }}
+              selects={[
+                {
+                  key: "status",
+                  label: "Status",
+                  allLabel: "Open",
+                  options: [
+                    { value: "done", label: "Done" },
+                    { value: "not_applicable", label: "Not applicable" },
+                    { value: "all", label: "All statuses" },
+                  ],
+                  width: 150,
+                },
+                {
+                  key: "due",
+                  label: "Due",
+                  allLabel: "Any time",
+                  options: [
+                    { value: "overdue", label: "Overdue" },
+                    { value: "7d", label: "Within 7 days" },
+                    { value: "14d", label: "Within 14 days" },
+                    { value: "30d", label: "Within 30 days" },
+                  ],
+                  width: 150,
+                },
+                {
+                  key: "owner",
+                  label: "Owner",
+                  allLabel: "Anyone",
+                  options: [
+                    { value: "me", label: "Mine" },
+                    { value: "none", label: "No owner" },
+                  ],
+                  width: 130,
+                },
+                {
+                  key: "check",
+                  label: "Check",
+                  allLabel: "All checks",
+                  options: Object.entries(TRIP_CHECK_CODE_LABEL).map(([value, label]) => ({ value, label })),
+                  width: 170,
+                },
+              ]}
+            />
+          }
           searchable={false}
           tableId="trip-checks"
+          enableCsv
+          csvFilename="trip-checks.csv"
           data={list.data?.items ?? []}
           columns={COLUMNS}
           getRowId={(r) => r.id}

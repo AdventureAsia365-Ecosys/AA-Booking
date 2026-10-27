@@ -30,6 +30,7 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
+import { localizeIsoDates } from "@/ui/booking/dates";
 
 const PAGE_SIZE = 20;
 
@@ -166,7 +167,7 @@ function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (i
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className={`text-[14px] text-ink ${n.read ? "font-medium" : "font-semibold"}`}>{n.title ?? label}</span>
+            <span className={`text-[14px] text-ink ${n.read ? "font-medium" : "font-semibold"}`}>{n.title ? localizeIsoDates(n.title) : label}</span>
             {n.title && n.title !== label && <Pill dot={false}>{label}</Pill>}
             {!n.read && <span className="sr-only">Unread</span>}
           </div>

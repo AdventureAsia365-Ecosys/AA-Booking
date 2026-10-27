@@ -39,14 +39,15 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
   const groups = [...STATUS_PHASES, { key: "closed", label: "Closed", statuses: ["cancelled"] as TripCaseStatus[] }];
 
   return (
-    <div ref={ref} className="relative flex flex-col gap-1">
-      <span className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted">Status</span>
+    // AA-996: the FilterBar shape (inline label before a 36 px control), so it shares the bar's single row.
+    <div ref={ref} className="relative flex items-center gap-1.5" data-bk-filter="">
+      <span className="shrink-0 whitespace-nowrap text-[12px] font-medium text-muted">Status</span>
       <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-9 min-w-[150px] cursor-pointer items-center justify-between gap-2 rounded-md border border-line bg-card px-3 text-[13px] text-ink hover:border-accent-border"
+        className="inline-flex h-9 min-w-[140px] cursor-pointer items-center justify-between gap-2 rounded-md border border-line bg-card px-3 text-[13px] text-ink hover:border-accent-border"
       >
         <span className="truncate">{label}</span>
         <ChevronDown size={14} className="shrink-0 text-muted" />

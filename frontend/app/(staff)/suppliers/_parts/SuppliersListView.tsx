@@ -91,49 +91,51 @@ export function SuppliersListView() {
         />
       </div>
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search name, SUP- code, contact or e-mail" }}
-            selects={[
-              {
-                key: "status",
-                label: "Status",
-                allLabel: "All statuses",
-                options: [
-                  { value: "active", label: "Active" },
-                  { value: "inactive", label: "Inactive" },
-                ],
-              },
-              {
-                key: "category",
-                label: "Category",
-                allLabel: "All categories",
-                options: SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
-              },
-              {
-                key: "country",
-                label: "Country",
-                allLabel: "All countries",
-                options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
-                width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
-              },
-              {
-                key: "sort",
-                label: "Sort",
-                allLabel: "Name A–Z",
-                options: [
-                  { value: "-updated_at", label: "Recently updated" },
-                  { value: "-created_at", label: "Newest first" },
-                  { value: "-company_name", label: "Name Z–A" },
-                ],
-              },
-            ]}
-          />
-        </div>
         <div className="bk-dt-sticky-end">
           <DataTable<Supplier>
+            filters={
+              <FilterBar
+                search={{ placeholder: "Search name, SUP- code, contact or e-mail" }}
+                selects={[
+                  {
+                    key: "status",
+                    label: "Status",
+                    allLabel: "All statuses",
+                    options: [
+                      { value: "active", label: "Active" },
+                      { value: "inactive", label: "Inactive" },
+                    ],
+                  },
+                  {
+                    key: "category",
+                    label: "Category",
+                    allLabel: "All categories",
+                    options: SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
+                  },
+                  {
+                    key: "country",
+                    label: "Country",
+                    allLabel: "All countries",
+                    options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                    width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
+                  },
+                  {
+                    key: "sort",
+                    label: "Sort",
+                    allLabel: "Name A–Z",
+                    options: [
+                      { value: "-updated_at", label: "Recently updated" },
+                      { value: "-created_at", label: "Newest first" },
+                      { value: "-company_name", label: "Name Z–A" },
+                    ],
+                  },
+                ]}
+              />
+            }
             searchable={false}
             tableId="suppliers"
+            enableCsv
+            csvFilename="suppliers.csv"
             data={list.data?.items ?? []}
             columns={columns}
             getRowId={(r) => r.id}
@@ -186,7 +188,7 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
       );
     },
   },
-  { id: "categories", header: "Categories", enableSorting: false, cell: ({ row }) => <CategoryChips categories={row.original.categories} /> },
+  { id: "categories", header: "Categories", accessorFn: (r) => r.categories.join(" "), enableSorting: false, cell: ({ row }) => <CategoryChips categories={row.original.categories} /> },
   {
     id: "contact",
     header: "Contact",
