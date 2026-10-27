@@ -1280,6 +1280,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
 - `frontend/ui/` holds byte copies of the CIS kit (`app/_kit`, `_brand/tokens.ts`, the `--aa-*` blocks of
   `globals.css`) with the source commit in each header. Brand values change in CIS first, then are copied again.
   Booking-only components are in `frontend/ui/booking/` and use Tailwind utilities mapped to the same variables.
+- Compact density (AA-996, S254): pages import `DataTable` from `@/ui`, which is the Booking wrapper
+  `ui/booking/DataTable.tsx` around the kit copy. From 768 to 1199 px CSS wide (zoomed laptops) cells are tighter, the
+  sidebar is the icon rail, the page gutter is 20 px (`app/globals.css`, pure CSS) and columns marked
+  `meta: { compact: "drawer" }` move into a row details drawer; at 1200 px and wider nothing changes.
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.

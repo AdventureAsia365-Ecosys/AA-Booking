@@ -11,6 +11,13 @@
 //                the design below 1440, AA-910 decision), and where the last column is the row menu it stays pinned
 //                (`bk-dt-sticky-end`, position: sticky) and in view.
 //   390 x 844  — phones (cards instead of tables): no horizontal page scroll, console clean.
+//   960 / 1100 — AA-996 compact density (768-1199 px: a laptop at 125-150 % browser zoom; ui/booking/DataTable.tsx and
+//                app/globals.css): the widest lists (cases, billing invoices / payments, suppliers, trip plans,
+//                destinations) fit their frame with no clipped column, in light and dark at 960; the sidebar is the
+//                68 px rail; the folded FX / audit columns open in the row's details drawer. Every page at 960: the page
+//                never scrolls sideways. At 1280 the sidebar is still the stored (expanded) width: nothing changed there.
+//                Review fixes: a CSV exported at 960 equals the one at 1400 (folded columns included); the details drawer
+//                closes for good when the window leaves 768-1199 px; the `[` key is ignored at 960.
 // The browser clock is frozen at fixtures.ts CLOCK and every fixture timestamp is older than 7 days, so relative dates
 // render as the (widest) absolute date on any day the check runs.
 // The API is mocked (see playwright.config.ts for why the fake session is safe). Measurements go to
@@ -161,6 +168,8 @@ type Measure = {
   tables: TableM[];
   tabstrips: { overflowY: number; hScrollbar: number }[];
   fxCells: { header: string; text: string; lines: number }[];
+  /** Rendered width of the shell sidebar (68 = icon rail, 248 = expanded). */
+  sidebarWidth: number | null;
 };
 
 async function measure(page: Page): Promise<Measure> {
@@ -260,6 +269,7 @@ async function measure(page: Page): Promise<Measure> {
       tables,
       tabstrips,
       fxCells,
+      sidebarWidth: (document.querySelector('[data-testid="admin-sidebar"]') as HTMLElement | null)?.offsetWidth ?? null,
     };
   }, FX_HEADERS);
 }
@@ -403,12 +413,158 @@ test.describe("1280 x 800 squeeze, light", () => {
       save(testInfo, pc, 1280, "light", m, c);
 
       commonChecks(pc, m, c, "light");
+      expect(m.sidebarWidth, "1280 is above the compact window: the sidebar keeps its stored (expanded) width").toBe(248);
       for (const t of m.tables) {
         expect(t.boxIsMain, `table "${t.head}" scrolls in its own box, not in <main>`).toBe(false);
         if (t.stickyEnd) {
           expect(t.lastHeaderPosition, `table "${t.head}": row-menu column pinned`).toBe("sticky");
           expect(t.lastHeaderVisible, `table "${t.head}": pinned row-menu column in view`).toBe(true);
         }
+      }
+    });
+  }
+});
+
+// AA-996 — compact density (768-1199 px). Nghiệp's laptop at 150 % zoom is about 960 px CSS wide, where the wide lists
+// used to cut their last columns (the frame scrolled sideways). The widest lists must now fit their frame with nothing
+// clipped and SLACK_PX to spare (the FX / audit columns are folded into the row's details drawer), at 960 in light and
+// dark and at 1100 in light; the sidebar is the 68 px rail.
+const COMPACT_PAGES: PageCase[] = [
+  { name: "cases", path: "/cases" },
+  { name: "billing-invoices", path: "/billing" },
+  { name: "billing-payments", path: "/billing?tab=payments" },
+  { name: "suppliers", path: "/suppliers" },
+  { name: "trip-plans", path: "/catalog/trip-plans" },
+  { name: "destinations", path: "/catalog/destinations" },
+];
+const COMPACT_PASSES = [
+  { width: 960, scheme: "light" },
+  { width: 960, scheme: "dark" },
+  { width: 1100, scheme: "light" },
+] as const;
+
+for (const { width, scheme } of COMPACT_PASSES) {
+  test.describe(`compact ${width} x 900, ${scheme}`, () => {
+    test.use({ viewport: { width, height: 900 }, colorScheme: scheme });
+    for (const pc of COMPACT_PAGES) {
+      test(`${pc.name} fits ${width} (compact density)`, async ({ page, baseURL }, testInfo) => {
+        const c = await prepare(page, baseURL!);
+        await open(page, pc, c);
+        const m = await measure(page);
+        fs.mkdirSync(OUT, { recursive: true });
+        await bringListIntoView(page, pc, "table", "last");
+        await page.screenshot({ path: path.join(OUT, `${pc.name}-${width}-${scheme}.png`) });
+        save(testInfo, { ...pc, name: `compact-${pc.name}` }, width, scheme, m, c);
+
+        commonChecks(pc, m, c, scheme);
+        expect(m.sidebarWidth, "compact density: the sidebar is the 68 px icon rail").toBe(68);
+        for (const t of m.tables) {
+          expect(t.boxScroll, `table "${t.head}" fits its frame at ${width}: no column cut off`).toBeLessThanOrEqual(t.boxClient);
+          expect(t.lastHeaderVisible, `table "${t.head}": last column "${t.lastHeader}" in view`).toBe(true);
+          expect(t.boxIsMain, `table "${t.head}" scrolls in its own box, not in <main>`).toBe(false);
+          expect(t.boxClient - t.minContent, `table "${t.head}": at least ${SLACK_PX} px to spare at ${width}`).toBeGreaterThanOrEqual(SLACK_PX);
+        }
+      });
+    }
+  });
+}
+
+test.describe("compact 960: the folded columns open in the row's details drawer", () => {
+  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
+  test("billing invoices: Issued, Total and Paid are in the details drawer", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "billing-invoices", path: "/billing" }, c);
+    const heads = await page.locator("main table thead th").allInnerTexts();
+    for (const folded of ["ISSUED", "TOTAL", "PAID"]) expect(heads.map((h) => h.trim().toUpperCase()), `${folded} left the table`).not.toContain(folded);
+    await page.locator('[data-testid="bk-dt-details"]').first().click();
+    const drawer = page.locator('[data-testid="bk-dt-details-drawer"]');
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText("INV-000001");
+    for (const label of ["Issued", "Total", "Paid"]) await expect(drawer.locator("dt", { hasText: new RegExp(`^${label}$`, "i") })).toHaveCount(1);
+    await page.waitForTimeout(300); // the kit drawer slides in (0.18 s): shoot it settled
+    await page.screenshot({ path: path.join(OUT, "billing-invoices-details-960-light.png") });
+    // Opening the details does not follow the row link (the button stops the row click).
+    expect(new URL(page.url()).pathname).toBe("/billing");
+    expect(c.unmocked, "every Booking API call has a fixture").toEqual([]);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+});
+
+// AA-996 review fixes: the CSV does not depend on the density, the details drawer does not outlive the compact window,
+// and the `[` key does not flip the hidden sidebar preference there.
+async function csvText(page: Page): Promise<string> {
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "CSV", exact: true }).click()]);
+  return fs.readFileSync((await download.path())!, "utf8");
+}
+const sidebarWidth = (page: Page) =>
+  page.evaluate(() => (document.querySelector('[data-testid="admin-sidebar"]') as HTMLElement | null)?.offsetWidth ?? null);
+
+test.describe("compact 960: the CSV export keeps every column", () => {
+  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
+  for (const pc of [
+    { name: "cases", path: "/cases", folded: ["Sales"] },
+    { name: "trip-plans", path: "/catalog/trip-plans", folded: ["Trip style", "Price hint"] },
+    { name: "destinations", path: "/catalog/destinations", folded: ["Coordinates", "Media"] },
+  ]) {
+    test(`${pc.name}: the file at 960 equals the file at 1400`, async ({ page, baseURL }) => {
+      const c = await prepare(page, baseURL!);
+      await open(page, pc, c);
+      const compactCsv = await csvText(page);
+      const header = compactCsv.replace(/^\uFEFF/, "").split("\n")[0].split(",");
+      for (const h of pc.folded) expect(header, `${h} is in the CSV at 960`).toContain(h);
+      expect(header, "the details button column is not exported").not.toContain("__details");
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.waitForTimeout(300);
+      expect(await csvText(page), "same file at 960 and 1400").toBe(compactCsv);
+      expect(c.consoleErrors, "console is clean").toEqual([]);
+    });
+  }
+});
+
+test.describe("compact 960: the details drawer and the sidebar key", () => {
+  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
+  test("the drawer closes when the window leaves the compact range and does not come back", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "billing-invoices", path: "/billing" }, c);
+    await page.locator('[data-testid="bk-dt-details"]').first().click();
+    const drawer = page.locator('[data-testid="bk-dt-details-drawer"]');
+    await expect(drawer).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(drawer).toHaveCount(0);
+    await page.setViewportSize({ width: 960, height: 900 });
+    await page.waitForTimeout(300);
+    await expect(drawer, "back in the compact window the drawer stays closed").toHaveCount(0);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+  test("the [ key does nothing at 960 (the stored sidebar width applies again at 1280)", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "cases", path: "/cases" }, c);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("[");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(300);
+    expect(await sidebarWidth(page), "the preference was not flipped at 960: expanded at 1280").toBe(248);
+    // Control: the key still works from 1200 px.
+    await page.keyboard.press("[");
+    await expect.poll(() => sidebarWidth(page)).toBe(68);
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+});
+
+// Every staff page at 960 (compact density): the page itself never scrolls sideways and tables keep to their own box.
+test.describe("960 x 900 compact, every page, light", () => {
+  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
+  for (const pc of PAGES) {
+    test(`${pc.name} at 960: page never scrolls sideways`, async ({ page, baseURL }, testInfo) => {
+      const c = await prepare(page, baseURL!);
+      await open(page, pc, c);
+      const m = await measure(page);
+      save(testInfo, pc, 960, "light", m, c);
+      commonChecks(pc, m, c, "light");
+      expect(m.sidebarWidth, "compact density: the sidebar is the 68 px icon rail").toBe(68);
+      for (const t of m.tables) {
+        expect(t.boxIsMain, `table "${t.head}" scrolls in its own box, not in <main>`).toBe(false);
+        if (t.stickyEnd) expect(t.lastHeaderVisible, `table "${t.head}": pinned row-menu column in view`).toBe(true);
       }
     });
   }

@@ -52,6 +52,7 @@ import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricin
 import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
+import type { BillingSummary, InvoiceStatus, InvoiceSummary, Kpi, Page as BillingPage, Payment } from "../../lib/api/billing";
 import staffMeJson from "./staff-me.json";
 
 /** The browser clock during the check (layout.spec.ts freezes it with page.clock.setFixedTime): the run gives the same
@@ -815,6 +816,100 @@ function countryDetail(iso: string): CountryDetail {
 }
 
 // ── Router ───────────────────────────────────────────────────────────────────
+// ── Billing (AA-996: the widest staff table, 9 columns; AA-682 S3) ─────────────
+// Long customer names, two currencies (VND amounts are the widest money strings), every optional value filled.
+const INVOICE_STATUSES: InvoiceStatus[] = ["sent", "partially_paid", "draft", "paid", "cancelled"];
+function invoice(i: number): InvoiceSummary {
+  const vnd = i % 3 !== 2;
+  const currency = vnd ? "VND" : "USD";
+  const total = vnd ? "1284500000" : "48250.00";
+  const paid = vnd ? "385350000" : "14475.00";
+  const balance = vnd ? "899150000" : "33775.00";
+  const status = INVOICE_STATUSES[i % INVOICE_STATUSES.length];
+  return {
+    id: uuid("7", i),
+    invoice_number: `INV-${pad(i + 1)}`,
+    status,
+    document_type: "proforma",
+    currency,
+    total_amount: total,
+    net_paid: paid,
+    verified_received: paid,
+    verified_refunded: "0",
+    unverified_amount: "0",
+    unverified_count: 0,
+    balance: status === "cancelled" ? null : balance,
+    next_due_date: status === "draft" ? null : "2026-11-15",
+    overdue_amount: i % 4 === 0 ? balance : "0",
+    oldest_overdue_date: i % 4 === 0 ? "2026-10-01" : null,
+    overdue: i % 4 === 0,
+    bill_to_name: `${PERSON_NAMES[i % 4]} and the Northern Highlands Family Travel Group`,
+    bill_to_email: `traveller.${i}@example.test`,
+    bill_to_address: null,
+    notes: null,
+    terms: null,
+    issued_at: status === "draft" ? null : EARLIER,
+    sent_by: status === "draft" ? null : person("u-002", 1),
+    cancelled_at: null,
+    cancel_reason: null,
+    created_by: "u-002",
+    created_at: EARLIER,
+    updated_at: NOW,
+    trip_case: { id: uuid("8", i), code: `TC-${pad(i + 1)}`, status: "confirmed", channel: "b2c", start_date: "2026-12-04" },
+    customer: { id: uuid("9", i), code: `CUS-${pad(i + 1)}`, name: PERSON_NAMES[i % 4] },
+    version: { id: uuid("a", i), number: 2, title: null, fx_rate_locked: vnd ? "25410.000000" : null },
+  };
+}
+function payment(i: number): Payment {
+  const vnd = i % 3 !== 2;
+  return {
+    id: uuid("b", i),
+    ref: `PAY-${pad(i + 1)}`,
+    kind: i % 7 === 6 ? "refund" : "receipt",
+    amount: vnd ? "385350000" : "14475.00",
+    currency: vnd ? "VND" : "USD",
+    method: (["bank_transfer", "card_offline", "cash", "other"] as const)[i % 4],
+    received_on: "2026-10-02",
+    reference: `Vietcombank transfer ${pad(i, 10)}`,
+    note: null,
+    received_amount: null,
+    received_currency: null,
+    evidence_file_id: null,
+    state: (["recorded", "verified", "voided"] as const)[i % 3],
+    recorded_by: person("u-002", i),
+    recorded_at: EARLIER,
+    verified_by: i % 3 === 1 ? person("u-003", 2) : null,
+    verified_at: i % 3 === 1 ? NOW : null,
+    voided_by: null,
+    voided_at: null,
+    void_reason: null,
+    invoice: { id: uuid("7", i), number: `INV-${pad(i + 1)}`, status: "partially_paid" },
+    trip_case: { id: uuid("8", i), code: `TC-${pad(i + 1)}` },
+    files: [],
+    needs_evidence: false,
+    actions: { edit: false, attach: false, verify: false, void: false },
+  };
+}
+const kpi = (count: number): Kpi => ({
+  count,
+  by_currency: [
+    { currency: "VND", amount: "8991500000" },
+    { currency: "USD", amount: "33775.00" },
+  ],
+  usd: "387625.40",
+  unconverted: 0,
+});
+const BILLING_SUMMARY: BillingSummary = {
+  outstanding: kpi(18),
+  overdue: kpi(4),
+  received_this_month: kpi(9),
+  awaiting_verification: kpi(3),
+  invoices: { draft: 3, sent: 9, partially_paid: 6, paid: 11, cancelled: 2 },
+  month_start: "2026-10-01",
+  today: "2026-10-23",
+};
+const billingPage = <T,>(items: T[], total: number): BillingPage<T> => ({ items, total, limit: ROWS, offset: 0 });
+
 export type FixtureAnswer = { status: number; body: unknown };
 
 const ok = (body: unknown): FixtureAnswer => ({ status: 200, body });
@@ -897,6 +992,10 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (at(0) === "catalog" && at(1) === "geo" && at(2) === "destinations" && seg.length === 4) return ok(destinationDetail(at(3)));
   if (p === "catalog/geo/countries") return ok(COUNTRY_LIST);
   if (at(0) === "catalog" && at(1) === "geo" && at(2) === "countries" && seg.length === 4) return ok(countryDetail(at(3)));
+
+  if (p === "billing/summary") return ok(BILLING_SUMMARY);
+  if (p === "invoices") return ok(billingPage(range(ROWS).map(invoice), 31));
+  if (p === "payments") return ok(billingPage(range(ROWS).map(payment), 58));
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (p === "catalog/trip-plans") {

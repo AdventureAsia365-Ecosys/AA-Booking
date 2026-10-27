@@ -8,7 +8,11 @@ export * from "./primitives";
 export * from "./Modal";
 export * from "./Drawer";
 export * from "./Toast";
-export * from "./DataTable";
+// AA-996: `DataTable` is the Booking wrapper (compact density for zoomed laptops) around the kit table; the kit file
+// itself stays a byte-comparable CIS copy.
+export type { DataTableProps, ColumnDef } from "./DataTable";
+export { createColumnHelper } from "./DataTable";
+export { DataTable, COMPACT_QUERY, useIsCompact, type BookingDataTableProps } from "./booking/DataTable";
 export * from "./csv";
 export * from "./savedViews";
 export { Providers } from "./Providers";

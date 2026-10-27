@@ -80,12 +80,13 @@ export function DestinationsView() {
     {
       id: "coords",
       header: "Coordinates",
+      meta: { compact: "drawer" }, // AA-996: with Media, in the details drawer below 1200 px
       enableSorting: false,
       accessorFn: (r) => coords(r.lat, r.lng) ?? "",
       cell: ({ row }) => <span className="bk-tabular whitespace-nowrap text-[12.5px] text-muted">{coords(row.original.lat, row.original.lng) ?? "—"}</span>,
     },
     { id: "status", header: "Booking status", accessorKey: "status", cell: ({ row }) => <GeoStatusBadge status={row.original.status} /> },
-    { id: "photos", header: "Media", accessorKey: "photo_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.photo_count} files</span> },
+    { id: "photos", header: "Media", meta: { compact: "drawer" }, accessorKey: "photo_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.photo_count} files</span> },
     {
       id: "actions",
       header: "",

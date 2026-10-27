@@ -183,6 +183,8 @@ export default function TripCasesPage() {
 
 // AA-910 (S250): fits the list frame at 1400 and 1440 px with 20 px to spare: customer 180 px, trip 170 px, sales 90 px
 // on desktop (full text in the tooltips); a date never breaks inside itself, and the status pill never shrinks.
+// AA-996: compact density (768-1199 px, ui/booking/DataTable.tsx): customer 140 px, trip 130 px, and Sales opens in the
+// row's details drawer, so the list fits a 960 px window (a 1440 px laptop at 150 % zoom) with 20 px to spare.
 const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   { id: "code", header: "Case", accessorKey: "code", cell: ({ row }) => <Code>{row.original.code}</Code> },
   {
@@ -191,7 +193,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     accessorKey: "customer_name",
     cell: ({ row }) => (
       <PersonCell
-        className="md:max-w-[180px]"
+        className="md:max-w-[140px] min-[1200px]:max-w-[180px]"
         name={row.original.customer_name}
         sub={row.original.customer_email ?? row.original.customer_phone}
         chips={
@@ -216,7 +218,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     header: "Trip",
     accessorKey: "trip_title",
     cell: ({ row }) => (
-      <span className="block max-w-[280px] text-[13px] text-body md:max-w-[170px]">
+      <span className="block max-w-[280px] text-[13px] text-body md:max-w-[130px] min-[1200px]:max-w-[170px]">
         <span className="block truncate" title={row.original.trip_title ?? undefined}>
           {row.original.trip_title ?? "Custom trip"}
         </span>
@@ -279,6 +281,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   {
     id: "sales",
     header: "Sales",
+    meta: { compact: "drawer" },
     accessorFn: (r) => r.assignees.find((a) => a.role === "sales")?.name ?? "",
     cell: ({ row }) => {
       const sales = row.original.assignees.find((a) => a.role === "sales");

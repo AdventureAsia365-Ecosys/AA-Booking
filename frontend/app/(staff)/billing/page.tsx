@@ -39,7 +39,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
         <Link
           href={`/billing/invoices/${encodeURIComponent(row.original.invoice_number)}`}
           onClick={(e) => e.stopPropagation()}
-          className="text-[13px] font-medium text-accent-deep hover:underline"
+          className="whitespace-nowrap text-[13px] font-medium text-accent-deep hover:underline"
         >
           {row.original.invoice_number}
         </Link>
@@ -51,7 +51,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
     id: "customer",
     header: "Customer",
     cell: ({ row }) => (
-      <span className="block max-w-[200px] truncate text-[13px] text-body">{row.original.bill_to_name ?? row.original.customer?.name ?? "—"}</span>
+      <span className="block max-w-[200px] truncate text-[13px] text-body md:max-w-[140px] min-[1200px]:max-w-[200px]">{row.original.bill_to_name ?? row.original.customer?.name ?? "—"}</span>
     ),
   },
   {
@@ -61,7 +61,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
       <Link
         href={`/cases/${encodeURIComponent(row.original.trip_case.code)}?tab=billing`}
         onClick={(e) => e.stopPropagation()}
-        className="text-[13px] text-accent-deep hover:underline"
+        className="whitespace-nowrap text-[13px] text-accent-deep hover:underline"
       >
         {row.original.trip_case.code}
       </Link>
@@ -70,6 +70,8 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
   {
     id: "issued",
     header: "Issued",
+    // AA-996: Issued (audit), Total and Paid (money detail; "Left to pay" stays) open in the details drawer below 1200 px.
+    meta: { compact: "drawer" },
     cell: ({ row }) => (row.original.issued_at ? <DateText value={row.original.issued_at} className="text-[13px]" /> : <span className="text-muted">—</span>),
   },
   {
@@ -77,13 +79,13 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
     header: "Next due",
     cell: ({ row }) =>
       row.original.next_due_date ? (
-        <DateText value={row.original.next_due_date} className={`text-[13px] ${row.original.overdue ? "font-semibold text-danger" : ""}`} />
+        <DateText value={row.original.next_due_date} className={`whitespace-nowrap text-[13px] ${row.original.overdue ? "font-semibold text-danger" : ""}`} />
       ) : (
         <span className="text-muted">—</span>
       ),
   },
-  { id: "total", header: "Total", cell: ({ row }) => <Money amount={row.original.total_amount} currency={row.original.currency} className="text-[13px]" /> },
-  { id: "paid", header: "Paid", cell: ({ row }) => <Money amount={row.original.net_paid} currency={row.original.currency} className="text-[13px]" /> },
+  { id: "total", header: "Total", meta: { compact: "drawer" }, cell: ({ row }) => <Money amount={row.original.total_amount} currency={row.original.currency} className="text-[13px]" /> },
+  { id: "paid", header: "Paid", meta: { compact: "drawer" }, cell: ({ row }) => <Money amount={row.original.net_paid} currency={row.original.currency} className="text-[13px]" /> },
   {
     id: "balance",
     header: "Left to pay",
@@ -133,6 +135,7 @@ const PAYMENT_COLUMNS: ColumnDef<Payment, unknown>[] = [
   {
     id: "who",
     header: "Recorded by",
+    meta: { compact: "drawer" }, // AA-996: audit, in the details drawer below 1200 px
     cell: ({ row }) => <span className="block max-w-[160px] truncate text-[13px] text-body">{row.original.recorded_by?.name ?? "—"}</span>,
   },
   { id: "state", header: "Status", cell: ({ row }) => <PaymentStateBadge state={row.original.state} /> },

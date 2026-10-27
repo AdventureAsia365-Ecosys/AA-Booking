@@ -79,6 +79,7 @@ export function TripPlansView() {
     {
       id: "style",
       header: "Trip style",
+      meta: { compact: "drawer" }, // AA-996: with the price hint, in the details drawer below 1200 px
       accessorFn: (r) => r.trip_style ?? "",
       cell: ({ row }) => <span className="text-[13px] text-body">{row.original.trip_style ?? "—"}</span>,
     },
@@ -87,6 +88,7 @@ export function TripPlansView() {
           {
             id: "hint",
             header: "Price hint",
+            meta: { compact: "drawer" as const },
             accessorFn: (r: TripPlanListItem) => Number(r.price_hint?.amount ?? 0),
             cell: ({ row }: { row: { original: TripPlanListItem } }) =>
               row.original.price_hint ? (

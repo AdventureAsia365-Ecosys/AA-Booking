@@ -123,6 +123,48 @@ body {
   }
 }
 
+/* AA-996 — compact density for zoomed laptops: 768-1199 px CSS wide (a 1440 px laptop at 125-150 % zoom; 150 % is
+   about 960 px). Keep the window in step with COMPACT_QUERY in ui/booking/DataTable.tsx, which folds the columns marked
+   `meta.compact = "drawer"` into the row's details drawer. Pure CSS (no flash after hydration, no layout shift); the
+   `!important` beats the kit's inline styles (ui/DataTable.tsx, ui/Sidebar.tsx are CIS copies and are not edited).
+   At 1200 px and wider nothing below applies, so the 1280-1440 px layout is exactly as before. Theme-neutral: only
+   sizes change, every colour stays a token (light and dark). */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+  /* Tables: tighter cells. */
+  .bk-dt table th {
+    padding: 8px 10px !important;
+    letter-spacing: 0.06em !important;
+  }
+  .bk-dt table td {
+    padding: 9px 10px !important;
+  }
+  /* Page gutter 32 → 20 px. */
+  .aa-admin-main {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  /* The sidebar is its 68 px icon rail (labels in the tooltips), whatever the stored preference: an expanded 248 px
+     sidebar leaves a 960 px window ~650 px for the page. The collapse toggle has nothing to do here, so it is hidden;
+     the stored preference applies again from 1200 px. Same presentation as ui/shell.css `[data-collapsed="true"]`. */
+  .aa-shell-sidebar {
+    width: 68px !important;
+  }
+  .aa-shell-sidebar .aa-sidebar-label,
+  .aa-shell-sidebar .aa-sidebar-group-title,
+  .aa-shell-sidebar .aa-sidebar-badge-pill,
+  .aa-shell-sidebar [data-testid="sidebar-collapse"] {
+    display: none !important;
+  }
+  .aa-shell-sidebar .aa-sidebar-badge-dot {
+    display: grid !important;
+  }
+  .aa-shell-sidebar nav button,
+  .aa-shell-sidebar > div:last-child button,
+  .aa-shell-sidebar > div:first-child button {
+    justify-content: center !important;
+  }
+}
+
 :focus-visible {
   outline: 2px solid var(--aa-accent-border);
   outline-offset: 2px;
