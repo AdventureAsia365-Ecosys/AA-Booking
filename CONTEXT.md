@@ -551,6 +551,10 @@ send, OTP) is not built: those still write rows only.
   date in the ops time zone (`b2b_ops_timezone`, Asia/Ho_Chi_Minh) and the job's transactions run in that zone, so
   the guard's `current_date` agrees. First runs are a DRY RUN (see Jobs).
 - Writes on a cancelled / completed case are 409 `case_closed`; an inactive assignee is 422 `staff_not_assignable`.
+- `GET /booking/trip-checks` also returns `counts` (open / overdue / done / not applicable / all under the same owner,
+  check, case and search filters; overdue = open and due before today, as the board) and, per row, the trip's
+  `checks` (total / done / not applicable) and `sales_name` (AA-996: the page's status tabs, progress and drawer
+  context).
 
 ## Supplier bookings and the supply track (AA-682 S1, bk-026; S252 design §3.1, §4, §5)
 
@@ -1283,6 +1287,15 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
 - `frontend/ui/` holds byte copies of the CIS kit (`app/_kit`, `_brand/tokens.ts`, the `--aa-*` blocks of
   `globals.css`) with the source commit in each header. Brand values change in CIS first, then are copied again.
   Booking-only components are in `frontend/ui/booking/` and use Tailwind utilities mapped to the same variables.
+- Case workspace and proposals (AA-996 audit slice 4, S254): the case header names the customer, the sales agent and
+  the date range with its length; Overview puts the trip facts (two columns, Edit pencil, approved total) in the main
+  column, a custom trip's empty legs card is one line, the TripPlanner inquiry panel shows the client's message,
+  budget, travel window, style and party when the snapshot carries them, and Countries falls back to `leg_countries`
+  (`GET /booking/trip-cases/{ref}`: the CIS tour country of each keyed leg, then the countries of the inquiry's
+  route-day places; read live, fail soft). The Proposals tab rows have Preview / Send / Discard draft. A sent or
+  approved version's price panel shows the saved total, channel, FX lock and dates and asks for no live quote; a
+  read-only session's 403 on the quote (`e2e_read_only`, `preview_read_only`) is explained, not shown as a role
+  problem. Approving a version with no items is 422 `version_empty`. Convert / Decline dialogs use the Modal footer.
 - Compact density (AA-996, S254): pages import `DataTable` from `@/ui`, which is the Booking wrapper
   `ui/booking/DataTable.tsx` around the kit copy. From 768 to 1199 px CSS wide (zoomed laptops) cells are tighter, the
   sidebar is the icon rail, the page gutter is 20 px (`app/globals.css`, pure CSS) and columns marked
