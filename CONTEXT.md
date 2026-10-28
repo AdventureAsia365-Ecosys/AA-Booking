@@ -63,15 +63,17 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. Also
   feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
   CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request.
-  `catalog.v_tour_place` (AA-996: list destinations) is read too. **Parse-backed views** (`v_tour_day`,
-  `v_tour_place`; their day text parses every live itinerary, `DISTINCT ON (tour_id, …)` behind a security barrier)
-  are read **by `tour_id` only** (`= $1` or `= ANY($1::uuid[])`), once per page, never per row and never by
-  `source_id` (#130: ~1.5 s a read, list 503). Enforced by the AA-996 perf guard (`tests/catalog_perf.py`: a static
-  scan of `app/`, and the integration stub with the live plan shape, whose `EXPLAIN` is checked for every such
-  statement any integration test runs). Even keyed by `tour_id`, `v_tour_place` costs ~10 ms a tour on Dev
-  (380 ms for 25, 994 ms for 100, S255), so the list reads destinations in chunks of 25 tours (each under the 1 s
-  extra timeout), all chunks of a page inside a 2 s budget, with a 5-minute per-process cache by `tour_id`; a chunk
-  that fails or does not fit leaves only its rows `null` (`degraded`). Later: CIS golden records.
+  `catalog.v_tour_place_name` (CIS 298, AA-996: list destinations; the names and positions of `v_tour_place` without
+  its per-place card / destination / segment lookups) is read too; the list never reads `v_tour_place`.
+  **Parse-backed views** (`v_tour_day`, `v_tour_place`, `v_tour_place_name`; their day text parses every live
+  itinerary, `DISTINCT ON (tour_id, …)` behind a security barrier) are read **by `tour_id` only** (`= $1` or
+  `= ANY($1::uuid[])`), once per page, never per row and never by `source_id` (#130: ~1.5 s a read, list 503).
+  Enforced by the AA-996 perf guard (`tests/catalog_perf.py`: a static scan of `app/`, and the integration stub with
+  the live plan shape, whose `EXPLAIN` is checked for every such statement any integration test runs). `v_tour_place`
+  cost ~10 ms a tour on Dev even keyed by `tour_id` (380 ms for 25, 994 ms for 100, S255); the bounds kept as the
+  safety net: destinations in chunks of 25 tours (each under the 1 s extra timeout), all chunks of a page inside a 2 s
+  budget, with a 5-minute per-process cache by `tour_id`; a chunk that fails or does not fit leaves only its rows
+  `null` (`degraded`). Later: CIS golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
   (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS

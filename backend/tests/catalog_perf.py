@@ -30,8 +30,11 @@ import asyncpg
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
-# Catalog views whose rows come from the itinerary parse (CIS 225 / 256 / 289).
-PARSE_BACKED = ("v_tour_day", "v_tour_place", "_tour_day_text")
+# Catalog views whose rows come from the itinerary parse (CIS 225 / 256 / 289; v_tour_place_name CIS 298).
+PARSE_BACKED = ("v_tour_day", "v_tour_place_name", "v_tour_place", "_tour_day_text")
+# Catalog views a trip-plans LIST page must never read (AA-996 S256): v_tour_place resolves a place card, a destination
+# and a route segment per place (~10 ms a tour on Dev); the list reads the names from v_tour_place_name (CIS 298).
+LIST_FORBIDDEN_RE = re.compile(r"\bcatalog\.v_tour_place\b(?!_)")
 PARSE_BACKED_RE = re.compile(r"\bcatalog\.(" + "|".join(PARSE_BACKED) + r")\b")
 CATALOG_RE = re.compile(r"\bcatalog\.(?!pg_)[a-z_]+")
 # The stub tables the parse-backed views read (stub_catalog.sql); the noise table holds NOISE_ROWS itinerary days of

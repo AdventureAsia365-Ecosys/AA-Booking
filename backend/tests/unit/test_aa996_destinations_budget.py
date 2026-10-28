@@ -17,7 +17,7 @@ from app.catalog import trip_plans
 from tests.unit.fakes import ScriptedConn
 from tests.unit.test_trip_plans import SALES
 
-DESTINATIONS = "FROM catalog.v_tour_place"
+DESTINATIONS = "FROM catalog.v_tour_place_name"
 TIMEOUT = "SET LOCAL statement_timeout = "
 
 
@@ -58,7 +58,7 @@ def _conn(n: int, clock: FakeClock, *, ms_per_read: float = 400, fail_on: int | 
     def places(ids: list[str]) -> Any:
         state["reads"] += 1
         if fail_on == state["reads"]:
-            return asyncpg.InsufficientPrivilegeError("permission denied for view v_tour_place")
+            return asyncpg.InsufficientPrivilegeError("permission denied for view v_tour_place_name")
         timeout = state["timeout_ms"]
         if timeout is not None and ms_per_read > timeout:
             clock.now += timeout / 1000

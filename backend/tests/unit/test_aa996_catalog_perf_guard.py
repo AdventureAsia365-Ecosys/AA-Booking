@@ -37,8 +37,19 @@ def test_the_scan_sees_the_app_reads_it_checks() -> None:
         for path in catalog_perf.APP_DIR.rglob("*.py")
         for _, text in catalog_perf.sql_strings(path.read_text(encoding="utf-8"))
     ]
-    assert any("FROM catalog.v_tour_place p" in t for t in texts)
+    assert any("FROM catalog.v_tour_place_name p" in t for t in texts)
     assert any("FROM catalog.v_tour_day WHERE tour_id = $1::uuid" in t for t in texts)
+
+
+def test_the_list_reads_destinations_from_the_names_view_only() -> None:
+    """AA-996 S256: v_tour_place resolves a card, a destination and a segment per place (~10 ms a tour on Dev, 994 ms
+    for a page of 100); the list reads the names from v_tour_place_name (CIS 298) and never the full view."""
+    source = (catalog_perf.APP_DIR / "catalog" / "trip_plans.py").read_text(encoding="utf-8")
+    texts = [" ".join(text.split()) for _, text in catalog_perf.sql_strings(source)]
+    assert [t for t in texts if catalog_perf.LIST_FORBIDDEN_RE.search(t)] == []
+    assert "FROM catalog.v_tour_place_name p" in " ".join(trip_plans.DESTINATIONS_SQL.split())
+    assert catalog_perf.LIST_FORBIDDEN_RE.search("SELECT 1 FROM catalog.v_tour_place p WHERE p.tour_id = $1")
+    assert not catalog_perf.LIST_FORBIDDEN_RE.search("SELECT 1 FROM catalog.v_tour_place_name p WHERE p.tour_id = $1")
 
 
 def test_static_guard_fails_the_130_list_statement() -> None:
@@ -64,6 +75,9 @@ def test_static_guard_fails_the_130_list_statement() -> None:
         ("SELECT * FROM catalog.v_tour_day WHERE tour_id IS NOT NULL", False),
         ("SELECT * FROM catalog.v_tour_day WHERE source_system = 'cis' AND source_id = $1", False),
         ("SELECT * FROM catalog.v_tour_place AS p WHERE p.source_id = ANY($1)", False),
+        # CIS 298: the names-only view has the same parse behind it, so the same rule.
+        ("SELECT * FROM catalog.v_tour_place_name p WHERE p.tour_id = ANY($1::uuid[])", True),
+        ("SELECT * FROM catalog.v_tour_place_name p WHERE p.source_id = $1", False),
         ("SELECT count(*) FROM catalog._tour_day_text", False),
     ],
 )
@@ -95,7 +109,7 @@ def _list_conn(n: int) -> ScriptedConn:
         ScriptedConn()
         .on("ORDER BY", rows)
         .on("SELECT count(*)", n)
-        .on("FROM catalog.v_tour_place", [])
+        .on("FROM catalog.v_tour_place_name", [])
         .on("FROM catalog.v_tour_photo", [])
         .on("AS u(plan_id)", [])
     )

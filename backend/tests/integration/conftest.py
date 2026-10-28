@@ -181,9 +181,9 @@ def migrated_booking_dsn(migrated_admin_dsn: str) -> str:
 
 # ── AA-996 perf guard: every catalog read of every route a test exercises ─────
 # Every Database a test builds records its statements; at teardown each statement that reads a parse-backed catalog
-# view (v_tour_day, v_tour_place, _tour_day_text) is EXPLAINed once per session against the stub, whose views have the
-# live plan shape (stub_catalog.sql). A scan of the itinerary rows without a tour_id condition parses every tour's
-# itinerary on Dev (#130: ~1.5 s a read, 503 on the list): the test that ran it fails at teardown.
+# view (v_tour_day, v_tour_place_name, v_tour_place, _tour_day_text) is EXPLAINed once per session against the stub,
+# whose views have the live plan shape (stub_catalog.sql). A scan of the itinerary rows without a tour_id condition
+# parses every tour's itinerary on Dev (#130: ~1.5 s a read, 503 on the list): the test that ran it fails at teardown.
 _explained: set[str] = set()
 
 
