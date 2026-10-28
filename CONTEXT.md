@@ -840,7 +840,9 @@ status shows it in its own `override` bucket and the audit summary starts with `
 - `GET /booking/health/ready` → 200 `{"status":"ok","db":"ok","schema_version":"bk-005"}` when the
   DB answers and **every** `bk-NNN` in `REQUIRED_SCHEMA_VERSIONS` is registered (a gap, e.g. bk-005 in but
   bk-004 missing, is not ready); otherwise 503 with `db` = `ok` | `error` | `not_configured` (plus
-  `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages.
+  `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages. Whenever the
+  schema read succeeds (200 or 503) the body also carries `registered_keys`: every registered `bk-NNN`, sorted
+  (AA-993 M4a, root ADR 0017 d7; read by the coming Deploy Dev `schema-gate`).
 - **Post-deploy verify (AA-993 V2, ADR 0016 D3)**: after every Deploy Dev, `post-deploy-verify.yml` checks ECS rollout
   COMPLETED with desired >= 1 and the running image = `<registry>/<repo>:<sha>`, `/booking/health` `git_sha` + `version`
   of the deployed commit, and `/booking/health/ready` 200 with `schema_version` >= the newest `REQUIRED_SCHEMA_VERSIONS`

@@ -15,7 +15,7 @@ in [docs/adr/0001-implements-root-0004.md](docs/adr/0001-implements-root-0004.md
 | Path | Purpose |
 |---|---|
 | `GET /booking/health` | Liveness, no DB. ALB health check. `{status, service, git_sha}` |
-| `GET /booking/health/ready` | DB reachable + required `bk-NNN` registered. 200 or 503. `{status, db, schema_version}` |
+| `GET /booking/health/ready` | DB reachable + required `bk-NNN` registered. 200 or 503. `{status, db, schema_version, registered_keys}` |
 | `GET /booking/staff/me` | Staff profile + permissions (CIS staff JWT; first token provisions the profile) |
 | `GET /booking/staff`, `PATCH /booking/staff/{cis_user_id}` | Admin: list staff, activate / set Booking role |
 | `GET /booking/staff/me/preferences`, `PUT …` | Own notification toggles `{notify: {type: bool}}` |

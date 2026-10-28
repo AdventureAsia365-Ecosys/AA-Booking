@@ -30,7 +30,9 @@ class Health(BaseModel):
 
 class Readiness(BaseModel):
     """``status`` ``ok`` / ``not_ready``; ``db`` ``ok`` / ``error`` / ``not_configured``. ``error`` is the exception
-    class name only; the last two fields appear when a required ``bk-NNN`` migration is not registered."""
+    class name only; ``required_schema_version`` and ``missing_schema_versions`` appear when a required ``bk-NNN``
+    migration is not registered. ``registered_keys``: every registered ``bk-NNN``, sorted, whenever the
+    schema read succeeded (read by the Deploy Dev schema gate)."""
 
     status: str
     db: str
@@ -38,6 +40,7 @@ class Readiness(BaseModel):
     error: str | None = None
     required_schema_version: str | None = None
     missing_schema_versions: list[str] | None = None
+    registered_keys: list[str] | None = None
 
 
 @router.get("/health", response_model=Health)
