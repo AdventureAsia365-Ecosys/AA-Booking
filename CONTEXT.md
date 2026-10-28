@@ -64,7 +64,10 @@ Design sources, in order:
   are read **by `tour_id` only** (`= $1` or `= ANY($1::uuid[])`), once per page, never per row and never by
   `source_id` (#130: ~1.5 s a read, list 503). Enforced by the AA-996 perf guard (`tests/catalog_perf.py`: a static
   scan of `app/`, and the integration stub with the live plan shape, whose `EXPLAIN` is checked for every such
-  statement any integration test runs). Later: CIS golden records.
+  statement any integration test runs). Even keyed by `tour_id`, `v_tour_place` costs ~10 ms a tour on Dev
+  (380 ms for 25, 994 ms for 100, S255), so the list reads destinations in chunks of 25 tours (each under the 1 s
+  extra timeout), all chunks of a page inside a 2 s budget, with a 5-minute per-process cache by `tour_id`; a chunk
+  that fails or does not fit leaves only its rows `null` (`degraded`). Later: CIS golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
   (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS

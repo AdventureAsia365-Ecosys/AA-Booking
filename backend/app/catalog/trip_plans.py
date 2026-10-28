@@ -30,12 +30,19 @@
   Catalog views are filtered by ``tour_id`` only: ``catalog._tour_day_text`` is ``DISTINCT ON (tour_id, day_number)``,
   so a ``source_id`` filter on ``v_tour_day`` is applied after every live tour's itinerary is parsed (~1.5 s a read on
   Dev); 25 such reads per page ran past the pool's 5 s command timeout (AA-996 slice 2 hotfix, lesson S238).
+- **Destinations are bounded** (AA-996 S255): ``catalog.v_tour_place`` costs about 10 ms a tour on Dev even keyed by
+  ``tour_id`` (per place it looks up the place card, the destination and the route segment; 380 ms for 25 tours,
+  994 ms for 100, against the 1 s budget of an extra). The read goes in chunks of ``DESTINATION_CHUNK`` tours, each
+  its own statement under the extra timeout, all chunks of a page inside ``DESTINATIONS_BUDGET_MS``; a tour version's
+  places are kept ``DESTINATIONS_TTL_S`` in a per-process cache keyed by ``tour_id``. A chunk that fails or does not
+  fit the budget leaves only its rows ``null`` (``degraded`` names ``destinations``); the rest of the page keeps them.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any
@@ -105,8 +112,9 @@ JOIN = (
 # views, so ``tour_id = ANY($1::uuid[])`` is pushed down to the tour's own rows (the TripPlanner pattern, lesson S238).
 # ``v_tour_day.places`` is itself ``array_agg(place_name ORDER BY position)`` of ``v_tour_place`` per day (CIS 225),
 # read here without the day-text parse of ``v_tour_day``.
-DESTINATIONS_SQL = """
-SELECT x.tour_id::text AS key, array_agg(x.place ORDER BY x.first_seen, x.place) AS places
+# Only the first MAX_DESTINATIONS places of a tour leave the database (the list shows no more).
+DESTINATIONS_SQL = f"""
+SELECT x.tour_id::text AS key, (array_agg(x.place ORDER BY x.first_seen, x.place))[1:{MAX_DESTINATIONS}] AS places
 FROM (
     SELECT p.tour_id, btrim(p.place_name) AS place, min(p.day_number * 1000 + p.position) AS first_seen
     FROM catalog.v_tour_place p
@@ -115,7 +123,7 @@ FROM (
 ) x
 WHERE x.place <> ''
 GROUP BY x.tour_id
-"""
+"""  # noqa: S608 — constants only, no input
 # The first tour photo of each page row without a CIS cover.
 FIRST_PHOTO_SQL = """
 SELECT DISTINCT ON (ph.tour_id) ph.tour_id::text AS key, ph.path
@@ -130,6 +138,17 @@ CROSS JOIN LATERAL ({prices.FROM_PRICE_SQL.format(plan="u.plan_id")}) fp
 """  # noqa: S608 — constants only, no input
 # Server-side budget of one extra: three of them stay well inside the pool's 5 s command_timeout (app.db).
 EXTRA_TIMEOUT_MS = 1000
+# Destinations (AA-996 S255): v_tour_place costs ~10 ms a tour on Dev, so one statement reads at most
+# DESTINATION_CHUNK tours (~0.4 s there, inside EXTRA_TIMEOUT_MS) and all chunks of one page share a wall budget. A
+# chunk that cannot get MIN_CHUNK_MS of the budget is not started. A page of MAX_PAGE rows is MAX_PAGE /
+# DESTINATION_CHUNK statements at most (not one per row).
+DESTINATION_CHUNK = 25
+DESTINATIONS_BUDGET_MS = 2000
+MIN_CHUNK_MS = 100
+# Per-process cache of a tour version's places (tour_id = one CIS version: a re-upload is a new key). The TTL bounds
+# how long an atom or place edit inside the same version takes to show in the list; the detail reads days live.
+DESTINATIONS_TTL_S = 300.0
+DESTINATIONS_CACHE_MAX = 4096
 # Any database error or timeout of an extra drops that extra only (logged), never the list.
 EXTRA_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, TimeoutError)
 SUPPLIER_JOIN = "LEFT JOIN booking.suppliers sp ON sp.id = p.supplier_id"
@@ -154,14 +173,16 @@ def describe_error(exc: BaseException) -> str:
     return f"error={type(exc).__name__} sqlstate={sqlstate} message={message}"
 
 
-async def _extra(conn: asyncpg.Connection, name: str, query: str, keys: list[str]) -> dict[str, Any] | None:
+async def _extra(
+    conn: asyncpg.Connection, name: str, query: str, keys: list[str], timeout_ms: int = EXTRA_TIMEOUT_MS
+) -> dict[str, Any] | None:
     """``{key: row}`` of one optional list extra, or ``None`` when it cannot be read (logged; the rows go out
     without it). Its own (sub)transaction with ``SET LOCAL statement_timeout``: a failure rolls back only this read."""
     if not keys:
         return {}
     try:
         async with conn.transaction():
-            await conn.execute(f"SET LOCAL statement_timeout = {EXTRA_TIMEOUT_MS}")
+            await conn.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
             rows = await conn.fetch(query, keys)
             # Inside a caller's transaction this is a savepoint: hand the caller its timeout back.
             await conn.execute("SET LOCAL statement_timeout TO DEFAULT")
@@ -169,6 +190,88 @@ async def _extra(conn: asyncpg.Connection, name: str, query: str, keys: list[str
         log.warning("trip_plan_list_extra_unavailable extra=%s %s", name, describe_error(exc))
         return None
     return {r["key"]: r for r in rows}
+
+
+class TtlCache:
+    """A small per-process ``{key: value}`` cache with a time to live, bounded to ``max_entries`` (the oldest entries
+    go first). Not shared between ECS tasks; a miss is only a slower read."""
+
+    def __init__(self, ttl_s: float, max_entries: int, clock: Callable[[], float] = time.monotonic) -> None:
+        self.ttl_s, self.max_entries, self.clock = ttl_s, max_entries, clock
+        self._items: dict[str, tuple[float, Any]] = {}
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def get_many(self, keys: Iterable[str]) -> dict[str, Any]:
+        now, found = self.clock(), {}
+        for key in keys:
+            item = self._items.get(key)
+            if item is None:
+                continue
+            if item[0] <= now:
+                del self._items[key]
+            else:
+                found[key] = item[1]
+        return found
+
+    def put_many(self, values: dict[str, Any]) -> None:
+        if self.ttl_s <= 0:
+            return
+        expires = self.clock() + self.ttl_s
+        for key, value in values.items():
+            self._items.pop(key, None)  # re-insert: dict order is the age order
+            self._items[key] = (expires, value)
+        if len(self._items) > self.max_entries:
+            now = self.clock()
+            for key in [k for k, (exp, _) in self._items.items() if exp <= now]:
+                del self._items[key]
+            while len(self._items) > self.max_entries:
+                del self._items[next(iter(self._items))]
+
+    def clear(self) -> None:
+        self._items.clear()
+
+
+DESTINATIONS_CACHE = TtlCache(DESTINATIONS_TTL_S, DESTINATIONS_CACHE_MAX)
+
+
+def _now() -> float:
+    """Seconds on the monotonic clock of the destinations budget (a seam for the budget tests)."""
+    return time.monotonic()
+
+
+async def _destinations(conn: asyncpg.Connection, tour_ids: list[str]) -> dict[str, list[str] | None]:
+    """``{tour_id: places}`` for every tour of a page: the cached places, then the misses read in chunks of
+    ``DESTINATION_CHUNK`` inside ``DESTINATIONS_BUDGET_MS``. ``None`` = not readable now (a chunk failed, or the budget
+    ran out before it): only those rows go out without destinations. The first failing chunk stops the read (a missing
+    grant or a slow view fails the next chunk the same way)."""
+    wanted = list(dict.fromkeys(tour_ids))
+    out: dict[str, list[str] | None] = dict(DESTINATIONS_CACHE.get_many(wanted))
+    misses = [t for t in wanted if t not in out]
+    start = _now()
+    for i in range(0, len(misses), DESTINATION_CHUNK):
+        chunk = misses[i : i + DESTINATION_CHUNK]
+        remaining = DESTINATIONS_BUDGET_MS - (_now() - start) * 1000
+        rows = None
+        if remaining >= MIN_CHUNK_MS:
+            rows = await _extra(
+                conn, "destinations", DESTINATIONS_SQL, chunk, timeout_ms=min(EXTRA_TIMEOUT_MS, round(remaining))
+            )
+        if rows is None:
+            left = misses[i:]
+            if remaining < MIN_CHUNK_MS:
+                log.warning(
+                    "trip_plan_list_extra_partial extra=destinations reason=budget budget_ms=%d unresolved=%d",
+                    DESTINATIONS_BUDGET_MS,
+                    len(left),
+                )
+            out.update(dict.fromkeys(left))
+            break
+        found = {t: list(rows[t]["places"] or []) if t in rows else [] for t in chunk}
+        DESTINATIONS_CACHE.put_many(found)
+        out.update(found)
+    return out
 
 
 def _price_hint(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -261,8 +364,8 @@ async def list_plans(
             offset,
         )
     page = [dict(r) for r in rows]
-    extras = {
-        "destinations": await _extra(conn, "destinations", DESTINATIONS_SQL, [r["tour_id"] for r in page]),
+    extras: dict[str, dict[str, Any] | None] = {
+        "destinations": await _destinations(conn, [r["tour_id"] for r in page]),
         "cover_photo": await _extra(
             conn, "cover_photo", FIRST_PHOTO_SQL, [r["tour_id"] for r in page if not r["cover_photo_path"]]
         ),
@@ -278,8 +381,15 @@ async def list_plans(
         "total": total,
         "limit": limit,
         "offset": offset,
-        "degraded": sorted(name for name, found in extras.items() if found is None),
+        "degraded": sorted(name for name, found in extras.items() if _degraded(name, found)),
     }
+
+
+def _degraded(name: str, found: dict[str, Any] | None) -> bool:
+    """An extra is degraded when it could not be read, or (destinations) when some of the page rows could not."""
+    if found is None:
+        return True
+    return name == "destinations" and any(v is None for v in found.values())
 
 
 def _list_item(row: dict[str, Any], staff: Staff, extras: dict[str, dict[str, Any] | None]) -> dict[str, Any]:
@@ -298,8 +408,9 @@ def _list_item(row: dict[str, Any], staff: Staff, extras: dict[str, dict[str, An
     if dst is None:
         out["destinations"] = None
     else:
-        places = dst[raw["tour_id"]]["places"] if raw["tour_id"] in dst else None
-        out["destinations"] = list(places or [])[:MAX_DESTINATIONS]
+        # A tour the read did not return has no places ([]); a tour whose chunk could not be read is None.
+        places = dst.get(raw["tour_id"], [])
+        out["destinations"] = None if places is None else list(places)[:MAX_DESTINATIONS]
     return out
 
 

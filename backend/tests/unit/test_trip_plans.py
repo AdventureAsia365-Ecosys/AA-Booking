@@ -285,7 +285,7 @@ def test_shape_hides_the_supplier_and_from_price_without_pricing_read() -> None:
 
 def test_list_item_falls_back_to_the_first_photo_and_caps_destinations() -> None:
     extras = {
-        "destinations": {"t-1": {"key": "t-1", "places": [f"P{i}" for i in range(12)]}},
+        "destinations": {"t-1": [f"P{i}" for i in range(12)]},
         "cover_photo": {"t-1": {"key": "t-1", "path": "/p/first"}},
         "from_price": {"p-1": {"key": "p-1", "amount": "1450.00", "currency": "USD", "season": None}},
     }
@@ -297,6 +297,8 @@ def test_list_item_falls_back_to_the_first_photo_and_caps_destinations() -> None
     assert kept["cover_photo_path"] == "/p/cover"
     bare = trip_plans._list_item(tour_row(), SALES, {"destinations": {}, "cover_photo": {}, "from_price": {}})
     assert bare["destinations"] == [] and bare["cover_photo_path"] is None and bare["from_price"] is None
+    unread = trip_plans._list_item(tour_row(), SALES, {"destinations": {"t-1": None}, "cover_photo": {}})
+    assert unread["destinations"] is None  # its chunk could not be read (AA-996 S255)
 
 
 def test_list_item_without_an_extra_leaves_its_field_null() -> None:
