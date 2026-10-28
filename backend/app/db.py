@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +55,32 @@ REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
 CONNECT_TIMEOUT_S = 5.0
 PROBE_TIMEOUT_S = 5.0
+# AA-996 perf guard: the timing budget of one statement. A statement at or over it logs ``slow_query`` (pool
+# ``command_timeout`` is 5 s, so a list that issues a few such reads is already close to a 503).
+SLOW_QUERY_MS = 1000
+SLOW_QUERY_SQL_CHARS = 200
+_CATALOG_RE = re.compile(r"\bcatalog\.")
+
+QueryLogger = Callable[[Any], None]
+
+
+def slow_query_logger(record: Any) -> None:
+    """asyncpg query logger (``LoggedQuery``): one warning per statement at or over ``SLOW_QUERY_MS``, with its
+    duration, whether it reads the CIS catalog, the error class (a read cut by ``command_timeout`` is
+    ``TimeoutError``) and the compacted SQL text. Never the arguments: they can hold personal data."""
+    duration_ms = int(record.elapsed * 1000)
+    if duration_ms < SLOW_QUERY_MS:
+        return
+    sql = " ".join(str(record.query).split())
+    error = type(record.exception).__name__ if record.exception is not None else "-"
+    log.warning(
+        "slow_query duration_ms=%d budget_ms=%d catalog=%s error=%s sql=%s",
+        duration_ms,
+        SLOW_QUERY_MS,
+        "true" if _CATALOG_RE.search(sql) else "false",
+        error,
+        sql[:SLOW_QUERY_SQL_CHARS],
+    )
 
 
 @dataclass(frozen=True)
@@ -62,10 +90,17 @@ class Readiness:
 
 
 class Database:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, query_loggers: Sequence[QueryLogger] = ()) -> None:
+        """``query_loggers``: extra asyncpg query loggers added to every pool connection next to the timing budget
+        log (the integration tests record the statements of each request with one)."""
         self._settings = settings
         self._pool: asyncpg.Pool | None = None
         self._lock = asyncio.Lock()
+        self._query_loggers = (slow_query_logger, *query_loggers)
+
+    async def _init_connection(self, conn: asyncpg.Connection) -> None:
+        for logger in self._query_loggers:
+            conn.add_query_logger(logger)
 
     @property
     def configured(self) -> bool:
@@ -83,6 +118,7 @@ class Database:
                     max_size=5,
                     timeout=CONNECT_TIMEOUT_S,
                     command_timeout=PROBE_TIMEOUT_S,
+                    init=self._init_connection,
                     # AA-824: named pool on the shared RDS (pg_stat_activity, data standards C2.2).
                     server_settings={"application_name": "booking-api"},
                 )
