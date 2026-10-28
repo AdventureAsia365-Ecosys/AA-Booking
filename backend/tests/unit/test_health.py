@@ -9,6 +9,8 @@ from app.main import create_app
 from app.settings import Settings
 
 SETTINGS = Settings(database_url=None, git_sha="0123abc", app_version="0.2.0")
+# AA-682: SETTINGS sets neither bucket env, so both stores are None.
+NO_STORAGE = {"supply_media": "not_configured", "ops_docs": "not_configured"}
 
 
 class ExplodingDatabase(Database):
@@ -42,7 +44,7 @@ def test_ready_200_when_ready() -> None:
     with TestClient(create_app(SETTINGS, FixedDatabase(Readiness(True, body)))) as client:
         r = client.get("/booking/health/ready")
     assert r.status_code == 200
-    assert r.json() == body
+    assert r.json() == {**body, "storage": NO_STORAGE}
 
 
 def test_ready_503_when_not_ready() -> None:
@@ -50,14 +52,31 @@ def test_ready_503_when_not_ready() -> None:
     with TestClient(create_app(SETTINGS, FixedDatabase(Readiness(False, body)))) as client:
         r = client.get("/booking/health/ready")
     assert r.status_code == 503
-    assert r.json() == body
+    assert r.json() == {**body, "storage": NO_STORAGE}
 
 
 def test_ready_503_when_database_url_missing() -> None:
     with TestClient(create_app(SETTINGS)) as client:
         r = client.get("/booking/health/ready")
     assert r.status_code == 503
-    assert r.json() == {"status": "not_ready", "db": "not_configured", "schema_version": None}
+    assert r.json() == {"status": "not_ready", "db": "not_configured", "schema_version": None, "storage": NO_STORAGE}
+
+
+def test_ready_reports_which_buckets_are_configured_never_their_names() -> None:
+    """AA-682: the ops-docs bucket was missing on Dev with nothing saying so. ``storage`` says whether each bucket env
+    reached the task; it never names the bucket (the name holds the account id) and never gates readiness."""
+    bucket = "aa-booking-dev-ops-docs-000000000000"
+    settings = Settings(database_url=None, ops_docs_bucket=bucket)
+    body = {"status": "ok", "db": "ok", "schema_version": "bk-001"}
+    with TestClient(create_app(settings, FixedDatabase(Readiness(True, body)))) as client:
+        r = client.get("/booking/health/ready")
+    assert r.status_code == 200
+    assert r.json()["storage"] == {"supply_media": "not_configured", "ops_docs": "configured"}
+    assert bucket not in r.text
+
+    with TestClient(create_app(SETTINGS, FixedDatabase(Readiness(False, {**body, "status": "not_ready"})))) as client:
+        r = client.get("/booking/health/ready")
+    assert r.status_code == 503 and r.json()["storage"] == NO_STORAGE
 
 
 def test_only_booking_prefix_is_served() -> None:

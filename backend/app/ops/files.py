@@ -1,11 +1,14 @@
 """Operations documents (bk-026 ``booking.ops_files``; AA-682 design D10): supplier vouchers and confirmations
 (S1), payment evidence (S3, bk-028), supplier bill documents and payout evidence (S4, bk-030).
 
-- **Private bucket, SSE-KMS.** The bytes go to the ops-docs bucket (``OPS_DOCS_BUCKET``, Terraform with a customer
-  managed KMS key as the bucket default) under the key bk-026 derives from the row, ``ops-docs/<kind>/<id>.<ext>``.
-  Evidence and vouchers may hold bank references and traveller names (``pii:payment``), so nothing is public: staff
-  read a file through a 300 s presigned GET that forces a download (``Content-Disposition: attachment``, the stored
-  content type), never inline in the admin, and every download writes an audit row.
+- **Private bucket, SSE-S3.** The bytes go to the ops-docs bucket (``OPS_DOCS_BUCKET``, AA-CIS-Infra
+  ``booking_ops_docs.tf``: SSE-S3 by default, a put naming another algorithm is denied, and every object verb is
+  denied to any principal but this app's task role) under the key bk-026 derives from the row,
+  ``ops-docs/<kind>/<id>.<ext>``. Evidence and vouchers may hold bank references and traveller names
+  (``pii:payment``), so nothing is public: staff read a file through a 300 s presigned GET that forces a download
+  (``Content-Disposition: attachment``, the stored content type), never inline in the admin, and every download writes
+  an audit row. (The S252 design asked for a KMS CMK; a new paid key waits for its own approval, and the bucket
+  policy keeps the other roles of the account out instead.)
 - **Upload body is JSON with the bytes in base64** (the AA-835 path, lessons S229: the Booking REST API has no
   ``binaryMediaTypes``), capped at :data:`MAX_BYTES` (3 MiB) by the staff BFF's 4.5 MB Vercel body limit; the database
   allows up to ``ops_docs_max_bytes`` (10 MB) for a later presigned-POST path (design Q10).
@@ -199,7 +202,7 @@ class S3OpsStore:
             Key=key,
             Body=data,
             ContentType=content_type,
-            ServerSideEncryption="aws:kms",  # the bucket default CMK; the bucket policy refuses anything else
+            ServerSideEncryption="AES256",  # the bucket default (SSE-S3); the bucket policy refuses any other
             ChecksumSHA256=base64.b64encode(bytes.fromhex(sha256)).decode("ascii"),
         )
 

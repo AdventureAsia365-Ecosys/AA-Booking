@@ -301,8 +301,9 @@ B2B API (AA-972, both set by AA-CIS-Infra `booking.tf` from the M2M pool and the
 Supplier photos (AA-835 S4, set by AA-CIS-Infra `booking_media.tf` / `booking.tf`): `SUPPLY_MEDIA_BUCKET` (the
 `aa-booking-<env>-supply-media-<account>` bucket, checked against the bk-023 naming rule at start-up; empty = uploads
 answer 503 `media_storage_unavailable`) and `SUPPLY_MEDIA_REGION` (default `us-west-1`).
-Operations documents (AA-682 S1, set by AA-CIS-Infra with the ops-docs bucket, its SSE-KMS CMK and the task-role grants
-`s3:PutObject` / `s3:GetObject` on `ops-docs/*` + `kms:GenerateDataKey` / `kms:Decrypt`): `OPS_DOCS_BUCKET` (the
+Operations documents (AA-682 S1, set by AA-CIS-Infra `booking_ops_docs.tf` with the ops-docs bucket (SSE-S3; every
+object verb denied to any principal but the Booking task role) and the task-role grant `s3:PutObject` /
+`s3:GetObject` on `ops-docs/*`): `OPS_DOCS_BUCKET` (the
 `aa-booking-<env>-ops-docs-<account>` bucket, checked against the bk-026 naming rule at start-up; empty = uploads and
 downloads answer 503 `ops_storage_unavailable`, everything else works) and `OPS_DOCS_REGION` (default `us-west-1`).
 Signed-in travellers (AA-908, optional, never set on Dev): `COGNITO_EXTERNAL_ISSUER`, the only issuer the inquiry intake
@@ -610,7 +611,7 @@ send, OTP) is not built: those still write rows only.
   `POST /bookings/{id}/cancel` also cancels `supplier_confirming` / `pre_departure` cases (critic B2) with the same
   cascade. No voucher or document on a B2B case (DM-6.8; 422 `document_not_allowed_b2b`, refused by bk-026 too).
 - **Documents** (`booking.ops_files`, design D10): `POST /booking/ops-files` (base64 JSON, PDF / JPEG / PNG / WebP read
-  from the bytes, at most 3 MB through the staff BFF; DB cap 10 MB), stored in the private ops-docs bucket (SSE-KMS)
+  from the bytes, at most 3 MB through the staff BFF; DB cap 10 MB), stored in the private ops-docs bucket (SSE-S3)
   under `ops-docs/<kind>/<id>.<ext>`; `GET …/{id}/download` = a 300 s presigned GET forcing an attachment, audited
   `ops_file.downloaded`; `POST …/{id}/remove` (reason, final; a removed voucher leaves its booking). Kinds of bk-028 /
   bk-029 (payment evidence, bills, payouts) answer 422 `kind_not_available` until those slices.
@@ -842,7 +843,10 @@ status shows it in its own `override` bucket and the audit summary starts with `
   bk-004 missing, is not ready); otherwise 503 with `db` = `ok` | `error` | `not_configured` (plus
   `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages. Whenever the
   schema read succeeds (200 or 503) the body also carries `registered_keys`: every registered `bk-NNN`, sorted
-  (AA-993 M4a, root ADR 0017 d7; read by the coming Deploy Dev `schema-gate`).
+  (AA-993 M4a, root ADR 0017 d7; read by the coming Deploy Dev `schema-gate`). Every body also carries `storage`
+  (AA-682): `{"supply_media": …, "ops_docs": …}`, each `configured` or `not_configured` (the bucket env is set on the
+  task or not; the bucket name is never shown). Informational only: it never makes the API not ready, since the
+  routes without a bucket still work and the upload routes answer 503 themselves.
 - **Post-deploy verify (AA-993 V2, ADR 0016 D3)**: after every Deploy Dev, `post-deploy-verify.yml` checks ECS rollout
   COMPLETED with desired >= 1 and the running image = `<registry>/<repo>:<sha>`, `/booking/health` `git_sha` + `version`
   of the deployed commit, and `/booking/health/ready` 200 with `schema_version` >= the newest `REQUIRED_SCHEMA_VERSIONS`

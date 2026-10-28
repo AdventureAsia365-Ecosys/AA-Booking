@@ -5633,7 +5633,7 @@
         "type": "object"
       },
       "Readiness": {
-        "description": "``status`` ``ok`` / ``not_ready``; ``db`` ``ok`` / ``error`` / ``not_configured``. ``error`` is the exception\nclass name only; ``required_schema_version`` and ``missing_schema_versions`` appear when a required ``bk-NNN``\nmigration is not registered. ``registered_keys``: every registered ``bk-NNN``, sorted, whenever the\nschema read succeeded (read by the Deploy Dev schema gate).",
+        "description": "``status`` ``ok`` / ``not_ready``; ``db`` ``ok`` / ``error`` / ``not_configured``. ``error`` is the exception\nclass name only; ``required_schema_version`` and ``missing_schema_versions`` appear when a required ``bk-NNN``\nmigration is not registered. ``registered_keys``: every registered ``bk-NNN``, sorted, whenever the\nschema read succeeded (read by the Deploy Dev schema gate). ``storage``: ``supply_media`` / ``ops_docs``,\neach ``configured`` / ``not_configured`` (the bucket env reached the task or not; never the bucket name).\nInformational: it never turns ``status`` to ``not_ready`` (without a bucket only the upload routes answer 503).",
         "properties": {
           "db": {
             "title": "Db",
@@ -5703,6 +5703,20 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage"
           }
         },
         "required": [

@@ -65,9 +65,9 @@ grants the task role ``s3:PutObject`` / ``s3:GetObject`` on ``supply-media/*``):
   naming CHECK). Empty (default) = uploads answer 503 ``media_storage_unavailable`` and listed photos carry no URL.
 - ``SUPPLY_MEDIA_REGION``: default ``us-west-1`` (the bucket's region; presigned URLs are signed for it).
 
-Operations documents (AA-682 S1, ``app.ops.files``; Terraform creates the private ops-docs bucket with an SSE-KMS CMK
-and grants the task role ``s3:PutObject`` / ``s3:GetObject`` on ``ops-docs/*`` plus ``kms:GenerateDataKey`` /
-``kms:Decrypt`` on the CMK):
+Operations documents (AA-682 S1, ``app.ops.files``; AA-CIS-Infra ``booking_ops_docs.tf`` creates the private ops-docs
+bucket, SSE-S3, objects reachable by the task role only, and grants it ``s3:PutObject`` / ``s3:GetObject`` on
+``ops-docs/*``):
 
 - ``OPS_DOCS_BUCKET``: the Booking ops-docs bucket (``aa-booking-<env>-ops-docs-<account>``, the bk-026 naming CHECK).
   Empty (default) = uploads answer 503 ``ops_storage_unavailable`` and downloads are unavailable.
