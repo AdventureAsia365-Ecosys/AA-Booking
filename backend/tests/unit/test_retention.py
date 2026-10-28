@@ -243,7 +243,7 @@ async def test_archiver_writes_gzipped_json_lines_encrypted() -> None:
 
 def test_archive_bucket_is_built_from_the_account_id() -> None:
     assert archive_bucket("111111111111") == "aa-cis-bronze-111111111111"
-    assert ARCHIVE_BUCKET_DISPLAY == "aa-cis-bronze-<acc2>"
+    assert ARCHIVE_BUCKET_DISPLAY == "aa-cis-bronze-<account-id>"
     for bad in ("", "12345", "1111111111111", "11111111111x"):
         with pytest.raises(ValueError):
             archive_bucket(bad)

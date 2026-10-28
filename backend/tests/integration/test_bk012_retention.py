@@ -197,6 +197,8 @@ async def test_job_retention_dry_run_then_live_archives_every_deleted_job_and_ne
         assert all(k.startswith("archive/booking/job/") and f"-{part['part']}-b" in k for k in part["object_keys"])
     (live_audit,) = await audit_rows(admin, "retention.live")
     assert json.loads(live_audit["after"])["affected_total"] == 3
+    # AA-998 R1: the audit log shows the real bucket of the running account, never an account label.
+    assert json.loads(live_audit["after"])["archive"] == f"s3://{TEST_BUCKET}/archive/booking/job/yyyy/mm/"
 
     # The next scheduled run sees the live run (same windows) and runs live itself, here with nothing to do.
     sched = result(await run(pool, s3, JOB_KIND, trigger="schedule"))

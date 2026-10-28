@@ -400,6 +400,8 @@ async def _run_locked(
         archiver = None
         if any(p.archive and r.candidates for p, r in zip(spec.parts, parts, strict=True)):
             archiver = S3Archiver(s3_factory(), job.id, bucket_factory())
+            # The real bucket (account ID from STS at runtime), shown in the audit log instead of the placeholder.
+            result["archive"] = f"s3://{archiver.bucket}/{ARCHIVE_PREFIX}/{spec.archive_name}/yyyy/mm/"
         for part, res in zip(spec.parts, parts, strict=True):
             if remaining <= 0:
                 break
