@@ -29,8 +29,9 @@ destinations (`degraded: ["destinations"]`).
   places, and `degraded` still names `destinations`. A failed read is never cached; an empty result is cached as `[]`.
 - **SQL returns at most `MAX_DESTINATIONS` (8) places per tour** (`[1:8]` on the array): the list never showed more.
 - **Budget 2 s, not 1.5 s:** with 4 chunks at ~0.4 s, 1.5 s would cut the last chunk of a cold 100-row page on Dev
-  today. Worst case of the whole list request stays well under the pool's 5 s per-statement `command_timeout`
-  (count + page + destinations <= 2 s + cover photo <= 1 s + from price <= 1 s).
+  today. Every statement stays under the pool's 5 s per-statement `command_timeout`; the extras of one request
+  add at most ~4 s of wall time after the count and page queries (destinations <= 2 s + cover photo <= 1 s +
+  from price <= 1 s).
 
 ## Changed
 
@@ -68,5 +69,6 @@ destinations (`degraded: ["destinations"]`).
   perf guard's `PARSE_BACKED` list must include it). The read-only diagnosis
   `AA-Ecosys/.tmp-session/S255/aa-996/explain_tour_place.py` (run in the Booking container) prints the hottest
   plan nodes for 25 / 100 tours to confirm which lookups cost the most before CIS writes it.
-- Re-run `live_catalog_budget.py` after deploy: at limit 100 the destinations should be 4 statements of ~0.3–0.4 s
+- After deploy, run the read-only `AA-Ecosys/.tmp-session/S255/aa-996/live_budget_after.py` (same harness as
+  `live_catalog_budget.py`) in the Booking container: at limit 100 the destinations should be 4 statements of ~0.3–0.4 s
   each (none near 1 s), and a second identical call should show none.
