@@ -11,7 +11,8 @@ import nextTs from "eslint-config-next/typescript";
 const PAGE_RESTRICTED_SYNTAX = [
   {
     selector: "JSXOpeningElement[name.name='table']",
-    message: "No raw <table> in page code: use the kit DataTable (ui/DataTable.tsx).",
+    message:
+      "No raw <table> in page code: use the kit DataTable (ui/DataTable.tsx), or LightTable (ui/booking/LightTable.tsx) for a short fixed list inside one record's card.",
   },
   {
     selector: "JSXAttribute[name.name='role'][value.value='dialog']",

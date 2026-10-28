@@ -35,8 +35,9 @@ async def update_staff(
     role: str | None,
     reason: str | None = None,
 ) -> dict[str, Any]:
-    """``reason`` (AA-996, optional in the API, asked for by the staff admin on Deactivate) is stored in the audit row
-    (``after.reason`` and the summary); it is never kept on the profile."""
+    """``reason`` (AA-996) is required when an active profile is deactivated (422 ``reason_required``) and optional
+    otherwise (activation, role change). It is stored in the audit row (``after.reason`` and the summary); it is never
+    kept on the profile."""
     reason = (reason or "").strip() or None
     if role is not None and role not in STAFF_ROLES:
         raise Invalid("unknown_staff_role", f"role must be one of {', '.join(STAFF_ROLES)}")
@@ -61,6 +62,9 @@ async def update_staff(
     new_role = current.role if role is None else role
     if (new_active, new_role) == (current.active, current.role):
         return current.public()
+    if current.active and not new_active and reason is None:
+        # AA-996 (spec §4.13): a deactivation always carries an audited reason, whichever client sends it.
+        raise Invalid("reason_required", "say why this profile is deactivated (reason)")
     updated = Staff.from_row(
         await conn.fetchrow(
             f"UPDATE booking.staff_users SET active = $2, role = $3 WHERE cis_user_id = $1"  # noqa: S608
@@ -85,10 +89,20 @@ async def update_staff(
             **({"reason": reason} if reason else {}),
         },
         entity_label=updated.name or cis_user_id,
-        summary=f"active {current.active} -> {updated.active}, role {current.role} -> {updated.role}"
+        # Lead with the verb the audit-log badge shows ("Deactivated" / "Activated") so a search for it finds the row.
+        summary=_access_verb(current.active, updated.active)
+        + f"active {current.active} -> {updated.active}, role {current.role} -> {updated.role}"
         + (f". Reason: {reason}" if reason else ""),
     )
     return updated.public()
+
+
+def _access_verb(before: bool, after: bool) -> str:
+    if before and not after:
+        return "Deactivated. "
+    if after and not before:
+        return "Activated. "
+    return ""
 
 
 async def directory(conn: asyncpg.Connection, *, role: str | None = None) -> list[dict[str, Any]]:

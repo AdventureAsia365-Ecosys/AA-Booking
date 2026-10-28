@@ -1300,6 +1300,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   the page's own checks block it; unreadable text is dropped on blur); date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,
   `DateText`), and ISO dates inside notification text are localised (`localizeIsoDates`). `npm run test:unit` runs the
   pure helpers' tests.
+- Light table (AA-996, S254): `LightTable` from `@/ui` (`ui/booking/LightTable.tsx`, an ARIA table on a CSS grid)
+  is the sanctioned exception to "DataTable for tables", only for short, fixed lists inside one record's card (the
+  invoice's lines, payment schedule and payments): no pager, search or Columns menu, stacked rows under 640 px. Every
+  real list (anything that can grow, be filtered or paged) uses `DataTable`.
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.

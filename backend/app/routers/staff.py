@@ -26,7 +26,8 @@ class StaffPatch(BaseModel):
 
     active: bool | None = None
     role: str | None = Field(default=None, max_length=40)
-    # AA-996: why a profile is deactivated (or re-activated); stored in the audit row only, never on the profile.
+    # AA-996: why a profile is deactivated (required then: 422 reason_required) or re-activated (optional); stored in
+    # the audit row only, never on the profile.
     reason: str | None = Field(default=None, max_length=500)
 
 

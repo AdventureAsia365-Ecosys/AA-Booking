@@ -28,6 +28,7 @@ import {
   DateText,
   InvoiceStatusBadge,
   KpiTile,
+  LightTable,
   Money,
   PaymentStateBadge,
   Pill,
@@ -37,11 +38,11 @@ import {
   formatDay,
   formatMoney,
   useToast,
+  type LightColumn,
 } from "@/ui";
 import { InvoiceFormModal } from "./InvoiceForm";
 import { RecordPaymentModal, VerifyPaymentDialog, VoidPaymentDialog, errorText } from "./PaymentDialogs";
 import { InvoiceDatesCard, InvoiceTotalsFooter } from "./InvoiceDocParts";
-import { LightTable, type LightColumn } from "@/ui/booking/LightTable";
 
 type Panel = "edit" | "amend" | "record" | "send" | "delete" | "cancel" | "remind" | null;
 
@@ -241,7 +242,13 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
               </Button>
             )}
             {a.remind && (
-              <Button onClick={() => setPanel("remind")} disabled={remind.isPending}>
+              <Button
+                onClick={() => {
+                  remind.reset(); // a failed send earlier must not show its error before this one is tried
+                  setPanel("remind");
+                }}
+                disabled={remind.isPending}
+              >
                 <BellRing size={14} /> Remind
               </Button>
             )}

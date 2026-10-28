@@ -5,20 +5,12 @@
 // by pattern, so no markup is ever trusted from the database.
 
 import { NOTIFICATION_TYPE_ICON } from "./notificationIcons";
-import { BadgeCheck, Bell, Handshake, Inbox, Repeat, UserCheck } from "lucide-react";
+import { Bell } from "lucide-react";
 import { localizeIsoDates } from "./dates";
 
-const TYPE_ICON: Record<string, React.ComponentType<{ size?: number }>> = {
-  "trip_case.new_inquiry": Inbox,
-  "trip_case.assigned": UserCheck,
-  "trip_case.status_changed": Repeat,
-  "proposal.approved": BadgeCheck,
-  "b2b.on_request": Handshake,
-};
-
 export function NotificationIcon({ type, read, size = 40 }: { type: string; read: boolean; size?: number }) {
-  // AA-996: every staff type has its own icon (notificationIcons.ts); TYPE_ICON stays as the W1 fallback.
-  const Icon = NOTIFICATION_TYPE_ICON[type] ?? TYPE_ICON[type] ?? Bell;
+  // AA-996: every staff type has its own icon (notificationIcons.ts); an unknown type gets the bell.
+  const Icon = NOTIFICATION_TYPE_ICON[type] ?? Bell;
   return (
     <span
       aria-hidden="true"

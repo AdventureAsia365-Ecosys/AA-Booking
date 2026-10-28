@@ -461,6 +461,10 @@ def test_admin_cannot_change_the_role_of_a_linked_row_but_can_suspend_it() -> No
         assert r.status_code == 409
         assert r.json()["detail"] == "managed_in_directory"
         assert conn.sql("UPDATE booking.staff_users") == []
-        r = c.patch("/booking/staff/u-2", json={"active": False, "role": "sales"}, headers=auth(cis.token(sub="u-1")))
+        r = c.patch(
+            "/booking/staff/u-2",
+            json={"active": False, "role": "sales", "reason": "Left"},
+            headers=auth(cis.token(sub="u-1")),
+        )
     assert r.status_code == 200
     assert r.json()["active"] is False and r.json()["role"] == "sales"

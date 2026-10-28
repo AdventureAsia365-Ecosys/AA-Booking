@@ -55,7 +55,7 @@ export function AuditLogView() {
     from: DATE_RE.test(get("from")) ? get("from") : undefined,
     to: DATE_RE.test(get("to")) ? get("to") : undefined,
     entity_id: entityIdValid ? entityId : undefined,
-    q: get("q").trim() || undefined,
+    q: get("q").trim().slice(0, 200) || undefined, // the API caps q at 200 (422 beyond)
     limit: PAGE_SIZE,
   };
   const filtered = Object.entries(filters).some(([k, v]) => k !== "limit" && v !== undefined);
