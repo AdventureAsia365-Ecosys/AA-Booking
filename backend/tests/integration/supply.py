@@ -36,6 +36,12 @@ async def purge_supply(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.supplier_rates")
         for table in TRIGGERED:
             await conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
+        # bk-032 (AA-996): a trip plan may name its supplier; the modules that delete every supplier start clean.
+        if await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns"
+            " WHERE table_schema = 'booking' AND table_name = 'trip_plans' AND column_name = 'supplier_id')"
+        ):
+            await conn.execute("UPDATE booking.trip_plans SET supplier_id = NULL WHERE supplier_id IS NOT NULL")
         # bk-019 (AA-972): plan components point at room types and services.
         await conn.execute("DELETE FROM booking.trip_plan_components")
         # bk-023 (AA-835): supplier photos name a hotel or a service (no FK, so they would outlive them).
