@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.9.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.8.0...v0.9.0) (2026-10-28)
+
+
+### Features
+
+* billing detail, notifications and staff fixes from the Figma audit (AA-996 slice 5) ([#128](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/128)) ([b5b2f8f](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/b5b2f8f42206b7741c59349cf25a4c49f6a328cd))
+* bk-029 country and destination profiles (Booking state of CIS places) ([#115](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/115)) ([67a2f31](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/67a2f3144b7e1ed125895e96a37eebff72e1f282))
+* bk-030 supplier bills, lines and payouts (migration) ([#119](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/119)) ([eb38a78](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/eb38a789f9120c8f5cc32a8143a67d83c3b2f912))
+* bk-031 adds the missing CIS tour countries to booking.countries ([#123](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/123)) ([bfeabce](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/bfeabceba1aa717b858d3bd4fe17db238fbf5a4f))
+* bk-032 trip plan supplier and price matrix table ([#129](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/129)) ([2294369](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/2294369b7ba0dbb739c0053c738e73e0c21e49cb))
+* Booking covers every Figma screen (coverage matrix, sign-in & security, soft-delete dialogs, CIS read-only forms, Destinations and Countries) ([#117](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/117)) ([c606f60](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c606f60cc0416183ea0dff43e693521352da44c5))
+* case workspace and proposals per the Figma audit (AA-996 slice 4) ([#127](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/127)) ([de3be3c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/de3be3c3283f0412944f9821e8b752b579ad07f8))
+* CIS photos on catalog countries (cover, gallery, drawer strips) and a neutral photo fallback ([#125](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/125)) ([26b8a8a](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/26b8a8abfb2ffe487dc52cef116a1555fd677b69))
+* compact density for staff lists on zoomed laptops ([#124](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/124)) ([96c1bcf](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/96c1bcf44d04cf8961d6c0b0509219ac26fa470f))
+* deploy gate blocks only on running retention jobs, plus a Dev-only bk_noop_sleep test kind (AA-993 G5) ([#121](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/121)) ([5aa2e69](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/5aa2e69a2ca1d0ff5d28b5a2af51be338fc4ac65))
+* en-GB date fields, Figma filter bar and CSV on every staff list ([#126](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/126)) ([7473755](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/7473755c0cc9ca7d7dab2332c2185acfb33c50ed))
+* My Payments customer routes for signed-in travellers (booking.customer.v1) ([#122](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/122)) ([d654e39](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d654e398c198a7b26b4e74f5f84e7c3d3d5b8616))
+* supplier bills and payouts (AA-682 S4, bk-030) ([#120](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/120)) ([0c54476](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/0c54476570b0ed05486393bb6172b3e44318b849))
+* trip plan supplier and price matrix, sellable-first list, plan picker (AA-996 slice 2) ([#130](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/130)) ([d78ae20](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d78ae200a89bb9f2c3a6130e2ed371398a9166ec))
+
+
+### Bug Fixes
+
+* Booking countries from CIS ISO codes, images from CIS photos ([#118](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/118)) ([7114271](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/711427102308f2a323402d572c1cf88da2b1cb03))
+* trip-plans list 503 from per-row catalog day reads; extras fail soft ([#131](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/131)) ([81fd84c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/81fd84c2551f988016e53972ed550ddc6e36c7d8))
+
 ## [0.8.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.7.0...v0.8.0) (2026-10-27)
 
 
