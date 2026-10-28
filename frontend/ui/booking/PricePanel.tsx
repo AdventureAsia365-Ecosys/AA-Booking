@@ -264,9 +264,10 @@ function quoteErrorView(error: unknown, canManageRules: boolean): QuoteErrorView
     };
   }
   if (e?.status === 404) {
+    // The quote-preview route ships with the pricing engine (bk-004, AA-810).
     return {
       title: "The pricing engine is not on this Booking API yet",
-      body: "Live quotes come from POST /booking/pricing/quote-preview, which ships with the pricing engine (bk-004, AA-810).",
+      body: "Live quotes come from POST /booking/pricing/quote-preview, which ships with the pricing engine.",
       link: null,
     };
   }

@@ -255,8 +255,9 @@ async def list_trip_plans(
     sort: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=trip_plans.MAX_PAGE)] = 25,
     offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+    # AA-986: the orphaned-plans view of the catalog.
     orphaned: Annotated[
-        bool, Query(description="AA-986: only the plans whose tour left the catalog (q = exact source_id)")
+        bool, Query(description="Only the plans whose tour left the catalog (q = exact source_id)")
     ] = False,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
