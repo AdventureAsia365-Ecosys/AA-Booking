@@ -70,7 +70,12 @@ def created(monkeypatch: pytest.MonkeyPatch, answers: dict[str, Any]) -> list[di
 async def test_ready_when_db_answers_and_required_version_registered(created: list[dict[str, Any]]) -> None:
     result = await Database(SETTINGS).readiness()
     assert result.ok
-    assert result.body == {"status": "ok", "db": "ok", "schema_version": REQUIRED_SCHEMA_VERSION}
+    assert result.body == {
+        "status": "ok",
+        "db": "ok",
+        "schema_version": REQUIRED_SCHEMA_VERSION,
+        "registered_keys": sorted(REQUIRED_SCHEMA_VERSIONS),
+    }
 
 
 @pytest.mark.asyncio
@@ -96,6 +101,7 @@ async def test_not_ready_when_an_older_required_version_is_missing(
     assert not result.ok
     assert result.body["schema_version"] == REQUIRED_SCHEMA_VERSION
     assert result.body["missing_schema_versions"] == ["bk-003"]
+    assert result.body["registered_keys"] == sorted(gap)  # AA-993 M4a: the gap is visible to the schema gate
 
 
 @pytest.mark.asyncio
@@ -115,6 +121,7 @@ async def test_newer_schema_is_ready(created: list[dict[str, Any]], answers: dic
     answers.update(_answers(versions=[*REQUIRED_SCHEMA_VERSIONS, "bk-999"]))
     result = await Database(SETTINGS).readiness()
     assert result.ok and result.body["schema_version"] == "bk-999"
+    assert result.body["registered_keys"][-1] == "bk-999"
 
 
 @pytest.mark.asyncio
@@ -128,6 +135,7 @@ async def test_not_ready_when_no_booking_version(created: list[dict[str, Any]], 
         "schema_version": None,
         "required_schema_version": REQUIRED_SCHEMA_VERSION,
         "missing_schema_versions": list(REQUIRED_SCHEMA_VERSIONS),
+        "registered_keys": [],
     }
 
 
@@ -141,6 +149,7 @@ async def test_not_ready_when_view_missing(created: list[dict[str, Any]], answer
     assert not result.ok
     assert result.body["db"] == "ok"
     assert result.body["error"] == "UndefinedTableError"
+    assert "registered_keys" not in result.body
 
 
 @pytest.mark.asyncio

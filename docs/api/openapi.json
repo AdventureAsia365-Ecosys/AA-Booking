@@ -5633,7 +5633,7 @@
         "type": "object"
       },
       "Readiness": {
-        "description": "``status`` ``ok`` / ``not_ready``; ``db`` ``ok`` / ``error`` / ``not_configured``. ``error`` is the exception\nclass name only; the last two fields appear when a required ``bk-NNN`` migration is not registered.",
+        "description": "``status`` ``ok`` / ``not_ready``; ``db`` ``ok`` / ``error`` / ``not_configured``. ``error`` is the exception\nclass name only; ``required_schema_version`` and ``missing_schema_versions`` appear when a required ``bk-NNN``\nmigration is not registered. ``registered_keys``: every registered ``bk-NNN``, sorted, whenever the\nschema read succeeded (read by the Deploy Dev schema gate).",
         "properties": {
           "db": {
             "title": "Db",
@@ -5663,6 +5663,20 @@
               }
             ],
             "title": "Missing Schema Versions"
+          },
+          "registered_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Keys"
           },
           "required_schema_version": {
             "anyOf": [

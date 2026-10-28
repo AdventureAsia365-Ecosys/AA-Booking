@@ -130,7 +130,12 @@ class Database:
             self._pool = None
 
     async def readiness(self) -> Readiness:
-        """DB answers ``SELECT 1`` and every required ``bk-NNN`` is registered."""
+        """DB answers ``SELECT 1`` and every required ``bk-NNN`` is registered.
+
+        Once the schema read succeeds the body also lists ``registered_keys``: every ``bk-NNN`` registered on this
+        database, sorted (AA-993 M4a, root ADR 0017 d7). The Deploy Dev ``schema-gate`` (M4b) reads it from the task
+        that is running to decide whether the keys the new code requires are applied; it shipped before the gate so the
+        first gate run reads a task that already has the field (``missing_schema_versions`` is the fallback)."""
         if not self.configured:
             return Readiness(False, {"status": "not_ready", "db": "not_configured", "schema_version": None})
         try:
@@ -157,7 +162,7 @@ class Database:
                 False,
                 {"status": "not_ready", "db": "ok", "error": type(exc).__name__, "schema_version": None},
             )
-        registered = list(registered or [])
+        registered = sorted(registered or [])
         version = max(registered) if registered else None
         missing = [v for v in REQUIRED_SCHEMA_VERSIONS if v not in registered]
         if missing:
@@ -169,6 +174,7 @@ class Database:
                     "schema_version": version,
                     "required_schema_version": REQUIRED_SCHEMA_VERSION,
                     "missing_schema_versions": missing,
+                    "registered_keys": registered,
                 },
             )
-        return Readiness(True, {"status": "ok", "db": "ok", "schema_version": version})
+        return Readiness(True, {"status": "ok", "db": "ok", "schema_version": version, "registered_keys": registered})
