@@ -213,16 +213,10 @@ function StatusMenu({
   );
 }
 
-/** Decline (inquiry) or Cancel (later status): a reason select + notes; the API stores "Reason: notes". */
-function CancelDialog({
-  c,
-  open,
-  decline,
-  onClose,
-  onConfirm,
-  busy,
-  error,
-}: {
+/** Decline (inquiry) or Cancel (later status): a reason select + notes; the API stores "Reason: notes".
+ *  AA-996 (Figma USER DETAILS-7): Cancel / confirm sit in the Modal footer band, like every other Booking dialog. The
+ *  form is remounted per open (it renders only while open), so it starts at the first reason each time. */
+function CancelDialog(props: {
   c: TripCaseDetail;
   open: boolean;
   decline: boolean;
@@ -231,14 +225,10 @@ function CancelDialog({
   busy: boolean;
   error: string | null;
 }) {
-  return (
-    <Modal open={open} onClose={busy ? () => {} : onClose} title={decline ? "Decline inquiry" : `Cancel ${c.code}`} width={520}>
-      {open && <CancelBody c={c} decline={decline} onClose={onClose} onConfirm={onConfirm} busy={busy} error={error} />}
-    </Modal>
-  );
+  return props.open ? <CancelModal {...props} /> : null;
 }
 
-function CancelBody({
+function CancelModal({
   c,
   decline,
   onClose,
@@ -259,45 +249,51 @@ function CancelBody({
   const needsNotes = reason === "Other";
   const text = notes.trim() ? `${reason}: ${notes.trim()}` : reason;
   return (
-    <div className="flex flex-col gap-4 font-sans">
-      <p className="text-sm text-body">
-        {decline ? "Decline" : "Cancel"} <strong className="font-mono">{c.code}</strong> from <strong>{c.customer_name ?? "this customer"}</strong>? The case
-        moves to Cancelled and keeps its history. It can be reopened later with a reason.
-      </p>
-      <Field label={decline ? "Reason for declining" : "Reason for cancelling"} required>
-        <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
-          {reasons.map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </select>
-      </Field>
-      <Field label={needsNotes ? "Notes" : "Additional notes (optional)"} required={needsNotes}>
-        <textarea className={textareaCls} value={notes} maxLength={1900} onChange={(e) => setNotes(e.target.value)} placeholder="Shown in the case history." />
-      </Field>
-      {error && <p className="text-[13px] text-danger">{error}</p>}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Keep case
-        </Button>
-        <Button variant="danger" onClick={() => onConfirm(text)} disabled={busy || (needsNotes && !notes.trim())}>
-          {busy ? "Working…" : decline ? "Decline inquiry" : "Cancel case"}
-        </Button>
+    <Modal
+      open
+      onClose={busy ? () => {} : onClose}
+      title={decline ? "Decline inquiry" : `Cancel ${c.code}`}
+      width={520}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Keep case
+          </Button>
+          <Button variant="danger" onClick={() => onConfirm(text)} disabled={busy || (needsNotes && !notes.trim())}>
+            {busy ? "Working…" : decline ? "Decline inquiry" : "Cancel case"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4 font-sans">
+        <p className="text-sm text-body">
+          {decline ? "Decline" : "Cancel"} <strong className="font-mono">{c.code}</strong> from <strong>{c.customer_name ?? "this customer"}</strong>? The
+          case moves to Cancelled and keeps its history. It can be reopened later with a reason.
+        </p>
+        <Field label={decline ? "Reason for declining" : "Reason for cancelling"} required>
+          <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
+            {reasons.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label={needsNotes ? "Notes" : "Additional notes (optional)"} required={needsNotes}>
+          <textarea className={textareaCls} value={notes} maxLength={1900} onChange={(e) => setNotes(e.target.value)} placeholder="Shown in the case history." />
+        </Field>
+        {error && <p className="text-[13px] text-danger">{error}</p>}
       </div>
-    </div>
-  );
-}
-
-/** Convert to discovery (Figma USER DETAILS-6 "Convert to Trip Case", minus the parts that are not ours:
- * the case already exists, a template link is W2). Assign first (when the rep changes), then the status. */
-function ConvertDialog({ c, open, onClose }: { c: TripCaseDetail; open: boolean; onClose: () => void }) {
-  return (
-    <Modal open={open} onClose={onClose} title="Convert to discovery" width={520}>
-      {open && <ConvertBody c={c} onClose={onClose} />}
     </Modal>
   );
 }
 
-function ConvertBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
+/** Convert to discovery (Figma USER DETAILS-6 "Convert to Trip Case", minus the parts that are not ours:
+ * the case already exists, a template link is W2). Assign first (when the rep changes), then the status.
+ * AA-996: the buttons are in the Modal footer band. */
+function ConvertDialog({ c, open, onClose }: { c: TripCaseDetail; open: boolean; onClose: () => void }) {
+  return open ? <ConvertModal c={c} onClose={onClose} /> : null;
+}
+
+function ConvertModal({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
   const me = useStaff();
   const canAssign = useCan("trip_case.assign");
   const current = c.assignees.find((a) => a.role === "sales")?.cis_user_id ?? "";
@@ -319,26 +315,35 @@ function ConvertBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void })
   }
 
   return (
-    <div className="flex flex-col gap-4 font-sans">
-      <p className="text-sm text-body">
-        Start working on this inquiry from <strong>{c.customer_name ?? "the customer"}</strong>. The case moves to Discovery: talk with the customer, then build a
-        proposal.
-      </p>
-      <Field label="Sales rep" hint={canAssign ? undefined : "Your role cannot change the assignment."}>
-        {canAssign ? <StaffSelect value={rep} onChange={setRep} /> : <input className={inputCls} disabled value={c.assignees.find((a) => a.role === "sales")?.name ?? "Unassigned"} />}
-      </Field>
-      <Field label="Note (optional)" hint="Saved in the case history with the status change.">
-        <textarea className={textareaCls} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="Called the customer, they want a quieter pace." />
-      </Field>
-      {err && <p className="text-[13px] text-danger">{friendlyError(err)}</p>}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={confirm} disabled={busy}>
-          {busy ? "Working…" : "Convert"}
-        </Button>
+    <Modal
+      open
+      onClose={busy ? () => {} : onClose}
+      title="Convert to discovery"
+      width={520}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={confirm} disabled={busy}>
+            {busy ? "Working…" : "Convert"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4 font-sans">
+        <p className="text-sm text-body">
+          Start working on this inquiry from <strong>{c.customer_name ?? "the customer"}</strong>. The case moves to Discovery: talk with the customer, then
+          build a proposal.
+        </p>
+        <Field label="Sales rep" hint={canAssign ? undefined : "Your role cannot change the assignment."}>
+          {canAssign ? <StaffSelect value={rep} onChange={setRep} /> : <input className={inputCls} disabled value={c.assignees.find((a) => a.role === "sales")?.name ?? "Unassigned"} />}
+        </Field>
+        <Field label="Note (optional)" hint="Saved in the case history with the status change.">
+          <textarea className={textareaCls} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="Called the customer, they want a quieter pace." />
+        </Field>
+        {err && <p className="text-[13px] text-danger">{friendlyError(err)}</p>}
       </div>
-    </div>
+    </Modal>
   );
 }

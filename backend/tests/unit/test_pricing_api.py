@@ -94,6 +94,16 @@ def test_content_creator_is_forbidden() -> None:
     assert conn.calls == []
 
 
+@pytest.mark.parametrize("role", ["admin", "sales", "contracting"])
+def test_every_role_that_edits_or_prices_a_version_may_quote(role: str) -> None:
+    """AA-996 (Figma audit item 11): the builder's live quote must work for the roles that build proposals (ui-spec
+    §4.8 / Q8: admin, sales, contracting). The 403 the audit saw was its read-only E2E session, not the role matrix."""
+    conn = _conn()
+    with _client(ScriptedDatabase(conn), staff=Staff("8", None, role.title(), role, True, "reviewer")) as client:
+        r = client.post(URL, json=_body())
+    assert r.status_code == 200, r.text
+
+
 # ── Happy paths ──────────────────────────────────────────────────────────────
 
 

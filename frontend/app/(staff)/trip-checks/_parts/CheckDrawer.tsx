@@ -9,10 +9,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { checkProgress } from "@/ui/booking/caseFacts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type FieldError } from "@/lib/api/client";
+import type { TripCaseStatus } from "@/lib/api/types";
 import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type CheckChanges, type TripCheck, type TripCheckStatus } from "@/lib/api/tripChecks";
-import { DateText, FormDrawer, Pill, TripCheckStatusBadge, useCan, useToast } from "@/ui";
+import { DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast } from "@/ui";
 import { Field, inputCls, LockedValue, textareaCls } from "../../cases/_parts/fields";
 import { StaffSelect } from "../../cases/_parts/StaffSelect";
 import { DateField } from "@/ui/booking/DateField";
@@ -70,6 +72,58 @@ function diff(c: TripCheck, f: Form): CheckChanges {
     else (out as Record<string, string | null>)[k] = v || null;
   });
   return out;
+}
+
+/** AA-996 (Figma View Details-3, audit item 8): on /trip-checks the drawer says which trip this check belongs to: the
+ *  customer or agency, the sales owner, the trip status and dates, and how many of the trip's checks are done, with a
+ *  link to the case's Checks tab for the others. */
+function TripContext({ check }: { check: TripCheck }) {
+  const t = check.trip_case;
+  const p = checkProgress(t.checks);
+  const fact = (label: string, value: React.ReactNode) => (
+    <div className="min-w-0">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="mt-0.5 truncate text-[13px] text-ink">{value}</dd>
+    </div>
+  );
+  return (
+    <div className="rounded-md border border-line bg-panel px-3 py-3" data-testid="check-trip-context">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+        {fact(t.channel === "b2b" ? "Agency" : "Customer", t.channel === "b2b" ? "B2B agency" : (t.customer_name ?? "—"))}
+        {fact("Sales", t.sales_name ?? "Unassigned")}
+        {fact("Trip status", <TripCaseStatusBadge status={t.status as TripCaseStatus} />)}
+        {fact(
+          "Travel dates",
+          t.start_date ? (
+            <>
+              <DateText value={t.start_date} />
+              {t.end_date ? (
+                <>
+                  {" – "}
+                  <DateText value={t.end_date} />
+                </>
+              ) : null}
+            </>
+          ) : (
+            "Not set"
+          ),
+        )}
+      </dl>
+      {p && (
+        <div className="mt-3 border-t border-line2 pt-2.5">
+          <div className="flex items-center justify-between gap-2 text-[12px]">
+            <span className="text-body">{p.label}</span>
+            <Link href={`/cases/${encodeURIComponent(t.code)}?tab=checks`} className="shrink-0 font-semibold text-accent-deep hover:underline">
+              Open Checks tab
+            </Link>
+          </div>
+          <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-line2" aria-hidden="true">
+            <span className={`block h-full rounded-full ${p.pct === 100 ? "bg-success" : "bg-accent"}`} style={{ width: `${p.pct}%` }} />
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function CheckDrawer({
@@ -152,6 +206,7 @@ function CheckDrawerBody({
           </span>
         )}
       </div>
+      {showCase && <TripContext check={check} />}
       {!canWrite && (
         <p className="rounded-md border border-line bg-panel px-3 py-2 text-[13px] text-muted">
           {writable ? "Read only: changing checks needs the operations role." : "This trip is closed: its checks are read only."}

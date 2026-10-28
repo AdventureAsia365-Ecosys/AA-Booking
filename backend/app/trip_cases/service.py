@@ -9,6 +9,7 @@ answer with the allowed next statuses instead of a bare trigger error.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -18,10 +19,13 @@ import asyncpg
 from app import audit, paging
 from app.auth.staff import Staff
 from app.catalog import liveness
+from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import invoices, supplier_bookings
 from app.trip_cases import sql
+
+log = logging.getLogger(__name__)
 
 STATUSES = (
     "new_inquiry",
@@ -308,6 +312,7 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     case["legs"] = [dict(r) for r in legs]
     await _tour_flags(conn, case)
     case.update(sql.trip_shape(case["inquiry_snapshot"], case["legs"], case.get("start_date")))
+    case["leg_countries"] = await leg_countries(conn, case["legs"], case["inquiry_snapshot"])
     case["versions"] = [sql.version_dict(r) for r in versions]
     case["status_history"] = [dict(r) for r in history]
     case["assignments"] = [dict(r) for r in assignments]
@@ -426,6 +431,70 @@ def _pax_consistent(changes: dict[str, Any], before: dict[str, Any]) -> dict[str
         if adults is not None:
             return {**changes, "pax": adults + (children or 0)}
     return changes
+
+
+# AA-996 (Figma audit item 15): the countries a case travels through, read from its legs, for the case page when staff
+# have not set ``countries`` themselves. A leg's CIS key gives its tour's country (``v_tour.country`` is a
+# ``v_country.name`` since CIS 288); the inquiry's route days give their places' countries (``v_destination``,
+# resolved by CIS). Legs first, in day order, then the route days; each code once.
+LEG_COUNTRIES_SQL = """
+SELECT iso2 FROM (
+    SELECT c.iso2::text AS iso2, 0 AS part, k.ord
+    FROM unnest($1::text[]) WITH ORDINALITY AS k(source_id, ord)
+    JOIN catalog.v_tour t ON t.source_system = 'cis' AND t.source_id = k.source_id
+    JOIN catalog.v_country c ON lower(c.name) = lower(t.country)
+    UNION ALL
+    SELECT d.country_iso2::text, 1, k.ord
+    FROM unnest($2::uuid[]) WITH ORDINALITY AS k(destination_id, ord)
+    JOIN catalog.v_destination d ON d.destination_id = k.destination_id
+    WHERE d.country_iso2 IS NOT NULL
+) found
+ORDER BY part, ord
+"""
+
+
+def _snapshot_destination_ids(snapshot: dict[str, Any] | None) -> list[str]:
+    """The CIS place ids of the inquiry's route days (contract ``itinerary.days[].destination_id``), in day order;
+    anything that is not a UUID is skipped (the snapshot is stored as received)."""
+    if not isinstance(snapshot, dict):
+        return []
+    itinerary = snapshot.get("itinerary") if isinstance(snapshot.get("itinerary"), dict) else snapshot
+    days = itinerary.get("days") if isinstance(itinerary, dict) else None
+    if not isinstance(days, list):
+        return []
+    named = [d for d in days if isinstance(d, dict)]
+    named.sort(key=lambda d: d.get("day") if isinstance(d.get("day"), int) else 0)
+    out: list[str] = []
+    for day in named:
+        try:
+            ident = str(uuid.UUID(str(day.get("destination_id"))))
+        except ValueError:
+            continue
+        if ident not in out:
+            out.append(ident)
+    return out
+
+
+async def leg_countries(
+    conn: asyncpg.Connection, legs: list[dict[str, Any]], snapshot: dict[str, Any] | None
+) -> list[str]:
+    """ISO-2 codes of the countries the legs (and the inquiry's route days) go through; ``[]`` when there is nothing
+    to resolve or the catalog cannot be read (fail soft, logged: the case page never fails on it)."""
+    keys = [leg["source_id"] for leg in legs if leg.get("source_system") == "cis" and leg.get("source_id")]
+    places = _snapshot_destination_ids(snapshot)
+    if not keys and not places:
+        return []
+    try:
+        async with conn.transaction():
+            rows = await conn.fetch(LEG_COUNTRIES_SQL, keys, places)
+    except CATALOG_ERRORS as exc:
+        log.warning("catalog unreadable, leg countries omitted: %s", type(exc).__name__)
+        return []
+    out: list[str] = []
+    for row in rows:
+        if row["iso2"] and row["iso2"] not in out:
+            out.append(row["iso2"])
+    return out
 
 
 async def _countries(conn: asyncpg.Connection, case_id: str) -> list[str]:

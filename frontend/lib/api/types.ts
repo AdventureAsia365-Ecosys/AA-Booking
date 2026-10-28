@@ -248,6 +248,9 @@ export interface TripCaseDetail extends Omit<TripCaseListItem, "latest_version">
   } | null;
   /** AA-986 L5: tours this case uses that AA no longer serves (kept; staff decide what to do). */
   tour_alerts?: TourAlert[];
+  /** AA-996: ISO-2 countries the legs go through (CIS tour countries, then the inquiry's route-day places); shown
+   *  when staff have not set `countries`. Optional: an API before AA-996 does not send it. */
+  leg_countries?: string[];
 }
 
 export interface ActivityItem {

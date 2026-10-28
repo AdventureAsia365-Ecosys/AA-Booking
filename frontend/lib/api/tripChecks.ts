@@ -54,6 +54,9 @@ export interface TripCheck {
     start_date: IsoDate | null;
     end_date: IsoDate | null;
     customer_name: string | null;
+    /** AA-996, /trip-checks rows only: the trip's stored checks (progress) and its sales owner. */
+    checks?: { total: number; done: number; not_applicable: number };
+    sales_name?: string | null;
   };
 }
 
@@ -86,11 +89,22 @@ export interface CaseChecks {
   writable: boolean;
 }
 
+/** AA-996: the /trip-checks tab counts under the current owner / check / search filters (every status). */
+export interface TripCheckCounts {
+  open: number;
+  overdue: number;
+  done: number;
+  not_applicable: number;
+  all: number;
+}
+
 export interface TripCheckPage {
   items: TripCheck[];
   total: number;
   limit: number;
   offset: number;
+  /** Optional: an API before AA-996 does not send it (the tabs then show no counts). */
+  counts?: TripCheckCounts;
 }
 
 export interface CheckChanges {

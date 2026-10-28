@@ -15,7 +15,7 @@ import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, Lock, MapPin, Pencil, Send, User } from "lucide-react";
+import { ArrowLeft, CalendarDays, Eye, Lock, MapPin, Pencil, Send, User } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
 import { settingsFromApi } from "@/lib/bookingConfig";
 import {
@@ -32,6 +32,7 @@ import {
   useCan,
 } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
+import { caseCountries } from "@/ui/booking/caseFacts";
 import { dayDate, itemsByDay, useVersion } from "@/app/(staff)/_parts/useVersion";
 import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 
@@ -80,6 +81,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
     ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}${c.duration_days ? ` (${c.duration_days} days)` : ""}`
     : "Dates to be confirmed";
   const sales = c.assignees.find((a) => a.role === "sales")?.name ?? null;
+  const countries = caseCountries(c).codes;
 
   return (
     <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
@@ -113,17 +115,21 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
               <span className="inline-flex items-center gap-1.5">
                 <User size={14} /> {c.customer_name ?? "Unnamed customer"}
               </span>
-              {c.countries.length > 0 && (
+              {countries.length > 0 && (
                 <span className="inline-flex items-center gap-1.5">
-                  <MapPin size={14} /> {c.countries.join(", ")}
+                  <MapPin size={14} /> {countries.join(", ")}
                 </span>
               )}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canWrite && !locked && (
+            {canWrite && !locked ? (
               <Button variant="secondary" onClick={() => router.push(builderHref)}>
                 <Pencil size={14} /> Edit
+              </Button>
+            ) : (
+              <Button variant="secondary" onClick={() => router.push(builderHref)}>
+                <Eye size={14} /> Open builder
               </Button>
             )}
             {canSend && (
@@ -257,7 +263,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                 ) : null}
                 <div>
                   <dt className="text-xs text-muted">Destinations</dt>
-                  <dd className="mt-0.5 text-ink">{c.countries.length ? c.countries.join(", ") : "—"}</dd>
+                  <dd className="mt-0.5 text-ink">{countries.length ? countries.join(", ") : "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-muted">Status</dt>
@@ -282,7 +288,12 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                     <Money amount={v.total_price} currency={v.currency} strong />
                   </p>
                   <p className="mt-1 text-xs text-muted">
-                    {v.valid_until ? (
+                    {v.is_approved ? (
+                      // AA-996 (audit item 12): an approved price no longer expires.
+                      <>
+                        Approved on <DateText value={v.approved_at} />
+                      </>
+                    ) : v.valid_until ? (
                       <>
                         Valid until <DateText value={v.valid_until} />
                       </>

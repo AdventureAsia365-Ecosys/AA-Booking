@@ -14,7 +14,8 @@
   customer notification row. No e-mail is sent. From then on the database locks the version's commercial
   fields and its items (bk-005 trigger); staff make a new version instead.
 - **Approve** records the customer's approval of a sent version (staff action until the customer app,
-  O8): the version is approved (bk-003 lock) and the case moves ``proposal_sent -> confirmed`` (D3).
+  O8): the version is approved (bk-003 lock) and the case moves ``proposal_sent -> confirmed`` (D3). A version with
+  no items is refused (422 ``version_empty``, AA-996): Send refuses one too, so only an out-of-band row can be both.
 - **Delete** soft-deletes an unsent, unapproved draft.
 - **Net costs** (bk-004 ``version_item_costs``, AA-810): each item carries its supplier net cost lines. ``GET
   …/items`` returns them per item; ``PUT …/items`` replaces an item's lines when the item has ``costs`` (omit it
@@ -892,6 +893,14 @@ async def approve_version(
         raise Conflict("version_superseded", "a later version was sent; approve that one")
     if case["status"] != "proposal_sent":
         raise Conflict("case_not_awaiting_approval", f"the case is {case['status']}, not proposal_sent")
+    # AA-996 (Figma audit item 12): Send already refuses an empty version, but a version that reached "sent" some
+    # other way (a data fix, a seed script) must not confirm a sale with nothing in it.
+    item_count = await conn.fetchval(
+        "SELECT count(*) FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid",
+        version["id"],
+    )
+    if not item_count:
+        raise Invalid("version_empty", "a version with no items cannot be approved")
     badges = await _version_badges(conn, case["id"])
     await conn.execute(
         "UPDATE booking.trip_case_versions SET is_approved = true, approved_at = now(), approved_by = $2,"

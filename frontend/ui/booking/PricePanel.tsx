@@ -248,8 +248,24 @@ export function FxNotice() {
 }
 
 // ── Result ───────────────────────────────────────────────────────────────────
-function quoteErrorView(error: unknown, canManageRules: boolean): { title: string; body: string; link: string | null } {
+type QuoteErrorView = { title: string; body: string; link: string | null; tone?: "info" };
+
+/** AA-996 (Figma audit item 11): a live quote is a POST, and a read-only session (the E2E staff user, AA-910; a
+ *  Preview-host sign-in, AA-911) refuses every POST with 403 before any role check. That is not a role problem, so it
+ *  is explained in a neutral box instead of "No access to pricing" (which blamed the role). */
+function quoteErrorView(error: unknown, canManageRules: boolean): QuoteErrorView {
   const e = error instanceof ApiError ? error : null;
+  if (e?.status === 403 && (e.code === "e2e_read_only" || e.code === "preview_read_only")) {
+    return {
+      title: "Live quote not available in this session",
+      body:
+        e.code === "preview_read_only"
+          ? "This is a read-only Preview sign-in: it cannot run the pricing engine. Sign in on the Booking admin to quote."
+          : "This test sign-in is read-only: it cannot run the pricing engine. Admin, sales and contracting users see the live quote here.",
+      link: null,
+      tone: "info",
+    };
+  }
   if (e?.status === 404) {
     return {
       title: "The pricing engine is not on this Booking API yet",
@@ -258,7 +274,9 @@ function quoteErrorView(error: unknown, canManageRules: boolean): { title: strin
     };
   }
   if (e?.status === 503) return { title: "Pricing data unavailable", body: "The Booking API could not read the pricing rules or FX rates. Try again in a moment.", link: null };
-  if (e?.status === 403) return { title: "No access to pricing", body: "Your Booking role cannot see margins and net costs.", link: null };
+  if (e?.status === 403) {
+    return { title: "No access to pricing", body: "Your Booking role cannot see margins and net costs: quotes need admin, sales or contracting.", link: null };
+  }
   if (e?.status === 422 && (e.code.startsWith("no FX rate") || e.code.startsWith("no pricing rule"))) {
     // AA-810: rows are entered and approved (maker-checker) on /pricing/rules; only approved rows price.
     const fx = e.code.startsWith("no FX rate");
@@ -277,10 +295,14 @@ export function QuoteResult({
   query,
   canManageRules = false,
   emptyHint = "Add at least one net cost line to see the selling price.",
+  readOnlyNote,
 }: {
   query: ReturnType<typeof useQuotePreview>;
   canManageRules?: boolean;
   emptyHint?: string;
+  /** Added after the read-only explanation (the builder: its saved version total is still right; the calculator
+   *  has no saved total, so it passes nothing). */
+  readOnlyNote?: string;
 }) {
   const [details, setDetails] = useState(false);
   if (!query.hasRequest) {
@@ -288,6 +310,17 @@ export function QuoteResult({
   }
   if (query.isError && !query.isFetching) {
     const v = quoteErrorView(query.error, canManageRules);
+    if (v.tone === "info") {
+      return (
+        <div role="status" className="rounded-md border border-line bg-panel px-3 py-3 text-[13px]" data-testid="quote-read-only">
+          <p className="font-semibold text-ink">{v.title}</p>
+          <p className="mt-0.5 text-body">
+            {v.body}
+            {readOnlyNote ? ` ${readOnlyNote}` : ""}
+          </p>
+        </div>
+      );
+    }
     return (
       <div role="alert" className="rounded-md border border-danger-border bg-danger-soft px-3 py-3 text-[13px] text-danger">
         <p className="font-semibold">{v.title}</p>

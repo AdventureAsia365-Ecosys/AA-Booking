@@ -11,7 +11,7 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, Pencil, UserPlus, Users as UsersIcon } from "lucide-react";
+import { ArrowLeft, Briefcase, CalendarDays, Pencil, User, UserPlus, Users as UsersIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import type { ActivityItem, TripCaseDetail } from "@/lib/api/types";
 import { CATALOG_STATE_META, catalogReasonLabel, isFlaggedState } from "@/lib/tourState";
@@ -30,10 +30,12 @@ import {
   SupplyBadge,
   TRIP_CASE_STATUS_META,
   TripCaseStatusBadge,
+  Money,
   formatDay,
   useCan,
   useUrlFilters,
 } from "@/ui";
+import { caseCountries, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFacts";
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
 import { AssignModal } from "./AssignModal";
@@ -107,12 +109,20 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                   {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>TripPlanner</Pill>}
                   {c.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
+                {/* Figma TRIP CASES DETAILS / Assigned Trips-1 meta: customer · agent · date range (N days) · pax. */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted" data-testid="case-meta">
                   <Code>{c.code}</Code>
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <User size={14} className="shrink-0" />
+                    <span className="truncate text-body">{c.channel === "b2b" ? "B2B agency" : (c.customer_name ?? "No customer")}</span>
+                  </span>
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <Briefcase size={14} className="shrink-0" />
+                    <span className="truncate">Agent: {salesName(c) ?? "Unassigned"}</span>
+                  </span>
                   <span className="inline-flex items-center gap-1">
                     <CalendarDays size={14} />
-                    {c.start_date ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}` : "Dates not set"}
-                    {c.duration_days ? ` · ${c.duration_days} days` : ""}
+                    {tripDates(c)}
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <UsersIcon size={14} />
@@ -167,7 +177,9 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
       </div>
 
       <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-8">
-        {tab === "overview" && <Overview c={c} canAssign={canAssign} onAssign={() => setPanel("assign")} />}
+        {tab === "overview" && (
+          <Overview c={c} canAssign={canAssign} canEdit={canWrite} onAssign={() => setPanel("assign")} onEdit={() => setPanel("edit")} />
+        )}
         {tab === "proposals" && <ProposalsTab c={c} />}
         {tab === "suppliers" && <SuppliersTab c={c} />}
         {tab === "billing" && <BillingTab c={c} />}
@@ -179,6 +191,19 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
       <EditDetailsDrawer c={c} open={panel === "edit"} onClose={() => setPanel(null)} />
     </main>
   );
+}
+
+function salesName(c: TripCaseDetail): string | null {
+  const a = c.assignees.find((x) => x.role === "sales");
+  return a ? (a.name ?? a.cis_user_id) : null;
+}
+
+/** "6 Dec 2026 – 19 Dec 2026 (14 days)"; the length comes from the legs, else from the two dates. */
+function tripDates(c: TripCaseDetail): string {
+  const end = c.trip_end_date ?? c.end_date;
+  if (!c.start_date) return c.duration_days ? `Dates not set · ${c.duration_days} days` : "Dates not set";
+  const days = c.duration_days ?? inclusiveDays(c.start_date, end);
+  return `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}${days ? ` (${days} day${days === 1 ? "" : "s"})` : ""}`;
 }
 
 function paxLabel(c: TripCaseDetail): string {
@@ -239,19 +264,36 @@ function TourAlerts({ c }: { c: TripCaseDetail }) {
   );
 }
 
-function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: boolean; onAssign: () => void }) {
+// AA-996 (Figma TRIP CASES DETAILS, audit item 6): the trip facts are the main column (a two-column grid with an Edit
+// pencil), the legs card follows and shrinks to one line on a custom trip, and the rail holds people and notes.
+function Overview({
+  c,
+  canAssign,
+  canEdit,
+  onAssign,
+  onEdit,
+}: {
+  c: TripCaseDetail;
+  canAssign: boolean;
+  canEdit: boolean;
+  onAssign: () => void;
+  onEdit: () => void;
+}) {
   const days = snapshotDays(c.inquiry_snapshot);
   const customDays = snapshotCustomDays(c.inquiry_snapshot);
+  const prefs = c.source_system === "tripplanner" ? inquiryPrefs(c.inquiry_snapshot) : null;
   const sales = c.assignees.filter((a) => a.role === "sales");
-  const countryNames = useCountryNames(c.countries);
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-5">
+        {!!c.tour_alerts?.length && <TourAlerts c={c} />}
+        <TripFacts c={c} canEdit={canEdit} onEdit={onEdit} />
         {c.source_system === "tripplanner" && (
           <Section title="Inquiry" description="What the customer built in TripPlanner, as received. Read-only." actions={<Pill tone="info" dot={false}>TripPlanner</Pill>}>
             <p className="mb-3 text-[13px] text-muted">
               Received <DateText value={c.created_at} withTime />
             </p>
+            {prefs && <InquiryPrefsBlock prefs={prefs} />}
             {days.length ? (
               <ol className="flex flex-col divide-y divide-line2 rounded-md border border-line">
                 {days.map((d, i) => (
@@ -272,9 +314,8 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
             )}
           </Section>
         )}
-        {!!c.tour_alerts?.length && <TourAlerts c={c} />}
-        <Section title="Trip legs" description="The CIS tours this case is built from, in day order." actions={<FromCisTag />}>
-          {c.legs.length ? (
+        {c.legs.length ? (
+          <Section title="Trip legs" description="The CIS tours this case is built from, in day order." actions={<FromCisTag />}>
             <ol className="flex flex-col gap-2">
               {c.legs.map((l, i) => (
                 <li key={`${l.source_tour_id}-${l.position}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-line px-3 py-2.5">
@@ -295,10 +336,15 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
                 </li>
               ))}
             </ol>
-          ) : (
-            <p className="text-[13px] text-muted">A custom trip: no CIS tour is linked yet.</p>
-          )}
-        </Section>
+          </Section>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-line bg-card px-4 py-3 text-[13px]" data-testid="legs-empty">
+            <span className="min-w-0 text-muted">
+              <span className="font-semibold text-ink">Trip legs</span> · A custom trip: no CIS tour is linked yet.
+            </span>
+            <FromCisTag />
+          </div>
+        )}
       </div>
       <div className="flex min-w-0 flex-col gap-5">
         <Section title="People">
@@ -315,12 +361,16 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
                 />
               ) : (
                 <>
-                  <Link href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`} className="block rounded-md hover:bg-bg">
-                    <PersonCell
-                      name={c.customer_name}
-                      sub={[c.customer_email, c.customer_phone].filter(Boolean).join(" · ") || null}
-                      chips={!c.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}
-                    />
+                  <PersonCell
+                    name={c.customer_name}
+                    sub={[c.customer_email, c.customer_phone].filter(Boolean).join(" · ") || null}
+                    chips={!c.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}
+                  />
+                  <Link
+                    href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`}
+                    className="mt-2 inline-flex h-8 items-center rounded-full border border-accent-border px-3.5 text-[12px] font-semibold uppercase tracking-[0.06em] text-accent-deep hover:bg-accent-tint"
+                  >
+                    View full profile
                   </Link>
                   {c.customer_needs_merge_review && (
                     <p className="mt-2 text-xs text-warning">
@@ -351,42 +401,117 @@ function Overview({ c, canAssign, onAssign }: { c: TripCaseDetail; canAssign: bo
             </div>
           </div>
         </Section>
-        <Section title="Trip details">
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px]">
-            <dt className="text-muted">Status</dt>
-            <dd className="text-ink">{TRIP_CASE_STATUS_META[c.status].label}</dd>
-            <dt className="text-muted">Adults / children</dt>
-            <dd className="text-ink">
-              {c.pax_adults ?? "—"} / {c.pax_children ?? "—"}
-            </dd>
-            <dt className="text-muted">Currency</dt>
-            <dd className="text-ink">{c.currency ?? "—"}</dd>
-            <dt className="text-muted">Countries</dt>
-            <dd className="text-ink">{c.countries.length ? countryNames : "—"}</dd>
-            <dt className="text-muted">Source</dt>
-            <dd className="text-ink">
-              {c.source_system === "tripplanner" ? (
-                "TripPlanner"
-              ) : c.source_system === "manual" ? (
-                "Manual"
-              ) : c.source_system === "crm" ? (
-                "B2B agency (AA-Partner CRM)"
-              ) : c.source_id ? (
-                <Link href={`/catalog/trip-plans/${encodeURIComponent(c.source_id)}`} className="text-accent-deep hover:underline">
-                  CIS trip plan
-                </Link>
-              ) : (
-                "CIS"
-              )}
-            </dd>
-            <dt className="text-muted">Created</dt>
-            <dd className="text-ink">
-              <DateText value={c.created_at} />
-            </dd>
-          </dl>
-        </Section>
         <NotesCard c={c} />
       </div>
+    </div>
+  );
+}
+
+/** The trip facts card (Figma "Trip Information"): two columns of label / value, Edit opens the Edit details drawer. */
+function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean; onEdit: () => void }) {
+  const { codes, fromLegs } = caseCountries(c);
+  const countryNames = useCountryNames(codes);
+  const approved = c.versions.find((v) => v.is_approved) ?? null;
+  const end = c.trip_end_date ?? c.end_date;
+  const days = c.duration_days ?? inclusiveDays(c.start_date, end);
+  const fact = (label: string, value: React.ReactNode, hint?: React.ReactNode) => (
+    <div className="min-w-0">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="mt-0.5 break-words text-[13px] text-ink">
+        {value}
+        {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+      </dd>
+    </div>
+  );
+  return (
+    <Section
+      title="Trip details"
+      actions={
+        canEdit ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label="Edit trip details"
+            title="Edit details"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink"
+          >
+            <Pencil size={14} />
+          </button>
+        ) : undefined
+      }
+    >
+      <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2" data-testid="trip-facts">
+        {fact("Status", TRIP_CASE_STATUS_META[c.status].label)}
+        {fact(
+          "Travel dates",
+          c.start_date ? `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}` : "Not set",
+          days ? `${days} day${days === 1 ? "" : "s"}` : undefined,
+        )}
+        {fact("Adults / children", c.pax_adults != null ? `${c.pax_adults} / ${c.pax_children ?? 0}` : c.pax ? `${c.pax} pax` : "Not set")}
+        {fact("Countries", codes.length ? countryNames : "—", fromLegs ? "From the trip legs" : undefined)}
+        {fact("Trip style", c.trip_style ?? "—")}
+        {fact("Currency", c.currency ?? "—")}
+        {fact(
+          "Approved total",
+          approved ? (
+            <Link href={`/cases/${encodeURIComponent(c.code)}/proposals/${approved.version_number}`} className="hover:underline">
+              <Money amount={approved.total_price} currency={approved.currency} strong />
+            </Link>
+          ) : (
+            <span className="text-muted">No approved proposal yet</span>
+          ),
+          approved ? `V${approved.version_number}` : undefined,
+        )}
+        {fact(
+          "Source",
+          c.source_system === "tripplanner" ? (
+            "TripPlanner"
+          ) : c.source_system === "manual" ? (
+            "Manual"
+          ) : c.source_system === "crm" ? (
+            "B2B agency (AA-Partner CRM)"
+          ) : c.source_id ? (
+            <Link href={`/catalog/trip-plans/${encodeURIComponent(c.source_id)}`} className="text-accent-deep hover:underline">
+              CIS trip plan
+            </Link>
+          ) : (
+            "CIS"
+          ),
+        )}
+        {fact("Created", <DateText value={c.created_at} />)}
+      </dl>
+    </Section>
+  );
+}
+
+/** Figma USER DETAILS-3 "Client message & preferences": the customer's words quoted, then a two-column fact grid. */
+function InquiryPrefsBlock({ prefs }: { prefs: NonNullable<ReturnType<typeof inquiryPrefs>> }) {
+  const w = prefs.travelWindow;
+  const when = w ? (w.text ?? [w.start ? formatDay(w.start) : null, w.end ? formatDay(w.end) : null].filter(Boolean).join(" – ")) : null;
+  const facts = [
+    ["Estimated budget", prefs.budget],
+    ["Travel window", when],
+    ["Travel style", prefs.travelStyle],
+    ["Party", prefs.party],
+  ].filter((f): f is [string, string] => !!f[1]);
+  return (
+    <div className="mb-4 flex flex-col gap-3" data-testid="inquiry-prefs">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Client message &amp; preferences</p>
+      {prefs.message && (
+        <blockquote className="whitespace-pre-wrap break-words rounded-md border-l-2 border-accent bg-panel px-3 py-2 text-[13px] italic text-body">
+          {prefs.message}
+        </blockquote>
+      )}
+      {facts.length > 0 && (
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+          {facts.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-xs text-muted">{label}</dt>
+              <dd className="mt-0.5 break-words text-[13px] text-ink">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }

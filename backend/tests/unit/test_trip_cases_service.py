@@ -257,3 +257,40 @@ async def test_assign_errors() -> None:
     with pytest.raises(Invalid) as inactive:
         await service.assign(conn, STAFF, "x", "u-2", "sales")
     assert inactive.value.code == "staff_not_assignable"
+
+
+# ── AA-996: countries from the legs ──────────────────────────────────────────
+
+PLACE_A = "d0000000-0000-4000-8000-000000000002"
+PLACE_B = "d0000000-0000-4000-8000-000000000001"
+
+
+async def test_leg_countries_from_keys_and_route_days_once_each() -> None:
+    legs = [
+        {"source_system": "cis", "source_id": "grp-laos"},
+        {"source_system": None, "source_id": None},  # a legacy leg without a catalog key
+        {"source_system": "cis", "source_id": "grp-vn"},
+    ]
+    snapshot = {
+        "itinerary": {
+            "days": [
+                {"day": 2, "destination_id": PLACE_B},
+                {"day": 1, "destination_id": PLACE_A},
+                {"day": 3, "destination_id": "not-a-uuid"},
+                {"day": 4, "destination_id": PLACE_A},
+            ]
+        }
+    }
+    found = [{"iso2": "LA"}, {"iso2": "VN"}, {"iso2": "LA"}, {"iso2": None}]
+    conn = ScriptedConn().on("FROM unnest($1::text[])", found)
+    assert await service.leg_countries(conn, legs, snapshot) == ["LA", "VN"]
+    (args,) = conn.sql("FROM unnest($1::text[])")
+    assert args == (["grp-laos", "grp-vn"], [PLACE_A, PLACE_B])
+
+
+async def test_leg_countries_skip_the_catalog_when_nothing_to_resolve_and_fail_soft() -> None:
+    quiet = ScriptedConn()
+    assert await service.leg_countries(quiet, [{"source_system": None, "source_id": None}], {"days": "x"}) == []
+    assert quiet.calls == []
+    broken = ScriptedConn().on("FROM unnest($1::text[])", asyncpg.UndefinedTableError("catalog.v_tour"))
+    assert await service.leg_countries(broken, [{"source_system": "cis", "source_id": "k"}], None) == []

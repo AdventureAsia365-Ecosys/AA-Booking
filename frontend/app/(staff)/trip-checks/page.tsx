@@ -5,13 +5,17 @@
 // (status, due date, owner, note, emergency contact on a B2C trip). The three standard checks are added by the system
 // when a trip is confirmed; custom checks are added on the case's Checks tab. The trip case status moves by itself with
 // the travel dates (bk_case_lifecycle, daily); the last runs are listed under the table.
+// AA-996 (Figma TRIP CHECKS, audit item 8): status tabs with counts above the list (Open / Overdue / Done / Not
+// applicable / All; the counts come with the list, under the same owner / check / search filters, and are hidden while
+// a due window narrows the rows) and, in the Trip
+// case cell, how far that trip is from ready ("3/9": its done and not-applicable checks of all its checks).
 
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ApiError } from "@/lib/api/client";
-import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type LifecycleRun, type TripCheck } from "@/lib/api/tripChecks";
+import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type LifecycleRun, type TripCheck, type TripCheckCounts } from "@/lib/api/tripChecks";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import {
   DataTable,
@@ -25,7 +29,43 @@ import {
   useCan,
   useUrlFilters,
 } from "@/ui";
+import { checkProgress, tabCountsShown } from "@/ui/booking/caseFacts";
+import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { CheckDrawer, checkTitle, isOverdue } from "./_parts/CheckDrawer";
+
+const STATUS_TABS = [
+  { key: "open", label: "Open" },
+  { key: "overdue", label: "Overdue" },
+  { key: "done", label: "Done" },
+  { key: "not_applicable", label: "Not applicable" },
+  { key: "all", label: "All" },
+] as const;
+type StatusTab = (typeof STATUS_TABS)[number]["key"];
+
+/** The tab the URL shows: Overdue = open checks with the "overdue" due filter; otherwise the status key. */
+function activeTab(status: string, due: string): StatusTab {
+  if ((status === "" || status === "open") && due === "overdue") return "overdue";
+  return (STATUS_TABS.find((t) => t.key === status)?.key ?? "open") as StatusTab;
+}
+
+/** "3/9" and a thin bar: the trip's resolved checks of all its checks (/trip-checks rows only). */
+function TripProgress({ checks }: { checks: TripCheck["trip_case"]["checks"] }) {
+  const p = checkProgress(checks);
+  if (!p) return null;
+  return (
+    <span className="flex items-center gap-1.5" title={p.label} data-testid="trip-progress">
+      <span className="block h-1.5 w-14 overflow-hidden rounded-full bg-line2" aria-hidden="true">
+        <span className={`block h-full rounded-full ${p.pct === 100 ? "bg-success" : "bg-accent"}`} style={{ width: `${p.pct}%` }} />
+      </span>
+      <span className="bk-tabular text-[11px] text-muted">
+        <span className="sr-only">{p.label}</span>
+        <span aria-hidden="true">
+          {p.resolved}/{p.total}
+        </span>
+      </span>
+    </span>
+  );
+}
 
 const DUE_WINDOWS: Record<string, number> = { overdue: -1, "7d": 7, "14d": 14, "30d": 30 };
 
@@ -69,6 +109,7 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
             {t.code}
           </Link>
           <TripCaseStatusBadge status={t.status} />
+          <TripProgress checks={t.checks} />
         </span>
       );
     },
@@ -130,10 +171,17 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
 
 export default function TripChecksPage() {
   const canRead = useCan("ops.read");
-  const { get } = useUrlFilters();
+  const { get, setMany } = useUrlFilters();
   const paging = useOffsetPage();
   const [openId, setOpenId] = useState<string | null>(null);
   const status = get("status") || "open";
+  const tab = activeTab(get("status"), get("due"));
+  const pickTab = (key: string) => {
+    // Overdue is the open list with the "overdue" due filter; leaving it clears that filter (other due windows stay).
+    const due = get("due") === "overdue" ? null : get("due") || null;
+    if (key === "overdue") setMany({ status: null, due: "overdue" });
+    else setMany({ status: key === "open" ? null : key, due });
+  };
   const query = {
     status,
     q: get("q") || undefined,
@@ -145,12 +193,25 @@ export default function TripChecksPage() {
   };
   const list = useQuery({ queryKey: ["trip-checks", "list", query], queryFn: () => tripChecksApi.list(query), enabled: canRead });
   const open = list.data?.items.find((c) => c.id === openId) ?? null;
+  // The counts arrive with the list; keep the last ones while a new page / filter loads (no flicker).
+  const [counts, setCounts] = useState<TripCheckCounts | null>(null);
+  const fresh = list.data?.counts ?? null;
+  if (fresh && JSON.stringify(fresh) !== JSON.stringify(counts)) setCounts(fresh);
+  // The counts ignore the due filter: show them only when each badge equals what its tab lists (tabCountsShown).
+  const countsShown = tabCountsShown(tab, get("due"));
 
   return (
     <PageFrame
       title="Trip checks"
       description="Pre-departure checks across sold trips: re-check bookings, emergency contact, insurance and your own checks. Soonest due first."
     >
+      {canRead && (
+        <SavedTabs
+          active={tab}
+          onSelect={pickTab}
+          tabs={STATUS_TABS.map(({ key, label }) => ({ key, label, count: countsShown ? counts?.[key] : undefined, countPending: countsShown && !counts && list.isPending }))}
+        />
+      )}
       <Section>
         <DataTable<TripCheck>
           filters={
