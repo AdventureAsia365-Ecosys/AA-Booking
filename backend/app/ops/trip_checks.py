@@ -246,14 +246,71 @@ async def list_checks(
     args = [list(BOARD_STATUSES), status, due_before, who, code, (case or "").strip() or None, pattern]
     total = await conn.fetchval(f"SELECT count(*) {CHECK_FROM} WHERE {where}", *args)  # noqa: S608
     rows = await conn.fetch(
-        f"SELECT {CHECK_COLUMNS} {CHECK_FROM} WHERE {where}"  # noqa: S608 — constants only
+        f"SELECT {CHECK_COLUMNS}, {CASE_PROGRESS} {CHECK_FROM} WHERE {where}"  # noqa: S608 — constants only
         " ORDER BY k.due_date NULLS LAST, tc.start_date NULLS LAST, tc.code, k.created_at, k.id"
         " LIMIT $8 OFFSET $9",
         *args,
         limit,
         offset,
     )
-    return {"items": [check_out(r, staff) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset}
+    # The tab counts: the same search, owner, check and case filters, every status (the status / due filters are what
+    # the tabs choose between).
+    count_args = [args[0], args[3], args[4], args[5], args[6]]
+    counts = await conn.fetchrow(f"SELECT {COUNTS} {CHECK_FROM} WHERE {COUNT_WHERE}", *count_args)  # noqa: S608
+    return {
+        "items": [list_row_out(r, staff) for r in rows],
+        "total": int(total or 0),
+        "limit": limit,
+        "offset": offset,
+        "counts": {key: int((counts or {}).get(key) or 0) for key in COUNT_KEYS},
+    }
+
+
+# AA-996 (Figma TRIP CHECKS, audit item 8): per row, how far its trip is from ready (the case's stored checks, counted
+# like v_trip_check_board) and the case's sales owner (context in the check drawer).
+CASE_PROGRESS = """
+    (SELECT count(*) FROM booking.trip_case_checks p WHERE p.trip_case_id = k.trip_case_id)::int AS case_checks_total,
+    (SELECT count(*) FROM booking.trip_case_checks p
+      WHERE p.trip_case_id = k.trip_case_id AND p.status = 'done')::int AS case_checks_done,
+    (SELECT count(*) FROM booking.trip_case_checks p
+      WHERE p.trip_case_id = k.trip_case_id AND p.status = 'not_applicable')::int AS case_checks_not_applicable,
+    (SELECT s.name FROM booking.staff_assignments a JOIN booking.staff_users s ON s.cis_user_id = a.staff_user_id
+      WHERE a.trip_case_id = k.trip_case_id AND a.role = 'sales' AND a.unassigned_at IS NULL
+      ORDER BY a.assigned_at DESC LIMIT 1) AS sales_name
+"""
+# Overdue = open with a due date before today, the board's definition (v_trip_check_board.checks_overdue).
+COUNT_KEYS = ("open", "overdue", "done", "not_applicable", "all")
+COUNTS = """
+    count(*) FILTER (WHERE k.status = 'open') AS open,
+    count(*) FILTER (WHERE k.status = 'open' AND k.due_date < current_date) AS overdue,
+    count(*) FILTER (WHERE k.status = 'done') AS done,
+    count(*) FILTER (WHERE k.status = 'not_applicable') AS not_applicable,
+    count(*) AS "all"
+"""
+COUNT_WHERE = (
+    "tc.deleted_at IS NULL AND tc.status = ANY($1::text[])"
+    " AND ($2::text IS NULL OR ($2 = 'none' AND k.assignee_ref IS NULL) OR k.assignee_ref = $2)"
+    " AND ($3::text IS NULL OR k.code = $3)"
+    " AND ($4::text IS NULL OR tc.code = upper($4) OR tc.id::text = $4)"
+    " AND ($5::text IS NULL OR tc.code ILIKE $5 OR k.title ILIKE $5)"
+)
+
+
+def list_row_out(row: Any, staff: Staff) -> dict[str, Any]:
+    """A /trip-checks row: :func:`check_out` plus the trip's progress and its sales owner under ``trip_case``."""
+    data = dict(row)
+    extra = {key: data.pop(key, None) for key in PROGRESS_KEYS}
+    out = check_out(data, staff)
+    out["trip_case"]["sales_name"] = extra["sales_name"]
+    out["trip_case"]["checks"] = {
+        "total": int(extra["case_checks_total"] or 0),
+        "done": int(extra["case_checks_done"] or 0),
+        "not_applicable": int(extra["case_checks_not_applicable"] or 0),
+    }
+    return out
+
+
+PROGRESS_KEYS = ("case_checks_total", "case_checks_done", "case_checks_not_applicable", "sales_name")
 
 
 # ── Writes ───────────────────────────────────────────────────────────────────

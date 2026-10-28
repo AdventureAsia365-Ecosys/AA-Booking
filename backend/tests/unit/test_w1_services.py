@@ -569,11 +569,12 @@ async def test_send_and_approve_refuse_b2b_cases() -> None:
 
 
 async def test_approve_rules() -> None:
-    def approve_conn(status: str = "proposal_sent", **version: Any) -> ScriptedConn:
+    def approve_conn(status: str = "proposal_sent", items: int = 3, **version: Any) -> ScriptedConn:
         return (
             ScriptedConn()
             .on("FROM booking.trip_cases tc", case_row(status))
             .on("FROM booking.trip_case_versions v", version_row(**version))
+            .on("SELECT count(*) FROM booking.trip_case_version_itinerary", items)
         )
 
     ok = approve_conn(is_sent_to_customer=True, badge="sent")
@@ -591,6 +592,20 @@ async def test_approve_rules() -> None:
         with pytest.raises(Conflict) as err:
             await versions.approve_version(conn, SALES, "TC-1", 1, None)
         assert err.value.code == code
+
+
+async def test_approve_refuses_a_version_without_items() -> None:
+    """AA-996 (Figma audit item 12): a sent version with no items (reached out of band) never confirms the case."""
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.trip_cases tc", case_row("proposal_sent"))
+        .on("FROM booking.trip_case_versions v", version_row(is_sent_to_customer=True, badge="sent"))
+        .on("SELECT count(*) FROM booking.trip_case_version_itinerary", 0)
+    )
+    with pytest.raises(Invalid) as err:
+        await versions.approve_version(conn, SALES, "TC-1", 1, "by phone")
+    assert err.value.code == "version_empty"
+    assert conn.sql("UPDATE booking.") == [] and conn.sql("INSERT INTO booking.") == []
 
 
 def badge_rows(*snapshots: dict[int, str]):
@@ -634,6 +649,7 @@ async def test_approve_audits_newly_superseded_versions_only() -> None:
             "FROM booking.trip_case_versions AS v",
             badge_rows({1: "superseded", 2: "sent", 3: "draft"}, {1: "superseded", 2: "approved", 3: "superseded"}),
         )
+        .on("SELECT count(*) FROM booking.trip_case_version_itinerary", 2)
     )
     await versions.approve_version(conn, SALES, "TC-1", 2, None)
     rows = [r for r in audit_args(conn) if r[3] == "trip_case_version.superseded"]

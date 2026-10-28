@@ -236,6 +236,57 @@ async def test_d3_send_approve_confirms_and_locks(pool: asyncpg.Pool, admin: asy
     assert "trip_case_version.sent" in actions and "trip_case_version.approved" in actions
 
 
+async def test_approve_refuses_a_sent_version_without_items(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
+    """AA-996 (Figma audit item 12): Dev had an approved V1 with no items and a 2,400 USD total, made out of band. A
+    version that is sent but empty is refused (422 version_empty) and the case stays at proposal_sent."""
+    boss = await staff(pool, admin, "boss")
+    case = await inquiry_case(pool)  # no legs: V1 starts with no items
+    v1 = await priced_v1(pool, admin, boss, case)
+    await move(pool, boss, case["code"], "discovery", "building", "proposal_sent")
+    # The way a seed script reaches "sent" without Send (Send itself refuses an empty version).
+    await admin.execute(
+        "UPDATE booking.trip_case_versions SET is_sent_to_customer = true, sent_at = now() WHERE id = $1::uuid",
+        v1["id"],
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        with pytest.raises(Invalid) as empty:
+            await versions.approve_version(conn, boss, case["code"], 1, "by phone")
+    assert empty.value.code == "version_empty"
+    row = await admin.fetchrow(
+        "SELECT v.is_approved, tc.status FROM booking.trip_case_versions v"
+        " JOIN booking.trip_cases tc ON tc.id = v.trip_case_id WHERE v.id = $1::uuid",
+        v1["id"],
+    )
+    assert (row["is_approved"], row["status"]) == (False, "proposal_sent")
+
+
+async def test_case_detail_derives_countries_from_the_legs(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
+    """AA-996 (Figma audit item 15): Countries read "—" on a TripPlanner case whose leg is in Laos. The detail now
+    carries ``leg_countries``: the CIS tour country of each keyed leg, then the countries of the route-day places;
+    stored ``countries`` are left alone."""
+    await admin.execute(
+        "INSERT INTO catalog.v_tour (source_id, title, country, duration_days, updated_at)"
+        " VALUES ('aa996-laos', 'Pak Ou Caves', 'Laos', 2, now())"
+    )
+    try:
+        case = await inquiry_case(pool, [(1, "tour-b", 1, 2)])
+        await admin.execute(
+            "UPDATE booking.trip_case_legs SET source_system = 'cis', source_id = 'aa996-laos'"
+            " WHERE trip_case_id = $1::uuid",
+            case["id"],
+        )
+        await admin.execute(
+            "UPDATE booking.trip_cases SET inquiry_snapshot = $2::jsonb WHERE id = $1::uuid",
+            case["id"],
+            json.dumps({"days": [{"day": 3, "destination_id": "d0000000-0000-4000-8000-000000000003"}]}),
+        )
+        async with pool.acquire() as conn:
+            detail = await service.get_case(conn, case["code"])
+        assert detail["countries"] == [] and detail["leg_countries"] == ["LA", "VN"]
+    finally:
+        await admin.execute("DELETE FROM catalog.v_tour WHERE source_id = 'aa996-laos'")
+
+
 async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
     case = await inquiry_case(pool, [(1, "tour-a", 1, 2)])

@@ -5,7 +5,9 @@ Read ``ops.read``, write ``ops.write`` (admin, sales, contracting). Staff tokens
 sessions stay read-only by the global rule in ``app.auth.staff``.
 
 - ``GET /trip-checks`` (``status``, ``due_before``, ``assignee``, ``code``, ``case``, ``q``): checks across the open
-  sold cases, soonest due first (the /trip-checks page).
+  sold cases, soonest due first (the /trip-checks page). ``counts`` = open / overdue / done / not applicable / all
+  under the same owner, check, case and search filters (the page's tabs); each row's ``trip_case`` carries ``checks``
+  (the trip's total / done / not applicable) and ``sales_name`` (AA-996).
 - ``GET /trip-cases/{ref}/checks``: one case's checks, board counts and the derived checks (suppliers, payment).
 - ``POST /trip-cases/{ref}/checks``: add a custom check.
 - ``PATCH /trip-checks/{id}``: status, assignee, due date, note, custom title, emergency contact (B2C only).

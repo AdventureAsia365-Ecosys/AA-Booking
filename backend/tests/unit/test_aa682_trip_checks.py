@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.auth.staff import PERMISSIONS, PREVIEW_PERMISSIONS
+from app.auth.staff import PERMISSIONS, PREVIEW_PERMISSIONS, Staff
 from app.jobs import kinds
 from app.jobs.worker import PermanentError
 from app.ops import lifecycle as lc
@@ -233,3 +233,63 @@ def test_patch_body_model() -> None:
         with pytest.raises(ValidationError):
             CheckChanges(**body)
     assert CheckChanges(due_date=None).model_dump(exclude_unset=True) == {"due_date": None}  # explicit null clears
+
+
+# ── AA-996: tab counts and per-trip progress on /trip-checks ──────────────────
+
+
+def _list_row(**extra: Any) -> dict[str, Any]:
+    return {
+        "id": CHECK,
+        "trip_case_id": "00000000-0000-4000-8000-0000000000c1",
+        "trip_case_code": "TC-000042",
+        "channel": "b2c",
+        "trip_case_status": "confirmed",
+        "start_date": TODAY,
+        "end_date": TODAY + timedelta(days=9),
+        "code": "insurance",
+        "title": "Insurance",
+        "status": "open",
+        "due_date": TODAY,
+        "assignee_ref": None,
+        "assignee_name": None,
+        "done_by": None,
+        "done_by_name": None,
+        "done_at": None,
+        "note": None,
+        "emergency_contact_name": None,
+        "emergency_contact_phone": None,
+        "cleared_at": None,
+        "created_by": "system",
+        "created_at": datetime(2026, 11, 1, tzinfo=UTC),
+        "updated_at": datetime(2026, 11, 1, tzinfo=UTC),
+        "customer_name": "Ann Lead",
+        "case_checks_total": 4,
+        "case_checks_done": 2,
+        "case_checks_not_applicable": 1,
+        "sales_name": "Sam Sales",
+        **extra,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_counts_every_status_and_rows_carry_trip_progress() -> None:
+    sales = Staff("u-7", "s@example.test", "Sam", "sales", True, "reviewer")
+    counts = {"open": 5, "overdue": 2, "done": 7, "not_applicable": 1, "all": 13}
+    conn = (
+        ScriptedConn()
+        .on("SELECT count(*) FROM booking.trip_case_checks k", 5)
+        .on("AS case_checks_total", [_list_row()])
+        .on("count(*) FILTER (WHERE k.status = 'open') AS open", counts)
+    )
+    out = await tc.list_checks(conn, sales, status="done", due_before=TODAY, assignee="me", q="TC-42", limit=10)
+    assert out["counts"] == counts and out["total"] == 5
+    (row,) = out["items"]
+    assert row["trip_case"]["checks"] == {"total": 4, "done": 2, "not_applicable": 1}
+    assert row["trip_case"]["sales_name"] == "Sam Sales" and row["trip_case"]["customer_name"] == "Ann Lead"
+    assert not {"case_checks_total", "case_checks_done", "sales_name", "customer_name"} & set(row)
+    # The counts ignore the status and due filters (the tabs choose between them) but keep owner and search.
+    (count_args,) = conn.sql("AS not_applicable")
+    assert count_args == (list(tc.BOARD_STATUSES), "u-7", None, None, "%TC-42%")
+    empty = await tc.list_checks(ScriptedConn(), sales)
+    assert empty["counts"] == dict.fromkeys(tc.COUNT_KEYS, 0)

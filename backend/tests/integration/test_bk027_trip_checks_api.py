@@ -219,6 +219,13 @@ async def test_trip_checks_list_filters(client: Client, admin: asyncpg.Connectio
     assert {i["trip_case"]["code"] for i in due["items"]} == {soon["code"]}
     allstatus = await _ok(await c.get("/trip-checks", params={"status": "all", "q": late["code"]}, headers=sales))
     assert allstatus["total"] == 3
+    # AA-996: tab counts over every status (same search), and each row's trip progress + sales owner.
+    assert allstatus["counts"] == {"open": 2, "overdue": 0, "done": 0, "not_applicable": 1, "all": 3}
+    assert unassigned["counts"]["not_applicable"] == 1 and unassigned["counts"]["all"] == 3
+    assert {
+        (i["trip_case"]["checks"]["total"], i["trip_case"]["checks"]["not_applicable"]) for i in allstatus["items"]
+    } == {(3, 1)}
+    assert {i["trip_case"]["sales_name"] for i in allstatus["items"]} == {None}
     by_code = await _ok(await c.get("/trip-checks", params={"code": "insurance"}, headers=sales))
     assert {i["code"] for i in by_code["items"]} == {"insurance"}
     assert all(i["trip_case"]["code"] != presale["code"] for i in by_code["items"])
