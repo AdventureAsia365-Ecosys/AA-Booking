@@ -53,14 +53,18 @@ def test_static_guard_fails_the_130_list_statement() -> None:
     [
         ("SELECT * FROM catalog.v_tour_day WHERE tour_id = $1::uuid", True),
         ("SELECT * FROM catalog.v_tour_place p WHERE p.tour_id = ANY($1::uuid[])", True),
+        ("SELECT * FROM catalog.v_tour_day WHERE tour_id IN ($1::uuid, $2::uuid)", True),
+        # A join or IN (subquery) on tour_id is not pushed into the DISTINCT ON view: Postgres hashes the whole view
+        # (every itinerary parsed), checked with EXPLAIN on the stub.
         (
             "SELECT * FROM catalog.v_tour_day d JOIN catalog.v_tour t ON d.tour_id = t.tour_id WHERE t.source_id = $1",
-            True,
+            False,
         ),
+        ("SELECT * FROM catalog.v_tour_day WHERE tour_id IN (SELECT tour_id FROM x)", False),
+        ("SELECT * FROM catalog.v_tour_day WHERE tour_id IS NOT NULL", False),
         ("SELECT * FROM catalog.v_tour_day WHERE source_system = 'cis' AND source_id = $1", False),
         ("SELECT * FROM catalog.v_tour_place AS p WHERE p.source_id = ANY($1)", False),
         ("SELECT count(*) FROM catalog._tour_day_text", False),
-        ("SELECT * FROM catalog.v_tour_day WHERE tour_id IN (SELECT tour_id FROM x)", True),
     ],
 )
 def test_static_findings(sql: str, ok: bool) -> None:
@@ -224,3 +228,6 @@ def test_plan_findings_and_parse_rows() -> None:
         "Seq Scan on catalog.stub_parsed_day_noise without a tour_id condition",
     ]
     assert catalog_perf.parse_rows(unpushed) == (12 + 800) * 25
+    # A tour_id condition that is not an equality keys nothing.
+    not_null = {"Node Type": "Append", "Plans": [_scan("stub_parsed_day", Filter="(tour_id IS NOT NULL)")]}
+    assert catalog_perf.plan_findings(not_null) == ["Seq Scan on catalog.stub_parsed_day without a tour_id condition"]

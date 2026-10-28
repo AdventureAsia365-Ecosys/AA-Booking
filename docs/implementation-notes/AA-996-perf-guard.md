@@ -32,7 +32,7 @@ by `source_id`; on Dev each read parsed every live itinerary (~1.5 s), 25 of the
   statement at or over `SLOW_QUERY_MS` (1 s) logs `slow_query duration_ms=… budget_ms=… catalog=… error=… sql=…`
   (no arguments: they can hold personal data). A read cut by `command_timeout` logs too (`error=TimeoutError`), so
   the #130 class shows in CloudWatch the first time it happens instead of only as a 503.
-- **Proof the guard fires:** `test_guard_catches_the_130_page_extras` feeds the exact #130 `LATERAL` statement
+- **Proof the guard fires:** `test_the_guard_fails_the_130_list_statement` feeds the exact #130 `LATERAL` statement
   (kept as a constant in the test) to the plan check and expects a violation; the unit static scan has the same
   proof. Both also pass the current hotfix statements.
 
@@ -87,3 +87,13 @@ by `source_id`; on Dev each read parsed every live itinerary (~1.5 s), 25 of the
 - Run the integration tests locally without docker: `initdb` a throwaway cluster on another port (the Postgres 16
   binaries in `/usr/lib/postgresql/16/bin`), `python -m tests.integration.bootstrap_roles <superuser DSN>`, then
   `BOOKING_TEST_ADMIN_DSN=… python -m pytest tests/integration`.
+
+## Review fixes (independent review, S255)
+
+- The static scan accepted `d.tour_id = t.tour_id` (a JOIN) and `tour_id IN (SELECT …)` as "keyed by tour_id". On
+  the stub `EXPLAIN` shows both hash the whole DISTINCT ON view (unfiltered scans of `stub_parsed_day` and
+  `stub_parsed_day_noise`), i.e. the #130 class. The scan now requires the `tour_id` comparison to be against a bind
+  parameter (`= $n`, `= ANY($n…)`, `IN ($n, …)`), matching the rule in CONTEXT.md; the unit cases that asserted the
+  join and the subquery as fine now assert them as findings.
+- The plan check counted any `tour_id` text in a scan condition (e.g. `tour_id IS NOT NULL`) as keyed; it now needs
+  an equality (`tour_id = …`).

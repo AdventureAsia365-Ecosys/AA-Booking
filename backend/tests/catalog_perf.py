@@ -42,6 +42,7 @@ _SQL_KEYWORDS = frozenset(
     "where join left right inner full cross on order group limit offset union with natural lateral as using".split()
 )
 _ALIAS_RE = re.compile(r"\bcatalog\.(" + "|".join(PARSE_BACKED) + r")\b(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?", re.I)
+_TOUR_ID_EQ_RE = re.compile(r"\btour_id = ")
 _STATEMENT_HEAD_RE = re.compile(r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE)\b", re.I)
 
 
@@ -58,7 +59,9 @@ def static_findings(sql: str) -> list[str]:
         prefix = rf"\b{re.escape(alias)}\." if alias else r"(?<![\w.])"
         if re.search(prefix + r"source_id\b", sql):
             findings.append(f"catalog.{view} is filtered by source_id (only tour_id reaches the itinerary parse)")
-        if not re.search(prefix + r"tour_id\s*(=|IN\b)", sql, re.I):
+        # Keyed = compared with a bind parameter. A join or IN (subquery) on tour_id is NOT pushed into the
+        # DISTINCT ON view (the view is hashed whole: every itinerary is parsed), nor is a source_id filter.
+        if not re.search(prefix + r"tour_id\s*(?:=\s*(?:ANY\s*\(\s*)?|IN\s*\(\s*)\$\d", sql, re.I):
             findings.append(f"catalog.{view} is not keyed by tour_id (= $n or = ANY($n::uuid[]))")
     return findings
 
@@ -186,7 +189,7 @@ def plan_findings(plan: dict[str, Any]) -> list[str]:
     out = []
     for node in base_scans(plan):
         conditions = " ".join(str(node.get(k, "")) for k in ("Filter", "Index Cond", "Recheck Cond"))
-        if "tour_id" not in conditions:
+        if not _TOUR_ID_EQ_RE.search(conditions):  # an equality: ``tour_id IS NOT NULL`` keys nothing
             out.append(f"{node['Node Type']} on catalog.{node['Relation Name']} without a tour_id condition")
     return out
 
