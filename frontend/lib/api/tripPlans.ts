@@ -8,6 +8,8 @@
 //   GET  /booking/catalog/trip-plans/facets                                                     (catalog.read)
 //   GET  /booking/catalog/trip-plans/{source_id}                                                (catalog.read)
 //   PUT  /booking/catalog/trip-plans/{source_id}/commercial                                     (trip_plan.write)
+//   GET  /booking/catalog/trip-plans/{source_id}/prices                     (pricing.read; AA-996, bk-032)
+//   PUT  /booking/catalog/trip-plans/{source_id}/prices                     (trip_plan.write; replaces the set)
 //   POST /booking/catalog/trip-plans/{source_id}/trip-cases                (trip_case.write + version.write)
 //
 // `source_id` is the stable CIS catalog key (contract catalog.tour.v1), never the CIS `tour_id`.
@@ -22,6 +24,22 @@ export interface PriceHint {
   amount: DecimalString;
   currency: string;
   basis: "per_person" | "per_group";
+}
+
+/** AA-996 (bk-032): the cheapest per-person B2C price covering 2 pax, still valid (ADR 0005 d6 "from" price). */
+export interface FromPrice {
+  amount: DecimalString;
+  currency: string;
+  basis: "per_person";
+  season: string | null;
+}
+
+/** AA-996 (bk-032): the plan's main supplier (null without pricing.read). */
+export interface PlanSupplier {
+  id: string;
+  code: string | null;
+  company_name: string | null;
+  status: "active" | "inactive" | null;
 }
 
 export interface TripPlanListItem {
@@ -43,6 +61,12 @@ export interface TripPlanListItem {
   /** null for staff without pricing.read (content creators). */
   default_channel: Channel | null;
   price_hint: PriceHint | null;
+  /** AA-996: derived from the price matrix; null without pricing.read. */
+  from_price: FromPrice | null;
+  supplier_id: string | null;
+  supplier: PlanSupplier | null;
+  /** AA-996: list rows only — the CIS day places, first appearance first (max 8). */
+  destinations?: string[];
 }
 
 export interface TripPlanDay {
@@ -121,6 +145,56 @@ export interface CommercialBody {
   default_channel: Channel | null;
   price_hint: { amount: string; currency: string; basis: "per_person" | "per_group" } | null;
   commercial_notes: string | null;
+  /** AA-996: left out = kept; null clears it. */
+  supplier_id?: string | null;
+}
+
+/** One row of the price matrix (AA-996, bk-032): the selling price per person for a channel, a season / validity, a
+ *  pax band and a currency. `priced` rows were priced from `net_amount` with the pricing rule and FX of `priced_on`. */
+export interface PriceRow {
+  position: number;
+  channel: Channel;
+  season: string | null;
+  peak: boolean;
+  valid_from: string;
+  valid_to: string;
+  pax_min: number;
+  pax_max: number | null;
+  currency: string;
+  amount: DecimalString;
+  net_amount: DecimalString | null;
+  net_currency: string | null;
+  effective_margin: DecimalString | null;
+  priced_on: string | null;
+  priced: boolean;
+  /** A priced row whose amount is a sales override of the computed price. */
+  overridden: boolean;
+}
+
+export interface PriceMatrix {
+  source_id: string;
+  items: PriceRow[];
+  from_price: FromPrice | null;
+}
+
+export interface PriceRowInput {
+  channel: Channel;
+  season: string | null;
+  peak: boolean;
+  valid_from: string;
+  valid_to: string;
+  pax_min: number;
+  pax_max: number | null;
+  currency: string;
+  /** With a net cost: an override of the computed price (null = use the computed price). */
+  amount: string | null;
+  net_amount: string | null;
+  net_currency: string | null;
+}
+
+export interface PricesBody {
+  items: PriceRowInput[];
+  below_floor_reason?: string | null;
 }
 
 export interface UseForTripCaseResult {
@@ -147,6 +221,9 @@ export const tripPlansApi = {
   get: (sourceId: string) => bkGet<TripPlanDetail>(`catalog/trip-plans/${enc(sourceId)}`),
   saveCommercial: (sourceId: string, body: CommercialBody) =>
     bkSend<TripPlanDetail>(`catalog/trip-plans/${enc(sourceId)}/commercial`, { method: "PUT", body }),
+  prices: (sourceId: string) => bkGet<PriceMatrix>(`catalog/trip-plans/${enc(sourceId)}/prices`),
+  savePrices: (sourceId: string, body: PricesBody) =>
+    bkSend<PriceMatrix>(`catalog/trip-plans/${enc(sourceId)}/prices`, { method: "PUT", body }),
   useForTripCase: (sourceId: string, body: Record<string, unknown>) =>
     bkSend<UseForTripCaseResult>(`catalog/trip-plans/${enc(sourceId)}/trip-cases`, { body }),
 };

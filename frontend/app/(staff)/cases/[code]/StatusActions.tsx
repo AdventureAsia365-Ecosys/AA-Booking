@@ -8,11 +8,14 @@
 // A reason is required whenever the case goes to or leaves `cancelled` (service.reason_required).
 
 import { useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, RotateCcw, X, XCircle } from "lucide-react";
 import type { TripCaseDetail, TripCaseStatus } from "@/lib/api/types";
 import { Button, ConfirmDialog, Modal, TRIP_CASE_STATUS_META, useCan, useStaff } from "@/ui";
 import { DECLINE_REASONS, Field, inputCls, textareaCls } from "../_parts/fields";
 import { StaffSelect } from "../_parts/StaffSelect";
+import { TripPlanPicker } from "../_parts/TripPlanPicker";
+import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { friendlyError } from "../_parts/QueryError";
 import { useAssign, useChangeStatus } from "./useCaseMutations";
 
@@ -286,9 +289,10 @@ function CancelModal({
   );
 }
 
-/** Convert to discovery (Figma USER DETAILS-6 "Convert to Trip Case", minus the parts that are not ours:
- * the case already exists, a template link is W2). Assign first (when the rep changes), then the status.
- * AA-996: the buttons are in the Modal footer band. */
+/** Convert to discovery (Figma USER DETAILS-6 "Convert to Trip Case", minus the part that is not ours: the case
+ * already exists). Assign first (when the rep changes), then the status, then (AA-996 slice 2, Figma "Template") the
+ * optional trip plan: POST /booking/catalog/trip-plans/{source_id}/trip-cases with this case adds a draft version
+ * from the plan's CIS days. AA-996: the buttons are in the Modal footer band. */
 function ConvertDialog({ c, open, onClose }: { c: TripCaseDetail; open: boolean; onClose: () => void }) {
   return open ? <ConvertModal c={c} onClose={onClose} /> : null;
 }
@@ -299,15 +303,26 @@ function ConvertModal({ c, onClose }: { c: TripCaseDetail; onClose: () => void }
   const current = c.assignees.find((a) => a.role === "sales")?.cis_user_id ?? "";
   const [rep, setRep] = useState(current || (me.role === "sales" ? me.cis_user_id : ""));
   const [note, setNote] = useState("");
+  const canStartFromPlan = useCan("version.write");
+  const [plan, setPlan] = useState<TripPlanListItem | null>(null);
+  const qc = useQueryClient();
   const assign = useAssign(c.code);
   const change = useChangeStatus(c.code);
-  const busy = assign.isPending || change.isPending;
-  const err = assign.error ?? change.error;
+  const fromPlan = useMutation({
+    mutationFn: (p: TripPlanListItem) => tripPlansApi.useForTripCase(p.source_id, { trip_case: c.code }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["trip-case", c.code] });
+      qc.invalidateQueries({ queryKey: ["trip-cases"] });
+    },
+  });
+  const busy = assign.isPending || change.isPending || fromPlan.isPending;
+  const err = assign.error ?? change.error ?? fromPlan.error;
 
   async function confirm() {
     try {
       if (canAssign && rep !== current) await assign.mutateAsync({ cisUserId: rep || null, quiet: true });
-      await change.mutateAsync({ to: "discovery", reason: note.trim() || undefined });
+      if (c.status === "new_inquiry") await change.mutateAsync({ to: "discovery", reason: note.trim() || undefined });
+      if (plan) await fromPlan.mutateAsync(plan);
       onClose();
     } catch {
       /* shown below */
@@ -339,6 +354,13 @@ function ConvertModal({ c, onClose }: { c: TripCaseDetail; onClose: () => void }
         <Field label="Sales rep" hint={canAssign ? undefined : "Your role cannot change the assignment."}>
           {canAssign ? <StaffSelect value={rep} onChange={setRep} /> : <input className={inputCls} disabled value={c.assignees.find((a) => a.role === "sales")?.name ?? "Unassigned"} />}
         </Field>
+        {canStartFromPlan && (
+          <div className="flex min-w-0 flex-col gap-1.5" role="group" aria-label="Start from a trip plan">
+            <span className="text-[13px] font-medium text-ink">Start from a trip plan (optional)</span>
+            <TripPlanPicker value={plan} onChange={setPlan} disabled={busy} />
+            <span className="text-xs text-muted">Adds a draft proposal from the plan&apos;s CIS days, unpriced.</span>
+          </div>
+        )}
         <Field label="Note (optional)" hint="Saved in the case history with the status change.">
           <textarea className={textareaCls} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="Called the customer, they want a quieter pace." />
         </Field>

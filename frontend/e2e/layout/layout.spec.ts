@@ -516,7 +516,7 @@ test.describe("compact 960: the CSV export keeps every column", () => {
   test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
   for (const pc of [
     { name: "cases", path: "/cases", folded: ["Sales"] },
-    { name: "trip-plans", path: "/catalog/trip-plans", folded: ["Trip style", "Price hint"] },
+    { name: "trip-plans", path: "/catalog/trip-plans", folded: ["Trip style", "Price from"] },
     { name: "destinations", path: "/catalog/destinations", folded: ["Coordinates", "Media"] },
   ]) {
     test(`${pc.name}: the file at 960 equals the file at 1400`, async ({ page, baseURL }) => {
