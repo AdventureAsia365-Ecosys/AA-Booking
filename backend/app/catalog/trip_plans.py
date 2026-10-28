@@ -18,6 +18,12 @@
   cancelled.
 - The price hint (``price_hint_*``) and the default channel are commercial data: only staff with ``pricing.read``
   see them (content creators read the catalog without them).
+- AA-996 (Figma audit slice 2, bk-032): the commercial row names the plan's **supplier** (``supplier_id``, an active
+  ``booking.suppliers`` row when it is set or changed; commercial data, ``pricing.read``) and the plan has a **price
+  matrix** (``app.catalog.trip_plan_prices``). List rows carry the ``destinations`` (the CIS day places, first
+  appearance first), a cover photo that falls back to the first tour photo, and the ``from_price`` derived from the
+  matrix. The list opens **sellable first** (``sort=sellable``, then title), so the default page shows the plans
+  Booking sells.
 """
 
 from __future__ import annotations
@@ -32,13 +38,16 @@ import asyncpg
 from app import audit, paging
 from app.auth.staff import Staff
 from app.catalog import liveness
+from app.catalog import trip_plan_prices as prices
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.trip_cases import service as trip_cases
 from app.trip_cases import sql, versions
 
 SOURCE_SYSTEM = "cis"
+DEFAULT_SORT = "sellable"
 SORTS = {
+    "sellable": "coalesce(p.sellable, false)",
     "title": "t.title",
     "country": "t.country",
     "duration_days": "t.duration_days",
@@ -55,14 +64,16 @@ COMMERCIAL_FIELDS = (
     "price_hint_currency",
     "price_hint_basis",
     "commercial_notes",
+    "supplier_id",
 )
 # Commercial fields hidden from staff without pricing.read.
-PRICING_FIELDS = ("default_channel", "price_hint")
+PRICING_FIELDS = ("default_channel", "price_hint", "from_price", "supplier")
+MAX_DESTINATIONS = 8
 
 PLAN_COLUMNS = """
     p.id::text AS plan_id, coalesce(p.sellable, false) AS sellable, p.trip_style, p.default_channel,
     p.price_hint_amount::text AS price_hint_amount, p.price_hint_currency::text AS price_hint_currency,
-    p.price_hint_basis
+    p.price_hint_basis, p.supplier_id::text AS supplier_id
 """
 LIST_COLUMNS = f"""
     t.source_system, t.source_id, t.tour_id::text AS tour_id, t.sku, t.title, t.country, t.duration_days,
@@ -80,6 +91,26 @@ JOIN = (
     "FROM catalog.v_tour t LEFT JOIN booking.trip_plans p"
     " ON p.source_system = t.source_system AND p.source_id = t.source_id"
 )
+# Per-row extras of a list PAGE (AA-996), joined LATERAL on equality keys after the LIMIT, so they run for the rows of
+# the page only (an ``= ANY($1)`` filter is not pushed through the catalog views' joins: lesson S238, AA-712).
+PAGE_EXTRAS = f"""
+LEFT JOIN LATERAL (
+    SELECT array_agg(x.place ORDER BY x.first_seen) AS places FROM (
+        SELECT btrim(u.place) AS place, min(d.day_number * 1000 + u.ord) AS first_seen
+        FROM catalog.v_tour_day d CROSS JOIN LATERAL unnest(d.places) WITH ORDINALITY AS u(place, ord)
+        WHERE d.source_system = pg.source_system AND d.source_id = pg.source_id AND btrim(u.place) <> ''
+        GROUP BY btrim(u.place)
+    ) x
+) dst ON true
+LEFT JOIN LATERAL (
+    SELECT ph.path FROM catalog.v_tour_photo ph
+    WHERE pg.cover_photo_path IS NULL AND ph.source_system = pg.source_system AND ph.source_id = pg.source_id
+    ORDER BY ph.position LIMIT 1
+) ph ON true
+LEFT JOIN LATERAL ({prices.FROM_PRICE_SQL.format(plan="pg.plan_id::uuid")}) fp ON true
+"""  # noqa: S608 — constants only, no input
+SUPPLIER_JOIN = "LEFT JOIN booking.suppliers sp ON sp.id = p.supplier_id"
+SUPPLIER_COLUMNS = "sp.code AS supplier_code, sp.company_name AS supplier_name, sp.status AS supplier_status"
 
 
 @asynccontextmanager
@@ -101,11 +132,29 @@ def _price_hint(row: dict[str, Any]) -> dict[str, Any] | None:
     return {"amount": amount, "currency": currency, "basis": basis}
 
 
+def _supplier(row: dict[str, Any]) -> dict[str, Any] | None:
+    code, name, status = (
+        row.pop("supplier_code", None),
+        row.pop("supplier_name", None),
+        row.pop("supplier_status", None),
+    )
+    sid = row.get("supplier_id")
+    if sid is None:
+        return None
+    return {"id": sid, "code": code, "company_name": name, "status": status}
+
+
 def _shape(row: Any, staff: Staff) -> dict[str, Any]:
     out = dict(row)
     out["price_hint"] = _price_hint(out)
     out["has_commercial_row"] = out["plan_id"] is not None
+    out["supplier"] = _supplier(out)
+    out["from_price"] = prices.from_price(
+        {"amount": out.pop("from_amount", None), "currency": out.pop("from_currency", None),
+         "season": out.pop("from_season", None)}
+    )  # fmt: skip
     if not staff.can("pricing.read"):
+        out["supplier_id"] = None
         for key in PRICING_FIELDS:
             out[key] = None
     return out
@@ -142,23 +191,49 @@ async def list_plans(
         add("coalesce(p.sellable, false) = {p}", sellable)
     if trip_style and trip_style.strip():
         add("lower(p.trip_style) = lower({p})", trip_style.strip())
-    raw = (sort or "title").strip()
-    column = SORTS.get(raw.lstrip("-+"))
+    raw = (sort or DEFAULT_SORT).strip()
+    key = raw.lstrip("-+")
+    column = SORTS.get(key)
     if column is None:
         raise Invalid("unknown_sort", f"sort must be one of {', '.join(SORTS)} (prefix - for descending)")
-    order = f"{column} {'DESC' if raw.startswith('-') else 'ASC'} NULLS LAST, t.source_id"
+    if key == DEFAULT_SORT:
+        # Sellable first (``-sellable`` = not for sale first), then by title.
+        order = f"{column} {'ASC' if raw.startswith('-') else 'DESC'}, t.title ASC NULLS LAST, t.source_id"
+    else:
+        order = f"{column} {'DESC' if raw.startswith('-') else 'ASC'} NULLS LAST, t.source_id"
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     limit = max(1, min(limit, MAX_PAGE))
     async with catalog_reads():
         total = await conn.fetchval(f"SELECT count(*) {JOIN} {clause}", *args)  # noqa: S608 — fixed fragments
         rows = await conn.fetch(
-            f"SELECT {LIST_COLUMNS} {JOIN} {clause}"  # noqa: S608 — fixed fragments, values are bound
-            f" ORDER BY {order} LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}",
+            f"""
+            SELECT pg.*, ph.path AS first_photo_path, dst.places AS destinations,
+                   fp.amount AS from_amount, fp.currency AS from_currency, fp.season AS from_season,
+                   {SUPPLIER_COLUMNS}
+            FROM (
+                SELECT {LIST_COLUMNS}, row_number() OVER (ORDER BY {order}) AS rn {JOIN} {clause}
+                ORDER BY {order} LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
+            ) pg
+            {PAGE_EXTRAS}
+            LEFT JOIN booking.suppliers sp ON sp.id = pg.supplier_id::uuid
+            ORDER BY pg.rn
+            """,  # noqa: S608 — fixed fragments, values are bound
             *args,
             limit,
             offset,
         )
-    return {"items": [_shape(r, staff) for r in rows], "total": total, "limit": limit, "offset": offset}
+    return {"items": [_list_item(r, staff) for r in rows], "total": total, "limit": limit, "offset": offset}
+
+
+def _list_item(row: Any, staff: Staff) -> dict[str, Any]:
+    raw = dict(row)
+    raw.pop("rn", None)
+    places = raw.pop("destinations", None) or []
+    first_photo = raw.pop("first_photo_path", None)
+    raw["cover_photo_path"] = raw["cover_photo_path"] or first_photo
+    out = _shape(raw, staff)
+    out["destinations"] = list(places)[:MAX_DESTINATIONS]
+    return out
 
 
 # AA-986 L5 (root ADR 0015 decision 5): "orphaned plans" = Booking trip plans whose tour is no longer in
@@ -296,9 +371,12 @@ async def facets(conn: asyncpg.Connection) -> dict[str, Any]:
 async def _tour(conn: asyncpg.Connection, source_id: str) -> dict[str, Any]:
     async with catalog_reads():
         row = await conn.fetchrow(
-            f"SELECT {DETAIL_COLUMNS} {JOIN}"  # noqa: S608 — fixed fragments
+            f"SELECT {DETAIL_COLUMNS}, {SUPPLIER_COLUMNS},"  # noqa: S608 — fixed fragments
+            " fp.amount AS from_amount, fp.currency AS from_currency, fp.season AS from_season"
+            f" {JOIN} {SUPPLIER_JOIN}"
             " LEFT JOIN booking.staff_users cb ON cb.cis_user_id = p.created_by"
             " LEFT JOIN booking.staff_users ub ON ub.cis_user_id = p.updated_by"
+            f" LEFT JOIN LATERAL ({prices.FROM_PRICE_SQL.format(plan='p.id')}) fp ON true"
             " WHERE t.source_system = $1 AND t.source_id = $2",
             SOURCE_SYSTEM,
             source_id,
@@ -365,13 +443,25 @@ def _norm(field: str, value: Any) -> Any:
         value = value.strip() or None
     if field == "price_hint_amount" and value is not None:
         return Decimal(str(value))
+    if field == "supplier_id" and value is not None:
+        return str(value)
     return value
+
+
+async def _check_supplier(conn: asyncpg.Connection, supplier_id: str) -> None:
+    """A supplier set or changed on a plan must exist and be active (an unchanged one may have been deactivated)."""
+    status = await conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", supplier_id)
+    if status is None:
+        raise Invalid("supplier_not_found", "the supplier does not exist")
+    if status != "active":
+        raise Invalid("supplier_inactive", "pick an active supplier")
 
 
 async def save_commercial(
     conn: asyncpg.Connection, staff: Staff, source_id: str, data: dict[str, Any]
 ) -> dict[str, Any]:
-    """PUT semantics: ``data`` holds every commercial field (``price_hint`` = {amount, currency, basis} or None).
+    """PUT semantics: ``data`` holds every commercial field (``price_hint`` = {amount, currency, basis} or None),
+    except ``supplier_id``: left out, the plan keeps its supplier; ``None`` clears it.
 
     Upsert on the catalog key; one audit row when something changed (``trip_plan.created`` / ``.updated``)."""
     tour = await _tour(conn, source_id)
@@ -384,7 +474,9 @@ async def save_commercial(
         "price_hint_currency": hint["currency"] if hint else None,
         "price_hint_basis": hint["basis"] if hint else None,
         "commercial_notes": _norm("commercial_notes", data.get("commercial_notes")),
+        "supplier_id": _norm("supplier_id", data.get("supplier_id")),
     }
+    keep_supplier = "supplier_id" not in data
     before_row = await conn.fetchrow(
         f"SELECT id::text AS id, {', '.join(COMMERCIAL_FIELDS)} FROM booking.trip_plans"  # noqa: S608 — constants
         " WHERE source_system = $1 AND source_id = $2 FOR UPDATE",
@@ -392,21 +484,27 @@ async def save_commercial(
         source_id,
     )
     before = {k: _norm(k, before_row[k]) for k in COMMERCIAL_FIELDS} if before_row else None
+    if keep_supplier:
+        # AA-996: a client that does not send supplier_id (older UI, the sellable toggle) keeps the plan's supplier.
+        new["supplier_id"] = before["supplier_id"] if before else None
     changed = sorted(k for k in COMMERCIAL_FIELDS if before is None or before[k] != new[k])
     if before is not None and not changed:
         return {**await get_plan(conn, staff, source_id), "changed": []}
+    if new["supplier_id"] is not None and (before is None or before["supplier_id"] != new["supplier_id"]):
+        await _check_supplier(conn, new["supplier_id"])
     try:
         saved = await conn.fetchrow(
             """
             INSERT INTO booking.trip_plans AS p
                 (source_system, source_id, sellable, trip_style, default_channel, price_hint_amount,
-                 price_hint_currency, price_hint_basis, commercial_notes, created_by, updated_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+                 price_hint_currency, price_hint_basis, commercial_notes, supplier_id, created_by, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $11)
             ON CONFLICT (source_system, source_id) DO UPDATE
                 SET sellable = EXCLUDED.sellable, trip_style = EXCLUDED.trip_style,
                     default_channel = EXCLUDED.default_channel, price_hint_amount = EXCLUDED.price_hint_amount,
                     price_hint_currency = EXCLUDED.price_hint_currency, price_hint_basis = EXCLUDED.price_hint_basis,
-                    commercial_notes = EXCLUDED.commercial_notes, updated_by = EXCLUDED.updated_by
+                    commercial_notes = EXCLUDED.commercial_notes, supplier_id = EXCLUDED.supplier_id,
+                    updated_by = EXCLUDED.updated_by
             RETURNING id::text AS id, (xmax = 0) AS inserted
             """,
             SOURCE_SYSTEM,

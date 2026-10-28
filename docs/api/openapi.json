@@ -912,7 +912,7 @@
       },
       "CommercialBody": {
         "additionalProperties": false,
-        "description": "Every commercial field (PUT): a field left out is cleared.",
+        "description": "Every commercial field (PUT): a field left out is cleared, except ``supplier_id`` (left out = kept, AA-996).",
         "properties": {
           "commercial_notes": {
             "anyOf": [
@@ -949,6 +949,18 @@
           "sellable": {
             "title": "Sellable",
             "type": "boolean"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
           },
           "trip_style": {
             "anyOf": [
@@ -4870,6 +4882,152 @@
           "basis"
         ],
         "title": "PriceParity",
+        "type": "object"
+      },
+      "PriceRowIn": {
+        "additionalProperties": false,
+        "description": "One price matrix row: the selling price per person, or the net cost per person to price it from (AA-996).",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "price per person; with a net cost, an override",
+            "title": "Amount"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "currency": {
+            "default": "USD",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "net_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "net cost per person to price the row from",
+            "title": "Net Amount"
+          },
+          "net_currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Currency"
+          },
+          "pax_max": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pax Max"
+          },
+          "pax_min": {
+            "default": 1,
+            "maximum": 999.0,
+            "minimum": 1.0,
+            "title": "Pax Min",
+            "type": "integer"
+          },
+          "peak": {
+            "default": false,
+            "title": "Peak",
+            "type": "boolean"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          },
+          "valid_from": {
+            "format": "date",
+            "title": "Valid From",
+            "type": "string"
+          },
+          "valid_to": {
+            "format": "date",
+            "title": "Valid To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "valid_from",
+          "valid_to"
+        ],
+        "title": "PriceRowIn",
+        "type": "object"
+      },
+      "PricesBody": {
+        "additionalProperties": false,
+        "properties": {
+          "below_floor_reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "required below the floor",
+            "title": "Below Floor Reason"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PriceRowIn"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PricesBody",
         "type": "object"
       },
       "Product": {
@@ -9796,6 +9954,118 @@
           }
         ],
         "summary": "Post Trip Plan Departure",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/prices": {
+      "get": {
+        "operationId": "get_trip_plan_prices_booking_catalog_trip_plans__source_id__prices_get",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Trip Plan Prices Booking Catalog Trip Plans  Source Id  Prices Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Trip Plan Prices",
+        "tags": [
+          "catalog"
+        ]
+      },
+      "put": {
+        "operationId": "put_trip_plan_prices_booking_catalog_trip_plans__source_id__prices_put",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Trip Plan Prices Booking Catalog Trip Plans  Source Id  Prices Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Trip Plan Prices",
         "tags": [
           "catalog"
         ]
