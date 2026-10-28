@@ -24,10 +24,17 @@
   appearance first), a cover photo that falls back to the first tour photo, and the ``from_price`` derived from the
   matrix. The list opens **sellable first** (``sort=sellable``, then title), so the default page shows the plans
   Booking sells.
+- List **extras** (destinations, the cover fallback, the from price) are read after the page query, one query each for
+  the whole page, keyed by ``tour_id`` / plan id, under a short ``statement_timeout``. Each fails soft: a slow, missing
+  or ungranted source drops that field (``null``, named in ``degraded``) and logs a warning; the list still answers.
+  Catalog views are filtered by ``tour_id`` only: ``catalog._tour_day_text`` is ``DISTINCT ON (tour_id, day_number)``,
+  so a ``source_id`` filter on ``v_tour_day`` is applied after every live tour's itinerary is parsed (~1.5 s a read on
+  Dev); 25 such reads per page ran past the pool's 5 s command timeout (AA-996 slice 2 hotfix, lesson S238).
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
@@ -43,6 +50,8 @@ from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound, Unavailable
 from app.trip_cases import service as trip_cases
 from app.trip_cases import sql, versions
+
+log = logging.getLogger(__name__)
 
 SOURCE_SYSTEM = "cis"
 DEFAULT_SORT = "sellable"
@@ -91,24 +100,38 @@ JOIN = (
     "FROM catalog.v_tour t LEFT JOIN booking.trip_plans p"
     " ON p.source_system = t.source_system AND p.source_id = t.source_id"
 )
-# Per-row extras of a list PAGE (AA-996), joined LATERAL on equality keys after the LIMIT, so they run for the rows of
-# the page only (an ``= ANY($1)`` filter is not pushed through the catalog views' joins: lesson S238, AA-712).
-PAGE_EXTRAS = f"""
-LEFT JOIN LATERAL (
-    SELECT array_agg(x.place ORDER BY x.first_seen) AS places FROM (
-        SELECT btrim(u.place) AS place, min(d.day_number * 1000 + u.ord) AS first_seen
-        FROM catalog.v_tour_day d CROSS JOIN LATERAL unnest(d.places) WITH ORDINALITY AS u(place, ord)
-        WHERE d.source_system = pg.source_system AND d.source_id = pg.source_id AND btrim(u.place) <> ''
-        GROUP BY btrim(u.place)
-    ) x
-) dst ON true
-LEFT JOIN LATERAL (
-    SELECT ph.path FROM catalog.v_tour_photo ph
-    WHERE pg.cover_photo_path IS NULL AND ph.source_system = pg.source_system AND ph.source_id = pg.source_id
-    ORDER BY ph.position LIMIT 1
-) ph ON true
-LEFT JOIN LATERAL ({prices.FROM_PRICE_SQL.format(plan="pg.plan_id::uuid")}) fp ON true
+# Extras of a list PAGE (AA-996), one query each for the rows of the page, run after the page query. They are keyed
+# by ``tour_id`` (catalog) or the plan id (Booking): ``tour_id`` is the DISTINCT ON / PARTITION BY key of the catalog
+# views, so ``tour_id = ANY($1::uuid[])`` is pushed down to the tour's own rows (the TripPlanner pattern, lesson S238).
+# ``v_tour_day.places`` is itself ``array_agg(place_name ORDER BY position)`` of ``v_tour_place`` per day (CIS 225),
+# read here without the day-text parse of ``v_tour_day``.
+DESTINATIONS_SQL = """
+SELECT x.tour_id::text AS key, array_agg(x.place ORDER BY x.first_seen, x.place) AS places
+FROM (
+    SELECT p.tour_id, btrim(p.place_name) AS place, min(p.day_number * 1000 + p.position) AS first_seen
+    FROM catalog.v_tour_place p
+    WHERE p.tour_id = ANY($1::uuid[]) AND p.day_number IS NOT NULL AND p.place_name IS NOT NULL
+    GROUP BY p.tour_id, btrim(p.place_name)
+) x
+WHERE x.place <> ''
+GROUP BY x.tour_id
+"""
+# The first tour photo of each page row without a CIS cover.
+FIRST_PHOTO_SQL = """
+SELECT DISTINCT ON (ph.tour_id) ph.tour_id::text AS key, ph.path
+FROM catalog.v_tour_photo ph
+WHERE ph.tour_id = ANY($1::uuid[]) AND ph.path IS NOT NULL
+ORDER BY ph.tour_id, ph.position NULLS LAST, ph.path
+"""
+FROM_PRICES_SQL = f"""
+SELECT u.plan_id::text AS key, fp.amount, fp.currency, fp.season
+FROM unnest($1::uuid[]) AS u(plan_id)
+CROSS JOIN LATERAL ({prices.FROM_PRICE_SQL.format(plan="u.plan_id")}) fp
 """  # noqa: S608 — constants only, no input
+# Server-side budget of one extra: three of them stay well inside the pool's 5 s command_timeout (app.db).
+EXTRA_TIMEOUT_MS = 1000
+# Any database error or timeout of an extra drops that extra only (logged), never the list.
+EXTRA_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, TimeoutError)
 SUPPLIER_JOIN = "LEFT JOIN booking.suppliers sp ON sp.id = p.supplier_id"
 SUPPLIER_COLUMNS = "sp.code AS supplier_code, sp.company_name AS supplier_name, sp.status AS supplier_status"
 
@@ -120,7 +143,32 @@ async def catalog_reads() -> AsyncIterator[None]:
     try:
         yield
     except CATALOG_ERRORS as exc:
+        log.warning("catalog_unavailable %s", describe_error(exc))
         raise Unavailable("catalog_unavailable", "the CIS catalog is not readable right now") from exc
+
+
+def describe_error(exc: BaseException) -> str:
+    """Class, SQLSTATE and the server message of a failed read (no DETAIL, no row data) for a log line."""
+    sqlstate = getattr(exc, "sqlstate", None) or "-"
+    message = " ".join(str(exc).split())[:300] or "-"
+    return f"error={type(exc).__name__} sqlstate={sqlstate} message={message}"
+
+
+async def _extra(conn: asyncpg.Connection, name: str, query: str, keys: list[str]) -> dict[str, Any] | None:
+    """``{key: row}`` of one optional list extra, or ``None`` when it cannot be read (logged; the rows go out
+    without it). Its own (sub)transaction with ``SET LOCAL statement_timeout``: a failure rolls back only this read."""
+    if not keys:
+        return {}
+    try:
+        async with conn.transaction():
+            await conn.execute(f"SET LOCAL statement_timeout = {EXTRA_TIMEOUT_MS}")
+            rows = await conn.fetch(query, keys)
+            # Inside a caller's transaction this is a savepoint: hand the caller its timeout back.
+            await conn.execute("SET LOCAL statement_timeout TO DEFAULT")
+    except EXTRA_ERRORS as exc:
+        log.warning("trip_plan_list_extra_unavailable extra=%s %s", name, describe_error(exc))
+        return None
+    return {r["key"]: r for r in rows}
 
 
 def _price_hint(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -206,33 +254,52 @@ async def list_plans(
     async with catalog_reads():
         total = await conn.fetchval(f"SELECT count(*) {JOIN} {clause}", *args)  # noqa: S608 — fixed fragments
         rows = await conn.fetch(
-            f"""
-            SELECT pg.*, ph.path AS first_photo_path, dst.places AS destinations,
-                   fp.amount AS from_amount, fp.currency AS from_currency, fp.season AS from_season,
-                   {SUPPLIER_COLUMNS}
-            FROM (
-                SELECT {LIST_COLUMNS}, row_number() OVER (ORDER BY {order}) AS rn {JOIN} {clause}
-                ORDER BY {order} LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}
-            ) pg
-            {PAGE_EXTRAS}
-            LEFT JOIN booking.suppliers sp ON sp.id = pg.supplier_id::uuid
-            ORDER BY pg.rn
-            """,  # noqa: S608 — fixed fragments, values are bound
+            f"SELECT {LIST_COLUMNS}, {SUPPLIER_COLUMNS} {JOIN} {SUPPLIER_JOIN} {clause}"  # noqa: S608 — fixed fragments
+            f" ORDER BY {order} LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}",
             *args,
             limit,
             offset,
         )
-    return {"items": [_list_item(r, staff) for r in rows], "total": total, "limit": limit, "offset": offset}
+    page = [dict(r) for r in rows]
+    extras = {
+        "destinations": await _extra(conn, "destinations", DESTINATIONS_SQL, [r["tour_id"] for r in page]),
+        "cover_photo": await _extra(
+            conn, "cover_photo", FIRST_PHOTO_SQL, [r["tour_id"] for r in page if not r["cover_photo_path"]]
+        ),
+        # Content creators never see a from price (PRICING_FIELDS): no read for them.
+        "from_price": (
+            await _extra(conn, "from_price", FROM_PRICES_SQL, [r["plan_id"] for r in page if r["plan_id"]])
+            if staff.can("pricing.read")
+            else {}
+        ),
+    }
+    return {
+        "items": [_list_item(r, staff, extras) for r in page],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "degraded": sorted(name for name, found in extras.items() if found is None),
+    }
 
 
-def _list_item(row: Any, staff: Staff) -> dict[str, Any]:
+def _list_item(row: dict[str, Any], staff: Staff, extras: dict[str, dict[str, Any] | None]) -> dict[str, Any]:
+    """One list row with its page extras; an extra that could not be read (``None``) leaves its field ``null``."""
     raw = dict(row)
-    raw.pop("rn", None)
-    places = raw.pop("destinations", None) or []
-    first_photo = raw.pop("first_photo_path", None)
-    raw["cover_photo_path"] = raw["cover_photo_path"] or first_photo
+    dst, photo, price = extras.get("destinations"), extras.get("cover_photo"), extras.get("from_price")
+    found = (photo or {}).get(raw["tour_id"])
+    raw["cover_photo_path"] = raw["cover_photo_path"] or (found["path"] if found else None)
+    fp = (price or {}).get(raw["plan_id"]) if raw["plan_id"] else None
+    raw.update(
+        from_amount=fp["amount"] if fp else None,
+        from_currency=fp["currency"] if fp else None,
+        from_season=fp["season"] if fp else None,
+    )
     out = _shape(raw, staff)
-    out["destinations"] = list(places)[:MAX_DESTINATIONS]
+    if dst is None:
+        out["destinations"] = None
+    else:
+        places = dst[raw["tour_id"]]["places"] if raw["tour_id"] in dst else None
+        out["destinations"] = list(places or [])[:MAX_DESTINATIONS]
     return out
 
 
@@ -386,20 +453,21 @@ async def _tour(conn: asyncpg.Connection, source_id: str) -> dict[str, Any]:
     return dict(row)
 
 
-async def _days(conn: asyncpg.Connection, source_id: str) -> list[dict[str, Any]]:
+async def _days(conn: asyncpg.Connection, tour: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tour's CIS days, read by ``tour_id``: a ``source_id`` filter is not pushed into ``v_tour_day`` (its day
+    text is DISTINCT ON (tour_id, day_number)), so it parsed every live tour's itinerary on each read."""
     async with catalog_reads():
         rows = await conn.fetch(
             "SELECT day_number, title, body, places FROM catalog.v_tour_day"
-            " WHERE source_system = $1 AND source_id = $2 ORDER BY day_number",
-            SOURCE_SYSTEM,
-            source_id,
+            " WHERE tour_id = $1::uuid ORDER BY day_number",
+            tour["tour_id"],
         )
     return [{**dict(r), "places": list(r["places"] or [])} for r in rows]
 
 
 async def get_plan(conn: asyncpg.Connection, staff: Staff, source_id: str) -> dict[str, Any]:
     tour = await _tour(conn, source_id)
-    days = await _days(conn, source_id)
+    days = await _days(conn, tour)
     async with catalog_reads():
         photos = await conn.fetch(
             "SELECT photo_id::text AS photo_id, path, place_label, position FROM catalog.v_tour_photo"
@@ -582,7 +650,7 @@ async def use_for_trip_case(
     seed = versions.Seed(
         title=(tour["title"] or source_id)[:200],
         channel=tour["default_channel"],
-        items=items_from_days(await _days(conn, source_id), tour),
+        items=items_from_days(await _days(conn, tour), tour),
         source_id=source_id,
         label=tour["sku"] or (tour["title"] or source_id)[:80],
     )

@@ -110,9 +110,26 @@ def test_summary(created: bool, new: dict[str, Any], changed: list[str], summary
     assert trip_plans._summary(created, new, changed) == summary
 
 
+DESTINATIONS = "FROM catalog.v_tour_place"
+FIRST_PHOTO = "FROM catalog.v_tour_photo"
+FROM_PRICES = "AS u(plan_id)"
+
+
+def list_conn(rows: list[dict[str, Any]], total: int = 1, **extras: Any) -> ScriptedConn:
+    """A list read: the count, the page query (``ORDER BY``) and its three extras (default: nothing found)."""
+    return (
+        ScriptedConn()
+        .on("ORDER BY", rows)
+        .on("SELECT count(*)", total)
+        .on(DESTINATIONS, extras.get("destinations", []))
+        .on(FIRST_PHOTO, extras.get("photos", []))
+        .on(FROM_PRICES, extras.get("prices", []))
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_builds_filters_and_rejects_unknown_sort() -> None:
-    conn = ScriptedConn().on("SELECT count(*)", 1).on("ORDER BY", [tour_row()])
+    conn = list_conn([tour_row()])
     out = await trip_plans.list_plans(
         conn, CONTENT, q=" 50% ", country=" Bhutan ", sellable=True, trip_style="Private", sort="-updated_at", limit=500
     )
@@ -267,21 +284,113 @@ def test_shape_hides_the_supplier_and_from_price_without_pricing_read() -> None:
 
 
 def test_list_item_falls_back_to_the_first_photo_and_caps_destinations() -> None:
-    row = tour_row(rn=1, first_photo_path="/p/first", destinations=[f"P{i}" for i in range(12)])
-    item = trip_plans._list_item(row, SALES)
+    extras = {
+        "destinations": {"t-1": {"key": "t-1", "places": [f"P{i}" for i in range(12)]}},
+        "cover_photo": {"t-1": {"key": "t-1", "path": "/p/first"}},
+        "from_price": {"p-1": {"key": "p-1", "amount": "1450.00", "currency": "USD", "season": None}},
+    }
+    item = trip_plans._list_item(tour_row(), SALES, extras)
     assert item["cover_photo_path"] == "/p/first" and item["destinations"] == [f"P{i}" for i in range(8)]
-    assert "rn" not in item and "first_photo_path" not in item
-    kept = trip_plans._list_item(tour_row(rn=1, cover_photo_path="/p/cover", first_photo_path=None), SALES)
-    assert kept["cover_photo_path"] == "/p/cover" and kept["destinations"] == []
+    assert item["from_price"] == {"amount": "1450.00", "currency": "USD", "basis": "per_person", "season": None}
+    assert "first_photo_path" not in item and "from_amount" not in item
+    kept = trip_plans._list_item(tour_row(cover_photo_path="/p/cover"), SALES, extras)
+    assert kept["cover_photo_path"] == "/p/cover"
+    bare = trip_plans._list_item(tour_row(), SALES, {"destinations": {}, "cover_photo": {}, "from_price": {}})
+    assert bare["destinations"] == [] and bare["cover_photo_path"] is None and bare["from_price"] is None
+
+
+def test_list_item_without_an_extra_leaves_its_field_null() -> None:
+    item = trip_plans._list_item(
+        tour_row(cover_photo_path="/p/cover"), SALES, {"destinations": None, "cover_photo": None, "from_price": None}
+    )
+    assert item["destinations"] is None and item["from_price"] is None and item["cover_photo_path"] == "/p/cover"
+
+
+@pytest.mark.asyncio
+async def test_list_reads_the_extras_by_tour_id_once_per_page_not_per_row() -> None:
+    # AA-996 hotfix: a source_id filter on catalog.v_tour_day is not pushed into the live view (every itinerary is
+    # parsed on each read, ~1.5 s), so 25 per-row reads ran past the 5 s pool timeout -> 503 catalog_unavailable.
+    rows = [tour_row(), tour_row(source_id="s-2", tour_id="t-2", plan_id=None, cover_photo_path="/p/own")]
+    conn = list_conn(
+        rows,
+        total=2,
+        destinations=[{"key": "t-1", "places": ["Paro", "Thimphu"]}],
+        photos=[{"key": "t-1", "path": "/p/first"}],
+        prices=[{"key": "p-1", "amount": "1450.00", "currency": "USD", "season": "Low"}],
+    )
+    out = await trip_plans.list_plans(conn, SALES)
+    first, second = out["items"]
+    assert first["destinations"] == ["Paro", "Thimphu"] and first["cover_photo_path"] == "/p/first"
+    assert first["from_price"]["amount"] == "1450.00" and second["destinations"] == []
+    assert second["cover_photo_path"] == "/p/own" and second["from_price"] is None and out["degraded"] == []
+    page = next(f for f, _ in conn.calls if "ORDER BY" in f and "LIMIT" in f)
+    assert "v_tour_day" not in page and "v_tour_photo" not in page and "LATERAL" not in page
+    assert not any("v_tour_day" in f for f, _ in conn.calls)
+    assert (
+        conn.sql(DESTINATIONS) == [(["t-1", "t-2"],)] and "p.tour_id = ANY($1::uuid[])" in trip_plans.DESTINATIONS_SQL
+    )
+    assert conn.sql(FIRST_PHOTO) == [(["t-1"],)] and "ph.tour_id = ANY($1::uuid[])" in trip_plans.FIRST_PHOTO_SQL
+    assert conn.sql(FROM_PRICES) == [(["p-1"],)]
+    timeouts = conn.sql("SET LOCAL statement_timeout = ")
+    assert len(timeouts) == 3  # each extra runs under its own short server-side budget
+
+
+@pytest.mark.asyncio
+async def test_list_skips_the_from_price_read_without_pricing_read() -> None:
+    conn = list_conn([tour_row()])
+    out = await trip_plans.list_plans(conn, CONTENT)
+    assert conn.sql(FROM_PRICES) == [] and out["items"][0]["from_price"] is None and out["degraded"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        asyncpg.QueryCanceledError("canceling statement due to statement timeout"),
+        TimeoutError(),
+        asyncpg.InsufficientPrivilegeError("permission denied for view v_tour_place"),
+        asyncpg.UndefinedTableError('relation "catalog.v_tour_place" does not exist'),
+        asyncpg.UndefinedColumnError("column p.place_name does not exist"),
+    ],
+)
+async def test_an_unreadable_extra_drops_only_that_field(error: Exception, caplog: pytest.LogCaptureFixture) -> None:
+    conn = list_conn([tour_row()], destinations=error, prices=[{"key": "p-1", "amount": "9.00", "currency": "USD",
+                                                                 "season": None}])  # fmt: skip
+    with caplog.at_level("WARNING", logger="app.catalog.trip_plans"):
+        out = await trip_plans.list_plans(conn, SALES)
+    (item,) = out["items"]
+    assert (
+        item["destinations"] is None and item["from_price"]["amount"] == "9.00" and out["degraded"] == ["destinations"]
+    )
+    (line,) = [r.getMessage() for r in caplog.records if "trip_plan_list_extra_unavailable" in r.getMessage()]
+    assert "extra=destinations" in line and f"error={type(error).__name__}" in line
+    assert f"sqlstate={getattr(error, 'sqlstate', None) or '-'}" in line
+
+
+@pytest.mark.asyncio
+async def test_catalog_unavailable_is_logged_with_its_sqlstate(caplog: pytest.LogCaptureFixture) -> None:
+    conn = ScriptedConn().on("SELECT count(*)", asyncpg.InsufficientPrivilegeError("permission denied for view v_tour"))
+    with caplog.at_level("WARNING", logger="app.catalog.trip_plans"), pytest.raises(Unavailable):
+        await trip_plans.list_plans(conn, SALES)
+    (line,) = [r.getMessage() for r in caplog.records if r.getMessage().startswith("catalog_unavailable")]
+    assert "error=InsufficientPrivilegeError sqlstate=42501 message=permission denied for view v_tour" in line
+
+
+@pytest.mark.asyncio
+async def test_detail_days_are_read_by_tour_id() -> None:
+    conn = plan_conn()
+    await trip_plans.get_plan(conn, SALES, SOURCE_ID)
+    assert conn.sql("FROM catalog.v_tour_day") == [("t-1",)]
+    assert "WHERE tour_id = $1::uuid" in next(f for f, _ in conn.calls if "FROM catalog.v_tour_day" in f)
 
 
 @pytest.mark.asyncio
 async def test_list_default_sort_is_sellable_first() -> None:
-    conn = ScriptedConn().on("SELECT count(*)", 0).on("ORDER BY", [])
+    conn = list_conn([], total=0)
     await trip_plans.list_plans(conn, SALES)
     flat, _ = next((f, a) for f, a in conn.calls if "ORDER BY" in f)
     assert "coalesce(p.sellable, false) DESC, t.title ASC" in flat
-    conn = ScriptedConn().on("SELECT count(*)", 0).on("ORDER BY", [])
+    conn = list_conn([], total=0)
     await trip_plans.list_plans(conn, SALES, sort="-sellable")
     flat, _ = next((f, a) for f, a in conn.calls if "ORDER BY" in f)
     assert "coalesce(p.sellable, false) ASC, t.title ASC" in flat
