@@ -760,7 +760,7 @@ card fee as its own row (it is built into the price, ADR 0005).
 |---|---|
 | FE | Billing (Invoices / Payments tabs, KPIs), invoice detail, Create Invoice (from approved version + schedule `Stepper`), Record Payment (+ evidence upload), Send reminder, Cancel / Void dialogs; case Billing tab; Trip checks list + drawer + case Checks tab; supplier Bookings / Bills tabs |
 | BE | the next keys after wave 2 (numbered when built): `invoices` (+ `due_date`, notes / terms, tax lines), `invoice_items`, `payment_schedule`, `payments` (+ `reference`, `external_ref`, status received / voided), `tax_rules` (rates pending the accountant, ADR 0005 §10), `trip_case_tasks` (+ task template; replaces the ERD `trip_case_checks` boolean row, which cannot hold the drawn per-task due date / assignee), `supplier_bookings`, `supplier_bills`, post-sale transition edges; media presign + S3 bucket (Infra); overdue job `bk_invoice_overdue`; email sending (decision pending; until then notifications only); endpoints §6.4 |
-| Infra | S3 bucket + KMS for evidence / vouchers; SES (if email is approved) |
+| Infra | S3 bucket (SSE-S3, task role only) for evidence / vouchers; SES (if email is approved) |
 | Gate | Tax rules confirmed with the accountant before invoices show tax; payment gateway is a separate decision (09 C11): W3 is manual recording only |
 
 ---

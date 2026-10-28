@@ -446,7 +446,7 @@ class FakeS3:
 
 
 @pytest.mark.asyncio
-async def test_s3_store_puts_with_kms_and_checksum_and_presigns_an_attachment(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_s3_store_puts_sse_s3_with_checksum_and_presigns_an_attachment(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeS3()
     made: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
@@ -472,7 +472,7 @@ async def test_s3_store_puts_with_kms_and_checksum_and_presigns_an_attachment(mo
             "Key": key,
             "Body": PDF,
             "ContentType": "application/pdf",
-            "ServerSideEncryption": "aws:kms",
+            "ServerSideEncryption": "AES256",
             "ChecksumSHA256": base64.b64encode(hashlib.sha256(PDF).digest()).decode("ascii"),
         }
     ]
