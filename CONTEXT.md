@@ -41,6 +41,10 @@ Design sources, in order:
 
 ## Role in the ecosystem
 
+Architecture diagram (AWS icons): `AA-Ecosys/docs/architecture/diagrams/booking.svg`, drawn from `booking.py` in the
+same folder; the catalog page `AA-Ecosys/docs/architecture/diagrams/README.md` holds every view and is shown in the CIS
+admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
+
 - **Owns** schema `booking.*` on the shared acc2 RDS (`aa-cis-dev-db`, PostgreSQL 15), migration key
   `bk-NNN`, and the **customer identity** (OTP) of the ecosystem (ADR 0001 decision 6).
 - **Consumes** through owner grants on views: TripPlanner `tripplanner.v_inquiry_outbox`
