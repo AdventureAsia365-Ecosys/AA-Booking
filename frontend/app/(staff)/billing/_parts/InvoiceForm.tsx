@@ -22,6 +22,8 @@ import {
 import { Button, Modal, Money, formatMoney, useToast } from "@/ui";
 import { errorText, fieldCls } from "./PaymentDialogs";
 import { fromCents, lineCents, sumCents, toCents } from "./money";
+import { DateField } from "@/ui/booking/DateField";
+import { formatDay } from "@/ui/booking/dates";
 
 type Mode = { kind: "create"; billing: CaseBilling } | { kind: "edit"; invoice: InvoiceDetail } | { kind: "amend"; invoice: InvoiceDetail };
 
@@ -34,6 +36,8 @@ interface AdjRow {
 
 const STEPS = ["Approved version", "Adjustments", "Payment schedule", "Review"] as const;
 const AMEND_STEPS = ["Added lines", "Payment schedule", "Review"] as const;
+
+type ScheduleRow = ScheduleRowIn & { key: number };
 
 function emptyAdj(): AdjRow {
   return { description: "", quantity: "1", unit_price: "", reason: "" };
@@ -88,12 +92,16 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
   // Schedule: the default (server-computed on the final total) or rows typed by hand.
   const frozen = mode.kind === "amend" ? mode.invoice.schedule.filter((r) => Number(r.covered_amount) > 0) : [];
   const [customSchedule, setCustomSchedule] = useState(mode.kind === "edit");
-  const [rows, setRows] = useState<ScheduleRowIn[]>(() => {
-    if (mode.kind === "create") return (mode.billing.defaults?.schedule ?? []).map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date }));
-    if (mode.kind === "edit") return mode.invoice.schedule.map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date }));
-    return mode.invoice.schedule
-      .filter((r) => Number(r.covered_amount) === 0)
-      .map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date }));
+  // Each row carries a stable `key` (React key only, never sent), so removing a row does not move another row's
+  // half-typed due date onto its neighbour.
+  const [rows, setRows] = useState<ScheduleRow[]>(() => {
+    const src =
+      mode.kind === "create"
+        ? (mode.billing.defaults?.schedule ?? [])
+        : mode.kind === "edit"
+          ? mode.invoice.schedule
+          : mode.invoice.schedule.filter((r) => Number(r.covered_amount) === 0);
+    return src.map((r, i) => ({ key: i, kind: r.kind, amount: r.amount, due_date: r.due_date }));
   });
   const [notes, setNotes] = useState(mode.kind === "edit" ? (mode.invoice.notes ?? "") : "");
   const [terms, setTerms] = useState(mode.kind === "edit" ? (mode.invoice.terms ?? "") : "");
@@ -116,7 +124,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       unit_price: a.unit_price.trim(),
       reason: a.reason.trim(),
     })),
-    schedule: customSchedule ? rows : undefined,
+    schedule: customSchedule ? rows.map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date })) : undefined,
   });
 
   const run = useMutation({
@@ -190,7 +198,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       {frozen.length > 0 && (
         <div className="rounded-md bg-line2 px-3 py-2 text-xs text-body">
           Already covered by verified payments and kept:{" "}
-          {frozen.map((r) => `${SCHEDULE_KIND_LABEL[r.kind]} ${formatMoney(r.amount, currency)} (${r.due_date})`).join(", ")}.
+          {frozen.map((r) => `${SCHEDULE_KIND_LABEL[r.kind]} ${formatMoney(r.amount, currency)} (${formatDay(r.due_date)})`).join(", ")}.
         </div>
       )}
       <label className="flex items-center gap-2 text-[13px] text-body">
@@ -202,7 +210,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       {customSchedule && (
         <>
           {rows.map((r, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[160px_1fr_160px_auto]">
+            <div key={r.key} className="grid gap-2 sm:grid-cols-[160px_1fr_160px_auto]">
               <select className={fieldCls} value={r.kind} onChange={(e) => setRow(i, { kind: e.target.value as ScheduleKind })}>
                 {Object.entries(SCHEDULE_KIND_LABEL).map(([v, l]) => (
                   <option key={v} value={v}>
@@ -211,14 +219,14 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
                 ))}
               </select>
               <input className={fieldCls} inputMode="decimal" aria-label="Amount" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} />
-              <input type="date" className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(e) => setRow(i, { due_date: e.target.value })} />
+              <DateField className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(v) => setRow(i, { due_date: v })} />
               <Button variant="ghost" size="sm" ariaLabel="Remove payment" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>
                 <Trash2 size={14} />
               </Button>
             </div>
           ))}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button size="sm" disabled={rows.length + frozen.length >= 10} onClick={() => setRows((xs) => [...xs, { kind: "other", amount: "", due_date: "" }])}>
+            <Button size="sm" disabled={rows.length + frozen.length >= 10} onClick={() => setRows((xs) => [...xs, { key: xs.reduce((m, x) => Math.max(m, x.key), -1) + 1, kind: "other", amount: "", due_date: "" }])}>
               <Plus size={13} /> Add a payment
             </Button>
             <span className={`text-xs ${scheduleOk ? "text-success" : "text-danger"}`}>
@@ -232,7 +240,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
         <ul className="text-[13px] text-body">
           {mode.billing.defaults.schedule.map((r) => (
             <li key={r.seq}>
-              {SCHEDULE_KIND_LABEL[r.kind]}: {total === base ? formatMoney(r.amount, currency) : "recomputed on the new total"} due {r.due_date}
+              {SCHEDULE_KIND_LABEL[r.kind]}: {total === base ? formatMoney(r.amount, currency) : "recomputed on the new total"} due {formatDay(r.due_date)}
             </li>
           ))}
         </ul>

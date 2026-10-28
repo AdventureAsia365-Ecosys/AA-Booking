@@ -13,6 +13,7 @@ import { CURRENCIES, Field, LockedValue, inputCls, paxErrors, textareaCls, toInt
 import { CountryPicker } from "../_parts/CountryPicker";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
+import { DateField } from "@/ui/booking/DateField";
 
 interface Form {
   start_date: string;
@@ -89,7 +90,7 @@ function EditBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
 
       <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Trip details</p>
       <Field label="Start date" hint="Clear it if the dates are not fixed yet.">
-        <input className={inputCls} type="date" value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} />
+        <DateField className={inputCls} value={f.start_date} onChange={(v) => setF({ ...f, start_date: v })} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Adults" required error={tried ? pax.adults : null}>

@@ -15,6 +15,7 @@ import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
 import { Button, Modal, fieldName, useToast } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, toInt } from "../../../cases/_parts/fields";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "../../../cases/new/CustomerPicker";
+import { DateField } from "@/ui/booking/DateField";
 
 type Target = "new_case" | "existing_case";
 const CASE_CODE_RE = /^TC-\d{6,}$/i; // lpad 6, grows past TC-999999 (bk-002 trip_case_code_seq)
@@ -143,7 +144,7 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
             />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Start date" hint="Optional">
-                <input className={inputCls} type="date" value={trip.start_date} onChange={(e) => setTrip({ ...trip, start_date: e.target.value })} />
+                <DateField className={inputCls} value={trip.start_date} onChange={(v) => setTrip({ ...trip, start_date: v })} />
               </Field>
               <Field label="Currency">
                 <select className={inputCls} value={trip.currency} onChange={(e) => setTrip({ ...trip, currency: e.target.value })}>

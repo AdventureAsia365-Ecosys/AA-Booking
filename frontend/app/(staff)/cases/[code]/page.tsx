@@ -30,7 +30,7 @@ import {
   SupplyBadge,
   TRIP_CASE_STATUS_META,
   TripCaseStatusBadge,
-  formatDate,
+  formatDay,
   useCan,
   useUrlFilters,
 } from "@/ui";
@@ -111,7 +111,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                   <Code>{c.code}</Code>
                   <span className="inline-flex items-center gap-1">
                     <CalendarDays size={14} />
-                    {c.start_date ? `${formatDate(c.start_date)}${c.trip_end_date ? ` – ${formatDate(c.trip_end_date)}` : ""}` : "Dates not set"}
+                    {c.start_date ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}` : "Dates not set"}
                     {c.duration_days ? ` · ${c.duration_days} days` : ""}
                   </span>
                   <span className="inline-flex items-center gap-1">

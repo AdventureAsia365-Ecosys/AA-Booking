@@ -46,6 +46,7 @@ import {
 } from "@/ui";
 import { RowMenu, type RowMenuItem } from "@/ui/booking/RowMenu";
 import { prepareUpload } from "../../_parts/SupplyContent";
+import { DateField } from "@/ui/booking/DateField";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 const fieldCls = "h-9 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
@@ -630,7 +631,7 @@ function AddBooking({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Service date</span>
-            <input type="date" className={fieldCls} value={form.service_date ?? ""} onChange={(e) => set({ service_date: e.target.value || null })} />
+            <DateField className={fieldCls} value={form.service_date ?? ""} onChange={(v) => set({ service_date: v || null })} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Net amount</span>

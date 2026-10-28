@@ -1,8 +1,10 @@
 // ui/booking/DateText.tsx
 // AA-683 — one date format everywhere (kit formatDate / formatDateTime, en-GB, 24 h: "9 Oct 2026",
 // "9 Oct 2026, 14:05"; spec §1.2 row "Dates"). `relative` adds "3 h ago" for list "Updated" columns.
+// AA-996: a date-only value ("2026-10-09") is a calendar day and is shown as that day in every time zone.
 
 import { formatDate, formatDateTime } from "../tokens";
+import { formatDay, isIsoDay } from "./dates";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -32,6 +34,15 @@ export function DateText({
   className?: string;
 }) {
   if (value == null || value === "") return <span className={className}>—</span>;
+  // AA-996: a calendar day ("2026-10-09": due date, trip start) is not an instant: `new Date()` would read it as UTC
+  // midnight and show the day before west of Greenwich. It is shown as that day, with no time and no "x d ago".
+  if (typeof value === "string" && isIsoDay(value)) {
+    return (
+      <time dateTime={value} className={className}>
+        {formatDay(value)}
+      </time>
+    );
+  }
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return <span className={className}>—</span>;
   const absolute = withTime ? formatDateTime(d) : formatDate(d);

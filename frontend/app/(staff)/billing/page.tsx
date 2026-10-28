@@ -19,6 +19,9 @@ import {
   DateText,
   FilterBar,
   InvoiceStatusBadge,
+  csvMoney,
+  type CsvColumn,
+  formatDay,
   KpiTile,
   Money,
   PageFrame,
@@ -30,6 +33,10 @@ import {
   useUrlFilters,
 } from "@/ui";
 
+// AA-996 (Figma audit, deviation 5; Figma PAYMENT & INVOICE): invoice numbers, trip case codes, dates and amounts never
+// wrap mid-value. To fit 1440 px with the widest real amounts (VND billions) the customer sits under the trip case code
+// (Figma "Trip case & customer", the one cell that truncates) and the amount paid under the total. Display only: the
+// CSV keeps one column per fact (INVOICE_CSV).
 const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
   {
     id: "number",
@@ -43,36 +50,38 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
         >
           {row.original.invoice_number}
         </Link>
-        <span className="text-xs text-muted">{row.original.issued_at ? "Sent" : "Draft"}</span>
+        <span className="whitespace-nowrap text-xs text-muted">{row.original.issued_at ? "Sent" : "Draft"}</span>
       </span>
     ),
   },
   {
-    id: "customer",
-    header: "Customer",
-    cell: ({ row }) => (
-      <span className="block max-w-[200px] truncate text-[13px] text-body md:max-w-[140px] min-[1200px]:max-w-[200px]">{row.original.bill_to_name ?? row.original.customer?.name ?? "—"}</span>
-    ),
-  },
-  {
     id: "case",
-    header: "Trip case",
-    cell: ({ row }) => (
-      <Link
-        href={`/cases/${encodeURIComponent(row.original.trip_case.code)}?tab=billing`}
-        onClick={(e) => e.stopPropagation()}
-        className="whitespace-nowrap text-[13px] text-accent-deep hover:underline"
-      >
-        {row.original.trip_case.code}
-      </Link>
-    ),
+    header: "Trip case / customer",
+    cell: ({ row }) => {
+      const name = row.original.bill_to_name ?? row.original.customer?.name ?? "—";
+      return (
+        <span className="flex min-w-0 flex-col">
+          <Link
+            href={`/cases/${encodeURIComponent(row.original.trip_case.code)}?tab=billing`}
+            onClick={(e) => e.stopPropagation()}
+            className="self-start whitespace-nowrap text-[13px] text-accent-deep hover:underline"
+          >
+            {row.original.trip_case.code}
+          </Link>
+          <span className="block max-w-[220px] truncate text-xs text-muted md:max-w-[140px] min-[1200px]:max-w-[180px]" title={name}>
+            {name}
+          </span>
+        </span>
+      );
+    },
   },
   {
     id: "issued",
     header: "Issued",
-    // AA-996: Issued (audit), Total and Paid (money detail; "Left to pay" stays) open in the details drawer below 1200 px.
+    // AA-996: Issued (audit) and Total (money detail, with the amount paid; "Left to pay" stays) open in the details
+    // drawer below 1200 px.
     meta: { compact: "drawer" },
-    cell: ({ row }) => (row.original.issued_at ? <DateText value={row.original.issued_at} className="text-[13px]" /> : <span className="text-muted">—</span>),
+    cell: ({ row }) => (row.original.issued_at ? <DateText value={row.original.issued_at} className="whitespace-nowrap text-[13px]" /> : <span className="text-muted">—</span>),
   },
   {
     id: "due",
@@ -84,26 +93,54 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
         <span className="text-muted">—</span>
       ),
   },
-  { id: "total", header: "Total", meta: { compact: "drawer" }, cell: ({ row }) => <Money amount={row.original.total_amount} currency={row.original.currency} className="text-[13px]" /> },
-  { id: "paid", header: "Paid", meta: { compact: "drawer" }, cell: ({ row }) => <Money amount={row.original.net_paid} currency={row.original.currency} className="text-[13px]" /> },
+  {
+    id: "total",
+    header: "Total / paid",
+    meta: { compact: "drawer" },
+    cell: ({ row }) => (
+      <span className="flex flex-col whitespace-nowrap">
+        <Money amount={row.original.total_amount} currency={row.original.currency} className="text-[13px]" />
+        <span className="text-xs text-muted">
+          paid <Money amount={row.original.net_paid} currency={row.original.currency} className="text-xs text-muted" />
+        </span>
+      </span>
+    ),
+  },
   {
     id: "balance",
     header: "Left to pay",
-    cell: ({ row }) => <Money amount={row.original.balance} currency={row.original.currency} strong className="text-[13px]" />,
+    cell: ({ row }) => <Money amount={row.original.balance} currency={row.original.currency} strong className="whitespace-nowrap text-[13px]" />,
   },
   { id: "status", header: "Status", cell: ({ row }) => <InvoiceStatusBadge status={row.original.status} overdue={row.original.overdue} /> },
+];
+
+/** The invoices CSV: one column per fact, whatever the table groups in one cell. */
+const INVOICE_CSV: CsvColumn<InvoiceSummary>[] = [
+  { header: "Invoice", value: (r) => r.invoice_number },
+  { header: "Trip case", value: (r) => r.trip_case.code },
+  { header: "Customer", value: (r) => r.bill_to_name ?? r.customer?.name ?? "" },
+  { header: "Issued", value: (r) => r.issued_at ?? "" },
+  { header: "Next due", value: (r) => r.next_due_date ?? "" },
+  { header: "Total", value: (r) => r.total_amount },
+  { header: "Paid", value: (r) => r.net_paid },
+  { header: "Left to pay", value: (r) => r.balance ?? "" },
+  { header: "Currency", value: (r) => r.currency },
+  { header: "Status", value: (r) => r.status },
+  { header: "Overdue", value: (r) => (r.overdue ? "yes" : "no") },
 ];
 
 const PAYMENT_COLUMNS: ColumnDef<Payment, unknown>[] = [
   {
     id: "ref",
     header: "Payment",
+    accessorFn: (r) => r.ref,
+    enableSorting: false,
     cell: ({ row }) => (
       <span className="flex flex-col">
         <Link
           href={`/billing/payments/${encodeURIComponent(row.original.ref)}`}
           onClick={(e) => e.stopPropagation()}
-          className="text-[13px] font-medium text-accent-deep hover:underline"
+          className="whitespace-nowrap text-[13px] font-medium text-accent-deep hover:underline"
         >
           {row.original.ref}
         </Link>
@@ -114,20 +151,28 @@ const PAYMENT_COLUMNS: ColumnDef<Payment, unknown>[] = [
   {
     id: "invoice",
     header: "Invoice",
+    accessorFn: (r) => r.invoice.number,
+    enableSorting: false,
     cell: ({ row }) => (
       <span className="flex flex-col text-[13px]">
-        <Link href={`/billing/invoices/${encodeURIComponent(row.original.invoice.number)}`} onClick={(e) => e.stopPropagation()} className="text-accent-deep hover:underline">
+        <Link
+          href={`/billing/invoices/${encodeURIComponent(row.original.invoice.number)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="whitespace-nowrap text-accent-deep hover:underline"
+        >
           {row.original.invoice.number}
         </Link>
-        <span className="text-xs text-muted">{row.original.trip_case.code}</span>
+        <span className="whitespace-nowrap text-xs text-muted">{row.original.trip_case.code}</span>
       </span>
     ),
   },
-  { id: "date", header: "Date", cell: ({ row }) => <DateText value={row.original.received_on} className="text-[13px]" /> },
-  { id: "method", header: "Method", cell: ({ row }) => <span className="text-[13px] text-body">{PAYMENT_METHOD_LABEL[row.original.method]}</span> },
+  { id: "date", header: "Date", accessorFn: (r) => r.received_on, enableSorting: false, cell: ({ row }) => <DateText value={row.original.received_on} className="whitespace-nowrap text-[13px]" /> },
+  { id: "method", header: "Method", accessorFn: (r) => PAYMENT_METHOD_LABEL[r.method], enableSorting: false, cell: ({ row }) => <span className="text-[13px] text-body">{PAYMENT_METHOD_LABEL[row.original.method]}</span> },
   {
     id: "amount",
     header: "Amount",
+    accessorFn: (r) => csvMoney(r.kind === "refund" ? `-${r.amount}` : r.amount, r.currency),
+    enableSorting: false,
     cell: ({ row }) => (
       <Money amount={row.original.kind === "refund" ? `-${row.original.amount}` : row.original.amount} currency={row.original.currency} strong className="text-[13px]" />
     ),
@@ -136,9 +181,11 @@ const PAYMENT_COLUMNS: ColumnDef<Payment, unknown>[] = [
     id: "who",
     header: "Recorded by",
     meta: { compact: "drawer" }, // AA-996: audit, in the details drawer below 1200 px
+    accessorFn: (r) => r.recorded_by?.name ?? "",
+    enableSorting: false,
     cell: ({ row }) => <span className="block max-w-[160px] truncate text-[13px] text-body">{row.original.recorded_by?.name ?? "—"}</span>,
   },
-  { id: "state", header: "Status", cell: ({ row }) => <PaymentStateBadge state={row.original.state} /> },
+  { id: "state", header: "Status", accessorFn: (r) => r.state, enableSorting: false, cell: ({ row }) => <PaymentStateBadge state={row.original.state} /> },
 ];
 
 function kpiValue(k: Kpi | undefined): React.ReactNode {
@@ -199,7 +246,7 @@ export default function BillingPage() {
           hint={kpiHint(s?.overdue, "invoice(s)")}
           hintTone={s && s.overdue.count ? "danger" : "neutral"}
         />
-        <KpiTile label="Received this month" value={canRead ? kpiValue(s?.received_this_month) : null} hint={s ? `verified, net of refunds, since ${s.month_start}` : undefined} />
+        <KpiTile label="Received this month" value={canRead ? kpiValue(s?.received_this_month) : null} hint={s ? `verified, net of refunds, since ${formatDay(s.month_start)}` : undefined} />
         <KpiTile
           label="Waiting for verification"
           value={canRead ? (s ? s.awaiting_verification.count : undefined) : null}
@@ -233,31 +280,34 @@ function InvoicesTab({ canRead }: { canRead: boolean }) {
   const list = useQuery({ queryKey: ["billing", "invoices", query], queryFn: () => billingApi.invoices(query), enabled: canRead });
   return (
     <Section>
-      <div className="mb-4">
-        <FilterBar
-          search={{ placeholder: "Search invoice, trip case or customer" }}
-          selects={[
-            {
-              key: "status",
-              label: "Status",
-              allLabel: "All statuses",
-              options: [
-                { value: "open", label: "Open (sent, part paid)" },
-                { value: "draft", label: "Draft" },
-                { value: "sent", label: "Sent" },
-                { value: "partially_paid", label: "Partially paid" },
-                { value: "paid", label: "Paid" },
-                { value: "cancelled", label: "Cancelled" },
-              ],
-              width: 190,
-            },
-            { key: "due", label: "Due", allLabel: "Any", options: [{ value: "overdue", label: "Overdue" }], width: 120 },
-          ]}
-        />
-      </div>
       <DataTable<InvoiceSummary>
+        filters={
+          <FilterBar
+            search={{ placeholder: "Search invoice, trip case or customer" }}
+            selects={[
+              {
+                key: "status",
+                label: "Status",
+                allLabel: "All statuses",
+                options: [
+                  { value: "open", label: "Open (sent, part paid)" },
+                  { value: "draft", label: "Draft" },
+                  { value: "sent", label: "Sent" },
+                  { value: "partially_paid", label: "Partially paid" },
+                  { value: "paid", label: "Paid" },
+                  { value: "cancelled", label: "Cancelled" },
+                ],
+                width: 190,
+              },
+              { key: "due", label: "Due", allLabel: "Any", options: [{ value: "overdue", label: "Overdue" }], width: 120 },
+            ]}
+          />
+        }
         searchable={false}
         tableId="billing-invoices"
+        csv={INVOICE_CSV}
+        enableCsv
+        csvFilename="invoices.csv"
         data={list.data?.items ?? []}
         columns={INVOICE_COLUMNS}
         getRowId={(r) => r.id}
@@ -268,7 +318,7 @@ function InvoicesTab({ canRead }: { canRead: boolean }) {
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
         emptyTitle={canRead ? "No invoice matches" : "Invoices need the billing role (admin, sales)"}
         emptyDescription="Create an invoice from a confirmed trip case: open it, then its Billing tab."
-        tableMinWidth={1100}
+        tableMinWidth={1000}
       />
     </Section>
   );
@@ -288,44 +338,46 @@ function PaymentsTab({ canRead }: { canRead: boolean }) {
   const list = useQuery({ queryKey: ["billing", "payments", query], queryFn: () => billingApi.payments(query), enabled: canRead });
   return (
     <Section>
-      <div className="mb-4">
-        <FilterBar
-          search={{ placeholder: "Search payment, invoice, case or reference" }}
-          selects={[
-            {
-              key: "state",
-              label: "Status",
-              allLabel: "All statuses",
-              options: [
-                { value: "recorded", label: "To verify" },
-                { value: "verified", label: "Verified" },
-                { value: "voided", label: "Voided" },
-              ],
-              width: 150,
-            },
-            {
-              key: "kind",
-              label: "Type",
-              allLabel: "Received and refunds",
-              options: [
-                { value: "receipt", label: "Received" },
-                { value: "refund", label: "Refunds" },
-              ],
-              width: 190,
-            },
-            {
-              key: "method",
-              label: "Method",
-              allLabel: "Any method",
-              options: Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => ({ value, label })),
-              width: 190,
-            },
-          ]}
-        />
-      </div>
       <DataTable<Payment>
+        filters={
+          <FilterBar
+            search={{ placeholder: "Search payment, invoice, case or reference" }}
+            selects={[
+              {
+                key: "state",
+                label: "Status",
+                allLabel: "All statuses",
+                options: [
+                  { value: "recorded", label: "To verify" },
+                  { value: "verified", label: "Verified" },
+                  { value: "voided", label: "Voided" },
+                ],
+                width: 150,
+              },
+              {
+                key: "kind",
+                label: "Type",
+                allLabel: "Received and refunds",
+                options: [
+                  { value: "receipt", label: "Received" },
+                  { value: "refund", label: "Refunds" },
+                ],
+                width: 190,
+              },
+              {
+                key: "method",
+                label: "Method",
+                allLabel: "Any method",
+                options: Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => ({ value, label })),
+                width: 190,
+              },
+            ]}
+          />
+        }
         searchable={false}
         tableId="billing-payments"
+        enableCsv
+        csvFilename="payments.csv"
         data={list.data?.items ?? []}
         columns={PAYMENT_COLUMNS}
         getRowId={(r) => r.id}

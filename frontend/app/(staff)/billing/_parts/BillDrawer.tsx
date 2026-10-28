@@ -40,6 +40,8 @@ import {
 } from "@/ui";
 import { fromCents, sumCents, toCents } from "./money";
 import { errorText, fieldCls, prepareEvidence, today } from "./PaymentDialogs";
+import { DateField } from "@/ui/booking/DateField";
+import { formatDay } from "@/ui/booking/dates";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
 const textareaCls = "rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border";
@@ -165,7 +167,7 @@ function lineColumns(currency: string, canPricing: boolean): ColumnDef<SupplierB
           </span>
           <span className="text-xs text-muted">
             {row.original.code}
-            {row.original.service_date ? ` · ${row.original.service_date}` : ""}
+            {row.original.service_date ? ` · ${formatDay(row.original.service_date)}` : ""}
           </span>
         </span>
       ),
@@ -379,7 +381,7 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
             message={
               <>
                 You checked the supplier&apos;s bill <strong>{b.bill_number}</strong> against the confirmed bookings: AA owes{" "}
-                <strong>{formatMoney(b.amount, b.currency)}</strong> to {b.supplier.name}, due {b.due_date}. Entered by{" "}
+                <strong>{formatMoney(b.amount, b.currency)}</strong> to {b.supplier.name}, due {formatDay(b.due_date)}. Entered by{" "}
                 {b.created_by?.name ?? "someone else"}
                 {b.facts_edited_by && b.facts_edited_by.id !== b.created_by?.id
                   ? `; amounts last changed by ${b.facts_edited_by.name ?? "someone else"}`
@@ -649,10 +651,10 @@ export function BillForm({
             </Field>
           </div>
           <Field label="Issue date" required>
-            <input type="date" className={fieldCls} value={issue} disabled={locked} onChange={(e) => setIssue(e.target.value)} />
+            <DateField className={fieldCls} value={issue} disabled={locked} onChange={(v) => setIssue(v)} />
           </Field>
           <Field label="Due date" required>
-            <input type="date" className={fieldCls} value={due} disabled={locked} onChange={(e) => setDue(e.target.value)} />
+            <DateField className={fieldCls} value={due} disabled={locked} onChange={(v) => setDue(v)} />
           </Field>
         </div>
 
@@ -688,7 +690,7 @@ export function BillForm({
                         </span>
                         <span className="text-xs text-muted">
                           {o.code} · {o.trip_case_code}
-                          {o.service_date ? ` · ${o.service_date}` : ""}
+                          {o.service_date ? ` · ${formatDay(o.service_date)}` : ""}
                           {o.net_amount ? ` · net ${formatMoney(o.net_amount, o.net_currency)}` : ""}
                           {o.billed.length ? ` · already billed ${o.billed.map((x) => formatMoney(x.amount, x.currency)).join(" + ")}` : ""}
                         </span>
@@ -795,7 +797,7 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
             </select>
           </Field>
           <Field label="Day the money left" required>
-            <input type="date" className={fieldCls} value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
+            <DateField className={fieldCls} value={paidOn} onChange={(v) => setPaidOn(v)} />
           </Field>
           <Field label="Bank reference" hint="Never a card number.">
             <input className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />

@@ -15,6 +15,7 @@ import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type CheckChanges, type TripCheck
 import { DateText, FormDrawer, Pill, TripCheckStatusBadge, useCan, useToast } from "@/ui";
 import { Field, inputCls, LockedValue, textareaCls } from "../../cases/_parts/fields";
 import { StaffSelect } from "../../cases/_parts/StaffSelect";
+import { DateField } from "@/ui/booking/DateField";
 
 const STATUS_OPTIONS: { value: TripCheckStatus; label: string }[] = [
   { value: "open", label: "Open" },
@@ -179,7 +180,7 @@ function CheckDrawerBody({
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Due date" hint={check.standard ? "Moves with the start date while open." : undefined}>
-          <input type="date" className={inputCls} value={form.due_date} onChange={set("due_date")} disabled={!canWrite} />
+          <DateField className={inputCls} value={form.due_date} onChange={(v) => setForm((f) => ({ ...f, due_date: v }))} disabled={!canWrite} />
         </Field>
         <Field label="Owner">
           {canWrite ? (
@@ -266,7 +267,7 @@ export function NewCheckDrawer({ caseCode, open, onClose }: { caseCode: string; 
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Due date">
-          <input type="date" className={inputCls} value={due} onChange={(e) => setDue(e.target.value)} />
+          <DateField className={inputCls} value={due} onChange={(v) => setDue(v)} />
         </Field>
         <Field label="Owner">
           <StaffSelect value={owner} onChange={setOwner} emptyLabel="Anyone on the case" ariaLabel="Owner" />

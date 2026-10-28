@@ -14,6 +14,7 @@ import { SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { DestinationPicker, type PickedPlace } from "@/app/(staff)/suppliers/_parts/DestinationPicker";
+import { TimeField } from "@/ui/booking/DateField";
 
 const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
 const linksText = (h?: HotelDetail) => (h?.links ?? []).map((l) => (l.label && l.label !== l.url ? `${l.label} | ${l.url}` : l.url)).join("\n");
@@ -170,10 +171,10 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
           <input className={inputCls} inputMode="decimal" value={form.longitude} onChange={(e) => set("longitude")(e.target.value)} placeholder="105.8542" />
         </FormField>
         <FormField label="Check-in from" error={errorFor(fe, "check_in_time")}>
-          <input type="time" className={inputCls} value={form.check_in_time} onChange={(e) => set("check_in_time")(e.target.value)} />
+          <TimeField className={inputCls} value={form.check_in_time} onChange={(v) => set("check_in_time")(v)} />
         </FormField>
         <FormField label="Check-out by" error={errorFor(fe, "check_out_time")}>
-          <input type="time" className={inputCls} value={form.check_out_time} onChange={(e) => set("check_out_time")(e.target.value)} />
+          <TimeField className={inputCls} value={form.check_out_time} onChange={(v) => set("check_out_time")(v)} />
         </FormField>
       </div>
       <FormField label="Amenities" hint="Separate with commas, e.g. Pool, Spa, Airport shuttle." error={errorFor(fe, "amenities")}>

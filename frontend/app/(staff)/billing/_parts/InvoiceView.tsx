@@ -32,6 +32,9 @@ import {
   Pill,
   ScheduleStateBadge,
   Section,
+  formatDate,
+  formatDay,
+  formatMoney,
   useToast,
 } from "@/ui";
 import { InvoiceFormModal } from "./InvoiceForm";
@@ -203,7 +206,7 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
           invoice.status === "draft"
             ? "Draft: only staff see it. Send it to show it to the customer in My Trips."
             : invoice.issued_at
-              ? `Sent ${new Date(invoice.issued_at).toLocaleDateString("en-GB")}${invoice.sent_by?.name ? ` by ${invoice.sent_by.name}` : ""}. Trip ${invoice.trip_case.code}.`
+              ? `Sent ${formatDate(invoice.issued_at)}${invoice.sent_by?.name ? ` by ${invoice.sent_by.name}` : ""}. Trip ${invoice.trip_case.code}.`
               : undefined
         }
         actions={
@@ -248,17 +251,17 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
       >
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <KpiTile label="Total" value={<Money amount={invoice.total_amount} currency={cur} />} />
-          <KpiTile label="Paid (verified)" value={<Money amount={invoice.net_paid} currency={cur} />} hint={Number(invoice.verified_refunded) > 0 ? `after ${invoice.verified_refunded} refunded` : undefined} />
+          <KpiTile label="Paid (verified)" value={<Money amount={invoice.net_paid} currency={cur} />} hint={Number(invoice.verified_refunded) > 0 ? `after ${formatMoney(invoice.verified_refunded, cur)} refunded` : undefined} />
           <KpiTile
             label={invoice.balance && Number(invoice.balance) < 0 ? "Overpaid" : "Left to pay"}
             value={invoice.balance === null ? null : <Money amount={invoice.balance.replace("-", "")} currency={cur} />}
-            hint={Number(invoice.overdue_amount) > 0 ? `${invoice.overdue_amount} ${cur} overdue` : invoice.next_due_date ? `next due ${invoice.next_due_date}` : undefined}
+            hint={Number(invoice.overdue_amount) > 0 ? `${formatMoney(invoice.overdue_amount, cur)} overdue` : invoice.next_due_date ? `next due ${formatDay(invoice.next_due_date)}` : undefined}
             hintTone={Number(invoice.overdue_amount) > 0 ? "danger" : "neutral"}
           />
           <KpiTile
             label="Waiting for verification"
             value={invoice.unverified_count}
-            hint={invoice.unverified_count ? `${invoice.unverified_amount} ${cur}: a second admin verifies` : "Nothing waiting"}
+            hint={invoice.unverified_count ? `${formatMoney(invoice.unverified_amount, cur)}: a second admin verifies` : "Nothing waiting"}
             hintTone={invoice.unverified_count ? "warning" : "neutral"}
           />
         </div>

@@ -13,15 +13,27 @@
 //     column placed before the row menu / open column (or last). Every value stays one click away.
 //   - The page's `tableMinWidth` (sized for 1400-1440 px) is replaced by `compactMinWidth` (default none: the table
 //     takes its frame and its columns share it).
-//   - The CSV export does not depend on the density (review fix): when columns are folded, the kit's own CSV button is
-//     replaced by the wrapper's, which exports every column of the page (the kit's header / accessor rule) over the
-//     rows the page passes, so a file exported at 960 px equals the one exported at 1440 px. The Columns menu lists the
-//     columns the table shows (the folded ones are in the drawer).
+//   - The CSV export does not depend on the density (review fix): the wrapper's CSV button exports every data column of
+//     the page (the kit's header / accessor rule) over the rows the page passes, so a file exported at 960 px equals
+//     the one exported at 1440 px. The Columns menu lists the columns the table shows (the folded ones are in the
+//     drawer).
+//
+// AA-996 (audit slice 1, deviation 10): `filters` puts the page's FilterBar into the table toolbar. The wrapper and the
+// bar's root are `display: contents` there (app/globals.css), so the search box shares the toolbar line with the kit's
+// Columns / CSV buttons and the bar's filter row (`order: 2`, full width) sits right under them: one fixed shape on
+// every list (Figma USER MANAGEMENT), instead of tools floating on a row of their own under a wrapping filter bar.
+//
+// AA-996 (review fix): every Booking CSV goes through the wrapper's button, at every density. The file = every column
+// of the page (or the page's `csv` columns) except the row tools (selection, details button, row menu / open link,
+// which carry no data), over the rows the page passes (all Booking lists filter in the page: `searchable={false}`),
+// and every value passes the spreadsheet formula guard (csvCell.ts). The kit's own exporter is not used, because it
+// writes the row-menu column and does not neutralise formulas, and ui/DataTable.tsx is a CIS copy not edited here.
 
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowData } from "@tanstack/react-table";
 import { Download, PanelRightOpen } from "lucide-react";
 import { useMemo, useState } from "react";
 import { downloadCsv, toCsv } from "../csv";
+import { safeCsvColumns } from "./csvCell";
 import { DataTable as KitDataTable, type DataTableProps } from "../DataTable";
 import { Drawer } from "../Drawer";
 import { K, RADIUS, sans } from "../tokens";
@@ -51,11 +63,28 @@ const DETAILS_ID = "__details";
 export type BookingDataTableProps<T> = DataTableProps<T> & {
   /** Minimum table width in compact density (default: none, the table fits its frame). */
   compactMinWidth?: number;
+  /** The page's FilterBar: drawn in the toolbar row, before the Columns / CSV tools. */
+  filters?: React.ReactNode;
+  /** The CSV file's columns when they differ from the table's (a cell that shows two facts, e.g. a trip case with its
+   *  customer underneath, still exports them as two columns). Default: one CSV column per table column. */
+  csv?: CsvColumn<T>[];
 };
 
-export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, ...rest }: BookingDataTableProps<T>) {
+export type CsvColumn<T> = { header: string; value: (row: T) => unknown };
+
+export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, filters, csv, ...rest }: BookingDataTableProps<T>) {
   const compact = useIsCompact();
-  const { data, getRowId, enableCsv = false, csvFilename = "export", toolbarExtra } = rest;
+  const { data, getRowId, enableCsv = false, csvFilename = "export" } = rest;
+  const toolbarExtra = filters ? (
+    <>
+      <div className="bk-dt-filters" style={{ display: "contents" }}>
+        {filters}
+      </div>
+      {rest.toolbarExtra}
+    </>
+  ) : (
+    rest.toolbarExtra
+  );
   // The open drawer's row, by id: resolved from the current `data` at render, so a refetch or a mutation shows fresh
   // values, and a row that left the data (page, filter, delete) closes the drawer.
   const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -79,8 +108,8 @@ export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, ...rest 
     return trailing ? [...kept.slice(0, -1), button, last] : [...kept, button];
   }, [columns, folding, folded, getRowId]);
   const detailsRow = folding && detailsId !== null ? data.find((r) => getRowId(r) === detailsId) : undefined;
-  // While columns are folded the kit's CSV would export only the shown columns: the wrapper's button exports them all.
-  const ownCsv = folding && enableCsv;
+  // The wrapper's CSV button replaces the kit's at every density (same look, same place): see the header note.
+  const ownCsv = enableCsv;
 
   return (
     <div className="bk-dt">
@@ -93,7 +122,7 @@ export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, ...rest 
           ownCsv ? (
             <>
               {toolbarExtra}
-              <CsvButton onClick={() => downloadCsv(csvFilename, toCsv(data, csvColumns(columns)))} />
+              <CsvButton onClick={() => downloadCsv(csvFilename, toCsv(data, safeCsvColumns(csv ?? csvColumns(columns))))} />
             </>
           ) : (
             toolbarExtra
@@ -107,11 +136,22 @@ export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, ...rest 
   );
 }
 
+/** AA-996 (audit slice 1): amount and currency as one CSV cell ("2400.00 USD"), the API's decimal string unchanged.
+ *  A display-only column gets a CSV value with `accessorFn` (the kit CSV writes "" for a column without one) plus
+ *  `enableSorting: false`, so the list sorts exactly as before. */
+export function csvMoney(amount: string | number | null | undefined, currency: string | null | undefined): string {
+  if (amount === null || amount === undefined || amount === "") return "";
+  return currency ? `${amount} ${currency}` : String(amount);
+}
+
+/** Columns that are row tools, never data: left out of every CSV. */
+const NON_DATA_IDS = new Set(["__select", DETAILS_ID, ...TRAILING_IDS]);
+
 /** The kit's CSV column rule (ui/DataTable.tsx `exportCsv`: header text or column id; accessorFn, else accessorKey,
- *  else empty), applied to every column of the page, so the file is the one the kit exports at 1200 px and wider. */
-export function csvColumns<T>(columns: ColumnDef<T, unknown>[]): { header: string; value: (row: T) => unknown }[] {
+ *  else empty), applied to every data column of the page (row tools left out), at every density. */
+export function csvColumns<T>(columns: ColumnDef<T, unknown>[]): CsvColumn<T>[] {
   return columns
-    .filter((c) => c.id !== "__select")
+    .filter((c) => !NON_DATA_IDS.has(c.id ?? ""))
     .map((c) => {
       const def = c as { accessorFn?: (r: T, i: number) => unknown; accessorKey?: string };
       return {

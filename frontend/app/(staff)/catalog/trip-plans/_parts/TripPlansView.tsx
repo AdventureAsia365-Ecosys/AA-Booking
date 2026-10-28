@@ -154,63 +154,66 @@ export function TripPlansView() {
       <Section>
         {orphanedView ? (
           <>
-            <div className="mb-4">
-              <FilterBar
-                search={{ placeholder: "Exact CIS source id" }}
-                selects={[
-                  {
-                    key: "show",
-                    label: "Show",
-                    allLabel: "CIS catalog tours",
-                    options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
-                    width: 190, // the facet counts load after the page (CLS)
-                  },
-                ]}
-              />
-            </div>
-            <OrphanedPlansTable />
+            <OrphanedPlansTable
+              filters={
+                <FilterBar
+                  search={{ placeholder: "Exact CIS source id" }}
+                  selects={[
+                    {
+                      key: "show",
+                      label: "Show",
+                      allLabel: "CIS catalog tours",
+                      options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                      width: 190, // the facet counts load after the page (CLS)
+                    },
+                  ]}
+                />
+              }
+            />
           </>
         ) : (
           <>
-            <div className="mb-4">
-              <FilterBar
-                search={{ placeholder: "Search title, SKU or CIS source id" }}
-                selects={[
-                  {
-                    key: "show",
-                    label: "Show",
-                    allLabel: "CIS catalog tours",
-                    options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
-                    width: 190, // the facet counts load after the page (CLS)
-                  },
-                  {
-                    key: "country",
-                    label: "Country",
-                    allLabel: "All countries",
-                    options: (f?.countries ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.tours})` })),
-                    width: 180,
-                  },
-                  {
-                    key: "sellable",
-                    label: "Status",
-                    allLabel: "Any status",
-                    options: [
-                      { value: "yes", label: "Sellable" },
-                      { value: "no", label: "Not for sale" },
-                    ],
-                  },
-                  {
-                    key: "style",
-                    label: "Trip style",
-                    allLabel: "Any style",
-                    options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
-                    width: 180,
-                  },
-                  { key: "sort", label: "Sort", allLabel: "Title A–Z", options: SORTS.slice(1) },
-                ]}
-              />
-            </div>
             <DataTable<TripPlanListItem>
+              filters={
+                <FilterBar
+                  search={{ placeholder: "Search title, SKU or CIS source id" }}
+                  selects={[
+                    {
+                      key: "show",
+                      label: "Show",
+                      allLabel: "CIS catalog tours",
+                      options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                      // The facet counts load after the page (CLS). AA-996: the widths let every filter fit one row at 1440.
+                      width: 160,
+                    },
+                    {
+                      key: "country",
+                      label: "Country",
+                      allLabel: "All countries",
+                      options: (f?.countries ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.tours})` })),
+                      width: 140,
+                    },
+                    {
+                      key: "sellable",
+                      label: "Status",
+                      allLabel: "Any status",
+                      options: [
+                        { value: "yes", label: "Sellable" },
+                        { value: "no", label: "Not for sale" },
+                      ],
+                      width: 120,
+                    },
+                    {
+                      key: "style",
+                      label: "Style",
+                      allLabel: "Any trip style",
+                      options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
+                      width: 150,
+                    },
+                    { key: "sort", label: "Sort", allLabel: "Title A–Z", options: SORTS.slice(1), width: 150 },
+                  ]}
+                />
+              }
               searchable={false}
               tableId="trip-plans"
               data={list.data?.items ?? []}

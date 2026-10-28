@@ -53,6 +53,9 @@ import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../l
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
 import type { BillingSummary, InvoiceStatus, InvoiceSummary, Kpi, Page as BillingPage, Payment } from "../../lib/api/billing";
+import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
+import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
+import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
 import staffMeJson from "./staff-me.json";
 
 /** The browser clock during the check (layout.spec.ts freezes it with page.clock.setFixedTime): the run gives the same
@@ -916,6 +919,104 @@ const BILLING_SUMMARY: BillingSummary = {
 };
 const billingPage = <T,>(items: T[], total: number): BillingPage<T> => ({ items, total, limit: ROWS, offset: 0 });
 
+// ── Supplier bills (AA-996 review fix: the list exports CSV like every list page) ─────────────────────────────────────
+// Bill 1 carries a formula-like supplier bill number: the CSV must neutralise it (csvCell.ts).
+function supplierBill(i: number): SupplierBill {
+  const status = (["received", "approved", "paid", "cancelled"] as const)[i % 4];
+  return {
+    id: uuid("9", i),
+    code: `BIL-${pad(i + 1)}`,
+    supplier: { id: SUP_ID, name: "Vietnam Heritage Riverside Hospitality and Transport Joint Stock Company" },
+    trip_case: i % 3 === 2 ? null : { id: uuid("8", i), code: `TC-${pad(i + 1)}`, channel: "b2c" },
+    bill_number: i === 0 ? "=HYPERLINK(\"http://x.test\",\"click\")" : `VHR/2026/10/${pad(i + 1, 4)}`,
+    currency: i % 2 ? "USD" : "VND",
+    amount: i % 2 ? "12450.00" : "1250000000",
+    issue_date: "2026-09-28",
+    due_date: "2026-10-09",
+    status,
+    notes: null,
+    document_file_id: null,
+    created_by: person("u-002", i),
+    facts_edited_by: null,
+    approved_by: status === "approved" || status === "paid" ? person("u-003", 2) : null,
+    approved_at: status === "approved" || status === "paid" ? NOW : null,
+    paid_at: status === "paid" ? NOW : null,
+    cancelled_by: status === "cancelled" ? person("u-003", 2) : null,
+    cancelled_at: status === "cancelled" ? NOW : null,
+    cancel_reason: status === "cancelled" ? "Duplicate" : null,
+    created_at: EARLIER,
+    updated_at: NOW,
+    paid_amount: status === "paid" ? (i % 2 ? "12450.00" : "1250000000") : "0",
+    balance: status === "paid" ? "0" : i % 2 ? "12450.00" : "1250000000",
+    live_payouts: status === "paid" ? 1 : 0,
+    line_count: 2,
+    lines_amount: i % 2 ? "12450.00" : "1250000000",
+    overdue: status === "approved",
+    approve_blockers: status === "received" ? ["maker_checker"] : [],
+    actions: { edit: status === "received", attach: true, approve: false, cancel: status !== "paid" && status !== "cancelled", pay: status === "approved" },
+  };
+}
+const billKpi = (count: number) => ({ count, by_currency: [{ currency: "VND", amount: "3750000000" }, { currency: "USD", amount: "24900.00" }] });
+const SUPPLIER_BILLS_SUMMARY: SupplierBillsSummary = {
+  to_approve: billKpi(7),
+  to_pay: billKpi(6),
+  overdue: billKpi(2),
+  paid_this_month: billKpi(5),
+  bills: { received: 7, approved: 6, paid: 9, cancelled: 2 },
+  month_start: "2026-10-01",
+  today: "2026-10-23",
+};
+
+// ── Trip checks (AA-996 audit slice 1: the list must fit 1440 px with its Status column in view) ─────────────────────
+// Worst case for width: long custom check titles, long customer names, a B2B row, overdue and done checks, owners with
+// long names and owners without a name.
+const CHECK_CODES = ["pre_trip_recheck", "emergency_contact", "insurance", "custom"] as const;
+function tripCheck(i: number): TripCheck {
+  const code = CHECK_CODES[i % 4];
+  const b2b = i % 7 === 3;
+  return {
+    id: uuid("e", i),
+    code,
+    title: code === "custom" ? "Confirm the private boat transfer and the river-side picnic permit with the harbour office" : "",
+    status: i % 5 === 4 ? "done" : "open",
+    due_date: i % 6 === 5 ? null : "2026-09-28",
+    assignee_ref: i % 3 === 0 ? null : `u-${pad(i % 4, 3)}`,
+    assignee: i % 3 === 0 ? null : { id: `u-${pad(i % 4, 3)}`, name: i % 8 === 7 ? null : `${PERSON_NAMES[i % 4]} ${i}` },
+    done_by: null,
+    done_at: null,
+    note: null,
+    emergency_contact_name: null,
+    emergency_contact_phone: null,
+    cleared_at: null,
+    created_by: null,
+    created_at: EARLIER,
+    updated_at: NOW,
+    standard: code !== "custom",
+    contact_allowed: !b2b,
+    trip_case: {
+      id: uuid("8", i),
+      code: `TC-${pad(i + 1)}`,
+      status: "supplier_confirming",
+      channel: b2b ? "b2b" : "b2c",
+      start_date: "2026-09-28",
+      end_date: "2026-10-17",
+      customer_name: b2b ? null : `Alexandra Catherine Montgomery-Whitfield ${i}`,
+    },
+  };
+}
+const LIFECYCLE_RUNS: LifecycleRun[] = range(3).map((i) => ({
+  id: uuid("f", i),
+  kind: i % 2 ? "bk_ops_reminders" : "bk_case_lifecycle",
+  status: "succeeded",
+  created_by: null,
+  created_at: EARLIER,
+  started_at: EARLIER,
+  finished_at: EARLIER,
+  attempt: 1,
+  result: i % 2 ? { checks_due_notified: 4, supplier_waiting_notified: 2, payments_notified: 1 } : { mode: "live", moves: { pre_departure: 2 }, blocked: 0 },
+  error: null,
+}));
+
 export type FixtureAnswer = { status: number; body: unknown };
 
 const ok = (body: unknown): FixtureAnswer => ({ status: 200, body });
@@ -1000,8 +1101,13 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (at(0) === "catalog" && at(1) === "geo" && at(2) === "countries" && seg.length === 4) return ok(countryDetail(at(3)));
 
   if (p === "billing/summary") return ok(BILLING_SUMMARY);
+  if (p === "trip-checks") return ok({ items: range(ROWS).map(tripCheck), total: 73, limit: ROWS, offset: 0 } satisfies TripCheckPage);
+  if (p === "case-lifecycle/runs") return ok({ items: LIFECYCLE_RUNS, scheduled_mode: "live", schedule_utc_hour: 1 });
+  if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
   if (p === "invoices") return ok(billingPage(range(ROWS).map(invoice), 31));
   if (p === "payments") return ok(billingPage(range(ROWS).map(payment), 58));
+  if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
+  if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (p === "catalog/trip-plans") {

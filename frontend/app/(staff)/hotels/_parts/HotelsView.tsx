@@ -77,49 +77,51 @@ export function HotelsView() {
       }
     >
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search hotel, HTL- code, address or supplier" }}
-            selects={[
-              {
-                key: "status",
-                label: "Status",
-                allLabel: "All statuses",
-                options: [
-                  { value: "active", label: "Active" },
-                  { value: "inactive", label: "Inactive" },
-                ],
-              },
-              {
-                key: "country",
-                label: "Country",
-                allLabel: "All countries",
-                options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
-                width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
-              },
-              {
-                key: "stars",
-                label: "Stars",
-                allLabel: "Any rating",
-                options: [5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? "star" : "stars"}` })),
-              },
-              {
-                key: "sort",
-                label: "Sort",
-                allLabel: "Name A–Z",
-                options: [
-                  { value: "-updated_at", label: "Recently updated" },
-                  { value: "-created_at", label: "Newest first" },
-                  { value: "-star_rating", label: "Most stars" },
-                ],
-              },
-            ]}
-          />
-        </div>
         <div className="bk-dt-sticky-end">
           <DataTable<Hotel>
+            filters={
+              <FilterBar
+                search={{ placeholder: "Search hotel, HTL- code, address or supplier" }}
+                selects={[
+                  {
+                    key: "status",
+                    label: "Status",
+                    allLabel: "All statuses",
+                    options: [
+                      { value: "active", label: "Active" },
+                      { value: "inactive", label: "Inactive" },
+                    ],
+                  },
+                  {
+                    key: "country",
+                    label: "Country",
+                    allLabel: "All countries",
+                    options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                    width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
+                  },
+                  {
+                    key: "stars",
+                    label: "Stars",
+                    allLabel: "Any rating",
+                    options: [5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? "star" : "stars"}` })),
+                  },
+                  {
+                    key: "sort",
+                    label: "Sort",
+                    allLabel: "Name A–Z",
+                    options: [
+                      { value: "-updated_at", label: "Recently updated" },
+                      { value: "-created_at", label: "Newest first" },
+                      { value: "-star_rating", label: "Most stars" },
+                    ],
+                  },
+                ]}
+              />
+            }
             searchable={false}
             tableId="hotels"
+            enableCsv
+            csvFilename="hotels.csv"
             data={list.data?.items ?? []}
             columns={columns}
             getRowId={(r) => r.id}

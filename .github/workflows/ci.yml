@@ -258,6 +258,10 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
 
+      # AA-996: pure helpers (ui/booking/dates.ts) under Node's built-in runner; Node 22 strips the TypeScript types.
+      - name: Unit tests (node --test)
+        run: npm run test:unit
+
       - name: Build (next build)
         env:
           NEXT_TELEMETRY_DISABLED: "1"

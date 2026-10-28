@@ -15,7 +15,8 @@ import { api } from "@/lib/api/client";
 import { proposalsApi } from "@/lib/api/proposals";
 import { QUOTE_VALIDITY_RANGE_DAYS, settingsFromApi } from "@/lib/bookingConfig";
 import { addDays, defaultSendMessage } from "@/lib/proposalDraft";
-import { Button, Modal, Money, Spinner, formatDate, staffDisplay, useStaff, useToast } from "@/ui";
+import { Button, Modal, Money, Spinner, formatDay, staffDisplay, useStaff, useToast } from "@/ui";
+import { DateField } from "@/ui/booking/DateField";
 
 const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
 const fieldCls = "w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
@@ -75,7 +76,7 @@ function SendBody({ code, n, onClose, onSent }: { code: string; n: number; onClo
       summary={{
         title,
         customer: c.customer_name,
-        dates: c.start_date ? `${formatDate(c.start_date)}${c.trip_end_date ? ` – ${formatDate(c.trip_end_date)}` : ""}` : "Dates to be confirmed",
+        dates: c.start_date ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}` : "Dates to be confirmed",
         total: v.total_price,
         currency: v.currency,
       }}
@@ -168,7 +169,7 @@ function SendForm({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium uppercase tracking-[0.04em] text-muted">Valid until</span>
-            <input type="date" value={validUntil} min={min} max={max} onChange={(e) => setValidUntil(e.target.value)} className={`${fieldCls} h-10 sm:w-56`} />
+            <DateField value={validUntil} min={min} max={max} onChange={(v) => setValidUntil(v)} className={`${fieldCls} h-10`} wrapperClassName="sm:w-56" />
             <span className="text-xs text-muted">
               {QUOTE_VALIDITY_RANGE_DAYS.min}–{QUOTE_VALIDITY_RANGE_DAYS.max} days from today.
             </span>

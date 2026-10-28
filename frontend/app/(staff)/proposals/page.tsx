@@ -34,7 +34,8 @@ import {
   TripCaseStatusBadge,
   VERSION_BADGE_META,
   VersionBadgePill,
-  formatDate,
+  csvMoney,
+  formatDay,
   useCan,
   useToast,
   useUrlFilters,
@@ -126,32 +127,34 @@ export default function ProposalsPage() {
       }
     >
       <Section>
-        <div className="mb-4">
-          <FilterBar
-            search={{ placeholder: "Search case code, customer or version title" }}
-            selects={[
-              {
-                key: "badge",
-                label: "Status",
-                allLabel: "All statuses",
-                options: Object.entries(VERSION_BADGE_META).map(([value, m]) => ({ value, label: m.label })),
-              },
-              {
-                key: "assignee",
-                label: "Sales",
-                allLabel: "Anyone",
-                options: [
-                  { value: "me", label: "Mine" },
-                  { value: "none", label: "Unassigned" },
-                ],
-              },
-            ]}
-            dateRange={{ fromKey: "from", toKey: "to", label: "Updated" }}
-          />
-        </div>
         <DataTable<VersionListItem>
+          filters={
+            <FilterBar
+              search={{ placeholder: "Search case code, customer or version title" }}
+              selects={[
+                {
+                  key: "badge",
+                  label: "Status",
+                  allLabel: "All statuses",
+                  options: Object.entries(VERSION_BADGE_META).map(([value, m]) => ({ value, label: m.label })),
+                },
+                {
+                  key: "assignee",
+                  label: "Sales",
+                  allLabel: "Anyone",
+                  options: [
+                    { value: "me", label: "Mine" },
+                    { value: "none", label: "Unassigned" },
+                  ],
+                },
+              ]}
+              dateRange={{ fromKey: "from", toKey: "to", label: "Updated" }}
+            />
+          }
           searchable={false}
           tableId="proposals"
+          enableCsv
+          csvFilename="proposals.csv"
           data={list.data?.items ?? []}
           columns={columns}
           getRowId={(r) => r.id}
@@ -350,7 +353,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                     <span className="block truncate text-[13px] font-medium text-ink">{c.customer_name ?? "Unnamed customer"}</span>
                     <span className="text-xs text-muted">
                       <Code>{c.code}</Code>
-                      {c.start_date ? ` · ${formatDate(c.start_date)}` : ""}
+                      {c.start_date ? ` · ${formatDay(c.start_date)}` : ""}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
@@ -390,6 +393,8 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
   {
     id: "proposal",
     header: "Proposal",
+    accessorFn: (r) => `${r.trip_case_code} V${r.version_number} ${r.title ?? r.trip_title ?? "Custom trip"}`,
+    enableSorting: false,
     cell: ({ row }) => {
       const title = row.original.title ?? row.original.trip_title ?? "Custom trip";
       const customer = row.original.customer.name ?? "Unnamed customer";
@@ -408,9 +413,11 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
   {
     id: "legs",
     header: "Trip",
+    accessorFn: (r) => r.leg_titles.join(" + "),
+    enableSorting: false,
     cell: ({ row }) => {
       const { leg_titles: legs, start_date, duration_days } = row.original;
-      const when = [start_date ? formatDate(start_date) : null, duration_days ? `${duration_days} days` : null].filter(Boolean).join(" · ");
+      const when = [start_date ? formatDay(start_date) : null, duration_days ? `${duration_days} days` : null].filter(Boolean).join(" · ");
       return (
         <FlexCell min={160}>
           <span title={legs.length ? legs.join("\n") : undefined} className="flex min-w-0 text-[13px] text-body">
@@ -423,10 +430,18 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
     },
   },
   { id: "badge", header: "Status", accessorKey: "badge", cell: ({ row }) => <VersionBadgePill badge={row.original.badge} /> },
-  { id: "total", header: "Total", cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} /> },
+  {
+    id: "total",
+    header: "Total",
+    accessorFn: (r) => csvMoney(r.total_price, r.currency),
+    enableSorting: false,
+    cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} />,
+  },
   {
     id: "edited",
     header: "Last edited",
+    accessorFn: (r) => r.updated_at,
+    enableSorting: false,
     cell: ({ row }) => (
       <span className="text-[13px] text-muted">
         <DateText value={row.original.updated_at} relative />
