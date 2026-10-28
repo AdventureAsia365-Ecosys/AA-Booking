@@ -4,6 +4,11 @@
 -- views; catalog.v_destination (AA-822 supplier place picker) is a view over fixed rows; v_destination_photo and
 -- v_country (AA-996 countries) are plain tables. Applied after the bk-NNN
 -- migrations (the grant needs role booking).
+-- Live invariants the stub keeps (AA-996 list hotfix): every v_tour_day / v_tour_photo row carries the tour_id of its
+-- live v_tour row (a trigger fills it when a test leaves it out), and catalog.v_tour_place is the per-place source of
+-- v_tour_day.places (CIS 225: places = array_agg(place_name ORDER BY position) per tour and day), here derived back
+-- from the stub's day rows. Booking reads the catalog views by tour_id, never through a source_id filter on
+-- v_tour_day (it is not pushed into the live view: every itinerary is parsed on each read).
 CREATE SCHEMA IF NOT EXISTS catalog;
 
 CREATE TABLE IF NOT EXISTS catalog.v_tour (
@@ -107,7 +112,29 @@ FROM (VALUES
     ('d0000000-0000-4000-8000-000000000005'::uuid, 'Lahore', 'Pakistan', 31.55::float8, 74.34::float8, 'PK')
 ) AS d (id, name, country, lat, lng, country_iso2);
 
+-- The live views carry the live tour's tour_id on every day and photo row.
+CREATE OR REPLACE FUNCTION catalog.stub_fill_tour_id() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.tour_id IS NULL THEN
+        SELECT t.tour_id INTO NEW.tour_id FROM catalog.v_tour t
+        WHERE t.source_system = NEW.source_system AND t.source_id = NEW.source_id;
+    END IF;
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS stub_fill_tour_id ON catalog.v_tour_day;
+CREATE TRIGGER stub_fill_tour_id BEFORE INSERT ON catalog.v_tour_day
+    FOR EACH ROW EXECUTE FUNCTION catalog.stub_fill_tour_id();
+DROP TRIGGER IF EXISTS stub_fill_tour_id ON catalog.v_tour_photo;
+CREATE TRIGGER stub_fill_tour_id BEFORE INSERT ON catalog.v_tour_photo
+    FOR EACH ROW EXECUTE FUNCTION catalog.stub_fill_tour_id();
+
+-- catalog.v_tour_place (CIS 225/256): one row per tour, day and place; only the columns Booking reads.
+CREATE OR REPLACE VIEW catalog.v_tour_place AS
+SELECT d.source_system, d.source_id, d.tour_id, d.day_number::smallint AS day_number, u.ord AS position,
+       u.place AS place_name
+FROM catalog.v_tour_day d CROSS JOIN LATERAL unnest(d.places) WITH ORDINALITY AS u(place, ord);
+
 -- CIS 225 grants (catalog_owner owns the views; role booking reads them).
 GRANT USAGE ON SCHEMA catalog TO booking;
-GRANT SELECT ON catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo, catalog.v_destination,
+GRANT SELECT ON catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo, catalog.v_tour_place, catalog.v_destination,
     catalog.v_destination_photo, catalog.v_country TO booking;

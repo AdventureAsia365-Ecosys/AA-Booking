@@ -347,3 +347,27 @@ async def test_list_rows_sellable_first_with_destinations_and_cover(
     # The detail keeps the CIS cover field as it is (null here); only list rows fall back.
     detail = (await c.get(f"/catalog/trip-plans/{PLAN}", headers=contracting)).json()
     assert detail["cover_photo_path"] is None and detail["from_price"] is None
+
+
+async def test_list_answers_when_an_extra_is_unreadable(
+    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    # AA-996 hotfix: a list extra that cannot be read (here: no grant on catalog.v_tour_place) drops that field only;
+    # it used to turn the whole list into 503 catalog_unavailable. The page and the other extras still answer.
+    c, cis = client
+    contracting = _auth(cis, MAKER)
+    assert (
+        await c.put(f"/catalog/trip-plans/{PLAN}/commercial", json=COMMERCIAL, headers=contracting)
+    ).status_code == 200
+    await admin.execute("REVOKE SELECT ON catalog.v_tour_place FROM booking")
+    try:
+        resp = await c.get("/catalog/trip-plans", params={"country": "Vietnam"}, headers=contracting)
+    finally:
+        await admin.execute("GRANT SELECT ON catalog.v_tour_place TO booking")
+    assert resp.status_code == 200
+    page = resp.json()
+    assert page["degraded"] == ["destinations"] and page["total"] == 2
+    plan = next(i for i in page["items"] if i["source_id"] == PLAN)
+    assert plan["destinations"] is None and plan["cover_photo_path"] == "/public/photos/first"
+    healthy = (await c.get("/catalog/trip-plans", params={"country": "Vietnam"}, headers=contracting)).json()
+    assert healthy["degraded"] == [] and next(i for i in healthy["items"] if i["source_id"] == PLAN)["destinations"]
