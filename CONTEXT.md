@@ -192,7 +192,10 @@ backend/
                            area, internal notes; soft, audited, no row = active). A country outside booking.countries
                            is listed read-only (booking_reference false; PATCH 409; bk-031 added the AA tour countries
                            KG / PK / TW / UZ, so only a non-AA cross-border country is left there). Images = distinct CIS photo paths
-                           of its places + its place-less tour photos (v_destination_photo, v_tour_photo; fail soft)
+                           of its places + its tour photos not tied to a place with a country (v_destination_photo,
+                           v_tour_photo; fail soft); cover_photo_path = first photo of its best-covered place, else
+                           tour; the detail adds photo_items (first 24, cover first). Paths only: the UI builds URLs
+                           with cisPhotoUrl() (ui/booking/CisPhoto.tsx, neutral tile when missing or broken)
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day;

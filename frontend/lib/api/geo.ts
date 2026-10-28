@@ -81,6 +81,8 @@ export interface CountryItem extends GeoState {
   destinations: number;
   /** Distinct CIS photo files of its places and of its tours' place-less photos. */
   photos: number;
+  /** CIS photo path of the country cover (first photo of its best-covered place, else tour); null = no CIS photo. */
+  cover_photo_path: string | null;
   tours: number;
   active_suppliers: number;
   area: string | null;
@@ -97,9 +99,20 @@ export interface CountryTour {
   sellable: boolean;
 }
 
+/** One CIS photo of a country (gallery order: the cover first). Build the URL with `cisPhotoUrl(path)`. */
+export interface CountryPhoto {
+  path: string;
+  /** Place name, else the tour photo's place label or the tour title. */
+  caption: string | null;
+  /** The CIS place the photo belongs to; null for a tour photo. */
+  destination_id: string | null;
+}
+
 export interface CountryDetail extends CountryItem {
   destination_items: DestinationItem[];
   tour_items: CountryTour[];
+  /** The first photos of the country (capped by the API; `photos` is the true count). */
+  photo_items: CountryPhoto[];
   changed?: string[];
 }
 

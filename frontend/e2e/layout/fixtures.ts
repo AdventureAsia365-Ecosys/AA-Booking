@@ -778,7 +778,8 @@ function countryItem(i: number): CountryItem {
     country_code: GEO_ISO[i % GEO_ISO.length],
     name: GEO_COUNTRIES[i % GEO_COUNTRIES.length],
     destinations: 120 + i * 37,
-    photos: 1400 + i * 211,
+    photos: i % 4 === 2 ? 0 : 1400 + i * 211,
+    cover_photo_path: i % 4 === 2 ? null : `/content/photos/layout-country-${i}`,
     tours: 30 + i * 9,
     active_suppliers: 4 + i,
     area: i % 2 ? "Indochina and the Mekong region" : null,
@@ -811,6 +812,11 @@ function countryDetail(iso: string): CountryDetail {
       duration_days: 10 + i,
       cover_photo_path: null,
       sellable: i % 3 === 0,
+    })),
+    photo_items: range(24).map((i) => ({
+      path: `/content/photos/layout-gallery-${i}`,
+      caption: i % 5 === 4 ? null : `${PLACE_NAMES[i % PLACE_NAMES.length]} ${i}`,
+      destination_id: i % 3 === 2 ? null : uuid("d", i),
     })),
   };
 }

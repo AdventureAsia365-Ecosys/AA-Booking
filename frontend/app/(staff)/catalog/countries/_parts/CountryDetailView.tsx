@@ -1,7 +1,8 @@
 "use client";
 // app/(staff)/catalog/countries/_parts/CountryDetailView.tsx — one country (AA-996; UI spec §3; Figma COUNTRY DETAILS,
 // -1, module 06; the drawer variant is folded into this page). Header: name, ISO code, Booking status, Deactivate /
-// Activate and Edit country (admin). Tabs: Overview (the CIS counts, Booking state: area, reason, internal notes),
+// Activate and Edit country (admin). Tabs: Overview (CIS cover hero, the CIS counts, the "Photos · From CIS" gallery
+// with a lightbox, Booking state: area, reason, internal notes),
 // Destinations (its CIS places with their own Booking status; a row opens the destination drawer) and Tours (CIS tours
 // naming the country, linking to the trip plan). Content is read-only "From CIS"; descriptions, FAQs and festivals have
 // no CIS source yet (UI spec Q18), so they are not shown.
@@ -11,15 +12,26 @@ import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { CheckCircle2, Globe, Hash, ImageIcon, MapPin, Pencil, Power, Store } from "lucide-react";
 import { geoApi, type CountryTour, type DestinationItem } from "@/lib/api/geo";
-import { Button, DataTable, DateText, FromCisTag, KpiTile, ManagedInCisLink, Section, useCan, useStaff, useUrlFilters } from "@/ui";
+import { Button, CisPhoto, DataTable, DateText, FromCisTag, KpiTile, ManagedInCisLink, Section, useCan, useStaff, useUrlFilters } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { CIS_EDITOR_ROLES, SellableBadge } from "@/app/(staff)/catalog/trip-plans/_parts/shared";
 import { CIS_PLACES_PATH, CountryDrawer, DestinationDrawer, GeoStatusBadge, coords } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
+import { CountryGallery, CountryHero } from "./CountryPhotos";
 
 const DEST_COLUMNS: ColumnDef<DestinationItem, unknown>[] = [
-  { id: "name", header: "Destination", accessorKey: "name", cell: ({ row }) => <span className="text-[13.5px] font-medium text-ink">{row.original.name}</span> },
+  {
+    id: "name",
+    header: "Destination",
+    accessorKey: "name",
+    cell: ({ row }) => (
+      <span className="flex min-w-0 items-center gap-3">
+        <CisPhoto path={row.original.cover_photo_path} alt="" className="h-9 w-12 shrink-0 rounded-md" />
+        <span className="truncate text-[13.5px] font-medium text-ink">{row.original.name}</span>
+      </span>
+    ),
+  },
   {
     id: "coords",
     header: "Coordinates",
@@ -37,9 +49,12 @@ const TOUR_COLUMNS: ColumnDef<CountryTour, unknown>[] = [
     header: "Tour",
     accessorFn: (r) => r.title ?? "",
     cell: ({ row }) => (
-      <Link href={`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}`} className="text-[13.5px] font-medium text-ink hover:underline">
-        {row.original.title ?? row.original.source_id}
-      </Link>
+      <span className="flex min-w-0 items-center gap-3">
+        <CisPhoto path={row.original.cover_photo_path} alt="" className="h-9 w-12 shrink-0 rounded-md" />
+        <Link href={`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}`} className="truncate text-[13.5px] font-medium text-ink hover:underline">
+          {row.original.title ?? row.original.source_id}
+        </Link>
+      </span>
     ),
   },
   { id: "sku", header: "SKU", accessorFn: (r) => r.sku ?? "", cell: ({ row }) => <span className="font-mono text-xs text-muted">{row.original.sku ?? "—"}</span> },
@@ -108,12 +123,14 @@ export function CountryDetailView({ iso }: { iso: string }) {
       <div className="mx-auto flex max-w-[1440px] flex-col gap-5 px-4 py-6 sm:px-8">
         {tab === "overview" && (
           <>
+            <CountryHero c={c} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <KpiTile label="Destinations" value={c.destinations} icon={<MapPin size={16} />} hint={<FromCisTag />} />
               <KpiTile label="Tours" value={c.tours} icon={<Globe size={16} />} hint={<FromCisTag />} />
               <KpiTile label="Images" value={c.photos} icon={<ImageIcon size={16} />} hint="CIS photos of its places and tours" />
               <KpiTile label="Active suppliers" value={c.active_suppliers} icon={<Store size={16} />} hint="in Booking" />
             </div>
+            <CountryGallery c={c} canOpenCis={CIS_EDITOR_ROLES.has(me.role)} onPlace={(id) => setMany({ place: id })} />
             <Section title="Booking state" description="Owned by Booking; an admin changes it.">
               <FactGrid>
                 <Fact label="Status">

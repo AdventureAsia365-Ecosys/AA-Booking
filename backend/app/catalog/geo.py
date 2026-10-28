@@ -9,8 +9,11 @@
   Booking can hold state for (profiles, suppliers, trip cases reference it). A CIS country outside it is listed and
   counted but cannot be edited yet (``booking_reference = false``; a PATCH is 409 ``country_not_in_booking``).
 - **Images** of a country = distinct photo paths (CIS 290 points every copy of one file at one path) of its places
-  (``v_destination_photo``) plus the photos of its tours that are not tied to a place (``v_tour_photo``); the count
-  fails soft (0, logged) when CIS does not serve those views.
+  (``v_destination_photo``) plus the photos of its tours that are not tied to a place, or tied to a place without a
+  resolved country (``v_tour_photo``). Its ``cover_photo_path`` is the cover of its best-covered place (else of its
+  best-covered tour); the detail adds ``photo_items``, the first ``MAX_COUNTRY_PHOTOS`` distinct photos, cover first.
+  All of it fails soft (0, no cover, no items; logged) when CIS does not serve those views. A country without a CIS
+  Drive photo folder (Dev: Vietnam, Japan, India…) has 0 here: CIS has no photo for it (AA-996 fix slice 3 notes).
 - **Booking state** (bk-029): ``booking.destination_profiles`` and ``booking.country_profiles`` hold the status
   (``active`` | ``inactive``), area (countries), internal notes and the deactivation reason. No row = active.
   Deactivate / Activate is the soft replacement of the Figma "Delete / Unpublish" dialogs: nothing is ever deleted.
@@ -42,6 +45,7 @@ MAX_PAGE = 100
 MAX_PHOTOS = 40
 MAX_COUNTRY_DESTINATIONS = 200
 MAX_COUNTRY_TOURS = 50
+MAX_COUNTRY_PHOTOS = 24
 DEST_SORTS = {"name": "lower(d.name)", "country": "lower(d.country)", "photos": "d.photo_count"}
 
 # Active supply records per place / country (Booking facts, not content).
@@ -243,41 +247,81 @@ COUNTRY_FROM = """
 # A country is listed when CIS has a place or a tour there, or Booking already keeps state for it.
 COUNTRY_LISTED = "(dest.iso2 IS NOT NULL OR tours.iso2 IS NOT NULL OR p.country_code IS NOT NULL)"
 
-# Distinct photo files per country: its places' photos, plus its tours' photos that are not tied to a place (a photo
-# tied to a place counts for the place's country, so a cross-border place is not counted twice). ``{only}`` narrows it
-# to one country (``AND iso2 = $1``) or is empty.
-COUNTRY_PHOTOS = """
-SELECT iso2::text AS iso2, count(DISTINCT path) AS photos FROM (
-    SELECT d.country_iso2 AS iso2, dp.path
+# The CIS photos of each country, one row per (photo, owner): its places' photos (``kind`` 0, by the place's ISO code)
+# and its tours' photos (``kind`` 1, by the tour's country) that are not tied to a place, or are tied to a place CIS
+# could not resolve to a country (``country_iso2`` NULL: counted nowhere else). A photo tied to a resolved place counts
+# for the place's country, so a cross-border place is not counted twice. ``owner_photos`` (photos of the same place /
+# tour) ranks the best-covered owner first: the country cover is the first photo of that owner.
+PHOTO_UNION = """
+    SELECT d.country_iso2::text AS iso2, dp.path, 0 AS kind,
+           count(*) OVER (PARTITION BY dp.destination_id) AS owner_photos, dp.destination_id::text AS owner,
+           dp.position, d.name AS caption, dp.destination_id::text AS destination_id
     FROM catalog.v_destination_photo dp JOIN catalog.v_destination d ON d.destination_id = dp.destination_id
     UNION ALL
-    SELECT c.iso2, tp.path
+    SELECT c.iso2::text, tp.path, 1, count(*) OVER (PARTITION BY tp.source_system, tp.source_id), tp.source_id,
+           tp.position, coalesce(tp.place_label, t.title), NULL
     FROM catalog.v_tour_photo tp
     JOIN catalog.v_tour t ON t.source_system = tp.source_system AND t.source_id = tp.source_id
     JOIN catalog.v_country c ON lower(c.name) = lower(t.country)
     WHERE tp.destination_id IS NULL
-) ph
-WHERE iso2 IS NOT NULL AND path IS NOT NULL {only}
-GROUP BY iso2
+       OR NOT EXISTS (SELECT 1 FROM catalog.v_destination pd
+                      WHERE pd.destination_id = tp.destination_id AND pd.country_iso2 IS NOT NULL)
 """
+PHOTO_RANK = "kind, owner_photos DESC, owner, position NULLS LAST, path"
+
+# Distinct photo files per country (CIS 290 points every copy of one file at one path) and its cover path. ``{only}``
+# narrows it to one country (``AND iso2 = $1``) or is empty.
+COUNTRY_PHOTOS = f"""
+SELECT iso2, count(DISTINCT path) AS photos, (array_agg(path ORDER BY {PHOTO_RANK}))[1] AS cover_photo_path
+FROM ({PHOTO_UNION}) ph
+WHERE iso2 IS NOT NULL AND path IS NOT NULL {{only}}
+GROUP BY iso2
+"""  # noqa: S608 — constant fragments only
+
+# The first ``$2`` distinct photos of one country, cover first (the country page gallery and drawer strip).
+COUNTRY_PHOTO_ITEMS = f"""
+SELECT path, caption, destination_id FROM (
+    SELECT DISTINCT ON (path) path, caption, destination_id, kind, owner_photos, owner, position
+    FROM ({PHOTO_UNION}) ph
+    WHERE iso2 = $1 AND path IS NOT NULL
+    ORDER BY path, kind, owner_photos DESC, owner, position NULLS LAST
+) p
+ORDER BY {PHOTO_RANK}
+LIMIT $2
+"""  # noqa: S608 — constant fragments only
+
+PHOTO_ERRORS = (*CATALOG_ERRORS, asyncpg.UndefinedColumnError)
 
 
-async def _country_photos(conn: asyncpg.Connection, iso: str | None = None) -> dict[str, int]:
-    """``{iso2: distinct photo count}``; ``{}`` (every country 0) when CIS does not serve the photo views."""
+async def _country_photos(conn: asyncpg.Connection, iso: str | None = None) -> dict[str, dict[str, Any]]:
+    """``{iso2: {"photos": n, "cover_photo_path": path}}``; ``{}`` (every country 0, no cover) when CIS does not serve
+    the photo views."""
     try:
         async with conn.transaction():
             if iso is None:
                 rows = await conn.fetch(COUNTRY_PHOTOS.format(only=""))
             else:
                 rows = await conn.fetch(COUNTRY_PHOTOS.format(only="AND iso2 = $1"), iso)
-    except (*CATALOG_ERRORS, asyncpg.UndefinedColumnError) as exc:
+    except PHOTO_ERRORS as exc:
         log.warning("catalog photo views unreadable, country photo counts omitted: %s", type(exc).__name__)
         return {}
-    return {r["iso2"]: r["photos"] for r in rows}
+    return {r["iso2"]: {"photos": r["photos"], "cover_photo_path": r["cover_photo_path"]} for r in rows}
 
 
-def _with_photos(row: dict[str, Any], photos: dict[str, int]) -> dict[str, Any]:
-    return {**row, "photos": photos.get(row["country_code"], 0)}
+async def _country_photo_items(conn: asyncpg.Connection, iso: str) -> list[dict[str, Any]]:
+    """The gallery of one country (first ``MAX_COUNTRY_PHOTOS``), or ``[]`` when CIS does not serve the photo views."""
+    try:
+        async with conn.transaction():
+            rows = await conn.fetch(COUNTRY_PHOTO_ITEMS, iso, MAX_COUNTRY_PHOTOS)
+    except PHOTO_ERRORS as exc:
+        log.warning("catalog photo views unreadable, country photos omitted: %s", type(exc).__name__)
+        return []
+    return [dict(r) for r in rows]
+
+
+def _with_photos(row: dict[str, Any], photos: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    found = photos.get(row["country_code"]) or {}
+    return {**row, "photos": found.get("photos", 0), "cover_photo_path": found.get("cover_photo_path")}
 
 
 async def list_countries(
@@ -359,6 +403,7 @@ async def get_country(conn: asyncpg.Connection, iso: str) -> dict[str, Any]:
         **country,
         "destination_items": [dict(r) for r in destinations],
         "tour_items": [dict(r) for r in tours],
+        "photo_items": await _country_photo_items(conn, iso),
     }
 
 

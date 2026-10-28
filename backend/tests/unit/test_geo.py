@@ -158,11 +158,14 @@ async def test_list_countries_args_and_areas() -> None:
         ScriptedConn()
         .on("ORDER BY c.name", [country_row(area="Indochina"), country_row(country_code="KH", name="Cambodia")])
         .on("d.country_iso2 IS NULL GROUP BY d.country", [{"name": "Nowhere", "destinations": 1}])
-        .on("count(DISTINCT path) AS photos", [{"iso2": "VN", "photos": 7}])
+        .on("count(DISTINCT path) AS photos", [{"iso2": "VN", "photos": 7, "cover_photo_path": "/content/photos/v"}])
     )
     out = await geo.list_countries(conn, q="viet", status="inactive", area="Indochina")
     assert out["total"] == 2 and out["areas"] == ["Indochina"] and out["unmapped"][0]["name"] == "Nowhere"
-    assert [(i["country_code"], i["photos"]) for i in out["items"]] == [("VN", 7), ("KH", 0)]
+    assert [(i["country_code"], i["photos"], i["cover_photo_path"]) for i in out["items"]] == [
+        ("VN", 7, "/content/photos/v"),
+        ("KH", 0, None),
+    ]
     _, args = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
     assert args == ("%viet%", "inactive", "Indochina")
     sql, _ = next((s, a) for s, a in conn.calls if "ORDER BY c.name" in s)
@@ -259,20 +262,32 @@ async def test_countries_come_from_cis_iso_codes_not_booking_country_names() -> 
 
 @pytest.mark.asyncio
 async def test_country_images_count_distinct_cis_photo_paths_of_places_and_tours() -> None:
-    conn = country_conn(country_row(country_code="BT", name="Bhutan")).on(
-        "count(DISTINCT path) AS photos", [{"iso2": "BT", "photos": 12}]
+    gallery = [{"path": "/content/photos/p1", "caption": "Paro", "destination_id": PLACE}]
+    conn = (
+        country_conn(country_row(country_code="BT", name="Bhutan"))
+        .on("count(DISTINCT path) AS photos", [{"iso2": "BT", "photos": 12, "cover_photo_path": "/content/photos/p1"}])
+        .on("SELECT DISTINCT ON (path)", gallery)
     )
     out = await geo.get_country(conn, "bt")
-    assert out["photos"] == 12
+    assert out["photos"] == 12 and out["cover_photo_path"] == "/content/photos/p1" and out["photo_items"] == gallery
     sql, args = next((s, a) for s, a in conn.calls if "count(DISTINCT path)" in s)
     assert args == ("BT",) and "AND iso2 = $1" in sql
     assert "FROM catalog.v_destination_photo dp JOIN catalog.v_destination d" in sql
     assert "FROM catalog.v_tour_photo tp" in sql and "WHERE tp.destination_id IS NULL" in sql
+    # A tour photo tied to a place CIS could not give a country counts for the tour's country (else for none).
+    assert "pd.country_iso2 IS NOT NULL" in sql
+    # Cover = first photo of the best-covered place, then tour; the gallery uses the same order, capped.
+    assert "ORDER BY kind, owner_photos DESC, owner, position NULLS LAST, path" in sql
+    items_sql, items_args = next((s, a) for s, a in conn.calls if "SELECT DISTINCT ON (path)" in s)
+    assert items_args == ("BT", geo.MAX_COUNTRY_PHOTOS) and "WHERE iso2 = $1" in items_sql
     # The CIS photo views missing or not granted: the country still loads, its image count is 0.
-    conn = country_conn(country_row(country_code="BT", name="Bhutan")).on(
-        "count(DISTINCT path) AS photos", asyncpg.UndefinedTableError("no view")
+    conn = (
+        country_conn(country_row(country_code="BT", name="Bhutan"))
+        .on("count(DISTINCT path) AS photos", asyncpg.UndefinedTableError("no view"))
+        .on("SELECT DISTINCT ON (path)", asyncpg.UndefinedTableError("no view"))
     )
-    assert (await geo.get_country(conn, "BT"))["photos"] == 0
+    missing = await geo.get_country(conn, "BT")
+    assert missing["photos"] == 0 and missing["cover_photo_path"] is None and missing["photo_items"] == []
     conn = (
         ScriptedConn()
         .on("ORDER BY c.name", [country_row()])

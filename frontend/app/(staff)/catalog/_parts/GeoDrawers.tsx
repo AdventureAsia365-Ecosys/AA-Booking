@@ -6,6 +6,7 @@
 //   CountryDrawer      ADD / EDIT COUNTRY: the country's CIS facts read-only; Booking status, reason, area and notes
 //                      editable (admin). "Add" picks an ISO country Booking does not list yet (no CIS place there):
 //                      countries are never created in Booking.
+// Both forms show the record's CIS photos as a read-only thumbnail strip (PhotoStrip; Figma media rows, audit item 3).
 // Places and country content are created and edited in CIS (Places / Master content). Writes: PATCH
 // /booking/catalog/geo/… (catalog.admin), soft only.
 
@@ -39,6 +40,27 @@ function apiMessage(err: unknown): string | null {
   if (!err) return null;
   if (err instanceof ApiError && err.status === 403) return "Only a Booking admin can change the Booking status.";
   return (err as Error).message;
+}
+
+/** A read-only strip of CIS photo thumbnails (first `max`, then a "+N" tile up to `total`). Empty = nothing. */
+export function PhotoStrip({ paths, total, name, max = 6 }: { paths: string[]; total: number; name: string; max?: number }) {
+  if (paths.length === 0) return null;
+  const shown = paths.slice(0, max);
+  const more = Math.max(total, paths.length) - shown.length;
+  return (
+    <ul className="grid grid-cols-6 gap-1.5" aria-label={`${name} photos from CIS`} data-testid="geo-photo-strip">
+      {shown.map((path, i) => (
+        <li key={`${path}-${i}`} className="relative min-w-0">
+          <CisPhoto path={path} alt={`${name} photo ${i + 1}`} className="aspect-square w-full rounded-md" />
+          {more > 0 && i === shown.length - 1 && (
+            <span className="bk-tabular absolute inset-0 grid place-items-center rounded-md bg-black/55 text-[12px] font-semibold text-white">
+              +{more}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 // ── Booking state fields (shared) ────────────────────────────────────────────
@@ -152,10 +174,14 @@ export function DestinationDrawer({ id, startEditing = false, onClose }: { id: s
   );
 }
 
+function destinationPaths(d: DestinationDetail): string[] {
+  return d.photos.length ? d.photos.map((p) => p.path) : d.cover_photo_path ? [d.cover_photo_path] : [];
+}
+
 function DestinationView({ d }: { d: DestinationDetail }) {
   const me = useStaff();
   const point = coords(d.lat, d.lng);
-  const photos = d.photos.length ? d.photos.map((p) => p.path) : d.cover_photo_path ? [d.cover_photo_path] : [];
+  const photos = destinationPaths(d);
   return (
     <div className="flex flex-col gap-5">
       <CisFieldset title="Media" editPath={CIS_EDITOR_ROLES.has(me.role) ? CIS_PLACES_PATH : null} editLabel="Open in CIS">
@@ -274,6 +300,9 @@ function DestinationForm({ d, onClose }: { d: DestinationDetail; onClose: () => 
         <CisField label="Destination media" wide>
           {d.photo_count ? `${d.photo_count} photo${d.photo_count === 1 ? "" : "s"} in CIS` : null}
         </CisField>
+        <div className="sm:col-span-2">
+          <PhotoStrip paths={destinationPaths(d)} total={d.photo_count} name={d.name} />
+        </div>
       </CisFieldset>
       <StateFields form={form} setForm={setForm} withArea={false} fe={fe} />
     </FormDrawer>
@@ -354,7 +383,12 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
           <CisField label="Country">{c ? `${c.name} (${c.country_code})` : detail.isLoading ? "…" : null}</CisField>
           <CisField label="Destinations">{c ? `${c.destinations} places` : null}</CisField>
           <CisField label="Tours">{c ? `${c.tours} CIS tours` : null}</CisField>
-          <CisField label="Images">{c ? `${c.photos} place photos` : null}</CisField>
+          <CisField label="Images">{c ? `${c.photos} CIS photo${c.photos === 1 ? "" : "s"}` : null}</CisField>
+          {c && c.photo_items.length > 0 && (
+            <div className="sm:col-span-2">
+              <PhotoStrip paths={c.photo_items.map((p) => p.path)} total={c.photos} name={c.name} />
+            </div>
+          )}
         </CisFieldset>
       )}
       {current && <StateFields form={current} setForm={setForm} withArea fe={fe} />}
