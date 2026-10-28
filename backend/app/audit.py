@@ -78,12 +78,14 @@ async def list_logs(
     entity_id: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    q: str | None = None,
     before: str | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
     """Newest first, keyset-paged (``before`` = the ``next_before`` of the previous page, ``app.paging``).
 
-    ``date_to`` is inclusive (the whole day)."""
+    ``date_to`` is inclusive (the whole day). ``q`` (AA-996) matches the summary, the action, the record label or the
+    actor's name anywhere, case-insensitive, with ``%`` / ``_`` taken literally."""
     where: list[str] = []
     args: list[Any] = []
 
@@ -101,6 +103,11 @@ async def list_logs(
         add("l.created_at >= {p}", _day_start(date_from))
     if date_to:
         add("l.created_at < {p}", _day_start(date_to + timedelta(days=1)))
+    if q and q.strip():
+        add(
+            "(l.summary ILIKE {p} OR l.action ILIKE {p} OR l.entity_label ILIKE {p} OR s.name ILIKE {p})",
+            paging.contains(q),
+        )
     cursor = paging.decode(before)
     if cursor:
         args.append(cursor[0])

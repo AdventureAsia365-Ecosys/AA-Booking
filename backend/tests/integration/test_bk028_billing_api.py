@@ -198,6 +198,10 @@ async def test_done_when_sequence(client: Client, admin: asyncpg.Connection) -> 
     up = await _evidence(c, a, dep["id"])
     detail = await _ok(await c.get(f"/payments/{dep['ref']}", headers=b))
     assert detail["evidence_file_id"] == up["id"] and detail["actions"]["verify"] and not detail["needs_evidence"]
+    # AA-996: the payment page's Customer and Related trip cards (e-mail / phone with customer.read).
+    assert detail["customer"]["code"].startswith("CUS-") and detail["customer"]["email"] == inv["bill_to_email"]
+    assert detail["trip_case"]["code"] == sold["code"] and detail["trip_case"]["status"] == "invoice_sent"
+    assert "start_date" in detail["trip_case"] and detail["trip_case"]["channel"] == "b2c"
     verified = await _ok(await c.post(f"/payments/{dep['ref']}/verify", headers=b))
     assert verified["state"] == "verified" and verified["verified_by"]["id"] == ADMIN_B
     assert (await _ok(await c.get(f"/invoices/{number}", headers=sales)))["status"] == "partially_paid"

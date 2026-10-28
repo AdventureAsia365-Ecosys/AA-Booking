@@ -40,6 +40,9 @@ async def list_audit_logs(
     entity_id: Annotated[uuid.UUID | None, Query()] = None,
     date_from: Annotated[date | None, Query(alias="from")] = None,
     date_to: Annotated[date | None, Query(alias="to", description="inclusive")] = None,
+    q: Annotated[
+        str | None, Query(max_length=200, description="text in the summary, action, record label or actor name")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     before: Annotated[str | None, Query(max_length=100, description="next_before of the previous page")] = None,
 ) -> dict[str, Any]:
@@ -51,6 +54,7 @@ async def list_audit_logs(
             entity_id=str(entity_id) if entity_id else None,
             date_from=date_from,
             date_to=date_to,
+            q=q,
             before=before,
             limit=limit,
         )

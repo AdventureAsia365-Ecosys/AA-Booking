@@ -27,8 +27,17 @@ async def list_staff(conn: asyncpg.Connection, *, active: bool | None = None) ->
 
 
 async def update_staff(
-    conn: asyncpg.Connection, admin: Staff, cis_user_id: str, *, active: bool | None, role: str | None
+    conn: asyncpg.Connection,
+    admin: Staff,
+    cis_user_id: str,
+    *,
+    active: bool | None,
+    role: str | None,
+    reason: str | None = None,
 ) -> dict[str, Any]:
+    """``reason`` (AA-996, optional in the API, asked for by the staff admin on Deactivate) is stored in the audit row
+    (``after.reason`` and the summary); it is never kept on the profile."""
+    reason = (reason or "").strip() or None
     if role is not None and role not in STAFF_ROLES:
         raise Invalid("unknown_staff_role", f"role must be one of {', '.join(STAFF_ROLES)}")
     row = await conn.fetchrow(
@@ -69,9 +78,15 @@ async def update_staff(
         entity_type="staff_user",
         entity_id=cis_user_id,
         before={"cis_user_id": cis_user_id, "active": current.active, "role": current.role},
-        after={"cis_user_id": cis_user_id, "active": updated.active, "role": updated.role},
+        after={
+            "cis_user_id": cis_user_id,
+            "active": updated.active,
+            "role": updated.role,
+            **({"reason": reason} if reason else {}),
+        },
         entity_label=updated.name or cis_user_id,
-        summary=f"active {current.active} -> {updated.active}, role {current.role} -> {updated.role}",
+        summary=f"active {current.active} -> {updated.active}, role {current.role} -> {updated.role}"
+        + (f". Reason: {reason}" if reason else ""),
     )
     return updated.public()
 
