@@ -58,7 +58,13 @@ Design sources, in order:
   (`app/supply/content.py`): the hotel / service detail shows what CIS published (status, text, photo URLs, the CIS
   `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. Also
   feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
-  CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request. Later: other catalog views (`v_tour_place`), CIS golden records.
+  CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request.
+  `catalog.v_tour_place` (AA-996: list destinations) is read too. **Parse-backed views** (`v_tour_day`,
+  `v_tour_place`; their day text parses every live itinerary, `DISTINCT ON (tour_id, …)` behind a security barrier)
+  are read **by `tour_id` only** (`= $1` or `= ANY($1::uuid[])`), once per page, never per row and never by
+  `source_id` (#130: ~1.5 s a read, list 503). Enforced by the AA-996 perf guard (`tests/catalog_perf.py`: a static
+  scan of `app/`, and the integration stub with the live plan shape, whose `EXPLAIN` is checked for every such
+  statement any integration test runs). Later: CIS golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
   (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
@@ -326,6 +332,9 @@ staff admin calls them) are reported as warnings. Each release gets the document
   uvicorn's access log. Values are redacted before rendering (`app/observability/scrub.py`: e-mails, `+` phone numbers,
   Bearer tokens, JWTs, key-like query values, Postgres `Key (email)=(…)` details, and whole values under keys such as
   `email`, `phone`, `name`, `token`, `authorization`). Log ids, never personal data (DM-6.4).
+- **Slow statements** (AA-996): every pool connection carries a query logger; a statement at or over 1 s
+  (`app.db.SLOW_QUERY_MS`, the pool `command_timeout` is 5 s) logs `slow_query duration_ms=… budget_ms=… catalog=…
+  error=… sql=…` (compacted SQL text, never the arguments). A read cut by the timeout logs `error=TimeoutError`.
 - **Request id:** a well-formed `X-Request-ID` (`[A-Za-z0-9._:-]{1,128}`) is kept, anything else is replaced by a new
   `uuid4().hex`; it is echoed as `X-Request-ID` on every response (the unhandled 500 too) and set as the Sentry tag
   `request_id`. API Gateway passes its `context.requestId` in that header once Infra maps it on the proxy integrations.

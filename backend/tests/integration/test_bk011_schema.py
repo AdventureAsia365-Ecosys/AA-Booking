@@ -23,7 +23,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await conn.execute(f"TRUNCATE {INTAKE_TABLES} CASCADE")
     await conn.execute("TRUNCATE tripplanner.outbox RESTART IDENTITY")
-    await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
+    await conn.execute("TRUNCATE catalog.v_tour, catalog.stub_parsed_day, catalog.v_tour_photo")
     try:
         yield conn
     finally:

@@ -16,13 +16,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 import pytest
 
+from app.db import Database, QueryLogger
+from app.settings import Settings
+from tests.catalog_perf import QueryRecorder, Statement, statement_findings
 from tests.migration_guard import MASTER_ROLE, OWNER_ROLE, OWNER_SCHEMA, migration_role
 
 ADMIN_DSN = os.environ.get("BOOKING_TEST_ADMIN_DSN", "")
@@ -172,3 +176,43 @@ def migrated_admin_dsn() -> str:
 @pytest.fixture(scope="session")
 def migrated_booking_dsn(migrated_admin_dsn: str) -> str:
     return booking_dsn(migrated_admin_dsn)
+
+
+# ── AA-996 perf guard: every catalog read of every route a test exercises ─────
+# Every Database a test builds records its statements; at teardown each statement that reads a parse-backed catalog
+# view (v_tour_day, v_tour_place, _tour_day_text) is EXPLAINed once per session against the stub, whose views have the
+# live plan shape (stub_catalog.sql). A scan of the itinerary rows without a tour_id condition parses every tour's
+# itinerary on Dev (#130: ~1.5 s a read, 503 on the list): the test that ran it fails at teardown.
+_explained: set[str] = set()
+
+
+async def _plan_problems(statements: list[Statement]) -> list[str]:
+    conn = await asyncpg.connect(ADMIN_DSN)
+    try:
+        return await statement_findings(conn, statements)
+    finally:
+        await conn.close()
+
+
+@pytest.fixture(autouse=True)
+def catalog_read_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[QueryRecorder]:
+    recorder = QueryRecorder()
+    build = Database.__init__
+
+    def recording_init(self: Database, settings: Settings, query_loggers: Sequence[QueryLogger] = ()) -> None:
+        build(self, settings, query_loggers=(*query_loggers, recorder))
+
+    monkeypatch.setattr(Database, "__init__", recording_init)
+    yield recorder
+    new = {s.flat: s for s in recorder.parse_backed() if s.flat not in _explained}
+    if not new or not ADMIN_DSN:
+        return
+    _explained.update(new)
+    # A fresh event loop in its own thread: the test's loop is closed or owned by pytest-asyncio.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        problems = pool.submit(asyncio.run, _plan_problems(list(new.values()))).result()
+    if problems:
+        pytest.fail(
+            "catalog read parses every itinerary (AA-996 perf guard; key parse-backed views by tour_id):\n"
+            + "\n".join(problems)
+        )

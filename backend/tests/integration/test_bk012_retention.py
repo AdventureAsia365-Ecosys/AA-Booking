@@ -39,7 +39,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await conn.execute(f"TRUNCATE {INTAKE_TABLES} CASCADE")
     await conn.execute("TRUNCATE tripplanner.outbox RESTART IDENTITY")
-    await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
+    await conn.execute("TRUNCATE catalog.v_tour, catalog.stub_parsed_day, catalog.v_tour_photo")
     for staff_id, role in ((ADMIN_ID, "admin"), (SALES_ID, "sales")):
         await conn.execute(
             "INSERT INTO booking.staff_users (cis_user_id, role, active) VALUES ($1, $2, true)"

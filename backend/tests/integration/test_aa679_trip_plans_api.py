@@ -36,7 +36,7 @@ TABLES = (
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await conn.execute(f"TRUNCATE {TABLES} CASCADE")
-    await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
+    await conn.execute("TRUNCATE catalog.v_tour, catalog.stub_parsed_day, catalog.v_tour_photo")
     for staff_id, role in (
         (ADMIN, "admin"),
         (CONTRACTING, "contracting"),
@@ -74,7 +74,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     try:
         yield conn
     finally:
-        await conn.execute("TRUNCATE catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo")
+        await conn.execute("TRUNCATE catalog.v_tour, catalog.stub_parsed_day, catalog.v_tour_photo")
         await conn.close()
 
 

@@ -1,14 +1,19 @@
 -- CI-only stub of the CIS catalog read model Booking reads (shape: AA-Ecosys docs/architecture/db-schema-reference.md
 -- and AA-CIS-App api/migrations/225_catalog_views.sql, only the columns Booking selects) plus the grant CIS 225 gives
--- role booking. catalog.v_tour / v_tour_day / v_tour_photo (AA-679 trip plans) are plain tables standing in for the
--- views; catalog.v_destination (AA-822 supplier place picker) is a view over fixed rows; v_destination_photo and
--- v_country (AA-996 countries) are plain tables. Applied after the bk-NNN
--- migrations (the grant needs role booking).
+-- role booking. catalog.v_tour / v_tour_photo (AA-679 trip plans) are plain tables standing in for the views;
+-- catalog.v_destination (AA-822 supplier place picker) is a view over fixed rows; v_destination_photo and
+-- v_country (AA-996 countries) are plain tables. Applied after the bk-NNN migrations (the grant needs role booking).
 -- Live invariants the stub keeps (AA-996 list hotfix): every v_tour_day / v_tour_photo row carries the tour_id of its
 -- live v_tour row (a trigger fills it when a test leaves it out), and catalog.v_tour_place is the per-place source of
 -- v_tour_day.places (CIS 225: places = array_agg(place_name ORDER BY position) per tour and day), here derived back
--- from the stub's day rows. Booking reads the catalog views by tour_id, never through a source_id filter on
--- v_tour_day (it is not pushed into the live view: every itinerary is parsed on each read).
+-- from the stub's day rows.
+-- AA-996 perf guard: the parse-backed views have the live PLAN shape. On Dev catalog._tour_day_text (CIS 289) parses
+-- every live itinerary and is DISTINCT ON (tour_id, day_number) behind a security barrier, so only a tour_id filter
+-- reaches the parse; a source_id filter is applied after every itinerary was parsed (~1.5 s a read, #130 -> 503).
+-- Here catalog._tour_day_text is the same DISTINCT ON over catalog.stub_parsed_day (the rows the tests write through
+-- v_tour_day) plus catalog.stub_parsed_day_noise (fixed itineraries of tours not in v_tour, never read by a correct
+-- query). A scan of either base table without a tour_id condition is the #130 class: tests/catalog_perf.py finds it in
+-- EXPLAIN. Tests write days through catalog.v_tour_day (INSTEAD OF triggers) and TRUNCATE catalog.stub_parsed_day.
 CREATE SCHEMA IF NOT EXISTS catalog;
 
 CREATE TABLE IF NOT EXISTS catalog.v_tour (
@@ -40,7 +45,9 @@ CREATE TABLE IF NOT EXISTS catalog.v_tour (
     content_hash      TEXT
 );
 
-CREATE TABLE IF NOT EXISTS catalog.v_tour_day (
+-- The parsed itinerary days. ord keeps insertion order: a repeated (tour, day) keeps the LAST block, like CIS 289.
+CREATE TABLE IF NOT EXISTS catalog.stub_parsed_day (
+    ord            BIGSERIAL PRIMARY KEY,
     source_system  TEXT NOT NULL DEFAULT 'cis',
     source_id      TEXT NOT NULL,
     tour_id        UUID,
@@ -49,6 +56,27 @@ CREATE TABLE IF NOT EXISTS catalog.v_tour_day (
     body           TEXT,
     places         TEXT[]
 );
+CREATE TABLE IF NOT EXISTS catalog.stub_parsed_day_noise (LIKE catalog.stub_parsed_day INCLUDING DEFAULTS);
+-- 200 tours x 4 days that are not in catalog.v_tour: a read that is not keyed by tour_id parses them all.
+INSERT INTO catalog.stub_parsed_day_noise (source_id, tour_id, day_number, title, body, places)
+SELECT 'stub-noise-' || t, ('00000000-0000-4000-9000-' || lpad(t::text, 12, '0'))::uuid, d, 'Noise day ' || d, '',
+       ARRAY['Noise ' || t]
+FROM generate_series(1, 200) AS t CROSS JOIN generate_series(1, 4) AS d
+WHERE NOT EXISTS (SELECT 1 FROM catalog.stub_parsed_day_noise);
+
+CREATE OR REPLACE VIEW catalog._tour_day_text WITH (security_barrier = true) AS
+SELECT DISTINCT ON (b.tour_id, b.day_number)
+       b.source_system, b.source_id, b.tour_id, b.day_number, b.title, b.body, b.places
+FROM (
+    SELECT ord, source_system, source_id, tour_id, day_number, title, body, places FROM catalog.stub_parsed_day
+    UNION ALL
+    SELECT ord, source_system, source_id, tour_id, day_number, title, body, places FROM catalog.stub_parsed_day_noise
+) b
+ORDER BY b.tour_id, b.day_number, b.ord DESC;
+
+CREATE OR REPLACE VIEW catalog.v_tour_day WITH (security_barrier = true) AS
+SELECT d.source_system, d.source_id, d.tour_id, d.day_number, d.title, d.body, d.places
+FROM catalog._tour_day_text d;
 
 CREATE TABLE IF NOT EXISTS catalog.v_tour_photo (
     source_system   TEXT NOT NULL DEFAULT 'cis',
@@ -121,18 +149,36 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$;
-DROP TRIGGER IF EXISTS stub_fill_tour_id ON catalog.v_tour_day;
-CREATE TRIGGER stub_fill_tour_id BEFORE INSERT ON catalog.v_tour_day
-    FOR EACH ROW EXECUTE FUNCTION catalog.stub_fill_tour_id();
+-- Tests write day rows through catalog.v_tour_day as they did when it was a table.
+CREATE OR REPLACE FUNCTION catalog.stub_write_day() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM catalog.stub_parsed_day s
+        WHERE s.source_system = OLD.source_system AND s.source_id = OLD.source_id AND s.day_number = OLD.day_number;
+        RETURN OLD;
+    END IF;
+    IF NEW.tour_id IS NULL THEN
+        SELECT t.tour_id INTO NEW.tour_id FROM catalog.v_tour t
+        WHERE t.source_system = coalesce(NEW.source_system, 'cis') AND t.source_id = NEW.source_id;
+    END IF;
+    INSERT INTO catalog.stub_parsed_day (source_system, source_id, tour_id, day_number, title, body, places)
+    VALUES (coalesce(NEW.source_system, 'cis'), NEW.source_id, NEW.tour_id, NEW.day_number, NEW.title, NEW.body,
+            NEW.places);
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS stub_write_day ON catalog.v_tour_day;
+CREATE TRIGGER stub_write_day INSTEAD OF INSERT OR DELETE ON catalog.v_tour_day
+    FOR EACH ROW EXECUTE FUNCTION catalog.stub_write_day();
 DROP TRIGGER IF EXISTS stub_fill_tour_id ON catalog.v_tour_photo;
 CREATE TRIGGER stub_fill_tour_id BEFORE INSERT ON catalog.v_tour_photo
     FOR EACH ROW EXECUTE FUNCTION catalog.stub_fill_tour_id();
 
--- catalog.v_tour_place (CIS 225/256): one row per tour, day and place; only the columns Booking reads.
-CREATE OR REPLACE VIEW catalog.v_tour_place AS
+-- catalog.v_tour_place (CIS 225/256): one row per tour, day and place; only the columns Booking reads. Over the
+-- parsed days like v_tour_day.places (security barrier: only a tour_id filter reaches the parse).
+CREATE OR REPLACE VIEW catalog.v_tour_place WITH (security_barrier = true) AS
 SELECT d.source_system, d.source_id, d.tour_id, d.day_number::smallint AS day_number, u.ord AS position,
        u.place AS place_name
-FROM catalog.v_tour_day d CROSS JOIN LATERAL unnest(d.places) WITH ORDINALITY AS u(place, ord);
+FROM catalog._tour_day_text d CROSS JOIN LATERAL unnest(d.places) WITH ORDINALITY AS u(place, ord);
 
 -- CIS 225 grants (catalog_owner owns the views; role booking reads them).
 GRANT USAGE ON SCHEMA catalog TO booking;
