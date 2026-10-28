@@ -186,4 +186,12 @@ async def test_ready_endpoint_as_booking_role(migrated_booking_dsn: str) -> None
         await db.close()
     assert live.status_code == 200
     assert ready.status_code == 200
-    assert ready.json() == {"status": "ok", "db": "ok", "schema_version": VERSIONS[-1]}
+    body = ready.json()
+    # AA-993 M4a: the body also lists every registered bk-NNN, sorted.
+    assert {k: body[k] for k in ("status", "db", "schema_version")} == {
+        "status": "ok",
+        "db": "ok",
+        "schema_version": VERSIONS[-1],
+    }
+    assert body["registered_keys"] == sorted(body["registered_keys"])
+    assert set(VERSIONS) <= set(body["registered_keys"])
