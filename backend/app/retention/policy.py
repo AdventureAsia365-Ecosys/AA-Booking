@@ -32,9 +32,11 @@ INBOX_KIND = "bk_retention_inbox_redact"
 # ``archive/booking/<table>/<yyyy>/<mm>/<job_id>-<run>-<part>-b<NNNNN>.jsonl.gz``.
 # The bucket name ends with the acc2 account ID (``aa-cis-bronze-<account>``). This repo is public, so the account
 # is not written here (AA-902): ``archive_bucket`` builds the name from the account the task runs in (STS, in
-# ``app.retention.jobs.default_bucket``); results and the summary show ``ARCHIVE_BUCKET_DISPLAY``.
+# ``app.retention.jobs.default_bucket``). A live run that archives records that real bucket in its result; the summary
+# and dry runs show ``ARCHIVE_BUCKET_DISPLAY``. AA-998 rule R1: admin pages (the audit log renders run results) never
+# print an account label such as "acc2", so the placeholder names the account ID generically.
 ARCHIVE_BUCKET_STEM = "aa-cis-bronze"
-ARCHIVE_BUCKET_DISPLAY = f"{ARCHIVE_BUCKET_STEM}-<acc2>"
+ARCHIVE_BUCKET_DISPLAY = f"{ARCHIVE_BUCKET_STEM}-<account-id>"
 ARCHIVE_REGION = "us-west-1"
 ARCHIVE_PREFIX = "archive/booking"
 

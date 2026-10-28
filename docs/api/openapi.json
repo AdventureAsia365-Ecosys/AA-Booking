@@ -9512,13 +9512,13 @@
             }
           },
           {
-            "description": "AA-986: only the plans whose tour left the catalog (q = exact source_id)",
+            "description": "Only the plans whose tour left the catalog (q = exact source_id)",
             "in": "query",
             "name": "orphaned",
             "required": false,
             "schema": {
               "default": false,
-              "description": "AA-986: only the plans whose tour left the catalog (q = exact source_id)",
+              "description": "Only the plans whose tour left the catalog (q = exact source_id)",
               "title": "Orphaned",
               "type": "boolean"
             }

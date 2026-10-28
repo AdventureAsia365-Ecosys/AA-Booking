@@ -166,7 +166,8 @@ async def _main(apply: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Back-fill the catalog tour key of booking.trip_case_legs (AA-830).")
+    # AA-830: the one-off leg key back-fill.
+    parser = argparse.ArgumentParser(description="Back-fill the catalog tour key of booking.trip_case_legs.")
     parser.add_argument("--apply", action="store_true", help="write the matched keys (default: DRY RUN, report only)")
     args = parser.parse_args(argv)
     return asyncio.run(_main(args.apply))
