@@ -247,7 +247,7 @@ async def test_trip_checks_list_filters(client: Client, admin: asyncpg.Connectio
     )
     owned = await _ok(await c.get("/trip-checks", params={"status": "all", "q": late["code"]}, headers=sales))
     assert owned["counts"] == {"open": 2, "overdue": 1, "done": 0, "not_applicable": 1, "all": 3}
-    assert {i["trip_case"]["sales_name"] for i in owned["items"]} == {SALES}  # ops.staff names each user by its id
+    assert {i["trip_case"]["sales_name"] for i in owned["items"]} == {"Staff One"}  # the display name, refreshed from the staff token (tests/staff_tokens.py)
     by_code = await _ok(await c.get("/trip-checks", params={"code": "insurance"}, headers=sales))
     assert {i["code"] for i in by_code["items"]} == {"insurance"}
     assert all(i["trip_case"]["code"] != presale["code"] for i in by_code["items"])
