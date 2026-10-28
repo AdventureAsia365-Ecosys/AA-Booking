@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.9.0...v0.10.0) (2026-10-28)
+
+
+### Features
+
+* catalog read perf guard (plan check, no N+1, slow query log) ([#132](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/132)) ([913b377](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/913b377b0391678484df99a2e8f7df15fd515d5d))
+
+
+### Bug Fixes
+
+* bound the trip-plans list destinations read (chunks, page budget, cache) ([#134](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/134)) ([f6e997b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f6e997b8ef83661e3aed43fe4222e70ff5ffc3c6))
+* remove internal issue IDs from user-visible text ([#136](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/136)) ([39a15d2](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/39a15d27066e4868b413e3d68d7bfd82f2f59537))
+
 ## [0.9.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.8.0...v0.9.0) (2026-10-28)
 
 
