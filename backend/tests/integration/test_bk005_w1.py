@@ -666,6 +666,8 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
             audit_ok = await client.get(
                 f"/booking/audit-logs?entity_type=trip_case&to={datetime.now(UTC).date()}", headers=boss
             )
+            audit_q = await client.get("/booking/audit-logs?q=TRIP_CASE.", headers=boss)
+            audit_q_none = await client.get("/booking/audit-logs?q=zz-no-such-text-zz", headers=boss)
             staff_detail = await client.get("/booking/staff/cathy", headers=boss)
             deleted = await client.delete(f"/booking/trip-cases/{code}/versions/1", headers=boss)
             gone = await client.get(f"/booking/trip-cases/{code}/versions/1", headers=boss)
@@ -712,5 +714,8 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
     }
     assert {"iso2": "VN", "name": "Vietnam"} in countries.json()["items"]
     assert audit_denied.status_code == 403 and audit_ok.status_code == 200 and audit_ok.json()["items"]
+    # AA-996: free-text search (case-insensitive; the action `trip_case.created` matches) and a miss.
+    assert audit_q.status_code == 200 and audit_q.json()["items"]
+    assert audit_q_none.status_code == 200 and audit_q_none.json()["items"] == []
     assert staff_detail.json()["role"] == "contracting"
     assert deleted.status_code == 204 and gone.status_code == 404

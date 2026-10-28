@@ -105,11 +105,11 @@ backend/
   app/main.py              FastAPI app factory; every path is under /booking
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
   app/routers/docs.py      GET /booking/openapi.json, GET /booking/docs (staff.admin outside test/local, AA-876)
-  app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff
+  app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff (PATCH `reason`: audit row only, AA-996)
   app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
   app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
   app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
-  app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin)
+  app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin; `q` text search, AA-996)
   app/auth/                identity_verifier.py (byte copy of AA-CIS-App api/core/identity_verifier.py, the multi-issuer
                            verifier; never edited here), identity_config.py (accepted issuers + clients, JWKS prefetch,
                            AA-680), profile / Cognito identity link / permissions (staff.py), admin ops (admin.py),
@@ -1300,6 +1300,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   the page's own checks block it; unreadable text is dropped on blur); date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,
   `DateText`), and ISO dates inside notification text are localised (`localizeIsoDates`). `npm run test:unit` runs the
   pure helpers' tests.
+- Light table (AA-996, S254): `LightTable` from `@/ui` (`ui/booking/LightTable.tsx`, an ARIA table on a CSS grid)
+  is the sanctioned exception to "DataTable for tables", only for short, fixed lists inside one record's card (the
+  invoice's lines, payment schedule and payments): no pager, search or Columns menu, stacked rows under 640 px. Every
+  real list (anything that can grow, be filtered or paged) uses `DataTable`.
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
   never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.

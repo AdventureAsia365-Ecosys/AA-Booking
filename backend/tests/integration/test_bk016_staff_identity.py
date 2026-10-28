@@ -159,7 +159,9 @@ async def test_admin_cannot_change_a_linked_role_but_can_suspend(
     assert (await client.get("/booking/staff/me", headers=boss)).status_code == 200
     assert (await client.get("/booking/staff/me", headers=sales)).status_code == 200
     role = await client.patch(f"/booking/staff/cog:{sales_sub}", json={"role": "contracting"}, headers=boss)
-    suspend = await client.patch(f"/booking/staff/cog:{sales_sub}", json={"active": False}, headers=boss)
+    suspend = await client.patch(
+        f"/booking/staff/cog:{sales_sub}", json={"active": False, "reason": "Suspended"}, headers=boss
+    )
     refused = await client.get("/booking/staff/me", headers=sales)
     listed = await client.get("/booking/staff", headers=boss)
     assert role.status_code == 409 and role.json()["detail"] == "managed_in_directory"

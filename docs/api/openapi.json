@@ -6159,6 +6159,18 @@
             ],
             "title": "Active"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "role": {
             "anyOf": [
               {
@@ -6873,6 +6885,25 @@
               ],
               "description": "inclusive",
               "title": "To"
+            }
+          },
+          {
+            "description": "text in the summary, action, record label or actor name",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "text in the summary, action, record label or actor name",
+              "title": "Q"
             }
           },
           {

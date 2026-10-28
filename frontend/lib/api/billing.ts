@@ -145,7 +145,19 @@ export interface Payment {
     net_paid?: DecimalString;
     balance?: DecimalString | null;
   };
-  trip_case: { id: string; code: string };
+  /** AA-996: the payment detail adds the trip facts (Related trip card); list rows carry id and code only. */
+  trip_case: {
+    id: string;
+    code: string;
+    status?: string;
+    trip_style?: string | null;
+    start_date?: IsoDate | null;
+    end_date?: IsoDate | null;
+    pax?: number | null;
+    channel?: "b2c" | "b2b";
+  };
+  /** AA-996: the invoice's customer (null on a B2B trip); e-mail and phone on the payment detail with customer.read. */
+  customer?: { id: string; code: string | null; name: string | null; email?: string | null; phone?: string | null } | null;
   files: OpsFile[];
   needs_evidence: boolean;
   actions: { edit: boolean; attach: boolean; verify: boolean; void: boolean };

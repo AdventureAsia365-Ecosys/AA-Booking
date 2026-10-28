@@ -26,6 +26,9 @@ class StaffPatch(BaseModel):
 
     active: bool | None = None
     role: str | None = Field(default=None, max_length=40)
+    # AA-996: why a profile is deactivated (required then: 422 reason_required) or re-activated (optional); stored in
+    # the audit row only, never on the profile.
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class Preferences(BaseModel):
@@ -86,4 +89,6 @@ async def patch_staff(
     pool: Pool,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        return await admin.update_staff(conn, staff, cis_user_id, active=body.active, role=body.role)
+        return await admin.update_staff(
+            conn, staff, cis_user_id, active=body.active, role=body.role, reason=body.reason
+        )

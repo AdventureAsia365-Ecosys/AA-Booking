@@ -66,6 +66,11 @@ const PAGES: PageCase[] = [
   // AA-996 slice 3: cover hero + "Photos · From CIS" gallery (24 tiles) on the country overview.
   { name: "country-overview", path: "/catalog/countries/LA", ready: '[data-testid="country-photos"]', noTable: true },
   { name: "settings-security", path: "/settings?tab=security", ready: "text=Company e-mail, one-time code", noTable: true },
+  // AA-996 slice 5: invoice detail (dates card, totals footer, light tables), payment detail (Related trip + Customer
+  // cards) and the notifications feed (per-type icons, labels, "Open invoice"). No kit DataTable on these pages.
+  { name: "invoice-detail", path: "/billing/invoices/INV-000004", ready: '[data-testid="invoice-totals"]', noTable: true },
+  { name: "payment-detail", path: "/billing/payments/PMT-000007", ready: '[data-testid="payment-customer"]', noTable: true },
+  { name: "notifications", path: "/notifications", ready: "text=Open invoice", noTable: true },
   { name: "suppliers", path: "/suppliers" },
   { name: "supplier-contracts", path: "/suppliers/SUP-000001?tab=contracts" },
   { name: "supplier-rates", path: "/suppliers/SUP-000001?tab=rates" },

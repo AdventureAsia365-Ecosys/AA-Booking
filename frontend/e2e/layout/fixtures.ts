@@ -12,6 +12,8 @@
 //
 // Nothing here is real: names, codes and e-mails are invented (example.test domains).
 
+// AA-996 slice 5: the invoice detail fixture (kept on its own line, apart from the billing list types).
+import type { InvoiceDetail } from "../../lib/api/billing";
 import type {
   AuditLogItem,
   CaseVersion,
@@ -309,15 +311,25 @@ function customerDetail(ref: string): CustomerDetail {
 }
 
 // ── Notifications + audit ────────────────────────────────────────────────────
+// AA-996 slice 5: one row per kind of target (case, invoice, payment, checks, supplier bookings, none), so the page
+// shows the per-type icons, labels and "Open …" actions; long titles stay the widest case.
+const NOTIFICATION_KINDS: [string, string, string, Record<string, unknown>][] = [
+  ["trip_case.new_inquiry", "New inquiry from TripPlanner: Grand Indochina Discovery for a family of six", "trip_case", { code: "TC-000001" }],
+  ["invoice.overdue", "TC-000022: 1,284,500,000 VND overdue since 2026-10-01 on INV-000004", "invoice", { invoice_number: "INV-000004", case_code: "TC-000022" }],
+  ["payment.recorded", "PMT-000007 recorded on INV-000004: verify it", "payment", { ref: "PMT-000007", invoice_number: "INV-000004" }],
+  ["trip_check.due", "TC-000010: Emergency contact of every traveller is overdue", "trip_case", { case_code: "TC-000010" }],
+  ["supplier_booking.waiting", "TC-000010: Emerald Riverside Boutique Hotel and Spa has not answered SB-000003", "supplier_booking", { code: "SB-000003", case_code: "TC-000010" }],
+  ["retention.held", "Retention held: booking.inbox_events", "retention", {}],
+];
 const NOTIFICATIONS: NotificationFeed = {
-  items: range(5).map((i) => ({
+  items: NOTIFICATION_KINDS.map(([type, title, entity_type, data], i) => ({
     id: `n-${i}`,
-    type: "inquiry.received",
-    title: "New inquiry from TripPlanner: Grand Indochina Discovery for a family of six",
+    type,
+    title,
     message: "Alexandra Catherine Montgomery-Whitfield asked for 20 days from 14 January 2027.",
-    entity_type: "trip_case",
+    entity_type,
     entity_id: uuid("c", i),
-    data: {},
+    data,
     created_at: NOW,
     read: i > 1,
   })),
@@ -358,6 +370,52 @@ function auditLogs(): CursorPage<AuditLogItem> {
       after: { net_amount: "1250000.00" },
     })),
     next_before: "al-49",
+  };
+}
+
+// ── AA-996 slice 5: invoice and payment detail ───────────────────────────────
+// A partially paid VND invoice with an adjustment (the totals footer shows both rows), three schedule rows (one
+// overdue) and two payments (one waiting for verification), every optional value long.
+function invoiceDetail(number: string): InvoiceDetail {
+  const base = invoice(1);
+  return {
+    ...base,
+    invoice_number: number,
+    status: "partially_paid",
+    overdue: true,
+    overdue_amount: "500000000",
+    next_due_date: "2026-10-01",
+    bill_to_address: "12 Hang Bac Street, Hoan Kiem District, Hanoi, Vietnam",
+    terms: "Deposit to confirm, balance 30 days before the trip.",
+    items: [
+      { id: "l-1", position: 1, kind: "version_total", description: "Grand Indochina Discovery: approved proposal V2 for a family of six", quantity: "1", unit_price: "1250000000", amount: "1250000000", reason: null, created_by: "u-002", created_at: EARLIER },
+      { id: "l-2", position: 2, kind: "adjustment", description: "Extra night in Hoi An (riverside family suite)", quantity: "1", unit_price: "34500000", amount: "34500000", reason: "Customer asked on the phone", created_by: "u-002", created_at: EARLIER },
+    ],
+    schedule: [
+      { id: "s-1", seq: 1, kind: "deposit", amount: "385350000", due_date: "2026-09-25", covered_amount: "385350000", remaining_amount: "0", state: "paid", days_overdue: null },
+      { id: "s-2", seq: 2, kind: "second", amount: "500000000", due_date: "2026-10-01", covered_amount: "0", remaining_amount: "500000000", state: "overdue", days_overdue: 22 },
+      { id: "s-3", seq: 3, kind: "final", amount: "399150000", due_date: "2026-11-15", covered_amount: "0", remaining_amount: "399150000", state: "scheduled", days_overdue: null },
+    ],
+    payments: [
+      { ...payment(1), state: "verified", actions: { edit: false, attach: false, verify: false, void: true } },
+      { ...payment(3), state: "recorded", actions: { edit: true, attach: true, verify: true, void: true } },
+    ],
+    issuer: { name: "Adventure Asia Travel Company Limited", address: "Floor 9, 123 Long Registered Office Street, Hanoi" },
+    payment_instructions: "Bank transfer to Vietcombank account 0000 0000 0000, reference the invoice number.",
+    actions: { edit: false, send: false, delete: false, amend: true, cancel: false, remind: true, record_payment: true },
+  };
+}
+function paymentDetail(ref: string): Payment {
+  const p = payment(1);
+  return {
+    ...p,
+    ref,
+    state: "verified",
+    note: "Deposit for the Grand Indochina Discovery; the bank slip shows the family name only.",
+    invoice: { ...p.invoice, currency: "VND", total_amount: "1284500000", net_paid: "385350000", balance: "899150000" },
+    trip_case: { ...p.trip_case, status: "payment_pending", trip_style: "Family adventure and cultural discovery", start_date: "2026-12-04", end_date: "2026-12-23", pax: 6, channel: "b2c" },
+    customer: { id: uuid("9", 1), code: "CUS-000002", name: PERSON_NAMES[1], email: "tran.van.contracting.officer@long-company-mail-domain.example.test", phone: "+84 912 345 678" },
+    actions: { edit: false, attach: false, verify: false, void: true },
   };
 }
 
@@ -1040,6 +1098,8 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "notifications") return ok(NOTIFICATIONS);
   if (p === "countries") return ok({ items: [{ iso2: "VN", name: "Vietnam" }, { iso2: "KH", name: "Cambodia" }, { iso2: "LA", name: "Laos" }, { iso2: "TH", name: "Thailand" }] });
   if (p === "audit-logs") return ok(auditLogs());
+  if (at(0) === "invoices" && seg.length === 2) return ok(invoiceDetail(at(1)));
+  if (at(0) === "payments" && seg.length === 2) return ok(paymentDetail(at(1)));
 
   if (p === "trip-cases/summary") return ok(TRIP_CASE_SUMMARY);
   if (p === "trip-cases") {

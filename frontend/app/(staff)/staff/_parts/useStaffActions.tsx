@@ -1,8 +1,9 @@
 "use client";
 // app/(staff)/staff/_parts/useStaffActions.tsx
 // AA-683 (fe-people) — admin actions on a Booking staff profile (UI spec §4.13): Change role (drawer) and
-// Activate / Deactivate (confirm). Both are PATCH /booking/staff/{cis_user_id} {role?, active?}, admin
-// only, audited server-side ("staff.updated"). Deactivate replaces Figma's Block / Suspend; there is no
+// Activate / Deactivate (confirm). Both are PATCH /booking/staff/{cis_user_id} {role?, active?, reason?}, admin
+// only, audited server-side ("staff.updated"). AA-996 (Figma BLOCK ADMIN, spec §4.13): Deactivate asks for a reason
+// (required here; the API keeps it optional) that is stored in the audit row only; Activate takes an optional one. Deactivate replaces Figma's Block / Suspend; there is no
 // reset password or invite here, because accounts and passwords live in CIS (ADR 0004 O1).
 // An admin cannot deactivate or demote themself (API 409 `cannot_demote_self`); the UI disables both.
 // AA-680: a profile linked to a company sign-in (`managed_in_directory`) takes its role from the booking-* group set
@@ -43,7 +44,7 @@ export function useStaffActions() {
   const [roleFor, setRoleFor] = useState<StaffProfile | null>(null);
 
   const patch = useMutation({
-    mutationFn: ({ staff, body }: { staff: StaffProfile; body: { active?: boolean; role?: string } }) =>
+    mutationFn: ({ staff, body }: { staff: StaffProfile; body: { active?: boolean; role?: string; reason?: string } }) =>
       api.staff.update(staff.cis_user_id, body),
     onSuccess: (updated, { staff, body }) => {
       qc.invalidateQueries({ queryKey: ["staff"] });
@@ -64,12 +65,20 @@ export function useStaffActions() {
       <ConfirmDialog
         open={pending !== null}
         onClose={() => setPending(null)}
-        onConfirm={() => pending && patch.mutate({ staff: pending.staff, body: { active: pending.kind === "activate" } })}
+        onConfirm={(reason) =>
+          pending &&
+          patch.mutate({ staff: pending.staff, body: { active: pending.kind === "activate", ...(reason ? { reason } : {}) } })
+        }
         busy={patch.isPending}
         error={patch.error ? staffErrorText(patch.error) : null}
         danger={pending?.kind === "deactivate"}
         title={pending?.kind === "activate" ? "Activate staff member" : "Deactivate staff member"}
         confirmLabel={pending?.kind === "activate" ? "Activate" : "Deactivate"}
+        reason={
+          pending?.kind === "deactivate"
+            ? { label: "Reason", required: true, placeholder: "e.g. left the company, contract ended", maxLength: 500 }
+            : { label: "Note (optional)", placeholder: "e.g. back from leave", maxLength: 500 }
+        }
         message={
           pending?.kind === "activate" ? (
             <>
@@ -80,7 +89,8 @@ export function useStaffActions() {
           ) : (
             <>
               Deactivate <strong className="text-ink">{name}</strong>? They lose access to Booking at once. Their CIS account is not
-              changed, and their open trip cases stay assigned to them until someone reassigns them.
+              changed, and their open trip cases stay assigned to them until someone reassigns them. The reason is kept in the
+              audit log.
             </>
           )
         }

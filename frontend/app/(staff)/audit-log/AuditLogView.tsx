@@ -5,8 +5,9 @@
 // 1:1 to the API: entity_type, actor (CIS user id), from / to (dates, `to` inclusive) and entity_id (set by "Only
 // this record" on a row, or by a link such as /audit-log?entity_id=<uuid>). Keyset pages via `before`
 // ("Show older"); a keyset page carries no total, so the footer counts loaded rows.
-// Not built (no API yet): free-text search and the server CSV export (`?format=csv`, spec §6.3). "Export CSV"
-// downloads the rows loaded on screen.
+// AA-996 (Figma AUDIT LOGS): free-text search `q` (summary, action, record label or actor name; API since this slice)
+// and the action badge colours of UI spec §1.3 (ui/booking/audit.ts). Not built: the server CSV export (`?format=csv`,
+// spec §6.3). "Export CSV" downloads the rows loaded on screen.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -54,6 +55,7 @@ export function AuditLogView() {
     from: DATE_RE.test(get("from")) ? get("from") : undefined,
     to: DATE_RE.test(get("to")) ? get("to") : undefined,
     entity_id: entityIdValid ? entityId : undefined,
+    q: get("q").trim().slice(0, 200) || undefined, // the API caps q at 200 (422 beyond)
     limit: PAGE_SIZE,
   };
   const filtered = Object.entries(filters).some(([k, v]) => k !== "limit" && v !== undefined);
@@ -96,6 +98,7 @@ export function AuditLogView() {
       <Section padded={false}>
         <div className="border-b border-line2 px-4 py-4 sm:px-5">
           <FilterBar
+            search={{ placeholder: "Search description, action, record or staff" }}
             selects={[
               {
                 key: "entity_type",
@@ -193,8 +196,8 @@ function AuditRow({
     <li className="border-b border-line2 px-4 py-3 last:border-b-0 sm:px-5" data-testid="audit-row">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Pill tone={auditActionTone(row.action)} dot={false} upper>
-            {auditActionLabel(row.action)}
+          <Pill tone={auditActionTone(row)} dot={false} upper>
+            {auditActionLabel(row)}
           </Pill>
           <span className="text-[12px] text-muted">{auditEntityLabel(row.entity_type)}</span>
           {label &&

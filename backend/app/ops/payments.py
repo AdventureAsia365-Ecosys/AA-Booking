@@ -54,7 +54,8 @@ PAYMENT_COLUMNS = f"""
     p.evidence_file_id::text AS evidence_file_id, {STATE_SQL} AS state, p.recorded_by, rec.name AS recorded_by_name,
     p.recorded_at, p.verified_by, ver.name AS verified_by_name, p.verified_at, p.voided_by, vo.name AS voided_by_name,
     p.voided_at, p.void_reason, p.created_at, p.updated_at, i.id::text AS invoice_id, i.invoice_number,
-    i.status AS invoice_status, tc.id::text AS trip_case_id, tc.code AS trip_case_code
+    i.status AS invoice_status, tc.id::text AS trip_case_id, tc.code AS trip_case_code,
+    cu.id::text AS customer_id, cu.code AS customer_code, cu.name AS customer_name
 """
 PAYMENT_FROM = """
 FROM booking.payments p
@@ -85,6 +86,11 @@ def payment_out(row: Any, staff: Staff, files: list[dict] | None = None) -> dict
         "status": out.pop("invoice_status"),
     }
     out["trip_case"] = {"id": out.pop("trip_case_id"), "code": out.pop("trip_case_code")}
+    # AA-996: who the money is from (the invoice's customer; none on a B2B trip). .pop with a default keeps rows read
+    # before this column list (and older test rows) valid.
+    customer_id = out.pop("customer_id", None)
+    customer = {"id": customer_id, "code": out.pop("customer_code", None), "name": out.pop("customer_name", None)}
+    out["customer"] = customer if customer_id else None
     out["files"] = files or []
     state = out["state"]
     recorder = out["recorded_by"]["id"] if out["recorded_by"] else None
@@ -145,7 +151,27 @@ async def get_payment(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[
         row["invoice_id"],
     )
     out["invoice"].update(dict(balance))
+    await _detail_context(conn, staff, out)
     return out
+
+
+async def _detail_context(conn: asyncpg.Connection, staff: Staff, out: dict[str, Any]) -> None:
+    """AA-996 (Figma PAYMENT DETAILS): the Related trip and Customer cards of the payment page. Additive fields: the
+    trip case gains its status, style, dates and party size; the customer gains e-mail and phone, only with
+    ``customer.read`` (billing.read alone keeps the name and code)."""
+    case = out.get("trip_case")
+    if case:
+        trip = await conn.fetchrow(
+            "SELECT status, trip_style, start_date, end_date, pax, channel FROM booking.trip_cases WHERE id = $1::uuid",
+            case["id"],
+        )
+        if trip is not None:
+            case.update(invoices.jsonable(dict(trip)))
+    customer = out.get("customer")
+    if customer and staff.can("customer.read"):
+        contact = await conn.fetchrow("SELECT email, phone FROM booking.customers WHERE id = $1::uuid", customer["id"])
+        if contact is not None:
+            customer.update(dict(contact))
 
 
 async def list_payments(
