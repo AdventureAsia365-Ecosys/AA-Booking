@@ -44,6 +44,21 @@ test("a fresh row is next year's 2-pax B2C USD row; the next row copies band and
   assert.notEqual(next.key, first.key);
 });
 
+test("the next row starts the next season, so it never overlaps the last one", () => {
+  const first = row({ valid_from: "2027-01-01", valid_to: "2027-04-30" });
+  const next = { ...newDraft(first), amount: "1500" };
+  assert.equal(next.valid_from, "2027-05-01");
+  assert.equal(next.valid_to, "2027-08-28"); // same 120-day window
+  assert.equal(next.pax_min, "2");
+  assert.deepEqual(draftsToBody([first, next]).errors, []);
+  const third = { ...newDraft(next), amount: "1500" };
+  assert.deepEqual(draftsToBody([first, next, third]).errors, []);
+  // Dates not usable yet: the next pax band on the same (blank) dates instead.
+  const band = newDraft(row({ valid_from: "", pax_min: "2", pax_max: "4" }));
+  assert.equal(band.pax_min, "5");
+  assert.equal(band.pax_max, "");
+});
+
 test("draftsToBody builds the PUT rows", () => {
   const { items, errors } = draftsToBody([
     row({ season: " Low ", pax_max: "" }),
@@ -67,6 +82,8 @@ test("draftsToBody refuses what the API refuses", () => {
   assert.deepEqual(fields([row({ amount: "" })]), ["0:amount"]);
   assert.deepEqual(fields([row({ amount: "0" })]), ["0:amount"]);
   assert.deepEqual(fields([row({ amount: "12.345" })]), ["0:amount"]);
+  assert.deepEqual(fields([row({ amount: "", net_amount: "0" })]), ["0:net_amount"]); // prices to 0
+  assert.deepEqual(fields([row({ amount: "500", net_amount: "0" })]), []); // a price over a zero cost is fine
   assert.deepEqual(fields([row({ valid_from: "" })]), ["0:valid_from"]);
   assert.deepEqual(fields([row(), row({ pax_min: "1", pax_max: "2" })]), ["1:row"]);
   assert.deepEqual(fields([row(), row({ pax_min: "3", pax_max: "" })]), []);

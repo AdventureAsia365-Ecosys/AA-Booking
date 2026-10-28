@@ -14,7 +14,7 @@ import Link from "next/link";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Calculator, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
-import { CHANNELS, SELLING_CURRENCIES, proposalsApi, type Channel, type QuotePreview, type QuotePreviewInput } from "@/lib/api/proposals";
+import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, proposalsApi, type Channel, type QuotePreview, type QuotePreviewInput } from "@/lib/api/proposals";
 import { costLineError, pct, type CostLine } from "@/lib/proposalDraft";
 import { EmptyState, Spinner } from "../primitives";
 import { formatMoney, Money } from "./Money";
@@ -23,9 +23,6 @@ import { useCan } from "../StaffContext";
 
 const inputCls =
   "h-9 w-full min-w-0 rounded-md border border-line bg-card px-3 text-[13px] text-ink outline-none focus:border-accent-border disabled:bg-panel disabled:text-muted";
-
-/** Supplier currencies seen in Asia tours; a suggestion list only, any ISO code is accepted. */
-const COST_CURRENCIES = ["USD", "VND", "THB", "KHR", "LAK", "MMK", "IDR", "MYR", "SGD", "PHP", "JPY", "KRW", "CNY", "NPR", "BTN", "INR", "LKR", "MNT", "EUR", "GBP", "AUD"];
 
 // ── Live quote ───────────────────────────────────────────────────────────────
 export function useQuotePreview(request: QuotePreviewInput | null, delayMs = 500) {

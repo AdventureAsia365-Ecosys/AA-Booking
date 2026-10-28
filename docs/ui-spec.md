@@ -407,7 +407,7 @@ The layout is `Assigned Trips-1.png` (03 decision 11), extended with tabs.
 - **Overview, main column**:
   - **Inquiry panel** (cases from TripPlanner): source chip "TripPlanner", received at, and the `inquiry_snapshot` rendered read-only: route days and legs, plus message / budget / travel window when the contract carries them (v1.2, Q12).
   - **Primary actions on a `new_inquiry` case**:
-    - "Convert to discovery": a modal with sales rep, optional notes, and status → `discovery`;
+    - "Convert to discovery": a modal with sales rep, optional notes, an optional "Start from a trip plan" picker (sellable plans, `version.write`; AA-996: adds a draft version from the plan's CIS days through `POST /booking/catalog/trip-plans/{source_id}/trip-cases` with `{trip_case}`), and status → `discovery`;
     - "Decline": a modal with a reason select (Budget too low / Not our destination / Duplicate / No response / Other) and notes, then status → `cancelled` with the reason;
     - "Reopen" when allowed.
   - **Trip legs**: an ordered list, each with the CIS tour title (from `catalog.v_tour` by `source_tour_id`), days from–to, and "View in catalog". All CIS content here is read-only, tagged "From CIS".

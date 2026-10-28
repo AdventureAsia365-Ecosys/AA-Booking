@@ -7,14 +7,15 @@
 // (title, SKU, country, duration, days, summary, inclusions, exclusions) with "Edit in CIS ↗" for the roles that edit
 // content in CIS. Slice 2 adds the Supplier select (Figma "Supplier" card: active suppliers) and the price matrix
 // (Figma "Pricing" card: per-person prices by channel, season and pax band, PriceMatrixEditor). The price hint stays
-// as a free "from" guide for plans without a matrix.
+// as a free "from" guide for plans without a matrix. The supplier select lists the first 100 active suppliers (the
+// API page cap); a search box above it (debounced `q`) finds the others, and the picked supplier stays listed.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import { suppliersApi } from "@/lib/api/suppliers";
-import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
+import { tripPlansApi, type PlanSupplier, type TripPlanDetail } from "@/lib/api/tripPlans";
 import { FormDrawer, useCan, useStaff, useToast } from "@/ui";
 import { draftsFrom, draftsToBody, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { CisField, CisFieldset } from "../../../_parts/CisFields";
@@ -67,6 +68,15 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
   const [needReason, setNeedReason] = useState(false);
   const [reason, setReason] = useState("");
   const [today] = useState(todayIso);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierQ, setSupplierQ] = useState("");
+  // The supplier shown as picked, kept as an option even when a search no longer lists it.
+  const [pickedSupplier, setPickedSupplier] = useState<PlanSupplier | null>(plan.supplier);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setSupplierQ(supplierSearch.trim()), 300);
+    return () => window.clearTimeout(id);
+  }, [supplierSearch]);
 
   const prices = useQuery({
     queryKey: ["trip-plans", "prices", plan.source_id],
@@ -74,8 +84,8 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
     enabled: canPrice,
   });
   const suppliers = useQuery({
-    queryKey: ["suppliers", "active-options"],
-    queryFn: () => suppliersApi.list({ status: "active", sort: "company_name", limit: 100 }),
+    queryKey: ["suppliers", "active-options", supplierQ],
+    queryFn: () => suppliersApi.list({ status: "active", sort: "company_name", limit: 100, q: supplierQ || undefined }),
     enabled: canPickSupplier,
     staleTime: 60_000,
   });
@@ -141,10 +151,19 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
   }
 
   const fe = save.error instanceof ApiError ? save.error.fieldErrors : [];
-  const apiMessage = save.error instanceof ApiError && !fe.length ? save.error.message : save.error ? String(save.error) : null;
+  const apiMessage =
+    save.error instanceof ApiError ? (fe.length ? null : save.error.message) : save.error instanceof Error ? save.error.message : null;
   const supplierOptions = suppliers.data?.items ?? [];
-  const currentSupplier = plan.supplier;
+  const currentSupplier = form.supplier_id && pickedSupplier?.id === form.supplier_id ? pickedSupplier : null;
   const showCurrent = currentSupplier && !supplierOptions.some((s) => s.id === currentSupplier.id);
+  const supplierTotal = suppliers.data?.total ?? 0;
+  const supplierHint = suppliers.isError
+    ? "The supplier list could not be loaded."
+    : supplierTotal > supplierOptions.length
+      ? `Showing the first ${supplierOptions.length} of ${supplierTotal} active suppliers; search to find the others.`
+      : supplierQ && !supplierOptions.length
+        ? "No active supplier matches the search."
+        : "The main supplier (ground operator) of this plan. Active suppliers only.";
   return (
     <FormDrawer
       open
@@ -196,12 +215,28 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         </span>
       </label>
       {canPickSupplier && (
-        <FormField
-          label="Supplier"
-          hint={suppliers.isError ? "The supplier list could not be loaded." : "The main supplier (ground operator) of this plan. Active suppliers only."}
-          error={errorFor(fe, "supplier_id")}
-        >
-          <select className={inputCls} value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} disabled={suppliers.isLoading}>
+        <FormField label="Supplier" hint={supplierHint} error={errorFor(fe, "supplier_id")}>
+          <input
+            aria-label="Search active suppliers"
+            className={inputCls}
+            placeholder="Search by name, code or contact"
+            maxLength={200}
+            value={supplierSearch}
+            onChange={(e) => setSupplierSearch(e.target.value)}
+            autoComplete="off"
+          />
+          <select
+            aria-label="Supplier"
+            className={inputCls}
+            value={form.supplier_id}
+            onChange={(e) => {
+              const id = e.target.value;
+              const hit = supplierOptions.find((o) => o.id === id);
+              if (hit) setPickedSupplier({ id: hit.id, code: hit.code, company_name: hit.company_name, status: "active" });
+              setForm({ ...form, supplier_id: id });
+            }}
+            disabled={suppliers.isLoading}
+          >
             <option value="">{suppliers.isLoading ? "Loading suppliers…" : "No supplier"}</option>
             {showCurrent && (
               <option value={currentSupplier.id}>
@@ -244,6 +279,8 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             onChange={(next) => {
               setDrafts(next);
               setRowErrors([]);
+              // The API asks for the reason again if a row is still below the floor after the edit.
+              setNeedReason(false);
             }}
             errors={rowErrors}
             saved={prices.data?.items ?? []}

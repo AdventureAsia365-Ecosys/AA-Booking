@@ -42,6 +42,9 @@ from app.pricing import service as pricing
 MAX_ROWS = 200
 B2C_CHANNELS = ("b2c_tailor_made", "fixed_departure")
 FROM_PAX = 2
+# ``amount`` is NUMERIC(12, 2); a margin at or below -100 % is refused as a typo (see ``_check_priced``).
+MAX_AMOUNT = Decimal("10000000000")
+MIN_MARGIN = Decimal("-1")
 # The fields that make a row (what the audit compares); the derived ones follow from them.
 KEY_FIELDS = (
     "channel",
@@ -187,6 +190,23 @@ async def _price(conn: asyncpg.Connection, row: Row, on: date) -> pricing.Priced
         raise Unavailable("pricing_data_unavailable", "the pricing rules or FX rates could not be read") from None
 
 
+def _check_priced(row: Row, amount: Decimal, margin: Decimal) -> None:
+    """Refuse a priced row the table cannot hold or that is surely a typo (a clear 422, never a 500)."""
+    n = row.position
+    if amount <= 0:
+        raise Invalid("price_missing", f"row {n}: the net cost prices to 0; enter a price", row=n)
+    if amount >= MAX_AMOUNT:
+        raise Invalid("price_too_high", f"row {n}: the price must be below {MAX_AMOUNT:,}", row=n)
+    if margin <= MIN_MARGIN:
+        # Only an override can get here: the rule itself never prices below cost. A margin of -100 % or less
+        # means the price is about half the net cost or lower, which is a missing digit, not a sales decision.
+        raise Invalid(
+            "override_too_low",
+            f"row {n}: the price is far below the net cost (margin {margin:.0%}); check the amount",
+            row=n,
+        )
+
+
 async def _plan(conn: asyncpg.Connection, source_id: str, *, lock: bool = False) -> asyncpg.Record | None:
     return await conn.fetchrow(
         "SELECT id::text AS id FROM booking.trip_plans WHERE source_system = 'cis' AND source_id = $1"  # noqa: S608
@@ -261,6 +281,7 @@ async def replace_prices(
         if row.net_amount is not None:
             quote = (await _price(conn, row, day)).quote
             amount, margin, priced_on = quote.final_total, quote.effective_margin, day
+            _check_priced(row, amount, margin)
             if quote.below_floor:
                 below.append(row.position)
         assert amount is not None  # noqa: S101 — normalise() requires a price or a net cost

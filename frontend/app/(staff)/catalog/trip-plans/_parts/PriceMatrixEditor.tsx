@@ -7,13 +7,12 @@
 // sales override). Rows of one channel and currency may not overlap (checked here and in the API).
 
 import { Plus, Trash2 } from "lucide-react";
-import { CHANNELS, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
+import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import type { PriceRow } from "@/lib/api/tripPlans";
 import { DateField, Money, formatDay } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
 
-const NET_CURRENCIES = ["USD", "VND", "THB", "KHR", "LAK", "MMK", "IDR", "MYR", "BTN", "NPR", "INR", "LKR", "JPY", "CNY", "KRW", "MNT", "EUR", "GBP", "AUD", "SGD"];
 const CHANNEL_SHORT: Record<string, string> = Object.fromEntries(CHANNELS.map((c) => [c.value, c.label]));
 
 function Field({ label, error, children, className = "" }: { label: string; error?: string; children: React.ReactNode; className?: string }) {
@@ -90,15 +89,16 @@ export function PriceMatrixEditor({
                   ))}
                 </select>
               </Field>
-              <Field label="Season" error={errorOf(i, "season")} className="col-span-2">
-                <span className="flex items-center gap-3">
+              <div className="col-span-2 flex min-w-0 items-start gap-3">
+                <Field label="Season" error={errorOf(i, "season")} className="flex-1">
                   <input className={inputCls} maxLength={80} placeholder="Low, High, Peak…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
-                  <span className="flex shrink-0 items-center gap-1.5 text-[12.5px] text-body">
-                    <input type="checkbox" className="h-4 w-4 accent-accent" checked={r.peak} onChange={(e) => set(i, { peak: e.target.checked })} />
-                    Peak
-                  </span>
-                </span>
-              </Field>
+                </Field>
+                {/* Its own label (not inside the Season label, which names only its first control). */}
+                <label className="mt-[22px] flex h-10 shrink-0 cursor-pointer items-center gap-1.5 text-[12.5px] text-body">
+                  <input type="checkbox" className="h-4 w-4 accent-accent" checked={r.peak} onChange={(e) => set(i, { peak: e.target.checked })} />
+                  Peak
+                </label>
+              </div>
               <Field label="Valid from" error={errorOf(i, "valid_from")} className="col-span-2 sm:col-span-2">
                 <DateField className={inputCls} value={r.valid_from} onChange={(v) => set(i, { valid_from: v })} aria-label={`Row ${i + 1} valid from`} />
               </Field>
@@ -131,7 +131,7 @@ export function PriceMatrixEditor({
                 <span className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
                   <input className={inputCls} inputMode="decimal" placeholder="net cost to price from" value={r.net_amount} onChange={(e) => set(i, { net_amount: e.target.value })} />
                   <select aria-label={`Row ${i + 1} net cost currency`} className={inputCls} value={r.net_currency} onChange={(e) => set(i, { net_currency: e.target.value })}>
-                    {NET_CURRENCIES.map((c) => (
+                    {COST_CURRENCIES.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
                   </select>

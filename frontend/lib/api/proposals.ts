@@ -65,6 +65,10 @@ export type Channel = (typeof CHANNELS)[number]["value"];
 /** Selling currencies (bk-004 engine.SELLING_CURRENCIES, ADR 0005 decision 5). */
 export const SELLING_CURRENCIES = ["USD", "EUR", "GBP", "AUD", "SGD"] as const;
 
+/** Supplier (net cost) currencies seen in Asia tours: the quote-preview cost lines and the trip plan price matrix
+ *  share this list. A suggestion list for quote-preview (any ISO code is accepted there). */
+export const COST_CURRENCIES = ["USD", "VND", "THB", "KHR", "LAK", "MMK", "IDR", "MYR", "SGD", "PHP", "JPY", "KRW", "CNY", "NPR", "BTN", "INR", "LKR", "MNT", "EUR", "GBP", "AUD"] as const;
+
 export interface QuotePreviewInput {
   channel: Channel;
   currency: string;

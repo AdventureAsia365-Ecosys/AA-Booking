@@ -214,6 +214,40 @@ async def test_override_below_floor_needs_a_reason(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("over", "code"),
+    [
+        # A net cost of 0 prices to 0, which the table refuses (amount > 0): a 422, not a 500.
+        ({"amount": None, "net_amount": Decimal("0")}, "price_missing"),
+        # A typo override (2000 net, 15 sold): margin about -13236 %, too far for a sales decision.
+        ({"amount": Decimal("15"), "net_amount": Decimal("2000")}, "override_too_low"),
+        # A price NUMERIC(12, 2) cannot hold.
+        ({"amount": None, "net_amount": Decimal("9999999999.99")}, "price_too_high"),
+    ],
+)
+async def test_priced_rows_the_table_cannot_hold_are_refused(
+    monkeypatch: pytest.MonkeyPatch, over: dict[str, Any], code: str
+) -> None:
+    fake_price(monkeypatch)
+    bad = row(net_currency="USD", **over)
+    conn = conn_with()
+    with pytest.raises(Invalid) as err:
+        await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [bad], below_floor_reason="Typo", on=DAY)
+    assert err.value.code == code and err.value.extra["row"] == 1
+    assert conn.sql("INSERT INTO booking.trip_plan_prices") == []
+
+
+@pytest.mark.asyncio
+async def test_a_deep_but_plausible_override_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_price(monkeypatch)
+    deep = row(amount=Decimal("1100"), net_amount=Decimal("2000"), net_currency="USD")  # margin -0.8483
+    conn = conn_with()
+    await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [deep], below_floor_reason="Write-off", on=DAY)
+    (inserted,) = conn.sql("INSERT INTO booking.trip_plan_prices")
+    assert inserted[10] == Decimal("1100") and inserted[13] == Decimal("-0.8482")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("error", "kind", "code"),
     [
         (pricing.NoRuleInForce(engine.Channel.B2B), Invalid, "pricing_rule_missing"),

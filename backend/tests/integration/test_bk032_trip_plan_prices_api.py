@@ -306,6 +306,17 @@ async def test_rows_priced_from_net_cost(client: tuple[httpx.AsyncClient, LocalC
     half = await c.put(url, json={"items": [_row(amount=None, net_amount="10")]}, headers=contracting)
     assert half.status_code == 422 and half.json()["detail"] == "invalid_net_cost"
 
+    # Rows the table cannot hold are a clear 422, never a 500: a net cost pricing to 0, a typo override.
+    zero_cost = {"items": [_row(amount=None, net_amount="0", net_currency="USD")]}
+    zero = await c.put(url, json=zero_cost, headers=contracting)
+    assert zero.status_code == 422 and zero.json()["detail"] == "price_missing"
+    typo = {"items": [_row(amount="15", net_amount="2000", net_currency="USD")], "below_floor_reason": "Typo"}
+    typo_put = await c.put(url, json=typo, headers=contracting)
+    assert typo_put.status_code == 422 and typo_put.json()["detail"] == "override_too_low"
+    deep = {"items": [_row(amount="1100", net_amount="2000", net_currency="USD")], "below_floor_reason": "Write-off"}
+    deep_put = await c.put(url, json=deep, headers=contracting)
+    assert deep_put.status_code == 200 and deep_put.json()["items"][0]["effective_margin"] == "-0.8482"
+
 
 async def test_list_rows_sellable_first_with_destinations_and_cover(
     client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection

@@ -84,12 +84,36 @@ const PAX = /^\d{1,3}$/;
 
 let seq = 0;
 
-/** A new row: the next season after the last row (same channel, currency and band), or a fresh 2-pax B2C row. */
+const DAY_MS = 86_400_000;
+
+function isoDayMs(day: string): number | null {
+  if (!ISO_DAY.test(day)) return null;
+  const ms = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function msIsoDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** A new row that does not overlap the last one: the next season after it (same channel, currency, band and window
+ *  length, starting the day after it ends); when its dates are not usable yet, the next pax band on the same dates.
+ *  Without a row: a fresh 2-pax B2C row for next year. */
 export function newDraft(after?: PriceDraft, today?: string): PriceDraft {
   seq += 1;
   const year = Number((today ?? "2026-01-01").slice(0, 4)) + 1;
   if (after) {
-    return { ...after, key: `new-${seq}`, season: "", peak: false, amount: "", net_amount: "" };
+    const next: PriceDraft = { ...after, key: `new-${seq}`, season: "", peak: false, amount: "", net_amount: "" };
+    const from = isoDayMs(after.valid_from);
+    const to = isoDayMs(after.valid_to);
+    if (from !== null && to !== null && to >= from) {
+      next.valid_from = msIsoDay(to + DAY_MS);
+      next.valid_to = msIsoDay(to + DAY_MS + (to - from));
+    } else if (PAX.test(after.pax_max.trim()) && Number(after.pax_max) < 999) {
+      next.pax_min = String(Number(after.pax_max) + 1);
+      next.pax_max = "";
+    }
+    return next;
   }
   return {
     key: `new-${seq}`,
@@ -168,6 +192,7 @@ export function draftsToBody(drafts: PriceDraft[]): { items: PriceRowBody[]; err
     else if (max !== null && min >= 1 && max < min) bad("pax_max", "Below the minimum.");
     if (amount && (!MONEY.test(amount) || Number(amount) <= 0)) bad("amount", "An amount above 0, up to 2 decimals.");
     if (net && !MONEY.test(net)) bad("net_amount", "An amount, up to 2 decimals.");
+    else if (net && !amount && Number(net) <= 0) bad("net_amount", "A net cost above 0, or enter the price.");
     if (!amount && !net) bad("amount", "Enter a price, or a net cost to price it from.");
     if (d.season.trim().length > 80) bad("season", "At most 80 characters.");
     items.push({
