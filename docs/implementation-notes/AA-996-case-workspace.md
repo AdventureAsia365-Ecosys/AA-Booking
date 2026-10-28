@@ -42,10 +42,24 @@ Code (lane, orchestrated). No migration.
   present the block is not drawn.
 - **Proposals tab actions mirror the /proposals row menu** (same icons, same disabled rules). Send stays disabled
   with the reason in the tooltip for an approved / sent / unpriced / empty draft; Discard is the existing DELETE of a
-  draft (Booking has no hard delete of sent or approved versions, so Figma's Delete = discard a draft).
+  draft (Booking has no hard delete of sent or approved versions, so Figma's Delete = discard a draft). Review fix:
+  Discard follows the API's own rule (`versions._editable`: not sent, not approved), so an older unsent draft that
+  shows as "superseded" once a later version went out can be discarded too; Send keeps the badge rule (draft only).
 - **Trip-check tabs drive the existing URL keys.** Overdue = `status` open + `due=overdue` (the filter that already
   existed), so the FilterBar selects stay in sync and keep working; leaving Overdue clears only that due value.
   `SavedTabs` gained optional `active` / `onSelect` props for a tab that sets two keys (backward compatible).
+- **Tab counts and the due filter (review fix).** The API counts ignore the due window (the tabs choose between
+  status and due). The page shows the counts only when each badge equals what its tab lists: no due filter, or the
+  "overdue" filter on the Overdue tab (leaving it clears that filter). With a 7 / 14 / 30-day window, or "overdue"
+  picked on another tab, the badges are hidden (`caseFacts.ts` `tabCountsShown`, node test + layout test). Applying
+  the window in the API was weighed and dropped: the Overdue tab's own window would then shrink every other badge to
+  its overdue subset, and the backend cannot tell that window from a date sent by a browser in another time zone.
+- **Day-only dates use `formatDay` (review fix, after rebasing on #126).** Trip dates in the header, the Travel dates
+  fact and the inquiry travel window are ISO days; the kit `formatDate` reads "2026-12-06" as UTC midnight and shows
+  the day before west of Greenwich. Timestamps (Created, Sent, Updated) keep `DateText` / `formatDate`.
+- **Read-only quote note is the caller's (review fix).** "The saved version total below is still correct." moved out
+  of `quoteErrorView` into an optional `readOnlyNote` prop on `QuoteResult`; the builder passes it, the
+  /pricing/calculator (no saved total) does not.
 - **Convert / Decline dialogs:** the stateful form now renders the Modal itself (mounted only while open) so its
   buttons can go into the Modal `footer` prop.
 
@@ -57,9 +71,12 @@ Code (lane, orchestrated). No migration.
   quote when locked, approval guard), preview (approved date, leg countries, Open builder on locked versions),
   `PricePanel.tsx` (read-only 403 explained), `StatusActions.tsx` (footers), `/trip-checks` (tabs, progress),
   `CheckDrawer.tsx` (trip context), `SavedTabs.tsx` (optional props), `ui/booking/caseFacts.ts` (+ node tests).
-- Not done here (other slices or follow-ups): the trip-checks table width at 1440 (slice 1, PR #126), CSV on the
-  Proposals tab / trip checks (slice 1), a trip-plan select in the Convert dialog (slice 2), the customer's past-trips
-  count in the People card (no API field; not added).
+- Rebased on #126 (en-GB dates, filter bar, CSV): the Proposals tab keeps #126's `accessorFn` / `csvMoney` CSV
+  columns next to the new row actions; the `actions` column is a row tool, which the Booking DataTable already leaves
+  out of the CSV (`NON_DATA_IDS`).
+- Not done here (other slices or follow-ups): the trip-checks table width at 1440 (slice 1, PR #126), a trip-plan
+  select in the Convert dialog (slice 2), the customer's past-trips count in the People card (no API field; not
+  added).
 
 ## Tradeoffs
 
@@ -68,17 +85,20 @@ Code (lane, orchestrated). No migration.
   differ by the checks due that day. Accepted (same as the existing badge).
 - A locked version no longer shows the live quote breakdown (margin, rule, FX used). The saved total, channel and FX
   lock are what was sent; re-pricing a locked version would show a different number than the customer got.
-- The one `next build` ran before the last change (the trip facts card moved above the inquiry panel; ordering only):
-  that change is covered by `tsc` and `eslint`, not by a second build / browser run.
+- Review fix: the build and the slice 4 shots were regenerated after the rebase on #126 and the review fixes (the
+  first run's build predated the trip facts / inquiry reorder). The overview test now also asserts the order (trip
+  facts above the TripPlanner inquiry), not only the column x / width.
 
 ## Should know
 
 - No migration. `leg_countries` and the trip-check `counts` / `checks` / `sales_name` are additive response fields;
   the frontend treats them as optional (an older API shows the page as before).
 - The layout-mock staff fixture (`e2e/layout/staff-me.json`) gains `ops.read` and `bill.read`, byte-identical to PR
-  #126, which also adds the fixtures the dashboard / billing pages then call (supplier-bookings summary, supplier
-  bills). Run the shared `layout.spec.ts` after #126 is on main; `case-workspace.spec.ts` stands alone
-  (`case-fixtures.ts` first, then the shared fixtures).
+  #126 (now on main, so the rebase left it unchanged). `case-workspace.spec.ts` stands alone (`case-fixtures.ts`
+  first, then the shared fixtures).
+- The integration test `test_trip_checks_list_filters` now pins the real SQL of the overdue count (one open check due
+  yesterday → `overdue` 1) and of the sales owner subquery (a closed earlier sales assignment loses to the open one).
+  It needs `BOOKING_TEST_ADMIN_DSN` (CI Postgres); locally it was skipped (no Docker in this WSL distro).
 - `ui/booking/caseFacts.test.mjs` runs with `node --test`; `npm run test:unit` (added by PR #126) picks it up.
 - The Dev data behind the audit (TC-000022 V1 approved with 0 items) stays as it is; new approvals of empty versions
   are refused.

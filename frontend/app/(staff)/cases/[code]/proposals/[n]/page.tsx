@@ -548,7 +548,12 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                   </div>
                   {!locked && (
                     <div className="border-t border-line2 pt-4">
-                      <QuoteResult query={quote} canManageRules={canManageRules} emptyHint="Enter net costs on the items above to see the selling price." />
+                      <QuoteResult
+                        query={quote}
+                        canManageRules={canManageRules}
+                        emptyHint="Enter net costs on the items above to see the selling price."
+                        readOnlyNote="The saved version total below is still correct."
+                      />
                     </div>
                   )}
                   {fresh?.below_floor && price.override.trim() && !price.overrideReason.trim() && (

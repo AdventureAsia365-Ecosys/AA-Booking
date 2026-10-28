@@ -226,6 +226,28 @@ async def test_trip_checks_list_filters(client: Client, admin: asyncpg.Connectio
         (i["trip_case"]["checks"]["total"], i["trip_case"]["checks"]["not_applicable"]) for i in allstatus["items"]
     } == {(3, 1)}
     assert {i["trip_case"]["sales_name"] for i in allstatus["items"]} == {None}
+    # AA-996 review: the real SQL of the overdue count and of the sales owner subquery. One open check due yesterday,
+    # and a sales owner on the case (a closed earlier assignment must not win).
+    late_open = next(i for i in allstatus["items"] if i["status"] == "open")
+    await admin.execute(
+        "UPDATE booking.trip_case_checks SET due_date = current_date - 1 WHERE id = $1::uuid", late_open["id"]
+    )
+    await admin.execute(
+        "INSERT INTO booking.staff_assignments (trip_case_id, staff_user_id, role, assigned_at, unassigned_at)"
+        " SELECT id, $2, 'sales', now() - interval '2 days', now() - interval '1 day' FROM booking.trip_cases"
+        " WHERE code = $1",
+        late["code"],
+        CONTRACTING,
+    )
+    await admin.execute(
+        "INSERT INTO booking.staff_assignments (trip_case_id, staff_user_id, role)"
+        " SELECT id, $2, 'sales' FROM booking.trip_cases WHERE code = $1",
+        late["code"],
+        SALES,
+    )
+    owned = await _ok(await c.get("/trip-checks", params={"status": "all", "q": late["code"]}, headers=sales))
+    assert owned["counts"] == {"open": 2, "overdue": 1, "done": 0, "not_applicable": 1, "all": 3}
+    assert {i["trip_case"]["sales_name"] for i in owned["items"]} == {SALES}  # ops.staff names each user by its id
     by_code = await _ok(await c.get("/trip-checks", params={"code": "insurance"}, headers=sales))
     assert {i["code"] for i in by_code["items"]} == {"insurance"}
     assert all(i["trip_case"]["code"] != presale["code"] for i in by_code["items"])

@@ -3,7 +3,7 @@
 // `npm run test:unit` runs every ui/booking/*.test.mjs once the audit slice 1 script is on main).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { caseCountries, checkProgress, inclusiveDays, inquiryPrefs } from "./caseFacts.ts";
+import { caseCountries, checkProgress, inclusiveDays, inquiryPrefs, tabCountsShown } from "./caseFacts.ts";
 
 test("inquiryPrefs is null when the snapshot carries only the route", () => {
   assert.equal(inquiryPrefs(null), null);
@@ -56,4 +56,14 @@ test("checkProgress counts not-applicable checks as resolved", () => {
   assert.deepEqual(checkProgress({ total: 3, done: 3, not_applicable: 0 }), { resolved: 3, total: 3, pct: 100, label: "3 of 3 checks done" });
   assert.equal(checkProgress({ total: 0, done: 0, not_applicable: 0 }), null);
   assert.equal(checkProgress(undefined), null);
+});
+
+test("tabCountsShown hides the trip-check tab counts while a due window narrows the rows", () => {
+  assert.equal(tabCountsShown("open", ""), true);
+  assert.equal(tabCountsShown("done", ""), true);
+  assert.equal(tabCountsShown("overdue", "overdue"), true);
+  assert.equal(tabCountsShown("done", "7d"), false);
+  assert.equal(tabCountsShown("all", "30d"), false);
+  assert.equal(tabCountsShown("open", "14d"), false);
+  assert.equal(tabCountsShown("done", "overdue"), false);
 });

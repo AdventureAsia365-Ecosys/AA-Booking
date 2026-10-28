@@ -6,7 +6,8 @@
 // when a trip is confirmed; custom checks are added on the case's Checks tab. The trip case status moves by itself with
 // the travel dates (bk_case_lifecycle, daily); the last runs are listed under the table.
 // AA-996 (Figma TRIP CHECKS, audit item 8): status tabs with counts above the list (Open / Overdue / Done / Not
-// applicable / All; the counts come with the list, under the same owner / check / search filters) and, in the Trip
+// applicable / All; the counts come with the list, under the same owner / check / search filters, and are hidden while
+// a due window narrows the rows) and, in the Trip
 // case cell, how far that trip is from ready ("3/9": its done and not-applicable checks of all its checks).
 
 import { useState } from "react";
@@ -28,7 +29,7 @@ import {
   useCan,
   useUrlFilters,
 } from "@/ui";
-import { checkProgress } from "@/ui/booking/caseFacts";
+import { checkProgress, tabCountsShown } from "@/ui/booking/caseFacts";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { CheckDrawer, checkTitle, isOverdue } from "./_parts/CheckDrawer";
 
@@ -196,6 +197,8 @@ export default function TripChecksPage() {
   const [counts, setCounts] = useState<TripCheckCounts | null>(null);
   const fresh = list.data?.counts ?? null;
   if (fresh && JSON.stringify(fresh) !== JSON.stringify(counts)) setCounts(fresh);
+  // The counts ignore the due filter: show them only when each badge equals what its tab lists (tabCountsShown).
+  const countsShown = tabCountsShown(tab, get("due"));
 
   return (
     <PageFrame
@@ -206,7 +209,7 @@ export default function TripChecksPage() {
         <SavedTabs
           active={tab}
           onSelect={pickTab}
-          tabs={STATUS_TABS.map(({ key, label }) => ({ key, label, count: counts?.[key], countPending: !counts && list.isPending }))}
+          tabs={STATUS_TABS.map(({ key, label }) => ({ key, label, count: countsShown ? counts?.[key] : undefined, countPending: countsShown && !counts && list.isPending }))}
         />
       )}
       <Section>

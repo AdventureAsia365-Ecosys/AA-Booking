@@ -254,7 +254,8 @@ async def list_checks(
         offset,
     )
     # The tab counts: the same search, owner, check and case filters, every status (the status / due filters are what
-    # the tabs choose between).
+    # the tabs choose between). The due window is left out on purpose: the page shows the counts only with no due
+    # filter or on its Overdue tab, where they equal each tab's rows (frontend ui/booking/caseFacts.ts tabCountsShown).
     count_args = [args[0], args[3], args[4], args[5], args[6]]
     counts = await conn.fetchrow(f"SELECT {COUNTS} {CHECK_FROM} WHERE {COUNT_WHERE}", *count_args)  # noqa: S608
     return {

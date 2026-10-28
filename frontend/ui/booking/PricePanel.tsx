@@ -260,8 +260,8 @@ function quoteErrorView(error: unknown, canManageRules: boolean): QuoteErrorView
       title: "Live quote not available in this session",
       body:
         e.code === "preview_read_only"
-          ? "This is a read-only Preview sign-in: it cannot run the pricing engine. Sign in on the Booking admin to quote. The saved version total below is still correct."
-          : "This test sign-in is read-only: it cannot run the pricing engine. Admin, sales and contracting users see the live quote here. The saved version total below is still correct.",
+          ? "This is a read-only Preview sign-in: it cannot run the pricing engine. Sign in on the Booking admin to quote."
+          : "This test sign-in is read-only: it cannot run the pricing engine. Admin, sales and contracting users see the live quote here.",
       link: null,
       tone: "info",
     };
@@ -295,10 +295,14 @@ export function QuoteResult({
   query,
   canManageRules = false,
   emptyHint = "Add at least one net cost line to see the selling price.",
+  readOnlyNote,
 }: {
   query: ReturnType<typeof useQuotePreview>;
   canManageRules?: boolean;
   emptyHint?: string;
+  /** Added after the read-only explanation (the builder: its saved version total is still right; the calculator
+   *  has no saved total, so it passes nothing). */
+  readOnlyNote?: string;
 }) {
   const [details, setDetails] = useState(false);
   if (!query.hasRequest) {
@@ -310,7 +314,10 @@ export function QuoteResult({
       return (
         <div role="status" className="rounded-md border border-line bg-panel px-3 py-3 text-[13px]" data-testid="quote-read-only">
           <p className="font-semibold text-ink">{v.title}</p>
-          <p className="mt-0.5 text-body">{v.body}</p>
+          <p className="mt-0.5 text-body">
+            {v.body}
+            {readOnlyNote ? ` ${readOnlyNote}` : ""}
+          </p>
         </div>
       );
     }

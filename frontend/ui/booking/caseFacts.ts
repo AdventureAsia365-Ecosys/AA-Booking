@@ -125,3 +125,16 @@ export function checkProgress(checks: { total: number; done: number; not_applica
   const pct = Math.round((resolved / checks.total) * 100);
   return { resolved, total: checks.total, pct, label: `${resolved} of ${checks.total} checks done` };
 }
+
+/** /trip-checks status tabs (AA-996 review fix): may the tab badges show the API's counts? The counts apply the
+ *  owner / check / search filters but never the due filter (GET /booking/trip-checks `counts`). A badge is only shown
+ *  when it equals what the list under that tab shows:
+ *  - no due filter: yes;
+ *  - the "overdue" filter on the Overdue tab: yes (Overdue = open and due before today, and leaving the tab clears
+ *    that filter, so every other badge is what its tab will show);
+ *  - any other due window (7 / 14 / 30 days, or "overdue" picked on another tab): no, the rows are a subset of the
+ *    badge's number. */
+export function tabCountsShown(tab: string, due: string): boolean {
+  if (!due) return true;
+  return due === "overdue" && tab === "overdue";
+}

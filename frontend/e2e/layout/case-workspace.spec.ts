@@ -207,6 +207,8 @@ test.describe("slice 4 behaviour at 1440", () => {
     const peopleBox = (await page.getByText("Assigned sales", { exact: true }).boundingBox())!;
     expect(factsBox.x + factsBox.width, "trip facts are the main column, left of the People rail").toBeLessThan(peopleBox.x);
     expect(factsBox.width, "trip facts are the wide column").toBeGreaterThan(600);
+    const inquiryBox = (await page.getByTestId("inquiry-prefs").boundingBox())!;
+    expect(factsBox.y, "trip facts sit above the TripPlanner inquiry").toBeLessThan(inquiryBox.y);
     expect(c.unmocked).toEqual([]);
     expect(c.consoleErrors).toEqual([]);
   });
@@ -232,6 +234,7 @@ test.describe("slice 4 behaviour at 1440", () => {
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${CUSTOM_CASE}/proposals/3`, '[data-testid="quote-read-only"]', c);
     await expect(page.getByTestId("quote-read-only")).toContainText("Live quote not available in this session");
+    await expect(page.getByTestId("quote-read-only")).toContainText("The saved version total below is still correct."); // builder only
     await expect(page.getByText("No access to pricing")).toHaveCount(0);
     expect(c.posts).toContain("POST pricing/quote-preview");
 
@@ -272,6 +275,13 @@ test.describe("slice 4 behaviour at 1440", () => {
     await tabs.getByRole("tab", { name: /Done/ }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get("status")).toBe("done");
     expect(new URL(page.url()).searchParams.get("due"), "leaving Overdue clears its due filter").toBeNull();
+    await expect(tabs.getByRole("tab", { name: /Done\s*102/ })).toBeVisible();
+    // A due window narrows the rows but not the counts (the API counts ignore it): the badges are hidden meanwhile.
+    await page.goto(`${baseURL}/trip-checks?status=done&due=7d`);
+    await expect(tabs.getByRole("tab", { name: "Done" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("trip-progress").first()).toBeVisible(); // the list (and its counts) arrived
+    await expect(tabs.getByRole("tab", { name: /\d/ })).toHaveCount(0);
+    await page.goto(`${baseURL}/trip-checks?status=done`);
     await page.locator(ROW).first().click();
     const context = page.getByTestId("check-trip-context");
     await expect(context).toContainText("Sales");
