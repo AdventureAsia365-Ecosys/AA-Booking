@@ -1289,11 +1289,15 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `meta: { compact: "drawer" }` move into a row details drawer; at 1200 px and wider nothing changes.
 - List and date pieces (AA-996 audit slice 1, S254): a list page passes its `FilterBar` to the table through the
   DataTable `filters` prop, which gives every list the Figma shape: row 1 search box + the table's Columns / CSV, row 2
-  the filters (labels inline) + "Reset filters" (always drawn, disabled at the defaults). Every list exports CSV
-  (`enableCsv`; a display-only column gets an `accessorFn` with sorting off; `csv` on the wrapper when a cell groups two
-  facts; the Countries grid uses `ExportCsvButton` in the bar's `tools` slot). Dates are typed and shown en-GB through
+  the filters (labels inline) + "Reset filters" (always drawn, disabled at the defaults). Every list page (a
+  sidebar list and the Supplier bills and case Proposals tabs; not the small tables inside a detail page, tab or drawer)
+  exports CSV (`enableCsv`; a display-only column gets an `accessorFn` with sorting off; `csv` on the wrapper when a
+  cell groups two facts; the Countries grid uses `ExportCsvButton` in the bar's `tools` slot). Every Booking CSV goes
+  through the wrapper's button: row tools (row menu, open link, details) are left out and every value passes the
+  spreadsheet formula guard `ui/booking/csvCell.ts`. Dates are typed and shown en-GB through
   `ui/booking/DateField.tsx` (`DateField` "28 Oct 2026", day-first input; `TimeField` 24 h) instead of the browser's
-  locale inputs; date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,
+  locale inputs; the box always shows the value the page holds (an out-of-range day is passed up and marked invalid so
+  the page's own checks block it; unreadable text is dropped on blur); date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,
   `DateText`), and ISO dates inside notification text are localised (`localizeIsoDates`). `npm run test:unit` runs the
   pure helpers' tests.
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and

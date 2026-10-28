@@ -11,8 +11,14 @@
 //
 // DateField: a text box (type "28/10/2026", "28 Oct 2026" or ISO; day first, never US order) plus a calendar button
 // that opens the browser's own date picker through a hidden native input (showPicker), so there is no home-made
-// calendar to maintain. `min` / `max` are honoured by both. A value that cannot be read stays in the box, marked
-// invalid, and the field keeps its last good value.
+// calendar to maintain. `min` / `max` are honoured by both.
+//
+// What is on screen is always what the page holds (review fix): the box never keeps text the page did not get.
+//   - A real day outside min / max is passed up (as the native input does) and the box is marked invalid, so the
+//     page's own range checks and the API see it and block the save.
+//   - Text that is not a day ("31/11/2026", "15/13/2026") is marked invalid while the field has focus; on blur it is
+//     dropped and the box shows the page's value again (the native input could not hold such text either).
+//   - When the page's value changes from outside (Reset filters, a form reset, a row removed), any pending text goes.
 
 import { useRef, useState } from "react";
 import { CalendarDays } from "lucide-react";
@@ -57,21 +63,26 @@ export function DateField({
   const picker = useRef<HTMLInputElement>(null);
   // What the person is typing; null = show the formatted value.
   const [draft, setDraft] = useState<string | null>(null);
+  // A new value from outside drops the pending text (render-time state adjustment, as in DataTable.tsx).
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setDraft(null);
+  }
   const shown = draft ?? (value ? formatDay(value) : "");
-  const parsed = draft === null ? undefined : parseDayInput(draft);
-  const invalid = draft !== null && (parsed === null || (!!parsed && !inRange(parsed, min, max)));
+  const parsed = draft === null ? (value ?? "") : parseDayInput(draft);
+  const invalid = parsed === null || (!!parsed && !inRange(parsed, min, max));
 
-  function commit() {
+  /** Enter keeps unreadable text in the box to fix; blur drops it. A readable day is always passed up. */
+  function commit(onBlur: boolean) {
     if (draft === null) return;
     const day = parseDayInput(draft);
-    if (day === "") {
-      setDraft(null);
-      if (value) onChange("");
-    } else if (day && inRange(day, min, max)) {
-      setDraft(null);
-      if (day !== value) onChange(day);
+    if (day === null) {
+      if (onBlur) setDraft(null);
+      return;
     }
-    // Not a day, or out of range: the text stays (marked invalid) and the value is unchanged.
+    setDraft(null);
+    if (day !== (value ?? "")) onChange(day);
   }
 
   function openPicker() {
@@ -98,11 +109,11 @@ export function DateField({
         aria-invalid={invalid || undefined}
         title={invalid ? `Not a valid date${min || max ? " in the allowed range" : ""}: use dd/mm/yyyy` : undefined}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => commit(true)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            commit();
+            commit(false);
           } else if (e.key === "Escape" && draft !== null) {
             setDraft(null);
           }
@@ -154,13 +165,22 @@ export function TimeField({
   onChange: (value: string) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setDraft(null);
+  }
   const shown = draft ?? normalizeTime(value);
   const invalid = draft !== null && parseTimeInput(draft) === null;
 
-  function commit() {
+  /** Same rule as DateField: Enter keeps unreadable text to fix, blur drops it, so the box always shows the value. */
+  function commit(onBlur: boolean) {
     if (draft === null) return;
     const t = parseTimeInput(draft);
-    if (t === null) return;
+    if (t === null) {
+      if (onBlur) setDraft(null);
+      return;
+    }
     setDraft(null);
     if (t !== normalizeTime(value)) onChange(t);
   }
@@ -179,11 +199,11 @@ export function TimeField({
         aria-invalid={invalid || undefined}
         title={invalid ? "Not a valid time: use 24-hour HH:MM" : undefined}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => commit(true)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            commit();
+            commit(false);
           } else if (e.key === "Escape" && draft !== null) {
             setDraft(null);
           }

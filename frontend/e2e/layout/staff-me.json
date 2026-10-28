@@ -12,6 +12,7 @@
     "audit.read",
     "b2b_desk.read",
     "b2b_desk.write",
+    "bill.read",
     "billing.read",
     "catalog.admin",
     "catalog.read",

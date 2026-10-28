@@ -24,7 +24,7 @@ import {
   TripCaseStatusBadge,
   useCan,
   useUrlFilters,
-  formatDate,
+  formatDay,
 } from "@/ui";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { QueryError, isForbidden } from "./_parts/QueryError";
@@ -257,11 +257,11 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       }
       return (
         <span className="text-[13px] text-body">
-          <span className="whitespace-nowrap">{formatDate(r.start_date)}</span>
+          <span className="whitespace-nowrap">{formatDay(r.start_date)}</span>
           {r.trip_end_date && (
             <>
               {" "}
-              – <span className="whitespace-nowrap">{formatDate(r.trip_end_date)}</span>
+              – <span className="whitespace-nowrap">{formatDay(r.trip_end_date)}</span>
             </>
           )}
           {sub && <span className="block text-xs text-muted">{sub}</span>}

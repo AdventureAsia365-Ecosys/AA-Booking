@@ -2,10 +2,12 @@
 // ui/booking/ExportCsvButton.tsx
 // AA-996 (audit slice 1, deviation 9) — the CSV button of a list that has no kit DataTable toolbar (the Countries card
 // grid), drawn like the kit's own toolbar button so every list shows the same "CSV" tool. Put it in the FilterBar
-// `tools` slot. The file is built with the kit helpers (ui/csv.ts `toCsv` + `downloadCsv`, UTF-8 BOM for Excel).
+// `tools` slot. The file is built with the kit helpers (ui/csv.ts `toCsv` + `downloadCsv`, UTF-8 BOM for Excel), every
+// value through the spreadsheet formula guard (csvCell.ts).
 
 import { Download } from "lucide-react";
 import { downloadCsv, toCsv } from "../csv";
+import { safeCsvColumns } from "./csvCell";
 import { K, RADIUS, sans } from "../tokens";
 
 export function ExportCsvButton<T>({
@@ -25,7 +27,7 @@ export function ExportCsvButton<T>({
       type="button"
       data-testid="bk-export-csv"
       disabled={off}
-      onClick={() => downloadCsv(filename, toCsv(rows, columns))}
+      onClick={() => downloadCsv(filename, toCsv(rows, safeCsvColumns(columns)))}
       style={{
         display: "inline-flex",
         alignItems: "center",

@@ -577,6 +577,7 @@ const LIST_PAGES: ListCase[] = [
   { name: "services", path: "/services", filters: true },
   { name: "billing-invoices", path: "/billing", filters: true },
   { name: "billing-payments", path: "/billing?tab=payments", filters: true },
+  { name: "billing-supplier-bills", path: "/billing?tab=supplier-bills", filters: true },
   { name: "trip-checks", path: "/trip-checks", filters: true },
   { name: "staff", path: "/staff", filters: true },
 ];
@@ -628,6 +629,13 @@ test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV o
       const [head, first] = text.split("\n");
       expect(head.split(",").length, "the CSV has columns").toBeGreaterThan(2);
       expect(first?.replace(/,/g, "").trim().length ?? 0, "the first CSV row has values").toBeGreaterThan(0);
+      // Review fix: row tools (row menu, open link) are not data, so they never become a CSV column.
+      const heads = head.split(",").map((h) => h.trim());
+      expect(heads, "no row-menu column in the CSV").not.toContain("Actions");
+      expect(heads, "no blank-header column in the CSV").not.toContain("");
+      // Review fix: free text that a spreadsheet would run as a formula is neutralised (csvCell.ts).
+      expect(text, "no cell starts with a formula").not.toMatch(/(^|,|\n)"?[=+@]/);
+      if (lc.name === "billing-supplier-bills") expect(text).toContain(`"'=HYPERLINK(""http://x.test"",""click"")"`);
       expect(c.unmocked, "every Booking API call has a fixture").toEqual([]);
       expect(c.consoleErrors, "console is clean").toEqual([]);
     });
@@ -697,6 +705,32 @@ test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV o
     await page.locator('main [data-testid="bk-filter-reset"]').first().click();
     await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBeNull();
     await expect(from).toHaveValue("");
+    // Review fix: text that is not a day is marked while typing and dropped on blur, so the box never shows a date
+    // the page does not hold.
+    await from.fill("31/02/2026");
+    await from.press("Enter");
+    await expect(from, "unreadable text is marked invalid").toHaveAttribute("aria-invalid", "true");
+    await from.blur();
+    await expect(from, "blur drops the unreadable text").toHaveValue("");
+    await expect(from).not.toHaveAttribute("aria-invalid", "true");
+    expect(new URL(page.url()).searchParams.get("from"), "the filter never got the unreadable text").toBeNull();
+    expect(c.consoleErrors, "console is clean").toEqual([]);
+  });
+
+  test("dates: an out-of-range day reaches the page, marked invalid (native input contract)", async ({ page, baseURL }) => {
+    // The same rule lets SendProposalModal's own `validUntil < min` check disable Send for an out-of-range Valid until.
+    const c = await prepare(page, baseURL!);
+    await open(page, { name: "cases", path: "/cases" }, c);
+    const from = page.getByRole("textbox", { name: "Created from" });
+    const to = page.getByRole("textbox", { name: "Created to" });
+    await from.fill("10/11/2026");
+    await from.blur();
+    await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBe("2026-11-10");
+    await to.fill("01/11/2026"); // before "from" = below the field's min
+    await to.blur();
+    await expect.poll(() => new URL(page.url()).searchParams.get("to"), { message: "the page holds what the box shows" }).toBe("2026-11-01");
+    await expect(to).toHaveValue("1 Nov 2026");
+    await expect(to, "out of range is marked").toHaveAttribute("aria-invalid", "true");
     expect(c.consoleErrors, "console is clean").toEqual([]);
   });
 });

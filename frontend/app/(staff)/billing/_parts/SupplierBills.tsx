@@ -15,6 +15,7 @@ import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import {
   Button,
   DataTable,
+  type CsvColumn,
   DateText,
   FilterBar,
   KpiTile,
@@ -83,6 +84,23 @@ export function SupplierBillsList({
   const list = useQuery({ queryKey: ["supplier-bills", "list", query], queryFn: () => supplierBillsApi.list(query), enabled: canRead });
   const openBill = get("bill");
   const caseFilter = get("case");
+
+  // AA-996 (review fix): the list exports CSV like every Booking list, one column per fact (the Bill cell shows the
+  // code and the supplier's own number).
+  const csvCols: CsvColumn<SupplierBill>[] = [
+    { header: "Bill", value: (r) => r.code },
+    { header: "Supplier bill number", value: (r) => r.bill_number },
+    ...(supplier ? [] : [{ header: "Supplier", value: (r: SupplierBill) => r.supplier.name }]),
+    { header: "Trip case", value: (r) => r.trip_case?.code ?? "" },
+    { header: "Issued", value: (r) => r.issue_date },
+    { header: "Due", value: (r) => r.due_date },
+    { header: "Amount", value: (r) => r.amount },
+    { header: "Paid", value: (r) => r.paid_amount },
+    { header: "Left to pay", value: (r) => (r.status === "cancelled" ? "" : r.balance) },
+    { header: "Currency", value: (r) => r.currency },
+    { header: "Status", value: (r) => r.status },
+    { header: "Overdue", value: (r) => (r.overdue ? "yes" : "no") },
+  ];
 
   const columns: ColumnDef<SupplierBill, unknown>[] = [
     {
@@ -189,6 +207,9 @@ export function SupplierBillsList({
           />
         }
         searchable={false}
+        enableCsv
+        csv={csvCols}
+        csvFilename={supplier ? "supplier-bills-of-supplier.csv" : "supplier-bills.csv"}
         tableId={supplier ? "supplier-bills-of-supplier" : "supplier-bills"}
         data={list.data?.items ?? []}
         columns={columns}

@@ -28,7 +28,7 @@ import {
   Section,
   TripCaseStatusBadge,
   VersionBadgePill,
-  formatDate,
+  formatDay,
   useCan,
 } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
@@ -77,7 +77,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const builderHref = `/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}`;
   const tripName = v.title ?? c.trip_title ?? "Custom trip";
   const dates = c.start_date
-    ? `${formatDate(c.start_date)}${c.trip_end_date ? ` – ${formatDate(c.trip_end_date)}` : ""}${c.duration_days ? ` (${c.duration_days} days)` : ""}`
+    ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}${c.duration_days ? ` (${c.duration_days} days)` : ""}`
     : "Dates to be confirmed";
   const sales = c.assignees.find((a) => a.role === "sales")?.name ?? null;
 
@@ -176,7 +176,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Day {d.day}</p>
                         <h2 className="mt-0.5 truncate text-[17px] font-medium text-ink">{headline}</h2>
                       </div>
-                      {date && <span className="shrink-0 text-[13px] text-muted">{formatDate(date)}</span>}
+                      {date && <span className="shrink-0 text-[13px] text-muted">{formatDay(date.toISOString().slice(0, 10))}</span>}
                     </header>
                     <div className="flex gap-4 px-5 py-4">
                       <div className="hidden w-10 shrink-0 text-center sm:block" aria-hidden="true">

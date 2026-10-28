@@ -37,6 +37,8 @@ interface AdjRow {
 const STEPS = ["Approved version", "Adjustments", "Payment schedule", "Review"] as const;
 const AMEND_STEPS = ["Added lines", "Payment schedule", "Review"] as const;
 
+type ScheduleRow = ScheduleRowIn & { key: number };
+
 function emptyAdj(): AdjRow {
   return { description: "", quantity: "1", unit_price: "", reason: "" };
 }
@@ -90,12 +92,16 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
   // Schedule: the default (server-computed on the final total) or rows typed by hand.
   const frozen = mode.kind === "amend" ? mode.invoice.schedule.filter((r) => Number(r.covered_amount) > 0) : [];
   const [customSchedule, setCustomSchedule] = useState(mode.kind === "edit");
-  const [rows, setRows] = useState<ScheduleRowIn[]>(() => {
-    if (mode.kind === "create") return (mode.billing.defaults?.schedule ?? []).map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date }));
-    if (mode.kind === "edit") return mode.invoice.schedule.map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date }));
-    return mode.invoice.schedule
-      .filter((r) => Number(r.covered_amount) === 0)
-      .map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date }));
+  // Each row carries a stable `key` (React key only, never sent), so removing a row does not move another row's
+  // half-typed due date onto its neighbour.
+  const [rows, setRows] = useState<ScheduleRow[]>(() => {
+    const src =
+      mode.kind === "create"
+        ? (mode.billing.defaults?.schedule ?? [])
+        : mode.kind === "edit"
+          ? mode.invoice.schedule
+          : mode.invoice.schedule.filter((r) => Number(r.covered_amount) === 0);
+    return src.map((r, i) => ({ key: i, kind: r.kind, amount: r.amount, due_date: r.due_date }));
   });
   const [notes, setNotes] = useState(mode.kind === "edit" ? (mode.invoice.notes ?? "") : "");
   const [terms, setTerms] = useState(mode.kind === "edit" ? (mode.invoice.terms ?? "") : "");
@@ -118,7 +124,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       unit_price: a.unit_price.trim(),
       reason: a.reason.trim(),
     })),
-    schedule: customSchedule ? rows : undefined,
+    schedule: customSchedule ? rows.map((r) => ({ kind: r.kind, amount: r.amount, due_date: r.due_date })) : undefined,
   });
 
   const run = useMutation({
@@ -204,7 +210,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       {customSchedule && (
         <>
           {rows.map((r, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[160px_1fr_160px_auto]">
+            <div key={r.key} className="grid gap-2 sm:grid-cols-[160px_1fr_160px_auto]">
               <select className={fieldCls} value={r.kind} onChange={(e) => setRow(i, { kind: e.target.value as ScheduleKind })}>
                 {Object.entries(SCHEDULE_KIND_LABEL).map(([v, l]) => (
                   <option key={v} value={v}>
@@ -220,7 +226,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
             </div>
           ))}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button size="sm" disabled={rows.length + frozen.length >= 10} onClick={() => setRows((xs) => [...xs, { kind: "other", amount: "", due_date: "" }])}>
+            <Button size="sm" disabled={rows.length + frozen.length >= 10} onClick={() => setRows((xs) => [...xs, { key: xs.reduce((m, x) => Math.max(m, x.key), -1) + 1, kind: "other", amount: "", due_date: "" }])}>
               <Plus size={13} /> Add a payment
             </Button>
             <span className={`text-xs ${scheduleOk ? "text-success" : "text-danger"}`}>

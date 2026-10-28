@@ -15,7 +15,7 @@ import { api } from "@/lib/api/client";
 import { proposalsApi } from "@/lib/api/proposals";
 import { QUOTE_VALIDITY_RANGE_DAYS, settingsFromApi } from "@/lib/bookingConfig";
 import { addDays, defaultSendMessage } from "@/lib/proposalDraft";
-import { Button, Modal, Money, Spinner, formatDate, staffDisplay, useStaff, useToast } from "@/ui";
+import { Button, Modal, Money, Spinner, formatDay, staffDisplay, useStaff, useToast } from "@/ui";
 import { DateField } from "@/ui/booking/DateField";
 
 const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
@@ -76,7 +76,7 @@ function SendBody({ code, n, onClose, onSent }: { code: string; n: number; onClo
       summary={{
         title,
         customer: c.customer_name,
-        dates: c.start_date ? `${formatDate(c.start_date)}${c.trip_end_date ? ` – ${formatDate(c.trip_end_date)}` : ""}` : "Dates to be confirmed",
+        dates: c.start_date ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}` : "Dates to be confirmed",
         total: v.total_price,
         currency: v.currency,
       }}

@@ -35,7 +35,7 @@ import {
   VERSION_BADGE_META,
   VersionBadgePill,
   csvMoney,
-  formatDate,
+  formatDay,
   useCan,
   useToast,
   useUrlFilters,
@@ -353,7 +353,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                     <span className="block truncate text-[13px] font-medium text-ink">{c.customer_name ?? "Unnamed customer"}</span>
                     <span className="text-xs text-muted">
                       <Code>{c.code}</Code>
-                      {c.start_date ? ` · ${formatDate(c.start_date)}` : ""}
+                      {c.start_date ? ` · ${formatDay(c.start_date)}` : ""}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
@@ -417,7 +417,7 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => {
       const { leg_titles: legs, start_date, duration_days } = row.original;
-      const when = [start_date ? formatDate(start_date) : null, duration_days ? `${duration_days} days` : null].filter(Boolean).join(" · ");
+      const when = [start_date ? formatDay(start_date) : null, duration_days ? `${duration_days} days` : null].filter(Boolean).join(" · ");
       return (
         <FlexCell min={160}>
           <span title={legs.length ? legs.join("\n") : undefined} className="flex min-w-0 text-[13px] text-body">
