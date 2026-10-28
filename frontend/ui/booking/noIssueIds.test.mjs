@@ -73,6 +73,27 @@ test("the scanner flags strings and JSX text, not comments", () => {
   assert.deepEqual(hits, ["see AA-3", "of AA-4", "AA-5", "Shipped in AA-6"]);
 });
 
+// Text files the app serves byte for byte (public/, and app/ icons or manifests): a comment in them reaches the
+// browser too, so the whole file is checked, comments included.
+const SERVED_AS_IS = /\.(svg|txt|json|xml|webmanifest|html)$/;
+
+function servedFiles(path) {
+  const abs = join(ROOT, path);
+  let st;
+  try {
+    st = statSync(abs);
+  } catch {
+    return [];
+  }
+  if (st.isFile()) return SERVED_AS_IS.test(path) ? [path] : [];
+  return readdirSync(abs).flatMap((name) => servedFiles(join(path, name)));
+}
+
+test("no file served as is (public/, app/ assets) names an internal issue ID", () => {
+  const hits = ["public", "app"].flatMap(servedFiles).filter((f) => ISSUE_ID.test(readFileSync(join(ROOT, f), "utf8")));
+  assert.deepEqual(hits, [], `issue IDs in files served as is:\n${hits.join("\n")}`);
+});
+
 test("no user-visible string in the staff app names an internal issue ID", () => {
   const files = SCAN.flatMap(sourceFiles);
   assert.ok(files.length > 50, `expected the app sources, found ${files.length} files`);
