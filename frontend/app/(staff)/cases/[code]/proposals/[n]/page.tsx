@@ -9,6 +9,9 @@
 // /booking/pricing/quote-preview, live and debounced on the draft lines; "Apply price" = POST
 // …/versions/{n}/price, which prices the SAVED lines on the server and stores the total that Send locks.
 // Saving changed items or costs clears that total on the server (S236 review finding 2).
+// AA-996 (Figma audit items 11, 12): a sent or approved version shows its saved price (total, channel, FX lock, sent /
+// approved dates) instead of a live quote; a read-only session's 403 on the quote is explained (PricePanel); "Record
+// approval" is refused for a version with no items (the API answers 422 version_empty too).
 
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -32,7 +35,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
-import { proposalsApi } from "@/lib/api/proposals";
+import { CHANNELS, proposalsApi } from "@/lib/api/proposals";
 import type { TripCaseDetail, VersionWithItems } from "@/lib/api/types";
 import {
   MAX_ITEMS,
@@ -201,7 +204,8 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
 
   // ── Price ──
   const flatLines = ordered.flatMap((it) => it.costs);
-  const request = canPrice ? quoteRequest(flatLines, price) : null;
+  // A locked version keeps its saved price: no live quote (AA-996, audit item 12; the panel shows the saved figures).
+  const request = canPrice && !locked ? quoteRequest(flatLines, price) : null;
   const quote = useQuotePreview(request);
   const fresh = quote.data && !quote.settling && !quote.isFetching && !quote.isError ? quote.data : null;
   const sellByLine = new Map<string, string>();
@@ -344,7 +348,12 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
               </Button>
             )}
             {canWrite && v.badge === "sent" && c.status === "proposal_sent" && (
-              <Button variant="primary" onClick={() => setApproveOpen(true)}>
+              <Button
+                variant="primary"
+                onClick={() => setApproveOpen(true)}
+                disabled={v.items.length === 0}
+                title={v.items.length === 0 ? "A version with no items cannot be approved" : undefined}
+              >
                 <CheckCircle2 size={14} /> Record approval
               </Button>
             )}
@@ -353,6 +362,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
 
         {editable && sendBlocked && items.length > 0 && !itemsDirty && (
           <p className="-mt-2 text-xs text-muted">Send is not available: {sendBlocked}</p>
+        )}
+        {canWrite && v.badge === "sent" && c.status === "proposal_sent" && v.items.length === 0 && (
+          <p role="alert" className="-mt-2 text-xs text-danger">
+            This sent version has no items, so it cannot be approved. Create a new version with the itinerary and send that one.
+          </p>
         )}
         {editable && itemsDirty && costError && (
           <p role="alert" className="-mt-2 text-xs text-danger">
@@ -499,10 +513,19 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           {/* ── Side column: price + version ── */}
           <div className="flex flex-col gap-5">
             {canPrice && (
-              <Section title="Price" description="Live quote from the Booking pricing engine; Apply price saves it on the version.">
+              <Section
+                title="Price"
+                description={locked ? "The price saved on this version when it was sent. It no longer changes." : "Live quote from the Booking pricing engine; Apply price saves it on the version."}
+              >
                 <div className="flex flex-col gap-4">
-                  <PriceSettings value={price} onChange={setPrice} belowFloor={!!fresh?.below_floor} disabled={locked} />
-                  {!locked && <FxNotice />}
+                  {locked ? (
+                    <LockedPrice v={v} />
+                  ) : (
+                    <>
+                      <PriceSettings value={price} onChange={setPrice} belowFloor={!!fresh?.below_floor} disabled={locked} />
+                      <FxNotice />
+                    </>
+                  )}
                   <div>
                     <p className="mb-2 text-[12px] font-medium uppercase tracking-[0.06em] text-muted">Net costs by item</p>
                     {ordered.length === 0 ? (
@@ -523,9 +546,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                       </ul>
                     )}
                   </div>
-                  <div className="border-t border-line2 pt-4">
-                    <QuoteResult query={quote} canManageRules={canManageRules} emptyHint="Enter net costs on the items above to see the selling price." />
-                  </div>
+                  {!locked && (
+                    <div className="border-t border-line2 pt-4">
+                      <QuoteResult query={quote} canManageRules={canManageRules} emptyHint="Enter net costs on the items above to see the selling price." />
+                    </div>
+                  )}
                   {fresh?.below_floor && price.override.trim() && !price.overrideReason.trim() && (
                     <p className="text-xs text-danger">A reason is required before a below-floor price can be applied.</p>
                   )}
@@ -542,21 +567,23 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                       {applyBlocked && <p className="text-xs text-muted">{applyBlocked}</p>}
                     </div>
                   )}
-                  <div className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
-                    <p>
-                      Saved version total: <Money amount={v.total_price} currency={v.currency} strong />
-                      {v.fx_locked && v.currency !== "USD" ? (
-                        <>
-                          {" "}
-                          at 1 USD = {v.fx_locked.rate} {v.currency}
-                        </>
-                      ) : null}{" "}
-                      (this is what Send locks).
-                    </p>
-                    <p className="mt-1">
-                      Apply price computes it on the server from the saved cost lines. Saving changed items or costs clears it.
-                    </p>
-                  </div>
+                  {!locked && (
+                    <div className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
+                      <p>
+                        Saved version total: <Money amount={v.total_price} currency={v.currency} strong />
+                        {v.fx_locked && v.currency !== "USD" ? (
+                          <>
+                            {" "}
+                            at 1 USD = {v.fx_locked.rate} {v.currency}
+                          </>
+                        ) : null}{" "}
+                        (this is what Send locks).
+                      </p>
+                      <p className="mt-1">
+                        Apply price computes it on the server from the saved cost lines. Saving changed items or costs clears it.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </Section>
             )}
@@ -647,6 +674,55 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
       {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={v.title} notes={v.notes} onClose={() => setDetailsOpen(false)} />}
       <SendProposalModal open={sendOpen} onClose={() => setSendOpen(false)} code={c.code} n={v.version_number} />
     </main>
+  );
+}
+
+/** The price panel of a sent or approved version (AA-996, audit item 12): the saved total and how it was locked,
+ *  instead of the editing empty state "No quote yet". */
+function LockedPrice({ v }: { v: VersionWithItems }) {
+  const row = (label: string, value: React.ReactNode) => (
+    <>
+      <dt className="text-muted">{label}</dt>
+      <dd className="text-right text-ink">{value}</dd>
+    </>
+  );
+  return (
+    <div className="flex flex-col gap-3" data-testid="locked-price">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted">Total</span>
+        <span className="font-display text-2xl font-semibold text-ink bk-tabular">
+          {v.total_price != null ? formatMoney(v.total_price, v.currency) : "—"}
+        </span>
+      </div>
+      {v.total_price == null && <p className="text-xs text-danger">This version was locked without a saved total.</p>}
+      <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-[13px]">
+        {row("Channel", v.channel ? (CHANNELS.find((ch) => ch.value === v.channel)?.label ?? v.channel) : "—")}
+        {row("Currency", v.currency ?? "—")}
+        {row(
+          "FX locked",
+          v.fx_locked && v.currency !== "USD" ? (
+            <>
+              1 USD = {v.fx_locked.rate} {v.currency}
+              {v.fx_locked.as_of && (
+                <span className="block text-xs text-muted">
+                  as of <DateText value={v.fx_locked.as_of} />
+                </span>
+              )}
+            </>
+          ) : (
+            "Not needed (USD)"
+          ),
+        )}
+        {row("Sent", <DateText value={v.sent_at} />)}
+        {row("Valid until", <DateText value={v.valid_until} />)}
+        {v.is_approved && row("Approved", <DateText value={v.approved_at} />)}
+      </dl>
+      <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
+        {v.is_approved
+          ? "The customer approved this price. Invoices are made from it on the Billing tab."
+          : "This is the price the customer received. To change it, create a new version from the case."}
+      </p>
+    </div>
   );
 }
 

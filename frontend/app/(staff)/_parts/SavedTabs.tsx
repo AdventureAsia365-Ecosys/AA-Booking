@@ -10,12 +10,18 @@ import { useUrlFilters } from "@/ui";
 export function SavedTabs({
   tabs,
   param = "tab",
+  active: activeKey,
+  onSelect,
 }: {
   tabs: { key: string; label: string; count?: number; countPending?: boolean }[];
   param?: string;
+  /** AA-996: a tab that sets more than one URL key (e.g. /trip-checks Overdue = status open + due overdue) passes the
+   *  active key and its own select handler; without them the tab is the `param` URL key, as before. */
+  active?: string;
+  onSelect?: (key: string) => void;
 }) {
   const { get, set } = useUrlFilters();
-  const active = get(param) || tabs[0]?.key;
+  const active = activeKey ?? (get(param) || tabs[0]?.key);
   return (
     <div role="tablist" className="bk-tabstrip bk-tabstrip-line flex gap-5">
       {tabs.map((t, i) => {
@@ -25,7 +31,7 @@ export function SavedTabs({
             key={t.key}
             role="tab"
             aria-selected={on}
-            onClick={() => set(param, i === 0 ? null : t.key)}
+            onClick={() => (onSelect ? onSelect(t.key) : set(param, i === 0 ? null : t.key))}
             className={`shrink-0 cursor-pointer border-b-2 pb-2.5 text-[13px] transition ${
               on ? "border-accent font-semibold text-accent-deep" : "border-transparent text-muted hover:text-ink"
             }`}
