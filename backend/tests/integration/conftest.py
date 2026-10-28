@@ -24,6 +24,7 @@ from urllib.parse import urlsplit, urlunsplit
 import asyncpg
 import pytest
 
+from app.catalog import trip_plans
 from app.db import Database, QueryLogger
 from app.settings import Settings
 from tests.catalog_perf import QueryRecorder, Statement, statement_findings
@@ -192,6 +193,14 @@ async def _plan_problems(statements: list[Statement]) -> list[str]:
         return await statement_findings(conn, statements)
     finally:
         await conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_destinations_cache() -> Iterator[None]:
+    """AA-996: the list destinations are cached per process by tour_id; every test starts without them."""
+    trip_plans.DESTINATIONS_CACHE.clear()
+    yield
+    trip_plans.DESTINATIONS_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)
