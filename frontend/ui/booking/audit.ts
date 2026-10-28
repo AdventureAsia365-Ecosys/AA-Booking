@@ -31,19 +31,38 @@ export function auditEntityLabel(entityType: string): string {
   return AUDIT_ENTITY_LABEL[entityType] ?? entityType.replace(/_/g, " ");
 }
 
-/** Spec §1.3 tone of an action such as `trip_case.status_changed` or `customer.blocked`. */
-export function auditActionTone(action: string): BookingTone {
-  const verb = action.split(".").pop() ?? action;
-  // Anchored on the verb, so `unblocked` / `unassigned` stay updates (info).
-  if (/^(archived|blocked|deleted|cancel|deactivat)/.test(verb)) return "danger";
-  if (/^(status_changed|sent|approved)/.test(verb)) return "warning";
-  if (/^(created|provisioned|opened)/.test(verb)) return "success";
+type VerbRef = Pick<AuditLogItem, "action"> & Partial<Pick<AuditLogItem, "before" | "after">>;
+
+/** The verb of a row: the last part of the action, except that a `staff.updated` row that switched `active` reads as
+ *  what it did (AA-996: the Deactivate dialog writes `staff.updated` with `active` false and a reason). */
+export function auditVerb(row: VerbRef): string {
+  const verb = row.action.split(".").pop() ?? row.action;
+  if (row.action === "staff.updated" && isRecord(row.before) && isRecord(row.after) && row.before.active !== row.after.active) {
+    if (row.after.active === false) return "deactivated";
+    if (row.after.active === true) return "activated";
+  }
+  return verb;
+}
+
+// UI spec §1.3 action classes (AA-996 Figma audit: the colour must tell the class). Anchored on the verb, so
+// `unblocked` / `unassigned` stay updates (info).
+const DANGER_RE = /^(archived|blocked|deleted|cancel|case_cancelled|voided|declined|deactivat|removed|personal_data_cleared|expired)/;
+const STATUS_RE = /^(status_changed|sent|approved|verified|confirmed|published|accepted|activated|superseded|amended|reminded|extended|requested|rerequested|incident_flagged|held)/;
+const CREATE_RE = /^(created|provisioned|opened|recorded|added|uploaded|placed|generated)/;
+
+/** Spec §1.3 tone of a row: CREATE → success · UPDATE → info · STATUS → warning · DELETE / BLOCK / VOID → danger.
+ *  Accepts a bare action string too (`trip_case.status_changed`). */
+export function auditActionTone(row: VerbRef | string): BookingTone {
+  const verb = auditVerb(typeof row === "string" ? { action: row } : row);
+  if (DANGER_RE.test(verb)) return "danger";
+  if (STATUS_RE.test(verb)) return "warning";
+  if (CREATE_RE.test(verb)) return "success";
   return "info";
 }
 
 /** `trip_case_version.items_replaced` → `items replaced` (rendered upper-case by the Pill). */
-export function auditActionLabel(action: string): string {
-  return (action.split(".").pop() ?? action).replace(/_/g, " ");
+export function auditActionLabel(row: VerbRef | string): string {
+  return auditVerb(typeof row === "string" ? { action: row } : row).replace(/_/g, " ");
 }
 
 type AuditRef = Pick<AuditLogItem, "action" | "entity_type" | "entity_id" | "entity_label" | "after">;

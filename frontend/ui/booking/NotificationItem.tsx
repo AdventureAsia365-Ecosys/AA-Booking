@@ -4,6 +4,7 @@
 // and the message with case codes in bold. The message is the plain text the API stored; codes are found
 // by pattern, so no markup is ever trusted from the database.
 
+import { NOTIFICATION_TYPE_ICON } from "./notificationIcons";
 import { BadgeCheck, Bell, Handshake, Inbox, Repeat, UserCheck } from "lucide-react";
 import { localizeIsoDates } from "./dates";
 
@@ -16,7 +17,8 @@ const TYPE_ICON: Record<string, React.ComponentType<{ size?: number }>> = {
 };
 
 export function NotificationIcon({ type, read, size = 40 }: { type: string; read: boolean; size?: number }) {
-  const Icon = TYPE_ICON[type] ?? Bell;
+  // AA-996: every staff type has its own icon (notificationIcons.ts); TYPE_ICON stays as the W1 fallback.
+  const Icon = NOTIFICATION_TYPE_ICON[type] ?? TYPE_ICON[type] ?? Bell;
   return (
     <span
       aria-hidden="true"
@@ -30,8 +32,8 @@ export function NotificationIcon({ type, read, size = 40 }: { type: string; read
   );
 }
 
-/** Human codes Booking issues (TC-000123, CUS-000123) and proposal refs (V2). */
-const CODE_RE = /\b((?:TC|CUS)-\d{3,})\b/g;
+/** Human codes Booking issues (TC-000123, CUS-000123; AA-996: INV-, PMT-, BIL-, SB- too) and proposal refs (V2). */
+const CODE_RE = /\b((?:TC|CUS|INV|PMT|BIL|SB)-\d{3,})\b/g;
 
 export function NotificationMessage({ text, className = "" }: { text: string; className?: string }) {
   // AA-996: the API stores dates in the text as ISO ("next due 2026-11-06"); show them like every other date.

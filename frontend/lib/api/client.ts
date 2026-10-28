@@ -140,7 +140,8 @@ export const api = {
     directory: (role?: string) => bkGet<{ items: StaffDirectoryEntry[] }>("staff/directory", { role }),
     list: (active?: boolean) => bkGet<{ items: StaffProfile[] }>("staff", { active }),
     get: (cisUserId: string) => bkGet<StaffDetail>(`staff/${enc(cisUserId)}`),
-    update: (cisUserId: string, body: { active?: boolean; role?: string }) =>
+    /** `reason` (AA-996) is stored in the audit row only; the staff admin asks for it on Deactivate. */
+    update: (cisUserId: string, body: { active?: boolean; role?: string; reason?: string }) =>
       bkSend<StaffProfile>(`staff/${enc(cisUserId)}`, { method: "PATCH", body }),
   },
   tripCases: {
@@ -219,6 +220,8 @@ export const api = {
         entity_id?: string;
         from?: string;
         to?: string;
+        /** AA-996: text in the summary, action, record label or actor name. */
+        q?: string;
         limit?: number;
         before?: string;
       } = {},

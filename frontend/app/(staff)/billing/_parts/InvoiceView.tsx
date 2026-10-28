@@ -5,11 +5,13 @@
 // state (scheduled / due soon / overdue / paid), the payments (record, verify by a second admin, void) and the
 // bill-to / issuer / payment instructions as printed on the payment request. Used by /billing/invoices/[number] and the
 // case Billing tab. "Paid" is never shown without verified money; no copy claims an e-mail.
+// AA-996 (Figma View Details, SEND REMAINDER): an Issue date / Due date card with the PDF note, a totals footer under
+// the lines, light tables (no Columns menu or pager) for the invoice's short lists, and a confirm before Remind (same
+// endpoint as before).
 
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ColumnDef } from "@tanstack/react-table";
 import { BellRing, Pencil, Plus, Send, Trash2 } from "lucide-react";
 import {
   billingApi,
@@ -23,7 +25,6 @@ import {
 import {
   Button,
   ConfirmDialog,
-  DataTable,
   DateText,
   InvoiceStatusBadge,
   KpiTile,
@@ -39,8 +40,10 @@ import {
 } from "@/ui";
 import { InvoiceFormModal } from "./InvoiceForm";
 import { RecordPaymentModal, VerifyPaymentDialog, VoidPaymentDialog, errorText } from "./PaymentDialogs";
+import { InvoiceDatesCard, InvoiceTotalsFooter } from "./InvoiceDocParts";
+import { LightTable, type LightColumn } from "@/ui/booking/LightTable";
 
-type Panel = "edit" | "amend" | "record" | "send" | "delete" | "cancel" | null;
+type Panel = "edit" | "amend" | "record" | "send" | "delete" | "cancel" | "remind" | null;
 
 export function useBillingRefresh(caseCode?: string) {
   const qc = useQueryClient();
@@ -88,99 +91,105 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
     mutationFn: () => billingApi.remind(invoice.invoice_number),
     onSuccess: (r) => {
       toast.success(r.reminded ? "Reminder added to the customer's My Trips feed (no e-mail)" : "Already reminded today");
+      setPanel(null);
       done();
     },
-    onError: (e) => toast.error(errorText(e)),
   });
 
-  const lineCols: ColumnDef<InvoiceLine, unknown>[] = [
+  const lineCols: LightColumn<InvoiceLine>[] = [
     {
       id: "description",
       header: "Line",
-      cell: ({ row }) => (
+      width: "minmax(0,2.4fr)",
+      phoneLabel: false,
+      cell: (r) => (
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13.5px] text-ink">{row.original.description}</span>
-          {row.original.kind === "version_total" ? (
+          <span className="text-[13.5px] text-ink">{r.description}</span>
+          {r.kind === "version_total" ? (
             <span className="text-xs text-muted">Approved proposal (locked)</span>
           ) : (
-            <span className="text-xs text-muted">Adjustment: {row.original.reason}</span>
+            <span className="text-xs text-muted">Adjustment: {r.reason}</span>
           )}
         </span>
       ),
     },
-    { id: "qty", header: "Qty", cell: ({ row }) => <span className="bk-tabular text-[13px]">{Number(row.original.quantity)}</span> },
-    { id: "unit", header: "Unit price", cell: ({ row }) => <Money amount={row.original.unit_price} currency={cur} className="text-[13px]" /> },
-    { id: "amount", header: "Amount", cell: ({ row }) => <Money amount={row.original.amount} currency={cur} strong className="text-[13px]" /> },
+    { id: "qty", numeric: true, width: "minmax(0,0.5fr)", header: "Qty", cell: (r) => <span className="bk-tabular text-[13px]">{Number(r.quantity)}</span> },
+    { id: "unit", numeric: true, header: "Unit price", cell: (r) => <Money amount={r.unit_price} currency={cur} className="text-[13px]" /> },
+    { id: "amount", numeric: true, header: "Amount", cell: (r) => <Money amount={r.amount} currency={cur} strong className="text-[13px]" /> },
   ];
-  const scheduleCols: ColumnDef<ScheduleRow, unknown>[] = [
-    { id: "kind", header: "Payment", cell: ({ row }) => <span className="text-[13px] text-ink">{SCHEDULE_KIND_LABEL[row.original.kind]}</span> },
-    { id: "due", header: "Due", cell: ({ row }) => <DateText value={row.original.due_date} className="text-[13px]" /> },
-    { id: "amount", header: "Amount", cell: ({ row }) => <Money amount={row.original.amount} currency={cur} className="text-[13px]" /> },
-    { id: "covered", header: "Paid", cell: ({ row }) => <Money amount={row.original.covered_amount} currency={cur} className="text-[13px]" /> },
+  const scheduleCols: LightColumn<ScheduleRow>[] = [
+    { id: "kind", header: "Payment", cell: (r) => <span className="text-[13px] text-ink">{SCHEDULE_KIND_LABEL[r.kind]}</span> },
+    { id: "due", header: "Due", cell: (r) => <DateText value={r.due_date} className="text-[13px]" /> },
+    { id: "amount", numeric: true, header: "Amount", cell: (r) => <Money amount={r.amount} currency={cur} className="text-[13px]" /> },
+    { id: "covered", numeric: true, header: "Paid", cell: (r) => <Money amount={r.covered_amount} currency={cur} className="text-[13px]" /> },
     {
       id: "state",
       header: "Status",
-      cell: ({ row }) => (
+      cell: (r) => (
         <span className="flex flex-col gap-0.5">
-          <ScheduleStateBadge state={row.original.state} />
-          {row.original.days_overdue ? <span className="text-xs text-danger">{row.original.days_overdue} day(s) late</span> : null}
+          <ScheduleStateBadge state={r.state} />
+          {r.days_overdue ? <span className="text-xs text-danger">{r.days_overdue} day(s) late</span> : null}
         </span>
       ),
     },
   ];
-  const paymentCols: ColumnDef<Payment, unknown>[] = [
+  const paymentCols: LightColumn<Payment>[] = [
     {
       id: "ref",
       header: "Payment",
-      cell: ({ row }) => (
+      width: "minmax(0,1.5fr)",
+      cell: (r) => (
         <span className="flex flex-col">
-          <Link href={`/billing/payments/${encodeURIComponent(row.original.ref)}`} className="text-[13px] font-medium text-accent-deep hover:underline">
-            {row.original.ref}
+          <Link href={`/billing/payments/${encodeURIComponent(r.ref)}`} className="text-[13px] font-medium text-accent-deep hover:underline">
+            {r.ref}
           </Link>
-          <span className="text-xs text-muted">{row.original.kind === "refund" ? "Refund" : "Received"} · {PAYMENT_METHOD_LABEL[row.original.method]}</span>
+          <span className="text-xs text-muted">{r.kind === "refund" ? "Refund" : "Received"} · {PAYMENT_METHOD_LABEL[r.method]}</span>
         </span>
       ),
     },
-    { id: "date", header: "Date", cell: ({ row }) => <DateText value={row.original.received_on} className="text-[13px]" /> },
+    { id: "date", header: "Date", cell: (r) => <DateText value={r.received_on} className="text-[13px]" /> },
     {
       id: "amount",
       header: "Amount",
-      cell: ({ row }) => (
-        <Money amount={row.original.kind === "refund" ? `-${row.original.amount}` : row.original.amount} currency={row.original.currency} className="text-[13px]" />
+      numeric: true,
+      cell: (r) => (
+        <Money amount={r.kind === "refund" ? `-${r.amount}` : r.amount} currency={r.currency} className="text-[13px]" />
       ),
     },
     {
       id: "who",
       header: "Recorded / verified",
-      cell: ({ row }) => (
+      cell: (r) => (
         <span className="text-xs text-body">
-          {row.original.recorded_by?.name ?? "—"}
-          {row.original.verified_by ? ` / ${row.original.verified_by.name ?? row.original.verified_by.id}` : ""}
+          {r.recorded_by?.name ?? "—"}
+          {r.verified_by ? ` / ${r.verified_by.name ?? r.verified_by.id}` : ""}
         </span>
       ),
     },
     {
       id: "state",
       header: "Status",
-      cell: ({ row }) => (
+      cell: (r) => (
         <span className="flex flex-col gap-0.5">
-          <PaymentStateBadge state={row.original.state} />
-          {row.original.state === "recorded" && row.original.needs_evidence && <span className="text-xs text-warning">Evidence missing</span>}
+          <PaymentStateBadge state={r.state} />
+          {r.state === "recorded" && r.needs_evidence && <span className="text-xs text-warning">Evidence missing</span>}
         </span>
       ),
     },
     {
       id: "actions",
       header: "",
-      cell: ({ row }) => (
+      width: "auto",
+      phoneLabel: false,
+      cell: (r) => (
         <span className="flex justify-end gap-1.5">
-          {row.original.actions.verify && (
-            <Button size="sm" variant="primary" onClick={() => setVerifying(row.original)}>
+          {r.actions.verify && (
+            <Button size="sm" variant="primary" onClick={() => setVerifying(r)}>
               Verify
             </Button>
           )}
-          {row.original.actions.void && (
-            <Button size="sm" variant="ghost" onClick={() => setVoiding(row.original)}>
+          {r.actions.void && (
+            <Button size="sm" variant="ghost" onClick={() => setVoiding(r)}>
               Void
             </Button>
           )}
@@ -232,7 +241,7 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
               </Button>
             )}
             {a.remind && (
-              <Button onClick={() => remind.mutate()} disabled={remind.isPending}>
+              <Button onClick={() => setPanel("remind")} disabled={remind.isPending}>
                 <BellRing size={14} /> Remind
               </Button>
             )}
@@ -271,25 +280,34 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
       <div className="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           <Section title="Lines" padded={false}>
-            <DataTable<InvoiceLine> searchable={false} tableId="invoice-lines" data={invoice.items} columns={lineCols} getRowId={(r) => r.id} tableMinWidth={560} />
+            <LightTable<InvoiceLine>
+              label="Invoice lines"
+              rows={invoice.items}
+              columns={lineCols}
+              rowKey={(r) => r.id}
+              footer={<InvoiceTotalsFooter invoice={invoice} />}
+            />
           </Section>
           <Section title="Payment schedule" description="Paid / due / overdue follows the verified payments, oldest due first." padded={false}>
-            <DataTable<ScheduleRow> searchable={false} tableId="invoice-schedule" data={invoice.schedule} columns={scheduleCols} getRowId={(r) => r.id} tableMinWidth={600} />
+            <LightTable<ScheduleRow> label="Payment schedule" rows={invoice.schedule} columns={scheduleCols} rowKey={(r) => r.id} />
           </Section>
           <Section title="Payments" description="Recorded by hand; each counts once a second admin has verified it." padded={false}>
-            <DataTable<Payment>
-              searchable={false}
-              tableId="invoice-payments"
-              data={invoice.payments}
+            <LightTable<Payment>
+              label="Payments"
+              rows={invoice.payments}
               columns={paymentCols}
-              getRowId={(r) => r.id}
-              emptyTitle="No payment yet"
-              emptyDescription={invoice.status === "draft" ? "Send the invoice first." : "Record a payment when money arrives."}
-              tableMinWidth={760}
+              rowKey={(r) => r.id}
+              empty={
+                <>
+                  <span className="font-medium text-ink">No payment yet.</span>{" "}
+                  {invoice.status === "draft" ? "Send the invoice first." : "Record a payment when money arrives."}
+                </>
+              }
             />
           </Section>
         </div>
         <div className="flex min-w-0 flex-col gap-5">
+          <InvoiceDatesCard invoice={invoice} />
           <Section title="Bill to">
             {invoice.bill_to_name ? (
               <div className="flex flex-col gap-0.5 text-[13px] text-body">
@@ -379,6 +397,28 @@ export function InvoiceView({ invoice, onChanged }: { invoice: InvoiceDetail; on
         error={cancel.isError ? errorText(cancel.error) : null}
         reason={{ label: "Why is it cancelled?", required: true }}
         message="Only an invoice with nothing paid can be cancelled: refund verified payments first. The customer's My Trips feed says it was cancelled."
+      />
+      <ConfirmDialog
+        open={panel === "remind"}
+        onClose={() => setPanel(null)}
+        onConfirm={() => remind.mutate()}
+        title={`Send a reminder for ${invoice.invoice_number}`}
+        confirmLabel="Send reminder"
+        busy={remind.isPending}
+        error={remind.isError ? errorText(remind.error) : null}
+        message={
+          <>
+            {invoice.bill_to_name ?? invoice.customer?.name ?? "The customer"} gets a reminder of this payment request in My
+            Trips, with what is left to pay
+            {invoice.balance && Number(invoice.balance) > 0 ? (
+              <>
+                {" "}
+                (<Money amount={invoice.balance} currency={cur} />)
+              </>
+            ) : null}
+            . No e-mail is sent, and a request is reminded at most once a day.
+          </>
+        }
       />
     </div>
   );

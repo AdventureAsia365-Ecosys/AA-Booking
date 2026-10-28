@@ -18,15 +18,55 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   // admin to pay it.
   "supplier_bill.due": "Supplier bill due",
   "supplier_bill.approved": "Bill approved: pay it",
+  // AA-996 (Figma audit): every other type the backend writes to the staff feed, so no row shows a raw key and the
+  // Type filter can select each one. AA-682 operations (app/ops/lifecycle.py, supplier_bookings.py, payments.py,
+  // invoices.py) and retention (app/retention/jobs.py).
+  "trip_case.gate_blocked": "Case cannot move on",
+  "trip_check.due": "Trip check due",
+  "supplier_booking.waiting": "Supplier not answering",
+  "supplier_booking.cancel_with_supplier": "Cancel with supplier",
+  "payment.recorded": "Payment to verify",
+  "payment.due_soon": "Payment due soon",
+  "invoice.overdue": "Invoice overdue",
+  "invoice.overpaid": "Invoice overpaid",
+  "invoice.balance_reopened": "Balance reopened",
+  "invoice.case_cancelled": "Invoice of a cancelled trip",
+  "retention.held": "Retention held",
 };
+
+/** The text of a data field, or null. */
+function text(n: StaffNotification, key: string): string | null {
+  const v = n.data?.[key];
+  return typeof v === "string" && v ? v : null;
+}
 
 /** Where an item leads, and the action label (one per type, spec §4.3). */
 export function notificationTarget(n: StaffNotification): { href: string; label: string } | null {
-  const code = typeof n.data?.code === "string" ? n.data.code : null;
+  const code = text(n, "code");
+  // The operations reminders name their case in `case_code` (trip_check.due, supplier_booking.waiting).
+  const caseCode = code ?? text(n, "case_code");
   if (n.type === "b2b.on_request") return { href: "/b2b-desk", label: "Open B2B desk" };
+  if (n.type === "trip_check.due") {
+    const ref = caseCode ?? n.entity_id;
+    return ref ? { href: `/cases/${encodeURIComponent(ref)}?tab=checks`, label: "Open checks" } : null;
+  }
   if (n.entity_type === "trip_case" || n.entity_type === "trip_case_version") {
-    const ref = code ?? n.entity_id;
+    const ref = caseCode ?? n.entity_id;
     return ref ? { href: `/cases/${encodeURIComponent(ref)}`, label: "Open case" } : null;
+  }
+  // AA-996: money rows open the invoice page (by its number), a recorded payment opens the payment to verify.
+  if (n.entity_type === "invoice") {
+    const number = text(n, "invoice_number");
+    return number ? { href: `/billing/invoices/${encodeURIComponent(number)}`, label: "Open invoice" } : null;
+  }
+  if (n.entity_type === "payment") {
+    const ref = text(n, "ref") ?? n.entity_id;
+    return ref ? { href: `/billing/payments/${encodeURIComponent(ref)}`, label: "Open payment" } : null;
+  }
+  if (n.entity_type === "supplier_booking") {
+    // Here `code` is the booking's own SB- code: the case is `case_code`.
+    const ref = text(n, "case_code");
+    return ref ? { href: `/cases/${encodeURIComponent(ref)}?tab=suppliers`, label: "Open suppliers" } : null;
   }
   if (n.entity_type === "trip_plan") {
     // An orphaned plan has no detail page any more (its CIS content is gone): open the Orphaned filter.

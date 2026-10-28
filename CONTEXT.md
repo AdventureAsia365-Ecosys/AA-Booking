@@ -105,11 +105,11 @@ backend/
   app/main.py              FastAPI app factory; every path is under /booking
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
   app/routers/docs.py      GET /booking/openapi.json, GET /booking/docs (staff.admin outside test/local, AA-876)
-  app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff
+  app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff (PATCH `reason`: audit row only, AA-996)
   app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
   app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
   app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
-  app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin)
+  app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin; `q` text search, AA-996)
   app/auth/                identity_verifier.py (byte copy of AA-CIS-App api/core/identity_verifier.py, the multi-issuer
                            verifier; never edited here), identity_config.py (accepted issuers + clients, JWKS prefetch,
                            AA-680), profile / Cognito identity link / permissions (staff.py), admin ops (admin.py),

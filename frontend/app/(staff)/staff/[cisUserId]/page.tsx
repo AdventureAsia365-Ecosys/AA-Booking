@@ -237,7 +237,7 @@ function Activity({ id }: { id: string }) {
             {items.map((a) => (
               <li key={a.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 border-b border-line2 py-3 first:pt-0 last:border-b-0">
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
-                  <Pill tone={auditActionTone(a.action)} dot={false} upper>{a.action.replace(/[._]/g, " ")}</Pill>
+                  <Pill tone={auditActionTone(a)} dot={false} upper>{a.action.replace(/[._]/g, " ")}</Pill>
                   <span className="min-w-0 text-[13px] text-ink">
                     {a.summary ?? a.action}
                     {a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}

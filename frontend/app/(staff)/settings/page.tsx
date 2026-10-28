@@ -62,6 +62,16 @@ const TYPE_HELP: Record<string, string> = {
   "trip_case.assigned": "A trip case was assigned to you.",
   "trip_case.status_changed": "A case you work on moved to another status.",
   "proposal.approved": "A customer approved a proposal version.",
+  // AA-996 (Figma audit): every preference row has a help line.
+  "tour.retired": "A CIS tour used by an open case or a trip plan left the catalog.",
+  "tour.reinstated": "A CIS tour that had left the catalog is served again.",
+  "b2b.on_request": "A confirmed partner booking has lines the B2B desk must accept or decline.",
+};
+
+/** Staff-facing help of the commercial defaults (AA-996: the stored row descriptions carry internal notes). */
+const SETTING_HELP: Record<string, string> = {
+  deposit_pct: "Asked when the customer confirms; the balance follows the payment schedule.",
+  quote_validity_days: "How long a sent proposal can be approved at its price.",
 };
 
 function isForbidden(e: unknown): boolean {
@@ -123,8 +133,11 @@ function GeneralTab() {
         actions={<ManagedInCisLink label="Manage in CIS" />}
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <ReadOnlyField label="Name">{name}</ReadOnlyField>
-          <ReadOnlyField label="CIS role">{staff.cis_role ?? "—"}</ReadOnlyField>
+          {/* AA-996: a company sign-in carries no CIS role claim; the field is left out rather than shown empty. */}
+          <div className={staff.cis_role ? "" : "sm:col-span-2"}>
+            <ReadOnlyField label="Name">{name}</ReadOnlyField>
+          </div>
+          {staff.cis_role && <ReadOnlyField label="CIS role">{staff.cis_role}</ReadOnlyField>}
           <div className="sm:col-span-2">
             <ReadOnlyField label="E-mail address" help="Change your e-mail in CIS; Booking copies it at sign-in.">
               {staff.email ?? "—"}
@@ -159,7 +172,7 @@ function GeneralTab() {
 
       <Block
         title="Commercial defaults"
-        description="Booking-wide values every proposal and invoice uses. Read-only here; an admin changes them in booking.settings."
+        description="Booking-wide values every proposal and invoice uses. Read-only: the Booking team changes them, not this page."
       >
         <CommercialDefaults />
       </Block>
@@ -299,10 +312,10 @@ function SettingsRows({ data }: { data: SettingsResponse }) {
   const updated = (r: SettingsResponse["items"][number] | undefined) =>
     r ? (
       <>
-        {r.description ? `${r.description} · ` : ""}Updated <DateText value={r.updated_at} />
+        {SETTING_HELP[r.key] ? `${SETTING_HELP[r.key]} · ` : ""}Updated <DateText value={r.updated_at} />
       </>
     ) : (
-      "Not set in booking.settings: ask an admin to add the row."
+      "Not set yet: ask the Booking team to set it."
     );
   return (
     <div className="grid gap-4">
