@@ -210,7 +210,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/settings` | Profile (read-only, from CIS), theme, notification preferences | SETTINGS, SETTINGS-1 (as preferences), EDIT PROFILE (part) (01) | all | W1 |
 | `/settings?tab=security` | Sign-in & security: sign-in method (company e-mail code), session facts (`GET /api/auth/session`: signed in, session end), last seen, "Manage staff & invites in CIS ↗" | SETTINGS-2, RESET PASSWORD (replaced) (01) | all | shipped (AA-996) |
 | `/cases` | Trip case list (+ saved filter "Inquiries" = `status=new_inquiry`) | TRIP CASES MANAGEMENT, TRIP PLAN MANAGEMENT (03, 05) | A S C(r) | W1 |
-| `/cases/new` | Create trip case (manual) | ADD NEW TRIP 8 (03) | A S | W1 |
+| `/cases/new` | Create trip case (manual; optional "Start from a trip plan", AA-996) | ADD NEW TRIP 8 (03) | A S | W1 |
 | `/cases/[code]` | Case workspace, tab Overview (+ Edit details drawer) | Assigned Trips-1 (layout), TRIP CASES DETAILS, USER DETAILS-3/-4/-5 (inquiry panel), ADD NEW ACTIVITY-2 (= "Edit Trip Case" form → Edit details drawer) (03, 02, 07) | A S C(r) | W1 |
 | `/cases/[code]?tab=proposals` | Versions list | TRIP CASES DETAILS-1, Assigned Trips-1 (03) | A S C(r) | W1 |
 | `/cases/[code]?tab=suppliers` | Supplier bookings of the case (AA-682 S1, bk-026): Generate from the approved version, Request / Confirm (ref + voucher, B2C only) / Declined / Cancel / Change; computed supply badge "Confirmed & Booked"; B2B on-request lines answered here (one action with the desk). Below: **Cost vs billed** panel (AA-682 S4, bk-030): expected net per booking next to the supplier bill lines, variance once billed and per currency (`bill.read` + `pricing.read`); links to the case's bills (`?tab=supplier-bills&case=`) and Enter bill (`bill.write`) | — (not drawn) | A S C | shipped (AA-682 S1, S4) |
@@ -407,7 +407,7 @@ The layout is `Assigned Trips-1.png` (03 decision 11), extended with tabs.
 - **Overview, main column**:
   - **Inquiry panel** (cases from TripPlanner): source chip "TripPlanner", received at, and the `inquiry_snapshot` rendered read-only: route days and legs, plus message / budget / travel window when the contract carries them (v1.2, Q12).
   - **Primary actions on a `new_inquiry` case**:
-    - "Convert to discovery": a modal with sales rep, optional notes, and status → `discovery`;
+    - "Convert to discovery": a modal with sales rep, optional notes, an optional "Start from a trip plan" picker (sellable plans, `version.write`; AA-996: adds a draft version from the plan's CIS days through `POST /booking/catalog/trip-plans/{source_id}/trip-cases` with `{trip_case}`), and status → `discovery`;
     - "Decline": a modal with a reason select (Budget too low / Not our destination / Duplicate / No response / Other) and notes, then status → `cancelled` with the reason;
     - "Reopen" when allowed.
   - **Trip legs**: an ordered list, each with the CIS tour title (from `catalog.v_tour` by `source_tour_id`), days from–to, and "View in catalog". All CIS content here is read-only, tagged "From CIS".

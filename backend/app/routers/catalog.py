@@ -9,6 +9,8 @@ Sellable trip plans (AA-679, S237 decision D4, bk-009):
 (AA-986 L5, with the reason and what is still attached). ``GET …/facets`` gives the filter options and counts.
 ``GET …/{source_id}`` is one tour with its CIS days and photos plus the commercial row.
 ``PUT …/{source_id}/commercial`` upserts the commercial row (``trip_plan.write``: admin, contracting).
+``GET …/{source_id}/prices`` (``pricing.read``) and ``PUT …/{source_id}/prices`` (``trip_plan.write``, replaces the
+set) keep the plan's per-person price matrix (bk-032, AA-996; ``app/catalog/trip_plan_prices.py``).
 ``POST …/{source_id}/trip-cases`` starts a trip case, or a new version of an existing case, from a sellable plan
 (``trip_case.write`` + ``version.write``: admin, sales).
 ``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
@@ -37,7 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app import catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import departures, plan_components
-from app.catalog import geo, trip_plans
+from app.catalog import geo, trip_plan_prices, trip_plans
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
 from app.trip_cases import service
@@ -50,6 +52,7 @@ CanRead = Annotated[Staff, Depends(require("catalog.read"))]
 CanWritePlans = Annotated[Staff, Depends(require("trip_plan.write"))]
 CanStartCase = Annotated[Staff, Depends(require("trip_case.write"))]
 CanReadSupply = Annotated[Staff, Depends(require("supply.read"))]
+CanReadPrices = Annotated[Staff, Depends(require("pricing.read"))]
 CanAdminCatalog = Annotated[Staff, Depends(require("catalog.admin"))]
 IsoCode = Annotated[str, Path(pattern=r"^[A-Za-z]{2}$", description="ISO 3166-1 alpha-2 country code")]
 GeoStatus = Literal["active", "inactive"]
@@ -71,7 +74,7 @@ class PriceHint(BaseModel):
 
 
 class CommercialBody(BaseModel):
-    """Every commercial field (PUT): a field left out is cleared."""
+    """Every commercial field (PUT): a field left out is cleared, except ``supplier_id`` (left out = kept, AA-996)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -80,6 +83,45 @@ class CommercialBody(BaseModel):
     default_channel: engine.Channel | None = None
     price_hint: PriceHint | None = None
     commercial_notes: str | None = Field(default=None, max_length=5_000)
+    supplier_id: uuid.UUID | None = None
+
+    def data(self) -> dict[str, Any]:
+        out = self.model_dump()
+        if "supplier_id" not in self.model_fields_set:
+            out.pop("supplier_id")
+        elif out["supplier_id"] is not None:
+            out["supplier_id"] = str(out["supplier_id"])
+        return out
+
+
+PerPerson = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2, allow_inf_nan=False)]
+NetCost = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2, allow_inf_nan=False)]
+Pax = Annotated[int, Field(ge=1, le=999)]
+
+
+class PriceRowIn(BaseModel):
+    """One price matrix row: the selling price per person, or the net cost per person to price it from (AA-996)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel: engine.Channel
+    season: str | None = Field(default=None, max_length=80)
+    peak: bool = False
+    valid_from: date
+    valid_to: date
+    pax_min: Pax = 1
+    pax_max: Pax | None = None
+    currency: Currency = engine.BASE_CURRENCY
+    amount: PerPerson | None = Field(default=None, description="price per person; with a net cost, an override")
+    net_amount: NetCost | None = Field(default=None, description="net cost per person to price the row from")
+    net_currency: Currency | None = None
+
+
+class PricesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PriceRowIn] = Field(max_length=trip_plan_prices.MAX_ROWS)
+    below_floor_reason: str | None = Field(default=None, max_length=500, description="required below the floor")
 
 
 class DestinationPatch(BaseModel):
@@ -250,7 +292,27 @@ async def put_trip_plan_commercial(
     body: CommercialBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        return await trip_plans.save_commercial(conn, staff, source_id, body.model_dump())
+        return await trip_plans.save_commercial(conn, staff, source_id, body.data())
+
+
+@router.get("/trip-plans/{source_id}/prices")
+async def get_trip_plan_prices(source_id: SourceId, staff: CanReadPrices, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await trip_plan_prices.list_prices(conn, staff, source_id)
+
+
+@router.put("/trip-plans/{source_id}/prices")
+async def put_trip_plan_prices(
+    body: PricesBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await trip_plan_prices.replace_prices(
+            conn,
+            staff,
+            source_id,
+            [r.model_dump() for r in body.items],
+            below_floor_reason=body.below_floor_reason,
+        )
 
 
 @router.post("/trip-plans/{source_id}/trip-cases", status_code=201)

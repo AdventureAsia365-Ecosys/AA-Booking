@@ -51,7 +51,7 @@ import type {
   SupplyMedia,
 } from "../../lib/api/supply";
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
-import type { OrphanedPlanItem, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
+import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
 import type { BillingSummary, InvoiceStatus, InvoiceSummary, Kpi, Page as BillingPage, Payment } from "../../lib/api/billing";
@@ -703,8 +703,50 @@ function tripPlan(i: number): TripPlanListItem {
     trip_style: "Private family adventure with soft trekking",
     default_channel: i % 2 ? "b2b" : "b2c_tailor_made",
     price_hint: { amount: "4850.00", currency: "USD", basis: "per_person" },
+    // AA-996 slice 2: the widest real values (a 5-digit price with season, a long supplier, eight long places).
+    from_price: i % 2 === 0 ? { amount: "12485.00", currency: "USD", basis: "per_person", season: "Low season" } : null,
+    supplier_id: i % 3 ? uuid("5", i) : null,
+    supplier: i % 3 ? { id: uuid("5", i), code: `SUP-${pad(i + 1)}`, company_name: "Red River Destination Management Company", status: "active" } : null,
+    destinations: ["Hanoi", "Ha Long Bay", "Hoi An Ancient Town", "Siem Reap", "Phnom Penh", "Can Tho", "Luang Prabang", "Vientiane"].slice(0, 2 + (i % 7)),
   };
 }
+
+// AA-996 slice 2: one trip plan with its CIS content (long text) and the price matrix (priced and hand rows).
+function tripPlanDetail(sourceId: string): TripPlanDetail {
+  return {
+    ...tripPlan(1),
+    source_id: sourceId,
+    source_version: 4,
+    slug: "grand-indochina-discovery",
+    subtitle: "Fourteen days from the Red River Delta to the temples of Angkor",
+    summary: "A long private journey through Vietnam and Cambodia with soft trekking, home stays and boat days. ".repeat(4),
+    description: null,
+    highlights: ["Ha Long Bay overnight cruise", "Angkor Wat at sunrise"],
+    duration_raw: "15 days / 14 nights",
+    inclusions: "All private transfers and the internal flights\nEnglish-speaking guides every day\nBreakfast daily, 9 lunches, 4 dinners",
+    exclusions: "International flights\nVisa fees\nTravel insurance and personal expenses",
+    best_time_to_go: "October to April",
+    group_size: "2-12",
+    itinerary_text: null,
+    published_at: NOW,
+    content_hash: "h",
+    commercial_notes: "DMC net rates 2027, 2 pax minimum, child policy as per contract",
+    days: range(15).map((d) => ({ day_number: d + 1, title: `Day ${d + 1} title`, body: "Body", places: ["Hanoi"] })),
+    photos: [],
+    cases_started: 3,
+    commercial: { created_at: EARLIER, updated_at: NOW, created_by: { id: "u-001", name: PERSON_NAMES[1] }, updated_by: null },
+  };
+}
+
+const PRICE_MATRIX: PriceMatrix = {
+  source_id: "",
+  from_price: { amount: "12485.00", currency: "USD", basis: "per_person", season: "Low season" },
+  items: [
+    { position: 1, channel: "b2c_tailor_made", season: "Low season", peak: false, valid_from: "2027-01-01", valid_to: "2027-04-30", pax_min: 2, pax_max: 2, currency: "USD", amount: "12485.00", net_amount: "8365.00", net_currency: "USD", effective_margin: "0.3000", priced_on: "2026-10-20", priced: true, overridden: false },
+    { position: 2, channel: "b2c_tailor_made", season: "Low season", peak: false, valid_from: "2027-01-01", valid_to: "2027-04-30", pax_min: 3, pax_max: 4, currency: "USD", amount: "10950.00", net_amount: null, net_currency: null, effective_margin: null, priced_on: null, priced: false, overridden: false },
+    { position: 3, channel: "fixed_departure", season: "Tet holiday peak", peak: true, valid_from: "2027-02-01", valid_to: "2027-02-20", pax_min: 11, pax_max: null, currency: "EUR", amount: "11250.00", net_amount: "185000000.00", net_currency: "VND", effective_margin: "0.1890", priced_on: "2026-10-20", priced: true, overridden: true },
+  ],
+};
 
 const TRIP_PLAN_FACETS: TripPlanFacets = {
   total: 412,
@@ -1170,6 +1212,8 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "prices") return ok({ ...PRICE_MATRIX, source_id: at(2) });
+  if (at(0) === "catalog" && at(1) === "trip-plans" && seg.length === 3) return ok(tripPlanDetail(at(2)));
   if (p === "catalog/trip-plans") {
     if (query.get("orphaned") === "true") return ok(page(range(9).map(orphanedPlan), 9));
     return ok(page(range(ROWS).map(tripPlan), 412));

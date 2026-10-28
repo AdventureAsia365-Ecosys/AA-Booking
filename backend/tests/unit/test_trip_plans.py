@@ -42,6 +42,8 @@ def tour_row(**over: Any) -> dict[str, Any]:
         "price_hint_currency": "USD",
         "price_hint_basis": "per_person",
         "commercial_notes": "net",
+        "supplier_id": None,
+        "cover_photo_path": None,
         "created_by": "u-5",
         "created_by_name": "Contracts",
         "updated_by": None,
@@ -192,6 +194,7 @@ STORED = {
     "price_hint_currency": "USD",
     "price_hint_basis": "per_person",
     "commercial_notes": "net",
+    "supplier_id": None,
 }
 BODY = {
     "sellable": True,
@@ -222,6 +225,66 @@ async def test_save_commercial_update_audits_the_changed_fields() -> None:
         and audit_args[8] == "BT-7D"
         and audit_args[9] == "Updated commercial_notes"
     )
+
+
+@pytest.mark.asyncio
+async def test_save_commercial_keeps_the_supplier_when_left_out() -> None:
+    """AA-996: BODY has no supplier_id (the sellable toggle, an older UI): the stored supplier stays."""
+    conn = plan_conn(stored={**STORED, "supplier_id": "00000000-0000-4000-8000-0000000000aa"})
+    out = await trip_plans.save_commercial(conn, CONTRACTING, SOURCE_ID, BODY)
+    assert out["changed"] == [] and conn.sql("INSERT INTO booking.trip_plans") == []
+
+
+@pytest.mark.asyncio
+async def test_save_commercial_checks_a_new_supplier() -> None:
+    new = "00000000-0000-4000-8000-0000000000bb"
+    inactive = plan_conn(stored=STORED).on("FROM booking.suppliers", "inactive")
+    with pytest.raises(Invalid) as err:
+        await trip_plans.save_commercial(inactive, CONTRACTING, SOURCE_ID, {**BODY, "supplier_id": new})
+    assert err.value.code == "supplier_inactive"
+    missing = plan_conn(stored=STORED).on("FROM booking.suppliers", None)
+    with pytest.raises(Invalid) as err:
+        await trip_plans.save_commercial(missing, CONTRACTING, SOURCE_ID, {**BODY, "supplier_id": new})
+    assert err.value.code == "supplier_not_found"
+    active = plan_conn(stored=STORED).on("FROM booking.suppliers", "active")
+    out = await trip_plans.save_commercial(active, CONTRACTING, SOURCE_ID, {**BODY, "supplier_id": new})
+    assert out["changed"] == ["supplier_id"]
+    (insert,) = active.sql("INSERT INTO booking.trip_plans")
+    assert insert[9] == new  # $10 = supplier_id
+
+
+def test_shape_hides_the_supplier_and_from_price_without_pricing_read() -> None:
+    row = tour_row(
+        supplier_id="s-1", supplier_code="SUP-000001", supplier_name="Red River", supplier_status="active",
+        from_amount="1450.00", from_currency="USD", from_season="Low",
+    )  # fmt: skip
+    sales = trip_plans._shape(dict(row), SALES)
+    assert sales["supplier"] == {"id": "s-1", "code": "SUP-000001", "company_name": "Red River", "status": "active"}
+    assert sales["from_price"] == {"amount": "1450.00", "currency": "USD", "basis": "per_person", "season": "Low"}
+    assert "supplier_code" not in sales and "from_amount" not in sales
+    content = trip_plans._shape(dict(row), CONTENT)
+    assert content["supplier"] is None and content["supplier_id"] is None and content["from_price"] is None
+
+
+def test_list_item_falls_back_to_the_first_photo_and_caps_destinations() -> None:
+    row = tour_row(rn=1, first_photo_path="/p/first", destinations=[f"P{i}" for i in range(12)])
+    item = trip_plans._list_item(row, SALES)
+    assert item["cover_photo_path"] == "/p/first" and item["destinations"] == [f"P{i}" for i in range(8)]
+    assert "rn" not in item and "first_photo_path" not in item
+    kept = trip_plans._list_item(tour_row(rn=1, cover_photo_path="/p/cover", first_photo_path=None), SALES)
+    assert kept["cover_photo_path"] == "/p/cover" and kept["destinations"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_default_sort_is_sellable_first() -> None:
+    conn = ScriptedConn().on("SELECT count(*)", 0).on("ORDER BY", [])
+    await trip_plans.list_plans(conn, SALES)
+    flat, _ = next((f, a) for f, a in conn.calls if "ORDER BY" in f)
+    assert "coalesce(p.sellable, false) DESC, t.title ASC" in flat
+    conn = ScriptedConn().on("SELECT count(*)", 0).on("ORDER BY", [])
+    await trip_plans.list_plans(conn, SALES, sort="-sellable")
+    flat, _ = next((f, a) for f, a in conn.calls if "ORDER BY" in f)
+    assert "coalesce(p.sellable, false) ASC, t.title ASC" in flat
 
 
 @pytest.mark.asyncio

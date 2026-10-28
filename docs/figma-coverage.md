@@ -38,7 +38,7 @@ updates its rows.
 | `ADD NEW ACTIVITY-2.png` | Edit case details drawer (`/cases/[code]`) | built | Misfiled: it is "Edit Trip Case". |
 | `ADD NEW ACTIVITY.png` | Add service drawer (`/services`) | new (AA-996) | Commercial facts editable; customer text "From CIS" note (CIS drafts it after save). |
 | `ADD NEW HOTEL.png` | `/hotels?new=1` | built |  |
-| `ADD NEW TRIP 8.png` | `/cases/new` | built |  |
+| `ADD NEW TRIP 8.png` | `/cases/new` | built | AA-996 slice 2: optional "Start from a trip plan" (sellable plans) seeds V1 from the plan. |
 | `ADD SUPPLIER.png` | `/suppliers/new` | built |  |
 | `ADMINS.png` | `/staff` | built |  |
 | `AUDIT LOGS.png` | `/audit-log` | built |  |
@@ -54,9 +54,9 @@ updates its rows.
 | `COUNTRY MANAGAMENT-3.png` | `/hotels` | duplicate / misfiled | Misnamed: Hotel Management list. |
 | `COUNTRY MANAGAMENT.png` | `/catalog/countries` | new (AA-996) | Countries from CIS places + Booking status. |
 | `CREATE INVOICE.png` | Create invoice stepper (case Billing tab) | built |  |
-| `CREATE NEW TEMPLATE-1.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable. |
-| `CREATE NEW TEMPLATE-2.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable. |
-| `CREATE NEW TEMPLATE.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable. |
+| `CREATE NEW TEMPLATE-1.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
+| `CREATE NEW TEMPLATE-2.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
+| `CREATE NEW TEMPLATE.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
 | `DELETE ACTIVITY.png` | Deactivate service dialog | replaced-by | Delete → Deactivate (rates and history kept). |
 | `DELETE COUNTRY.png` | Deactivate country dialog | replaced-by (new (AA-996)) | Booking status → inactive (soft); reactivation is the same dialog. |
 | `DELETE DESTINATION.png` | Deactivate destination dialog | replaced-by (new (AA-996)) | Booking status → inactive (soft). |
@@ -78,9 +78,9 @@ updates its rows.
 | `EDIT PAYMENT.png` | Edit payment dialog | built |  |
 | `EDIT PROFILE.png` | Staff role / activation dialog (`/staff`, `/staff/[cisUserId]`); profile read-only in `/settings` | built |  |
 | `EDIT SUPPLIER.png` | `/suppliers/[id]/edit` | built |  |
-| `EDIT TEMPLATE-1.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable. |
-| `EDIT TEMPLATE-2.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable. |
-| `EDIT TEMPLATE.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable. |
+| `EDIT TEMPLATE-1.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
+| `EDIT TEMPLATE-2.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
+| `EDIT TEMPLATE.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
 | `Group 1410084962.png` | `/login` (background) | built |  |
 | `HOTEL DETAILS.png` | `/hotels?view=[id]` hotel drawer | built |  |
 | `HOTEL MANAGEMENT.png` | `/hotels` | built |  |

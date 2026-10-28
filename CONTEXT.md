@@ -199,7 +199,12 @@ backend/
   app/catalog/destinations.py  reads of catalog.v_destination (fail closed on writes, soft on reads; re-exported by
                            app/catalog/__init__.py)
   app/catalog/trip_plans.py  catalog.v_tour LEFT JOIN booking.trip_plans (live), commercial upsert, items from v_tour_day;
-                           list_orphaned (AA-986 L5: plans whose tour left v_tour, not paused; reason + attached)
+                           list_orphaned (AA-986 L5: plans whose tour left v_tour, not paused; reason + attached);
+                           AA-996: supplier on the commercial row (kept when left out), list sellable first, page rows
+                           + destinations (v_tour_day places), first-photo cover fallback, from_price (LATERAL per row)
+  app/catalog/trip_plan_prices.py  AA-996 (bk-032): the per-person price matrix of a plan; rows by hand or priced
+                           from a net cost with app.pricing.service (quote-preview's rule / FX / rounding); PUT
+                           replaces the set (audited), no overlaps per channel + currency; from price (B2C, 2 pax)
   app/catalog/liveness.py  AA-986 L5: served state of a catalog key (served | retired | paused | not_in_catalog) from
                            v_tour + v_tour_retired, feature detection of the CIS 274 views, strict / soft reads
   app/catalog/lifecycle.py AA-986 L5: bk_tour_lifecycle_pull (outbox → inbox → staff notifications) + PullSchedule
@@ -380,7 +385,8 @@ send, OTP) is not built: those still write rows only.
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
   (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
-  are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair; B2B
+  are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair; its
+  price matrix and supplier (AA-996, bk-032) are read with `pricing.read` and written with `trip_plan.write`; B2B
   cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules.
   Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
   contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
@@ -962,7 +968,7 @@ contract is in force or upcoming), contracts expire. Adds country `MN`. Grants p
 Columns: `sellable`, `trip_style` (free text, Q16), `default_channel`, a price hint (amount + currency + basis, all or
 nothing; never a quote), `commercial_notes` (`conf:commercial`), who / when. No catalog content is copied (O7): the
 API joins `catalog.v_tour` live, so a tour that leaves the catalog drops out of every list. Never deleted (role
-`booking` has no DELETE / TRUNCATE). No supplier link yet (later key).
+`booking` has no DELETE / TRUNCATE). The supplier link came with `bk-032`.
 
 ### `bk-010` (AA-823 wave 2b, needs `bk-001`, `bk-003`, `bk-004`, `bk-005`, `bk-008`)
 
@@ -1218,8 +1224,23 @@ Catalog → Countries can keep state for them (`booking_reference` true by itsel
 NOTHING`; grants unchanged (`booking` reads only). Not in `REQUIRED_SCHEMA_VERSIONS`: the code works before and after
 it (those countries are read-only until it is applied).
 
+### `bk-032` (AA-996 trip plan supplier and price matrix — needs `bk-003`, `bk-008`, `bk-009`)
+
+`trip_plans.supplier_id` (FK `suppliers`, nullable, `conf:commercial`; set or changed only to an active supplier, an
+unchanged one may have been deactivated since) and `trip_plan_prices`: the per-person **selling** price list of a
+plan (root ADR 0005 d3/d6), one row per channel × season label / validity (`valid_from`..`valid_to`) × pax band
+(`pax_min`..`pax_max`, null = and more) × selling currency, with `peak` (the rule's peak uplift), `amount`, and
+optionally the net cost per person it was priced from (`net_amount` + `net_currency`, never leaves Booking) with the
+`effective_margin` and `priced_on` of the save; a price sent with a net cost is a sales override (`overridden`). Replaced as a set by `PUT /booking/catalog/trip-plans/{source_id}/prices`
+(SELECT, INSERT, DELETE; no UPDATE, no trigger), one `trip_plan.prices_replaced` audit row per change (rows before and
+after; an override below the floor needs `below_floor_reason`). Overlaps per channel + currency are refused by the
+API. Current-state list (history in `audit_logs`): no DM-7.1 row. In `REQUIRED_SCHEMA_VERSIONS` (every trip plan
+query reads `supplier_id`): apply it before the code deploys. The from price (cheapest B2C row covering 2 pax, still
+valid, USD first) is derived on read; `booking.v_from_prices` (contract `price.from.v1`) is still to come, and the B2B
+parity read keeps the bk-009 price hint until then.
+
 Waiting for decisions: `trip_case_countries` / `areas` / `country_profiles` (O7,
-ISO mapping), the trip plan price matrix / `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
+ISO mapping), `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
 operations S5 (My Payments: AA-682).
 
 ## Out of scope today
@@ -1229,8 +1250,8 @@ agency settlement (B2B cases have no customer invoice, CRM O-10), a customer not
 of AA-682 are written but `booking.customer.v1` serves payments only; critic note 11),
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
-sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11), the trip plan price matrix
-and `v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
+sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11),
+`v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
 contract), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel

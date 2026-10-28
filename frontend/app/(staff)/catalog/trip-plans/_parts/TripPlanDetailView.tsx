@@ -4,13 +4,16 @@
 // photos from catalog.v_tour / v_tour_day / v_tour_photo). Side column: the Booking commercial panel (sellable,
 // trip style, channel, price hint, notes) with "Edit commercial" (trip_plan.write) and "Use for trip case"
 // (trip_case.write, sellable plans only). The /commercial route opens the same page with the drawer open.
+// AA-996 slice 2: the commercial panel names the supplier and the from price, and a "Price matrix" panel lists the
+// per-person prices (pricing.read; bk-032).
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Briefcase, CalendarDays, EyeOff, Globe, Hash, Pencil, Store } from "lucide-react";
 import { CHANNELS } from "@/lib/api/proposals";
 import { tripPlansApi } from "@/lib/api/tripPlans";
-import { Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, useCan, useStaff } from "@/ui";
+import { daysNights, marginLabel, paxBandLabel } from "@/ui/booking/tripPlans";
+import { Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, formatDay, useCan, useStaff } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "../../../_parts/DetailHeader";
 import { CommercialDrawer } from "./CommercialDrawer";
@@ -41,6 +44,11 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
   const sellableToggle = useSellableToggle();
 
   const plan = useQuery({ queryKey: ["trip-plans", "detail", sourceId], queryFn: () => tripPlansApi.get(sourceId) });
+  const prices = useQuery({
+    queryKey: ["trip-plans", "prices", sourceId],
+    queryFn: () => tripPlansApi.prices(sourceId),
+    enabled: canPrice,
+  });
   const p = plan.data;
   const tabs = [
     { key: "overview", label: "Overview" },
@@ -68,7 +76,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
           <>
             {p.sku && <MetaItem icon={<Hash size={13} />}>{p.sku}</MetaItem>}
             {p.country && <MetaItem icon={<Globe size={13} />}>{p.country}</MetaItem>}
-            {p.duration_days && <MetaItem icon={<CalendarDays size={13} />}>{p.duration_days} days</MetaItem>}
+            {p.duration_days && <MetaItem icon={<CalendarDays size={13} />}>{daysNights(p.duration_days)}</MetaItem>}
           </>
         }
         actions={
@@ -189,6 +197,26 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
               <Fact label="Trip style">{p.trip_style || "—"}</Fact>
               {canPrice && (
                 <>
+                  <Fact label="Supplier">
+                    {p.supplier ? (
+                      <span>
+                        {p.supplier.company_name ?? p.supplier.code}
+                        {p.supplier.status === "inactive" && <span className="text-xs text-muted"> (inactive)</span>}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </Fact>
+                  <Fact label="Price from">
+                    {p.from_price ? (
+                      <span>
+                        <Money amount={p.from_price.amount} currency={p.from_price.currency} strong />{" "}
+                        <span className="text-xs text-muted">per person{p.from_price.season ? `, ${p.from_price.season}` : ""}</span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </Fact>
                   <Fact label="Default channel">{p.default_channel ? CHANNEL_LABEL[p.default_channel] ?? p.default_channel : "—"}</Fact>
                   <Fact label="Price hint">
                     {p.price_hint ? (
@@ -222,10 +250,50 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
             </FactGrid>
             {canPrice && (
               <p className="mt-4 text-xs text-muted">
-                The price hint guides sales only. Proposals are priced from their cost lines; the price matrix comes later.
+                The price matrix is the published per-person price list; the hint is a free guide. A proposal is still priced from its own cost lines.
               </p>
             )}
           </Section>
+          {canPrice && (
+            <Section
+              title="Price matrix"
+              description="Per person, by channel, season and pax band."
+              actions={
+                canEdit && (
+                  <Button size="sm" onClick={() => setEditing(true)}>
+                    <Pencil size={14} /> Edit
+                  </Button>
+                )
+              }
+            >
+              {prices.isLoading ? (
+                <p className="text-[13px] text-muted">Loading…</p>
+              ) : prices.isError ? (
+                <p className="text-[13px] text-danger">The price matrix could not be loaded.</p>
+              ) : !prices.data?.items.length ? (
+                <p className="text-[13px] text-muted2">No prices yet.{canEdit ? " Add them in Edit." : ""}</p>
+              ) : (
+                <ul className="flex flex-col divide-y divide-line2" data-testid="price-matrix">
+                  {prices.data.items.map((r) => (
+                    <li key={r.position} className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                      <span className="min-w-0 text-[13px]">
+                        <span className="block font-medium text-ink">
+                          {r.season || "Any season"}
+                          {r.peak && <span className="text-xs font-normal text-muted"> · peak</span>}
+                          <span className="font-normal text-muted"> · {paxBandLabel(r.pax_min, r.pax_max)}</span>
+                        </span>
+                        <span className="block text-xs text-muted">
+                          {CHANNEL_LABEL[r.channel] ?? r.channel} · {formatDay(r.valid_from)} – {formatDay(r.valid_to)}
+                          {r.priced && marginLabel(r.effective_margin) && ` · margin ${marginLabel(r.effective_margin)}`}
+                        </span>
+                      </span>
+                      <Money amount={r.amount} currency={r.currency} strong className="shrink-0 text-[13px]" />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+          )}
         </div>
       </div>
       {editing && <CommercialDrawer plan={p} onClose={() => setEditing(false)} />}

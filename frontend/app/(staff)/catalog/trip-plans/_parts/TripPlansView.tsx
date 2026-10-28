@@ -4,20 +4,27 @@
 // Every CIS catalog tour (GET /booking/catalog/trip-plans, a live join of catalog.v_tour and booking.trip_plans)
 // with its Booking state: Sellable / Not for sale, trip style and the sales price hint. Tour content is read-only
 // ("From CIS"). Filter options and counts come from the server (/facets), pagination is server-side.
+// AA-996 (Figma audit item 2): the list opens sellable first (the API default), rows show "N days / N-1 nights", the
+// tour's places as the subtitle (else SKU, else a short CIS id), the from price of the price matrix (else the price
+// hint), and the row menu has "Edit commercial" (trip_plan.write) and "Edit in CIS ↗" (CIS content roles).
 
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CalendarDays, Eye, EyeOff, Globe, Store, Unlink } from "lucide-react";
+import { CalendarDays, ExternalLink, Eye, EyeOff, Globe, Pencil, Store, Unlink } from "lucide-react";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
-import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, Money, PageFrame, Pill, Section, useCan, useUrlFilters } from "@/ui";
+import { CIS_ADMIN_URL } from "@/lib/config";
+import { daysNights, planSubtitle } from "@/ui/booking/tripPlans";
+import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, Money, PageFrame, Pill, Section, useCan, useStaff, useUrlFilters } from "@/ui";
 import { OrphanedPlansTable } from "./OrphanedPlans";
-import { SellableBadge, priceBasisLabel } from "./shared";
+import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
 import { useSellableToggle } from "./useSellableToggle";
 import { RowMenu } from "@/ui/booking/RowMenu";
 
+// The API opens sellable first (sort=sellable, then title): that is the "all" option of the Sort select.
 const SORTS = [
+  { value: "sellable", label: "Sellable first" },
   { value: "title", label: "Title A–Z" },
   { value: "country", label: "Country" },
   { value: "duration_days", label: "Shortest first" },
@@ -30,6 +37,9 @@ export function TripPlansView() {
   const { get } = useUrlFilters();
   const paging = useOffsetPage();
   const canPrice = useCan("pricing.read");
+  const canEditCommercial = useCan("trip_plan.write");
+  const me = useStaff();
+  const canEditInCis = CIS_EDITOR_ROLES.has(me.role);
   const sellableToggle = useSellableToggle();
 
   // AA-986 L5: "show=orphaned" switches the table to the plans whose tour left the CIS catalog.
@@ -60,10 +70,12 @@ export function TripPlansView() {
         <span className="flex min-w-0 items-center gap-3">
           <CisPhoto path={row.original.cover_photo_path} alt="" className="h-10 w-14 shrink-0 rounded-md" />
           <span className="min-w-0">
-            <span className="block max-w-[320px] truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
+            <span className="block max-w-[236px] truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
               {row.original.title}
             </span>
-            <span className="block text-xs text-muted">{row.original.sku ?? "No SKU"}</span>
+            <span className="block max-w-[236px] truncate text-xs text-muted" title={planSubtitle(row.original)}>
+              {planSubtitle(row.original)}
+            </span>
           </span>
         </span>
       ),
@@ -71,9 +83,18 @@ export function TripPlansView() {
     { id: "country", header: "Country", accessorFn: (r) => r.country ?? "", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.country ?? "—"}</span> },
     {
       id: "days",
-      header: "Days",
+      header: "Duration",
       accessorFn: (r) => r.duration_days ?? 0,
-      cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.duration_days ?? "—"}</span>,
+      // "15 days / 14 nights" on two lines, so the column stays narrow (the table must fit 1400 without scrolling).
+      cell: ({ row }) => {
+        const [days, nights] = (daysNights(row.original.duration_days) ?? "—").split(" / ");
+        return (
+          <span className="bk-tabular whitespace-nowrap text-[13px]" title={daysNights(row.original.duration_days) ?? undefined}>
+            {days}
+            {nights && <span className="block text-xs text-muted">{nights}</span>}
+          </span>
+        );
+      },
     },
     { id: "status", header: "Status", accessorFn: (r) => (r.sellable ? 1 : 0), cell: ({ row }) => <SellableBadge sellable={row.original.sellable} /> },
     {
@@ -81,21 +102,29 @@ export function TripPlansView() {
       header: "Trip style",
       meta: { compact: "drawer" }, // AA-996: with the price hint, in the details drawer below 1200 px
       accessorFn: (r) => r.trip_style ?? "",
-      cell: ({ row }) => <span className="text-[13px] text-body">{row.original.trip_style ?? "—"}</span>,
+      cell: ({ row }) => (
+        <span className="block max-w-[120px] truncate text-[13px] text-body" title={row.original.trip_style ?? undefined}>
+          {row.original.trip_style ?? "—"}
+        </span>
+      ),
     },
     ...(canPrice
       ? [
           {
             id: "hint",
-            header: "Price hint",
+            header: "Price from",
             meta: { compact: "drawer" as const },
-            accessorFn: (r: TripPlanListItem) => Number(r.price_hint?.amount ?? 0),
+            accessorFn: (r: TripPlanListItem) => Number(r.from_price?.amount ?? r.price_hint?.amount ?? 0),
             cell: ({ row }: { row: { original: TripPlanListItem } }) =>
-              row.original.price_hint ? (
-                <span className="text-[13px]">
-                  <span className="text-muted">from </span>
+              row.original.from_price ? (
+                <span className="text-[13px]" title="Per person, from the price matrix">
+                  <Money amount={row.original.from_price.amount} currency={row.original.from_price.currency} />
+                  <span className="block text-xs text-muted">per person</span>
+                </span>
+              ) : row.original.price_hint ? (
+                <span className="text-[13px]" title="Price hint (no price matrix yet)">
                   <Money amount={row.original.price_hint.amount} currency={row.original.price_hint.currency} />
-                  <span className="block text-xs text-muted">{priceBasisLabel(row.original.price_hint.basis)}</span>
+                  <span className="block text-xs text-muted">{priceBasisLabel(row.original.price_hint.basis)} · hint</span>
                 </span>
               ) : (
                 <span className="text-[13px] text-muted2">—</span>
@@ -112,6 +141,25 @@ export function TripPlansView() {
           label={`Actions for ${row.original.title}`}
           items={[
             { label: "View details", icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}`) },
+            ...(canEditCommercial
+              ? [
+                  {
+                    label: "Edit commercial",
+                    icon: <Pencil size={14} />,
+                    onSelect: () => router.push(`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}/commercial`),
+                  },
+                ]
+              : []),
+            ...(canEditInCis
+              ? [
+                  {
+                    label: "Edit in CIS ↗",
+                    icon: <ExternalLink size={14} />,
+                    onSelect: () =>
+                      window.open(`${CIS_ADMIN_URL}/admin/master-content?tour=${encodeURIComponent(row.original.tour_id)}`, "_blank", "noopener,noreferrer"),
+                  },
+                ]
+              : []),
             ...(sellableToggle.canWrite
               ? [
                   row.original.sellable
@@ -210,7 +258,7 @@ export function TripPlansView() {
                       options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
                       width: 150,
                     },
-                    { key: "sort", label: "Sort", allLabel: "Title A–Z", options: SORTS.slice(1), width: 150 },
+                    { key: "sort", label: "Sort", allLabel: "Sellable first", options: SORTS.slice(1), width: 150 },
                   ]}
                 />
               }

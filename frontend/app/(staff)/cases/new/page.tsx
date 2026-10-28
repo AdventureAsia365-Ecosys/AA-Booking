@@ -2,7 +2,10 @@
 // app/(staff)/cases/new/page.tsx — Create trip case (W1, UI spec §4.6; Figma ADD NEW TRIP 8, enriched per
 // 03 decision 4). POST /booking/trip-cases with an existing customer or an inline new lead, start date,
 // adults / children, currency, countries, initial status, sales rep and internal notes. Trip style is
-// left out until its source is decided (Q16); "Start from trip plan" arrives with W2 trip plans.
+// left out until its source is decided (Q16).
+// AA-996 (Figma audit slice 2): "Start from a trip plan" (optional) — with a sellable plan picked, the case is created
+// by POST /booking/catalog/trip-plans/{source_id}/trip-cases (same fields), so V1 starts from the plan's CIS days, the
+// case keeps the plan's key and countries default to the plan's country.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -10,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
+import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import type { CustomerSummary } from "@/lib/api/types";
 import { Button, Section, useCan, useStaff, useToast, fieldName } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, textareaCls, toInt } from "../_parts/fields";
@@ -18,6 +22,7 @@ import { StaffSelect } from "../_parts/StaffSelect";
 import { QueryError } from "../_parts/QueryError";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "./CustomerPicker";
 import { DateField } from "@/ui/booking/DateField";
+import { TripPlanPicker } from "../_parts/TripPlanPicker";
 
 export default function NewTripCasePage() {
   const router = useRouter();
@@ -25,6 +30,8 @@ export default function NewTripCasePage() {
   const qc = useQueryClient();
   const me = useStaff();
   const canWrite = useCan("trip_case.write");
+  const canStartFromPlan = useCan("version.write");
+  const [plan, setPlan] = useState<TripPlanListItem | null>(null);
 
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
@@ -61,6 +68,7 @@ export default function NewTripCasePage() {
           phone: lead.phone.trim() || undefined,
           contact_consent: lead.contact_consent,
         };
+      if (plan) return tripPlansApi.useForTripCase(plan.source_id, body).then((r) => r.trip_case);
       return api.tripCases.create(body);
     },
     onSuccess: (c) => {
@@ -132,6 +140,15 @@ export default function NewTripCasePage() {
           />
         </Section>
 
+        {canStartFromPlan && (
+          <Section
+            title="Start from a trip plan"
+            description="Optional. Pick a sellable plan: proposal V1 starts from its CIS days (unpriced), and the case keeps the link to the plan."
+          >
+            <TripPlanPicker value={plan} onChange={setPlan} disabled={create.isPending} />
+          </Section>
+        )}
+
         <Section title="Trip details" description="The rough shape of the trip. Everything here can change later in the case.">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Start date" hint="Optional">
@@ -150,7 +167,11 @@ export default function NewTripCasePage() {
                 ))}
               </select>
             </Field>
-            <Field label="Countries" hint="Optional. The order you pick is kept." className="sm:col-span-2 lg:col-span-4">
+            <Field
+              label="Countries"
+              hint={plan && !countries.length ? "Optional. Left empty, the plan's country is used." : "Optional. The order you pick is kept."}
+              className="sm:col-span-2 lg:col-span-4"
+            >
               <CountryPicker value={countries} onChange={setCountries} />
             </Field>
           </div>

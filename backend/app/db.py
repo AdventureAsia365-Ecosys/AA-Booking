@@ -46,6 +46,8 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-028",  # AA-682 S3: invoices, invoice_items, payment_schedule, payments, money guards, balance views
     # bk-029 (AA-996 country / destination profiles) is not listed by AA-996 (its call, see its notes).
     "bk-030",  # AA-682 S4: supplier_bills, supplier_bill_items, supplier_payouts, settle, v_supplier_bill_balance
+    # bk-031 (AA-996 countries data) changes no shape.
+    "bk-032",  # AA-996 slice 2: trip_plans.supplier_id (read by every trip plan query), trip_plan_prices
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
