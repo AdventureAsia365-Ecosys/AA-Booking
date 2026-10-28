@@ -110,7 +110,7 @@ def test_summary(created: bool, new: dict[str, Any], changed: list[str], summary
     assert trip_plans._summary(created, new, changed) == summary
 
 
-DESTINATIONS = "FROM catalog.v_tour_place"
+DESTINATIONS = "FROM catalog.v_tour_place_name"
 FIRST_PHOTO = "FROM catalog.v_tour_photo"
 FROM_PRICES = "AS u(plan_id)"
 
@@ -350,8 +350,8 @@ async def test_list_skips_the_from_price_read_without_pricing_read() -> None:
     [
         asyncpg.QueryCanceledError("canceling statement due to statement timeout"),
         TimeoutError(),
-        asyncpg.InsufficientPrivilegeError("permission denied for view v_tour_place"),
-        asyncpg.UndefinedTableError('relation "catalog.v_tour_place" does not exist'),
+        asyncpg.InsufficientPrivilegeError("permission denied for view v_tour_place_name"),
+        asyncpg.UndefinedTableError('relation "catalog.v_tour_place_name" does not exist'),
         asyncpg.UndefinedColumnError("column p.place_name does not exist"),
     ],
 )

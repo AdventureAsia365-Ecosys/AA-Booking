@@ -30,12 +30,16 @@
   Catalog views are filtered by ``tour_id`` only: ``catalog._tour_day_text`` is ``DISTINCT ON (tour_id, day_number)``,
   so a ``source_id`` filter on ``v_tour_day`` is applied after every live tour's itinerary is parsed (~1.5 s a read on
   Dev); 25 such reads per page ran past the pool's 5 s command timeout (AA-996 slice 2 hotfix, lesson S238).
-- **Destinations are bounded** (AA-996 S255): ``catalog.v_tour_place`` costs about 10 ms a tour on Dev even keyed by
-  ``tour_id`` (per place it looks up the place card, the destination and the route segment; 380 ms for 25 tours,
-  994 ms for 100, against the 1 s budget of an extra). The read goes in chunks of ``DESTINATION_CHUNK`` tours, each
-  its own statement under the extra timeout, all chunks of a page inside ``DESTINATIONS_BUDGET_MS``; a tour version's
-  places are kept ``DESTINATIONS_TTL_S`` in a per-process cache keyed by ``tour_id``. A chunk that fails or does not
-  fit the budget leaves only its rows ``null`` (``degraded`` names ``destinations``); the rest of the page keeps them.
+- **Destinations come from ``catalog.v_tour_place_name``** (CIS 298, AA-996 S256): row for row the names of
+  ``catalog.v_tour_place`` (``tour_id``, ``day_number``, ``position``, ``place_name``) without its per-place place
+  card, destination and route segment lookups, which made ``v_tour_place`` cost about 10 ms a tour on Dev even keyed
+  by ``tour_id`` (380 ms for 25 tours, 994 ms for 100, against the 1 s budget of an extra). The list never reads
+  ``v_tour_place`` (the detail page reads its days from ``v_tour_day``).
+- **Destinations are bounded** (AA-996 S255, kept as the safety net): the read goes in chunks of
+  ``DESTINATION_CHUNK`` tours, each its own statement under the extra timeout, all chunks of a page inside
+  ``DESTINATIONS_BUDGET_MS``; a tour version's places are kept ``DESTINATIONS_TTL_S`` in a per-process cache keyed by
+  ``tour_id``. A chunk that fails or does not fit the budget leaves only its rows ``null`` (``degraded`` names
+  ``destinations``); the rest of the page keeps them.
 """
 
 from __future__ import annotations
@@ -110,14 +114,15 @@ JOIN = (
 # Extras of a list PAGE (AA-996), one query each for the rows of the page, run after the page query. They are keyed
 # by ``tour_id`` (catalog) or the plan id (Booking): ``tour_id`` is the DISTINCT ON / PARTITION BY key of the catalog
 # views, so ``tour_id = ANY($1::uuid[])`` is pushed down to the tour's own rows (the TripPlanner pattern, lesson S238).
-# ``v_tour_day.places`` is itself ``array_agg(place_name ORDER BY position)`` of ``v_tour_place`` per day (CIS 225),
-# read here without the day-text parse of ``v_tour_day``.
+# ``v_tour_day.places`` is itself ``array_agg(place_name ORDER BY position)`` of ``v_tour_place`` per day (CIS 225);
+# ``v_tour_place_name`` (CIS 298) is the same names and positions without v_tour_place's place lookups, read here
+# without the day-text bodies of ``v_tour_day``.
 # Only the first MAX_DESTINATIONS places of a tour leave the database (the list shows no more).
 DESTINATIONS_SQL = f"""
 SELECT x.tour_id::text AS key, (array_agg(x.place ORDER BY x.first_seen, x.place))[1:{MAX_DESTINATIONS}] AS places
 FROM (
     SELECT p.tour_id, btrim(p.place_name) AS place, min(p.day_number * 1000 + p.position) AS first_seen
-    FROM catalog.v_tour_place p
+    FROM catalog.v_tour_place_name p
     WHERE p.tour_id = ANY($1::uuid[]) AND p.day_number IS NOT NULL AND p.place_name IS NOT NULL
     GROUP BY p.tour_id, btrim(p.place_name)
 ) x
@@ -138,8 +143,9 @@ CROSS JOIN LATERAL ({prices.FROM_PRICE_SQL.format(plan="u.plan_id")}) fp
 """  # noqa: S608 — constants only, no input
 # Server-side budget of one extra: three of them stay well inside the pool's 5 s command_timeout (app.db).
 EXTRA_TIMEOUT_MS = 1000
-# Destinations (AA-996 S255): v_tour_place costs ~10 ms a tour on Dev, so one statement reads at most
-# DESTINATION_CHUNK tours (~0.4 s there, inside EXTRA_TIMEOUT_MS) and all chunks of one page share a wall budget. A
+# Destinations (AA-996 S255): v_tour_place cost ~10 ms a tour on Dev (~0.4 s a chunk); v_tour_place_name (CIS 298)
+# drops the lookups that cost most. The bounds stay as the safety net: one statement reads at most
+# DESTINATION_CHUNK tours (inside EXTRA_TIMEOUT_MS) and all chunks of one page share a wall budget. A
 # chunk that cannot get MIN_CHUNK_MS of the budget is not started. A page of MAX_PAGE rows is MAX_PAGE /
 # DESTINATION_CHUNK statements at most (not one per row).
 DESTINATION_CHUNK = 25

@@ -352,18 +352,18 @@ async def test_list_rows_sellable_first_with_destinations_and_cover(
 async def test_list_answers_when_an_extra_is_unreadable(
     client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
 ) -> None:
-    # AA-996 hotfix: a list extra that cannot be read (here: no grant on catalog.v_tour_place) drops that field only;
+    # AA-996 hotfix: a list extra that cannot be read (here: no grant on catalog.v_tour_place_name) drops that field;
     # it used to turn the whole list into 503 catalog_unavailable. The page and the other extras still answer.
     c, cis = client
     contracting = _auth(cis, MAKER)
     assert (
         await c.put(f"/catalog/trip-plans/{PLAN}/commercial", json=COMMERCIAL, headers=contracting)
     ).status_code == 200
-    await admin.execute("REVOKE SELECT ON catalog.v_tour_place FROM booking")
+    await admin.execute("REVOKE SELECT ON catalog.v_tour_place_name FROM booking")
     try:
         resp = await c.get("/catalog/trip-plans", params={"country": "Vietnam"}, headers=contracting)
     finally:
-        await admin.execute("GRANT SELECT ON catalog.v_tour_place TO booking")
+        await admin.execute("GRANT SELECT ON catalog.v_tour_place_name TO booking")
     assert resp.status_code == 200
     page = resp.json()
     assert page["degraded"] == ["destinations"] and page["total"] == 2

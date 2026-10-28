@@ -3,9 +3,11 @@ chunks, each keyed by ``tour_id`` and parsing only its own tours' days, and a se
 per-process cache.
 
 Live check 28/10 (role booking on Dev): one ``catalog.v_tour_place`` read for 100 tours took 994 ms against the
-1 s statement_timeout of a list extra (380 ms for 25). The stub cannot be made as slow as Dev; what it checks is the
-shape that keeps every statement inside the budget: at most ``DESTINATION_CHUNK`` tours a statement, each under its
-own timeout, the plan keyed by tour_id, and no statement near the slow-query budget."""
+1 s statement_timeout of a list extra (380 ms for 25). Since S256 the list reads ``catalog.v_tour_place_name``
+(CIS 298: the same names without v_tour_place's per-place lookups) and never ``v_tour_place``. The stub cannot be made
+as slow as Dev; what it checks is the shape that keeps every statement inside the budget: the names view only, at most
+``DESTINATION_CHUNK`` tours a statement, each under its own timeout, the plan keyed by tour_id, no statement near the
+slow-query budget and the whole page's destinations inside ``STUB_PAGE_BUDGET_MS``."""
 
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from app.catalog import trip_plans
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.catalog_perf import QueryRecorder, explain, parse_rows, plan_findings
+from tests.catalog_perf import LIST_FORBIDDEN_RE, QueryRecorder, explain, parse_rows, plan_findings
 from tests.staff_tokens import LocalCis
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -31,6 +33,9 @@ COUNTRY = "Budgetland"
 TOURS = trip_plans.MAX_PAGE
 DAYS = 2
 KEYS = [f"aa996b00-0000-4000-8000-{i:012d}" for i in range(TOURS)]
+# All destination reads of one 100-row page on the stub (client-side elapsed, every chunk): a fraction of the 2 s
+# DESTINATIONS_BUDGET_MS, so a regression that reads more per tour shows here before it reaches Dev.
+STUB_PAGE_BUDGET_MS = 500
 
 
 async def _clean(conn: asyncpg.Connection) -> None:
@@ -96,7 +101,7 @@ async def _list(client: tuple[httpx.AsyncClient, dict[str, str]], recorder: Quer
 
 
 def _destination_reads(recorder: QueryRecorder) -> list:
-    return [s for s in recorder.statements if "FROM catalog.v_tour_place" in s.flat]
+    return [s for s in recorder.statements if "FROM catalog.v_tour_place_name" in s.flat]
 
 
 async def test_a_full_page_reads_destinations_in_bounded_chunks(
@@ -123,6 +128,10 @@ async def test_a_full_page_reads_destinations_in_bounded_chunks(
         assert parse_rows(plan) <= chunk * DAYS  # only the chunk's own itinerary days reach the parse
     slow = [round(s.elapsed * 1000) for s in reads if s.elapsed * 1000 >= 250]
     assert slow == [], f"destination reads at or over 250 ms on the stub: {slow}"
+    total_ms = round(sum(s.elapsed for s in reads) * 1000)
+    assert total_ms <= STUB_PAGE_BUDGET_MS, f"destinations of one page took {total_ms} ms on the stub"
+    # the list never reads the full place view (a card, a destination and a segment lookup per place on Dev)
+    assert [s.flat[:120] for s in catalog_read_guard.statements if LIST_FORBIDDEN_RE.search(s.sql)] == []
 
 
 async def test_the_second_read_of_a_page_takes_the_places_from_the_cache(

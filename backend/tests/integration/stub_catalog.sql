@@ -180,7 +180,14 @@ SELECT d.source_system, d.source_id, d.tour_id, d.day_number::smallint AS day_nu
        u.place AS place_name
 FROM catalog._tour_day_text d CROSS JOIN LATERAL unnest(d.places) WITH ORDINALITY AS u(place, ord);
 
+-- catalog.v_tour_place_name (CIS 298, AA-996 S256): row for row the names of v_tour_place (source_system, source_id,
+-- tour_id, day_number, position, place_name) without its place card / destination / segment lookups; the trip-plans
+-- list reads its destinations here. Same parse-backed shape (only a tour_id filter reaches the parse).
+CREATE OR REPLACE VIEW catalog.v_tour_place_name WITH (security_barrier = true) AS
+SELECT p.source_system, p.source_id, p.tour_id, p.day_number, p.position, p.place_name
+FROM catalog.v_tour_place p;
+
 -- CIS 225 grants (catalog_owner owns the views; role booking reads them).
 GRANT USAGE ON SCHEMA catalog TO booking;
-GRANT SELECT ON catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo, catalog.v_tour_place, catalog.v_destination,
-    catalog.v_destination_photo, catalog.v_country TO booking;
+GRANT SELECT ON catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo, catalog.v_tour_place,
+    catalog.v_tour_place_name, catalog.v_destination, catalog.v_destination_photo, catalog.v_country TO booking;
