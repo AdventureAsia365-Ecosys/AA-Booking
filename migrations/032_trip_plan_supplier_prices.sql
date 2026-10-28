@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS booking.trip_plan_prices (
     amount            NUMERIC(12, 2) NOT NULL,
     net_amount        NUMERIC(12, 2),
     net_currency      CHAR(3),
-    effective_margin  NUMERIC(12, 4),
+    effective_margin  NUMERIC(6, 4),
     priced_on         DATE,
     overridden        BOOLEAN NOT NULL DEFAULT false,
     created_by        TEXT REFERENCES booking.staff_users (cis_user_id),
