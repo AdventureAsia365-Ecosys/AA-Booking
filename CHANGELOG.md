@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.10.0...v0.11.0) (2026-10-29)
+
+
+### Features
+
+* registered_keys on /booking/health/ready ([#139](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/139)) ([82e36d5](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/82e36d5bf1a486e9f207e7191a78b4c3a6aee094))
+
+
+### Bug Fixes
+
+* ops-docs uploads use SSE-S3; readiness reports bucket configuration ([#142](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/142)) ([5a11502](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/5a1150233525d5a98e54dbf1aad6c76927a633a9))
+* read the trip-plans list destinations from catalog.v_tour_place_name (CIS 298) ([#141](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/141)) ([ad4be19](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ad4be1946c5b59ea4227b521e06a45672f1a66b0))
+* restore bk-032 to its applied bytes and widen effective_margin in bk-033 ([#137](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/137)) ([dfea34c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/dfea34c24bb6ca0c11847ee2376cd414755fb4a8))
+
 ## [0.10.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.9.0...v0.10.0) (2026-10-28)
 
 
