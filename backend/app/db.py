@@ -50,6 +50,8 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-030",  # AA-682 S4: supplier_bills, supplier_bill_items, supplier_payouts, settle, v_supplier_bill_balance
     # bk-031 (AA-996 countries data) changes no shape.
     "bk-032",  # AA-996 slice 2: trip_plans.supplier_id (read by every trip plan query), trip_plan_prices
+    # bk-033 (AA-996 effective_margin width) changes no shape read here.
+    "bk-034",  # AA-993: itinerary source_tour_id index (lifecycle read; first expand file, auto-applied before deploy)
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
