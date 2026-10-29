@@ -16,10 +16,11 @@ import { AlertTriangle, Calculator, ChevronDown, Plus, Trash2 } from "lucide-rea
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, proposalsApi, type Channel, type QuotePreview, type QuotePreviewInput } from "@/lib/api/proposals";
 import { costLineError, pct, type CostLine } from "@/lib/proposalDraft";
-import { EmptyState, Spinner } from "../primitives";
-import { formatMoney, Money } from "./Money";
-import { DateText } from "./DateText";
-import { useCan } from "../StaffContext";
+import { EmptyState, Spinner } from "../core/primitives";
+import { formatMoney } from "../core/format";
+import { Money } from "../core/Money";
+import { DateText } from "../core/DateText";
+import { useCan } from "../local/StaffContext";
 
 const inputCls =
   "h-9 w-full min-w-0 rounded-md border border-line bg-card px-3 text-[13px] text-ink outline-none focus:border-accent-border disabled:bg-panel disabled:text-muted";

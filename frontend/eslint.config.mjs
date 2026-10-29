@@ -1,43 +1,33 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import { kitConfig } from "./ui/core/eslint-kit.mjs";
 
-// AA-683 — UI conventions for page code (app/**), mirroring the CIS kit rules (AA-732):
-//   1. no raw <table>            → use the kit DataTable (ui/DataTable.tsx)
-//   2. no hand-rolled dialog     → use the kit Modal / Drawer, or ui/booking ConfirmDialog / FormDrawer
-//   3. no raw hex colour literal → read a token (ui/tokens.ts `K`, or a Tailwind utility mapped to --aa-*)
-// Unlike CIS, className IS allowed: Booking pages use Tailwind utilities generated from the same
-// --aa-* variables (UI spec Q2). The copied kit in ui/ is exempt (it is a byte copy of CIS).
-const PAGE_RESTRICTED_SYNTAX = [
-  {
-    selector: "JSXOpeningElement[name.name='table']",
-    message:
-      "No raw <table> in page code: use the kit DataTable (ui/DataTable.tsx), or LightTable (ui/booking/LightTable.tsx) for a short fixed list inside one record's card.",
-  },
-  {
-    selector: "JSXAttribute[name.name='role'][value.value='dialog']",
-    message: "No hand-rolled dialog in page code: use ui Modal / Drawer / ConfirmDialog / FormDrawer.",
-  },
-  {
-    selector: "Literal[value=/^#[0-9A-Fa-f]{3,8}$/]",
-    message: "No raw hex colour in page code: use a token (K.* or a Tailwind utility mapped to --aa-*).",
-  },
-];
-
+// AA-994 S4b (root ADR 0016 decision 7, plan guards G1-G11) — the UI kit conformance rules, vendored with the kit core
+// (ui/core/eslint-kit.mjs, byte-identical in every app), `tailwind` preset at `error`:
+//   no-raw-main, no-raw-table, no-raw-dialog, no-hex-colour, no-hand-styled-button, no-raw-aa-var,
+//   no-aa-var-definition, no-legacy-kit.
+// They replace the three AA-683 page rules (no raw <table>, no hand-rolled dialog, no raw hex). className stays allowed:
+// Booking pages use Tailwind utilities generated from the same --aa-* variables (UI spec Q2).
+// Scope: page code (app/**) and the Booking components (ui/booking/**). The kit core (ui/core, a byte copy of CIS) and
+// the shell (ui/local, inline styles on K like the CIS shell) are not in scope. Inside ui/booking a component may style
+// its own <button> (the plan's G5 applies outside ui/**).
+// Violations that existed before S4b are frozen in eslint-suppressions.json (ESLint bulk suppressions); Frontend Build
+// prunes it and fails when it is stale or grows (check-kit-copy.mjs --suppressions).
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  kitConfig({ preset: "tailwind", files: ["app/**/*.{ts,tsx}"] }),
+  kitConfig({
+    preset: "tailwind",
+    files: ["ui/booking/**/*.{ts,tsx}"],
+    rules: { "aa-kit/no-hand-styled-button": "off" },
+  }),
+  // The kit DataTable uses TanStack's useReactTable, which the React Compiler skips (same warning in CIS). The file is
+  // the kit core copy, so the rule is silenced here instead of editing it.
   {
-    files: ["app/**/*.tsx", "ui/booking/**/*.tsx"],
-    rules: {
-      "no-restricted-syntax": ["error", ...PAGE_RESTRICTED_SYNTAX],
-    },
-  },
-  // The copied kit DataTable uses TanStack's useReactTable, which the React Compiler skips (same
-  // warning in CIS). The file is a byte copy, so the rule is silenced here instead of editing it.
-  {
-    files: ["ui/DataTable.tsx", "ui/core/DataTable.tsx"],
+    files: ["ui/core/DataTable.tsx"],
     rules: {
       "react-hooks/incompatible-library": "off",
     },

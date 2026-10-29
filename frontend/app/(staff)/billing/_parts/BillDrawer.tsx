@@ -37,10 +37,10 @@ import {
   formatMoney,
   useCan,
   useToast,
+  DateField,
 } from "@/ui";
 import { fromCents, sumCents, toCents } from "./money";
 import { errorText, fieldCls, prepareEvidence, today } from "./PaymentDialogs";
-import { DateField } from "@/ui/booking/DateField";
 import { formatDay } from "@/ui/booking/dates";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;

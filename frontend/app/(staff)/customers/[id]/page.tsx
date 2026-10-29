@@ -24,8 +24,8 @@ import {
   Section,
   TripCaseStatusBadge,
   useCan,
+  RowMenu,
 } from "@/ui";
-import { RowMenu } from "@/ui/booking/RowMenu";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { CustomerFormDrawer } from "../_parts/CustomerFormDrawer";
 import { useCustomerActions } from "../_parts/useCustomerActions";

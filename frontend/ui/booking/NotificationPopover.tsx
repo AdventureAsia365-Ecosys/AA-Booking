@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { StaffNotification } from "@/lib/api/types";
-import { DateText } from "./DateText";
+import { DateText } from "../core/DateText";
 import { NOTIFICATION_TYPE_LABEL, notificationTarget } from "./notifications";
 import { NotificationIcon, NotificationMessage } from "./NotificationItem";
 import { localizeIsoDates } from "./dates";

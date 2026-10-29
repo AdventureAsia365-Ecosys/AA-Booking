@@ -14,10 +14,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type FieldError } from "@/lib/api/client";
 import type { TripCaseStatus } from "@/lib/api/types";
 import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type CheckChanges, type TripCheck, type TripCheckStatus } from "@/lib/api/tripChecks";
-import { DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast } from "@/ui";
+import { DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast, DateField } from "@/ui";
 import { Field, inputCls, LockedValue, textareaCls } from "../../cases/_parts/fields";
 import { StaffSelect } from "../../cases/_parts/StaffSelect";
-import { DateField } from "@/ui/booking/DateField";
 
 const STATUS_OPTIONS: { value: TripCheckStatus; label: string }[] = [
   { value: "open", label: "Open" },

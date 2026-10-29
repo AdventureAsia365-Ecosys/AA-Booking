@@ -8,11 +8,10 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type ContractBody, type SupplierContract } from "@/lib/api/suppliers";
-import { FormDrawer, useToast } from "@/ui";
+import { FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { supplierError } from "./shared";
-import { DateField } from "@/ui/booking/DateField";
 
 export function ContractDrawer({
   supplierRef,

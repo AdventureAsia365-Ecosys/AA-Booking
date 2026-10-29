@@ -43,10 +43,11 @@ import {
   SupplyBadge,
   useCan,
   useToast,
+  RowMenu,
+  type RowMenuItem,
+  DateField,
 } from "@/ui";
-import { RowMenu, type RowMenuItem } from "@/ui/booking/RowMenu";
 import { prepareUpload } from "../../_parts/SupplyContent";
-import { DateField } from "@/ui/booking/DateField";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 const fieldCls = "h-9 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";

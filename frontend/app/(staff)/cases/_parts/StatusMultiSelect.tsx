@@ -40,7 +40,7 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
 
   return (
     // AA-996: the FilterBar shape (inline label before a 36 px control), so it shares the bar's single row.
-    <div ref={ref} className="relative flex items-center gap-1.5" data-bk-filter="">
+    <div ref={ref} className="relative flex items-center gap-1.5" data-kit-filter="">
       <span className="shrink-0 whitespace-nowrap text-[12px] font-medium text-muted">Status</span>
       <button
         type="button"
@@ -69,7 +69,7 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
                   aria-selected={value.includes(s)}
                   className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-body hover:bg-bg"
                 >
-                  <input type="checkbox" checked={value.includes(s)} onChange={() => toggle(s)} className="h-4 w-4 accent-[var(--aa-accent)]" />
+                  <input type="checkbox" checked={value.includes(s)} onChange={() => toggle(s)} className="h-4 w-4 accent-accent" />
                   {TRIP_CASE_STATUS_META[s].label}
                 </label>
               ))}

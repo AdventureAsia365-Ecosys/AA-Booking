@@ -111,7 +111,7 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
 | DB access | asyncpg with plain SQL, no ORM in request paths; `ssl="require"` |
 | Lint / tests | ruff, pytest + pytest-asyncio, migration guard, integration tests on Postgres 15 |
 | Runtime | ECS Fargate service `aa-booking-dev-api` on `aa-cis-dev-cluster` (acc2, us-west-1) |
-| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the copied CIS kit tokens, react-query, TanStack Table. Vercel project `aa-booking-admin`, deployed by CI (`.github/workflows/vercel-deploy.yml`, see Staff admin frontend). Customer surface (O8) not started |
+| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the UI kit core tokens (`frontend/ui/core`, root ADR 0016), react-query, TanStack Table. Vercel project `aa-booking-admin`, deployed by CI (`.github/workflows/vercel-deploy.yml`, see Staff admin frontend). Customer surface (O8) not started |
 
 ## Layout
 
@@ -1329,9 +1329,20 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
 - `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the access token as Bearer. Tokens live only in
   httpOnly cookies. Booking roles of company sign-in profiles are read-only on `/staff` (set in CIS → Platform →
   Staff, API 409 `managed_in_directory`); Activate / Deactivate stays.
-- `frontend/ui/` holds byte copies of the CIS kit (`app/_kit`, `_brand/tokens.ts`, the `--aa-*` blocks of
-  `globals.css`) with the source commit in each header. Brand values change in CIS first, then are copied again.
-  Booking-only components are in `frontend/ui/booking/` and use Tailwind utilities mapped to the same variables.
+- UI kit (AA-994 S4b, root ADR 0016): `frontend/ui/core/` is the kit core, a byte copy of AA-CIS-App
+  `frontend/app/_kit/core/` written by the root `tools/kit/kit-sync.sh` and pinned in `frontend/kit.lock.json`; it is
+  never edited here (the kit-sync bot opens the sync PR after a CIS core change). It carries the one `--aa-*` token set
+  (`ui/core/tokens.css`, imported by `app/globals.css`), the primitives, Modal / ConfirmModal, Drawer, Toast, DataTable,
+  PageFrame, Section, KpiTile, FilterBar + `useUrlFilters`, RowMenu, DateField, Money / DateText and the kit lint
+  (`ui/core/eslint-kit.mjs`). `frontend/ui/local/` is the Booking staff shell (sidebar, topbar, bottom nav, ⌘K
+  palette, staff context, nav, `shell.css`, the theme store bound to `bk_theme`; the sidebar state uses the core key
+  `cis_sidebar`, carried over once from `bk_sidebar`). `frontend/ui/booking/` holds Booking components (Tailwind
+  utilities on the same variables) and pure helpers; Booking-only CSS values are `--bk-*` (`ui/booking-tokens.css`).
+  Pages import everything from `@/ui` (the barrel `ui/index.ts`; `ConfirmDialog` is the core `ConfirmModal`,
+  `PageFrame` the core frame with the Booking wide column and gutter). Frontend Build checks the copy (integrity,
+  `--aa-*` definitions only in the core tokens, provenance of the lock's CIS commit on CIS main) and lints `app/**`
+  and `ui/booking/**` with the kit `tailwind` preset at error; violations from before S4b live in
+  `frontend/eslint-suppressions.json`, which may only shrink.
 - Case workspace and proposals (AA-996 audit slice 4, S254): the case header names the customer, the sales agent and
   the date range with its length; Overview puts the trip facts (two columns, Edit pencil, approved total) in the main
   column, a custom trip's empty legs card is one line, the TripPlanner inquiry panel shows the client's message,
@@ -1342,7 +1353,7 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   read-only session's 403 on the quote (`e2e_read_only`, `preview_read_only`) is explained, not shown as a role
   problem. Approving a version with no items is 422 `version_empty`. Convert / Decline dialogs use the Modal footer.
 - Compact density (AA-996, S254): pages import `DataTable` from `@/ui`, which is the Booking wrapper
-  `ui/booking/DataTable.tsx` around the kit copy. From 768 to 1199 px CSS wide (zoomed laptops) cells are tighter, the
+  `ui/booking/DataTable.tsx` around the kit core table. From 768 to 1199 px CSS wide (zoomed laptops) cells are tighter, the
   sidebar is the icon rail, the page gutter is 20 px (`app/globals.css`, pure CSS) and columns marked
   `meta: { compact: "drawer" }` move into a row details drawer; at 1200 px and wider nothing changes.
 - List and date pieces (AA-996 audit slice 1, S254): a list page passes its `FilterBar` to the table through the
@@ -1352,8 +1363,9 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   exports CSV (`enableCsv`; a display-only column gets an `accessorFn` with sorting off; `csv` on the wrapper when a
   cell groups two facts; the Countries grid uses `ExportCsvButton` in the bar's `tools` slot). Every Booking CSV goes
   through the wrapper's button: row tools (row menu, open link, details) are left out and every value passes the
-  spreadsheet formula guard `ui/booking/csvCell.ts`. Dates are typed and shown en-GB through
-  `ui/booking/DateField.tsx` (`DateField` "28 Oct 2026", day-first input; `TimeField` 24 h) instead of the browser's
+  spreadsheet formula guard `ui/booking/csvCell.ts`. Dates are typed and shown en-GB through the kit
+  `DateField` ("28 Oct 2026", day-first input; `ui/core/DateField.tsx` since AA-994 S4a/S4b) and the Booking
+  `TimeField` (24 h, `ui/booking/TimeField.tsx`) instead of the browser's
   locale inputs; the box always shows the value the page holds (an out-of-range day is passed up and marked invalid so
   the page's own checks block it; unreadable text is dropped on blur); date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,
   `DateText`), and ISO dates inside notification text are localised (`localizeIsoDates`). `npm run test:unit` runs the
@@ -1364,7 +1376,7 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   real list (anything that can grow, be filtered or paged) uses `DataTable`.
 - Auth hardening: `lib/safeNext.ts` (post-login target stays same-origin), `lib/sameOrigin.ts` (BFF writes, login and
   logout refuse cross-origin requests), `ui/booking/QueryProvider.tsx` (a 401 anywhere goes to `/login?next=…`; 4xx is
-  never retried). The CIS `ui/Providers.tsx` copy stays byte-comparable but is not mounted.
+  never retried). The kit core `ui/core/Providers.tsx` is not mounted.
 - Every route of UI spec §3 exists. Wave 1 pages, `/audit-log` (S237, over `GET /booking/audit-logs`) and
   `/pricing/rules` (S237, AA-810: rules + FX tabs, new-row drawers, Approve), `/suppliers` (S237, AA-822: list with
   KPIs, add / edit form with the CIS place typeahead, detail with Profile + Contracts + Rates tabs (AA-823: rates per

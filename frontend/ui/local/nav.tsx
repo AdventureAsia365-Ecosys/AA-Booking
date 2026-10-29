@@ -1,5 +1,5 @@
 "use client";
-// ui/nav.tsx
+// ui/local/nav.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — the Booking navigation model (replaces CIS adminNav.tsx), shared by the Sidebar, the Topbar
 // breadcrumb, the CommandPalette and the BottomNav. Order, groups, labels and icons are UI spec §2.2
 // (Figma regrouped per shell C-1/C-10). An item shows only when the role may open its page

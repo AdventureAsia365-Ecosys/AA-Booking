@@ -1,6 +1,6 @@
 "use client";
 // ui/booking/DataTable.tsx
-// AA-996 — the Booking list table: the kit DataTable (ui/DataTable.tsx, a byte-comparable CIS copy, never edited here)
+// AA-996 — the Booking list table: the kit DataTable (ui/core/DataTable.tsx, the kit core copy, never edited here)
 // plus a compact density for zoomed laptops. Every page imports `DataTable` from "@/ui", which is this wrapper, so the
 // density applies to every list without a per-page change.
 //
@@ -27,17 +27,17 @@
 // of the page (or the page's `csv` columns) except the row tools (selection, details button, row menu / open link,
 // which carry no data), over the rows the page passes (all Booking lists filter in the page: `searchable={false}`),
 // and every value passes the spreadsheet formula guard (csvCell.ts). The kit's own exporter is not used, because it
-// writes the row-menu column and does not neutralise formulas, and ui/DataTable.tsx is a CIS copy not edited here.
+// writes the row-menu column and does not neutralise formulas, and ui/core/DataTable.tsx is the kit core copy, not edited here.
 
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowData } from "@tanstack/react-table";
 import { Download, PanelRightOpen } from "lucide-react";
 import { useMemo, useState } from "react";
-import { downloadCsv, toCsv } from "../csv";
+import { downloadCsv, toCsv } from "../core/csv";
 import { safeCsvColumns } from "./csvCell";
-import { DataTable as KitDataTable, type DataTableProps } from "../DataTable";
-import { Drawer } from "../Drawer";
-import { K, RADIUS, sans } from "../tokens";
-import { useMediaQuery } from "../useMediaQuery";
+import { DataTable as KitDataTable, type DataTableProps } from "../core/DataTable";
+import { Drawer } from "../core/Drawer";
+import { K, RADIUS, sans } from "../core/tokens";
+import { useMediaQuery } from "../core/useMediaQuery";
 
 declare module "@tanstack/react-table" {
   // TanStack's documented way to type column meta (module augmentation); both type parameters are required by it.
@@ -147,7 +147,7 @@ export function csvMoney(amount: string | number | null | undefined, currency: s
 /** Columns that are row tools, never data: left out of every CSV. */
 const NON_DATA_IDS = new Set(["__select", DETAILS_ID, ...TRAILING_IDS]);
 
-/** The kit's CSV column rule (ui/DataTable.tsx `exportCsv`: header text or column id; accessorFn, else accessorKey,
+/** The kit's CSV column rule (ui/core/DataTable.tsx `exportCsv`: header text or column id; accessorFn, else accessorKey,
  *  else empty), applied to every data column of the page (row tools left out), at every density. */
 export function csvColumns<T>(columns: ColumnDef<T, unknown>[]): CsvColumn<T>[] {
   return columns

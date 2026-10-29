@@ -12,10 +12,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import type { CustomerSummary } from "@/lib/api/types";
 import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
-import { Button, Modal, fieldName, useToast } from "@/ui";
+import { Button, Modal, fieldName, useToast, DateField } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, toInt } from "../../../cases/_parts/fields";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "../../../cases/new/CustomerPicker";
-import { DateField } from "@/ui/booking/DateField";
 
 type Target = "new_case" | "existing_case";
 const CASE_CODE_RE = /^TC-\d{6,}$/i; // lpad 6, grows past TC-999999 (bk-002 trip_case_code_seq)

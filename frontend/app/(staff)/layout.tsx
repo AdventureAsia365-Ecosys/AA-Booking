@@ -15,9 +15,10 @@ import { redirect } from "next/navigation";
 import { ACCESS_COOKIE } from "@/lib/session";
 import { CIS_STAFF_URL } from "@/lib/config";
 import { fetchStaffMe } from "@/lib/api/server";
-import { AdminShell } from "@/ui/AdminShell";
-import { StaffProvider } from "@/ui/StaffContext";
 import { SessionNotice } from "./SessionNotice";
+// Server component: the shell modules directly, not the "@/ui" barrel (which re-exports client and server modules).
+import { AdminShell } from "@/ui/local/AdminShell";
+import { StaffProvider } from "@/ui/local/StaffContext";
 
 export const dynamic = "force-dynamic";
 

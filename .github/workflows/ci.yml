@@ -7,6 +7,9 @@ name: CI
 # table template, AA-751, and the multi-issuer verifier, AA-680).
 # An eighth, "Migration preflight" (AA-993 M4b), classifies a PR's new migrations and refuses the cases that would leave
 # Deploy Dev waiting on a manual apply; non-required until the ruleset adds it (pull_request and merge_group only).
+# UI kit core (AA-994 S4b, root ADR 0016): frontend/ui/core is checked inside Frontend Build (integrity + provenance
+# against frontend/kit.lock.json, kit lint at error with a suppressions file that only shrinks), not by "Vendored CIS
+# copies".
 
 on:
   pull_request:
@@ -407,11 +410,76 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
+      # AA-994 S4b (root ADR 0016 decision 5) — the vendored UI kit core, before npm ci (dependency-free). Integrity:
+      # every file of ui/core has the sha256 of its MANIFEST.json, no file is missing or extra, the manifest is the one
+      # kit.lock.json pins, and no CSS file outside ui/core/tokens.css defines an --aa-* variable (Booking-only values
+      # are --bk-*). Provenance: that manifest is AA-CIS-App's at the lock's ref and the ref is on CIS main (reads
+      # GitHub only when this change touches frontend/kit.lock.json or frontend/ui/core; otherwise it passes at once).
+      - name: Kit core integrity (check-kit-copy.mjs)
+        run: |
+          node ui/core/check-kit-copy.mjs
+          node ui/core/check-kit-copy.mjs --css .
+
+      - name: Kit core provenance (kit.lock.json ref on AA-CIS-App main)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
+        run: python3 ../backend/scripts/check_kit_provenance.py kit.lock.json --base "$BASE_SHA"
+
       - name: Install dependencies
+        id: install
         run: npm ci
 
-      - name: Lint (eslint, no warnings allowed)
-        run: npm run lint
+      # AA-994 S4b (root ADR 0016 decision 7, plan guards G1-G11) — page code (app/**) and the Booking components
+      # (ui/booking/**) are linted with the kit preset (ui/core/eslint-kit.mjs, `tailwind`) at `error`, no warnings
+      # allowed; violations that existed before S4b are frozen in frontend/eslint-suppressions.json (ESLint bulk
+      # suppressions), which only shrinks:
+      #   1. `eslint --prune-suppressions` fails on any violation the file does not cover and rewrites the file;
+      #   2. the committed file must equal the pruned one (a fix that did not prune its entries fails);
+      #   3. no entry and no rule total may grow against the base branch's file (a `--suppress-all` that hides new
+      #      violations fails), a new entry may only carry a deleted/renamed file's violations into a file the base did
+      #      not have, and no entry may name a deleted file;
+      #   4. no inline `eslint-disable` of a kit rule (or bare `eslint-disable`) in page code.
+      # They run even when an earlier step failed (once npm ci succeeded), so one run shows every reason.
+      - name: Lint (eslint, kit preset at error, no warnings, suppressions pruned)
+        id: eslint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npx eslint --max-warnings 0 --prune-suppressions
+
+      - name: Suppressions file is pruned
+        if: ${{ !cancelled() && steps.eslint.conclusion != 'skipped' }}
+        run: |
+          if ! git diff --exit-code -- eslint-suppressions.json; then
+            echo "::error file=frontend/eslint-suppressions.json::Violations were fixed but their suppressions were not removed. Run 'npx eslint --prune-suppressions' in frontend/ and commit eslint-suppressions.json (the diff above)."
+            exit 1
+          fi
+          git checkout -- eslint-suppressions.json
+
+      - name: Suppressions do not grow
+        if: ${{ !cancelled() && steps.eslint.conclusion != 'skipped' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          case "$BASE_SHA" in
+            ""|0000000000000000000000000000000000000000)
+              echo "::notice::No base commit for this event: suppressions growth check skipped."
+              exit 0 ;;
+          esac
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          BASE_FILE="$RUNNER_TEMP/base-eslint-suppressions.json"
+          if ! git show "$BASE_SHA:frontend/eslint-suppressions.json" > "$BASE_FILE" 2>/dev/null; then
+            echo "::notice::The base commit has no frontend/eslint-suppressions.json (this change creates the baseline): growth check skipped."
+            exit 0
+          fi
+          BASE_LIST="$RUNNER_TEMP/base-frontend-files.txt"
+          git ls-tree -r --name-only "$BASE_SHA" -- . > "$BASE_LIST"  # paths relative to frontend/ (the cwd)
+          node ui/core/check-kit-copy.mjs --suppressions "$BASE_FILE" eslint-suppressions.json --base-files "$BASE_LIST"
+
+      - name: No inline disable of a kit rule
+        if: ${{ !cancelled() }}
+        run: |
+          node ui/core/check-kit-copy.mjs --no-kit-disable app
+          node ui/core/check-kit-copy.mjs --no-kit-disable ui/booking
 
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck

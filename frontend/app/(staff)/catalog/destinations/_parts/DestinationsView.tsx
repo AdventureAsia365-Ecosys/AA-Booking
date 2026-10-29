@@ -25,8 +25,8 @@ import {
   Section,
   useCan,
   useUrlFilters,
+  RowMenu,
 } from "@/ui";
-import { RowMenu } from "@/ui/booking/RowMenu";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { DestinationPicker } from "@/app/(staff)/suppliers/_parts/DestinationPicker";
 import { CIS_PLACES_PATH, DestinationDrawer, GeoStatusBadge, coords } from "../../_parts/GeoDrawers";

@@ -1,5 +1,5 @@
 "use client";
-// ui/StaffContext.tsx
+// ui/local/StaffContext.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — the signed-in staff profile (GET /booking/staff/me), loaded server-side by the (staff) layout
 // and handed to client components. Replaces CIS useAdminIdentity (which read a client-writable cookie):
 // here the role comes from the Booking API, behind a verified JWT.

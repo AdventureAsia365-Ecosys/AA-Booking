@@ -19,9 +19,8 @@ import {
   type PaymentMethod,
 } from "@/lib/api/billing";
 import type { OpsFile } from "@/lib/api/supplierBookings";
-import { Button, ConfirmDialog, Modal, Money, formatMoney, useToast } from "@/ui";
+import { Button, ConfirmDialog, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
 import { prepareUpload } from "../../_parts/SupplyContent";
-import { DateField } from "@/ui/booking/DateField";
 import { formatDay } from "@/ui/booking/dates";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;

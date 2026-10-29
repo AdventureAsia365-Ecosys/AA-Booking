@@ -15,8 +15,7 @@ import { api } from "@/lib/api/client";
 import { proposalsApi } from "@/lib/api/proposals";
 import { QUOTE_VALIDITY_RANGE_DAYS, settingsFromApi } from "@/lib/bookingConfig";
 import { addDays, defaultSendMessage } from "@/lib/proposalDraft";
-import { Button, Modal, Money, Spinner, formatDay, staffDisplay, useStaff, useToast } from "@/ui";
-import { DateField } from "@/ui/booking/DateField";
+import { Button, Modal, Money, Spinner, formatDay, staffDisplay, useStaff, useToast, DateField } from "@/ui";
 
 const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
 const fieldCls = "w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";

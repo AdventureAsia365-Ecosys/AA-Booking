@@ -6,9 +6,9 @@
 // value through the spreadsheet formula guard (csvCell.ts).
 
 import { Download } from "lucide-react";
-import { downloadCsv, toCsv } from "../csv";
+import { downloadCsv, toCsv } from "../core/csv";
 import { safeCsvColumns } from "./csvCell";
-import { K, RADIUS, sans } from "../tokens";
+import { K, RADIUS, sans } from "../core/tokens";
 
 export function ExportCsvButton<T>({
   rows,

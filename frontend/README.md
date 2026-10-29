@@ -68,12 +68,18 @@ app/
 proxy.ts                 Next 16 middleware: no session → /login; Cognito token near expiry → /api/auth/refresh;
                          re-mints the legacy Booking token
 lib/                     config, session cookies, rbac (page roles), typed API client + types
-ui/                      copied CIS kit (byte copies, header names the CIS commit) + Booking shell
-ui/booking/              Booking components (StatusBadge, Stepper, FilterBar, ConfirmDialog, FormDrawer, …)
+ui/index.ts              the barrel: pages import from "@/ui" only
+ui/core/                 UI kit core: byte copy of AA-CIS-App frontend/app/_kit/core (kit-sync, kit.lock.json)
+ui/local/                Booking staff shell (sidebar, topbar, bottom nav, ⌘K palette, nav, theme store)
+ui/booking/              Booking components (StatusBadge, Stepper, FormDrawer, DataTable wrapper, …) + helpers
 ```
 
 ## Rules
 
-- Page code never uses a raw hex colour, a raw `<table>` or a hand-rolled dialog (eslint).
-- Copied kit files in `ui/` change only their imports and storage keys; brand values change in CIS first.
+- Page code (`app/**`, `ui/booking/**`) follows the kit lint (`ui/core/eslint-kit.mjs`, `tailwind` preset at error):
+  no raw `<main>` / `<table>` / dialog, no hex colour, no `var(--aa-…)` string, no hand-styled `<button>` in pages.
+  Older violations sit in `eslint-suppressions.json`, which may only shrink.
+- `ui/core/` is never edited here: change the kit in AA-CIS-App `frontend/app/_kit/core/`, then sync
+  (`tools/kit/kit-sync.sh booking` in the root repo, or the kit-sync bot PR). No `--aa-*` value is defined outside
+  `ui/core/tokens.css`; Booking-only values are `--bk-*`.
 - No mock data: a page whose endpoint does not exist yet says so in an empty state.

@@ -157,7 +157,7 @@ export function CustomerPicker({
               type="checkbox"
               checked={lead.contact_consent}
               onChange={(e) => onLead({ ...lead, contact_consent: e.target.checked })}
-              className="h-4 w-4 accent-[var(--aa-accent)]"
+              className="h-4 w-4 accent-accent"
             />
             The customer agreed to be contacted
           </label>

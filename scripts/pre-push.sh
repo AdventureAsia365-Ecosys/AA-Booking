@@ -448,7 +448,10 @@ run_check() {
         return
       fi
       if [[ "$id" == "fe-lint" ]]; then
-        run_step "$id" frontend "ci.yml / Frontend Build / Lint (eslint, no warnings allowed)" "npm run lint" -- npm run lint --silent
+        # AA-994 S4b (plan guard G19): the kit core integrity checks run with the lint (both dependency-free and fast).
+        run_step "$id" frontend "ci.yml / Frontend Build / Kit core integrity + Lint (kit preset at error)" \
+          "node ui/core/check-kit-copy.mjs && node ui/core/check-kit-copy.mjs --css . && npm run lint" -- \
+          bash -c 'node ui/core/check-kit-copy.mjs && node ui/core/check-kit-copy.mjs --css . && npm run lint --silent'
       else
         run_step "$id" frontend "ci.yml / Frontend Build / Typecheck (tsc --noEmit)" "npm run typecheck" -- npm run typecheck --silent
       fi ;;
