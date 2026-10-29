@@ -16,7 +16,8 @@ import ts from "typescript";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SCAN = ["app", "ui", "lib", "proxy.ts"];
 const SOURCE = /\.(tsx?|mjs|js)$/;
-const SKIP = /\.test\.(mjs|ts|tsx)$/;
+// Tests and lint configs are never rendered: eslint-kit.mjs messages are developer-facing (the kit core copy, AA-994).
+const SKIP = /(\.test\.(mjs|ts|tsx)|(^|\/)eslint-[\w-]+\.mjs)$/;
 const ISSUE_ID = /\bAA-\d+\b/;
 
 function sourceFiles(path) {

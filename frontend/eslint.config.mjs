@@ -37,7 +37,7 @@ const eslintConfig = defineConfig([
   // The copied kit DataTable uses TanStack's useReactTable, which the React Compiler skips (same
   // warning in CIS). The file is a byte copy, so the rule is silenced here instead of editing it.
   {
-    files: ["ui/DataTable.tsx"],
+    files: ["ui/DataTable.tsx", "ui/core/DataTable.tsx"],
     rules: {
       "react-hooks/incompatible-library": "off",
     },
