@@ -3,8 +3,8 @@
 // AA-683 — edits in a side drawer (UI spec §5): the kit Drawer + a <form>, a Cancel / Save footer, a
 // dirty guard (closing with unsaved changes asks first) and the field errors of a 422 answer.
 
-import { Drawer } from "../Drawer";
-import { Button } from "../primitives";
+import { Drawer } from "../core/Drawer";
+import { Button } from "../core/primitives";
 import type { FieldError } from "@/lib/api/client";
 
 /** "body.pax" → "pax": the field name of a FastAPI 422 error location. */

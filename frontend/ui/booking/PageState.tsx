@@ -6,7 +6,7 @@
 
 import { Lock, SearchX } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
-import { EmptyState, ErrorState, SkeletonBar } from "../primitives";
+import { EmptyState, ErrorState, SkeletonBar } from "../core/primitives";
 
 export function PageSkeleton({ side = true }: { side?: boolean }) {
   return (

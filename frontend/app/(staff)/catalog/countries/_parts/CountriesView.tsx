@@ -13,8 +13,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Eye, Globe, ImageIcon, MapPin, Pencil, Plus, Power, Store } from "lucide-react";
 import { geoApi, type CountryItem, type GeoStatus } from "@/lib/api/geo";
-import { Button, CisPhoto, EmptyState, ErrorState, ExportCsvButton, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters } from "@/ui";
-import { RowMenu } from "@/ui/booking/RowMenu";
+import { Button, CisPhoto, EmptyState, ErrorState, ExportCsvButton, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters, RowMenu } from "@/ui";
 import { CIS_PLACES_PATH, CountryDrawer, GeoStatusBadge } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
 

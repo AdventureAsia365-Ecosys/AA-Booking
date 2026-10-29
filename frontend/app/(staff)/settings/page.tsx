@@ -38,9 +38,9 @@ import {
   useThemeChoice,
   useToast,
   useUrlFilters,
+  type ThemeChoice,
+  signOut,
 } from "@/ui";
-import type { ThemeChoice } from "@/ui/theme";
-import { signOut } from "@/ui/signOut";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 

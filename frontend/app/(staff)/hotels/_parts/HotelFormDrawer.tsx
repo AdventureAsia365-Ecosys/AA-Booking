@@ -8,13 +8,12 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { supplyApi, type HotelBody, type HotelDetail } from "@/lib/api/supply";
-import { FormDrawer, useToast } from "@/ui";
+import { FormDrawer, useToast, TimeField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { DestinationPicker, type PickedPlace } from "@/app/(staff)/suppliers/_parts/DestinationPicker";
-import { TimeField } from "@/ui/booking/DateField";
 
 const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
 const linksText = (h?: HotelDetail) => (h?.links ?? []).map((l) => (l.label && l.label !== l.url ? `${l.label} | ${l.url}` : l.url)).join("\n");

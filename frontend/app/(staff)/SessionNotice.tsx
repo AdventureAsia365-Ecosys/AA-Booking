@@ -5,9 +5,7 @@
 
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Hourglass, ShieldOff } from "lucide-react";
-import { Button } from "@/ui/primitives";
-import { LOGO_SRC } from "@/ui/brand";
-import { signOut } from "@/ui/signOut";
+import { Button, LOGO_SRC, signOut } from "@/ui";
 
 const ICON = {
   pending: <Hourglass size={28} className="text-accent" />,

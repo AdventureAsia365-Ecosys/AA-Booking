@@ -1,12 +1,12 @@
 "use client";
-// ui/BottomNav.tsx
+// ui/local/BottomNav.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/BottomNav.tsx (CIS commit 039bb250): fixed phone
-// nav (< 768 px, ui/shell.css). Booking items (UI spec §2.1): Dashboard, Cases, Customers, Notifications,
+// nav (< 768 px, ui/local/shell.css). Booking items (UI spec §2.1): Dashboard, Cases, Customers, Notifications,
 // More (opens the drawer with the full nav). Items the role cannot open are left out.
 
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Briefcase, LayoutGrid, Menu, Users } from "lucide-react";
-import { K } from "./tokens";
+import { K } from "../core/tokens";
 import { navActive } from "./nav";
 import { useStaff } from "./StaffContext";
 import { canSeePage } from "@/lib/rbac";

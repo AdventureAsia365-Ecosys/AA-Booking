@@ -1,5 +1,5 @@
 "use client";
-// ui/CommandPalette.tsx
+// ui/local/CommandPalette.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/CommandPalette.tsx (CIS commit 039bb250): the ⌘K /
 // Ctrl K palette. Same dialog, keyboard handling and look. Booking sources: the role's pages (ui/nav.tsx),
 // trip cases (GET /booking/trip-cases?q=, roles with trip_case.read) and customers (GET /booking/customers?q=,
@@ -9,12 +9,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Briefcase, Users, CornerDownLeft } from "lucide-react";
-import { K, RADIUS, sans, serif, alpha } from "./tokens";
+import { K, RADIUS, sans, serif, alpha } from "../core/tokens";
 import { allEntries, type NavEntry } from "./nav";
 import { useStaff } from "./StaffContext";
 import { api } from "@/lib/api/client";
 import { canSeePage } from "@/lib/rbac";
-import { TRIP_CASE_STATUS_META } from "./booking/StatusBadge";
+import { TRIP_CASE_STATUS_META } from "../booking/StatusBadge";
 
 type Row =
   | { kind: "page"; label: string; href: string; icon: React.ReactNode }

@@ -8,12 +8,11 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { FormDrawer } from "@/ui";
+import { FormDrawer, DateField } from "@/ui";
 import { CURRENCIES, Field, LockedValue, inputCls, paxErrors, textareaCls, toInt } from "../_parts/fields";
 import { CountryPicker } from "../_parts/CountryPicker";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
-import { DateField } from "@/ui/booking/DateField";
 
 interface Form {
   start_date: string;

@@ -1,13 +1,14 @@
 /* AA-683 — global styles for the Booking staff admin.
-   One colour source (the --aa-* variables copied from CIS), two ways to read it:
-     - copied kit components (ui/*.tsx) use inline styles on `K` (ui/tokens.ts);
+   One colour source (the --aa-* variables of the kit core, ui/core/tokens.css, AA-994 S4b), two ways to read it:
+     - kit core components (ui/core) and the shell (ui/local) use inline styles on `K` (ui/core/tokens.ts);
      - Booking components and page layout use the Tailwind utilities generated below (UI spec Q2).
-   Never a raw hex in page code (eslint rule in eslint.config.mjs). */
+   Never a raw hex in page code (kit lint, eslint.config.mjs). No --aa-* variable is defined outside
+   ui/core/tokens.css (check-kit-copy.mjs --css, Frontend Build): Booking-only values are --bk-* in ui/booking-tokens.css. */
 
 @import "tailwindcss";
-@import "../ui/tokens.css";
+@import "../ui/core/tokens.css";
 @import "../ui/booking-tokens.css";
-@import "../ui/shell.css";
+@import "../ui/local/shell.css";
 
 /* The theme is driven by <html data-theme> (restored before paint in app/layout.tsx), not by the
    OS media query, so Tailwind's `dark:` variant follows the same attribute. */
@@ -58,7 +59,7 @@
   --font-mono: var(--bk-font-mono);
   --font-script: var(--bk-font-script);
 
-  /* Kit radii (ui/tokens.ts RADIUS): sm 6, md 8, lg 12. */
+  /* Kit radii (ui/core/tokens.ts RADIUS): sm 6, md 8, lg 12. */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -123,17 +124,37 @@ body {
   }
 }
 
+/* AA-994 S4b — the kit core KpiTile (ui/core/KpiTile.tsx) draws its hint line (the third child) at 12 px with the
+   inherited line height; the former Booking tile used Tailwind `text-xs` (12 px, unitless line height 1/0.75 = 16 px,
+   inherited as a ratio by a pill inside the hint), so every tile was 2 px shorter. Keep the Booking tile height (no
+   inline line-height on that line, so no !important needed). Tailwind's own variable, not a literal: the minifier
+   rounds a literal calc() to 1.33333, which is 1 px off on a long page. */
+[data-kit-kpi] > div:nth-child(3) {
+  line-height: var(--text-xs--line-height);
+}
+
+/* AA-994 S4b — `ConfirmDialog` is the kit core ConfirmModal (ui/core/Modal.tsx), whose message and reason box inherit
+   the Modal body's line height (1.5 = 21 px at 14 px). The former Booking dialog set them in Tailwind `text-sm`
+   (14 px / 20 px); keep that, so the dialogs keep their height. `confirm-dialog` is the ConfirmModal's default test id
+   (Booking pages never pass another). */
+[data-testid="confirm-dialog"] h2 + div,
+[data-testid="confirm-dialog"] textarea {
+  line-height: var(--text-sm--line-height);
+}
+
 /* AA-996 (audit slice 1) — a FilterBar passed to the Booking DataTable (`filters`) joins the kit table toolbar: its root
    steps out of the box tree, so its search box sits on the toolbar line next to Columns / CSV and its filter row
-   (order 2, full width) wraps under them. ui/booking/FilterBar.tsx, ui/booking/DataTable.tsx. */
-.bk-dt-filters > .bk-filterbar {
-  display: contents;
+   (order 2, full width) wraps under them. ui/booking/DataTable.tsx. Since AA-994 S4b the bar is the kit core FilterBar
+   (ui/core/FilterBar.tsx, class `aa-kit-filterbar`), whose block layout is an inline style: `!important` lets this rule
+   do what its `layout="toolbar"` does, without each page passing it. */
+.bk-dt-filters > .aa-kit-filterbar {
+  display: contents !important;
 }
 
 /* AA-996 — compact density for zoomed laptops: 768-1199 px CSS wide (a 1440 px laptop at 125-150 % zoom; 150 % is
    about 960 px). Keep the window in step with COMPACT_QUERY in ui/booking/DataTable.tsx, which folds the columns marked
    `meta.compact = "drawer"` into the row's details drawer. Pure CSS (no flash after hydration, no layout shift); the
-   `!important` beats the kit's inline styles (ui/DataTable.tsx, ui/Sidebar.tsx are CIS copies and are not edited).
+   `!important` beats the kit's inline styles (ui/core/DataTable.tsx is the kit core copy, ui/local/Sidebar.tsx keeps the CIS inline styles).
    At 1200 px and wider nothing below applies, so the 1280-1440 px layout is exactly as before. Theme-neutral: only
    sizes change, every colour stays a token (light and dark). */
 @media (min-width: 768px) and (max-width: 1199.98px) {
@@ -152,7 +173,7 @@ body {
   }
   /* The sidebar is its 68 px icon rail (labels in the tooltips), whatever the stored preference: an expanded 248 px
      sidebar leaves a 960 px window ~650 px for the page. The collapse toggle has nothing to do here, so it is hidden;
-     the stored preference applies again from 1200 px. Same presentation as ui/shell.css `[data-collapsed="true"]`. */
+     the stored preference applies again from 1200 px. Same presentation as ui/local/shell.css `[data-collapsed="true"]`. */
   .aa-shell-sidebar {
     width: 68px !important;
   }

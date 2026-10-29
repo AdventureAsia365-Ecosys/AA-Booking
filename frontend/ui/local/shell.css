@@ -168,9 +168,9 @@
     box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
   }
 
-  /* A centred kit Modal ends above the bottom nav (60px + 16px gap) instead of under it, so its footer
-     buttons never sit over the nav (AA-679). Only when the shell renders the nav; elsewhere 24px. */
-  :root:has(.aa-bottom-nav) { --aa-modal-inset-bottom: 76px; }
+  /* AA-994 S4b: the AA-679 rule that set --aa-modal-inset-bottom here is gone. The kit core Modal does not read it
+     (the Booking copy did), and no CSS outside ui/core/tokens.css may define an --aa-* variable (check-kit-copy.mjs
+     --css). The phone inset above the bottom nav is to be upstreamed into the kit core Modal. */
 
   /* Topbar element swap: hide the full search pill + the "Admin /" crumb root, show the mobile
      hamburger + search icon + the flex spacer that keeps the right cluster right-aligned. Tighten
@@ -185,3 +185,10 @@
   .aa-topbar-spacer { display: block !important; }
 }
 
+
+/* AA-994 S4b — the kit core PageHeader (ui/core/primitives.tsx) puts the text block's `flex` and the actions'
+   alignment in classes (an inline style would win over a media rule). Same values as AA-CIS-App app/globals.css, so the
+   header lays out exactly as the former inline-style copy did. The CIS phone "stack" rule (actions under the text when
+   the header has a description) is left out on purpose: S4b keeps every Booking page as it was. */
+.aa-page-header-text { flex: 1 1 240px; }
+.aa-page-header-actions { justify-content: flex-end; max-width: 100%; }

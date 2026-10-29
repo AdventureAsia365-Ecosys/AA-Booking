@@ -591,15 +591,15 @@ const LIST_PAGES: ListCase[] = [
  *  row 2 = every filter + "Reset filters". Vertical centres of each part, to check each row is one line. */
 async function toolbarRows(page: Page) {
   return page.evaluate(() => {
-    const bar = document.querySelector('main [data-testid="bk-filterbar"]');
+    const bar = document.querySelector('main [data-testid="kit-filterbar"]');
     const toolbar = bar?.closest(".bk-dt-filters")?.parentElement ?? null;
     const box = (el: Element) => {
       const r = el.getBoundingClientRect();
       return { text: (el.textContent ?? "").trim().slice(0, 20) || el.tagName, mid: Math.round(r.top + r.height / 2), top: Math.round(r.top) };
     };
-    const search = bar?.querySelector(':scope > [data-bk-filter-row="1"]');
+    const search = bar?.querySelector(':scope > [data-kit-filter-row="1"]');
     const tools = toolbar ? Array.from(toolbar.querySelectorAll(":scope > div:not(.bk-dt-filters) > button, :scope > button")).map(box) : [];
-    const row2 = bar?.querySelector(':scope > [data-bk-filter-row="2"]');
+    const row2 = bar?.querySelector(':scope > [data-kit-filter-row="2"]');
     return {
       inToolbar: !!toolbar,
       row1: [...(search ? [box(search)] : []), ...tools],
@@ -620,7 +620,7 @@ test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV o
         const row = await toolbarRows(page);
         void testInfo.attach("toolbar-rows", { body: JSON.stringify(row, null, 1), contentType: "application/json" });
         expect(row.inToolbar, "the FilterBar is in the table toolbar (DataTable `filters`)").toBe(true);
-        await expect(page.locator('main [data-testid="bk-filter-reset"]').first(), "Reset filters is on the bar").toBeVisible();
+        await expect(page.locator('main [data-testid="kit-filterbar-reset"]').first(), "Reset filters is on the bar").toBeVisible();
         const spread = (xs: { mid: number }[]) => Math.max(...xs.map((x) => x.mid)) - Math.min(...xs.map((x) => x.mid));
         expect(row.row1.length, "row 1 has the search box and the tools").toBeGreaterThanOrEqual(3);
         expect(spread(row.row1), `search box and Columns / CSV on one line: ${JSON.stringify(row.row1)}`).toBeLessThanOrEqual(4);
@@ -649,13 +649,13 @@ test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV o
   test("countries: CSV in the filter bar's tools slot, one row", async ({ page, baseURL }) => {
     const c = await prepare(page, baseURL!);
     await open(page, { name: "countries", path: "/catalog/countries", ready: "text=Area: Indochina" }, c);
-    const bar = page.locator('main [data-testid="bk-filterbar"]');
+    const bar = page.locator('main [data-testid="kit-filterbar"]');
     const csv = bar.locator('[data-testid="bk-export-csv"]');
     await expect(csv).toBeVisible();
     const rows = await bar.evaluate((el) =>
-      Array.from(el.querySelectorAll(':scope > [data-bk-filter-row="1"], :scope > [data-bk-filter-row="2"] > *')).map((x) => {
+      Array.from(el.querySelectorAll(':scope > [data-kit-filter-row="1"], :scope > [data-kit-filter-row="2"] > *')).map((x) => {
         const r = x.getBoundingClientRect();
-        return { row: x.closest('[data-bk-filter-row="2"]') ? 2 : 1, mid: Math.round(r.top + r.height / 2) };
+        return { row: x.closest('[data-kit-filter-row="2"]') ? 2 : 1, mid: Math.round(r.top + r.height / 2) };
       }),
     );
     for (const n of [1, 2]) {
@@ -706,8 +706,8 @@ test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV o
     await from.press("Enter");
     await expect.poll(() => new URL(page.url()).searchParams.get("from"), { message: "day first: 10 November" }).toBe("2026-11-10");
     await expect(from).toHaveValue("10 Nov 2026");
-    await expect(page.locator('main [data-testid="bk-filter-reset"]').first()).toBeEnabled();
-    await page.locator('main [data-testid="bk-filter-reset"]').first().click();
+    await expect(page.locator('main [data-testid="kit-filterbar-reset"]').first()).toBeEnabled();
+    await page.locator('main [data-testid="kit-filterbar-reset"]').first().click();
     await expect.poll(() => new URL(page.url()).searchParams.get("from")).toBeNull();
     await expect(from).toHaveValue("");
     // Review fix: text that is not a day is marked while typing and dropped on blur, so the box never shows a date

@@ -1,5 +1,5 @@
 "use client";
-// ui/Sidebar.tsx
+// ui/local/Sidebar.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/Sidebar.tsx (CIS commit 039bb250). Same
 // structure, CSS classes (ui/shell.css) and collapse behaviour (chevron + `[` key, 68 px icon rail,
 // phone drawer). Booking changes (UI spec §2.1–2.2, 01-shell §0.5):
@@ -11,13 +11,13 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronsLeft, ChevronsRight, LogOut } from "lucide-react";
-import { K, alpha, sans, serif } from "./tokens";
-import { LOGO_SRC } from "./brand";
+import { K, alpha, sans, serif } from "../core/tokens";
+import { LOGO_SRC } from "../core/brand";
 import { SETTINGS_ENTRY, navActive, visibleGroups, type NavEntry } from "./nav";
-import { useSidebarCollapsed } from "./useSidebar";
+import { useSidebarCollapsed } from "../core/useSidebar";
 import { staffDisplay, useStaff } from "./StaffContext";
 import { signOut } from "./signOut";
-import { COMPACT_QUERY } from "./booking/DataTable";
+import { COMPACT_QUERY } from "../booking/DataTable";
 
 export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () => void; drawerOpen?: boolean }) {
   const router = useRouter();

@@ -1,4 +1,4 @@
-// ui/signOut.ts
+// ui/local/signOut.ts (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 / AA-680 — sign out: the BFF clears every session cookie (and revokes a Cognito refresh token). After a
 // company e-mail session the browser goes through Cognito /logout (ends the managed-login session, then back to
 // /login); otherwise straight to /login.

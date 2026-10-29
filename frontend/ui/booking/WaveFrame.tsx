@@ -4,9 +4,9 @@
 // sections) around an EmptyState "Coming in wave N". Nothing in it looks like data: no rows, no numbers.
 
 import { Hourglass } from "lucide-react";
-import { EmptyState } from "../primitives";
+import { EmptyState } from "../core/primitives";
 import { PageFrame } from "./PageFrame";
-import { Section } from "./Section";
+import { Section } from "../core/Section";
 
 export interface WaveFrameProps {
   wave: 2 | 3;

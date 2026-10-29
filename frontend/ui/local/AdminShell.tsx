@@ -1,5 +1,5 @@
 "use client";
-// ui/AdminShell.tsx
+// ui/local/AdminShell.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/AdminShell.tsx (CIS commit 039bb250): Sidebar |
 // (Topbar over the page), ⌘K palette, phone drawer + BottomNav. Booking addition: the page-level role
 // check (lib/rbac.ts). A page the signed-in role may not open renders a "no access" state instead of
@@ -13,8 +13,8 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { BottomNav } from "./BottomNav";
 import { CommandPalette } from "./CommandPalette";
-import { EmptyState } from "./primitives";
-import { K } from "./tokens";
+import { EmptyState } from "../core/primitives";
+import { K } from "../core/tokens";
 import { useStaff } from "./StaffContext";
 import { canSeePage } from "@/lib/rbac";
 

@@ -9,11 +9,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import type { SupplierContract } from "@/lib/api/suppliers";
 import { MEAL_PLANS, supplyApi, type MealPlan, type RateBody, type SupplierRate } from "@/lib/api/supply";
-import { FormDrawer, useToast } from "@/ui";
+import { FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { UNIT_LABEL, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
-import { DateField } from "@/ui/booking/DateField";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
 const MEAL_LABEL: Record<MealPlan, string> = { RO: "Room only", BB: "Bed & breakfast", HB: "Half board", FB: "Full board", AI: "All inclusive" };

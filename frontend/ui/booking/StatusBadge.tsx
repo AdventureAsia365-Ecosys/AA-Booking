@@ -8,7 +8,7 @@ import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBooki
 import type { TripCheckStatus } from "@/lib/api/tripChecks";
 import type { InvoiceStatus, PaymentState, ScheduleState } from "@/lib/api/billing";
 import type { PayoutState, SupplierBillStatus } from "@/lib/api/supplierBills";
-import { formatMoney } from "./Money";
+import { formatMoney } from "../core/format";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
 

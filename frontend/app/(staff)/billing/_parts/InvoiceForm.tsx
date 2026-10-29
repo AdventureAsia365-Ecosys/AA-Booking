@@ -19,10 +19,9 @@ import {
   type ScheduleKind,
   type ScheduleRowIn,
 } from "@/lib/api/billing";
-import { Button, Modal, Money, formatMoney, useToast } from "@/ui";
+import { Button, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
 import { errorText, fieldCls } from "./PaymentDialogs";
 import { fromCents, lineCents, sumCents, toCents } from "./money";
-import { DateField } from "@/ui/booking/DateField";
 import { formatDay } from "@/ui/booking/dates";
 
 type Mode = { kind: "create"; billing: CaseBilling } | { kind: "edit"; invoice: InvoiceDetail } | { kind: "amend"; invoice: InvoiceDetail };

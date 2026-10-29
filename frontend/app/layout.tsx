@@ -1,14 +1,19 @@
 // app/layout.tsx
 // AA-683 — root layout: brand fonts (Fahkwang titles, Poppins UI, JetBrains Mono codes, Satisfy for the
 // login splash line only; design system §2.2), the theme + sidebar restore scripts (before paint, no
-// flash; keys bk_theme / bk_sidebar) and the app-wide providers (react-query with the Booking 401 / retry
-// rules in ui/booking/QueryProvider.tsx, toasts).
+// flash) and the app-wide providers (react-query with the Booking 401 / retry rules in
+// ui/booking/QueryProvider.tsx, toasts).
+// AA-994 S4b: the theme script is the kit core store's (ui/local/theme.ts, key `bk_theme`); the sidebar state is the
+// kit core store's key `cis_sidebar` (ui/core/sidebarStore.ts; localStorage is per origin, so it never meets the CIS
+// admin's). The sidebar script carries a stored Booking `bk_sidebar` choice over to that key once.
 
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { BookingQueryProvider } from "@/ui/booking/QueryProvider";
-import { ToastProvider } from "@/ui/Toast";
-import { BRAND } from "@/ui/brand";
+// Server component: the modules directly, not the "@/ui" barrel.
+import { ToastProvider } from "@/ui/core/Toast";
+import { BRAND } from "@/ui/core/brand";
+import { themeStore } from "@/ui/local/theme";
 
 export const metadata: Metadata = {
   title: { default: "Booking · Adventure Asia", template: "%s · Booking" },
@@ -23,14 +28,13 @@ export const viewport: Viewport = {
   themeColor: BRAND.ink, // navy, as the site header (design system §2.1: not the leftover orange)
 };
 
-const THEME_RESTORE = `(function(){try{var c=localStorage.getItem('bk_theme');var r=(c==='light'||c==='dark')?c:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',r);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
-const SIDEBAR_RESTORE = `(function(){try{var s=localStorage.getItem('bk_sidebar');document.documentElement.setAttribute('data-sidebar',s==='collapsed'?'collapsed':'expanded');}catch(e){document.documentElement.setAttribute('data-sidebar','expanded');}})();`;
+const SIDEBAR_RESTORE = `(function(){try{var s=localStorage.getItem('cis_sidebar');if(s===null){var o=localStorage.getItem('bk_sidebar');if(o==='collapsed'||o==='expanded'){localStorage.setItem('cis_sidebar',o);s=o;}localStorage.removeItem('bk_sidebar');}document.documentElement.setAttribute('data-sidebar',s==='collapsed'?'collapsed':'expanded');}catch(e){document.documentElement.setAttribute('data-sidebar','expanded');}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_RESTORE }} />
+        <script dangerouslySetInnerHTML={{ __html: themeStore.restoreScript }} />
         <script dangerouslySetInnerHTML={{ __html: SIDEBAR_RESTORE }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

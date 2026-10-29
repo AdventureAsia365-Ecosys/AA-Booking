@@ -16,11 +16,10 @@ import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { CIS_ADMIN_URL } from "@/lib/config";
 import { daysNights, planSubtitle } from "@/ui/booking/tripPlans";
-import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, Money, PageFrame, Pill, Section, useCan, useStaff, useUrlFilters } from "@/ui";
+import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, Money, PageFrame, Pill, Section, useCan, useStaff, useUrlFilters, RowMenu } from "@/ui";
 import { OrphanedPlansTable } from "./OrphanedPlans";
 import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
 import { useSellableToggle } from "./useSellableToggle";
-import { RowMenu } from "@/ui/booking/RowMenu";
 
 // The API opens sellable first (sort=sellable, then title): that is the "all" option of the Sort select.
 const SORTS = [

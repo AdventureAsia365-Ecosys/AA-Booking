@@ -1,23 +1,23 @@
 "use client";
-// ui/Topbar.tsx
+// ui/local/Topbar.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/Topbar.tsx (CIS commit 039bb250). Same 60 px bar,
-// CSS classes (ui/shell.css) and phone element swap. Booking changes (UI spec §2.1, 01-shell §0.5):
+// CSS classes (ui/local/shell.css) and phone element swap. Booking changes (UI spec §2.1, 01-shell §0.5):
 //   - breadcrumb "Booking / <page>" from ui/nav.tsx;
 //   - right: theme switch, then the Figma pill cluster: bell (unread dot → popover) | dashed divider |
 //     role label + avatar → menu (Settings, Open CIS admin ↗, Sign out).
 // AA-883 (S241 admin console, Q1 "every app links across") — a visible "CIS console ↗" link left of
 // the theme switch, so the way back to the CIS console is one click (not only inside the account
-// menu). The label hides below 768 px (ui/shell.css), the icon stays.
+// menu). The label hides below 768 px (ui/local/shell.css), the icon stays.
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, ExternalLink, LogOut, Menu as MenuIcon, Monitor, Moon, Search, Settings, Sun } from "lucide-react";
-import { K, sans, serif } from "./tokens";
+import { K, sans, serif } from "../core/tokens";
 import { useThemeChoice } from "./useTheme";
 import type { ThemeChoice } from "./theme";
 import { pageTitle } from "./nav";
 import { staffDisplay, useStaff } from "./StaffContext";
-import { NotificationPopover } from "./booking/NotificationPopover";
+import { NotificationPopover } from "../booking/NotificationPopover";
 import { signOut } from "./signOut";
 import { CIS_CONSOLE_URL } from "@/lib/config";
 

@@ -15,13 +15,12 @@ import { ArrowLeft } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import type { CustomerSummary } from "@/lib/api/types";
-import { Button, Section, useCan, useStaff, useToast, fieldName } from "@/ui";
+import { Button, Section, useCan, useStaff, useToast, fieldName, DateField } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, textareaCls, toInt } from "../_parts/fields";
 import { CountryPicker } from "../_parts/CountryPicker";
 import { StaffSelect } from "../_parts/StaffSelect";
 import { QueryError } from "../_parts/QueryError";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "./CustomerPicker";
-import { DateField } from "@/ui/booking/DateField";
 import { TripPlanPicker } from "../_parts/TripPlanPicker";
 
 export default function NewTripCasePage() {

@@ -9,9 +9,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS, type Channel } from "@/lib/api/proposals";
 import { pricingPolicyApi } from "@/lib/api/pricingPolicy";
-import { FormDrawer, useToast } from "@/ui";
+import { FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
-import { DateField } from "@/ui/booking/DateField";
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);

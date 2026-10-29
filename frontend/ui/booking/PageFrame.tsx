@@ -1,30 +1,15 @@
 // ui/booking/PageFrame.tsx
-// AA-683 — the scroll region of every staff page (the shell's <main>, class kept from CIS for the
-// phone padding rule in ui/shell.css) with the kit PageHeader on top.
+// AA-683 — the scroll region of every staff page with the kit PageHeader on top. Since AA-994 S4b (root ADR 0016)
+// it is the kit core PageFrame (ui/core/PageFrame.tsx, upstreamed from this file in S4a) with the Booking defaults,
+// so the pages keep their look: a "wide" 1440 px column (the core default is "full") and the Booking gutter of
+// 24 px 32 px (Tailwind `px-8 py-6` before; the core frame pads 28 px 36 px 56 px). The phone rule (ui/local/shell.css)
+// and the 768-1199 px compact rule (app/globals.css) still override the gutter through `.aa-admin-main !important`.
 
-import { PageHeader } from "../primitives";
+import type { ComponentProps } from "react";
+import { PageFrame as KitPageFrame } from "../core/PageFrame";
 
-export function PageFrame({
-  title,
-  description,
-  actions,
-  breadcrumbs,
-  children,
-  width = "wide",
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  actions?: React.ReactNode;
-  breadcrumbs?: { label: string; href?: string }[];
-  children: React.ReactNode;
-  width?: "wide" | "narrow";
-}) {
-  return (
-    <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
-      <div className={`mx-auto flex flex-col gap-5 ${width === "narrow" ? "max-w-[880px]" : "max-w-[1440px]"}`}>
-        <PageHeader title={title} description={description} actions={actions} breadcrumbs={breadcrumbs} />
-        {children}
-      </div>
-    </main>
-  );
+const BOOKING_GUTTER = { padding: "24px 32px" } as const;
+
+export function PageFrame({ width = "wide", style, ...rest }: ComponentProps<typeof KitPageFrame>) {
+  return <KitPageFrame width={width} style={{ ...BOOKING_GUTTER, ...style }} {...rest} />;
 }
