@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.11.0...v0.12.0) (2026-10-29)
+
+
+### Features
+
+* Deploy Dev schema-gate and CI Migration preflight ([#146](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/146)) ([541d303](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/541d3035b8918bbe1e680bddc2de8f582642c343))
+
 ## [0.11.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.10.0...v0.11.0) (2026-10-29)
 
 
