@@ -178,6 +178,8 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         # bk-025 (AA-992): the data coverage contract views (test_bk025_ops_views.py).
         ("v_ops_data_totals", "SELECT"),
         ("v_ops_trip_plan_keys", "SELECT"),
+        # bk-035 (AA-1003): the inquiry inbox key view (test_bk035_ops_inquiry_inbox.py).
+        ("v_ops_inquiry_inbox", "SELECT"),
     }
     assert await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'USAGE')")
     assert not await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'CREATE')")
