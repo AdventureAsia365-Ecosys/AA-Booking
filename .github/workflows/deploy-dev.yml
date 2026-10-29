@@ -51,10 +51,11 @@ name: Deploy Dev
 # Schema gate (AA-993 M4b, root ADR 0017 d7; the `schema-gate` job, before the job guard and the build): the commit's
 # required bk-NNN keys (REQUIRED_SCHEMA_VERSIONS of backend/app/db.py, plus every migrations/ file at or below the
 # newest one) must be in /booking/health/ready `registered_keys` on Dev, and the AA-CIS-Infra Migration Apply run that
-# applied files last must be green (its blocking Isolation Probe included). It polls up to 20 min (an expand file
-# merged in the same PR is copied by the migration-sync bot and applied by Migration Apply meanwhile), then fails
-# BEFORE the rollout. No AWS and no secret: the readiness URL and the Infra Actions API are public. With DB_AUTO_APPLY
-# off it only checks that the keys are registered, which the manual DB Migrate flow already guarantees. Logic:
+# applied files last must have apply and its blocking Isolation Probe green. It polls up to SCHEMA_GATE_TIMEOUT_S
+# (repo variable, default 2400 s: an expand file merged in the same PR is copied by the migration-sync bot and applied
+# by Migration Apply meanwhile), then fails BEFORE the rollout. No AWS and no secret: the readiness URL and the Infra
+# Actions API are public. With DB_AUTO_APPLY off it only checks that the keys are registered, which the manual DB
+# Migrate flow already guarantees (apply within the window, or re-run this workflow after the apply). Logic:
 # .github/scripts/schema_gate.py (backend/tests/unit/test_schema_gate_script.py).
 #
 # The base task definition is the family's latest ACTIVE revision, so a redeploy of an older commit keeps
@@ -109,7 +110,8 @@ jobs:
     needs: config
     runs-on: ubuntu-latest
     environment: dev
-    timeout-minutes: 25
+    # The script stops at SCHEMA_GATE_TIMEOUT_S (default 2400 s, at most 2580 s); the job limit is the backstop.
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
@@ -125,6 +127,7 @@ jobs:
       - name: Wait until Dev has every key this commit needs
         env:
           GH_TOKEN: ${{ github.token }}
+          SCHEMA_GATE_TIMEOUT_S: ${{ vars.SCHEMA_GATE_TIMEOUT_S }}
           BASE_URL: ${{ vars.BOOKING_API_BASE_URL || 'https://api-booking.lumiguides.it.com' }}
         run: |
           python3 .github/scripts/schema_gate.py --app booking --readiness-file backend/app/db.py \
