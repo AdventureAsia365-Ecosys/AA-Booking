@@ -1,6 +1,6 @@
 [project]
 name = "aa-booking-api"
-version = "0.10.0"
+version = "0.11.0"
 description = "AA-Booking (AAA) API — FastAPI + asyncpg on the shared acc2 RDS, schema booking"
 requires-python = ">=3.12,<3.13"
 
