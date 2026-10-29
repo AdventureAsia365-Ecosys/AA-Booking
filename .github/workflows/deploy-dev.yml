@@ -48,6 +48,15 @@ name: Deploy Dev
 # commit + version, /booking/health/ready on a schema >= the newest bk-NNN this commit needs. The `result` job
 # ("Deploy Dev result") is red when any job did not succeed, skipped included: read that one.
 #
+# Schema gate (AA-993 M4b, root ADR 0017 d7; the `schema-gate` job, before the job guard and the build): the commit's
+# required bk-NNN keys (REQUIRED_SCHEMA_VERSIONS of backend/app/db.py, plus every migrations/ file at or below the
+# newest one) must be in /booking/health/ready `registered_keys` on Dev, and the AA-CIS-Infra Migration Apply run that
+# applied files last must be green (its blocking Isolation Probe included). It polls up to 20 min (an expand file
+# merged in the same PR is copied by the migration-sync bot and applied by Migration Apply meanwhile), then fails
+# BEFORE the rollout. No AWS and no secret: the readiness URL and the Infra Actions API are public. With DB_AUTO_APPLY
+# off it only checks that the keys are registered, which the manual DB Migrate flow already guarantees. Logic:
+# .github/scripts/schema_gate.py (backend/tests/unit/test_schema_gate_script.py).
+#
 # The base task definition is the family's latest ACTIVE revision, so a redeploy of an older commit keeps
 # the latest Terraform env/secrets: revert config in Terraform. This workflow never changes the service's
 # desired count; scaling 0 → 1 is a separate step (until then the verify, and so the run, is red).
@@ -61,6 +70,7 @@ on:
       - "!backend/pyproject.toml"
       - ".github/workflows/deploy-dev.yml"
       - ".github/scripts/booking-deploy-preflight.sh"
+      - ".github/scripts/schema_gate.py"
   workflow_dispatch:
     inputs:
       override_running_jobs:
@@ -92,9 +102,37 @@ jobs:
             exit 1
           fi
 
+  # AA-993 M4b: wait (bounded) for the schema this commit needs, before the job guard reads the live jobs (so its
+  # answer is fresh when the rollout starts). Runs on the deployed commit's own tree.
+  schema-gate:
+    name: Schema gate
+    needs: config
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github/scripts
+            backend/app/db.py
+            migrations
+          sparse-checkout-cone-mode: false
+
+      - name: Wait until Dev has every key this commit needs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_URL: ${{ vars.BOOKING_API_BASE_URL || 'https://api-booking.lumiguides.it.com' }}
+        run: |
+          python3 .github/scripts/schema_gate.py --app booking --readiness-file backend/app/db.py \
+            --migrations-dir migrations --ready-url "${BASE_URL%/}/booking/health/ready"
+
   preflight:
     name: Pre-deploy job guard
-    needs: config
+    needs: [config, schema-gate]
     runs-on: ubuntu-latest
     environment: dev
     env:
@@ -121,7 +159,7 @@ jobs:
 
   deploy:
     name: Deploy to ECS Dev
-    needs: [config, preflight]
+    needs: [config, schema-gate, preflight]
     runs-on: ubuntu-latest
     environment: dev
     env:
@@ -209,7 +247,7 @@ jobs:
     name: Deploy Dev result
     runs-on: ubuntu-latest
     if: always()
-    needs: [config, preflight, deploy, verify]
+    needs: [config, schema-gate, preflight, deploy, verify]
     steps:
       - name: Every job succeeded
         env:
@@ -219,7 +257,7 @@ jobs:
           set -uo pipefail
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           BAD=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"] | join(", ")')
-          if [ -n "$BAD" ] || [ "$(echo "$NEEDS" | jq 'length')" -lt 4 ]; then
+          if [ -n "$BAD" ] || [ "$(echo "$NEEDS" | jq 'length')" -lt 5 ]; then
             echo "::error::Deploy Dev ($EVENT) is not verified: ${BAD:-a job result is missing}"
             exit 1
           fi

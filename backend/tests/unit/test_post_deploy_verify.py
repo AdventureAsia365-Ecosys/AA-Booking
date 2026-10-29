@@ -39,7 +39,7 @@ PREFIX = "bk"
 HEALTH, READY = "/booking/health", "/booking/health/ready"
 SERVICE_NAME = "aa-booking-api"
 ECS_SVC = "aa-booking-dev-api"
-DEPLOY_JOBS = ("config", "preflight", "deploy", "verify")
+DEPLOY_JOBS = ("config", "schema-gate", "preflight", "deploy", "verify")  # AA-993 M4b: schema-gate
 
 BASH = shutil.which("bash")
 # Skipped only off CI (a dev box without jq); on CI a missing tool fails loudly instead of skipping the verify tests.
@@ -574,6 +574,8 @@ def test_result_is_green_only_when_every_job_succeeded() -> None:
         {"verify": "cancelled"},
         {"deploy": "failure", "verify": "skipped"},
         {"preflight": "failure", "deploy": "skipped", "verify": "skipped"},
+        # AA-993 M4b: the schema this commit needs is not on Dev; nothing after the gate runs.
+        {"schema-gate": "failure", "preflight": "skipped", "deploy": "skipped", "verify": "skipped"},
         # AWS_ROLE_ARN unset on a push: config fails, everything after it skips.
         {"config": "failure", "preflight": "skipped", "deploy": "skipped", "verify": "skipped"},
         {"config": "skipped", "preflight": "skipped", "deploy": "skipped", "verify": "skipped"},
