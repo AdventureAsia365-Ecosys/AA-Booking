@@ -195,6 +195,8 @@ class DeparturePage(Strict):
 class HoldLine(Strict):
     line_ref: str = Field(max_length=64)
     line_status: Literal["available", "on_request"]
+    # 1.2 (AA-952): the line's price in the held quote (the CRM's AA line net).
+    b2b_price: Money | None = None
 
 
 class Hold(Strict):
@@ -204,6 +206,10 @@ class Hold(Strict):
     expires_at: datetime
     extended_count: int = Field(ge=0, le=1)
     lines: list[HoldLine]
+    # 1.2 (AA-952): the held quote's hash (presented by the confirm), currency and FX lock.
+    price_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    currency: Currency | None = None
+    fx: FxLock | None = None
 
 
 class BookingLine(Strict):

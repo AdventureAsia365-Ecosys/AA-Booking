@@ -17,6 +17,9 @@
 - **Read / release** (``GET``, ``DELETE /holds/{id}``): another partner's hold is 404. An ``active`` hold past
   ``expires_at`` reads as ``expired`` (the expiry job writes it later, ``app.b2b.expiry``). Release: active →
   ``released``; released / expired → no-op; confirmed → 422 (cancel the booking instead, ``app.b2b.cancellation``).
+  Every ``Hold`` answer also carries the quote it holds (AA-952, contract 1.2): ``price_hash``, ``currency``, ``fx``
+  and each line's ``b2b_price`` (the CRM writes its AA lines from them after the client accepts and confirms with
+  that hash after the deposit). Never a net cost or a supplier rate.
 - **Served tours only** (AA-986 L5, root ADR 0015 decision 5): a new hold and a confirm refuse a ``tp:`` line whose
   tour is not served with 409 ``tour_not_served`` (``app.b2b.served``); replays and confirmed bookings are kept.
 - **Confirm** (``POST /holds/{id}/confirm``, scope ``book``; memo seam 1): the only place Booking creates a commercial
@@ -45,9 +48,10 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.b2b import cancellation, departures, desk, served
+from app.b2b import cancellation, departures, desk, quotes, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
+from app.pricing import engine
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +101,15 @@ SELECT id::text AS id, proposal_ref, proposal_version, currency::text AS currenc
        total_b2b_price, price_hash::text AS price_hash, valid_until
 FROM booking.b2b_quotes WHERE id = $1::uuid AND partner_id = $2::uuid
 """
+# AA-952 (booking.b2b.v1 1.2): what a hold answer says of its quote, so the CRM can write the agency's AA lines (net =
+# the line's b2b_price, with the quote's FX lock) and present the quote's price_hash at confirm without keeping its
+# own copy. The b2b price only: never the net cost or the supplier rates (conf:commercial).
+HOLD_QUOTE_SQL = """
+SELECT q.currency::text AS currency, q.fx_rate_per_usd, q.fx_buffer_pct, q.fx_as_of, q.fx_source,
+       q.price_hash::text AS price_hash
+FROM booking.b2b_quotes q WHERE q.id = $1::uuid
+"""
+HOLD_PRICES_SQL = "SELECT ql.line_ref, ql.b2b_price FROM booking.b2b_quote_lines ql WHERE ql.quote_id = $1::uuid"
 QUOTE_LINES_SQL = """
 SELECT line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult, pax_child,
        departure_id::text AS departure_id, net_cost_usd, supplier_rate_ids::text[] AS supplier_rate_ids
@@ -211,8 +224,13 @@ async def _check_departure_rehold_limit(
 
 
 async def _hold_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
+    """The contract ``Hold``. Since 1.2 (AA-952) also the quote it holds: ``price_hash`` (what a confirm presents),
+    ``currency``, ``fx`` (the quote's lock, as ``POST /quotes`` gave it) and each line's ``b2b_price``. They are left
+    out only when the quote row cannot be read (never on a hold this API made)."""
     lines = await conn.fetch(LINES_SQL, hold["id"])
-    return {
+    quote = await conn.fetchrow(HOLD_QUOTE_SQL, hold["quote_id"])
+    prices = {r["line_ref"]: r.get("b2b_price") for r in await conn.fetch(HOLD_PRICES_SQL, hold["quote_id"])}
+    out: dict[str, Any] = {
         "hold_id": hold["id"],
         "quote_id": hold["quote_id"],
         "status": hold["status"],
@@ -220,6 +238,30 @@ async def _hold_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
         "extended_count": int(hold["extended_count"]),
         "lines": [{"line_ref": r["line_ref"], "line_status": r["held_as"]} for r in lines],
     }
+    if quote is None:
+        return out
+    currency = quote["currency"]
+    fx = quotes.FxLock(
+        currency=currency,
+        rate_per_usd=Decimal(quote["fx_rate_per_usd"]),
+        buffer_pct=Decimal(quote["fx_buffer_pct"]),
+        as_of=quote["fx_as_of"],
+        source=quote["fx_source"],
+    )
+    out["price_hash"] = quote["price_hash"]
+    out["currency"] = currency
+    out["fx"] = {
+        "base_currency": engine.BASE_CURRENCY,
+        "quote_currency": currency,
+        "rate_per_usd": format(fx.selling_rate, "f"),
+        "rate_date": fx.as_of.isoformat(),
+        "source": fx.source,
+    }
+    for line in out["lines"]:
+        price = prices.get(line["line_ref"])
+        if price is not None:
+            line["b2b_price"] = quotes.money(Decimal(price), currency)
+    return out
 
 
 async def _find(conn: asyncpg.Connection, caller: Caller, hold_id: str, *, lock: bool = False) -> Any:

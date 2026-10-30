@@ -322,7 +322,7 @@ async def test_departures_quote_hold_confirm(
     assert changed["price_hash"] == quote["price_hash"]
     hold = await _ok(await c.post("/b2b/v1/holds", json=hold_body, headers=_m2m(m2m, "key-pro1-a")), 201)
     assert hold["status"] == "active" and hold["extended_count"] == 0 and hold["quote_id"] == quote["quote_id"]
-    assert hold["lines"] == [
+    assert [{k: x[k] for k in ("line_ref", "line_status")} for x in hold["lines"]] == [
         {"line_ref": "tour", "line_status": "available"},
         {"line_ref": "room", "line_status": "on_request"},
     ]
@@ -371,6 +371,12 @@ async def test_departures_quote_hold_confirm(
     assert again == booking
     got = await _ok(await c.get(f"/b2b/v1/holds/{hold['hold_id']}", headers=_m2m(m2m)))
     assert got["status"] == "confirmed" and got["lines"] == hold["lines"]
+    # AA-952 (contract 1.2): a hold answer carries the quote it holds (the CRM's AA lines and its confirm hash).
+    assert got["price_hash"] == quote["price_hash"] and got["currency"] == quote["currency"]
+    assert got["fx"] == quote["fx"]
+    assert {x["line_ref"]: x["b2b_price"] for x in got["lines"]} == {
+        x["line_ref"]: x["b2b_price"] for x in quote["lines"]
+    }
     assert (await _seats(c, m2m))[DAY1] == (0, 2, 2)
     _problem(await c.delete(f"/b2b/v1/holds/{hold['hold_id']}", headers=_m2m(m2m)), 422, "invalid")
 
