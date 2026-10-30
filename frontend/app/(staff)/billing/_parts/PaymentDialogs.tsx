@@ -19,7 +19,9 @@ import {
   type PaymentMethod,
 } from "@/lib/api/billing";
 import type { OpsFile } from "@/lib/api/supplierBookings";
-import { Checkbox, Input, Select, Textarea, Button, ConfirmDialog, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
+import {
+  Checkbox, Input, Select, Textarea, Button, ConfirmDialog, LinkButton, Modal, Money, formatMoney, useToast, DateField,
+} from "@/ui";
 import { prepareUpload } from "../../_parts/SupplyContent";
 import { formatDay } from "@/ui/booking/dates";
 
@@ -318,16 +320,16 @@ export function EvidenceFiles({ payment, onChanged }: { payment: Payment; onChan
         <ul className="flex flex-col gap-1">
           {payment.files.map((f) => (
             <li key={f.id}>
-              <button
-                type="button"
+              <LinkButton
+                weight="regular"
                 onClick={() => open.mutate(f)}
-                className="inline-flex max-w-full cursor-pointer items-center gap-1.5 truncate text-left text-[13px] text-accent-deep hover:underline"
+                className="max-w-full overflow-hidden"
                 title="Download (link valid 5 minutes)"
               >
                 <Download size={13} className="shrink-0" />
                 <span className="truncate">{f.file_name}</span>
                 {f.id === payment.evidence_file_id && <span className="text-xs text-muted">(evidence)</span>}
-              </button>
+              </LinkButton>
             </li>
           ))}
         </ul>

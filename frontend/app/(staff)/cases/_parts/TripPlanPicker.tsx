@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Map as MapIcon, Search } from "lucide-react";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
-import { Input, CisPhoto } from "@/ui";
+import { Input, CisPhoto, K, LinkButton, ListButton } from "@/ui";
 import { daysNights, planSubtitle } from "@/ui/booking/tripPlans";
 import { inputCls } from "./fields";
 
@@ -60,14 +60,9 @@ export function TripPlanPicker({
     return (
       <div className="flex items-center justify-between gap-3 rounded-md border border-accent-border bg-accent-tint px-3 py-2.5" data-testid="trip-plan-picked">
         <PlanLine plan={value} />
-        <button
-          type="button"
-          onClick={() => onChange(null)}
-          disabled={disabled}
-          className="shrink-0 cursor-pointer text-[13px] font-semibold text-accent-deep hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-        >
+        <LinkButton onClick={() => onChange(null)} disabled={disabled} className="shrink-0">
           Change
-        </button>
+        </LinkButton>
       </div>
     );
   }
@@ -97,20 +92,19 @@ export function TripPlanPicker({
           ) : results.isError ? (
             <p className="px-3 py-3 text-[13px] text-danger">{(results.error as Error).message}</p>
           ) : results.data?.items.length ? (
-            results.data.items.map((p) => (
-              <button
+            results.data.items.map((p, i, all) => (
+              <ListButton
                 key={p.source_id}
-                type="button"
                 role="option"
-                aria-selected={false}
                 onClick={() => {
                   onChange(p);
                   setOpen(false);
                 }}
-                className="flex w-full cursor-pointer items-center border-b border-line2 px-3 py-2 text-left last:border-b-0 hover:bg-panel"
+                // A hairline between results (the kit row has no border of its own).
+                style={{ borderRadius: 0, borderBottom: i < all.length - 1 ? `1px solid ${K.line2}` : undefined }}
               >
                 <PlanLine plan={p} />
-              </button>
+              </ListButton>
             ))
           ) : (
             <p className="flex items-center gap-2 px-3 py-3 text-[13px] text-muted">

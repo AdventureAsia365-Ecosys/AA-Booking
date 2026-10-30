@@ -30,6 +30,8 @@ import {
   Modal,
   Money,
   PageFrame,
+  IconButton,
+  ListButton,
   Section,
   Spinner,
   TripCaseStatusBadge,
@@ -222,43 +224,43 @@ function RowActions({
 }) {
   const closed = CLOSED.includes(row.trip_case_status);
   const draft = row.badge === "draft";
-  const btn =
-    "grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-30";
   const label = `${row.trip_case_code} V${row.version_number}`;
   // Stop the row click so an action never also opens the builder.
   return (
     <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-      <button type="button" className={btn} title="Open builder" aria-label={`Open builder for ${label}`} onClick={() => onOpen(builderHref(row))}>
+      <IconButton title="Open builder" label={`Open builder for ${label}`} onClick={() => onOpen(builderHref(row))}>
         <Pencil size={14} />
-      </button>
-      <button type="button" className={btn} title="Preview" aria-label={`Preview ${label}`} onClick={() => onOpen(`${builderHref(row)}/preview`)}>
+      </IconButton>
+      <IconButton title="Preview" label={`Preview ${label}`} onClick={() => onOpen(`${builderHref(row)}/preview`)}>
         <Eye size={14} />
-      </button>
+      </IconButton>
       {canWrite && (
         <>
-          <button type="button" className={btn} title="New version (copies the latest)" aria-label={`New version of ${row.trip_case_code}`} disabled={closed} onClick={() => onAction("copy")}>
+          <IconButton
+            title="New version (copies the latest)"
+            label={`New version of ${row.trip_case_code}`}
+            disabled={closed}
+            onClick={() => onAction("copy")}
+          >
             <CopyPlus size={14} />
-          </button>
-          <button
-            type="button"
-            className={btn}
+          </IconButton>
+          <IconButton
             title={draft ? "Send to customer" : "Only a draft can be sent"}
-            aria-label={`Send ${label}`}
+            label={`Send ${label}`}
             disabled={!draft || !SENDABLE_FROM.includes(row.trip_case_status)}
             onClick={() => onAction("send")}
           >
             <Send size={14} />
-          </button>
-          <button
-            type="button"
-            className={`${btn} hover:text-danger`}
+          </IconButton>
+          <IconButton
+            tone="danger"
             title={draft ? "Delete draft" : "Only a draft can be deleted"}
-            aria-label={`Delete ${label}`}
+            label={`Delete ${label}`}
             disabled={!draft || closed}
             onClick={() => onAction("delete")}
           >
             <Trash2 size={14} />
-          </button>
+          </IconButton>
         </>
       )}
     </div>
@@ -344,11 +346,11 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
             const closed = CLOSED.includes(c.status);
             return (
               <li key={c.id}>
-                <button
-                  type="button"
+                <ListButton
                   disabled={closed || pending !== null}
                   onClick={() => choose(c.code)}
-                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-accent-tint disabled:cursor-not-allowed disabled:opacity-50"
+                  className="justify-between"
+                  style={{ gap: 12, padding: "10px 12px", borderRadius: 0 }}
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-medium text-ink">{c.customer_name ?? "Unnamed customer"}</span>
@@ -361,7 +363,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                     {pending === c.code && <Spinner />}
                     <TripCaseStatusBadge status={c.status} />
                   </span>
-                </button>
+                </ListButton>
               </li>
             );
           })}

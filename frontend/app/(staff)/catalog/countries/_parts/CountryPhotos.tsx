@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import type { CountryDetail, CountryPhoto } from "@/lib/api/geo";
-import { CisPhoto, FromCisTag, ManagedInCisLink, Modal, Section } from "@/ui";
+import { CisPhoto, FromCisTag, IconButton, LinkButton, ManagedInCisLink, Modal, Pressable, Section } from "@/ui";
 
 /** CIS admin page of the photo library (per-country Drive folders matched to places and tours). */
 export const CIS_PHOTOS_PATH = "/admin/photos";
@@ -63,14 +63,13 @@ export function CountryGallery({ c, canOpenCis, onPlace }: { c: CountryDetail; c
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-6" data-testid="country-photos">
           {items.map((p, i) => (
             <li key={p.path} className="min-w-0">
-              <button
-                type="button"
+              <Pressable
                 onClick={() => setOpen(i)}
-                className="block w-full overflow-hidden rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                className="overflow-hidden rounded-md"
                 aria-label={`Open photo ${i + 1}${p.caption ? `: ${p.caption}` : ""}`}
               >
                 <CisPhoto path={p.path} alt="" className="aspect-[4/3] w-full transition-transform hover:scale-[1.03]" />
-              </button>
+              </Pressable>
               {p.caption && <p className="mt-1 truncate text-xs text-muted">{p.caption}</p>}
             </li>
           ))}
@@ -148,13 +147,9 @@ function Lightbox({
         <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
           <span className="min-w-0 truncate text-body">{p.caption ?? "Tour photo"}</span>
           {p.destination_id && (
-            <button
-              type="button"
-              onClick={() => onPlace(p.destination_id!)}
-              className="inline-flex items-center gap-1 font-medium text-accent-deep hover:underline"
-            >
+            <LinkButton onClick={() => onPlace(p.destination_id!)} style={{ gap: 4 }}>
               <MapPin size={13} /> Open destination
-            </button>
+            </LinkButton>
           )}
         </div>
       </div>
@@ -164,15 +159,15 @@ function Lightbox({
 
 function NavButton({ side, label, onClick, children }: { side: "left" | "right"; label: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
+    <IconButton
+      variant="overlay"
+      size="lg"
+      label={label}
+      title=""
       onClick={onClick}
-      className={`absolute top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white hover:bg-black/70 ${
-        side === "left" ? "left-2" : "right-2"
-      }`}
+      className={`absolute top-1/2 -translate-y-1/2 ${side === "left" ? "left-2" : "right-2"}`}
     >
       {children}
-    </button>
+    </IconButton>
   );
 }

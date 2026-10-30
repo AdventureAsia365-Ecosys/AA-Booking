@@ -34,6 +34,7 @@ import {
   DateText,
   Drawer,
   FormDrawer,
+  LinkButton,
   Modal,
   Money,
   PayoutStateBadge,
@@ -100,20 +101,20 @@ function Files({
     <ul className="flex flex-col gap-1">
       {files.map((f) => (
         <li key={f.id} className="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
+          <LinkButton
+            weight="regular"
             onClick={() => open.mutate(f)}
-            className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 truncate text-left text-[13px] text-accent-deep hover:underline"
+            className="min-w-0 overflow-hidden"
             title="Download (link valid 5 minutes)"
           >
             <Download size={13} className="shrink-0" />
             <span className="truncate">{f.file_name}</span>
             {f.id === current && <span className="text-xs text-muted">(current)</span>}
-          </button>
+          </LinkButton>
           {canRemove && f.id !== current && (
-            <button type="button" className="text-xs text-muted hover:text-danger" onClick={() => setRemoving(f)} disabled={remove.isPending}>
+            <LinkButton tone="muted" size="sm" weight="regular" onClick={() => setRemoving(f)} disabled={remove.isPending}>
               Remove
-            </button>
+            </LinkButton>
           )}
         </li>
       ))}

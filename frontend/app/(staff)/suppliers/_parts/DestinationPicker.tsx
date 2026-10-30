@@ -8,7 +8,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, X } from "lucide-react";
 import { suppliersApi, type CatalogPlace } from "@/lib/api/suppliers";
-import { Input, FromCisTag } from "@/ui";
+import { Input, FromCisTag, IconButton, ListButton } from "@/ui";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 
 export interface PickedPlace {
@@ -56,14 +56,9 @@ export function DestinationPicker({
           </span>
           <FromCisTag />
         </span>
-        <button
-          type="button"
-          onClick={() => onChange(null)}
-          aria-label="Clear the place"
-          className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-muted hover:bg-line2 hover:text-ink"
-        >
+        <IconButton variant="plain" size="xs" round onClick={() => onChange(null)} label="Clear the place">
           <X size={14} />
-        </button>
+        </IconButton>
       </div>
     );
   }
@@ -95,9 +90,9 @@ export function DestinationPicker({
             <li className="px-3 py-2 text-[13px] text-muted">No CIS place matches{country ? " in this country" : ""}.</li>
           )}
           {items.map((p) => (
-            <li key={p.destination_id} role="option" aria-selected={false}>
-              <button
-                type="button"
+            <li key={p.destination_id} role="presentation">
+              <ListButton
+                role="option"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onChange(p);
@@ -105,11 +100,12 @@ export function DestinationPicker({
                   setQ("");
                   setOpen(false);
                 }}
-                className="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[13px] hover:bg-panel"
+                className="justify-between"
+                style={{ borderRadius: 0 }}
               >
                 <span className="truncate text-ink">{p.name}</span>
                 <span className="shrink-0 text-xs text-muted">{p.country}</span>
-              </button>
+              </ListButton>
             </li>
           ))}
         </ul>

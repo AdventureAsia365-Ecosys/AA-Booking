@@ -60,9 +60,13 @@ import {
   Code,
   ConfirmDialog,
   DateText,
+  ButtonGroup,
   FormDrawer,
   FromCisTag,
+  IconButton,
+  LinkButton,
   Money,
+  Pressable,
   Section,
   TripCaseStatusBadge,
   VersionBadgePill,
@@ -298,14 +302,13 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
         {/* Header bar (Figma: back arrow, title, Cancel / Save as Draft / primary) */}
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-4">
           <div className="flex min-w-0 items-start gap-3">
-            <button
-              type="button"
+            <IconButton
               onClick={() => leave(`/cases/${encodeURIComponent(c.code)}?tab=proposals`)}
-              aria-label="Back to the case"
-              className="mt-1 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink"
+              label="Back to the case"
+              className="mt-1"
             >
               <ArrowLeft size={16} />
-            </button>
+            </IconButton>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="font-display text-2xl font-semibold text-ink">Proposal V{v.version_number}</h1>
@@ -437,9 +440,8 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                           <p className="text-[15px] font-semibold text-ink">Day {g.day}</p>
                           {date && <p className="text-xs text-muted">{date}</p>}
                         </div>
-                        <button
-                          type="button"
-                          aria-label={isCollapsed ? `Expand day ${g.day}` : `Collapse day ${g.day}`}
+                        <IconButton
+                          label={isCollapsed ? `Expand day ${g.day}` : `Collapse day ${g.day}`}
                           aria-expanded={!isCollapsed}
                           onClick={() =>
                             setCollapsed((s) => {
@@ -449,10 +451,9 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                               return next;
                             })
                           }
-                          className="grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink"
                         >
                           <ChevronDown size={15} className={`transition-transform ${isCollapsed ? "" : "rotate-180"}`} />
-                        </button>
+                        </IconButton>
                       </div>
                       {!isCollapsed && (
                         <div className="flex flex-col gap-2 p-3">
@@ -483,14 +484,13 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                             />
                           ))}
                           {editable && (
-                            <button
-                              type="button"
+                            <Button
+                              variant="dashed"
                               onClick={() => setDrawer({ mode: "add", day: g.day })}
                               disabled={items.length >= MAX_ITEMS}
-                              className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-line py-2 text-[12px] font-semibold text-accent-deep hover:border-accent-border hover:bg-accent-tint disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <Plus size={13} /> Add item on day {g.day}
-                            </button>
+                            </Button>
                           )}
                         </div>
                       )}
@@ -500,13 +500,9 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
               </ol>
             )}
             {editable && groups.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setExtraDays(lastDay + 1)}
-                className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-accent-border py-3 text-[13px] font-semibold text-accent-deep hover:bg-accent-tint"
-              >
+              <Button variant="dashed" onClick={() => setExtraDays(lastDay + 1)} className="mt-3" style={{ width: "100%" }}>
                 <CalendarPlus size={15} /> Add another day
-              </button>
+              </Button>
             )}
             {editable && extraDays > 0 && extraDays > Math.max(0, ...items.map((i) => i.day_to)) && (
               <p className="mt-2 text-xs text-muted">Empty days at the end are not saved: add an item to keep them.</p>
@@ -612,13 +608,9 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
               </dl>
               {v.notes && <p className="mt-3 whitespace-pre-wrap rounded-md bg-panel px-3 py-2 text-xs text-body">{v.notes}</p>}
               {editable && v.badge === "draft" && (
-                <button
-                  type="button"
-                  onClick={() => setDeleteOpen(true)}
-                  className="mt-4 inline-flex cursor-pointer items-center gap-1.5 text-[12px] font-semibold text-danger hover:underline"
-                >
+                <LinkButton tone="danger" size="sm" onClick={() => setDeleteOpen(true)} className="mt-4">
                   <Trash2 size={13} /> Delete draft version
-                </button>
+                </LinkButton>
               )}
             </Section>
             <Link href={`/cases/${encodeURIComponent(c.code)}`} className="text-[13px] font-medium text-accent-deep hover:underline" onClick={(e) => { if (dirty) { e.preventDefault(); leave(`/cases/${encodeURIComponent(c.code)}`); } }}>
@@ -764,7 +756,6 @@ function ItemCard({
   // Per-line selling amounts only: the API returns no per-item total, and summing decimal strings in floating
   // point here could disagree with the server by a cent (S236 review finding 10).
   const priced = sellAmounts.filter((a): a is string => a != null);
-  const iconBtn = "grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-30";
   return (
     <div
       draggable={editable}
@@ -827,20 +818,20 @@ function ItemCard({
         )}
       </div>
       {editable && (
-        <div className="flex shrink-0 flex-col gap-1 sm:flex-row">
-          <button type="button" className={iconBtn} aria-label={`Move ${item.title} up`} disabled={first} onClick={() => onMove(-1)}>
+        <ButtonGroup label={`Actions for ${item.title}`} gap="sm" className="shrink-0 flex-col self-start sm:flex-row">
+          <IconButton label={`Move ${item.title} up`} disabled={first} onClick={() => onMove(-1)}>
             <ArrowUp size={14} />
-          </button>
-          <button type="button" className={iconBtn} aria-label={`Move ${item.title} down`} disabled={last} onClick={() => onMove(1)}>
+          </IconButton>
+          <IconButton label={`Move ${item.title} down`} disabled={last} onClick={() => onMove(1)}>
             <ArrowDown size={14} />
-          </button>
-          <button type="button" className={iconBtn} aria-label={`Edit ${item.title}`} onClick={onEdit}>
+          </IconButton>
+          <IconButton label={`Edit ${item.title}`} onClick={onEdit}>
             <Pencil size={14} />
-          </button>
-          <button type="button" className={`${iconBtn} hover:text-danger`} aria-label={`Remove ${item.title}`} onClick={onRemove}>
+          </IconButton>
+          <IconButton tone="danger" label={`Remove ${item.title}`} onClick={onRemove}>
             <Trash2 size={14} />
-          </button>
-        </div>
+          </IconButton>
+        </ButtonGroup>
       )}
     </div>
   );
@@ -864,11 +855,10 @@ function CostGroup({
   const [open, setOpen] = useState(item.costs.length > 0);
   return (
     <li className="rounded-md border border-line">
-      <button
-        type="button"
+      <Pressable
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 12px", textAlign: "left" }}
       >
         <span className="min-w-0">
           <span className="block truncate text-[13px] font-medium text-ink">{item.title}</span>
@@ -877,7 +867,7 @@ function CostGroup({
           </span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
+      </Pressable>
       {open && (
         <div className="border-t border-line2 p-2">
           <CostLinesEditor lines={item.costs} onChange={onChange} newLine={newLine} disabled={disabled} sellAmounts={sellAmounts} sellCurrency={sellCurrency} />

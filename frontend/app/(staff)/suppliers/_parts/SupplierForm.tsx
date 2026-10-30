@@ -13,7 +13,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { SUPPLIER_CATEGORIES, suppliersApi, type Supplier, type SupplierBody, type SupplierCategory, type SupplierDetail } from "@/lib/api/suppliers";
-import { Input, Select, Textarea, Button, PageFrame, Section, fieldName, useCan, useToast } from "@/ui";
+import { Input, Select, Textarea, Button, ChipButton, PageFrame, Section, fieldName, useCan, useToast } from "@/ui";
 import { Field, textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { QueryError } from "@/app/(staff)/cases/_parts/QueryError";
@@ -174,18 +174,14 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
                 {SUPPLIER_CATEGORIES.map((c) => {
                   const on = categories.includes(c);
                   return (
-                    <button
+                    <ChipButton
                       key={c}
-                      type="button"
                       role="checkbox"
-                      aria-checked={on}
+                      selected={on}
                       onClick={() => setCategories((cur) => (on ? cur.filter((x) => x !== c) : SUPPLIER_CATEGORIES.filter((x) => x === c || cur.includes(x))))}
-                      className={`cursor-pointer rounded-full border px-3 py-1.5 text-[13px] font-medium ${
-                        on ? "border-accent-border bg-accent-tint text-accent-deep" : "border-line bg-card text-body hover:border-accent-border"
-                      }`}
                     >
                       {CATEGORY_LABEL[c]}
-                    </button>
+                    </ChipButton>
                   );
                 })}
               </div>

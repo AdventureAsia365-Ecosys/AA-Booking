@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { CustomerSummary } from "@/lib/api/types";
-import { Checkbox, Input, CustomerStatusBadge, PersonCell } from "@/ui";
+import { Checkbox, Input, CustomerStatusBadge, K, LinkButton, ListButton, PersonCell, SegmentedControl } from "@/ui";
 import { Field, inputCls } from "../_parts/fields";
 
 export interface LeadInput {
@@ -68,30 +68,24 @@ export function CustomerPicker({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Customer">
-        {(["existing", "new"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            role="radio"
-            aria-checked={mode === m}
-            onClick={() => onMode(m)}
-            className={`cursor-pointer rounded-full border px-4 py-1.5 text-[13px] font-medium ${
-              mode === m ? "border-accent bg-accent-tint text-accent-deep" : "border-line text-muted hover:text-ink"
-            }`}
-          >
-            {m === "existing" ? "Existing customer" : "+ New lead"}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        appearance="chips"
+        label="Customer"
+        options={[
+          { value: "existing", label: "Existing customer" },
+          { value: "new", label: "+ New lead" },
+        ]}
+        value={mode}
+        onChange={onMode}
+      />
 
       {mode === "existing" ? (
         customer ? (
           <div className="flex items-center justify-between gap-3 rounded-md border border-accent-border bg-accent-tint px-3 py-2.5">
             <PersonCell name={customer.name} sub={[customer.code, customer.email ?? customer.phone].filter(Boolean).join(" · ")} chips={<CustomerStatusBadge status={customer.status} />} />
-            <button type="button" onClick={() => onCustomer(null)} className="shrink-0 cursor-pointer text-[13px] font-semibold text-accent-deep hover:underline">
+            <LinkButton onClick={() => onCustomer(null)} className="shrink-0">
               Change
-            </button>
+            </LinkButton>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -114,25 +108,26 @@ export function CustomerPicker({
                 ) : results.isError ? (
                   <p className="px-3 py-3 text-[13px] text-danger">{(results.error as Error).message}</p>
                 ) : results.data?.items.length ? (
-                  results.data.items.map((c) => (
-                    <button
+                  results.data.items.map((c, i, all) => (
+                    <ListButton
                       key={c.id}
-                      type="button"
                       onClick={() => onCustomer(c)}
                       disabled={c.is_blocked}
                       title={c.is_blocked ? "This customer is blocked: a case cannot be opened for them." : undefined}
-                      className="flex w-full cursor-pointer items-center justify-between gap-3 border-b border-line2 px-3 py-2 text-left last:border-b-0 hover:bg-bg disabled:cursor-not-allowed disabled:opacity-50"
+                      className="justify-between"
+                      // A hairline between results (the kit row has no border of its own).
+                      style={{ gap: 12, borderRadius: 0, borderBottom: i < all.length - 1 ? `1px solid ${K.line2}` : undefined }}
                     >
                       <PersonCell name={c.name} sub={[c.code, c.email ?? c.phone].filter(Boolean).join(" · ")} />
                       <CustomerStatusBadge status={c.status} />
-                    </button>
+                    </ListButton>
                   ))
                 ) : (
                   <p className="px-3 py-3 text-[13px] text-muted">
                     No customer matches.{" "}
-                    <button type="button" onClick={() => onMode("new")} className="cursor-pointer font-semibold text-accent-deep hover:underline">
+                    <LinkButton size="inherit" onClick={() => onMode("new")}>
                       Add a new lead
-                    </button>
+                    </LinkButton>
                   </p>
                 )}
               </div>

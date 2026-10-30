@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { safeNext } from "@/lib/safeNext";
-import { Button, Input } from "@/ui";
+import { Button, IconButton, Input } from "@/ui";
 
 const inputCls = "w-full";
 // The sign-in card keeps its taller boxes (44 px, as before the kit controls); the password box leaves room for the
@@ -90,14 +90,14 @@ export function LoginForm({ next }: { next: string }) {
             disabled={busy}
             required
           />
-          <button
-            type="button"
+          <IconButton
+            variant="plain"
+            label={show ? "Hide password" : "Show password"}
             onClick={() => setShow((v) => !v)}
-            aria-label={show ? "Hide password" : "Show password"}
-            className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 cursor-pointer place-items-center rounded-md text-muted hover:text-ink"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2"
           >
             {show ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
+          </IconButton>
         </span>
       </label>
       <Button type="submit" variant="primary" size="lg" disabled={busy} style={{ marginTop: 4, height: 44 }}>

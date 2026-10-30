@@ -34,6 +34,8 @@ import {
   auditRecordLabel,
   auditEntityLabel,
   downloadCsv,
+  IconButton,
+  LinkButton,
   toCsv,
   useCan,
   useUrlFilters,
@@ -116,14 +118,9 @@ export function AuditLogView() {
                 <span className="truncate">
                   {entityIdValid ? <>Record: {entityLabel ?? `${entityId.slice(0, 8)}…`}</> : "Record id not valid (ignored)"}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => set("entity_id", null)}
-                  aria-label="Show every record"
-                  className="cursor-pointer rounded-full p-0.5 hover:bg-card"
-                >
+                <IconButton variant="plain" size="xs" round onClick={() => set("entity_id", null)} label="Show every record">
                   <X size={13} />
-                </button>
+                </IconButton>
               </span>
             )}
           </FilterBar>
@@ -224,23 +221,14 @@ function AuditRow({
           )}
         </span>
         {row.entity_id && !filteredByEntity && (
-          <button
-            type="button"
-            onClick={() => onOnly(row.entity_id as string)}
-            className="cursor-pointer font-semibold text-accent-deep hover:underline"
-          >
+          <LinkButton size="sm" onClick={() => onOnly(row.entity_id as string)}>
             Only this record
-          </button>
+          </LinkButton>
         )}
         {changes.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            className="cursor-pointer font-semibold text-accent-deep hover:underline"
-          >
+          <LinkButton size="sm" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
             {open ? "Hide changes" : `Show changes (${changes.length})`}
-          </button>
+          </LinkButton>
         )}
       </div>
       {open && (

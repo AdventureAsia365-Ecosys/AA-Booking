@@ -11,7 +11,9 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, RotateCcw, X, XCircle } from "lucide-react";
 import type { TripCaseDetail, TripCaseStatus } from "@/lib/api/types";
-import { Input, Select, Textarea, Button, ConfirmDialog, Modal, TRIP_CASE_STATUS_META, useCan, useStaff } from "@/ui";
+import {
+  Input, Select, Textarea, Button, ConfirmDialog, ListButton, Modal, TRIP_CASE_STATUS_META, useCan, useStaff,
+} from "@/ui";
 import { DECLINE_REASONS, Field, inputCls, textareaCls } from "../_parts/fields";
 import { StaffSelect } from "../_parts/StaffSelect";
 import { TripPlanPicker } from "../_parts/TripPlanPicker";
@@ -167,15 +169,9 @@ function StatusMenu({
   };
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-[34px] cursor-pointer items-center gap-1.5 rounded-full border border-accent-border px-4 text-[13px] font-semibold uppercase tracking-[0.06em] text-accent-deep hover:bg-accent-tint"
-      >
+      <Button variant="secondary" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         Change status <ChevronDown size={14} />
-      </button>
+      </Button>
       {open && (
         <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg border border-line bg-card p-1.5 shadow-lg">
           {moves.length === 0 && <p className="px-3 py-2 text-[13px] text-muted">No other status is reachable from here.</p>}
@@ -186,28 +182,17 @@ function StatusMenu({
                 <span className="block text-[11.5px]">Approve a sent proposal version to confirm.</span>
               </div>
             ) : (
-              <button
-                key={s}
-                type="button"
-                role="menuitem"
-                onClick={pick(() => onMove(s))}
-                className="block w-full cursor-pointer rounded-md px-3 py-2 text-left text-[13px] text-ink hover:bg-bg"
-              >
+              <ListButton key={s} role="menuitem" onClick={pick(() => onMove(s))}>
                 {TRIP_CASE_STATUS_META[s].label}
-              </button>
+              </ListButton>
             ),
           )}
           {canCancel && (
             <>
               <div className="my-1 border-t border-line2" />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={pick(onCancel)}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] font-medium text-danger hover:bg-danger-soft"
-              >
+              <ListButton role="menuitem" tone="danger" onClick={pick(onCancel)}>
                 <XCircle size={14} /> Cancel case…
-              </button>
+              </ListButton>
             </>
           )}
         </div>

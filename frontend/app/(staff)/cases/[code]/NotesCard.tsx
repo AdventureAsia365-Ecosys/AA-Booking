@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { Pencil } from "lucide-react";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { Textarea, Button, Section, useCan } from "@/ui";
+import { Textarea, Button, IconButton, Section, useCan } from "@/ui";
 import { textareaCls } from "../_parts/fields";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
@@ -30,9 +30,9 @@ export function NotesCard({ c }: { c: TripCaseDetail }) {
       description="Staff only. Earlier text is kept in the Activity tab."
       actions={
         canWrite && !editing ? (
-          <button type="button" onClick={start} aria-label="Edit internal notes" className="grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line text-muted hover:text-accent-deep">
+          <IconButton onClick={start} label="Edit internal notes">
             <Pencil size={14} />
-          </button>
+          </IconButton>
         ) : undefined
       }
     >

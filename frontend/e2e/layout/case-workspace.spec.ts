@@ -12,7 +12,9 @@
 //     saved price and never asks for a live quote;
 //   - trip checks: status tabs with counts, per-trip progress, Overdue = the open list with due=overdue, the drawer's
 //     trip context;
-//   - Convert / Decline dialogs keep their buttons in the Modal footer band.
+//   - Convert / Decline dialogs keep their buttons in the Modal footer band;
+//   - kit buttons (AA-994 S6d): the case tabs are a kit tab list (counts, arrow keys), the status menu trigger and its
+//     items keep their ARIA, the builder's row actions are a labelled group of kit icon buttons.
 // Shots: $LAYOUT_SHOTS_DIR (default e2e/layout/results) as slice4-<name>-<width>.png.
 
 import fs from "node:fs";
@@ -300,6 +302,40 @@ test.describe("slice 4 behaviour at 1440", () => {
     expect(dueBox, "a form DateField is a 40 px box with a 1 px border and a background").toEqual({ border: "1px", style: "solid", height: 40, transparent: false });
     await page.waitForTimeout(300);
     await shot(page, "trip-check-drawer", 1440);
+    expect(c.unmocked).toEqual([]);
+    expect(c.consoleErrors).toEqual([]);
+  });
+
+  test("kit buttons: case tabs, status menu, builder controls", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, `/cases/${CUSTOM_CASE}`, '[data-testid="trip-facts"]', c);
+    const tabs = page.getByRole("tablist", { name: "Trip case sections" });
+    await expect(tabs.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: /Proposals\s*3/ })).toHaveAttribute("aria-selected", "false");
+    // One tab stop: the arrow keys move along the strip and select (the URL follows).
+    await tabs.getByRole("tab", { name: "Overview" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(tabs.getByRole("tab", { name: /Proposals/ })).toHaveAttribute("aria-selected", "true");
+    await expect(page).toHaveURL(/[?&]tab=proposals/);
+    await expect(page.locator(ROW).first()).toBeVisible();
+
+    const trigger = page.getByRole("button", { name: /Change status/ });
+    await expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("menu").getByRole("menuitem", { name: /Cancel case/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+
+    await open(page, `/cases/${CUSTOM_CASE}/proposals/3`, '[data-testid="quote-read-only"]', c);
+    await expect(page.getByRole("button", { name: "Back to the case" })).toBeVisible();
+    const day = page.getByRole("button", { name: /^(Collapse|Expand) day 1$/ });
+    await expect(day).toHaveAttribute("aria-expanded", "true");
+    const groups = page.getByRole("group", { name: /^Actions for / });
+    await expect(groups.first().getByRole("button", { name: /^Remove / })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add another day" })).toBeVisible();
+    expect(c.posts.filter((p) => !p.includes("quote-preview")), "nothing was written").toEqual([]);
     expect(c.unmocked).toEqual([]);
     expect(c.consoleErrors).toEqual([]);
   });

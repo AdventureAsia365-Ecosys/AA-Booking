@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { PageFrame, Skeleton, SkeletonStyle, initialsOf, useUrlFilters } from "@/ui";
+import { PageFrame, Skeleton, SkeletonStyle, Tabs, initialsOf, useUrlFilters } from "@/ui";
 
 export interface DetailTab {
   key: string;
@@ -76,25 +76,18 @@ export function DetailHeader({
             </div>
             {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
           </div>
-          <div role="tablist" className="bk-tabstrip -mb-px flex gap-6">
-            {tabs.map((t) => {
-              const on = t.key === activeTab;
-              return (
-                <button
-                  key={t.key}
-                  role="tab"
-                  aria-selected={on}
-                  onClick={() => onTab(t.key)}
-                  className={`shrink-0 cursor-pointer border-b-2 pb-2.5 text-[13px] ${
-                    on ? "border-accent font-semibold text-accent-deep" : "border-transparent text-muted hover:text-ink"
-                  }`}
-                >
-                  {t.label}
-                  {t.count !== undefined && <span className="ml-1 text-xs text-muted2">({t.count})</span>}
-                </button>
-              );
-            })}
-          </div>
+          <Tabs
+            variant="underline"
+            ariaLabel={`${name} sections`}
+            className="bk-tabstrip -mb-px"
+            tabs={tabs.map((t) => ({
+              key: t.key,
+              label: t.label,
+              count: t.count !== undefined ? `(${t.count})` : undefined,
+            }))}
+            active={activeTab}
+            onChange={onTab}
+          />
         </div>
       </div>
     </div>

@@ -19,6 +19,7 @@ import {
   DateText,
   FilterBar,
   KpiTile,
+  LinkButton,
   Money,
   Section,
   SupplierBillStatusBadge,
@@ -108,16 +109,14 @@ export function SupplierBillsList({
       header: "Bill",
       cell: ({ row }) => (
         <span className="flex flex-col">
-          <button
-            type="button"
+          <LinkButton
             onClick={(e) => {
               e.stopPropagation();
               showBill(row.original.code);
             }}
-            className="cursor-pointer text-left text-[13px] font-medium text-accent-deep hover:underline"
           >
             {row.original.code}
-          </button>
+          </LinkButton>
           <span className="block max-w-[160px] truncate text-xs text-muted" title={row.original.bill_number}>
             {row.original.bill_number}
           </span>
@@ -178,9 +177,9 @@ export function SupplierBillsList({
           <span>
             Bills of trip case <strong className="text-ink">{caseFilter}</strong> (its own bills and bills with a line of it)
           </span>
-          <button type="button" className="text-xs font-semibold text-accent-deep hover:underline" onClick={() => setMany({ case: null })}>
+          <LinkButton size="sm" onClick={() => setMany({ case: null })}>
             Show all
-          </button>
+          </LinkButton>
         </div>
       )}
       <DataTable<SupplierBill>
