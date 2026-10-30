@@ -1,9 +1,10 @@
 // app/not-found.tsx — AA-683: unknown URL (outside the spec §3 route map).
 import Link from "next/link";
+import { StandaloneFrame } from "@/ui/local/StandaloneFrame";
 
 export default function NotFound() {
   return (
-    <main className="grid min-h-screen place-items-center bg-bg px-4">
+    <StandaloneFrame className="bg-bg px-4">
       <div className="text-center">
         <p className="font-display text-5xl font-semibold text-accent">404</p>
         <h1 className="mt-2 text-lg font-semibold text-ink">This page does not exist</h1>
@@ -12,6 +13,6 @@ export default function NotFound() {
           Dashboard
         </Link>
       </div>
-    </main>
+    </StandaloneFrame>
   );
 }

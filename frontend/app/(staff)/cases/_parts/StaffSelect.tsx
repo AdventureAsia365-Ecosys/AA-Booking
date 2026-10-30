@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import type { StaffDirectoryEntry } from "@/lib/api/types";
 import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
-import { useStaff } from "@/ui";
+import { Select, useStaff } from "@/ui";
 import { inputCls } from "./fields";
 
 export function useStaffDirectory() {
@@ -47,7 +47,7 @@ export function StaffSelect({
   // Keep a current holder selectable even when the directory no longer lists them (deactivated).
   const known = !value || items.some((s) => s.cis_user_id === value);
   return (
-    <select
+    <Select
       id={id}
       aria-label={ariaLabel}
       className={inputCls}
@@ -64,6 +64,6 @@ export function StaffSelect({
           {s.cis_user_id === me.cis_user_id ? " (me)" : ""}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }

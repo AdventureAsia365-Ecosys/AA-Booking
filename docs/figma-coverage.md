@@ -50,8 +50,8 @@ updates its rows.
 | `COUNTRY DETAILS-1.png` | `/catalog/countries/[iso]` | new (AA-996) |  |
 | `COUNTRY DETAILS.png` | `/catalog/countries/[iso]` | new (AA-996) | Drawer variant folded into the detail page (spec 06 recommendation). |
 | `COUNTRY MANAGAMENT-1.png` | `/catalog/countries` | new (AA-996) | Countries from CIS places + Booking status. |
-| `COUNTRY MANAGAMENT-2.png` | `/hotels` | duplicate / misfiled | Misnamed: Hotel Management list. |
-| `COUNTRY MANAGAMENT-3.png` | `/hotels` | duplicate / misfiled | Misnamed: Hotel Management list. |
+| `COUNTRY MANAGAMENT-2.png` | `/hotels` (grid) | duplicate / misfiled | Misnamed: Hotel Management list. |
+| `COUNTRY MANAGAMENT-3.png` | `/hotels` (grid) | duplicate / misfiled | Misnamed: Hotel Management list. |
 | `COUNTRY MANAGAMENT.png` | `/catalog/countries` | new (AA-996) | Countries from CIS places + Booking status. |
 | `CREATE INVOICE.png` | Create invoice stepper (case Billing tab) | built |  |
 | `CREATE NEW TEMPLATE-1.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
@@ -83,7 +83,7 @@ updates its rows.
 | `EDIT TEMPLATE.png` | Commercial drawer (`/catalog/trip-plans/[sourceId]`, `…/commercial`) | new (AA-996) | Figma form layout: tour content (title, duration, country, summary, days, inclusions / exclusions) read-only "From CIS" + "Edit in CIS ↗"; commercial fields editable: Supplier (active suppliers) and the per-person price matrix (channel × season / validity × pax band × currency, bk-032) replace the Figma Supplier and Pricing cards (AA-996 slice 2). |
 | `Group 1410084962.png` | `/login` (background) | built |  |
 | `HOTEL DETAILS.png` | `/hotels?view=[id]` hotel drawer | built |  |
-| `HOTEL MANAGEMENT.png` | `/hotels` | built |  |
+| `HOTEL MANAGEMENT.png` | `/hotels` | built | Photo grid by default (AA-994 S6d, S254 audit #19): first supplier photo or the neutral tile, photo count, place chip, name, code, stars, supplier, status, updated, row menu; a Grid / Table switch (`?view=table`) keeps the same filters, paging and CSV. |
 | `ITINERARY BUILDER-1.png` | `/proposals` (+ row actions) | built |  |
 | `ITINERARY BUILDER-2.png` | Send proposal dialog | built |  |
 | `ITINERARY BUILDER-3.png` | `/cases/[code]/proposals/[n]` builder | built |  |
@@ -93,10 +93,10 @@ updates its rows.
 | `NOTIFICATION.png` | `/notifications` | built |  |
 | `OVERVIEW-1.png` | Notification popover (topbar bell) | built |  |
 | `OVERVIEW.png` | `/` Dashboard | built |  |
-| `PAYMENT & INVOICE-1.png` | `/billing` | built |  |
+| `PAYMENT & INVOICE-1.png` | `/billing` | built | Row menu on the invoice and payment rows (S255 rescore, AA-994 S6d): invoice = View invoice, Open trip case, Cancel invoice (when allowed); payment = View payment, View invoice, Download evidence (when a file is attached), Void (when allowed). No invoice PDF exists yet, so no Download PDF item. |
 | `PAYMENT & INVOICE-2.png` | `/billing` | built |  |
 | `PAYMENT & INVOICE-3.png` | `/billing` | built |  |
-| `PAYMENT & INVOICE.png` | `/billing` | built |  |
+| `PAYMENT & INVOICE.png` | `/billing` | built | Row menu: see `PAYMENT & INVOICE-1.png`. |
 | `PAYMENT DETAILS.png` | `/billing/payments/[ref]` | built |  |
 | `PAYMENT MANAGEMENt.png` | `/billing` | built |  |
 | `RECORD PAYMENT.png` | Record payment dialog | built |  |

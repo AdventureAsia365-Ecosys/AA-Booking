@@ -7,11 +7,12 @@
 import { Lock, SearchX } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { EmptyState, ErrorState, SkeletonBar } from "../core/primitives";
+import { PageFrame } from "./PageFrame";
 
 export function PageSkeleton({ side = true }: { side?: boolean }) {
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6" aria-busy="true" aria-label="Loading">
-      <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
+    <PageFrame>
+      <div className="flex flex-col gap-5" role="status" aria-busy="true" aria-label="Loading">
         <SkeletonBar w="40%" h={26} />
         <SkeletonBar w="25%" h={14} />
         <div className={`grid gap-5 ${side ? "lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]" : ""}`}>
@@ -28,15 +29,15 @@ export function PageSkeleton({ side = true }: { side?: boolean }) {
           )}
         </div>
       </div>
-    </main>
+    </PageFrame>
   );
 }
 
 export function PageError({ error, onRetry, what = "this page" }: { error: unknown; onRetry?: () => void; what?: string }) {
   const status = error instanceof ApiError ? error.status : 0;
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
-      <div className="mx-auto max-w-[880px] rounded-lg border border-line bg-card p-5">
+    <PageFrame width="narrow">
+      <div className="rounded-lg border border-line bg-card p-5">
         {status === 403 ? (
           <EmptyState
             icon={<Lock size={28} />}
@@ -49,6 +50,6 @@ export function PageError({ error, onRetry, what = "this page" }: { error: unkno
           <ErrorState message={(error as Error | null)?.message ?? `Could not load ${what}.`} onRetry={onRetry} />
         )}
       </div>
-    </main>
+    </PageFrame>
   );
 }

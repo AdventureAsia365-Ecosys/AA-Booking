@@ -591,6 +591,9 @@ function hotel(i: number): Hotel {
     amenities: ["Pool", "Spa", "Airport transfer"],
     links: [],
     room_type_count: 6,
+    // The photo grid (S254 Figma audit #19): most hotels have supplier photos, some none (the neutral tile).
+    photo_count: i % 4 === 3 ? 0 : 1 + (i % 3) * 6,
+    cover_photo_url: i % 4 === 3 ? null : `https://signed.example/supply-media/hotel/${uuid("2", i)}/cover.jpg`,
   };
 }
 

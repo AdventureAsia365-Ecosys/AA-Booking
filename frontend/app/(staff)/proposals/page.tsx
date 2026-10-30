@@ -20,6 +20,7 @@ import { proposalsApi } from "@/lib/api/proposals";
 import type { VersionListItem } from "@/lib/api/types";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import {
+  Input,
   Button,
   Code,
   ConfirmDialog,
@@ -319,12 +320,12 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
       <label className="relative block">
         <span className="sr-only">Search trip cases</span>
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted2" />
-        <input
+        <Input
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Case code, customer name or e-mail"
-          className="h-10 w-full rounded-md border border-line bg-card pl-9 pr-3 text-sm text-ink outline-none focus:border-accent-border"
+          className="w-full" style={{ paddingLeft: 36 }}
         />
       </label>
       {cases.isLoading ? (

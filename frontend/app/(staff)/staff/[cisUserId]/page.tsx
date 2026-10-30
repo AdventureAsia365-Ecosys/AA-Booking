@@ -16,6 +16,7 @@ import type { AuditLogItem, StaffAssignmentRow, StaffDetail } from "@/lib/api/ty
 import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
 import { CIS_STAFF_PATH } from "@/lib/config";
 import {
+  PageFrame,
   Button,
   Code,
   DataTable,
@@ -55,7 +56,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
   if (q.isError || !q.data) {
     const status = q.error instanceof ApiError ? q.error.status : 0;
     return (
-      <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+      <PageFrame width="full">
         {status === 404 ? (
           <EmptyState
             icon={<UserRound size={30} />}
@@ -73,7 +74,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
         ) : (
           <ErrorState message={(q.error as Error)?.message ?? "Could not load the profile."} onRetry={() => q.refetch()} />
         )}
-      </main>
+      </PageFrame>
     );
   }
 
@@ -82,7 +83,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
   const managed = actions.roleManagedInCis(s);
   const roleLabel = isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role;
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <DetailHeader
         back={isAdmin ? { href: "/staff", label: "Staff" } : undefined}
         name={s.name ?? s.email ?? s.cis_user_id}
@@ -141,7 +142,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
         {tab === "activity" && isAdmin && <Activity id={s.cis_user_id} />}
       </div>
       {actions.dialogs}
-    </main>
+    </PageFrame>
   );
 }
 

@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { SERVICE_TYPES, supplyApi, type ServiceBody, type ServiceDetail, type ServiceType, type ServiceUnit } from "@/lib/api/supply";
-import { FormDrawer, useStaff, useToast } from "@/ui";
+import { Input, Select, Textarea, FormDrawer, useStaff, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { CATEGORY_FOR, SERVICE_TYPE_LABEL, SERVICE_UNIT_OPTIONS, SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -119,7 +119,7 @@ export function ServiceFormDrawer({
       <ServiceCisContent service={service} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Type" required error={errorFor(fe, "service_type")}>
-          <select
+          <Select
             className={inputCls}
             value={form.service_type}
             onChange={(e) => {
@@ -132,7 +132,7 @@ export function ServiceFormDrawer({
                 {SERVICE_TYPE_LABEL[t]}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
         <FormField
           label="Rates are"
@@ -141,18 +141,18 @@ export function ServiceFormDrawer({
           hint={unitLocked ? "Fixed: this service already has rates in this unit." : "The unit its net rates are entered in."}
           error={errorFor(fe, "unit")}
         >
-          <select className={inputCls} value={form.unit} onChange={(e) => set("unit")(e.target.value as ServiceUnit)} disabled={unitLocked}>
+          <Select className={inputCls} value={form.unit} onChange={(e) => set("unit")(e.target.value as ServiceUnit)} disabled={unitLocked}>
             {SERVICE_UNIT_OPTIONS.map((u) => (
               <option key={u.value} value={u.value}>
                 {u.label}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       </div>
       {service ? (
         <FormField label="Supplier" locked hint="A service stays with the supplier it was created under (its rates live there).">
-          <input className={inputCls} value={`${service.supplier_name} (${service.supplier_code})`} disabled />
+          <Input className={inputCls} value={`${service.supplier_name} (${service.supplier_code})`} disabled />
         </FormField>
       ) : (
         <FormField label="Supplier" required hint={`Active suppliers with the matching category.`} error={errorFor(fe, "supplier_id")}>
@@ -160,7 +160,7 @@ export function ServiceFormDrawer({
         </FormField>
       )}
       <FormField label="Working title" required error={errorFor(fe, "title")}>
-        <input className={inputCls} maxLength={200} value={form.title} onChange={(e) => set("title")(e.target.value)} placeholder="e.g. Old Quarter street food walk" />
+        <Input className={inputCls} maxLength={200} value={form.title} onChange={(e) => set("title")(e.target.value)} placeholder="e.g. Old Quarter street food walk" />
       </FormField>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
@@ -177,32 +177,32 @@ export function ServiceFormDrawer({
           <span className="text-xs text-muted">A CIS place. Picking one fills the country.</span>
         </div>
         <FormField label="Country" error={errorFor(fe, "country_code")}>
-          <select className={inputCls} value={form.country_code} onChange={(e) => set("country_code")(e.target.value)}>
+          <Select className={inputCls} value={form.country_code} onChange={(e) => set("country_code")(e.target.value)}>
             <option value="">—</option>
             {(countries.data?.items ?? []).map((c) => (
               <option key={c.iso2} value={c.iso2}>
                 {c.name}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <FormField label="Max group size" error={errorFor(fe, "max_group_size")}>
-          <input type="number" min={1} max={999} className={inputCls} value={form.max_group_size} onChange={(e) => set("max_group_size")(e.target.value)} />
+          <Input type="number" min={1} max={999} className={inputCls} value={form.max_group_size} onChange={(e) => set("max_group_size")(e.target.value)} />
         </FormField>
         <FormField label="Duration (minutes)" error={errorFor(fe, "duration_minutes")}>
-          <input type="number" min={1} className={inputCls} value={form.duration} onChange={(e) => set("duration")(e.target.value)} />
+          <Input type="number" min={1} className={inputCls} value={form.duration} onChange={(e) => set("duration")(e.target.value)} />
         </FormField>
       </div>
       <FormField label="Inclusions" hint="Separate with commas, e.g. Guide, Tastings, Water." error={errorFor(fe, "inclusions")}>
-        <input className={inputCls} value={form.inclusions} onChange={(e) => set("inclusions")(e.target.value)} />
+        <Input className={inputCls} value={form.inclusions} onChange={(e) => set("inclusions")(e.target.value)} />
       </FormField>
       <FormField label="CIS catalog reference" hint="Optional: the CIS component or tour id this service delivers." error={errorFor(fe, "source_id")}>
-        <input className={`${inputCls} font-mono`} maxLength={120} value={form.source_id} onChange={(e) => set("source_id")(e.target.value)} />
+        <Input className={`${inputCls} font-mono`} maxLength={120} value={form.source_id} onChange={(e) => set("source_id")(e.target.value)} />
       </FormField>
       <FormField label="Internal notes" hint="Staff only." error={errorFor(fe, "internal_notes")}>
-        <textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
+        <Textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
   );

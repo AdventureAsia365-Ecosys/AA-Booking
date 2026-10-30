@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Map as MapIcon, Search } from "lucide-react";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
-import { CisPhoto } from "@/ui";
+import { Input, CisPhoto } from "@/ui";
 import { daysNights, planSubtitle } from "@/ui/booking/tripPlans";
 import { inputCls } from "./fields";
 
@@ -77,8 +77,8 @@ export function TripPlanPicker({
       <label className="relative">
         <span className="sr-only">Search sellable trip plans</span>
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted2" />
-        <input
-          className={`${inputCls} pl-9`}
+        <Input
+          className={inputCls} style={{ paddingLeft: 36 }}
           placeholder="Search sellable trip plans by title, SKU or CIS id"
           value={search}
           disabled={disabled}

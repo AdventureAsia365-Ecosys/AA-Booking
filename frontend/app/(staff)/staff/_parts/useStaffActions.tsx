@@ -15,7 +15,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
 import { ROLE_LABEL, STAFF_ROLES, type StaffRole } from "@/lib/rbac";
-import { ConfirmDialog, FormDrawer, useStaff, useToast } from "@/ui";
+import { Radio, ConfirmDialog, FormDrawer, useStaff, useToast } from "@/ui";
 
 /** What each Booking role can do, for the role picker (backend PERMISSIONS in app/auth/staff.py). */
 export const ROLE_HELP: Record<StaffRole, string> = {
@@ -171,7 +171,7 @@ function RoleDrawer({
                 role === r ? "border-accent-border bg-accent-tint" : "border-line bg-card"
               } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
             >
-              <input type="radio" name="role" value={r} checked={role === r} disabled={disabled} onChange={() => setRole(r)} className="mt-1 accent-accent" />
+              <Radio name="role" value={r} checked={role === r} disabled={disabled} onChange={() => setRole(r)} style={{ marginTop: 4 }} />
               <span>
                 <span className="block text-[13px] font-semibold text-ink">{ROLE_LABEL[r]}</span>
                 <span className="block text-xs text-muted">{ROLE_HELP[r]}</span>

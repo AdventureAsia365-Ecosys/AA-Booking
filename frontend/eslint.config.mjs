@@ -1,7 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
-import { kitConfig } from "./ui/core/eslint-kit.mjs";
+import { STAGED_RULES, kitConfig } from "./ui/core/eslint-kit.mjs";
 
 // AA-994 S4b (root ADR 0016 decision 7, plan guards G1-G11) — the UI kit conformance rules, vendored with the kit core
 // (ui/core/eslint-kit.mjs, byte-identical in every app), `tailwind` preset at `error`:
@@ -14,15 +14,17 @@ import { kitConfig } from "./ui/core/eslint-kit.mjs";
 // its own <button> (the plan's G5 applies outside ui/**).
 // Violations that existed before S4b are frozen in eslint-suppressions.json (ESLint bulk suppressions); Frontend Build
 // prunes it and fails when it is stale or grows (check-kit-copy.mjs --suppressions).
+// AA-994 S6d: the staged rule 8 `no-raw-form-control` (STAGED_RULES) is on too: every page form uses the kit Field /
+// Input / Select / Textarea / Checkbox / Radio / DateField (file inputs and hidden inputs stay allowed by the rule).
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
-  kitConfig({ preset: "tailwind", files: ["app/**/*.{ts,tsx}"] }),
+  kitConfig({ preset: "tailwind", files: ["app/**/*.{ts,tsx}"], rules: STAGED_RULES }),
   kitConfig({
     preset: "tailwind",
     files: ["ui/booking/**/*.{ts,tsx}"],
-    rules: { "aa-kit/no-hand-styled-button": "off" },
+    rules: { ...STAGED_RULES, "aa-kit/no-hand-styled-button": "off" },
   }),
   // The kit DataTable uses TanStack's useReactTable, which the React Compiler skips (same warning in CIS). The file is
   // the kit core copy, so the rule is silenced here instead of editing it.

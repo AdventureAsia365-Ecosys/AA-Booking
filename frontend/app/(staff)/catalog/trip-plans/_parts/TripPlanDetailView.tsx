@@ -13,7 +13,7 @@ import { Briefcase, CalendarDays, EyeOff, Globe, Hash, Pencil, Store } from "luc
 import { CHANNELS } from "@/lib/api/proposals";
 import { tripPlansApi } from "@/lib/api/tripPlans";
 import { daysNights, marginLabel, paxBandLabel } from "@/ui/booking/tripPlans";
-import { Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, formatDay, useCan, useStaff } from "@/ui";
+import { PageFrame, Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, formatDay, useCan, useStaff } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "../../../_parts/DetailHeader";
 import { CommercialDrawer } from "./CommercialDrawer";
@@ -62,7 +62,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
 
   const highlights = highlightList(p.highlights);
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <DetailHeader
         back={{ href: "/catalog/trip-plans", label: "Trip plans" }}
         name={p.title}
@@ -299,6 +299,6 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
       {editing && <CommercialDrawer plan={p} onClose={() => setEditing(false)} />}
       {using && <UseForTripCaseModal plan={p} onClose={() => setUsing(false)} />}
       {sellableToggle.dialogs}
-    </main>
+    </PageFrame>
   );
 }

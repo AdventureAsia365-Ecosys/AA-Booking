@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { TRIP_CASE_STATUSES, type TripCaseStatus } from "@/lib/api/types";
-import { STATUS_PHASES, TRIP_CASE_STATUS_META } from "@/ui";
+import { Checkbox, STATUS_PHASES, TRIP_CASE_STATUS_META } from "@/ui";
 
 export function parseStatuses(raw: string): TripCaseStatus[] {
   return raw
@@ -69,7 +69,7 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
                   aria-selected={value.includes(s)}
                   className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-body hover:bg-bg"
                 >
-                  <input type="checkbox" checked={value.includes(s)} onChange={() => toggle(s)} className="h-4 w-4 accent-accent" />
+                  <Checkbox checked={value.includes(s)} onChange={() => toggle(s)} />
                   {TRIP_CASE_STATUS_META[s].label}
                 </label>
               ))}

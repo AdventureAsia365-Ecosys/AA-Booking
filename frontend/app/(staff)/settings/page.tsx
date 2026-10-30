@@ -24,6 +24,7 @@ import { CIS_STAFF_PATH } from "@/lib/config";
 import type { SessionFacts } from "@/lib/sessionFacts";
 import type { SettingsResponse, StaffPreferences } from "@/lib/api/types";
 import {
+  Button,
   EmptyState,
   ErrorState,
   ManagedInCisLink,
@@ -233,13 +234,9 @@ function SecurityTab() {
         title="This session"
         description="Your access renews by itself every few minutes until the session ends; then you sign in again."
         actions={
-          <button
-            type="button"
-            onClick={() => void signOut(router)}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-line px-4 py-2 text-[13px] font-medium text-ink hover:border-accent-border"
-          >
+          <Button variant="ghost" onClick={() => void signOut(router)}>
             <LogOut size={14} /> Sign out
-          </button>
+          </Button>
         }
       >
         {facts.isError ? (

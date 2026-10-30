@@ -70,6 +70,10 @@ export interface Hotel extends SupplyRecord {
   amenities: string[];
   links: HotelLink[];
   room_type_count: number;
+  /** List rows only (the photo grid): active supplier photos, and the first one as a presigned URL (15 minutes; null
+   *  when the hotel has none or storage cannot sign). */
+  photo_count?: number;
+  cover_photo_url?: string | null;
 }
 
 export interface RoomType {

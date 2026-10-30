@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { Skeleton, SkeletonStyle, initialsOf, useUrlFilters } from "@/ui";
+import { PageFrame, Skeleton, SkeletonStyle, initialsOf, useUrlFilters } from "@/ui";
 
 export interface DetailTab {
   key: string;
@@ -128,8 +128,9 @@ export function Fact({ label, children, wide }: { label: string; children: React
 /** Loading state of a person detail page: the header band and two cards as shimmer bars. */
 export function DetailSkeleton({ label }: { label: string }) {
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto" aria-busy="true" aria-label={label}>
+    <PageFrame bleed>
       <SkeletonStyle />
+      <div role="status" aria-busy="true" aria-label={label}>
       <div className="border-b border-line bg-bg py-6 md:px-8">
         <div className="mx-auto flex max-w-[1440px] items-center gap-4">
           <Skeleton w={56} h={56} r={28} />
@@ -149,6 +150,7 @@ export function DetailSkeleton({ label }: { label: string }) {
           </div>
         ))}
       </div>
-    </main>
+      </div>
+    </PageFrame>
   );
 }

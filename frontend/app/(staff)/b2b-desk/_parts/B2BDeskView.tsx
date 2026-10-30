@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/b2bDesk";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import {
+  Select,
   Button,
   DataTable,
   DateText,
@@ -66,7 +67,7 @@ const KIND_LABEL: Record<string, string> = {
   entrance: "Entrance",
   meal: "Meal",
 };
-const fieldCls = "h-9 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
+const fieldCls = "w-full";
 
 function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
@@ -360,13 +361,13 @@ function DeclineModal({ line, onClose, onDone }: { line: OnRequestLine | null; o
           </p>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Reason</span>
-            <select className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as DeclineCode)}>
+            <Select size="sm" className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as DeclineCode)}>
               {DECLINE_CODES.map((c) => (
                 <option key={c} value={c}>
                   {DECLINE_LABEL[c]}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           {decline.isError && <p className="text-danger">{errorText(decline.error)}</p>}
         </div>
@@ -540,13 +541,13 @@ function FlagModal({ departure, onClose, onDone }: { departure: DeskDeparture | 
           </p>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Type</span>
-            <select className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as IncidentCode)}>
+            <Select size="sm" className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as IncidentCode)}>
               {INCIDENT_CODES.map((c) => (
                 <option key={c} value={c}>
                   {INCIDENT_LABEL[c]}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           {flag.isError && <p className="text-danger">{errorText(flag.error)}</p>}
         </div>

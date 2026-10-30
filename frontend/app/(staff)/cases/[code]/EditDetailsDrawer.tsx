@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { FormDrawer, DateField } from "@/ui";
+import { Input, Select, Textarea, FormDrawer, DateField } from "@/ui";
 import { CURRENCIES, Field, LockedValue, inputCls, paxErrors, textareaCls, toInt } from "../_parts/fields";
 import { CountryPicker } from "../_parts/CountryPicker";
 import { friendlyError } from "../_parts/QueryError";
@@ -93,18 +93,18 @@ function EditBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Adults" required error={tried ? pax.adults : null}>
-          <input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={f.pax_adults} onChange={(e) => setF({ ...f, pax_adults: e.target.value })} />
+          <Input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={f.pax_adults} onChange={(e) => setF({ ...f, pax_adults: e.target.value })} />
         </Field>
         <Field label="Children" error={tried ? pax.children : null}>
-          <input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={f.pax_children} onChange={(e) => setF({ ...f, pax_children: e.target.value })} />
+          <Input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={f.pax_children} onChange={(e) => setF({ ...f, pax_children: e.target.value })} />
         </Field>
       </div>
       <Field label="Currency" hint="Proposals already sent keep the currency they were sent in.">
-        <select className={inputCls} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>
+        <Select className={inputCls} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>
           {currencies.map((cur) => (
             <option key={cur}>{cur}</option>
           ))}
-        </select>
+        </Select>
       </Field>
       <Field label="Countries">
         <CountryPicker value={f.countries} onChange={(countries) => setF({ ...f, countries })} />
@@ -112,7 +112,7 @@ function EditBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
 
       <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Notes</p>
       <Field label="Internal notes" hint="Staff only. The customer never sees these.">
-        <textarea className={textareaCls} value={f.notes} maxLength={10000} onChange={(e) => setF({ ...f, notes: e.target.value })} />
+        <Textarea className={textareaCls} value={f.notes} maxLength={10000} onChange={(e) => setF({ ...f, notes: e.target.value })} />
       </Field>
     </FormDrawer>
   );

@@ -30,6 +30,9 @@ import {
 import type { TripCaseDetail } from "@/lib/api/types";
 import { CostVsBilled } from "./CostVsBilled";
 import {
+  Input,
+  Select,
+  Textarea,
   Button,
   ConfirmDialog,
   DataTable,
@@ -50,7 +53,7 @@ import {
 import { prepareUpload } from "../../_parts/SupplyContent";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
-const fieldCls = "h-9 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
+const fieldCls = "w-full";
 const SKIP_LABEL: Record<NonNullable<UnbookedItem["skip_reason"]>, string> = {
   booked: "Booked",
   no_supplier: "No supplier on this item",
@@ -428,17 +431,17 @@ function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking;
           <span className="text-xs font-semibold text-muted">
             Supplier confirmation ref <span className="text-danger">*</span>
           </span>
-          <input className={fieldCls} value={ref} maxLength={100} onChange={(e) => setRef(e.target.value)} placeholder="e.g. HTL-48213" />
+          <Input size="sm" className={fieldCls} value={ref} maxLength={100} onChange={(e) => setRef(e.target.value)} placeholder="e.g. HTL-48213" />
         </label>
         {documents ? (
           <div className="flex flex-col gap-2 rounded-md border border-line2 p-3">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">
               <FileUp size={13} /> Document (optional): PDF, or a photo of it, at most 3 MB
             </span>
-            <select className={fieldCls} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+            <Select size="sm" className={fieldCls} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
               <option value="supplier_voucher">Voucher</option>
               <option value="supplier_confirmation">Supplier confirmation</option>
-            </select>
+            </Select>
             <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-xs" />
             <span className="text-xs text-muted">Stored privately; staff download it with a link valid 5 minutes.</span>
           </div>
@@ -483,13 +486,13 @@ function DeclineBooking({ b, onClose, onDone }: { b: SupplierBooking; onClose: (
         </p>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Reason</span>
-          <select className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as DeclineCode)}>
+          <Select size="sm" className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as DeclineCode)}>
             {DECLINE_CODES.map((d) => (
               <option key={d} value={d}>
                 {DECLINE_LABEL[d]}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         {run.isError && <p className="text-danger">{errorText(run.error)}</p>}
       </div>
@@ -605,29 +608,29 @@ function AddBooking({
           <span className="text-xs font-semibold text-muted">
             Supplier <span className="text-danger">*</span>
           </span>
-          <select className={fieldCls} value={form.supplier_id} onChange={(e) => set({ supplier_id: e.target.value })} required>
+          <Select size="sm" className={fieldCls} value={form.supplier_id} onChange={(e) => set({ supplier_id: e.target.value })} required>
             <option value="">Choose a supplier…</option>
             {(suppliers.data?.items ?? []).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.company_name} ({s.code})
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Item of the approved version</span>
-          <select className={fieldCls} value={form.version_item_id ?? ""} onChange={(e) => set({ version_item_id: e.target.value || null })}>
+          <Select size="sm" className={fieldCls} value={form.version_item_id ?? ""} onChange={(e) => set({ version_item_id: e.target.value || null })}>
             <option value="">Extra item (not in the proposal)</option>
             {bookable.map((i) => (
               <option key={i.version_item_id} value={i.version_item_id}>
                 Item {i.position} · {i.supply_label ?? i.title}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">What is booked</span>
-          <input className={fieldCls} maxLength={500} value={form.item_description ?? ""} onChange={(e) => set({ item_description: e.target.value })} />
+          <Input size="sm" className={fieldCls} maxLength={500} value={form.item_description ?? ""} onChange={(e) => set({ item_description: e.target.value })} />
         </label>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
@@ -636,16 +639,16 @@ function AddBooking({
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Net amount</span>
-            <input inputMode="decimal" className={fieldCls} value={form.net_amount ?? ""} onChange={(e) => set({ net_amount: e.target.value || null })} />
+            <Input size="sm" inputMode="decimal" className={fieldCls} value={form.net_amount ?? ""} onChange={(e) => set({ net_amount: e.target.value || null })} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Currency</span>
-            <input className={fieldCls} maxLength={3} placeholder="USD" value={form.net_currency ?? ""} onChange={(e) => set({ net_currency: e.target.value.toUpperCase() || null })} />
+            <Input size="sm" className={fieldCls} maxLength={3} placeholder="USD" value={form.net_currency ?? ""} onChange={(e) => set({ net_currency: e.target.value.toUpperCase() || null })} />
           </label>
         </div>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Notes</span>
-          <textarea className="min-h-[72px] w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border" maxLength={2000} value={form.notes ?? ""} onChange={(e) => set({ notes: e.target.value || null })} />
+          <Textarea className="min-h-[72px] w-full" maxLength={2000} value={form.notes ?? ""} onChange={(e) => set({ notes: e.target.value || null })} />
           {c.channel === "b2b" && <span className="text-xs text-muted">B2B trip: never write traveller names here.</span>}
         </label>
         <p className="text-xs text-muted">For an item of the proposal, empty fields take the item&apos;s date, nights, pax and net cost.</p>

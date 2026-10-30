@@ -8,7 +8,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, X } from "lucide-react";
 import { suppliersApi, type CatalogPlace } from "@/lib/api/suppliers";
-import { FromCisTag } from "@/ui";
+import { Input, FromCisTag } from "@/ui";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 
 export interface PickedPlace {
@@ -71,7 +71,7 @@ export function DestinationPicker({
   const items = places.data?.items ?? [];
   return (
     <div className="relative">
-      <input
+      <Input
         className={inputCls}
         value={text}
         onChange={(e) => type(e.target.value)}

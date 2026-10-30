@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { api } from "@/lib/api/client";
 import { inputCls } from "./fields";
+import { Select } from "@/ui";
 
 export const MAX_COUNTRIES = 20;
 
@@ -43,7 +44,7 @@ export function CountryPicker({ value, onChange }: { value: string[]; onChange: 
           ))}
         </ul>
       )}
-      <select
+      <Select
         className={inputCls}
         value=""
         aria-label="Add a country"
@@ -66,7 +67,7 @@ export function CountryPicker({ value, onChange }: { value: string[]; onChange: 
             {c.name} ({c.iso2})
           </option>
         ))}
-      </select>
+      </Select>
     </div>
   );
 }

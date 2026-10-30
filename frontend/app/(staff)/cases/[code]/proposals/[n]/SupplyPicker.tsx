@@ -6,8 +6,9 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supplyApi, type SupplyOption } from "@/lib/api/supply";
+import { Input } from "@/ui";
 
-const inputCls = "h-10 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
+const inputCls = "w-full";
 
 export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) {
   const [text, setText] = useState("");
@@ -31,7 +32,7 @@ export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) 
   const items = options.data?.items ?? [];
   return (
     <div className="relative">
-      <input
+      <Input
         className={inputCls}
         value={text}
         onChange={(e) => type(e.target.value)}

@@ -9,9 +9,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { safeNext } from "@/lib/safeNext";
+import { Button, Input } from "@/ui";
 
-const inputCls =
-  "h-11 w-full rounded-md border border-line bg-card px-3.5 text-sm text-ink outline-none transition focus:border-accent-border focus:ring-2 focus:ring-accent-soft";
+const inputCls = "w-full";
+// The sign-in card keeps its taller boxes (44 px, as before the kit controls); the password box leaves room for the
+// show / hide button.
+const TALL = { height: 44 } as const;
 
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
@@ -60,8 +63,9 @@ export function LoginForm({ next }: { next: string }) {
       )}
       <label className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">CIS username</span>
-        <input
+        <Input
           className={inputCls}
+          style={TALL}
           name="username"
           autoComplete="username"
           autoCapitalize="none"
@@ -75,8 +79,9 @@ export function LoginForm({ next }: { next: string }) {
       <label className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">Password</span>
         <span className="relative">
-          <input
-            className={`${inputCls} pr-11`}
+          <Input
+            className={inputCls}
+            style={{ ...TALL, paddingRight: 44 }}
             name="password"
             type={show ? "text" : "password"}
             autoComplete="current-password"
@@ -95,14 +100,10 @@ export function LoginForm({ next }: { next: string }) {
           </button>
         </span>
       </label>
-      <button
-        type="submit"
-        disabled={busy}
-        className="mt-1 inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full bg-accent px-6 text-[13px] font-semibold uppercase tracking-[0.06em] text-on-accent transition hover:bg-accent-deep disabled:cursor-not-allowed disabled:opacity-60"
-      >
+      <Button type="submit" variant="primary" size="lg" disabled={busy} style={{ marginTop: 4, height: 44 }}>
         {busy && <Loader2 size={16} className="animate-spin" />}
         {busy ? "Signing in…" : "Sign in"}
-      </button>
+      </Button>
     </form>
   );
 }

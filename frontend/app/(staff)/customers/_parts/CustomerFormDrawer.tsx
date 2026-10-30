@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type FieldError } from "@/lib/api/client";
 import type { CustomerDetail, CustomerPatchBody, CustomerSummary } from "@/lib/api/types";
-import { FormDrawer, fieldName, useToast } from "@/ui";
+import { Checkbox, Input, FormDrawer, fieldName, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 
 const FIELDS = ["name", "email", "phone", "address", "contact_consent"];
@@ -153,7 +153,7 @@ function CustomerForm({ onClose, mode, onCreated }: { onClose: () => void; mode:
         </p>
       )}
       <FormField label="Full name" required error={show("name")}>
-        <input className={inputCls} value={v.name} maxLength={200} onChange={(e) => set("name", e.target.value)} autoComplete="off" autoFocus />
+        <Input className={inputCls} value={v.name} maxLength={200} onChange={(e) => set("name", e.target.value)} autoComplete="off" autoFocus />
       </FormField>
       <FormField
         label="E-mail"
@@ -161,17 +161,17 @@ function CustomerForm({ onClose, mode, onCreated }: { onClose: () => void; mode:
         error={emailLocked ? null : show("email")}
         hint={emailLocked ? "Verified customers change their e-mail through their own sign-in." : "E-mail or phone is required."}
       >
-        <input className={inputCls} type="email" value={v.email} maxLength={254} disabled={emailLocked} onChange={(e) => set("email", e.target.value)} autoComplete="off" />
+        <Input className={inputCls} type="email" value={v.email} maxLength={254} disabled={emailLocked} onChange={(e) => set("email", e.target.value)} autoComplete="off" />
       </FormField>
       <FormField label="Phone" error={show("phone")} hint="With the country code, e.g. +44 7700 900077.">
-        <input className={inputCls} type="tel" value={v.phone} maxLength={40} onChange={(e) => set("phone", e.target.value)} autoComplete="off" />
+        <Input className={inputCls} type="tel" value={v.phone} maxLength={40} onChange={(e) => set("phone", e.target.value)} autoComplete="off" />
       </FormField>
       <FormField label="Location" error={show("address")} hint="City and country, or a postal address.">
-        <input className={inputCls} value={v.address} maxLength={500} onChange={(e) => set("address", e.target.value)} autoComplete="off" />
+        <Input className={inputCls} value={v.address} maxLength={500} onChange={(e) => set("address", e.target.value)} autoComplete="off" />
       </FormField>
       {mode.kind === "create" && (
         <label className="flex items-start gap-2.5 text-[13px] text-body">
-          <input type="checkbox" checked={v.contact_consent} onChange={(e) => set("contact_consent", e.target.checked)} className="mt-0.5 h-4 w-4 accent-accent" />
+          <Checkbox checked={v.contact_consent} onChange={(e) => set("contact_consent", e.target.checked)} style={{ marginTop: 2 }} />
           <span>The customer agreed to be contacted about this trip.</span>
         </label>
       )}

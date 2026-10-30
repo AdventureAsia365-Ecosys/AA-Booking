@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { supplyApi, type HotelBody, type HotelDetail } from "@/lib/api/supply";
-import { FormDrawer, useToast, TimeField } from "@/ui";
+import { Input, Select, Textarea, FormDrawer, useToast, TimeField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -109,7 +109,7 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
       </p>
       {hotel ? (
         <FormField label="Supplier" locked hint="A hotel stays with the supplier it was created under (its rates live there).">
-          <input className={inputCls} value={`${hotel.supplier_name} (${hotel.supplier_code})`} disabled />
+          <Input className={inputCls} value={`${hotel.supplier_name} (${hotel.supplier_code})`} disabled />
         </FormField>
       ) : (
         <FormField label="Supplier" required hint="Active suppliers with the Hotel category." error={errorFor(fe, "supplier_id")}>
@@ -117,21 +117,21 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
         </FormField>
       )}
       <FormField label="Hotel name" required error={errorFor(fe, "name")}>
-        <input className={inputCls} maxLength={200} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="e.g. Hanoi Emerald Hotel" />
+        <Input className={inputCls} maxLength={200} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="e.g. Hanoi Emerald Hotel" />
       </FormField>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Style" hint="e.g. Boutique, Resort, Homestay." error={errorFor(fe, "hotel_style")}>
-          <input className={inputCls} maxLength={60} value={form.hotel_style} onChange={(e) => set("hotel_style")(e.target.value)} />
+          <Input className={inputCls} maxLength={60} value={form.hotel_style} onChange={(e) => set("hotel_style")(e.target.value)} />
         </FormField>
         <FormField label="Star rating" error={errorFor(fe, "star_rating")}>
-          <select className={inputCls} value={form.star_rating} onChange={(e) => set("star_rating")(e.target.value)}>
+          <Select className={inputCls} value={form.star_rating} onChange={(e) => set("star_rating")(e.target.value)}>
             <option value="">Not rated</option>
             {[1, 2, 3, 4, 5].map((n) => (
               <option key={n} value={n}>
                 {n} {n === 1 ? "star" : "stars"}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -149,25 +149,25 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
           <span className="text-xs text-muted">A CIS place. Picking one fills the country.</span>
         </div>
         <FormField label="Country" error={errorFor(fe, "country_code")}>
-          <select className={inputCls} value={form.country_code} onChange={(e) => set("country_code")(e.target.value)}>
+          <Select className={inputCls} value={form.country_code} onChange={(e) => set("country_code")(e.target.value)}>
             <option value="">—</option>
             {(countries.data?.items ?? []).map((c) => (
               <option key={c.iso2} value={c.iso2}>
                 {c.name}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       </div>
       <FormField label="Street address" error={errorFor(fe, "address")}>
-        <input className={inputCls} maxLength={500} value={form.address} onChange={(e) => set("address")(e.target.value)} />
+        <Input className={inputCls} maxLength={500} value={form.address} onChange={(e) => set("address")(e.target.value)} />
       </FormField>
       <div className="grid grid-cols-2 gap-4">
         <FormField label="Latitude" error={errorFor(fe, "latitude")}>
-          <input className={inputCls} inputMode="decimal" value={form.latitude} onChange={(e) => set("latitude")(e.target.value)} placeholder="21.0285" />
+          <Input className={inputCls} inputMode="decimal" value={form.latitude} onChange={(e) => set("latitude")(e.target.value)} placeholder="21.0285" />
         </FormField>
         <FormField label="Longitude" error={errorFor(fe, "longitude")}>
-          <input className={inputCls} inputMode="decimal" value={form.longitude} onChange={(e) => set("longitude")(e.target.value)} placeholder="105.8542" />
+          <Input className={inputCls} inputMode="decimal" value={form.longitude} onChange={(e) => set("longitude")(e.target.value)} placeholder="105.8542" />
         </FormField>
         <FormField label="Check-in from" error={errorFor(fe, "check_in_time")}>
           <TimeField className={inputCls} value={form.check_in_time} onChange={(v) => set("check_in_time")(v)} />
@@ -177,13 +177,13 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
         </FormField>
       </div>
       <FormField label="Amenities" hint="Separate with commas, e.g. Pool, Spa, Airport shuttle." error={errorFor(fe, "amenities")}>
-        <input className={inputCls} value={form.amenities} onChange={(e) => set("amenities")(e.target.value)} />
+        <Input className={inputCls} value={form.amenities} onChange={(e) => set("amenities")(e.target.value)} />
       </FormField>
       <FormField label="Staff links" hint="One per line: a URL, or “Label | URL” (extranet, supplier site, map). Not shown to customers." error={errorFor(fe, "links")}>
-        <textarea className={textareaCls} value={form.links} onChange={(e) => set("links")(e.target.value)} placeholder="Extranet | https://…" />
+        <Textarea className={textareaCls} value={form.links} onChange={(e) => set("links")(e.target.value)} placeholder="Extranet | https://…" />
       </FormField>
       <FormField label="Internal notes" hint="Staff only." error={errorFor(fe, "internal_notes")}>
-        <textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
+        <Textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
   );

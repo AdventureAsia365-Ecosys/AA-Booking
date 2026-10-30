@@ -29,6 +29,11 @@ export {
 } from "./core/FilterBar";
 export { RowMenu, type RowMenuItem } from "./core/RowMenu";
 export { DateField } from "./core/DateField";
+// AA-994 S6a/S6d: the kit form controls (lint rule no-raw-form-control).
+export {
+  Field, Input, Select, Textarea, Checkbox, Radio, controlStyle, CONTROL_CLASS,
+  type InputProps, type SelectProps, type SelectOption, type TextareaProps, type ChoiceProps, type ControlSize,
+} from "./core/FormControls";
 export { Money } from "./core/Money";
 export { formatMoney, minorUnits } from "./core/format";
 export { DateText, relativeTime } from "./core/DateText";

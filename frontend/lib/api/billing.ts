@@ -88,6 +88,8 @@ export interface InvoiceSummary {
   trip_case: { id: string; code: string; status: string; channel: "b2c" | "b2b"; start_date: IsoDate | null };
   customer: { id: string; code: string; name: string | null } | null;
   version: { id: string; number: number; title: string | null; fx_rate_locked: DecimalString | null };
+  /** What this staff member may do (list rows and the detail; the staff list's row menu reads `cancel`). */
+  actions?: InvoiceActions;
 }
 
 export interface InvoiceLine {

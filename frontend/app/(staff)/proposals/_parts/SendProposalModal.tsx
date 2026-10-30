@@ -15,10 +15,10 @@ import { api } from "@/lib/api/client";
 import { proposalsApi } from "@/lib/api/proposals";
 import { QUOTE_VALIDITY_RANGE_DAYS, settingsFromApi } from "@/lib/bookingConfig";
 import { addDays, defaultSendMessage } from "@/lib/proposalDraft";
-import { Button, Modal, Money, Spinner, formatDay, staffDisplay, useStaff, useToast, DateField } from "@/ui";
+import { Input, Textarea, Button, Modal, Money, Spinner, formatDay, staffDisplay, useStaff, useToast, DateField } from "@/ui";
 
 const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
-const fieldCls = "w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
+const fieldCls = "w-full";
 
 export function SendProposalModal({
   open,
@@ -160,11 +160,11 @@ function SendForm({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium uppercase tracking-[0.04em] text-muted">Subject</span>
-            <input value={subject} maxLength={200} onChange={(e) => setSubject(e.target.value)} className={`${fieldCls} h-10`} />
+            <Input value={subject} maxLength={200} onChange={(e) => setSubject(e.target.value)} className={fieldCls} />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium uppercase tracking-[0.04em] text-muted">Message</span>
-            <textarea value={message} rows={8} maxLength={10_000} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} py-2 leading-relaxed`} />
+            <Textarea value={message} rows={8} maxLength={10_000} onChange={(e) => setMessage(e.target.value)} className={`${fieldCls} leading-relaxed`} />
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium uppercase tracking-[0.04em] text-muted">Valid until</span>

@@ -16,15 +16,14 @@ import { ApiError } from "@/lib/api/client";
 import { CHANNELS, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import { suppliersApi } from "@/lib/api/suppliers";
 import { tripPlansApi, type PlanSupplier, type TripPlanDetail } from "@/lib/api/tripPlans";
-import { FormDrawer, useCan, useStaff, useToast } from "@/ui";
+import { Checkbox, Input, Select, Textarea, FormDrawer, useCan, useStaff, useToast } from "@/ui";
 import { draftsFrom, draftsToBody, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { CisField, CisFieldset } from "../../../_parts/CisFields";
 import { CIS_EDITOR_ROLES } from "./shared";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 import { PriceMatrixEditor } from "./PriceMatrixEditor";
 
-const textareaCls =
-  "min-h-[96px] w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border";
+const textareaCls = "min-h-[96px] w-full";
 
 interface FormState {
   sellable: boolean;
@@ -203,9 +202,8 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         </CisField>
       </CisFieldset>
       <label className="flex items-start gap-3 rounded-md border border-line bg-panel px-3 py-3">
-        <input
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 accent-accent"
+        <Checkbox
+          style={{ marginTop: 2 }}
           checked={form.sellable}
           onChange={(e) => setForm({ ...form, sellable: e.target.checked })}
         />
@@ -216,7 +214,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
       </label>
       {canPickSupplier && (
         <FormField label="Supplier" hint={supplierHint} error={errorFor(fe, "supplier_id")}>
-          <input
+          <Input
             aria-label="Search active suppliers"
             className={inputCls}
             placeholder="Search by name, code or contact"
@@ -225,7 +223,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             onChange={(e) => setSupplierSearch(e.target.value)}
             autoComplete="off"
           />
-          <select
+          <Select
             aria-label="Supplier"
             className={inputCls}
             value={form.supplier_id}
@@ -248,14 +246,14 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
                 {s.company_name} · {s.code}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       )}
       <FormField label="Trip style" hint="Free text for now, for example Private or Small group." error={errorFor(fe, "trip_style")}>
-        <input className={inputCls} maxLength={60} value={form.trip_style} onChange={(e) => setForm({ ...form, trip_style: e.target.value })} />
+        <Input className={inputCls} maxLength={60} value={form.trip_style} onChange={(e) => setForm({ ...form, trip_style: e.target.value })} />
       </FormField>
       <FormField label="Default channel" hint="Suggested for proposals started from this plan." error={errorFor(fe, "default_channel")}>
-        <select
+        <Select
           className={inputCls}
           value={form.default_channel}
           onChange={(e) => setForm({ ...form, default_channel: e.target.value as Channel | "" })}
@@ -266,7 +264,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
               {c.label}
             </option>
           ))}
-        </select>
+        </Select>
       </FormField>
       {canPrice &&
         (prices.isLoading ? (
@@ -289,13 +287,13 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         ))}
       {needReason && (
         <FormField label="Reason for prices below the floor" required hint="Kept in the audit log with the price matrix.">
-          <input className={inputCls} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Input className={inputCls} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
         </FormField>
       )}
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1.5 text-[13px] font-medium text-ink">Price hint</legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_96px_132px]">
-          <input
+          <Input
             aria-label="Price hint amount"
             inputMode="decimal"
             className={inputCls}
@@ -303,14 +301,14 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             value={form.hint_amount}
             onChange={(e) => setForm({ ...form, hint_amount: e.target.value })}
           />
-          <select aria-label="Price hint currency" className={inputCls} value={form.hint_currency} onChange={(e) => setForm({ ...form, hint_currency: e.target.value })}>
+          <Select aria-label="Price hint currency" className={inputCls} value={form.hint_currency} onChange={(e) => setForm({ ...form, hint_currency: e.target.value })}>
             {SELLING_CURRENCIES.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             aria-label="Price hint basis"
             className={inputCls}
             value={form.hint_basis}
@@ -318,14 +316,14 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
           >
             <option value="per_person">per person</option>
             <option value="per_group">per group</option>
-          </select>
+          </Select>
         </div>
         <span className="text-xs text-muted">
           A free guide for sales when the plan has no price matrix; the matrix wins where it has a price. Leave the amount empty for no hint.
         </span>
       </fieldset>
       <FormField label="Commercial notes" hint="Staff only, never shown to customers." error={errorFor(fe, "commercial_notes")}>
-        <textarea className={textareaCls} maxLength={5000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        <Textarea className={textareaCls} maxLength={5000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </FormField>
     </FormDrawer>
   );

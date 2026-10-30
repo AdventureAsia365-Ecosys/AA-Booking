@@ -17,6 +17,7 @@ import { LoginForm } from "./LoginForm";
 import { CIS_STAFF_URL } from "@/lib/config";
 import { cognitoSignInAvailable, isPreviewSignInHost, workforceSignInHost } from "@/lib/cognito";
 import { safeNext } from "@/lib/safeNext";
+import { StandaloneFrame } from "@/ui/local/StandaloneFrame";
 
 export const metadata: Metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
@@ -52,7 +53,7 @@ export default async function LoginPage({
   const legacyForm = !isPreviewSignInHost(host);
   const signInHref = `/api/auth/signin/cognito${next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`;
   return (
-    <main data-theme="light" className="bk-login-bg relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
+    <StandaloneFrame theme="light" className="bk-login-bg relative overflow-hidden px-4 py-10">
       <div className="w-full max-w-[440px]">
         <div className="mb-6 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -121,6 +122,6 @@ export default async function LoginPage({
           .
         </p>
       </div>
-    </main>
+    </StandaloneFrame>
   );
 }

@@ -2,16 +2,10 @@
   "app/(staff)/SessionNotice.tsx": {
     "aa-kit/no-hex-colour": {
       "count": 1
-    },
-    "aa-kit/no-raw-main": {
-      "count": 1
     }
   },
   "app/(staff)/_parts/DetailHeader.tsx": {
     "aa-kit/no-hand-styled-button": {
-      "count": 1
-    },
-    "aa-kit/no-raw-main": {
       "count": 1
     }
   },
@@ -68,9 +62,6 @@
   "app/(staff)/cases/[code]/page.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 4
-    },
-    "aa-kit/no-raw-main": {
-      "count": 3
     }
   },
   "app/(staff)/cases/[code]/proposals/[n]/ItemDrawer.tsx": {
@@ -86,14 +77,6 @@
   "app/(staff)/cases/[code]/proposals/[n]/page.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 10
-    },
-    "aa-kit/no-raw-main": {
-      "count": 1
-    }
-  },
-  "app/(staff)/cases/[code]/proposals/[n]/preview/page.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 1
     }
   },
   "app/(staff)/cases/_parts/CountryPicker.tsx": {
@@ -116,16 +99,6 @@
       "count": 4
     }
   },
-  "app/(staff)/cases/new/page.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 2
-    }
-  },
-  "app/(staff)/catalog/countries/_parts/CountryDetailView.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 1
-    }
-  },
   "app/(staff)/catalog/countries/_parts/CountryPhotos.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 3
@@ -136,25 +109,12 @@
       "count": 2
     }
   },
-  "app/(staff)/catalog/trip-plans/_parts/TripPlanDetailView.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 1
-    }
-  },
   "app/(staff)/catalog/trip-plans/_parts/UseForTripCaseModal.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 1
     }
   },
   "app/(staff)/customers/[id]/page.tsx": {
-    "aa-kit/no-hand-styled-button": {
-      "count": 1
-    },
-    "aa-kit/no-raw-main": {
-      "count": 2
-    }
-  },
-  "app/(staff)/notifications/page.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 1
     }
@@ -169,18 +129,8 @@
       "count": 6
     }
   },
-  "app/(staff)/services/_parts/ServiceDetailView.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 2
-    }
-  },
   "app/(staff)/settings/page.tsx": {
     "aa-kit/no-hand-styled-button": {
-      "count": 3
-    }
-  },
-  "app/(staff)/staff/[cisUserId]/page.tsx": {
-    "aa-kit/no-raw-main": {
       "count": 2
     }
   },
@@ -194,55 +144,29 @@
       "count": 2
     }
   },
-  "app/(staff)/suppliers/_parts/EditSupplierView.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 1
-    }
-  },
   "app/(staff)/suppliers/_parts/SupplierBookingsTab.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 1
     }
   },
-  "app/(staff)/suppliers/_parts/SupplierDetailView.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 2
-    }
-  },
   "app/(staff)/suppliers/_parts/SupplierForm.tsx": {
     "aa-kit/no-hand-styled-button": {
       "count": 1
-    },
-    "aa-kit/no-raw-main": {
-      "count": 2
     }
   },
   "app/login/LoginForm.tsx": {
     "aa-kit/no-hand-styled-button": {
-      "count": 2
+      "count": 1
     }
   },
   "app/login/page.tsx": {
     "aa-kit/no-hex-colour": {
-      "count": 1
-    },
-    "aa-kit/no-raw-main": {
-      "count": 1
-    }
-  },
-  "app/not-found.tsx": {
-    "aa-kit/no-raw-main": {
       "count": 1
     }
   },
   "ui/booking/NotificationPopover.tsx": {
     "aa-kit/no-hex-colour": {
       "count": 1
-    }
-  },
-  "ui/booking/PageState.tsx": {
-    "aa-kit/no-raw-main": {
-      "count": 2
     }
   }
 }

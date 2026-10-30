@@ -302,6 +302,45 @@ async def list_media(
     return {"items": [_out(r, urls) for r in rows], "max_bytes": MAX_BYTES, "max_active": MAX_ACTIVE_PER_ENTITY}
 
 
+# The list cards (S254 Figma audit #19, hotel photo grid): per record, how many active photos it has and the first one
+# (the order of the media list: created_at, id). One grouped read for the whole page (index entity_type, entity_id,
+# created_at), never one per row.
+SUMMARY_SQL = """
+SELECT m.entity_id::text AS entity_id, count(*)::int AS photo_count,
+       (array_agg(m.s3_key ORDER BY m.created_at, m.id))[1] AS first_key
+FROM booking.entity_media m
+WHERE m.entity_type = $1 AND m.entity_id = ANY($2::uuid[]) AND m.status = 'active'
+GROUP BY m.entity_id
+"""
+
+
+async def add_photo_summary(
+    conn: asyncpg.Connection, store: MediaStore | None, kind: Kind, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Adds ``photo_count`` and ``cover_photo_url`` (presigned, the first active photo; null when there is none or it
+    cannot be signed) to each list row. Fails soft: a read error leaves every row at 0 / null, logged, so the list
+    itself never fails over its photos."""
+    for item in items:
+        item["photo_count"] = 0
+        item["cover_photo_url"] = None
+    if not items:
+        return items
+    try:
+        rows = await conn.fetch(SUMMARY_SQL, kind.entity, [item["id"] for item in items])
+    except asyncpg.PostgresError as exc:
+        log.warning("supply_media_summary_failed entity=%s error=%s", kind.entity, type(exc).__name__)
+        return items
+    firsts = [{"s3_key": r["first_key"], "status": "active"} for r in rows]
+    urls = await _urls(store, firsts)
+    by_id = {r["entity_id"]: r for r in rows}
+    for item in items:
+        row = by_id.get(str(item["id"]))
+        if row is not None:
+            item["photo_count"] = row["photo_count"]
+            item["cover_photo_url"] = urls.get(row["first_key"])
+    return items
+
+
 async def get_media(conn: asyncpg.Connection, media_id: str, *, lock: bool = False) -> Any:
     mid = records.as_uuid(media_id, "media_not_found", "photo")
     row = await conn.fetchrow(

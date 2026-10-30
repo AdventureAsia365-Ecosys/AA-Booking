@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { supplyApi, type RoomType, type RoomTypeBody } from "@/lib/api/supply";
-import { FormDrawer, useToast } from "@/ui";
+import { Input, Textarea, FormDrawer, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -62,18 +62,18 @@ export function RoomTypeDrawer({ hotelRef, room, onClose }: { hotelRef: string; 
       fieldErrors={fe}
     >
       <FormField label="Name" required error={errorFor(fe, "name")}>
-        <input autoFocus className={inputCls} maxLength={120} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="e.g. Deluxe Double" />
+        <Input autoFocus className={inputCls} maxLength={120} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="e.g. Deluxe Double" />
       </FormField>
       <div className="grid grid-cols-2 gap-4">
         <FormField label="Max occupancy" error={errorFor(fe, "max_occupancy")}>
-          <input type="number" min={1} max={20} className={inputCls} value={form.max_occupancy} onChange={(e) => set("max_occupancy")(e.target.value)} />
+          <Input type="number" min={1} max={20} className={inputCls} value={form.max_occupancy} onChange={(e) => set("max_occupancy")(e.target.value)} />
         </FormField>
         <FormField label="Bed types" hint="Comma separated." error={errorFor(fe, "bed_types")}>
-          <input className={inputCls} value={form.bed_types} onChange={(e) => set("bed_types")(e.target.value)} placeholder="Queen, Twin" />
+          <Input className={inputCls} value={form.bed_types} onChange={(e) => set("bed_types")(e.target.value)} placeholder="Queen, Twin" />
         </FormField>
       </div>
       <FormField label="Internal notes" hint="Staff only." error={errorFor(fe, "internal_notes")}>
-        <textarea className={textareaCls} maxLength={2000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
+        <Textarea className={textareaCls} maxLength={2000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
   );

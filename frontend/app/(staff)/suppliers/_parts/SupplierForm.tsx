@@ -13,7 +13,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { SUPPLIER_CATEGORIES, suppliersApi, type Supplier, type SupplierBody, type SupplierCategory, type SupplierDetail } from "@/lib/api/suppliers";
-import { Button, Section, fieldName, useCan, useToast } from "@/ui";
+import { Input, Select, Textarea, Button, PageFrame, Section, fieldName, useCan, useToast } from "@/ui";
 import { Field, textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { QueryError } from "@/app/(staff)/cases/_parts/QueryError";
@@ -126,14 +126,14 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
 
   if (!canWrite) {
     return (
-      <main className="aa-admin-main flex-1 overflow-y-auto px-4 py-6 sm:px-8">
+      <PageFrame width="full">
         <QueryError error={new ApiError("forbidden", 403)} what="editing suppliers" />
-      </main>
+      </PageFrame>
     );
   }
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <div className="border-b border-line bg-bg px-4 py-4 sm:px-8">
         <div className="mx-auto flex max-w-[880px] flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -164,7 +164,7 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
         <Section title="Basic information">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Supplier name" required error={show("company_name")} className="sm:col-span-2">
-              <input className={inputCls} maxLength={200} value={text.company_name} onChange={(e) => set("company_name")(e.target.value)} placeholder="e.g. Hanoi Emerald Hotel" />
+              <Input className={inputCls} maxLength={200} value={text.company_name} onChange={(e) => set("company_name")(e.target.value)} placeholder="e.g. Hanoi Emerald Hotel" />
             </Field>
             <fieldset className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
               <legend className="mb-1.5 text-[13px] font-medium text-ink">
@@ -196,10 +196,10 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
               )}
             </fieldset>
             <Field label="Website" hint="Optional." error={show("website")} className="sm:col-span-2">
-              <input className={inputCls} type="url" maxLength={500} value={text.website} onChange={(e) => set("website")(e.target.value)} placeholder="https://" />
+              <Input className={inputCls} type="url" maxLength={500} value={text.website} onChange={(e) => set("website")(e.target.value)} placeholder="https://" />
             </Field>
             <Field label="Internal notes" hint="Staff only. Never shown to customers." className="sm:col-span-2">
-              <textarea
+              <Textarea
                 className={textareaCls}
                 maxLength={5000}
                 value={text.internal_notes}
@@ -213,16 +213,16 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
         <Section title="Contact details">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Primary contact person">
-              <input className={inputCls} maxLength={200} value={text.contact_name} onChange={(e) => set("contact_name")(e.target.value)} placeholder="Full name" />
+              <Input className={inputCls} maxLength={200} value={text.contact_name} onChange={(e) => set("contact_name")(e.target.value)} placeholder="Full name" />
             </Field>
             <Field label="Job title">
-              <input className={inputCls} maxLength={120} value={text.contact_title} onChange={(e) => set("contact_title")(e.target.value)} placeholder="e.g. Sales Manager" />
+              <Input className={inputCls} maxLength={120} value={text.contact_title} onChange={(e) => set("contact_title")(e.target.value)} placeholder="e.g. Sales Manager" />
             </Field>
             <Field label="E-mail address" error={show("contact_email")}>
-              <input className={inputCls} type="email" maxLength={254} value={text.contact_email} onChange={(e) => set("contact_email")(e.target.value)} placeholder="contact@supplier.com" />
+              <Input className={inputCls} type="email" maxLength={254} value={text.contact_email} onChange={(e) => set("contact_email")(e.target.value)} placeholder="contact@supplier.com" />
             </Field>
             <Field label="Phone number">
-              <input className={inputCls} type="tel" maxLength={40} value={text.contact_phone} onChange={(e) => set("contact_phone")(e.target.value)} placeholder="e.g. +84 24 1234 5678" />
+              <Input className={inputCls} type="tel" maxLength={40} value={text.contact_phone} onChange={(e) => set("contact_phone")(e.target.value)} placeholder="e.g. +84 24 1234 5678" />
             </Field>
           </div>
         </Section>
@@ -230,7 +230,7 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
         <Section title="Location" description="The city is a CIS place, so it matches tours and hotels; the address lines are free text.">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Street address" className="sm:col-span-2">
-              <input className={inputCls} maxLength={500} value={text.address} onChange={(e) => set("address")(e.target.value)} placeholder="Full street address" />
+              <Input className={inputCls} maxLength={500} value={text.address} onChange={(e) => set("address")(e.target.value)} placeholder="Full street address" />
             </Field>
             <div className="flex min-w-0 flex-col gap-1.5">
               <span className="text-[13px] font-medium text-ink">City / place</span>
@@ -246,20 +246,20 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
               <span className="text-xs text-muted">Picking a place fills the country.</span>
             </div>
             <Field label="Country">
-              <select className={inputCls} value={text.country_code} onChange={(e) => set("country_code")(e.target.value)}>
+              <Select className={inputCls} value={text.country_code} onChange={(e) => set("country_code")(e.target.value)}>
                 <option value="">Not set</option>
                 {(countries.data?.items ?? []).map((c) => (
                   <option key={c.iso2} value={c.iso2}>
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
             <Field label="State / province" hint="Optional.">
-              <input className={inputCls} maxLength={120} value={text.region} onChange={(e) => set("region")(e.target.value)} />
+              <Input className={inputCls} maxLength={120} value={text.region} onChange={(e) => set("region")(e.target.value)} />
             </Field>
             <Field label="Postal code" hint="Optional.">
-              <input className={inputCls} maxLength={20} value={text.postal_code} onChange={(e) => set("postal_code")(e.target.value)} />
+              <Input className={inputCls} maxLength={20} value={text.postal_code} onChange={(e) => set("postal_code")(e.target.value)} />
             </Field>
           </div>
         </Section>
@@ -287,6 +287,6 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
           </Button>
         </div>
       </form>
-    </main>
+    </PageFrame>
   );
 }

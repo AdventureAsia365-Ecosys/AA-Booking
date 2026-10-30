@@ -188,14 +188,9 @@ function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (i
               </Link>
             )}
             {!n.read && (
-              <button
-                type="button"
-                onClick={() => onRead(n.id)}
-                disabled={busy}
-                className="inline-flex h-8 cursor-pointer items-center rounded-full border border-line bg-card px-3.5 text-xs font-medium text-ink3 hover:bg-bg disabled:opacity-60"
-              >
+              <Button size="sm" variant="ghost" onClick={() => onRead(n.id)} disabled={busy}>
                 Mark as read
-              </button>
+              </Button>
             )}
           </div>
         )}

@@ -19,6 +19,7 @@ import { ArrowLeft, CalendarDays, Eye, Lock, MapPin, Pencil, Send, User } from "
 import { ApiError, api } from "@/lib/api/client";
 import { settingsFromApi } from "@/lib/bookingConfig";
 import {
+  PageFrame,
   Button,
   Code,
   DateText,
@@ -84,7 +85,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const countries = caseCountries(c).codes;
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+    <PageFrame width="full">
       <div className="mx-auto flex max-w-[1280px] flex-col gap-5">
         {/* Header bar (Figma: back arrow + "Itinerary Preview") */}
         <div className="flex items-center gap-3 border-b border-line pb-3">
@@ -309,6 +310,6 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
         </div>
       </div>
       <SendProposalModal open={sendOpen} onClose={() => setSendOpen(false)} code={c.code} n={v.version_number} />
-    </main>
+    </PageFrame>
   );
 }

@@ -357,9 +357,10 @@ async def list_invoices(
         f" ORDER BY coalesce(i.issued_at, i.created_at) DESC, i.id DESC LIMIT ${len(args) - 1} OFFSET ${len(args)}",
         *args,
     )
-    return jsonable(
-        {"items": [summary_out(r) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset}
-    )
+    items = [summary_out(r) for r in rows]
+    for item in items:
+        item["actions"] = actions(item, staff)  # the staff list's row menu (S255 Figma rescore)
+    return jsonable({"items": items, "total": int(total or 0), "limit": limit, "offset": offset})
 
 
 async def for_case(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[str, Any]:
