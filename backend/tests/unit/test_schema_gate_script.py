@@ -267,7 +267,7 @@ def test_the_probe_must_start_after_the_red_runs_jobs_finished() -> None:
     jobs = _jobs("success", "failure")
     for job in jobs["jobs"]:
         job["completed_at"] = "2026-10-29T10:30:00Z"
-    jobs["jobs"][0]["completed_at"] = None      # a skipped job has no completed_at
+    jobs["jobs"][0]["completed_at"] = None  # a skipped job has no completed_at
     assert not _probe_state([_probe(90, 20)], red_jobs=jobs).ok
     assert _probe_state([_probe(91, 31)], red_jobs=jobs).ok
 
