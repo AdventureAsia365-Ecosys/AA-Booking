@@ -4,8 +4,8 @@
     "repo": "AdventureAsia365-Ecosys/AA-CIS-App",
     "path": "frontend/app/_kit/core"
   },
-  "ref": "16d8428106743add51dcc8f069fc678b23746eb0",
+  "ref": "539fc5872446747248ea57d0bef5c36e1d477640",
   "profile": "full",
   "dest": "frontend/ui/core",
-  "manifest_sha256": "86a4ad8996ac628b509dd4903a87bf66e355c7d410e26e22bcb15d02cea72f85"
+  "manifest_sha256": "054ea6252d7114207f9229322eee56767583d0d43479e4712144bada9d4ba18a"
 }
