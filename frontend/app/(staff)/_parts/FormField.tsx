@@ -1,13 +1,14 @@
 // app/(staff)/_parts/FormField.tsx
 // AA-683 (fe-people) — a labelled form field for drawers (design system §4 "Forms": label above, 13 px 500,
 // inputs 40 px, radius 8, white with a 1 px line). Shows the 422 message of the matching field inline.
+// AA-994 S6d: the kit Field (same look, which S6a took from this spec) with its ARIA wiring: the control is described by
+// the hint or error, invalid when there is an error, required when marked.
 
-import { Lock } from "lucide-react";
 import type { FieldError } from "@/lib/api/client";
-import { fieldName } from "@/ui";
+import { Field, fieldName } from "@/ui";
 
-export const inputCls =
-  "h-10 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border disabled:cursor-not-allowed disabled:bg-panel disabled:text-muted";
+/** Layout only: the look (40 px, border, focus / disabled states) comes from the kit Input / Select (AA-994 S6d). */
+export const inputCls = "w-full";
 
 export function FormField({
   label,
@@ -26,15 +27,9 @@ export function FormField({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
-        {label}
-        {required && <span className="text-danger">*</span>}
-        {locked && <Lock size={12} className="text-muted2" aria-label="Locked" />}
-      </span>
+    <Field label={label} required={required} hint={hint} locked={locked} error={error}>
       {children}
-      {error ? <span className="text-xs text-danger">{error}</span> : hint ? <span className="text-xs text-muted">{hint}</span> : null}
-    </label>
+    </Field>
   );
 }
 

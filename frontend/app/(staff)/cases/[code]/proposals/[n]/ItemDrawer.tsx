@@ -8,13 +8,13 @@
 
 import { useState } from "react";
 import { Unlink, X } from "lucide-react";
-import { FormDrawer, FromCisTag } from "@/ui";
+import { Input, Textarea, FormDrawer, FromCisTag } from "@/ui";
 import { MAX_DAY, NOTES_MAX, TITLE_MAX, validateItem, type DraftItem } from "@/lib/proposalDraft";
 import { SupplyPicker } from "./SupplyPicker";
 
 export type ItemDraftFields = Pick<DraftItem, "title" | "day_from" | "day_to" | "notes" | "source_tour_id" | "supply">;
 
-const inputCls = "h-10 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
+const inputCls = "w-full";
 
 export function ItemDrawer({
   open,
@@ -79,30 +79,30 @@ function ItemForm({
         <span className="text-[13px] font-medium text-ink">
           Title <span className="text-danger">*</span>
         </span>
-        <input autoFocus value={title} maxLength={TITLE_MAX} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Hanoi city walk and street food evening" className={inputCls} />
+        <Input autoFocus value={title} maxLength={TITLE_MAX} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Hanoi city walk and street food evening" className={inputCls} />
         {touched && errors.title && <span className="text-xs text-danger">{errors.title}</span>}
       </label>
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5">
           <span className="text-[13px] font-medium text-ink">From day</span>
-          <input type="number" min={1} max={MAX_DAY} value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+          <Input type="number" min={1} max={MAX_DAY} value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-[13px] font-medium text-ink">To day</span>
-          <input type="number" min={1} max={MAX_DAY} value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+          <Input type="number" min={1} max={MAX_DAY} value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
         </label>
         {touched && errors.days && <span className="col-span-2 text-xs text-danger">{errors.days}</span>}
         <span className="col-span-2 text-xs text-muted">An item can span several days, e.g. a 3-day trek on days 4–6.</span>
       </div>
       <label className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">Note to the customer</span>
-        <textarea
+        <Textarea
           value={notes}
           rows={5}
           maxLength={NOTES_MAX}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Pick-up time, room note, what is arranged for this customer. Tour descriptions come from CIS."
-          className="w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border"
+          className="w-full"
         />
         <span className="text-right text-xs text-muted2">
           {notes.length} / {NOTES_MAX}

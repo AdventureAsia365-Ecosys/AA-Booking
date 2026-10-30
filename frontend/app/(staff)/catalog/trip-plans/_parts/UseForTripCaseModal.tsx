@@ -12,7 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import type { CustomerSummary } from "@/lib/api/types";
 import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
-import { Button, Modal, fieldName, useToast, DateField } from "@/ui";
+import { Input, Select, Button, Modal, fieldName, useToast, DateField } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, toInt } from "../../../cases/_parts/fields";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "../../../cases/new/CustomerPicker";
 
@@ -146,19 +146,19 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
                 <DateField className={inputCls} value={trip.start_date} onChange={(v) => setTrip({ ...trip, start_date: v })} />
               </Field>
               <Field label="Currency">
-                <select className={inputCls} value={trip.currency} onChange={(e) => setTrip({ ...trip, currency: e.target.value })}>
+                <Select className={inputCls} value={trip.currency} onChange={(e) => setTrip({ ...trip, currency: e.target.value })}>
                   {CURRENCIES.map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Field label="Adults" required error={tried ? pax.adults : null}>
-                <input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={trip.pax_adults} onChange={(e) => setTrip({ ...trip, pax_adults: e.target.value })} />
+                <Input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={trip.pax_adults} onChange={(e) => setTrip({ ...trip, pax_adults: e.target.value })} />
               </Field>
               <Field label="Children" error={tried ? pax.children : null}>
-                <input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={trip.pax_children} onChange={(e) => setTrip({ ...trip, pax_children: e.target.value })} />
+                <Input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={trip.pax_children} onChange={(e) => setTrip({ ...trip, pax_children: e.target.value })} />
               </Field>
             </div>
           </>
@@ -169,7 +169,7 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
             hint="The plan's days become a new version of that case; its earlier versions stay."
             error={tried && codeInvalid ? "Enter a case code like TC-000123." : null}
           >
-            <input className={inputCls} placeholder="TC-000123" value={caseCode} onChange={(e) => setCaseCode(e.target.value)} />
+            <Input className={inputCls} placeholder="TC-000123" value={caseCode} onChange={(e) => setCaseCode(e.target.value)} />
           </Field>
         )}
 

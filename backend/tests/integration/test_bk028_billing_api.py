@@ -385,6 +385,9 @@ async def test_case_cancel_cascade_reopen_b2b_and_permissions(client: Client, ad
     # Lists and KPIs.
     listed = await _ok(await c.get("/invoices", params={"status": "draft", "q": sold["code"]}, headers=sales))
     assert [i["invoice_number"] for i in listed["items"]] == [draft["invoice_number"]]
+    # The list rows carry the same actions as the detail (the staff list's row menu).
+    detail = await _ok(await c.get(f"/invoices/{draft['invoice_number']}", headers=sales))
+    assert listed["items"][0]["actions"] == detail["actions"] and listed["items"][0]["actions"]["cancel"] is False
     kpis = await _ok(await c.get("/billing/summary", headers=sales))
     assert kpis["invoices"]["draft"] >= 1 and {"outstanding", "overdue", "received_this_month"} <= set(kpis)
     assert (await _ok(await c.get("/payments", params={"state": "recorded"}, headers=sales)))["total"] >= 0

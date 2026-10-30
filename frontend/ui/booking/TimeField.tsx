@@ -4,10 +4,11 @@
 // text in the browser's locale ("02:05 PM" on an en-US machine); this field always shows the UI-spec format (24 h,
 // "14:05") while keeping the native value contract: value / onChange "HH:MM" (24 h) or "".
 // The date field moved to the kit core in AA-994 S4a (ui/core/DateField.tsx, `DateField` from "@/ui"); the time field
-// stays here until the kit form controls (AA-994 S6a).
+// stays here until the kit form controls (AA-994 S6a). AA-994 S6d: the text box is the kit Input (its invalid state
+// draws the danger border from `aria-invalid`).
 
 import { useState } from "react";
-import { K } from "../core/tokens";
+import { Input } from "../core/FormControls";
 import { normalizeTime, parseTimeInput } from "./dates";
 
 type BaseProps = {
@@ -22,9 +23,6 @@ type BaseProps = {
   "aria-label"?: string;
   placeholder?: string;
 };
-
-/** Inline, so it wins over the page's border class whatever the CSS order. */
-const INVALID: React.CSSProperties = { borderColor: K.danger };
 
 /** 24-hour time: type "14:05", "1405" or "2:05 pm"; it always shows "14:05". */
 export function TimeField({
@@ -62,7 +60,7 @@ export function TimeField({
 
   return (
     <span className={`relative flex min-w-0 ${wrapperClassName}`} data-bk-field="time">
-      <input
+      <Input
         {...rest}
         type="text"
         inputMode="text"
@@ -84,7 +82,6 @@ export function TimeField({
           }
         }}
         className={`bk-tabular ${className}`}
-        style={invalid ? INVALID : undefined}
       />
     </span>
   );

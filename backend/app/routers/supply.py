@@ -184,6 +184,7 @@ def _payload(body: BaseModel) -> dict[str, Any]:
 async def list_hotels(
     _: CanRead,
     pool: Pool,
+    store: Store,
     q: Annotated[str | None, Query(max_length=200, description="name, code, address or supplier")] = None,
     status: Annotated[str | None, Query(max_length=20)] = None,
     supplier: Annotated[str | None, Query(max_length=64, description="supplier UUID or code")] = None,
@@ -195,7 +196,7 @@ async def list_hotels(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await records.list_records(
+        page = await records.list_records(
             conn,
             HOTEL,
             q=q,
@@ -208,6 +209,9 @@ async def list_hotels(
             limit=limit,
             offset=offset,
         )
+        # The photo grid of the staff list (photo count + first supplier photo, presigned): one read for the page.
+        await media.add_photo_summary(conn, store, HOTEL, page["items"])
+        return page
 
 
 @router.post("/hotels", status_code=201)

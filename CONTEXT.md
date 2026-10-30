@@ -239,7 +239,8 @@ backend/
   app/supply/              hotels + room types + services (records.py, one implementation for both kinds) and supplier
                            net rates + the default net of a version item (rates.py); AA-835 S4: supplier photos
                            (media.py: base64 upload, type and size read from the bytes, S3 put to SUPPLY_MEDIA_BUCKET,
-                           presigned previews, usage_rights / removal) and the CIS content read-back (content.py)
+                           presigned previews, usage_rights / removal; the hotel list's photo count + first photo,
+                           one grouped read per page, AA-994 S6d) and the CIS content read-back (content.py)
   app/contracts/           byte copies of AA-Ecosys docs/contracts/*.json (SHA-256 pinned by a test)
   tests/unit/              unit tests + migration guard (tests/migration_guard.py)
   tests/integration/       real Postgres: applies migrations/, checks role privileges, /ready, booking.job vs template
@@ -1356,10 +1357,14 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   `cis_sidebar`, carried over once from `bk_sidebar`). `frontend/ui/booking/` holds Booking components (Tailwind
   utilities on the same variables) and pure helpers; Booking-only CSS values are `--bk-*` (`ui/booking-tokens.css`).
   Pages import everything from `@/ui` (the barrel `ui/index.ts`; `ConfirmDialog` is the core `ConfirmModal`,
-  `PageFrame` the core frame with the Booking wide column and gutter). Frontend Build checks the copy (integrity,
+  `PageFrame` the core frame with the Booking wide column and gutter; `PageFrame bleed` for a detail page with an
+  edge-to-edge header band). Frontend Build checks the copy (integrity,
   `--aa-*` definitions only in the core tokens, provenance of the lock's CIS commit on CIS main) and lints `app/**`
-  and `ui/booking/**` with the kit `tailwind` preset at error; violations from before S4b live in
-  `frontend/eslint-suppressions.json`, which may only shrink.
+  and `ui/booking/**` with the kit `tailwind` preset at error, plus the staged rule `no-raw-form-control` (AA-994
+  S6d: every form uses the kit `Field` / `Input` / `Select` / `Textarea` / `Checkbox` / `Radio` / `DateField`); no page
+  writes a raw `<main>` (the pages outside the staff shell use `ui/local/StandaloneFrame.tsx`). Violations from before
+  S4b live in `frontend/eslint-suppressions.json`, which may only shrink (S6d: hand-styled buttons and four hex shadows
+  are what is left).
 - Case workspace and proposals (AA-996 audit slice 4, S254): the case header names the customer, the sales agent and
   the date range with its length; Overview puts the trip facts (two columns, Edit pencil, approved total) in the main
   column, a custom trip's empty legs card is one line, the TripPlanner inquiry panel shows the client's message,
@@ -1381,7 +1386,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   cell groups two facts; the Countries grid uses `ExportCsvButton` in the bar's `tools` slot). Every Booking CSV goes
   through the wrapper's button: row tools (row menu, open link, details) are left out and every value passes the
   spreadsheet formula guard `ui/booking/csvCell.ts`. Dates are typed and shown en-GB through the kit
-  `DateField` ("28 Oct 2026", day-first input; `ui/core/DateField.tsx` since AA-994 S4a/S4b) and the Booking
+  `DateField` ("28 Oct 2026", day-first input; `ui/core/DateField.tsx` since AA-994 S4a/S4b; `DateField` from `@/ui` is
+  `ui/booking/FormDateField.tsx`, the kit field with the kit control look, `size="sm"` next to small Inputs) and the Booking
   `TimeField` (24 h, `ui/booking/TimeField.tsx`) instead of the browser's
   locale inputs; the box always shows the value the page holds (an out-of-range day is passed up and marked invalid so
   the page's own checks block it; unreadable text is dropped on blur); date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,

@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, ExternalLink, MapPin, Pencil, Store, Truck } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { geoApi, type DestinationDetail, type GeoStatus } from "@/lib/api/geo";
-import { Button, CisPhoto, DateText, Drawer, FormDrawer, Pill, useCan, useStaff, useToast } from "@/ui";
+import { Input, Select, Textarea, Button, CisPhoto, DateText, Drawer, FormDrawer, Pill, useCan, useStaff, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
@@ -87,23 +87,23 @@ function StateFields({
     <section className="flex flex-col gap-4" aria-label="Booking state">
       <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Booking</span>
       <FormField label="Booking status" hint="Inactive = Booking does not sell trips here. Nothing is deleted." error={errorFor(fe, "status")}>
-        <select className={inputCls} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as GeoStatus })}>
+        <Select className={inputCls} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as GeoStatus })}>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
-        </select>
+        </Select>
       </FormField>
       {form.status === "inactive" && (
         <FormField label="Reason" hint="Shown to staff next to the status." error={errorFor(fe, "status_reason")}>
-          <input className={inputCls} maxLength={500} value={form.status_reason} onChange={(e) => setForm({ ...form, status_reason: e.target.value })} />
+          <Input className={inputCls} maxLength={500} value={form.status_reason} onChange={(e) => setForm({ ...form, status_reason: e.target.value })} />
         </FormField>
       )}
       {withArea && (
         <FormField label="Area" hint="Sales grouping, for example Indochina." error={errorFor(fe, "area")}>
-          <input className={inputCls} maxLength={60} value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} />
+          <Input className={inputCls} maxLength={60} value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} />
         </FormField>
       )}
       <FormField label="Internal notes" hint="Staff only, never shown to customers." error={errorFor(fe, "internal_notes")}>
-        <textarea
+        <Textarea
           className={textareaCls}
           maxLength={5000}
           value={form.internal_notes}
@@ -357,7 +357,7 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
     >
       {!iso && (
         <FormField label="Country name" required hint="Countries with a CIS place or tour are listed already; add Booking state for another ISO country here.">
-          <select
+          <Select
             className={inputCls}
             value={picked}
             onChange={(e) => {
@@ -371,7 +371,7 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
                 {x.name}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       )}
       {picked && (

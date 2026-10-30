@@ -9,6 +9,7 @@ import hashlib
 import struct
 from typing import Any
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -375,3 +376,30 @@ def test_upload_without_bucket_is_503_and_patch_body_is_checked() -> None:
     assert res.status_code == 503 and res.json()["detail"] == "media_storage_unavailable"
     assert client(ADMIN).patch(f"/booking/media/{MID}", json={"status": "active"}).status_code == 422
     assert client(ADMIN).patch(f"/booking/media/{MID}", json={"s3_key": "x"}).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_photo_summary_counts_and_signs_the_first_photo() -> None:
+    other = "88888888-8888-4888-8888-888888888888"
+    key = f"supply-media/hotel/{HID}/{MID}.png"
+    conn = ScriptedConn().on("array_agg(m.s3_key", [{"entity_id": HID, "photo_count": 3, "first_key": key}])
+    items = [{"id": HID}, {"id": other}]
+    out = await media.add_photo_summary(conn, FakeStore(), HOTEL, items)
+    assert [(i["photo_count"], i["cover_photo_url"]) for i in out] == [(3, f"https://signed.example/{key}"), (0, None)]
+    assert conn.sql("array_agg(m.s3_key") == [("hotel", [HID, other])]  # one read for the page
+
+
+@pytest.mark.asyncio
+async def test_photo_summary_fails_soft() -> None:
+    conn = ScriptedConn().on("array_agg(m.s3_key", asyncpg.PostgresError("boom"))
+    out = await media.add_photo_summary(conn, FakeStore(), HOTEL, [{"id": HID}])
+    assert out == [{"id": HID, "photo_count": 0, "cover_photo_url": None}]
+    empty = ScriptedConn()
+    assert await media.add_photo_summary(empty, None, HOTEL, []) == [] and empty.calls == []
+    # No bucket configured: the count stays, the cover is null.
+    conn = ScriptedConn().on("array_agg(m.s3_key", [{"entity_id": HID, "photo_count": 1, "first_key": "k"}])
+    assert (await media.add_photo_summary(conn, None, HOTEL, [{"id": HID}]))[0] == {
+        "id": HID,
+        "photo_count": 1,
+        "cover_photo_url": None,
+    }

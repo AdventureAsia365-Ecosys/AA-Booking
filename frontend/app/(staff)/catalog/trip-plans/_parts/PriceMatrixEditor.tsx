@@ -9,7 +9,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import type { PriceRow } from "@/lib/api/tripPlans";
-import { DateField, Money, formatDay } from "@/ui";
+import { Checkbox, Input, Select, DateField, Money, formatDay } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
 
@@ -81,21 +81,21 @@ export function PriceMatrixEditor({
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-4">
               <Field label="Channel" className="col-span-2">
-                <select className={inputCls} value={r.channel} onChange={(e) => set(i, { channel: e.target.value as Channel })}>
+                <Select className={inputCls} value={r.channel} onChange={(e) => set(i, { channel: e.target.value as Channel })}>
                   {CHANNELS.map((c) => (
                     <option key={c.value} value={c.value}>
                       {c.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <div className="col-span-2 flex min-w-0 items-start gap-3">
                 <Field label="Season" error={errorOf(i, "season")} className="flex-1">
-                  <input className={inputCls} maxLength={80} placeholder="Low, High, Peak…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
+                  <Input className={inputCls} maxLength={80} placeholder="Low, High, Peak…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
                 </Field>
                 {/* Its own label (not inside the Season label, which names only its first control). */}
                 <label className="mt-[22px] flex h-10 shrink-0 cursor-pointer items-center gap-1.5 text-[12.5px] text-body">
-                  <input type="checkbox" className="h-4 w-4 accent-accent" checked={r.peak} onChange={(e) => set(i, { peak: e.target.checked })} />
+                  <Checkbox checked={r.peak} onChange={(e) => set(i, { peak: e.target.checked })} />
                   Peak
                 </label>
               </div>
@@ -106,20 +106,20 @@ export function PriceMatrixEditor({
                 <DateField className={inputCls} value={r.valid_to} min={r.valid_from || undefined} onChange={(v) => set(i, { valid_to: v })} aria-label={`Row ${i + 1} valid to`} />
               </Field>
               <Field label="Pax from" error={errorOf(i, "pax_min")}>
-                <input className={inputCls} inputMode="numeric" value={r.pax_min} onChange={(e) => set(i, { pax_min: e.target.value })} />
+                <Input className={inputCls} inputMode="numeric" value={r.pax_min} onChange={(e) => set(i, { pax_min: e.target.value })} />
               </Field>
               <Field label="Pax to" error={errorOf(i, "pax_max")}>
-                <input className={inputCls} inputMode="numeric" placeholder="and more" value={r.pax_max} onChange={(e) => set(i, { pax_max: e.target.value })} />
+                <Input className={inputCls} inputMode="numeric" placeholder="and more" value={r.pax_max} onChange={(e) => set(i, { pax_max: e.target.value })} />
               </Field>
               <Field label="Currency">
-                <select className={inputCls} value={r.currency} onChange={(e) => set(i, { currency: e.target.value })}>
+                <Select className={inputCls} value={r.currency} onChange={(e) => set(i, { currency: e.target.value })}>
                   {SELLING_CURRENCIES.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Field label="Price / person" error={errorOf(i, "amount")}>
-                <input
+                <Input
                   className={inputCls}
                   inputMode="decimal"
                   placeholder={r.net_amount.trim() ? "computed" : "amount"}
@@ -129,12 +129,12 @@ export function PriceMatrixEditor({
               </Field>
               <Field label="Net cost / person (optional)" error={errorOf(i, "net_amount")} className="col-span-2 sm:col-span-4">
                 <span className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
-                  <input className={inputCls} inputMode="decimal" placeholder="net cost to price from" value={r.net_amount} onChange={(e) => set(i, { net_amount: e.target.value })} />
-                  <select aria-label={`Row ${i + 1} net cost currency`} className={inputCls} value={r.net_currency} onChange={(e) => set(i, { net_currency: e.target.value })}>
+                  <Input className={inputCls} inputMode="decimal" placeholder="net cost to price from" value={r.net_amount} onChange={(e) => set(i, { net_amount: e.target.value })} />
+                  <Select aria-label={`Row ${i + 1} net cost currency`} className={inputCls} value={r.net_currency} onChange={(e) => set(i, { net_currency: e.target.value })}>
                     {COST_CURRENCIES.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
-                  </select>
+                  </Select>
                 </span>
               </Field>
             </div>

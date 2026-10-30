@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { Pencil } from "lucide-react";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { Button, Section, useCan } from "@/ui";
+import { Textarea, Button, Section, useCan } from "@/ui";
 import { textareaCls } from "../_parts/fields";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
@@ -45,7 +45,7 @@ export function NotesCard({ c }: { c: TripCaseDetail }) {
             update.mutate({ notes: text.trim() || null }, { onSuccess: () => setEditing(false) });
           }}
         >
-          <textarea className={textareaCls} value={text} maxLength={10000} rows={6} onChange={(e) => setText(e.target.value)} aria-label="Internal notes" autoFocus />
+          <Textarea className={textareaCls} value={text} maxLength={10000} rows={6} onChange={(e) => setText(e.target.value)} aria-label="Internal notes" autoFocus />
           {update.isError && <p className="text-[13px] text-danger">{friendlyError(update.error)}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={update.isPending}>

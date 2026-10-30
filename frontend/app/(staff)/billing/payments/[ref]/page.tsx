@@ -14,6 +14,8 @@ import { ExternalLink, Mail, Phone } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { billingApi, PAYMENT_METHOD_LABEL, type Payment } from "@/lib/api/billing";
 import {
+  Input,
+  Textarea,
   Button,
   DateText,
   EmptyState,
@@ -209,12 +211,12 @@ export default function PaymentPage({ params }: { params: Promise<{ ref: string 
       >
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Bank or receipt reference</span>
-          <input className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />
+          <Input size="sm" className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />
           <span className="text-xs text-muted">Never a card number.</span>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Note</span>
-          <textarea rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} className="rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border" />
+          <Textarea rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
       </FormDrawer>
     </PageFrame>

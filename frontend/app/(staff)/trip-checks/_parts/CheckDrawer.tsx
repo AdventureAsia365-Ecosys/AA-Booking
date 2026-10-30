@@ -14,7 +14,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type FieldError } from "@/lib/api/client";
 import type { TripCaseStatus } from "@/lib/api/types";
 import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type CheckChanges, type TripCheck, type TripCheckStatus } from "@/lib/api/tripChecks";
-import { DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast, DateField } from "@/ui";
+import { Input, Select, Textarea, DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast, DateField } from "@/ui";
 import { Field, inputCls, LockedValue, textareaCls } from "../../cases/_parts/fields";
 import { StaffSelect } from "../../cases/_parts/StaffSelect";
 
@@ -213,7 +213,7 @@ function CheckDrawerBody({
       )}
       {check.code === "custom" ? (
         <Field label="What to check" required>
-          <input className={inputCls} value={form.title} onChange={set("title")} maxLength={200} disabled={!canWrite} />
+          <Input className={inputCls} value={form.title} onChange={set("title")} maxLength={200} disabled={!canWrite} />
         </Field>
       ) : (
         <Field label="Check">
@@ -224,13 +224,13 @@ function CheckDrawerBody({
         label="Status"
         hint={check.done_by && check.status === "done" ? <>Done by {check.done_by.name ?? check.done_by.id}{check.done_at ? <> · <DateText value={check.done_at} withTime /></> : null}</> : undefined}
       >
-        <select className={inputCls} value={form.status} onChange={set("status")} disabled={!canWrite || (check.code === "emergency_contact" && !check.contact_allowed)}>
+        <Select className={inputCls} value={form.status} onChange={set("status")} disabled={!canWrite || (check.code === "emergency_contact" && !check.contact_allowed)}>
           {STATUS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
-        </select>
+        </Select>
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Due date" hint={check.standard ? "Moves with the start date while open." : undefined}>
@@ -253,10 +253,10 @@ function CheckDrawerBody({
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Name">
-                <input className={inputCls} value={form.emergency_contact_name} onChange={set("emergency_contact_name")} maxLength={200} disabled={!canWrite} autoComplete="off" />
+                <Input className={inputCls} value={form.emergency_contact_name} onChange={set("emergency_contact_name")} maxLength={200} disabled={!canWrite} autoComplete="off" />
               </Field>
               <Field label="Phone" hint="With the country code, e.g. +84 90 123 4567.">
-                <input
+                <Input
                   className={inputCls}
                   type="tel"
                   value={form.emergency_contact_phone}
@@ -276,7 +276,7 @@ function CheckDrawerBody({
           </p>
         ))}
       <Field label="Note" hint={check.cleared_at ? "Notes were removed after the trip." : undefined}>
-        <textarea className={textareaCls} value={form.note} onChange={set("note")} maxLength={2000} disabled={!canWrite || !!check.cleared_at} />
+        <Textarea className={textareaCls} value={form.note} onChange={set("note")} maxLength={2000} disabled={!canWrite || !!check.cleared_at} />
       </Field>
     </FormDrawer>
   );
@@ -317,7 +317,7 @@ export function NewCheckDrawer({ caseCode, open, onClose }: { caseCode: string; 
       fieldErrors={err.fields}
     >
       <Field label="What to check" required>
-        <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="e.g. Visa approval letters received" />
+        <Input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="e.g. Visa approval letters received" />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Due date">
@@ -328,7 +328,7 @@ export function NewCheckDrawer({ caseCode, open, onClose }: { caseCode: string; 
         </Field>
       </div>
       <Field label="Note">
-        <textarea className={textareaCls} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
+        <Textarea className={textareaCls} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
       </Field>
     </FormDrawer>
   );

@@ -53,6 +53,9 @@ import {
   type DraftItem,
 } from "@/lib/proposalDraft";
 import {
+  Input,
+  Textarea,
+  PageFrame,
   Button,
   Code,
   ConfirmDialog,
@@ -290,7 +293,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           : null;
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+    <PageFrame width="full">
       <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
         {/* Header bar (Figma: back arrow, title, Cancel / Save as Draft / primary) */}
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-4">
@@ -678,7 +681,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
       />
       {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={v.title} notes={v.notes} onClose={() => setDetailsOpen(false)} />}
       <SendProposalModal open={sendOpen} onClose={() => setSendOpen(false)} code={c.code} n={v.version_number} />
-    </main>
+    </PageFrame>
   );
 }
 
@@ -920,12 +923,12 @@ function DetailsDrawer({ code, n, title, notes, onClose }: { code: string; n: nu
     >
       <label className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">Proposal title</span>
-        <input value={t} maxLength={200} onChange={(e) => setT(e.target.value)} placeholder="e.g. Vietnam north to south, family pace" className={`${cls} h-10`} />
+        <Input value={t} maxLength={200} onChange={(e) => setT(e.target.value)} placeholder="e.g. Vietnam north to south, family pace" className={cls} />
         <span className="text-xs text-muted">Shown to the customer as the proposal name. A title cannot be cleared once set.</span>
       </label>
       <label className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">Internal notes</span>
-        <textarea value={nt} rows={6} maxLength={10_000} onChange={(e) => setNt(e.target.value)} className={`${cls} py-2`} />
+        <Textarea value={nt} rows={6} maxLength={10_000} onChange={(e) => setNt(e.target.value)} className={cls} />
       </label>
     </FormDrawer>
   );

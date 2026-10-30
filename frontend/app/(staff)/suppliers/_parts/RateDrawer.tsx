@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import type { SupplierContract } from "@/lib/api/suppliers";
 import { MEAL_PLANS, supplyApi, type MealPlan, type RateBody, type SupplierRate } from "@/lib/api/supply";
-import { FormDrawer, useToast, DateField } from "@/ui";
+import { Input, Select, Textarea, FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { UNIT_LABEL, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -115,11 +115,11 @@ export function RateDrawer({
       </p>
       {rate ? (
         <FormField label="Prices" locked hint="A rate stays on what it prices; add a new rate for something else.">
-          <input className={inputCls} value={rateTarget(rate)} disabled />
+          <Input className={inputCls} value={rateTarget(rate)} disabled />
         </FormField>
       ) : (
         <FormField label="Prices" required hint="Active room types and services of this supplier." error={errorFor(fe, "hotel_room_type_id")}>
-          <select className={inputCls} value={form.target} onChange={(e) => set("target")(e.target.value)} disabled={options.isLoading}>
+          <Select className={inputCls} value={form.target} onChange={(e) => set("target")(e.target.value)} disabled={options.isLoading}>
             <option value="">
               {options.isLoading ? "Loading…" : options.data?.items.length ? "Pick a room type or service" : "This supplier has no active hotel room or service yet"}
             </option>
@@ -129,16 +129,16 @@ export function RateDrawer({
                 {o.label} ({o.code})
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       )}
       {unit && <p className="-mt-2 text-xs text-muted">Net is {UNIT_LABEL[unit]}.</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label="Net amount" required hint={`In ${contract.currency}.`} error={errorFor(fe, "net_amount")}>
-          <input className={`${inputCls} bk-tabular`} inputMode="decimal" value={form.net_amount} onChange={(e) => set("net_amount")(e.target.value)} placeholder="1200000" />
+          <Input className={`${inputCls} bk-tabular`} inputMode="decimal" value={form.net_amount} onChange={(e) => set("net_amount")(e.target.value)} placeholder="1200000" />
         </FormField>
         <FormField label="Season" hint="A label, e.g. Low, Peak, Christmas." error={errorFor(fe, "season")}>
-          <input className={inputCls} maxLength={80} value={form.season} onChange={(e) => set("season")(e.target.value)} />
+          <Input className={inputCls} maxLength={80} value={form.season} onChange={(e) => set("season")(e.target.value)} />
         </FormField>
         <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
           <DateField className={inputCls} value={form.valid_from} min={contract.valid_from} max={contract.valid_to ?? undefined} onChange={(v) => set("valid_from")(v)} />
@@ -147,26 +147,26 @@ export function RateDrawer({
           <DateField className={inputCls} value={form.valid_to} min={form.valid_from} max={contract.valid_to ?? undefined} onChange={(v) => set("valid_to")(v)} />
         </FormField>
         <FormField label="Pax from" hint="Empty = any." error={errorFor(fe, "pax_min")}>
-          <input type="number" min={1} max={999} className={inputCls} value={form.pax_min} onChange={(e) => set("pax_min")(e.target.value)} />
+          <Input type="number" min={1} max={999} className={inputCls} value={form.pax_min} onChange={(e) => set("pax_min")(e.target.value)} />
         </FormField>
         <FormField label="Pax to" error={errorFor(fe, "pax_max")}>
-          <input type="number" min={1} max={999} className={inputCls} value={form.pax_max} onChange={(e) => set("pax_max")(e.target.value)} />
+          <Input type="number" min={1} max={999} className={inputCls} value={form.pax_max} onChange={(e) => set("pax_max")(e.target.value)} />
         </FormField>
       </div>
       {roomRate && (
         <FormField label="Meal plan" error={errorFor(fe, "meal_plan")}>
-          <select className={inputCls} value={form.meal_plan} onChange={(e) => set("meal_plan")(e.target.value)}>
+          <Select className={inputCls} value={form.meal_plan} onChange={(e) => set("meal_plan")(e.target.value)}>
             <option value="">Not stated</option>
             {MEAL_PLANS.map((m) => (
               <option key={m} value={m}>
                 {m} · {MEAL_LABEL[m]}
               </option>
             ))}
-          </select>
+          </Select>
         </FormField>
       )}
       <FormField label="Notes" hint="Supplements, child policy… Staff only." error={errorFor(fe, "notes")}>
-        <textarea className={textareaCls} maxLength={2000} value={form.notes} onChange={(e) => set("notes")(e.target.value)} />
+        <Textarea className={textareaCls} maxLength={2000} value={form.notes} onChange={(e) => set("notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
   );

@@ -16,6 +16,7 @@ import { api, ApiError } from "@/lib/api/client";
 import type { ActivityItem, TripCaseDetail } from "@/lib/api/types";
 import { CATALOG_STATE_META, catalogReasonLabel, isFlaggedState } from "@/lib/tourState";
 import {
+  PageFrame,
   Button,
   Code,
   DateText,
@@ -70,7 +71,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
   if (q.isError || !q.data) {
     const notFound = q.error instanceof ApiError && q.error.status === 404;
     return (
-      <main className="aa-admin-main flex-1 px-4 py-6 sm:px-8">
+      <PageFrame width="full">
         {notFound ? (
           <EmptyState
             title={`Trip case ${ref} not found`}
@@ -84,14 +85,14 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
         ) : (
           <QueryError error={q.error} onRetry={() => q.refetch()} what="this trip case" />
         )}
-      </main>
+      </PageFrame>
     );
   }
   const c = q.data;
   const cancelNote = c.status === "cancelled" ? [...c.status_history].reverse().find((h) => h.to_status === "cancelled")?.note : null;
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       {/* Header band (spec §4.7) */}
       <div className="border-b border-line bg-bg px-4 pb-5 pt-6 sm:px-8">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
@@ -189,7 +190,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
 
       <AssignModal c={c} open={panel === "assign"} onClose={() => setPanel(null)} />
       <EditDetailsDrawer c={c} open={panel === "edit"} onClose={() => setPanel(null)} />
-    </main>
+    </PageFrame>
   );
 }
 
@@ -216,7 +217,8 @@ function paxLabel(c: TripCaseDetail): string {
 
 function WorkspaceSkeleton() {
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto" aria-busy="true" aria-label="Loading trip case">
+    <PageFrame bleed>
+      <div role="status" aria-busy="true" aria-label="Loading trip case">
       <div className="border-b border-line bg-bg px-4 pb-5 pt-6 sm:px-8">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-4">
           <Skeleton w={280} h={26} />
@@ -228,7 +230,8 @@ function WorkspaceSkeleton() {
         <Skeleton h={220} r={12} />
         <Skeleton h={220} r={12} />
       </div>
-    </main>
+      </div>
+    </PageFrame>
   );
 }
 

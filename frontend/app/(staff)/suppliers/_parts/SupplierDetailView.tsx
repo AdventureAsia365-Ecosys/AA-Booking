@@ -13,7 +13,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, CalendarDays, CheckCircle2, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
-import { Button, Code, ConfirmDialog, DataTable, DateText, EmptyState, ErrorState, FromCisTag, Section, useStaff, useToast, RowMenu, type RowMenuItem } from "@/ui";
+import { Button, Code, ConfirmDialog, DataTable, PageFrame, DateText, EmptyState, ErrorState, FromCisTag, Section, useStaff, useToast, RowMenu, type RowMenuItem } from "@/ui";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { ContractDrawer } from "./ContractDrawer";
 import { RatesTab } from "./RatesTab";
@@ -39,7 +39,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
   if (q.isError || !q.data) {
     const status = q.error instanceof ApiError ? q.error.status : 0;
     return (
-      <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+      <PageFrame width="full">
         {status === 404 ? (
           <EmptyState
             icon={<Store size={30} />}
@@ -52,14 +52,14 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         ) : (
           <ErrorState message={(q.error as Error)?.message ?? "Could not load the supplier."} onRetry={() => q.refetch()} />
         )}
-      </main>
+      </PageFrame>
     );
   }
 
   const s = q.data;
   const where = locationText(s);
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <DetailHeader
         back={{ href: "/suppliers", label: "Suppliers" }}
         name={s.company_name}
@@ -120,7 +120,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         )}
       </div>
       {actions.dialogs}
-    </main>
+    </PageFrame>
   );
 }
 

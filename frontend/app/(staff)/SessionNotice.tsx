@@ -6,6 +6,7 @@
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Hourglass, ShieldOff } from "lucide-react";
 import { Button, LOGO_SRC, signOut } from "@/ui";
+import { StandaloneFrame } from "@/ui/local/StandaloneFrame";
 
 const ICON = {
   pending: <Hourglass size={28} className="text-accent" />,
@@ -28,7 +29,7 @@ export function SessionNotice({
 }) {
   const router = useRouter();
   return (
-    <main className="grid min-h-screen place-items-center bg-bg px-4 py-10">
+    <StandaloneFrame className="bg-bg px-4 py-10">
       <div className="w-full max-w-[460px] rounded-lg border border-line bg-card p-8 text-center shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={LOGO_SRC} alt="Adventure Asia" width={56} height={36} className="mx-auto mb-5 h-auto w-14" />
@@ -56,6 +57,6 @@ export function SessionNotice({
           </Button>
         </div>
       </div>
-    </main>
+    </StandaloneFrame>
   );
 }

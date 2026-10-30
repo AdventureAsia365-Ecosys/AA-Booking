@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
 import { supplyApi, type SupplierRate } from "@/lib/api/supply";
-import { Button, ConfirmDialog, EmptyState, Section, useToast, RowMenu } from "@/ui";
+import { Select, Button, ConfirmDialog, EmptyState, Section, useToast, RowMenu } from "@/ui";
 import { RatesTable, amountText, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { RateDrawer } from "./RateDrawer";
@@ -63,13 +63,13 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
           <label className="sr-only" htmlFor="rates-contract">
             Contract
           </label>
-          <select id="rates-contract" className={`${inputCls} h-9 w-auto min-w-[220px]`} value={contract?.id ?? ""} onChange={(e) => setPicked(e.target.value)}>
+          <Select size="sm" id="rates-contract" className={`${inputCls} w-auto min-w-[220px]`} value={contract?.id ?? ""} onChange={(e) => setPicked(e.target.value)}>
             {items.map((k) => (
               <option key={k.id} value={k.id}>
                 {k.title} · {k.currency} · {k.phase.replace("_", " ")}
               </option>
             ))}
-          </select>
+          </Select>
           {contract && <ContractPhaseBadge phase={contract.phase} />}
           {editable && s.status === "active" && (
             <Button variant="primary" onClick={() => setDrawer({})}>

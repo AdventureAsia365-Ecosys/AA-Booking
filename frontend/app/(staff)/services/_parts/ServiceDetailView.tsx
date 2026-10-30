@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity as ActivityIcon, Ban, CalendarDays, Hash, MapPin, Pencil, Power, Tag } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { supplyApi, type ServiceDetail } from "@/lib/api/supply";
-import { Button, Code, DateText, EmptyState, ErrorState, FromCisTag, Section } from "@/ui";
+import { PageFrame, Button, Code, DateText, EmptyState, ErrorState, FromCisTag, Section } from "@/ui";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { RatesTable, SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
@@ -35,7 +35,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
   if (q.isError || !q.data) {
     const code = q.error instanceof ApiError ? q.error.status : 0;
     return (
-      <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+      <PageFrame width="full">
         {code === 404 ? (
           <EmptyState
             icon={<ActivityIcon size={30} />}
@@ -48,13 +48,13 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
         ) : (
           <ErrorState message={(q.error as Error)?.message ?? "Could not load the service."} onRetry={() => q.refetch()} />
         )}
-      </main>
+      </PageFrame>
     );
   }
 
   const s = q.data;
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <DetailHeader
         back={{ href: "/services", label: "Services" }}
         name={s.title}
@@ -102,7 +102,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
       </div>
       {editing && <ServiceFormDrawer service={s} onClose={() => setEditing(false)} />}
       {status.dialogs}
-    </main>
+    </PageFrame>
   );
 }
 

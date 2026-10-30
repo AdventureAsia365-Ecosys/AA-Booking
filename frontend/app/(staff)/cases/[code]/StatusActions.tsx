@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, RotateCcw, X, XCircle } from "lucide-react";
 import type { TripCaseDetail, TripCaseStatus } from "@/lib/api/types";
-import { Button, ConfirmDialog, Modal, TRIP_CASE_STATUS_META, useCan, useStaff } from "@/ui";
+import { Input, Select, Textarea, Button, ConfirmDialog, Modal, TRIP_CASE_STATUS_META, useCan, useStaff } from "@/ui";
 import { DECLINE_REASONS, Field, inputCls, textareaCls } from "../_parts/fields";
 import { StaffSelect } from "../_parts/StaffSelect";
 import { TripPlanPicker } from "../_parts/TripPlanPicker";
@@ -274,14 +274,14 @@ function CancelModal({
           case moves to Cancelled and keeps its history. It can be reopened later with a reason.
         </p>
         <Field label={decline ? "Reason for declining" : "Reason for cancelling"} required>
-          <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
+          <Select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
             {reasons.map((r) => (
               <option key={r}>{r}</option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label={needsNotes ? "Notes" : "Additional notes (optional)"} required={needsNotes}>
-          <textarea className={textareaCls} value={notes} maxLength={1900} onChange={(e) => setNotes(e.target.value)} placeholder="Shown in the case history." />
+          <Textarea className={textareaCls} value={notes} maxLength={1900} onChange={(e) => setNotes(e.target.value)} placeholder="Shown in the case history." />
         </Field>
         {error && <p className="text-[13px] text-danger">{error}</p>}
       </div>
@@ -352,7 +352,7 @@ function ConvertModal({ c, onClose }: { c: TripCaseDetail; onClose: () => void }
           build a proposal.
         </p>
         <Field label="Sales rep" hint={canAssign ? undefined : "Your role cannot change the assignment."}>
-          {canAssign ? <StaffSelect value={rep} onChange={setRep} /> : <input className={inputCls} disabled value={c.assignees.find((a) => a.role === "sales")?.name ?? "Unassigned"} />}
+          {canAssign ? <StaffSelect value={rep} onChange={setRep} /> : <Input className={inputCls} disabled value={c.assignees.find((a) => a.role === "sales")?.name ?? "Unassigned"} />}
         </Field>
         {canStartFromPlan && (
           <div className="flex min-w-0 flex-col gap-1.5" role="group" aria-label="Start from a trip plan">
@@ -362,7 +362,7 @@ function ConvertModal({ c, onClose }: { c: TripCaseDetail; onClose: () => void }
           </div>
         )}
         <Field label="Note (optional)" hint="Saved in the case history with the status change.">
-          <textarea className={textareaCls} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="Called the customer, they want a quieter pace." />
+          <Textarea className={textareaCls} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="Called the customer, they want a quieter pace." />
         </Field>
         {err && <p className="text-[13px] text-danger">{friendlyError(err)}</p>}
       </div>

@@ -79,6 +79,7 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Recorder]:
         for name in names:
             recs[name] = Recorder()
             monkeypatch.setattr(module, name, recs[name])
+    recs["list_records"].result = {"items": [], "total": 0, "limit": 25, "offset": 0}  # a page, as the router reads it
     recs["get_contract"] = Recorder({"id": KID})
     monkeypatch.setattr("app.routers.supply.suppliers.get_contract", recs["get_contract"])
     return recs

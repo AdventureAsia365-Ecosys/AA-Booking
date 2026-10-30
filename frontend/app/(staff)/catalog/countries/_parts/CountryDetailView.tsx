@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { CheckCircle2, Globe, Hash, ImageIcon, MapPin, Pencil, Power, Store } from "lucide-react";
 import { geoApi, type CountryTour, type DestinationItem } from "@/lib/api/geo";
-import { Button, CisPhoto, DataTable, DateText, FromCisTag, KpiTile, ManagedInCisLink, Section, useCan, useStaff, useUrlFilters } from "@/ui";
+import { PageFrame, Button, CisPhoto, DataTable, DateText, FromCisTag, KpiTile, ManagedInCisLink, Section, useCan, useStaff, useUrlFilters } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { CIS_EDITOR_ROLES, SellableBadge } from "@/app/(staff)/catalog/trip-plans/_parts/shared";
@@ -82,7 +82,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
   if (q.isError || !c) return <PageError error={q.error} onRetry={() => q.refetch()} what="this country" />;
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <DetailHeader
         back={{ href: "/catalog/countries", label: "Countries" }}
         name={c.name}
@@ -204,7 +204,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
       {canWrite && get("edit") === "1" && <CountryDrawer iso={c.country_code} onClose={() => setMany({ edit: null })} />}
       {place && <DestinationDrawer key={place} id={place} onClose={() => setMany({ place: null })} />}
       {status.dialogs}
-    </main>
+    </PageFrame>
   );
 }
 

@@ -19,7 +19,7 @@ import {
   type ScheduleKind,
   type ScheduleRowIn,
 } from "@/lib/api/billing";
-import { Button, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
+import { Checkbox, Input, Select, Textarea, Button, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
 import { errorText, fieldCls } from "./PaymentDialogs";
 import { fromCents, lineCents, sumCents, toCents } from "./money";
 import { formatDay } from "@/ui/booking/dates";
@@ -174,13 +174,13 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
       </p>
       {adjs.map((a, i) => (
         <div key={i} className="grid gap-2 rounded-md border border-line2 p-3 sm:grid-cols-[1fr_80px_120px_auto]">
-          <input className={fieldCls} placeholder="What it is for" value={a.description} maxLength={500} onChange={(e) => setAdj(i, { description: e.target.value })} />
-          <input className={fieldCls} inputMode="decimal" aria-label="Quantity" value={a.quantity} onChange={(e) => setAdj(i, { quantity: e.target.value })} />
-          <input className={fieldCls} inputMode="decimal" placeholder={`Price (${currency})`} value={a.unit_price} onChange={(e) => setAdj(i, { unit_price: e.target.value })} />
+          <Input size="sm" className={fieldCls} placeholder="What it is for" value={a.description} maxLength={500} onChange={(e) => setAdj(i, { description: e.target.value })} />
+          <Input size="sm" className={fieldCls} inputMode="decimal" aria-label="Quantity" value={a.quantity} onChange={(e) => setAdj(i, { quantity: e.target.value })} />
+          <Input size="sm" className={fieldCls} inputMode="decimal" placeholder={`Price (${currency})`} value={a.unit_price} onChange={(e) => setAdj(i, { unit_price: e.target.value })} />
           <Button variant="ghost" size="sm" ariaLabel="Remove line" onClick={() => setAdjs((xs) => xs.filter((_, j) => j !== i))}>
             <Trash2 size={14} />
           </Button>
-          <input className={`${fieldCls} sm:col-span-3`} placeholder="Reason (required)" value={a.reason} maxLength={500} onChange={(e) => setAdj(i, { reason: e.target.value })} />
+          <Input size="sm" className={`${fieldCls} sm:col-span-3`} placeholder="Reason (required)" value={a.reason} maxLength={500} onChange={(e) => setAdj(i, { reason: e.target.value })} />
           <span className="self-center text-right text-xs text-muted">{adjCents[i] !== null ? formatMoney(fromCents(adjCents[i] as bigint), currency) : "—"}</span>
         </div>
       ))}
@@ -201,7 +201,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
         </div>
       )}
       <label className="flex items-center gap-2 text-[13px] text-body">
-        <input type="checkbox" checked={!customSchedule} onChange={(e) => setCustomSchedule(!e.target.checked)} />
+        <Checkbox checked={!customSchedule} onChange={(e) => setCustomSchedule(!e.target.checked)} />
         {amend
           ? "Put the difference on the last unpaid payment (or a new one)"
           : "Use the default schedule (deposit now, balance before the trip; one payment when the trip is close)"}
@@ -210,15 +210,15 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
         <>
           {rows.map((r, i) => (
             <div key={r.key} className="grid gap-2 sm:grid-cols-[160px_1fr_160px_auto]">
-              <select className={fieldCls} value={r.kind} onChange={(e) => setRow(i, { kind: e.target.value as ScheduleKind })}>
+              <Select size="sm" className={fieldCls} value={r.kind} onChange={(e) => setRow(i, { kind: e.target.value as ScheduleKind })}>
                 {Object.entries(SCHEDULE_KIND_LABEL).map(([v, l]) => (
                   <option key={v} value={v}>
                     {l}
                   </option>
                 ))}
-              </select>
-              <input className={fieldCls} inputMode="decimal" aria-label="Amount" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} />
-              <DateField className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(v) => setRow(i, { due_date: v })} />
+              </Select>
+              <Input size="sm" className={fieldCls} inputMode="decimal" aria-label="Amount" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} />
+              <DateField size="sm" className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(v) => setRow(i, { due_date: v })} />
               <Button variant="ghost" size="sm" ariaLabel="Remove payment" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>
                 <Trash2 size={14} />
               </Button>
@@ -257,17 +257,17 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
         <>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Payment terms (printed on the payment request)</span>
-            <textarea rows={2} maxLength={2000} value={terms} onChange={(e) => setTerms(e.target.value)} className="rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border" />
+            <Textarea rows={2} maxLength={2000} value={terms} onChange={(e) => setTerms(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Internal note (never shown to the customer)</span>
-            <textarea rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} className="rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border" />
+            <Textarea rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </label>
         </>
       )}
       {mode.kind === "create" && (
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={sendNow} onChange={(e) => setSendNow(e.target.checked)} /> Send it now: the customer sees the
+          <Checkbox checked={sendNow} onChange={(e) => setSendNow(e.target.checked)} /> Send it now: the customer sees the
           payment request in My Trips (no e-mail is sent)
         </label>
       )}

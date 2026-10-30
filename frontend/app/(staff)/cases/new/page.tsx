@@ -15,7 +15,7 @@ import { ArrowLeft } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import type { CustomerSummary } from "@/lib/api/types";
-import { Button, Section, useCan, useStaff, useToast, fieldName, DateField } from "@/ui";
+import { Input, Select, Textarea, PageFrame, Button, Section, useCan, useStaff, useToast, fieldName, DateField } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, textareaCls, toInt } from "../_parts/fields";
 import { CountryPicker } from "../_parts/CountryPicker";
 import { StaffSelect } from "../_parts/StaffSelect";
@@ -87,14 +87,14 @@ export default function NewTripCasePage() {
 
   if (!canWrite) {
     return (
-      <main className="aa-admin-main flex-1 overflow-y-auto px-4 py-6 sm:px-8">
+      <PageFrame width="full">
         <QueryError error={new ApiError("forbidden", 403)} what="creating trip cases" />
-      </main>
+      </PageFrame>
     );
   }
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       {/* Header bar (Figma ADD NEW TRIP 8): back, title, Cancel + primary. */}
       <div className="border-b border-line bg-bg px-4 py-4 sm:px-8">
         <div className="mx-auto flex max-w-[880px] flex-wrap items-center justify-between gap-3">
@@ -154,17 +154,17 @@ export default function NewTripCasePage() {
               <DateField className={inputCls} value={trip.start_date} onChange={(v) => setTrip({ ...trip, start_date: v })} />
             </Field>
             <Field label="Adults" required error={tried ? pax.adults : null}>
-              <input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={trip.pax_adults} onChange={(e) => setTrip({ ...trip, pax_adults: e.target.value })} />
+              <Input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={trip.pax_adults} onChange={(e) => setTrip({ ...trip, pax_adults: e.target.value })} />
             </Field>
             <Field label="Children" error={tried ? pax.children : null}>
-              <input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={trip.pax_children} onChange={(e) => setTrip({ ...trip, pax_children: e.target.value })} />
+              <Input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={trip.pax_children} onChange={(e) => setTrip({ ...trip, pax_children: e.target.value })} />
             </Field>
             <Field label="Currency">
-              <select className={inputCls} value={trip.currency} onChange={(e) => setTrip({ ...trip, currency: e.target.value })}>
+              <Select className={inputCls} value={trip.currency} onChange={(e) => setTrip({ ...trip, currency: e.target.value })}>
                 {CURRENCIES.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
-              </select>
+              </Select>
             </Field>
             <Field
               label="Countries"
@@ -182,13 +182,13 @@ export default function NewTripCasePage() {
               <StaffSelect value={assignee} onChange={setAssignee} />
             </Field>
             <Field label="Initial status" hint="Use Discovery when you are already talking with the customer.">
-              <select className={inputCls} value={initialStatus} onChange={(e) => setInitialStatus(e.target.value as "new_inquiry" | "discovery")}>
+              <Select className={inputCls} value={initialStatus} onChange={(e) => setInitialStatus(e.target.value as "new_inquiry" | "discovery")}>
                 <option value="new_inquiry">New inquiry</option>
                 <option value="discovery">Discovery</option>
-              </select>
+              </Select>
             </Field>
             <Field label="Internal notes" hint="Staff only. The customer never sees these." className="sm:col-span-2">
-              <textarea
+              <Textarea
                 className={textareaCls}
                 value={notes}
                 maxLength={10000}
@@ -223,6 +223,6 @@ export default function NewTripCasePage() {
           </Button>
         </div>
       </form>
-    </main>
+    </PageFrame>
   );
 }

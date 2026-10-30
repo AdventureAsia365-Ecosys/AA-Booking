@@ -13,6 +13,7 @@ import { Archive, Ban, Briefcase, CalendarDays, FileText, Hash, Inbox, MapPin, P
 import { api, ApiError } from "@/lib/api/client";
 import type { CustomerDetail, TripCaseListItem } from "@/lib/api/types";
 import {
+  PageFrame,
   Button,
   Code,
   CustomerStatusBadge,
@@ -51,7 +52,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   if (q.isError || !q.data) {
     const status = q.error instanceof ApiError ? q.error.status : 0;
     return (
-      <main className="aa-admin-main flex-1 overflow-y-auto px-8 py-6">
+      <PageFrame width="full">
         {status === 404 ? (
           <EmptyState
             icon={<Users size={30} />}
@@ -64,7 +65,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         ) : (
           <ErrorState message={(q.error as Error)?.message ?? "Could not load the customer."} onRetry={() => q.refetch()} />
         )}
-      </main>
+      </PageFrame>
     );
   }
 
@@ -80,7 +81,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     : [];
 
   return (
-    <main className="aa-admin-main flex-1 overflow-y-auto">
+    <PageFrame bleed>
       <DetailHeader
         back={{ href: "/customers", label: "Customers" }}
         name={c.name ?? "Unnamed customer"}
@@ -138,7 +139,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       </div>
       <CustomerFormDrawer open={editing} onClose={() => setEditing(false)} mode={{ kind: "edit", customer: c }} />
       {actions.dialogs}
-    </main>
+    </PageFrame>
   );
 }
 

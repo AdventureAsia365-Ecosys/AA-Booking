@@ -287,6 +287,17 @@ test.describe("slice 4 behaviour at 1440", () => {
     await expect(context).toContainText("Sales");
     await expect(context).toContainText(/\d+ of \d+ checks done/);
     await expect(context.getByRole("link", { name: "Open Checks tab" })).toHaveAttribute("href", /\/cases\/TC-000200\?tab=checks/);
+    // The drawer's due-date box has the kit control look, like the Select beside it (AA-994 S6d review: form date
+    // boxes rendered bare, no border and auto height, once the shared form classes became layout only).
+    const dueBox = await page
+      .getByRole("dialog")
+      .locator('[data-kit-field="date"] input[type="text"]')
+      .first()
+      .evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { border: s.borderTopWidth, style: s.borderTopStyle, height: Math.round(el.getBoundingClientRect().height), transparent: s.backgroundColor === "rgba(0, 0, 0, 0)" };
+      });
+    expect(dueBox, "a form DateField is a 40 px box with a 1 px border and a background").toEqual({ border: "1px", style: "solid", height: 40, transparent: false });
     await page.waitForTimeout(300);
     await shot(page, "trip-check-drawer", 1440);
     expect(c.unmocked).toEqual([]);

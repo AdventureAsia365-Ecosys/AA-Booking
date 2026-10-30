@@ -6,15 +6,25 @@
 // proposal); payments are recorded on an invoice. billing.read (admin, sales); never in a preview session.
 // AA-682 S4 (bk-030): a third tab, Supplier bills (?tab=supplier-bills; bill.read = admin, sales, contracting), with its
 // own four KPIs (to approve, to pay, overdue, paid out this month) and the bill drawer. Contracting sees only that tab.
+// S255 Figma rescore (PAYMENT & INVOICE): a row menu on the invoice and payment tables with the detail pages' actions:
+// invoice = View invoice, Open trip case, Cancel invoice (when the row's `actions.cancel` allows it); payment = View
+// payment, View invoice, Download evidence (when a file is attached), Void (when `actions.void` allows it). There is no
+// invoice PDF in Booking yet, so no "Download PDF" item (the invoice page says so).
 
+import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Ban, Download, Eye, FileText, FolderOpen } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ApiError } from "@/lib/api/client";
 import { billingApi, PAYMENT_METHOD_LABEL, type InvoiceSummary, type Kpi, type Payment } from "@/lib/api/billing";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { SupplierBillKpis, SupplierBillsList } from "./_parts/SupplierBills";
+import { useBillingRefresh } from "./_parts/InvoiceView";
+import { VoidPaymentDialog, errorText } from "./_parts/PaymentDialogs";
 import {
+  ConfirmDialog,
   DataTable,
   DateText,
   FilterBar,
@@ -26,10 +36,14 @@ import {
   Money,
   PageFrame,
   PaymentStateBadge,
+  paymentEvidenceFileId,
+  RowMenu,
+  type RowMenuItem,
   Section,
   Tabs,
   formatMoney,
   useCan,
+  useToast,
   useUrlFilters,
 } from "@/ui";
 
@@ -68,7 +82,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
           >
             {row.original.trip_case.code}
           </Link>
-          <span className="block max-w-[220px] truncate text-xs text-muted md:max-w-[140px] min-[1200px]:max-w-[180px]" title={name}>
+          <span className="block max-w-[220px] truncate text-xs text-muted md:max-w-[140px] min-[1200px]:max-w-[170px]" title={name}>
             {name}
           </span>
         </span>
@@ -278,8 +292,48 @@ function InvoicesTab({ canRead }: { canRead: boolean }) {
     offset: paging.offset,
   };
   const list = useQuery({ queryKey: ["billing", "invoices", query], queryFn: () => billingApi.invoices(query), enabled: canRead });
+  const router = useRouter();
+  const toast = useToast();
+  const refresh = useBillingRefresh();
+  const [cancelling, setCancelling] = useState<InvoiceSummary | null>(null);
+  const cancel = useMutation({
+    mutationFn: ({ inv, reason }: { inv: InvoiceSummary; reason: string }) => billingApi.cancel(inv.invoice_number, reason),
+    onSuccess: (_, { inv }) => {
+      toast.success(`${inv.invoice_number} cancelled`);
+      setCancelling(null);
+      refresh();
+    },
+  });
+  function menuFor(r: InvoiceSummary): RowMenuItem[] {
+    const items: RowMenuItem[] = [
+      { label: "View invoice", icon: <Eye size={15} />, onSelect: () => router.push(`/billing/invoices/${encodeURIComponent(r.invoice_number)}`) },
+      { label: "Open trip case", icon: <FolderOpen size={15} />, onSelect: () => router.push(`/cases/${encodeURIComponent(r.trip_case.code)}`) },
+    ];
+    if (r.actions?.cancel) {
+      items.push({ label: "Cancel invoice", icon: <Ban size={15} />, onSelect: () => setCancelling(r), danger: true, divider: true });
+    }
+    return items;
+  }
+  // The row menu shares the Status cell: a column of its own pushed the table past its 1400 / 1440 px budget (AA-996).
+  const columns: ColumnDef<InvoiceSummary, unknown>[] = INVOICE_COLUMNS.map((c) =>
+    c.id === "status"
+      ? {
+          ...c,
+          cell: ({ row }) => (
+            <span className="flex items-center justify-between gap-1">
+              <InvoiceStatusBadge status={row.original.status} overdue={row.original.overdue} />
+              {/* the button's 32 px box has 8 px of air on each side of its icon: let it overlap the cell padding */}
+              <span className="-mr-2 shrink-0">
+                <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.invoice_number}`} />
+              </span>
+            </span>
+          ),
+        }
+      : c,
+  );
   return (
     <Section>
+      <div className="bk-dt-sticky-end">
       <DataTable<InvoiceSummary>
         filters={
           <FilterBar
@@ -309,7 +363,7 @@ function InvoicesTab({ canRead }: { canRead: boolean }) {
         enableCsv
         csvFilename="invoices.csv"
         data={list.data?.items ?? []}
-        columns={INVOICE_COLUMNS}
+        columns={columns}
         getRowId={(r) => r.id}
         loading={list.isLoading}
         error={list.isError ? (list.error instanceof ApiError ? list.error.message : "Could not load the invoices") : null}
@@ -319,6 +373,19 @@ function InvoicesTab({ canRead }: { canRead: boolean }) {
         emptyTitle={canRead ? "No invoice matches" : "Invoices need the billing role (admin, sales)"}
         emptyDescription="Create an invoice from a confirmed trip case: open it, then its Billing tab."
         tableMinWidth={1000}
+      />
+      </div>
+      <ConfirmDialog
+        open={!!cancelling}
+        onClose={() => setCancelling(null)}
+        onConfirm={(reason) => cancelling && cancel.mutate({ inv: cancelling, reason })}
+        title={cancelling ? `Cancel ${cancelling.invoice_number}` : "Cancel invoice"}
+        confirmLabel="Cancel invoice"
+        danger
+        busy={cancel.isPending}
+        error={cancel.isError ? errorText(cancel.error) : null}
+        reason={{ label: "Why is it cancelled?", required: true }}
+        message="Only an invoice with nothing paid can be cancelled: refund verified payments first. The customer's My Trips feed says it was cancelled."
       />
     </Section>
   );
@@ -336,8 +403,38 @@ function PaymentsTab({ canRead }: { canRead: boolean }) {
     offset: paging.offset,
   };
   const list = useQuery({ queryKey: ["billing", "payments", query], queryFn: () => billingApi.payments(query), enabled: canRead });
+  const router = useRouter();
+  const toast = useToast();
+  const refresh = useBillingRefresh();
+  const [voiding, setVoiding] = useState<Payment | null>(null);
+  const download = useMutation({
+    mutationFn: (fileId: string) => billingApi.download(fileId),
+    onSuccess: (r) => window.open(r.url, "_blank", "noopener"),
+    onError: (e) => toast.error(errorText(e)),
+  });
+  function menuFor(p: Payment): RowMenuItem[] {
+    const items: RowMenuItem[] = [
+      { label: "View payment", icon: <Eye size={15} />, onSelect: () => router.push(`/billing/payments/${encodeURIComponent(p.ref)}`) },
+      { label: "View invoice", icon: <FileText size={15} />, onSelect: () => router.push(`/billing/invoices/${encodeURIComponent(p.invoice.number)}`) },
+    ];
+    // The evidence file (bank slip, receipt): list rows carry its id but no `files`; a 5-minute download link.
+    const fileId = paymentEvidenceFileId(p);
+    if (fileId) items.push({ label: "Download evidence", icon: <Download size={15} />, onSelect: () => download.mutate(fileId) });
+    if (p.actions.void) items.push({ label: "Void", icon: <Ban size={15} />, onSelect: () => setVoiding(p), danger: true, divider: true });
+    return items;
+  }
+  const columns: ColumnDef<Payment, unknown>[] = [
+    ...PAYMENT_COLUMNS,
+    {
+      id: "actions",
+      header: () => <span className="sr-only">Actions</span>, // the menu button alone: keeps the table within 1440 px (AA-996)
+      enableSorting: false,
+      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.ref}`} />,
+    },
+  ];
   return (
     <Section>
+      <div className="bk-dt-sticky-end">
       <DataTable<Payment>
         filters={
           <FilterBar
@@ -379,7 +476,7 @@ function PaymentsTab({ canRead }: { canRead: boolean }) {
         enableCsv
         csvFilename="payments.csv"
         data={list.data?.items ?? []}
-        columns={PAYMENT_COLUMNS}
+        columns={columns}
         getRowId={(r) => r.id}
         loading={list.isLoading}
         error={list.isError ? (list.error instanceof ApiError ? list.error.message : "Could not load the payments") : null}
@@ -390,6 +487,8 @@ function PaymentsTab({ canRead }: { canRead: boolean }) {
         emptyDescription="Payments are recorded on an invoice."
         tableMinWidth={960}
       />
+      </div>
+      <VoidPaymentDialog payment={voiding} onClose={() => setVoiding(null)} onDone={refresh} />
     </Section>
   );
 }

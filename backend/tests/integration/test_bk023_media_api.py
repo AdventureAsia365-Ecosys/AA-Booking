@@ -318,3 +318,47 @@ async def test_read_back_and_published_text_on_proposal_items(
     )
     saved = await _ok(await c.put(f"{base}/items", json={"items": items}, headers=sales))
     assert saved["items"][0]["supply"]["description"] == "A quiet garden hotel."
+
+
+async def test_hotel_list_photo_summary(
+    client: tuple[httpx.AsyncClient, LocalCis, FakeStore], admin: asyncpg.Connection
+) -> None:
+    """The staff hotel list (photo grid, S254 Figma audit #19): per row the number of active photos and the first one
+    (upload order), presigned; a hotel without photos has 0 / null; a removed photo no longer counts."""
+    c, cis, _ = client
+    maker, sales = _auth(cis, MAKER), _auth(cis, SALES)
+    hotel, _, _ = await _hotel_and_service(c, maker)
+    bare = await _ok(
+        await c.post(
+            "/hotels",
+            json={"supplier_id": hotel["supplier_id"], "name": "Bare", "destination_id": HANOI},
+            headers=maker,
+        ),
+        201,
+    )
+    first = await _ok(
+        await c.post(
+            f"/hotels/{hotel['code']}/media",
+            json={"content_type": "image/png", "data_base64": b64(png(salt=b"a")), "filename": "a.png"},
+            headers=maker,
+        ),
+        201,
+    )
+    second = await _ok(
+        await c.post(
+            f"/hotels/{hotel['code']}/media",
+            json={"content_type": "image/png", "data_base64": b64(png(salt=b"b")), "filename": "b.png"},
+            headers=maker,
+        ),
+        201,
+    )
+    first_url = f"https://signed.example/supply-media/hotel/{hotel['id']}/{first['id']}.png"
+
+    async def summary() -> dict[str, tuple[int, str | None]]:
+        rows = (await _ok(await c.get("/hotels", params={"limit": 100}, headers=sales)))["items"]
+        return {r["code"]: (r["photo_count"], r["cover_photo_url"]) for r in rows}
+
+    assert (await summary()) == {hotel["code"]: (2, first_url), bare["code"]: (0, None)}
+    await _ok(await c.patch(f"/media/{first['id']}", json={"status": "removed"}, headers=maker))
+    second_url = f"https://signed.example/supply-media/hotel/{hotel['id']}/{second['id']}.png"
+    assert (await summary()) == {hotel["code"]: (1, second_url), bare["code"]: (0, None)}

@@ -3,11 +3,11 @@
 // design system §4 "Forms"), the input class, and the option lists that are configuration, not data.
 
 import { Lock } from "lucide-react";
+import { Field as KitField } from "@/ui";
 
-export const inputCls =
-  "h-10 w-full rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border disabled:cursor-not-allowed disabled:bg-panel disabled:text-muted";
-export const textareaCls =
-  "min-h-[96px] w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border";
+// Layout only: the look (40 px, border, focus / disabled states) comes from the kit Input / Select / Textarea (AA-994 S6d).
+export const inputCls = "w-full";
+export const textareaCls = "min-h-[96px] w-full";
 
 /** Spec §4.6: USD default; the five currencies sales quote in today. */
 export const CURRENCIES = ["USD", "EUR", "GBP", "AUD", "SGD"] as const;
@@ -21,6 +21,7 @@ export const DECLINE_REASONS = [
   "Other",
 ] as const;
 
+/** The kit Field (AA-994 S6d): label above, hint or error under, ARIA wiring to the control. */
 export function Field({
   label,
   required,
@@ -37,14 +38,9 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      <span className="text-[13px] font-medium text-ink">
-        {label}
-        {required && <span className="text-danger"> *</span>}
-      </span>
+    <KitField label={label} required={required} hint={hint} error={error} className={className || undefined}>
       {children}
-      {error ? <span className="text-xs text-danger">{error}</span> : hint ? <span className="text-xs text-muted">{hint}</span> : null}
-    </label>
+    </KitField>
   );
 }
 

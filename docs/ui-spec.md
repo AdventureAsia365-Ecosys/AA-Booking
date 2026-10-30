@@ -230,7 +230,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/suppliers/new`, `/suppliers/[id]/edit` | Supplier form | ADD SUPPLIER, EDIT SUPPLIER (08) | A C | W2 |
 | `/suppliers/[id]` | Supplier detail (tabs Profile / Contracts / Rates / Bookings / Bills) | SUPPLIER  DETAILS (08); tabs not drawn | A C, S(r) | W2 (Bookings: AA-682 S1, read-only list linking to the case; Bills: AA-682 S4, this supplier's bills + Enter bill + the bill drawer, `?bill=BIL-…`) |
 | `/suppliers/rate-sheets/[id]` | Rate-sheet upload review + publish (maker-checker) | not drawn (ADR 0005 §7–8) | A C | W2 |
-| `/hotels` | Hotel grid | HOTEL MANAGEMENT, COUNTRY MANAGAMENT-2/-3, DELETE HOTEL (07, 06) | A C, S(r) | W2 |
+| `/hotels` | Hotel grid (default) / table (`?view=table`) | HOTEL MANAGEMENT, COUNTRY MANAGAMENT-2/-3, DELETE HOTEL (07, 06) | A C, S(r) | W2 |
 | `/hotels?view=[id]` / `?edit=[id]` / `?new=1` | Hotel drawer (view / edit / add) | EDIT HOTEL-1, EDIT HOTEL, ADD NEW HOTEL, HOTEL DETAILS (07) | A C, S(r) | W2 |
 | `/services`, `/services/[id]` | Commercial services (activity, transfer, guide, entrance, meal) over CIS places | ACTIVITY MANAGEMENT, -1, -2, ACTIVITY  DETAILS, -1, -2, ADD NEW ACTIVITY, -1, EDIT ACTIVITY, DELETE ACTIVITY, UNPUBLISH ACTIVITY (07) | A C, S(r) | W2 |
 | `/pricing/rules` | Pricing rules + FX rates (append-only, maker-checker) | not drawn (ADR 0005) | A C | W2 |
@@ -645,7 +645,7 @@ Permissions in bk-681 (code matrix): `trip_case.read` = A S C; `trip_case.write`
 | `GET/POST /booking/suppliers/{id}/contracts`, `PATCH /booking/contracts/{id}` | `{valid_from, valid_to, currency, payment_terms, cancellation_policy, status(draft\|published\|expired)}` | Contracts tab |
 | `POST /booking/rate-sheets` (multipart xlsx) → `{id, status:'validating'}`; `GET /booking/rate-sheets/{id}` → `{rows_ok, errors:[{sheet,row,field,message}], preview[]}`; `POST /booking/rate-sheets/{id}/publish` (403 if `uploaded_by == me`, maker-checker) | ADR 0005 §7–8 | rate-sheet review |
 | `GET /booking/suppliers/{id}/rates?service_type=&valid_on=` | `{items:[{service_type, variant, season\|date range, unit, net, currency, supplements, child_policy, valid_from, valid_to}]}` | Rates tab, hotel / service Rates |
-| `GET/POST /booking/hotels`, `GET/PATCH/DELETE /booking/hotels/{id}` | `{name, destination_id, supplier_id, address, hotel_style, links[{label,url}], internal_notes?, status}` | `/hotels` (no customer-facing `description` or photos until Q17 is decided: O7) |
+| `GET/POST /booking/hotels`, `GET/PATCH/DELETE /booking/hotels/{id}` | `{name, destination_id, supplier_id, address, hotel_style, links[{label,url}], internal_notes?, status}`; list rows also carry `photo_count` and `cover_photo_url` (first active supplier photo, presigned 15 min; AA-994 S6d) for the grid | `/hotels` (no customer-facing `description` or photos until Q17 is decided: O7; supplier photos are internal, bk-023) |
 | `GET/POST /booking/services`, `GET/PATCH/DELETE /booking/services/{id}` | `{service_type, title(internal), destination_id, supplier_id?, max_group_size?, internal_notes, status, source:{system, id}?}` | `/services` |
 | `GET /booking/pricing/rules`, `POST /booking/pricing/rules` (append-only new row), `GET/POST /booking/pricing/fx-rates` | rows of bk-004; publish requires a second person (Q19) | `/pricing/rules` |
 | `GET /booking/catalog/trip-plans?q=&sellable=&country=&style=` | `catalog.v_tour` LEFT JOIN `booking.trip_plans` → `{source_id, title, sku, country, duration_days, cover, sellable, trip_style, from_price{amount,currency}?}` | `/catalog/trip-plans` |
@@ -672,7 +672,7 @@ Permissions in bk-681 (code matrix): `trip_case.read` = A S C; `trip_case.write`
 
 | Method + path | Request → response (sketch) | For |
 |---|---|---|
-| `GET /booking/invoices?status=&overdue=&case=&q=&from=&to=`, `GET /booking/invoices/{number}` | invoice + items + tax lines + schedule + payments + balance | `/billing`, invoice detail, case Billing tab |
+| `GET /booking/invoices?status=&overdue=&case=&q=&from=&to=`, `GET /booking/invoices/{number}` | invoice + items + tax lines + schedule + payments + balance; list rows carry the staff `actions` too (row menu, AA-994 S6d) | `/billing`, invoice detail, case Billing tab |
 | `POST /booking/trip-cases/{ref}/invoices` | `{lines_from_approved_version:true, adjustments:[{description, quantity, unit_price, reason}], issued_at, schedule:[{kind, amount\|pct, due_date}], notes, send_now}`; 409 without an approved version | Create Invoice |
 | `POST /booking/invoices/{number}/send`, `/cancel {reason}`, `/remind {message?}` | status changes + notifications | row actions |
 | `GET /booking/payments?…`, `GET /booking/payments/{ref}` | payment + invoice + schedule item + evidence | payments tab, detail |

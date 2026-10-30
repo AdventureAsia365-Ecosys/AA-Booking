@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { CustomerSummary } from "@/lib/api/types";
-import { CustomerStatusBadge, PersonCell } from "@/ui";
+import { Checkbox, Input, CustomerStatusBadge, PersonCell } from "@/ui";
 import { Field, inputCls } from "../_parts/fields";
 
 export interface LeadInput {
@@ -98,8 +98,8 @@ export function CustomerPicker({
             <label className="relative">
               <span className="sr-only">Search customers</span>
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted2" />
-              <input
-                className={`${inputCls} pl-9`}
+              <Input
+                className={inputCls} style={{ paddingLeft: 36 }}
                 placeholder="Search by name, e-mail, phone or CUS- code"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -144,20 +144,18 @@ export function CustomerPicker({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name" required error={errs.name}>
-            <input className={inputCls} value={lead.name} maxLength={200} onChange={(e) => onLead({ ...lead, name: e.target.value })} autoComplete="off" />
+            <Input className={inputCls} value={lead.name} maxLength={200} onChange={(e) => onLead({ ...lead, name: e.target.value })} autoComplete="off" />
           </Field>
           <Field label="E-mail" error={errs.email ?? errs.contact} hint="E-mail or phone is required.">
-            <input className={inputCls} type="email" value={lead.email} maxLength={254} onChange={(e) => onLead({ ...lead, email: e.target.value })} autoComplete="off" />
+            <Input className={inputCls} type="email" value={lead.email} maxLength={254} onChange={(e) => onLead({ ...lead, email: e.target.value })} autoComplete="off" />
           </Field>
           <Field label="Phone" error={errs.phone}>
-            <input className={inputCls} type="tel" value={lead.phone} maxLength={40} onChange={(e) => onLead({ ...lead, phone: e.target.value })} autoComplete="off" />
+            <Input className={inputCls} type="tel" value={lead.phone} maxLength={40} onChange={(e) => onLead({ ...lead, phone: e.target.value })} autoComplete="off" />
           </Field>
           <label className="flex items-center gap-2 text-[13px] text-body sm:self-end sm:pb-2.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={lead.contact_consent}
               onChange={(e) => onLead({ ...lead, contact_consent: e.target.checked })}
-              className="h-4 w-4 accent-accent"
             />
             The customer agreed to be contacted
           </label>

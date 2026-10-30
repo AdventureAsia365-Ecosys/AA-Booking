@@ -9,7 +9,7 @@ import { Star } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type SupplierCategory } from "@/lib/api/suppliers";
 import type { RateUnit, ServiceType, ServiceUnit, SupplierRate } from "@/lib/api/supply";
-import { Code, DataTable, DateText, Pill } from "@/ui";
+import { Select, Code, DataTable, DateText, Pill } from "@/ui";
 import { inputCls } from "./FormField";
 
 export const SERVICE_TYPE_LABEL: Record<ServiceType, string> = {
@@ -83,14 +83,14 @@ export function SupplierSelect({
   });
   const items = list.data?.items ?? [];
   return (
-    <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || list.isLoading}>
+    <Select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || list.isLoading}>
       <option value="">{list.isLoading ? "Loading suppliers…" : items.length ? "Pick a supplier" : "No active supplier with this category"}</option>
       {items.map((s) => (
         <option key={s.id} value={s.id}>
           {s.company_name} ({s.code})
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 

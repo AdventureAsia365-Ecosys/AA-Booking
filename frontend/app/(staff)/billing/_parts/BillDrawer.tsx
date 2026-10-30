@@ -24,6 +24,10 @@ import {
   type SupplierPayout,
 } from "@/lib/api/supplierBills";
 import {
+  Checkbox,
+  Input,
+  Select,
+  Textarea,
   Button,
   ConfirmDialog,
   DataTable,
@@ -44,7 +48,6 @@ import { errorText, fieldCls, prepareEvidence, today } from "./PaymentDialogs";
 import { formatDay } from "@/ui/booking/dates";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
-const textareaCls = "rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border";
 
 function Field({ label, required = false, children, hint }: { label: string; required?: boolean; children: React.ReactNode; hint?: string }) {
   return (
@@ -608,9 +611,9 @@ export function BillForm({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Supplier" required>
             {supplier || editing ? (
-              <input className={fieldCls} value={supplier?.name ?? bill?.supplier.name ?? ""} disabled />
+              <Input size="sm" className={fieldCls} value={supplier?.name ?? bill?.supplier.name ?? ""} disabled />
             ) : (
-              <select
+              <Select size="sm"
                 className={fieldCls}
                 value={supplierId}
                 onChange={(e) => {
@@ -624,11 +627,11 @@ export function BillForm({
                     {s.company_name}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
           </Field>
           <Field label="Trip case" hint="Optional: leave empty for a statement covering several trips.">
-            <input
+            <Input size="sm"
               className={fieldCls}
               value={caseRef}
               disabled={editing}
@@ -640,21 +643,21 @@ export function BillForm({
             />
           </Field>
           <Field label="Supplier's bill number" required>
-            <input className={fieldCls} value={number} maxLength={100} disabled={locked} onChange={(e) => setNumber(e.target.value)} />
+            <Input size="sm" className={fieldCls} value={number} maxLength={100} disabled={locked} onChange={(e) => setNumber(e.target.value)} />
           </Field>
           <div className="grid grid-cols-[1fr_96px] gap-2">
             <Field label="Amount" required>
-              <input className={fieldCls} inputMode="decimal" value={amount} disabled={locked} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+              <Input size="sm" className={fieldCls} inputMode="decimal" value={amount} disabled={locked} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
             </Field>
             <Field label="Currency" required>
-              <input className={fieldCls} value={currency} maxLength={3} disabled={locked} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+              <Input size="sm" className={fieldCls} value={currency} maxLength={3} disabled={locked} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
             </Field>
           </div>
           <Field label="Issue date" required>
-            <DateField className={fieldCls} value={issue} disabled={locked} onChange={(v) => setIssue(v)} />
+            <DateField size="sm" className={fieldCls} value={issue} disabled={locked} onChange={(v) => setIssue(v)} />
           </Field>
           <Field label="Due date" required>
-            <DateField className={fieldCls} value={due} disabled={locked} onChange={(v) => setDue(v)} />
+            <DateField size="sm" className={fieldCls} value={due} disabled={locked} onChange={(v) => setDue(v)} />
           </Field>
         </div>
 
@@ -673,8 +676,7 @@ export function BillForm({
                   const st = lines[o.id] ?? { checked: false, amount: "" };
                   return (
                     <li key={o.id} className="flex flex-wrap items-center gap-2 py-1.5">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         aria-label={`Bill ${o.code}`}
                         checked={st.checked}
                         onChange={(e) =>
@@ -695,7 +697,7 @@ export function BillForm({
                           {o.billed.length ? ` · already billed ${o.billed.map((x) => formatMoney(x.amount, x.currency)).join(" + ")}` : ""}
                         </span>
                       </span>
-                      <input
+                      <Input size="sm"
                         className={`${fieldCls} w-[120px]`}
                         inputMode="decimal"
                         disabled={!st.checked}
@@ -718,7 +720,7 @@ export function BillForm({
         )}
 
         <Field label="Notes" hint={hasB2b || bill?.trip_case?.channel === "b2b" ? "No traveller names on a B2B trip." : undefined}>
-          <textarea rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} className={textareaCls} />
+          <Textarea rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         {!locked && !hasB2b && (
           <Field label="Supplier's document (PDF or a photo, at most 3 MB)" hint="Optional now; the approver checks it. Stored privately.">
@@ -785,26 +787,26 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={`Amount (${bill.currency})`} required>
-            <input className={fieldCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <Input size="sm" className={fieldCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
           <Field label="Method">
-            <select className={fieldCls} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+            <Select size="sm" className={fieldCls} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
               {Object.entries(PAYMENT_METHOD_LABEL).map(([v, l]) => (
                 <option key={v} value={v}>
                   {l}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label="Day the money left" required>
-            <DateField className={fieldCls} value={paidOn} onChange={(v) => setPaidOn(v)} />
+            <DateField size="sm" className={fieldCls} value={paidOn} onChange={(v) => setPaidOn(v)} />
           </Field>
           <Field label="Bank reference" hint="Never a card number.">
-            <input className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />
+            <Input size="sm" className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />
           </Field>
         </div>
         <Field label="Note">
-          <textarea rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} className={textareaCls} />
+          <Textarea rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
         <div className="flex flex-col gap-2 rounded-md border border-line2 p-3">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">
@@ -818,7 +820,7 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
             <p>{errorText(run.error)}</p>
             {duplicate && (
               <label className="mt-1 flex items-center gap-2 text-xs text-body">
-                <input type="checkbox" checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} /> It is another transfer
+                <Checkbox checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} /> It is another transfer
                 with the same reference: record it anyway
               </label>
             )}

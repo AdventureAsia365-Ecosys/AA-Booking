@@ -17,13 +17,13 @@ import { ApiError } from "@/lib/api/client";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, proposalsApi, type Channel, type QuotePreview, type QuotePreviewInput } from "@/lib/api/proposals";
 import { costLineError, pct, type CostLine } from "@/lib/proposalDraft";
 import { EmptyState, Spinner } from "../core/primitives";
+import { Checkbox, Input, Select, Textarea } from "../core/FormControls";
 import { formatMoney } from "../core/format";
 import { Money } from "../core/Money";
 import { DateText } from "../core/DateText";
 import { useCan } from "../local/StaffContext";
 
-const inputCls =
-  "h-9 w-full min-w-0 rounded-md border border-line bg-card px-3 text-[13px] text-ink outline-none focus:border-accent-border disabled:bg-panel disabled:text-muted";
+const inputCls = "w-full min-w-0";
 
 // ── Live quote ───────────────────────────────────────────────────────────────
 export function useQuotePreview(request: QuotePreviewInput | null, delayMs = 500) {
@@ -77,7 +77,7 @@ export function CostLinesEditor({
           <div key={l.key} className="rounded-md border border-line2 bg-panel p-2">
             <div className="grid grid-cols-[minmax(0,1fr)_84px_auto] items-center gap-2">
               <label className="sr-only" htmlFor={`${l.key}-amt`}>Net amount</label>
-              <input
+              <Input size="sm"
                 id={`${l.key}-amt`}
                 inputMode="decimal"
                 placeholder="Net amount"
@@ -87,7 +87,7 @@ export function CostLinesEditor({
                 className={`${inputCls} bk-tabular`}
               />
               <label className="sr-only" htmlFor={`${l.key}-cur`}>Currency</label>
-              <input
+              <Input size="sm"
                 id={`${l.key}-cur`}
                 list="bk-cost-currencies"
                 maxLength={3}
@@ -108,14 +108,14 @@ export function CostLinesEditor({
             </div>
             <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
               <label className="sr-only" htmlFor={`${l.key}-note`}>Supplier note</label>
-              <input
+              <Input size="sm"
                 id={`${l.key}-note`}
                 placeholder="Supplier / what this covers (optional)"
                 maxLength={200}
                 value={l.supplier_note}
                 disabled={disabled}
                 onChange={(e) => update(i, { supplier_note: e.target.value })}
-                className={`${inputCls} h-8 text-xs`}
+                className={inputCls} style={{ fontSize: 12, height: 32 }}
               />
               {sell != null && sellCurrency && (
                 <span className="text-right text-xs text-muted">
@@ -169,33 +169,33 @@ export function PriceSettings({
     <div className="grid grid-cols-2 gap-3">
       <label className="flex flex-col gap-1">
         <span className="text-[12px] font-medium text-ink">Channel</span>
-        <select value={value.channel} disabled={disabled} onChange={(e) => set("channel", e.target.value as Channel)} className={inputCls}>
+        <Select size="sm" value={value.channel} disabled={disabled} onChange={(e) => set("channel", e.target.value as Channel)} className={inputCls}>
           {CHANNELS.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-[12px] font-medium text-ink">Selling currency</span>
-        <select value={value.currency} disabled={disabled} onChange={(e) => set("currency", e.target.value)} className={inputCls}>
+        <Select size="sm" value={value.currency} disabled={disabled} onChange={(e) => set("currency", e.target.value)} className={inputCls}>
           {SELLING_CURRENCIES.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <label className="col-span-2 flex cursor-pointer items-center gap-2 text-[13px] text-ink">
-        <input type="checkbox" checked={value.peak} disabled={disabled} onChange={(e) => set("peak", e.target.checked)} className="h-4 w-4 accent-accent" />
+        <Checkbox checked={value.peak} disabled={disabled} onChange={(e) => set("peak", e.target.checked)} />
         Peak season dates (adds the rule&apos;s peak uplift)
       </label>
       <label className="col-span-2 flex flex-col gap-1">
         <span className="text-[12px] font-medium text-ink">
           Override total <span className="font-normal text-muted">(optional, in {value.currency})</span>
         </span>
-        <input
+        <Input size="sm"
           inputMode="decimal"
           placeholder="Leave empty to use the computed total"
           value={value.override}
@@ -208,14 +208,14 @@ export function PriceSettings({
       {showReason && belowFloor && value.override.trim() && (
         <label className="col-span-2 flex flex-col gap-1">
           <span className="text-[12px] font-medium text-danger">Reason for pricing below the floor *</span>
-          <textarea
+          <Textarea
             rows={2}
             maxLength={500}
             value={value.overrideReason}
             disabled={disabled}
             onChange={(e) => set("overrideReason", e.target.value)}
             placeholder="e.g. repeat client, matched a competitor quote"
-            className="rounded-md border border-danger-border bg-card px-3 py-2 text-[13px] text-ink outline-none focus:border-danger"
+            className="border-danger-border"
           />
         </label>
       )}

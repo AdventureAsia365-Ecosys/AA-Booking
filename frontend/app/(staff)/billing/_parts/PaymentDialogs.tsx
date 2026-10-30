@@ -19,13 +19,12 @@ import {
   type PaymentMethod,
 } from "@/lib/api/billing";
 import type { OpsFile } from "@/lib/api/supplierBookings";
-import { Button, ConfirmDialog, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
+import { Checkbox, Input, Select, Textarea, Button, ConfirmDialog, Modal, Money, formatMoney, useToast, DateField } from "@/ui";
 import { prepareUpload } from "../../_parts/SupplyContent";
 import { formatDay } from "@/ui/booking/dates";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
-export const fieldCls =
-  "h-9 w-full min-w-0 rounded-md border border-line bg-card px-3 text-sm text-ink outline-none focus:border-accent-border";
+export const fieldCls = "w-full min-w-0";
 
 export function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
@@ -147,50 +146,50 @@ function RecordBody({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Type</span>
-          <select className={fieldCls} value={kind} onChange={(e) => setKind(e.target.value as PaymentKind)}>
+          <Select size="sm" className={fieldCls} value={kind} onChange={(e) => setKind(e.target.value as PaymentKind)}>
             <option value="receipt">Money received</option>
             <option value="refund">Refund paid back</option>
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">
             Amount ({invoice.currency}) <span className="text-danger">*</span>
           </span>
-          <input className={fieldCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+          <Input size="sm" className={fieldCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Method</span>
-          <select className={fieldCls} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+          <Select size="sm" className={fieldCls} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
             {Object.entries(PAYMENT_METHOD_LABEL).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">
             Day the money moved <span className="text-danger">*</span>
           </span>
-          <DateField className={fieldCls} value={receivedOn} onChange={(v) => setReceivedOn(v)} />
+          <DateField size="sm" className={fieldCls} value={receivedOn} onChange={(v) => setReceivedOn(v)} />
         </label>
       </div>
       <label className="flex flex-col gap-1">
         <span className="text-xs font-semibold text-muted">Bank or receipt reference</span>
-        <input className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} placeholder="e.g. VCB FT2630012345" />
+        <Input size="sm" className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} placeholder="e.g. VCB FT2630012345" />
         <span className="text-xs text-muted">Never a card number.</span>
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-xs font-semibold text-muted">Note</span>
-        <textarea rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} className="rounded-md border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent-border" />
+        <Textarea rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
       </label>
       <label className="flex items-center gap-2 text-xs text-body">
-        <input type="checkbox" checked={other} onChange={(e) => setOther(e.target.checked)} /> The money arrived in another currency
+        <Checkbox checked={other} onChange={(e) => setOther(e.target.checked)} /> The money arrived in another currency
       </label>
       {other && (
         <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-          <input className={fieldCls} inputMode="decimal" value={receivedAmount} onChange={(e) => setReceivedAmount(e.target.value)} placeholder="Amount that arrived" />
-          <input className={fieldCls} value={receivedCurrency} maxLength={3} onChange={(e) => setReceivedCurrency(e.target.value.toUpperCase())} aria-label="Currency that arrived" />
+          <Input size="sm" className={fieldCls} inputMode="decimal" value={receivedAmount} onChange={(e) => setReceivedAmount(e.target.value)} placeholder="Amount that arrived" />
+          <Input size="sm" className={fieldCls} value={receivedCurrency} maxLength={3} onChange={(e) => setReceivedCurrency(e.target.value.toUpperCase())} aria-label="Currency that arrived" />
         </div>
       )}
       {method !== "cash" && (
@@ -207,7 +206,7 @@ function RecordBody({
           <p>{errorText(run.error)}</p>
           {duplicate && (
             <label className="mt-1 flex items-center gap-2 text-xs text-body">
-              <input type="checkbox" checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} /> It is another payment with
+              <Checkbox checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} /> It is another payment with
               the same reference: record it anyway
             </label>
           )}
