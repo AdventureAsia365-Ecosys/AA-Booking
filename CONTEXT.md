@@ -1382,7 +1382,8 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   cell groups two facts; the Countries grid uses `ExportCsvButton` in the bar's `tools` slot). Every Booking CSV goes
   through the wrapper's button: row tools (row menu, open link, details) are left out and every value passes the
   spreadsheet formula guard `ui/booking/csvCell.ts`. Dates are typed and shown en-GB through the kit
-  `DateField` ("28 Oct 2026", day-first input; `ui/core/DateField.tsx` since AA-994 S4a/S4b) and the Booking
+  `DateField` ("28 Oct 2026", day-first input; `ui/core/DateField.tsx` since AA-994 S4a/S4b; `DateField` from `@/ui` is
+  `ui/booking/FormDateField.tsx`, the kit field with the kit control look, `size="sm"` next to small Inputs) and the Booking
   `TimeField` (24 h, `ui/booking/TimeField.tsx`) instead of the browser's
   locale inputs; the box always shows the value the page holds (an out-of-range day is passed up and marked invalid so
   the page's own checks block it; unreadable text is dropped on blur); date-only values ("2026-10-09") are formatted as calendar days (`ui/booking/dates.ts` `formatDay`,

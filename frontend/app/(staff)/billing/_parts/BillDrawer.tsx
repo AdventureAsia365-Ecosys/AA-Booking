@@ -654,10 +654,10 @@ export function BillForm({
             </Field>
           </div>
           <Field label="Issue date" required>
-            <DateField className={fieldCls} value={issue} disabled={locked} onChange={(v) => setIssue(v)} />
+            <DateField size="sm" className={fieldCls} value={issue} disabled={locked} onChange={(v) => setIssue(v)} />
           </Field>
           <Field label="Due date" required>
-            <DateField className={fieldCls} value={due} disabled={locked} onChange={(v) => setDue(v)} />
+            <DateField size="sm" className={fieldCls} value={due} disabled={locked} onChange={(v) => setDue(v)} />
           </Field>
         </div>
 
@@ -799,7 +799,7 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
             </Select>
           </Field>
           <Field label="Day the money left" required>
-            <DateField className={fieldCls} value={paidOn} onChange={(v) => setPaidOn(v)} />
+            <DateField size="sm" className={fieldCls} value={paidOn} onChange={(v) => setPaidOn(v)} />
           </Field>
           <Field label="Bank reference" hint="Never a card number.">
             <Input size="sm" className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />

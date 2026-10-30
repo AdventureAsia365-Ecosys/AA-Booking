@@ -635,7 +635,7 @@ function AddBooking({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Service date</span>
-            <DateField className={fieldCls} value={form.service_date ?? ""} onChange={(v) => set({ service_date: v || null })} />
+            <DateField size="sm" className={fieldCls} value={form.service_date ?? ""} onChange={(v) => set({ service_date: v || null })} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Net amount</span>

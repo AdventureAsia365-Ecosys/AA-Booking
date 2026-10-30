@@ -218,7 +218,7 @@ function FormBody({ mode, onClose, onDone }: { mode: Mode; onClose: () => void; 
                 ))}
               </Select>
               <Input size="sm" className={fieldCls} inputMode="decimal" aria-label="Amount" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} />
-              <DateField className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(v) => setRow(i, { due_date: v })} />
+              <DateField size="sm" className={fieldCls} aria-label="Due date" value={r.due_date} onChange={(v) => setRow(i, { due_date: v })} />
               <Button variant="ghost" size="sm" ariaLabel="Remove payment" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>
                 <Trash2 size={14} />
               </Button>

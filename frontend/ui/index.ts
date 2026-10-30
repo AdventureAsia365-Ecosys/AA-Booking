@@ -28,7 +28,9 @@ export {
   FilterBar, FilterField, useUrlFilters, filterControlStyle, FILTER_CONTROL_CLASS, type FilterSelect,
 } from "./core/FilterBar";
 export { RowMenu, type RowMenuItem } from "./core/RowMenu";
-export { DateField } from "./core/DateField";
+// The kit DateField with the kit control look (40 px, border, focus / invalid / disabled states) for forms; `size="sm"`
+// next to small Inputs. The FilterBar keeps its own filter look.
+export { FormDateField as DateField, type FormDateFieldProps as DateFieldProps } from "./booking/FormDateField";
 // AA-994 S6a/S6d: the kit form controls (lint rule no-raw-form-control).
 export {
   Field, Input, Select, Textarea, Checkbox, Radio, controlStyle, CONTROL_CLASS,
@@ -76,6 +78,7 @@ export * from "./booking/NotificationPopover";
 export * from "./booking/notifications";
 export * from "./booking/NotificationItem";
 export * from "./booking/audit";
+export * from "./booking/paymentEvidence";
 export * from "./booking/LightTable";
 
 // Kit loading placeholders under the spec names (UI spec §5 "Skeleton").

@@ -36,6 +36,7 @@ import {
   Money,
   PageFrame,
   PaymentStateBadge,
+  paymentEvidenceFileId,
   RowMenu,
   type RowMenuItem,
   Section,
@@ -408,9 +409,9 @@ function PaymentsTab({ canRead }: { canRead: boolean }) {
       { label: "View payment", icon: <Eye size={15} />, onSelect: () => router.push(`/billing/payments/${encodeURIComponent(p.ref)}`) },
       { label: "View invoice", icon: <FileText size={15} />, onSelect: () => router.push(`/billing/invoices/${encodeURIComponent(p.invoice.number)}`) },
     ];
-    // The evidence file (bank slip, receipt), else the newest attached file; a 5-minute download link.
-    const file = p.files.find((f) => f.id === p.evidence_file_id) ?? p.files[p.files.length - 1];
-    if (file) items.push({ label: "Download evidence", icon: <Download size={15} />, onSelect: () => download.mutate(file.id) });
+    // The evidence file (bank slip, receipt): list rows carry its id but no `files`; a 5-minute download link.
+    const fileId = paymentEvidenceFileId(p);
+    if (fileId) items.push({ label: "Download evidence", icon: <Download size={15} />, onSelect: () => download.mutate(fileId) });
     if (p.actions.void) items.push({ label: "Void", icon: <Ban size={15} />, onSelect: () => setVoiding(p), danger: true, divider: true });
     return items;
   }

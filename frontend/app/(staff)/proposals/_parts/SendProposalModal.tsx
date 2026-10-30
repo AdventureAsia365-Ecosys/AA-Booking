@@ -168,7 +168,7 @@ function SendForm({
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium uppercase tracking-[0.04em] text-muted">Valid until</span>
-            <DateField value={validUntil} min={min} max={max} onChange={(v) => setValidUntil(v)} className={`${fieldCls} h-10`} wrapperClassName="sm:w-56" />
+            <DateField value={validUntil} min={min} max={max} onChange={(v) => setValidUntil(v)} className={fieldCls} wrapperClassName="sm:w-56" />
             <span className="text-xs text-muted">
               {QUOTE_VALIDITY_RANGE_DAYS.min}–{QUOTE_VALIDITY_RANGE_DAYS.max} days from today.
             </span>

@@ -171,7 +171,7 @@ function RecordBody({
           <span className="text-xs font-semibold text-muted">
             Day the money moved <span className="text-danger">*</span>
           </span>
-          <DateField className={fieldCls} value={receivedOn} onChange={(v) => setReceivedOn(v)} />
+          <DateField size="sm" className={fieldCls} value={receivedOn} onChange={(v) => setReceivedOn(v)} />
         </label>
       </div>
       <label className="flex flex-col gap-1">
