@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.12.0...v0.13.0) (2026-10-30)
+
+
+### Features
+
+* bk-034 expand index on trip_case_version_itinerary.source_tour_id ([#149](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/149)) ([f6604ac](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f6604ac665559595ae0befe0ca30493afe64438e))
+* inquiry inbox key contract view for the CIS TP-03 handoff check (bk-035) ([#152](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/152)) ([22d55dd](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/22d55dd8cb0224d66ab8d6f3b4321ea73a98f902))
+
 ## [0.12.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.11.0...v0.12.0) (2026-10-29)
 
 
