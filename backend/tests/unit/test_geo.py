@@ -42,6 +42,9 @@ def place_row(**over: Any) -> dict[str, Any]:
         "active_suppliers": 2,
         "active_hotels": 1,
         "active_services": 0,
+        "hidden_from_customers": False,
+        "hidden_reason": None,
+        "merged_into": None,
     }
     row.update(over)
     return row
@@ -100,7 +103,7 @@ def test_action_and_summary() -> None:
 async def test_list_destinations_filters_bind_values_and_sorts() -> None:
     conn = (
         ScriptedConn()
-        .on("SELECT count(*) FROM catalog.v_destination d LEFT JOIN booking.destination_profiles", 1)
+        .on("SELECT count(*) FROM catalog.v_destination d LEFT JOIN catalog.v_destination_redirect rd", 1)
         .on("ORDER BY", [place_row()])
         .on("count(DISTINCT d.country_iso2)", {"total": 3, "active": 2, "inactive": 1, "countries": 2})
     )
@@ -115,6 +118,40 @@ async def test_list_destinations_filters_bind_values_and_sorts() -> None:
         await geo.list_destinations(ScriptedConn(), sort="password")
     with pytest.raises(Invalid):
         await geo.list_destinations(ScriptedConn(), status="gone")
+
+
+@pytest.mark.asyncio
+async def test_list_destinations_marks_and_filters_places_hidden_from_customers() -> None:
+    """AA-997: staff still see a place CIS hides (suspect point) or merged, with the reason; ``visibility`` filters."""
+    hidden = place_row(hidden_from_customers=True, hidden_reason="location_unconfirmed")
+    conn = (
+        ScriptedConn()
+        .on("SELECT count(*) FROM", 1)
+        .on("ORDER BY", [hidden])
+        .on("count(DISTINCT d.country_iso2)", {"total": 3, "active": 3, "inactive": 0, "countries": 1, "hidden": 1})
+    )
+    out = await geo.list_destinations(conn, visibility="Hidden")
+    assert out["items"][0]["lat"] == 21.03 and out["items"][0]["hidden_reason"] == "location_unconfirmed"
+    assert out["summary"]["hidden"] == 1
+    page_sql, _ = next((s, a) for s, a in conn.calls if "ORDER BY" in s)
+    assert f"WHERE {geo.HIDDEN_SQL}" in page_sql
+    assert "LEFT JOIN catalog.v_destination_redirect rd ON rd.destination_id = d.destination_id" in page_sql
+    assert "'merged'" in page_sql and "'location_unconfirmed'" in page_sql
+    assert "rd.keeper_id::text AS merged_into" in page_sql
+    summary_sql = next(s for s, _ in conn.calls if "count(DISTINCT d.country_iso2)" in s)
+    assert "LEFT JOIN catalog.v_destination_redirect rd" in summary_sql and "AS hidden" in summary_sql
+    shown = ScriptedConn().on("SELECT count(*) FROM", 0)
+    await geo.list_destinations(shown, visibility="shown", q="ha")
+    shown_sql = next(s for s, _ in shown.calls if "ORDER BY" in s)
+    assert f"AND NOT {geo.HIDDEN_SQL}" in shown_sql
+    with pytest.raises(Invalid):
+        await geo.list_destinations(ScriptedConn(), visibility="secret")
+
+
+def test_hidden_reason_prefers_merged_over_an_unconfirmed_point() -> None:
+    """A merged row that is also suspect reads ``merged``: staff fix it by looking at the keeper."""
+    assert geo.HIDDEN_REASON_SQL.index("'merged'") < geo.HIDDEN_REASON_SQL.index("'location_unconfirmed'")
+    assert "d.geo_status = 'suspect'" in geo.HIDDEN_SQL and "rd.keeper_id IS NOT NULL" in geo.HIDDEN_SQL
 
 
 @pytest.mark.asyncio
@@ -337,12 +374,16 @@ def test_routes_map_arguments_and_permissions(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(geo, "update_country", update_country)
 
     with make_client(CONTENT) as c:  # every staff role reads
-        r = c.get("/booking/catalog/geo/destinations?q=ha&country=VN&status=inactive&limit=50&offset=25&sort=name")
+        r = c.get(
+            "/booking/catalog/geo/destinations?q=ha&country=VN&status=inactive&visibility=hidden"
+            "&limit=50&offset=25&sort=name"
+        )
         assert r.status_code == 200
         assert listing.calls[0][1] == {
             "q": "ha",
             "country": "VN",
             "status": "inactive",
+            "visibility": "hidden",
             "sort": "name",
             "limit": 50,
             "offset": 25,
@@ -352,6 +393,7 @@ def test_routes_map_arguments_and_permissions(monkeypatch: pytest.MonkeyPatch) -
         assert c.get("/booking/catalog/geo/countries/VN").status_code == 200
         assert c.get("/booking/catalog/geo/countries/V1").status_code == 422
         assert c.get("/booking/catalog/geo/destinations/not-a-uuid").status_code == 422
+        assert c.get("/booking/catalog/geo/destinations?visibility=all").status_code == 422
         assert c.patch(f"/booking/catalog/geo/destinations/{PLACE}", json={"status": "inactive"}).status_code == 403
     with make_client(SALES) as c:
         assert c.patch("/booking/catalog/geo/countries/VN", json={"status": "inactive"}).status_code == 403

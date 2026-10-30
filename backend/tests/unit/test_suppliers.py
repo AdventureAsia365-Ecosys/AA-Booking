@@ -172,6 +172,47 @@ async def test_catalog_fails_closed_on_writes_and_soft_on_reads() -> None:
 
 
 @pytest.mark.asyncio
+async def test_picker_never_offers_a_merged_place_and_a_write_naming_one_is_422() -> None:
+    """AA-997: a merged CIS place (v_destination_redirect row) is not pickable; its keeper is."""
+    conn = ScriptedConn([("catalog.v_destination", [])])
+    await catalog.search_destinations(conn, q="han")
+    sql = conn.calls[0][0]
+    assert "LEFT JOIN catalog.v_destination_redirect rd ON rd.destination_id = d.destination_id" in sql
+    assert "AND rd.keeper_id IS NULL" in sql and "AS hidden_reason" in sql
+    keeper = "d0000000-0000-4000-8000-0000000000aa"
+    merged = {
+        "destination_id": SUPPLIER_ID,
+        "name": "Fictive Bay",
+        "country": "Vietnam",
+        "country_code": "VN",
+        "hidden_from_customers": True,
+        "hidden_reason": "merged",
+        "merged_into": keeper,
+    }
+    with pytest.raises(Invalid) as exc:
+        await catalog.require_destination(ScriptedConn([("catalog.v_destination", merged)]), SUPPLIER_ID)
+    assert exc.value.code == "merged_destination" and exc.value.body()["merged_into"] == keeper
+    # name resolution of an id a supplier already holds keeps working
+    by_id = await catalog.destinations_by_id(ScriptedConn([("catalog.v_destination", [merged])]), [SUPPLIER_ID])
+    assert by_id[SUPPLIER_ID]["merged_into"] == keeper
+
+
+@pytest.mark.asyncio
+async def test_a_place_with_an_unconfirmed_point_stays_pickable() -> None:
+    suspect = {
+        "destination_id": SUPPLIER_ID,
+        "name": "Fictive Bay",
+        "country": "Vietnam",
+        "country_code": "VN",
+        "hidden_from_customers": True,
+        "hidden_reason": "location_unconfirmed",
+        "merged_into": None,
+    }
+    place = await catalog.require_destination(ScriptedConn([("catalog.v_destination", suspect)]), SUPPLIER_ID)
+    assert place["hidden_reason"] == "location_unconfirmed"
+
+
+@pytest.mark.asyncio
 async def test_unknown_place_is_422() -> None:
     conn = ScriptedConn([("catalog.v_destination", None)])
     with pytest.raises(Invalid) as exc:

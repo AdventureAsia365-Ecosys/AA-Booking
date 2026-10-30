@@ -234,3 +234,42 @@ async def test_countries_list_detail_and_update(
     pk_edit = await c.patch("/catalog/geo/countries/PK", json={"area": "South Asia"}, headers=boss)
     assert pk_edit.status_code == 200, pk_edit.text
     assert pk_edit.json()["area"] == "South Asia" and pk_edit.json()["booking_reference"] is True
+
+
+async def test_places_hidden_from_customers_stay_visible_to_staff_with_the_reason(
+    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    """AA-997: CIS hides Hoi An's point (geo_status 'suspect') and merges Atlantis into Hanoi. Staff still list both,
+    with coordinates, flagged with the reason; ``visibility`` filters them; the supplier picker drops the merged one."""
+    c, cis = client
+    content = _auth(cis, CONTENT)
+    await admin.execute(
+        "INSERT INTO catalog.stub_destination_state (destination_id, geo_status, duplicate_of)"
+        " VALUES ($1::uuid, 'suspect', NULL), ($2::uuid, 'ok', $3::uuid)",
+        HOI_AN,
+        ATLANTIS,
+        HANOI,
+    )
+    try:
+        listing = (await c.get("/catalog/geo/destinations", headers=content)).json()
+        assert listing["total"] == 5 and listing["summary"]["hidden"] == 2
+        by_name = {i["name"]: i for i in listing["items"]}
+        assert (by_name["Hoi An"]["hidden_reason"], by_name["Hoi An"]["lat"]) == ("location_unconfirmed", 15.88)
+        assert by_name["Atlantis"]["hidden_reason"] == "merged" and by_name["Atlantis"]["merged_into"] == HANOI
+        assert by_name["Hanoi"]["hidden_from_customers"] is False and by_name["Hanoi"]["hidden_reason"] is None
+        hidden = (await c.get("/catalog/geo/destinations", params={"visibility": "hidden"}, headers=content)).json()
+        assert [i["name"] for i in hidden["items"]] == ["Atlantis", "Hoi An"] and hidden["total"] == 2
+        shown = (await c.get("/catalog/geo/destinations", params={"visibility": "shown"}, headers=content)).json()
+        assert [i["name"] for i in shown["items"]] == ["Hanoi", "Lahore", "Luang Prabang"]
+        detail = (await c.get(f"/catalog/geo/destinations/{HOI_AN}", headers=content)).json()
+        assert detail["hidden_from_customers"] is True and detail["lng"] == 108.33
+        country = (await c.get("/catalog/geo/countries/VN", headers=content)).json()
+        assert {i["name"]: i["hidden_reason"] for i in country["destination_items"]} == {
+            "Hanoi": None,
+            "Hoi An": "location_unconfirmed",
+        }
+        picker = (await c.get("/catalog/destinations", headers=content)).json()["items"]
+        names = {i["name"]: i for i in picker}
+        assert "Atlantis" not in names and names["Hoi An"]["hidden_reason"] == "location_unconfirmed"
+    finally:
+        await admin.execute("TRUNCATE catalog.stub_destination_state")

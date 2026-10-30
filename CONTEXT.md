@@ -52,7 +52,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   pattern outbox → pull job → `booking.inbox_events`. CIS catalog read model (contract `catalog.tour.v1`, CIS
   migration 225 grant to role `booking`), **read live** at request time (no copy, no outbox consumer):
   `catalog.v_destination` (supplier place picker and check, AA-822; Catalog → Destinations / Countries, AA-996, with
-  `v_destination_photo` feature-detected) and `catalog.v_tour` / `v_tour_day` /
+  `v_destination_photo` feature-detected; AA-997: with `catalog.v_destination_redirect` (CIS 257) and
+  `v_destination.geo_status`, a place CIS hides from customers or merged stays listed for staff, flagged
+  `hidden_from_customers` + reason, and the picker never offers a merged place) and `catalog.v_tour` / `v_tour_day` /
   `v_tour_photo` (trip plan endpoints, AA-679, S237 decision D4). **Tour liveness** (AA-986 L5, root ADR 0015
   decision 5, contract `catalog.tour.v1.3`, CIS migration 274): `catalog.v_tour_retired` (tombstone: `retired` /
   `paused` + reason; a `restored` row of a key served again is no tombstone), read live next to `v_tour` (`app/catalog/liveness.py`), and `catalog.v_tour_lifecycle_outbox`,

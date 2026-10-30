@@ -128,10 +128,20 @@ INSERT INTO catalog.v_country (iso2, iso3, numeric_code, name, iso_name) VALUES
     ('KZ', 'KAZ', '398', 'Kazakhstan', 'Kazakhstan')
 ON CONFLICT (iso2) DO NOTHING;
 
+-- AA-997: CIS geo_status (228) and duplicate_of (257) of the fixed places; no row = 'ok' and not merged. Tests write
+-- here to hide (suspect) or merge a place and TRUNCATE it after.
+CREATE TABLE IF NOT EXISTS catalog.stub_destination_state (
+    destination_id  UUID PRIMARY KEY,
+    geo_status      TEXT NOT NULL DEFAULT 'ok',
+    duplicate_of    UUID
+);
+
 CREATE OR REPLACE VIEW catalog.v_destination AS
 SELECT 'cis'::text AS source_system, d.id::text AS source_id, d.id AS destination_id, d.name, d.country,
        d.lat, d.lng, NULL::text AS cover_photo_path, NULL::text AS cover_image_url, 0::bigint AS photo_count,
-       now() AS created_at, now() AS updated_at, d.country_iso2
+       now() AS created_at, now() AS updated_at, d.country_iso2,
+       coalesce((SELECT s.geo_status FROM catalog.stub_destination_state s WHERE s.destination_id = d.id), 'ok')
+           AS geo_status
 FROM (VALUES
     ('d0000000-0000-4000-8000-000000000001'::uuid, 'Hanoi', 'Vietnam', 21.03::float8, 105.85::float8, 'VN'::char(2)),
     ('d0000000-0000-4000-8000-000000000002'::uuid, 'Luang Prabang', 'Laos', 19.89::float8, 102.13::float8, 'LA'),
@@ -139,6 +149,12 @@ FROM (VALUES
     ('d0000000-0000-4000-8000-000000000004'::uuid, 'Atlantis', 'Nowhere', 0::float8, 0::float8, NULL),
     ('d0000000-0000-4000-8000-000000000005'::uuid, 'Lahore', 'Pakistan', 31.55::float8, 74.34::float8, 'PK')
 ) AS d (id, name, country, lat, lng, country_iso2);
+
+-- CIS 257: a merged destination id -> its keeper (the merged row stays in v_destination).
+CREATE OR REPLACE VIEW catalog.v_destination_redirect AS
+SELECT s.destination_id, s.duplicate_of AS keeper_id
+FROM catalog.stub_destination_state s
+WHERE s.duplicate_of IS NOT NULL;
 
 -- The live views carry the live tour's tour_id on every day and photo row.
 CREATE OR REPLACE FUNCTION catalog.stub_fill_tour_id() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -190,4 +206,5 @@ FROM catalog.v_tour_place p;
 -- CIS 225 grants (catalog_owner owns the views; role booking reads them).
 GRANT USAGE ON SCHEMA catalog TO booking;
 GRANT SELECT ON catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo, catalog.v_tour_place,
-    catalog.v_tour_place_name, catalog.v_destination, catalog.v_destination_photo, catalog.v_country TO booking;
+    catalog.v_tour_place_name, catalog.v_destination, catalog.v_destination_photo, catalog.v_country,
+    catalog.v_destination_redirect TO booking;

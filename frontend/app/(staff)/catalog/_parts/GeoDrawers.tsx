@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, ExternalLink, MapPin, Pencil, Store, Truck } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
-import { geoApi, type DestinationDetail, type GeoStatus } from "@/lib/api/geo";
+import { geoApi, type DestinationDetail, type GeoStatus, type HiddenReason } from "@/lib/api/geo";
 import { Input, Select, Textarea, Button, CisPhoto, DateText, Drawer, FormDrawer, Pill, useCan, useStaff, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -29,6 +29,21 @@ export const CIS_PLACES_PATH = "/admin/places";
 
 export function GeoStatusBadge({ status }: { status: GeoStatus }) {
   return status === "active" ? <Pill tone="success">Active</Pill> : <Pill tone="neutral">Inactive</Pill>;
+}
+
+/** AA-997: why CIS keeps a place off customer maps; the place and its point are fixed in CIS Places. */
+export const HIDDEN_REASON_LABEL: Record<HiddenReason, string> = {
+  location_unconfirmed: "Location not confirmed in CIS",
+  merged: "Merged into another place in CIS",
+};
+
+export function CustomerVisibilityBadge({ reason }: { reason: HiddenReason | null }) {
+  if (!reason) return <Pill tone="success">Shown</Pill>;
+  return (
+    <Pill tone="warning" title={HIDDEN_REASON_LABEL[reason]}>
+      Hidden from customers
+    </Pill>
+  );
 }
 
 export function coords(lat: number | null, lng: number | null): string | null {
@@ -200,6 +215,12 @@ function DestinationView({ d }: { d: DestinationDetail }) {
           <span className="inline-flex flex-wrap items-center gap-2">
             <GeoStatusBadge status={d.status} />
             {d.status_reason && <span className="text-xs text-muted">{d.status_reason}</span>}
+          </span>
+        </Fact>
+        <Fact label="Customer maps">
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <CustomerVisibilityBadge reason={d.hidden_reason} />
+            {d.hidden_reason && <span className="text-xs text-muted">{HIDDEN_REASON_LABEL[d.hidden_reason]}</span>}
           </span>
         </Fact>
         <Fact label="Photos in CIS">{d.photo_count}</Fact>
