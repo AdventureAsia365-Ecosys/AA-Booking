@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.13.0...v0.14.0) (2026-10-30)
+
+
+### Features
+
+* hold answers carry the held quote's hash, FX lock and line prices (booking.b2b.v1 1.2) ([#155](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/155)) ([5f2b320](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/5f2b3203ab728aa16d3766eedf36ed45f0d75514))
+* hotel photo grid, billing row menus, pages on the kit frame and form controls ([#156](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/156)) ([45de036](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/45de0368663b2c70a6156c8f456d152398968c26))
+
+
+### Bug Fixes
+
+* schema gate accepts a newer green standalone isolation probe after a probe-only red run ([#153](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/153)) ([e2412c6](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/e2412c6d4e46c04b384bb8855bf13c4c456352c6))
+
 ## [0.13.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.12.0...v0.13.0) (2026-10-30)
 
 
