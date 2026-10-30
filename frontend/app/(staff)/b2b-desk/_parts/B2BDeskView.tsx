@@ -37,6 +37,7 @@ import {
   PageFrame,
   Pill,
   Section,
+  SegmentedControl,
   useCan,
   useToast,
   useUrlFilters,
@@ -291,19 +292,19 @@ function OnRequestTab() {
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {(["open", "answered", "all"] as const).map((k) => (
-          <button
-            key={k}
-            onClick={() => set("state", k === "open" ? null : k)}
-            className={`rounded-full border px-3 py-1 text-xs ${
-              state === k ? "border-accent bg-accent-tint font-semibold text-accent-deep" : "border-line text-muted hover:text-ink"
-            }`}
-          >
-            {k === "open" ? "Waiting for an answer" : k === "answered" ? "Answered" : "All"}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        appearance="chips"
+        size="sm"
+        label="Request state"
+        className="mb-3"
+        options={[
+          { value: "open", label: "Waiting for an answer" },
+          { value: "answered", label: "Answered" },
+          { value: "all", label: "All" },
+        ]}
+        value={state}
+        onChange={(k) => set("state", k === "open" ? null : k)}
+      />
       <DataTable<OnRequestLine>
         searchable={false}
         tableId="b2b-desk-on-request"

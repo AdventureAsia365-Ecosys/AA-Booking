@@ -22,6 +22,8 @@ import {
   DateText,
   EmptyState,
   FromCisTag,
+  IconButton,
+  LinkButton,
   MoneyBadge,
   PersonCell,
   Pill,
@@ -29,6 +31,7 @@ import {
   Skeleton,
   Stepper,
   SupplyBadge,
+  Tabs,
   TRIP_CASE_STATUS_META,
   TripCaseStatusBadge,
   Money,
@@ -147,33 +150,29 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
             </div>
           </div>
           <Stepper status={c.status} cancelReason={cancelNote} />
-          <div role="tablist" className="bk-tabstrip -mb-5 flex gap-5">
-            {TABS.map((t) => {
-              const on = t.key === tab;
+          <Tabs
+            variant="underline"
+            ariaLabel="Trip case sections"
+            gap={20}
+            className="bk-tabstrip -mb-5"
+            tabs={TABS.map((t) => {
               const later = "wave" in t;
-              return (
-                <button
-                  key={t.key}
-                  role="tab"
-                  aria-selected={on}
-                  disabled={later}
-                  title={later ? `Coming in wave ${t.wave}` : undefined}
-                  onClick={() => set("tab", t.key === "overview" ? null : t.key)}
-                  className={`shrink-0 border-b-2 pb-2.5 text-[13px] ${
-                    on ? "border-accent font-semibold text-accent-deep" : "border-transparent text-muted hover:text-ink"
-                  } ${later ? "cursor-not-allowed opacity-50 hover:text-muted" : "cursor-pointer"}`}
-                >
-                  {t.label}
-                  {t.key === "proposals" && <span className="ml-1 text-xs text-muted2">{c.versions.length}</span>}
-                  {t.key === "suppliers" && c.supply && c.supply.state !== "none" && (
-                    <span className="ml-1 text-xs text-muted2">
-                      {c.supply.items_booked}/{Math.max(c.supply.items_to_book, c.supply.live)}
-                    </span>
-                  )}
-                </button>
-              );
+              return {
+                key: t.key,
+                label: t.label,
+                disabled: later,
+                title: later ? `Coming in wave ${t.wave}` : undefined,
+                count:
+                  t.key === "proposals"
+                    ? c.versions.length
+                    : t.key === "suppliers" && c.supply && c.supply.state !== "none"
+                      ? `${c.supply.items_booked}/${Math.max(c.supply.items_to_book, c.supply.live)}`
+                      : undefined,
+              };
             })}
-          </div>
+            active={tab}
+            onChange={(key) => set("tab", key === "overview" ? null : key)}
+          />
         </div>
       </div>
 
@@ -391,9 +390,9 @@ function Overview({
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Assigned sales</p>
                 {canAssign && (
-                  <button type="button" onClick={onAssign} className="cursor-pointer text-[12px] font-semibold text-accent-deep hover:underline">
+                  <LinkButton size="sm" onClick={onAssign}>
                     {sales.length ? "Change" : "Assign"}
-                  </button>
+                  </LinkButton>
                 )}
               </div>
               {sales.length ? (
@@ -431,15 +430,9 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
       title="Trip details"
       actions={
         canEdit ? (
-          <button
-            type="button"
-            onClick={onEdit}
-            aria-label="Edit trip details"
-            title="Edit details"
-            className="grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink"
-          >
+          <IconButton onClick={onEdit} label="Edit trip details" title="Edit details">
             <Pencil size={14} />
-          </button>
+          </IconButton>
         ) : undefined
       }
     >
@@ -567,9 +560,9 @@ function Activity({ code }: { code: string }) {
         </ol>
       )}
       {q.hasNextPage && (
-        <button type="button" onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage} className="mt-3 cursor-pointer text-[13px] font-semibold text-accent-deep hover:underline disabled:opacity-50">
+        <LinkButton onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage} className="mt-3">
           {q.isFetchingNextPage ? "Loading…" : "Show older"}
-        </button>
+        </LinkButton>
       )}
     </Section>
   );

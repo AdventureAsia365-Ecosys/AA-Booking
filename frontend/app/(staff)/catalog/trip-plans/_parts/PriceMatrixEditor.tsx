@@ -9,7 +9,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import type { PriceRow } from "@/lib/api/tripPlans";
-import { Checkbox, Input, Select, DateField, Money, formatDay } from "@/ui";
+import { Checkbox, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
 
@@ -70,14 +70,15 @@ export function PriceMatrixEditor({
                   {band && ` · ${band}`}
                 </span>
               </span>
-              <button
-                type="button"
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted hover:bg-danger-soft hover:text-danger"
-                aria-label={`Remove price row ${i + 1}`}
+              <IconButton
+                variant="plain"
+                size="sm"
+                tone="danger"
+                label={`Remove price row ${i + 1}`}
                 onClick={() => onChange(rows.filter((_, j) => j !== i))}
               >
                 <Trash2 size={14} />
-              </button>
+              </IconButton>
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-4">
               <Field label="Channel" className="col-span-2">
@@ -149,13 +150,9 @@ export function PriceMatrixEditor({
           </div>
         );
       })}
-      <button
-        type="button"
-        className="inline-flex items-center gap-1.5 self-start rounded-md px-1 text-[13px] font-medium text-accent-deep hover:underline"
-        onClick={() => onChange([...rows, newDraft(rows[rows.length - 1], today)])}
-      >
+      <LinkButton className="self-start" onClick={() => onChange([...rows, newDraft(rows[rows.length - 1], today)])}>
         <Plus size={14} /> Add price row
-      </button>
+      </LinkButton>
     </fieldset>
   );
 }

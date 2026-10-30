@@ -21,6 +21,7 @@ import {
   DateText,
   EmptyState,
   ErrorState,
+  LinkButton,
   Pill,
   Section,
   TripCaseStatusBadge,
@@ -127,9 +128,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           <div role="status" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[13px] text-danger">
             <Ban size={15} /> This customer is blocked: no new trip case can be opened for them.
             {actions.canAdmin && (
-              <button onClick={() => actions.unblock(c)} className="ml-auto cursor-pointer font-semibold underline-offset-2 hover:underline">
+              <LinkButton tone="inherit" size="inherit" onClick={() => actions.unblock(c)} className="ml-auto">
                 Unblock
-              </button>
+              </LinkButton>
             )}
           </div>
         )}

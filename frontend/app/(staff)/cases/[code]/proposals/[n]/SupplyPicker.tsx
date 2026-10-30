@@ -6,7 +6,7 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supplyApi, type SupplyOption } from "@/lib/api/supply";
-import { Input } from "@/ui";
+import { Input, ListButton } from "@/ui";
 
 const inputCls = "w-full";
 
@@ -56,9 +56,9 @@ export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) 
             <li className="px-3 py-2 text-[13px] text-muted">No active room type or service matches.</li>
           )}
           {items.map((o) => (
-            <li key={`${o.kind}:${o.id}`} role="option" aria-selected={false}>
-              <button
-                type="button"
+            <li key={`${o.kind}:${o.id}`} role="presentation">
+              <ListButton
+                role="option"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onPick(o);
@@ -66,14 +66,15 @@ export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) 
                   setQ("");
                   setOpen(false);
                 }}
-                className="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[13px] hover:bg-panel"
+                className="justify-between"
+                style={{ borderRadius: 0 }}
               >
                 <span className="min-w-0 truncate text-ink">
                   <span className="text-muted">{o.kind === "room_type" ? "Room · " : "Service · "}</span>
                   {o.label}
                 </span>
                 <span className="shrink-0 text-xs text-muted">{o.supplier_name}</span>
-              </button>
+              </ListButton>
             </li>
           ))}
         </ul>

@@ -31,7 +31,9 @@ import {
   NOTIFICATION_TYPE_LABEL,
   NotificationIcon,
   PageFrame,
+  SegmentedControl,
   SkeletonBar,
+  Switch,
   DateText,
   staffDisplay,
   useCan,
@@ -153,22 +155,20 @@ function GeneralTab() {
       </Block>
 
       <Block title="Appearance" description="Applies to this browser only.">
-        <div role="radiogroup" aria-label="Theme" className="flex flex-wrap gap-2">
-          {THEMES.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="radio"
-              aria-checked={theme === t.key}
-              onClick={() => setTheme(t.key)}
-              className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-medium ${
-                theme === t.key ? "border-accent bg-accent-tint text-accent-deep" : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          appearance="chips"
+          label="Theme"
+          options={THEMES.map((t) => ({
+            value: t.key,
+            label: (
+              <>
+                {t.icon} {t.label}
+              </>
+            ),
+          }))}
+          value={theme}
+          onChange={setTheme}
+        />
       </Block>
 
       <Block
@@ -384,17 +384,7 @@ function NotificationsTab() {
                   <p className="text-[13.5px] font-medium text-ink">{label}</p>
                   {TYPE_HELP[type] && <p className="mt-0.5 text-xs text-muted">{TYPE_HELP[type]}</p>}
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={on}
-                  aria-label={label}
-                  disabled={save.isPending}
-                  onClick={() => save.mutate({ [type]: !on })}
-                  className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition disabled:opacity-60 ${on ? "bg-success" : "bg-line"}`}
-                >
-                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-card shadow transition ${on ? "left-[22px]" : "left-0.5"}`} />
-                </button>
+                <Switch label={label} checked={on} disabled={save.isPending} onChange={(next) => save.mutate({ [type]: next })} />
               </li>
             );
           })}

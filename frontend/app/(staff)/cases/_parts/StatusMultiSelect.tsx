@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { TRIP_CASE_STATUSES, type TripCaseStatus } from "@/lib/api/types";
-import { Checkbox, STATUS_PHASES, TRIP_CASE_STATUS_META } from "@/ui";
+import { Checkbox, ListButton, Pressable, STATUS_PHASES, TRIP_CASE_STATUS_META, controlStyle } from "@/ui";
 
 export function parseStatuses(raw: string): TripCaseStatus[] {
   return raw
@@ -42,16 +42,17 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
     // AA-996: the FilterBar shape (inline label before a 36 px control), so it shares the bar's single row.
     <div ref={ref} className="relative flex items-center gap-1.5" data-kit-filter="">
       <span className="shrink-0 whitespace-nowrap text-[12px] font-medium text-muted">Status</span>
-      <button
-        type="button"
+      {/* A select-like trigger: the kit control look on a bare surface (the kit focus ring stays: no `outline`). */}
+      <Pressable
+        display="inline"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-9 min-w-[140px] cursor-pointer items-center justify-between gap-2 rounded-md border border-line bg-card px-3 text-[13px] text-ink hover:border-accent-border"
+        style={{ ...controlStyle("sm"), outline: undefined, minWidth: 140, justifyContent: "space-between", gap: 8 }}
       >
         <span className="truncate">{label}</span>
         <ChevronDown size={14} className="shrink-0 text-muted" />
-      </button>
+      </Pressable>
       {open && (
         <div
           role="listbox"
@@ -76,13 +77,9 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
             </div>
           ))}
           {value.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onChange([])}
-              className="mt-1 w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] font-medium text-accent-deep hover:bg-bg"
-            >
+            <ListButton density="compact" onClick={() => onChange([])} className="mt-1">
               Clear status filter
-            </button>
+            </ListButton>
           )}
         </div>
       )}

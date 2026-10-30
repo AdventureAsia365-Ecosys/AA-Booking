@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { Unlink, X } from "lucide-react";
-import { Input, Textarea, FormDrawer, FromCisTag } from "@/ui";
+import { Input, Textarea, FormDrawer, FromCisTag, IconButton, LinkButton } from "@/ui";
 import { MAX_DAY, NOTES_MAX, TITLE_MAX, validateItem, type DraftItem } from "@/lib/proposalDraft";
 import { SupplyPicker } from "./SupplyPicker";
 
@@ -117,9 +117,9 @@ function ItemForm({
               <span className="font-mono text-xs text-muted">{supply.code}</span>
               {!supply.active && <span className="ml-1 text-xs text-warning">(inactive)</span>}
             </span>
-            <button type="button" onClick={() => setSupply(null)} aria-label="Remove the room or service" className="cursor-pointer text-muted hover:text-danger">
+            <IconButton variant="plain" size="xs" tone="danger" onClick={() => setSupply(null)} label="Remove the room or service">
               <X size={14} />
-            </button>
+            </IconButton>
           </div>
         ) : (
           <SupplyPicker onPick={(o) => setSupply({ kind: o.kind, id: o.id, code: o.code, label: o.label, active: true })} />
@@ -136,9 +136,9 @@ function ItemForm({
             <span className="flex min-w-0 items-center gap-2 text-[13px] text-body">
               <FromCisTag /> <span className="truncate font-mono text-xs">{tour}</span>
             </span>
-            <button type="button" onClick={() => setTour(null)} className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-muted hover:text-danger">
+            <LinkButton tone="muted" size="sm" onClick={() => setTour(null)} style={{ gap: 4 }}>
               <Unlink size={13} /> Detach
-            </button>
+            </LinkButton>
           </div>
         ) : (
           <p className="text-xs text-muted">

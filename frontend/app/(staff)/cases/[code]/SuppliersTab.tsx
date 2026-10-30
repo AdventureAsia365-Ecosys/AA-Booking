@@ -38,6 +38,7 @@ import {
   DataTable,
   DateText,
   FormDrawer,
+  LinkButton,
   Modal,
   Money,
   Pill,
@@ -363,16 +364,18 @@ function Files({ b }: { b: SupplierBooking }) {
   return (
     <span className="flex flex-col gap-1">
       {b.files.map((f) => (
-        <button
+        <LinkButton
           key={f.id}
-          type="button"
+          size="sm"
+          weight="regular"
           onClick={() => open.mutate(f)}
-          className="inline-flex max-w-[180px] cursor-pointer items-center gap-1 truncate text-left text-xs text-accent-deep hover:underline"
+          className="max-w-[180px] overflow-hidden"
+          style={{ gap: 4 }}
           title={`Download ${f.file_name} (link valid 5 minutes)`}
         >
           <Download size={12} className="shrink-0" />
           <span className="truncate">{f.kind === "supplier_voucher" ? "Voucher" : "Confirmation"} · {f.file_name}</span>
-        </button>
+        </LinkButton>
       ))}
     </span>
   );

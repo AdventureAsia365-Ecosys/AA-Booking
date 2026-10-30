@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { api } from "@/lib/api/client";
 import { inputCls } from "./fields";
-import { Select } from "@/ui";
+import { IconButton, Select } from "@/ui";
 
 export const MAX_COUNTRIES = 20;
 
@@ -32,14 +32,15 @@ export function CountryPicker({ value, onChange }: { value: string[]; onChange: 
               className="inline-flex items-center gap-1 rounded-full border border-accent-border bg-accent-tint py-0.5 pl-2.5 pr-1 text-[12px] font-medium text-accent-deep"
             >
               {name(iso)}
-              <button
-                type="button"
+              <IconButton
+                variant="plain"
+                size="xs"
+                round
                 onClick={() => onChange(value.filter((v) => v !== iso))}
-                aria-label={`Remove ${name(iso)}`}
-                className="grid h-5 w-5 cursor-pointer place-items-center rounded-full hover:bg-accent-soft"
+                label={`Remove ${name(iso)}`}
               >
                 <X size={12} />
-              </button>
+              </IconButton>
             </li>
           ))}
         </ul>

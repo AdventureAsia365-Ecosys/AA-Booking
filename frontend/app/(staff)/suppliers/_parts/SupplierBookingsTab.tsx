@@ -11,7 +11,10 @@ import { ApiError } from "@/lib/api/client";
 import { DECLINE_LABEL, SUPPLIER_BOOKING_STATUSES, supplierBookingsApi, type SupplierBooking } from "@/lib/api/supplierBookings";
 import type { SupplierDetail } from "@/lib/api/suppliers";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
-import { DataTable, DateText, Money, SUPPLIER_BOOKING_STATUS_META, Section, SupplierBookingStatusBadge, useCan, useUrlFilters } from "@/ui";
+import {
+  DataTable, DateText, Money, SUPPLIER_BOOKING_STATUS_META, Section, SegmentedControl, SupplierBookingStatusBadge, useCan,
+  useUrlFilters,
+} from "@/ui";
 
 export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
   const canRead = useCan("ops.read");
@@ -86,20 +89,18 @@ export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
 
   return (
     <Section title="Bookings with this supplier" description="Supplier bookings of sold trips. Request, confirm or decline them on the trip case's Suppliers tab.">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {(["live", ...SUPPLIER_BOOKING_STATUSES] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => set("sb_status", k === "live" ? null : k)}
-            className={`rounded-full border px-3 py-1 text-xs ${
-              status === k ? "border-accent bg-accent-tint font-semibold text-accent-deep" : "border-line text-muted hover:text-ink"
-            }`}
-          >
-            {k === "live" ? "Live" : SUPPLIER_BOOKING_STATUS_META[k].label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        appearance="chips"
+        size="sm"
+        label="Booking status"
+        className="mb-3"
+        options={(["live", ...SUPPLIER_BOOKING_STATUSES] as const).map((k) => ({
+          value: k,
+          label: k === "live" ? "Live" : SUPPLIER_BOOKING_STATUS_META[k].label,
+        }))}
+        value={status}
+        onChange={(k) => set("sb_status", k === "live" ? null : k)}
+      />
       <DataTable<SupplierBooking>
         searchable={false}
         tableId="supplier-bookings"

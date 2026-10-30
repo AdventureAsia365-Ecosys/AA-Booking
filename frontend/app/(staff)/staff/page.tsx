@@ -16,7 +16,10 @@ import { api } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
 import { ROLE_LABEL, STAFF_ROLES, isStaffRole } from "@/lib/rbac";
 import { CIS_STAFF_PATH, CIS_STAFF_URL } from "@/lib/config";
-import { DataTable, DateText, FilterBar, KpiTile, ManagedInCisLink, PageFrame, PersonCell, Pill, Section, StatusBadge, useUrlFilters } from "@/ui";
+import {
+  DataTable, DateText, FilterBar, IconButton, KpiTile, ManagedInCisLink, PageFrame, PersonCell, Pill, Section, StatusBadge,
+  useUrlFilters,
+} from "@/ui";
 import { useStaffActions } from "./_parts/useStaffActions";
 
 export default function StaffPage() {
@@ -158,18 +161,12 @@ function IconAction({
   success?: boolean;
   disabled?: boolean;
 }) {
-  const tone = danger ? "text-danger hover:bg-danger-soft" : success ? "text-success hover:bg-success-soft" : "text-muted hover:text-ink hover:border-accent-border";
+  // Deactivate / Activate keep their red / green icon at rest (the kit button stays neutral; the icon carries the tone).
+  const iconTone = danger ? "text-danger" : success ? "text-success" : undefined;
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={`grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card disabled:cursor-not-allowed disabled:opacity-40 ${tone}`}
-    >
-      {children}
-    </button>
+    <IconButton label={label} tone={danger ? "danger" : "neutral"} disabled={disabled} onClick={onClick}>
+      {iconTone ? <span className={`inline-grid ${iconTone}`}>{children}</span> : children}
+    </IconButton>
   );
 }
 

@@ -12,7 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import type { CustomerSummary } from "@/lib/api/types";
 import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
-import { Input, Select, Button, Modal, fieldName, useToast, DateField } from "@/ui";
+import { Input, Select, Button, Modal, SegmentedControl, fieldName, useToast, DateField } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, toInt } from "../../../cases/_parts/fields";
 import { CustomerPicker, EMPTY_LEAD, leadErrors, type LeadInput } from "../../../cases/new/CustomerPicker";
 
@@ -108,27 +108,16 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
           <span className="font-medium text-ink">{plan.title}</span>, titled from CIS. It is not priced: add cost lines and
           price it in the builder.
         </p>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Target">
-          {(
-            [
-              ["new_case", "New trip case"],
-              ["existing_case", "Add to an existing case"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={target === value}
-              onClick={() => setTarget(value)}
-              className={`cursor-pointer rounded-full border px-4 py-1.5 text-[13px] font-medium ${
-                target === value ? "border-accent bg-accent-tint text-accent-deep" : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          appearance="chips"
+          label="Target"
+          options={[
+            { value: "new_case", label: "New trip case" },
+            { value: "existing_case", label: "Add to an existing case" },
+          ]}
+          value={target}
+          onChange={setTarget}
+        />
 
         {target === "new_case" ? (
           <>

@@ -16,7 +16,9 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Eye, Send, Trash2 } from "lucide-react";
 import { proposalsApi } from "@/lib/api/proposals";
 import type { CaseVersion, TripCaseDetail } from "@/lib/api/types";
-import { ConfirmDialog, DataTable, DateText, Money, Section, VersionBadgePill, csvMoney, useCan, useToast } from "@/ui";
+import {
+  ConfirmDialog, DataTable, DateText, IconButton, Money, Section, VersionBadgePill, csvMoney, useCan, useToast,
+} from "@/ui";
 import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 
 const CLOSED = ["completed", "cancelled"];
@@ -82,8 +84,6 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         // older draft shown as "superseded" once a later version went out.
         const discardable = !v.is_sent_to_customer && !v.is_approved;
         const label = `${c.code} V${v.version_number}`;
-        const btn =
-          "grid h-8 w-8 cursor-pointer place-items-center rounded-md border border-line bg-card text-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-30";
         const sendWhy = !draft
           ? "Only a draft can be sent"
           : !sendable
@@ -97,26 +97,23 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         // Stop the row click so an action never also opens the builder.
         return (
           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()} data-testid="version-actions">
-            <button type="button" className={btn} title="Preview" aria-label={`Preview ${label}`} onClick={() => router.push(`${builderHref(v.version_number)}/preview`)}>
+            <IconButton title="Preview" label={`Preview ${label}`} onClick={() => router.push(`${builderHref(v.version_number)}/preview`)}>
               <Eye size={14} />
-            </button>
+            </IconButton>
             {canWrite && (
               <>
-                <button
-                  type="button"
-                  className={btn}
+                <IconButton
                   title={sendWhy}
-                  aria-label={`Send ${label} to the customer`}
+                  label={`Send ${label} to the customer`}
                   disabled={!canSendRow}
                   onClick={() => setAction({ kind: "send", n: v.version_number })}
                 >
                   <Send size={14} />
-                </button>
-                <button
-                  type="button"
-                  className={`${btn} hover:text-danger`}
+                </IconButton>
+                <IconButton
+                  tone="danger"
                   title={!discardable ? "A sent or approved version is kept" : closed ? "The case is closed" : "Discard draft"}
-                  aria-label={`Discard draft ${label}`}
+                  label={`Discard draft ${label}`}
                   disabled={!discardable || closed}
                   onClick={() => {
                     discard.reset();
@@ -124,7 +121,7 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
                   }}
                 >
                   <Trash2 size={14} />
-                </button>
+                </IconButton>
               </>
             )}
           </div>
