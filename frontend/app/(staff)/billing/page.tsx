@@ -82,7 +82,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceSummary, unknown>[] = [
           >
             {row.original.trip_case.code}
           </Link>
-          <span className="block max-w-[220px] truncate text-xs text-muted md:max-w-[140px] min-[1200px]:max-w-[180px]" title={name}>
+          <span className="block max-w-[220px] truncate text-xs text-muted md:max-w-[140px] min-[1200px]:max-w-[170px]" title={name}>
             {name}
           </span>
         </span>
@@ -314,15 +314,23 @@ function InvoicesTab({ canRead }: { canRead: boolean }) {
     }
     return items;
   }
-  const columns: ColumnDef<InvoiceSummary, unknown>[] = [
-    ...INVOICE_COLUMNS,
-    {
-      id: "actions",
-      header: "Actions",
-      enableSorting: false,
-      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.invoice_number}`} />,
-    },
-  ];
+  // The row menu shares the Status cell: a column of its own pushed the table past its 1400 / 1440 px budget (AA-996).
+  const columns: ColumnDef<InvoiceSummary, unknown>[] = INVOICE_COLUMNS.map((c) =>
+    c.id === "status"
+      ? {
+          ...c,
+          cell: ({ row }) => (
+            <span className="flex items-center justify-between gap-1">
+              <InvoiceStatusBadge status={row.original.status} overdue={row.original.overdue} />
+              {/* the button's 32 px box has 8 px of air on each side of its icon: let it overlap the cell padding */}
+              <span className="-mr-2 shrink-0">
+                <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.invoice_number}`} />
+              </span>
+            </span>
+          ),
+        }
+      : c,
+  );
   return (
     <Section>
       <div className="bk-dt-sticky-end">
@@ -419,7 +427,7 @@ function PaymentsTab({ canRead }: { canRead: boolean }) {
     ...PAYMENT_COLUMNS,
     {
       id: "actions",
-      header: "Actions",
+      header: () => <span className="sr-only">Actions</span>, // the menu button alone: keeps the table within 1440 px (AA-996)
       enableSorting: false,
       cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.ref}`} />,
     },
