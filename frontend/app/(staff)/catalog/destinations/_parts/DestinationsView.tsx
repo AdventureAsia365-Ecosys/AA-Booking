@@ -10,7 +10,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { CheckCircle2, Eye, Globe, MapPin, Pencil, Plus, Power } from "lucide-react";
-import { geoApi, type DestinationItem, type GeoStatus } from "@/lib/api/geo";
+import { geoApi, type CustomerVisibility, type DestinationItem, type GeoStatus } from "@/lib/api/geo";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import {
   Button,
@@ -29,7 +29,7 @@ import {
 } from "@/ui";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { DestinationPicker } from "@/app/(staff)/suppliers/_parts/DestinationPicker";
-import { CIS_PLACES_PATH, DestinationDrawer, GeoStatusBadge, coords } from "../../_parts/GeoDrawers";
+import { CIS_PLACES_PATH, CustomerVisibilityBadge, DestinationDrawer, GeoStatusBadge, HIDDEN_REASON_LABEL, coords } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
 
 const SORTS = [
@@ -49,6 +49,7 @@ export function DestinationsView() {
     q: get("q") || undefined,
     country: get("country") || undefined,
     status: (get("status") || undefined) as GeoStatus | undefined,
+    visibility: (get("visibility") || undefined) as CustomerVisibility | undefined,
     sort: get("sort") || undefined,
     limit: paging.limit,
     offset: paging.offset,
@@ -72,6 +73,11 @@ export function DestinationsView() {
               {row.original.name}
             </span>
             {row.original.status_reason && <span className="block max-w-[260px] truncate text-xs text-muted">{row.original.status_reason}</span>}
+            {row.original.hidden_reason && (
+              <span className="mt-0.5 block" title={HIDDEN_REASON_LABEL[row.original.hidden_reason]}>
+                <CustomerVisibilityBadge reason={row.original.hidden_reason} />
+              </span>
+            )}
           </span>
         </span>
       ),
@@ -113,7 +119,7 @@ export function DestinationsView() {
     },
   ];
 
-  const filtered = !!(query.q || query.country || query.status);
+  const filtered = !!(query.q || query.country || query.status || query.visibility);
   return (
     <PageFrame
       title="Destinations"
@@ -155,6 +161,15 @@ export function DestinationsView() {
                   options: [
                     { value: "active", label: "Active" },
                     { value: "inactive", label: "Inactive" },
+                  ],
+                },
+                {
+                  key: "visibility",
+                  label: "Customer maps",
+                  allLabel: "Shown and hidden",
+                  options: [
+                    { value: "shown", label: "Shown to customers" },
+                    { value: "hidden", label: "Hidden from customers" },
                   ],
                 },
                 { key: "sort", label: "Sort", allLabel: "Name A–Z", options: SORTS },

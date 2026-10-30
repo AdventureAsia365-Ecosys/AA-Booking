@@ -196,13 +196,23 @@ async def list_geo_destinations(
     q: Annotated[str | None, Query(max_length=120)] = None,
     country: Annotated[str | None, Query(min_length=2, max_length=2, description="ISO-2 country code")] = None,
     status: GeoStatus | None = None,
+    visibility: Annotated[
+        Literal["shown", "hidden"] | None, Query(description="hidden = CIS keeps the place off customer maps")
+    ] = None,
     sort: Annotated[str | None, Query(max_length=40)] = None,
     limit: Annotated[int, Query(ge=1, le=geo.MAX_PAGE)] = 25,
     offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await geo.list_destinations(
-            conn, q=q, country=country, status=status, sort=sort, limit=limit, offset=offset
+            conn,
+            q=q,
+            country=country,
+            status=status,
+            visibility=visibility,
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
 
 

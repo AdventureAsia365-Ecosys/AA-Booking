@@ -150,6 +150,10 @@ export interface CatalogPlace {
   name: string;
   country: string;
   country_code: string | null;
+  /** AA-997: the picker never lists a merged place; an unconfirmed point stays pickable. */
+  hidden_from_customers?: boolean;
+  hidden_reason?: "location_unconfirmed" | "merged" | null;
+  merged_into?: string | null;
 }
 
 export type Changed<T> = T & { changed: string[] };

@@ -10,6 +10,13 @@ or grant fails only this read, not the caller's whole transaction.
 - Reads fail soft: when the catalog cannot be read, the place name is simply missing.
 
 ``v_destination.country`` is a country name (``Vietnam``), mapped to ISO-2 through ``booking.countries`` (bk-005).
+
+AA-997: every row says whether CIS keeps the place off customer maps (``hidden_from_customers``, ``hidden_reason``
+``location_unconfirmed`` | ``merged``; ``merged_into`` = the keeper of a merged place,
+``catalog.v_destination_redirect``, CIS 257). The picker never offers a merged place (staff pick its keeper), and a
+write naming one is 422 ``merged_destination``; a supplier that already holds a merged id keeps it and its name still
+resolves. A place whose point is unconfirmed stays pickable: the place is real, only its pin is in review in CIS (no
+coordinates here).
 """
 
 from __future__ import annotations
@@ -39,8 +46,13 @@ CATALOG_ERRORS: tuple[type[Exception], ...] = (
 MAX_SEARCH = 50
 
 DESTINATION_SQL = """
-    SELECT d.destination_id::text AS destination_id, d.name, d.country, c.iso2::text AS country_code
+    SELECT d.destination_id::text AS destination_id, d.name, d.country, c.iso2::text AS country_code,
+           (rd.keeper_id IS NOT NULL OR coalesce(d.geo_status = 'suspect', false)) AS hidden_from_customers,
+           CASE WHEN rd.keeper_id IS NOT NULL THEN 'merged'
+                WHEN d.geo_status = 'suspect' THEN 'location_unconfirmed' END AS hidden_reason,
+           rd.keeper_id::text AS merged_into
     FROM catalog.v_destination d
+    LEFT JOIN catalog.v_destination_redirect rd ON rd.destination_id = d.destination_id
     LEFT JOIN booking.countries c ON lower(c.name) = lower(d.country)
 """
 
@@ -69,13 +81,21 @@ async def require_destination(conn: asyncpg.Connection, destination_id: str) -> 
         raise Unavailable("catalog_unavailable", "the CIS catalog cannot be read right now; try again later") from exc
     if row is None:
         raise Invalid("unknown_destination", f"destination {destination_id} is not a CIS catalog place")
-    return dict(row)
+    place = dict(row)
+    if place.get("merged_into"):
+        raise Invalid(
+            "merged_destination",
+            f"{place['name']} was merged into another CIS place ({place['merged_into']}); pick that place instead",
+            merged_into=place["merged_into"],
+        )
+    return place
 
 
 async def search_destinations(
     conn: asyncpg.Connection, *, q: str | None = None, country: str | None = None, limit: int = 20
 ) -> dict[str, Any]:
-    """Places for a picker: name contains ``q``, optional ISO-2 ``country``. 503 when the catalog cannot be read."""
+    """Places for a picker: name contains ``q``, optional ISO-2 ``country``; never a merged place (AA-997). 503 when
+    the catalog cannot be read."""
     pattern = paging.contains(q) if q and q.strip() else None
     try:
         async with conn.transaction():
@@ -83,6 +103,7 @@ async def search_destinations(
                 f"""{DESTINATION_SQL}
                 WHERE ($1::text IS NULL OR d.name ILIKE $1)
                   AND ($2::text IS NULL OR c.iso2 = $2)
+                  AND rd.keeper_id IS NULL
                 ORDER BY lower(d.name), d.country, d.destination_id
                 LIMIT $3""",  # noqa: S608 — constant
                 pattern,

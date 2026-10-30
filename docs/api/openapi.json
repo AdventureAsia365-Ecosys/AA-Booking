@@ -9287,6 +9287,28 @@
             }
           },
           {
+            "description": "hidden = CIS keeps the place off customer maps",
+            "in": "query",
+            "name": "visibility",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "shown",
+                    "hidden"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "hidden = CIS keeps the place off customer maps",
+              "title": "Visibility"
+            }
+          },
+          {
             "in": "query",
             "name": "sort",
             "required": false,

@@ -21,6 +21,12 @@
   (``booking.suppliers`` / ``hotels`` / ``services``), and how many CIS tours name the country.
 - Reads need ``catalog.read`` (every staff role); a status / notes change needs ``catalog.admin`` (admin only, UI spec
   §3 "A edit status"). Every change writes one audit row.
+- **Hidden from customers** (AA-997): ``catalog.v_destination`` lists every CIS place, also one CIS hides from
+  customer maps (``geo_status = 'suspect'``: its point is not confirmed) and one CIS merged into another place (a
+  ``catalog.v_destination_redirect`` row, ``merged_into`` = the keeper). Staff keep seeing both, with their
+  coordinates, so they can review them; each row says ``hidden_from_customers`` and ``hidden_reason``
+  (``location_unconfirmed`` | ``merged``). ``visibility`` (``shown`` | ``hidden``) filters the list and the summary
+  counts ``hidden``. The point itself is fixed in CIS (Places), never here.
 - A catalog that cannot be read is 503 ``catalog_unavailable`` (``trip_plans.catalog_reads``); an unknown place is
   404 on reads and 404 on writes (the id is checked against the view before a profile row is written).
 """
@@ -58,14 +64,25 @@ SUPPLY_AT_PLACE = """
         AS active_services
 """
 
-DEST_COLUMNS = """
+VISIBILITIES = ("shown", "hidden")
+# AA-997: why CIS keeps a place off customer maps (catalog.v_destination.geo_status, CIS 228; a merge is a
+# catalog.v_destination_redirect row, CIS 257). NULL = shown. Needs DEST_FROM's ``rd`` join.
+HIDDEN_REASON_SQL = (
+    "CASE WHEN rd.keeper_id IS NOT NULL THEN 'merged' WHEN d.geo_status = 'suspect' THEN 'location_unconfirmed' END"
+)
+HIDDEN_SQL = "(rd.keeper_id IS NOT NULL OR d.geo_status = 'suspect')"
+
+DEST_COLUMNS = f"""
     d.destination_id::text AS destination_id, d.name, d.country, d.country_iso2::text AS country_code,
     d.lat::float8 AS lat, d.lng::float8 AS lng, d.cover_photo_path, d.cover_image_url, d.photo_count,
     coalesce(p.status, 'active') AS status, p.status_reason, p.internal_notes, p.updated_at AS profile_updated_at,
-    p.updated_by AS profile_updated_by, ub.name AS profile_updated_by_name
+    p.updated_by AS profile_updated_by, ub.name AS profile_updated_by_name,
+    coalesce({HIDDEN_SQL}, false) AS hidden_from_customers, {HIDDEN_REASON_SQL} AS hidden_reason,
+    rd.keeper_id::text AS merged_into
 """
 DEST_FROM = """
     FROM catalog.v_destination d
+    LEFT JOIN catalog.v_destination_redirect rd ON rd.destination_id = d.destination_id
     LEFT JOIN booking.destination_profiles p ON p.destination_id = d.destination_id
     LEFT JOIN booking.staff_users ub ON ub.cis_user_id = p.updated_by
 """
@@ -80,6 +97,15 @@ def _status(value: str | None) -> str | None:
     return v
 
 
+def _visibility(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    v = value.strip().lower()
+    if v not in VISIBILITIES:
+        raise Invalid("invalid_visibility", "visibility must be shown or hidden")
+    return v
+
+
 # ── Destinations ────────────────────────────────────────────────────────────
 
 
@@ -89,12 +115,14 @@ async def list_destinations(
     q: str | None = None,
     country: str | None = None,
     status: str | None = None,
+    visibility: str | None = None,
     sort: str | None = None,
     limit: int = 25,
     offset: int = 0,
 ) -> dict[str, Any]:
     """CIS places with their Booking status. ``q`` = part of the name, ``country`` = ISO-2, ``status`` = active /
-    inactive. ``summary`` (total, active, inactive, countries) counts the whole catalog, not the filtered page."""
+    inactive, ``visibility`` = shown / hidden (hidden from customers by CIS, AA-997). ``summary`` (total, active,
+    inactive, countries, hidden) counts the whole catalog, not the filtered page."""
     where: list[str] = []
     args: list[Any] = []
 
@@ -109,6 +137,9 @@ async def list_destinations(
     wanted = _status(status)
     if wanted:
         add("coalesce(p.status, 'active') = {p}", wanted)
+    seen = _visibility(visibility)
+    if seen:
+        where.append(HIDDEN_SQL if seen == "hidden" else f"NOT {HIDDEN_SQL}")
     raw = (sort or "name").strip()
     column = DEST_SORTS.get(raw.lstrip("-+"))
     if column is None:
@@ -126,21 +157,23 @@ async def list_destinations(
             offset,
         )
         summary = await conn.fetchrow(
-            """
+            f"""
             SELECT count(*) AS total,
                    count(*) FILTER (WHERE coalesce(p.status, 'active') = 'active') AS active,
                    count(*) FILTER (WHERE p.status = 'inactive') AS inactive,
-                   count(DISTINCT d.country_iso2) AS countries
+                   count(DISTINCT d.country_iso2) AS countries,
+                   count(*) FILTER (WHERE {HIDDEN_SQL}) AS hidden
             FROM catalog.v_destination d
+            LEFT JOIN catalog.v_destination_redirect rd ON rd.destination_id = d.destination_id
             LEFT JOIN booking.destination_profiles p ON p.destination_id = d.destination_id
-            """
+            """  # noqa: S608 — constant fragments only
         )
     return {
         "items": [dict(r) for r in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
-        "summary": dict(summary) if summary else {"total": 0, "active": 0, "inactive": 0, "countries": 0},
+        "summary": dict(summary) if summary else {"total": 0, "active": 0, "inactive": 0, "countries": 0, "hidden": 0},
     }
 
 

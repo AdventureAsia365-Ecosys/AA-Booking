@@ -3,7 +3,7 @@
 // bk-029). Place content (name, country, coordinates, photos) is the CIS catalog read live (catalog.v_destination,
 // v_destination_photo, v_tour) and is read-only here; Booking owns only the status, area and internal notes.
 //
-//   GET   /booking/catalog/geo/destinations?q=&country=&status=&sort=&limit=&offset=   (catalog.read)
+//   GET   /booking/catalog/geo/destinations?q=&country=&status=&visibility=&sort=&limit=&offset= (catalog.read)
 //   GET   /booking/catalog/geo/destinations/{destination_id}                          (catalog.read)
 //   PATCH /booking/catalog/geo/destinations/{destination_id}                          (catalog.admin: admin)
 //   GET   /booking/catalog/geo/countries?q=&status=&area=                             (catalog.read)
@@ -16,6 +16,9 @@ import type { IsoDateTime, OffsetPage } from "./types";
 const enc = encodeURIComponent;
 
 export type GeoStatus = "active" | "inactive";
+/** AA-997: CIS keeps the place off customer maps (shown here to staff, with its coordinates, for review). */
+export type HiddenReason = "location_unconfirmed" | "merged";
+export type CustomerVisibility = "shown" | "hidden";
 
 /** Booking state, shared by countries and destinations. */
 export interface GeoState {
@@ -39,6 +42,11 @@ export interface DestinationItem extends GeoState {
   cover_photo_path: string | null;
   cover_image_url: string | null;
   photo_count: number;
+  /** AA-997: true when CIS hides the place from customers (its point is unconfirmed, or it was merged). */
+  hidden_from_customers: boolean;
+  hidden_reason: HiddenReason | null;
+  /** The CIS place a merged place now points to. */
+  merged_into: string | null;
 }
 
 export interface DestinationPhoto {
@@ -60,6 +68,8 @@ export interface DestinationSummary {
   active: number;
   inactive: number;
   countries: number;
+  /** AA-997: places CIS keeps off customer maps. */
+  hidden: number;
 }
 
 export interface DestinationPage extends OffsetPage<DestinationItem> {
@@ -70,6 +80,7 @@ export interface DestinationQuery {
   q?: string;
   country?: string;
   status?: GeoStatus;
+  visibility?: CustomerVisibility;
   sort?: string;
   limit?: number;
   offset?: number;

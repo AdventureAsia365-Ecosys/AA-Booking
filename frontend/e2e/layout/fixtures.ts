@@ -868,11 +868,18 @@ function destination(i: number): DestinationItem {
     profile_updated_at: inactive ? NOW : null,
     profile_updated_by: inactive ? "u-001" : null,
     profile_updated_by_name: inactive ? "Alexandra Montgomery-Whitfield" : null,
+    // AA-997: a few places CIS keeps off customer maps (the row's extra badge is the widest name cell)
+    hidden_from_customers: i % 7 === 3 || i % 11 === 6,
+    hidden_reason: i % 7 === 3 ? "location_unconfirmed" : i % 11 === 6 ? "merged" : null,
+    merged_into: i % 7 !== 3 && i % 11 === 6 ? uuid("d", i + 1) : null,
   };
 }
 
 function destinationPage(): DestinationPage {
-  return { ...page(range(ROWS).map(destination), 1872), summary: { total: 1872, active: 1790, inactive: 82, countries: 14 } };
+  return {
+    ...page(range(ROWS).map(destination), 1872),
+    summary: { total: 1872, active: 1790, inactive: 82, countries: 14, hidden: 57 },
+  };
 }
 
 function destinationDetail(id: string): DestinationDetail {
