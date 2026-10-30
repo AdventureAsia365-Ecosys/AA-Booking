@@ -481,7 +481,11 @@ send, OTP) is not built: those still write rows only.
   validity); a line that does not fit is 422 `sold_out` and nothing is held. Length = setting `b2b_hold_hours` (48),
   capped by the earliest departure start. An `active` hold past `expires_at` reads `expired` at once; the job
   `bk_b2b_hold_expire` writes the status. `DELETE` releases (released / expired: no-op; confirmed: 422). Error codes
-  follow the contract: `sold_out` 422, `hold_expired` 410.
+  follow the contract: `sold_out` 422, `hold_expired` 410. **Contract 1.2 (AA-952)**: every `Hold` answer (place,
+  read, extend) also carries the quote it holds: `price_hash` (what the confirm presents), `currency`, `fx` (the
+  quote's lock, as `POST /quotes` answered it) and each line's `b2b_price`; the CRM writes the agency's AA lines from
+  them after its client accepts and confirms with that hash after the deposit. Additive and optional in the response
+  model; never a net cost or a supplier rate.
 - **Confirm (AA-973, memo seam 1)**: `POST /holds/{id}/confirm` (scope `book`) is the only B2B path that creates a
   commercial record: one transaction opens a **B2B trip case** (`channel = 'b2b'`, `customer_id` NULL,
   `party_tenant_id` = the agency, `source_system = 'crm'`, `source_id` = the proposal ref, status `confirmed` inserted

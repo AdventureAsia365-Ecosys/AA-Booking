@@ -2172,6 +2172,18 @@
       "Hold": {
         "additionalProperties": false,
         "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -2182,6 +2194,16 @@
             "minimum": 0.0,
             "title": "Extended Count",
             "type": "integer"
+          },
+          "fx": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FxLock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "hold_id": {
             "maxLength": 64,
@@ -2194,6 +2216,18 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "price_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Hash"
           },
           "quote_id": {
             "maxLength": 64,
@@ -2225,6 +2259,16 @@
       "HoldLine": {
         "additionalProperties": false,
         "properties": {
+          "b2b_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "line_ref": {
             "maxLength": 64,
             "title": "Line Ref",

@@ -336,6 +336,36 @@ async def test_get_hold_reads_effective_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_hold_carries_the_quote_it_holds() -> None:
+    """AA-952 (contract 1.2): the held quote's hash, currency, FX lock (the selling rate, as POST /quotes gave it) and
+    each line's b2b price; never the net cost or the supplier rates."""
+    conn = find_conn(hold_row())
+    conn.on("FROM booking.b2b_quotes q WHERE q.id", {
+        "currency": "VND", "fx_rate_per_usd": D("25000"), "fx_buffer_pct": D("0.02"), "fx_as_of": date(2027, 2, 1),
+        "fx_source": "test", "price_hash": "b" * 64,
+    })  # fmt: skip
+    conn.on("FROM booking.b2b_quote_lines ql", [{"line_ref": "L1", "b2b_price": D("12345000")}])
+    out = await holds.get_hold(conn, CALLER, HOLD)
+    assert out["price_hash"] == "b" * 64 and out["currency"] == "VND"
+    assert out["fx"] == {"base_currency": "USD", "quote_currency": "VND", "rate_per_usd": "25500.00000000",
+                         "rate_date": "2027-02-01", "source": "test"}  # fmt: skip
+    assert out["lines"][0]["b2b_price"] == {"amount": "12345000", "currency": "VND"}
+    assert "b2b_price" not in out["lines"][1]  # a line the quote has no price for is left without one
+    assert conn.sql("FROM booking.b2b_quote_lines ql") == [(QUOTE,)]
+    assert "net_cost" not in str(out) and "supplier" not in str(out)
+    # The response model accepts it (extra="forbid"): the 1.2 fields are part of the contract.
+    from app.routers.b2b import Hold
+
+    assert Hold.model_validate(out).fx is not None
+
+
+@pytest.mark.asyncio
+async def test_get_hold_without_its_quote_row_keeps_the_1_1_shape() -> None:
+    out = await holds.get_hold(find_conn(hold_row()), CALLER, HOLD)
+    assert {"price_hash", "currency", "fx"}.isdisjoint(out) and all("b2b_price" not in x for x in out["lines"])
+
+
+@pytest.mark.asyncio
 async def test_get_hold_of_another_partner_or_bad_id_is_not_found() -> None:
     for hold_id in (HOLD, "nope"):
         conn = find_conn(None)
