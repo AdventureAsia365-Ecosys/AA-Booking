@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.14.0...v0.15.0) (2026-10-31)
+
+
+### Features
+
+* mark CIS places hidden from customers on Booking destination screens ([#160](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/160)) ([636df62](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/636df62c8286910004e6783c702e470e7ddec91e))
+* proposal items read back today's CIS text; B2B confirm names what was sold; preview fits 390 px ([#163](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/163)) ([16fbed6](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/16fbed68bcb7995d6635a24adce62d7c6b855a98))
+
 ## [0.14.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.13.0...v0.14.0) (2026-10-30)
 
 
