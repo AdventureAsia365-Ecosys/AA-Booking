@@ -12,7 +12,7 @@
 // An item may book a hotel room type or a service (bk-010, AA-823). Saved with no cost line, such an item is sent
 // without `costs`, and the API fills its net from the supplier rate in force (the line keeps `supplier_rate_id`).
 
-import type { VersionItem, VersionItemSupply } from "./api/types";
+import type { VersionItem, VersionItemCis, VersionItemSupply } from "./api/types";
 import type { CostInput, ItemInput, QuotePreviewInput } from "./api/proposals";
 
 export interface CostLine {
@@ -36,6 +36,8 @@ export interface DraftItem {
   costs: CostLine[];
   /** The hotel room type or service this item books, if any. */
   supply?: VersionItemSupply | null;
+  /** AA-1013: the CIS read-back of the saved item (display only, never sent back). */
+  cis?: VersionItemCis | null;
 }
 
 export const MAX_ITEMS = 200;
@@ -71,6 +73,7 @@ export function fromApi(items: VersionItem[]): DraftItem[] {
         supplier_rate_id: c.supplier_rate_id ?? null,
       })),
       supply: it.supply ?? null,
+      cis: it.cis ?? null,
     }));
 }
 

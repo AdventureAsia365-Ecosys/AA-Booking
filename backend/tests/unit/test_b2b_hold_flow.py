@@ -426,6 +426,15 @@ def confirm_conn(hold: dict[str, Any] | None = None, **over: Any) -> ScriptedCon
     items = iter(f"9e000000-0000-4000-8000-00000000000{n}" for n in range(1, 10))
     conn.on("INSERT INTO booking.trip_case_version_itinerary", lambda *_: next(items))
     conn.on("SELECT code FROM booking.trip_cases", "TC-000042")
+    # AA-1013: the names on the items (invented catalog, hotel and service names).
+    conn.on(
+        "FROM catalog.v_tour WHERE source_id",
+        over.get("tours", [{"source_id": "BT-7D", "title": "Lantern Ridge Trek — 3 Days"}]),
+    )
+    conn.on("FROM booking.hotel_room_types t", [{"id": ROOM, "title": "Hotel Mistral Bay · Deluxe Twin"}])
+    conn.on(
+        "SELECT id::text AS id, title FROM booking.services", [{"id": SERVICE, "title": "Airport  transfer\n(private)"}]
+    )
     return conn
 
 
@@ -449,12 +458,22 @@ async def test_confirm_opens_a_b2b_case_with_an_approved_version() -> None:
     # on 5 March, the service on 5 March; the biggest party is the plan line (2 adults + 1 child).
     assert case == ("P-1", TENANT, START, date(2027, 3, 5), 3, 2, 1, "EUR", f"b2b_hold:{HOLD}")
     [version] = conn.sql("INSERT INTO booking.trip_case_versions")
-    assert version[1:] == ("B2B P-1 v1", D("1150.00"), "EUR", date(2027, 2, 2), D("0.9"), date(2027, 1, 31))
+    # AA-1013: the version and its items read as what was sold (tour, room, service), not component ids; the agency's
+    # proposal ref / version and line refs move to the notes.
+    assert version[1:] == (
+        "Lantern Ridge Trek — 3 Days",
+        "Agency proposal P-1 v1",
+        D("1150.00"),
+        "EUR",
+        date(2027, 2, 2),
+        D("0.9"),
+        date(2027, 1, 31),
+    )
     items = conn.sql("INSERT INTO booking.trip_case_version_itinerary")
-    assert [(i[1], i[3], i[4], i[5], i[6], i[7]) for i in items] == [
-        (1, 1, 3, "BT-7D", None, None),
-        (2, 4, 5, None, ROOM, None),
-        (3, 5, 5, None, None, SERVICE),
+    assert [i[1:] for i in items] == [
+        (1, "Lantern Ridge Trek — 3 Days", 1, 3, "BT-7D", "Agency line L1", None, None),
+        (2, "Hotel Mistral Bay · Deluxe Twin", 4, 5, None, "Agency line L2", ROOM, None),
+        (3, "Airport transfer (private)", 5, 5, None, "Agency line L3", None, SERVICE),
     ]
     costs = conn.sql("INSERT INTO booking.version_item_costs")
     assert [(c[1], c[3]) for c in costs] == [(D("800.01"), "r-1"), (D("200.00"), None), (D("10.00"), None)]
@@ -468,6 +487,28 @@ async def test_confirm_opens_a_b2b_case_with_an_approved_version() -> None:
     # The status history names no staff member (system change) and notes the M2M client.
     assert conn.sql("set_config('booking.actor'")
     assert conn.sql("set_config('booking.status_note'") == [(f"B2B confirm by m2m:crm-client of hold {HOLD}",)]
+
+
+@pytest.mark.asyncio
+async def test_confirm_item_titles_fall_back_when_names_cannot_be_read() -> None:
+    """AA-1013: an unreadable catalog never fails the confirm; a missing name falls back to the kind (+ plan key)."""
+    conn = confirm_conn(tours=asyncpg.UndefinedTableError("relation catalog.v_tour does not exist"))
+    conn.on("FROM booking.hotel_room_types t", [])
+    conn.on("SELECT id::text AS id, title FROM booking.services", [{"id": SERVICE, "title": "  "}])
+    await confirm(conn)
+    [version] = conn.sql("INSERT INTO booking.trip_case_versions")
+    assert version[1] == "Trip plan BT-7D"
+    items = conn.sql("INSERT INTO booking.trip_case_version_itinerary")
+    assert [i[2] for i in items] == ["Trip plan BT-7D", "Hotel room", "Transfer"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_without_a_trip_plan_line_takes_the_first_line_as_headline() -> None:
+    conn = confirm_conn(lines=quote_lines()[1:])
+    await confirm(conn)
+    [version] = conn.sql("INSERT INTO booking.trip_case_versions")
+    assert version[1] == "Hotel Mistral Bay · Deluxe Twin"
+    assert not conn.sql("FROM catalog.v_tour WHERE source_id")
 
 
 @pytest.mark.asyncio

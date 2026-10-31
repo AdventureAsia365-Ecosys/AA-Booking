@@ -5,6 +5,7 @@ that leaves the catalog dropping out of every read."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 import asyncpg
@@ -257,6 +258,100 @@ async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], adm
         "SELECT action, summary FROM booking.audit_logs WHERE action = 'trip_case_version.created' ORDER BY created_at"
     )
     assert all(r["summary"].endswith("from trip plan BT-7D") or "BT-5D" in r["summary"] for r in actions)
+
+
+async def test_items_read_back_a_cis_rewrite_and_staff_refresh_them(
+    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    """AA-1013: a version made before CIS rewrote the tour keeps its titles; each item says what CIS says today, and a
+    staff save of the CIS titles clears the flags. Nothing changes by itself; the trail does not store the read-back."""
+    c, cis = client
+    contracting, sales = _auth(cis, CONTRACTING), _auth(cis, SALES)
+    await c.put(f"/catalog/trip-plans/{BHUTAN_A}/commercial", json=COMMERCIAL, headers=contracting)
+    body = {"new_customer": {"name": "Ana Traveller", "email": "ana@example.com"}, "pax_adults": 2}
+    made = (await c.post(f"/catalog/trip-plans/{BHUTAN_A}/trip-cases", json=body, headers=sales)).json()
+    code = made["trip_case"]["code"]
+    assert [i["cis"]["changed"] for i in made["version"]["items"]] == [False, False, False]
+    assert made["version"]["items"][0]["cis"]["tour_title"] == "Bhutan Dragon Trails"
+
+    # CIS rewrites days 1 and 3 (a later block of the same day wins, as in CIS 289).
+    await admin.executemany(
+        "INSERT INTO catalog.v_tour_day (source_id, day_number, title, body, places) VALUES ($1, $2, $3, $4, $5)",
+        [(BHUTAN_A, 1, "Paro arrival", "Welcome", ["Paro"]), (BHUTAN_A, 3, "Tiger's  Nest hike", "Hike", None)],
+    )
+    url = f"/trip-cases/{code}/versions/1/items"
+    got = (await c.get(url, headers=sales)).json()
+    assert [i["title"] for i in got["items"]] == ["Arrive in Paro", "Day 2", "Tiger's Nest hike"]
+    assert [(i["cis"]["day_number"], i["cis"]["title"], i["cis"]["changed"]) for i in got["items"]] == [
+        (1, "Paro arrival", True),
+        (2, None, False),  # CIS has no title for day 2: nothing to compare
+        (3, "Tiger's  Nest hike", False),  # whitespace only
+    ]
+
+    # Refresh = staff save the CIS titles (the builder's "Refresh from CIS"), ids kept.
+    items = [
+        {
+            "id": i["id"],
+            "title": i["cis"]["title"] if i["cis"]["changed"] else i["title"],
+            "day_from": i["day_from"],
+            "day_to": i["day_to"],
+            "source_tour_id": i["source_tour_id"],
+        }
+        for i in got["items"]
+    ]
+    saved = await c.put(url, json={"items": items}, headers=sales)
+    assert saved.status_code == 200, saved.text
+    assert [(i["title"], i["cis"]["changed"]) for i in saved.json()["items"]] == [
+        ("Paro arrival", False),
+        ("Day 2", False),
+        ("Tiger's Nest hike", False),
+    ]
+    trail = await admin.fetchval(
+        "SELECT after::text FROM booking.audit_logs WHERE action = 'trip_case_version.items_replaced'"
+    )
+    assert "Paro arrival" in trail and '"cis"' not in trail
+
+    # A catalog that cannot be read leaves the items without a read-back; the version still loads.
+    await admin.execute("REVOKE SELECT ON catalog.v_tour FROM booking")
+    try:
+        soft = await c.get(url, headers=sales)
+        assert soft.status_code == 200 and [i["cis"] for i in soft.json()["items"]] == [None, None, None]
+    finally:
+        await admin.execute("GRANT SELECT ON catalog.v_tour TO booking")
+
+
+async def test_one_day_tripplanner_legs_are_not_read_as_cis_day_copies(
+    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    """AA-1013 review: a one-day TripPlanner leg is titled from the TripPlanner snapshot (or "AA tour <key>"), not
+    with a CIS day title, so a version prefilled from legs never says CIS has newer text: a lone one-day leg of a
+    3-day CIS tour, and a one-day CIS tour whose leg has no named snapshot day."""
+    c, cis = client
+    snapshot = {"days": [{"day": 1, "source_tour_id": BHUTAN_A, "name": "Paro valley evening"}], "custom_days": []}
+    customer = await admin.fetchval(
+        "INSERT INTO booking.customers (name, email) VALUES ('Lead', 'lead-1013@example.com') RETURNING id"
+    )
+    case = await admin.fetchrow(
+        "INSERT INTO booking.trip_cases (customer_id, source_system, inquiry_snapshot, currency)"
+        " VALUES ($1, 'tripplanner', $2::jsonb, 'USD') RETURNING id::text AS id, code",
+        customer,
+        json.dumps(snapshot),
+    )
+    await admin.executemany(
+        "INSERT INTO booking.trip_case_legs (trip_case_id, position, source_tour_id, day_from, day_to)"
+        " VALUES ($1::uuid, $2, $3, $4, $5)",
+        [(case["id"], 1, BHUTAN_A, 1, 1), (case["id"], 2, LAOS, 2, 2)],
+    )
+    sales = _auth(cis, SALES)
+    made = await c.post(f"/trip-cases/{case['code']}/versions", json={}, headers=sales)
+    assert made.status_code == 201, made.text
+    got = (await c.get(f"/trip-cases/{case['code']}/versions/1/items", headers=sales)).json()["items"]
+    assert [i["title"] for i in got] == ["Paro valley evening", f"AA tour {LAOS}"]
+    # CIS day 1 of each tour says something else ("Arrive in Paro", "Luang Prabang"); neither leg is a day copy.
+    assert [(i["cis"]["tour_title"], i["cis"]["day_number"], i["cis"]["changed"]) for i in got] == [
+        ("Bhutan Dragon Trails", None, False),
+        ("Mekong Valley", None, False),
+    ]
 
 
 async def test_tour_leaving_the_catalog_drops_out(

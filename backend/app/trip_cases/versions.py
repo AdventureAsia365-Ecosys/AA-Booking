@@ -28,6 +28,9 @@
   highlights CIS **published** for its hotel / service (``supply.description`` / ``supply.highlights``, read live from
   ``catalog.v_supply_content``); a draft, in review, stale or unpublished entity gives null / [], and so does a
   Booking without CIS 278 (``app.supply.content``).
+- **CIS read-back** (AA-1013): every item of a response carries ``cis``, what the catalog says today about the tour
+  (and, for a day-by-day copy, the day) the item was made from, with ``changed`` when the stored title differs. Nothing
+  is refreshed by itself: staff refresh a draft's titles in the builder and save (``app.trip_cases.cis_readback``).
 - **Price** (``POST …/versions/{n}/price``) runs the pricing engine (``app.pricing.service``, the same code as
   quote-preview) on the stored cost lines and saves the total, selling currency, channel and the selling FX rate
   on a draft. A total below the channel floor needs a reason (audited). Send then locks all of it (bk-005).
@@ -51,7 +54,7 @@ from app.pricing import engine
 from app.pricing import service as pricing
 from app.supply import content as supply_content
 from app.supply import rates as supply_rates
-from app.trip_cases import sql
+from app.trip_cases import cis_readback, sql
 from app.trip_cases.service import ensure_staff_managed, is_terminal, resolve_case, set_status
 from app.trip_cases.sql import leg_title  # noqa: F401 — re-exported (tests, older imports)
 
@@ -138,7 +141,9 @@ def prefill_from_legs(legs: list[Any], snapshot: dict[str, Any] | None) -> list[
 
 async def _items(conn: asyncpg.Connection, version_id: str, *, content: bool = False) -> list[dict[str, Any]]:
     """The items of a version in order. ``content``: each item that books supply also carries the CIS-published
-    description and highlights of its hotel / service (AA-835; responses only, never the write-path comparisons)."""
+    description and highlights of its hotel / service (AA-835), and each item gets ``cis``, what the CIS catalog says
+    today about its tour and day (AA-1013, ``app.trip_cases.cis_readback``); responses only, never the write-path
+    comparisons."""
     rows = await conn.fetch(
         f"SELECT id::text AS id, {ITEM_SELECT}, {ITEM_COSTS_JSON}, {ITEM_SUPPLY_JSON}"  # noqa: S608 — constant
         " FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid ORDER BY position",
@@ -152,6 +157,7 @@ async def _items(conn: asyncpg.Connection, version_id: str, *, content: bool = F
         out.append(item)
     if content:
         await supply_content.attach_to_items(conn, out)
+        await cis_readback.attach(conn, out)
     return out
 
 
@@ -643,7 +649,8 @@ async def replace_items(
         entity_id=version["id"],
         before={"items": before},
         after={
-            "items": version["items"],
+            # The CIS read-back is what the catalog says today, not what was saved (AA-1013): kept out of the trail.
+            "items": [{k: v for k, v in i.items() if k != "cis"} for i in version["items"]],
             "removed": removed,
             "costs_replaced": len(rewrite),
             "rate_defaults": rate_defaults,

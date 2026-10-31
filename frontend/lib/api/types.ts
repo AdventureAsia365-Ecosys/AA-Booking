@@ -290,6 +290,19 @@ export interface VersionItemSupply {
   highlights?: string[];
 }
 
+/** AA-1013: what the CIS catalog says today about the tour (and day) a version item was made from. Read live on every
+ *  items response; never stored. `day_number` / `title` only for a tour copied day by day (one-day items). */
+export interface VersionItemCis {
+  source_id: string;
+  tour_title: string | null;
+  tour_updated_at: string | null;
+  day_number: number | null;
+  /** Today's CIS title of that day; null when the item is not a day copy (a leg, a B2B line) or CIS has no title. */
+  title: string | null;
+  /** The stored title differs from `title` (whitespace aside). */
+  changed: boolean;
+}
+
 export interface VersionItem {
   id: string;
   position: number;
@@ -303,6 +316,8 @@ export interface VersionItem {
   hotel_room_type_id?: string | null;
   service_id?: string | null;
   supply?: VersionItemSupply | null;
+  /** AA-1013: null when the item has no catalog tour or the catalog could not be read. */
+  cis?: VersionItemCis | null;
 }
 
 export interface VersionWithItems extends Version {
