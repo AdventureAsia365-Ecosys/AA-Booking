@@ -57,9 +57,13 @@ test("the summary counts changed items and names each tour once", () => {
   assert.equal(s.tours[0].updated_at, "2027-03-04T05:06:00Z");
 });
 
-test("a multi-day item names its tour unless its title already does", () => {
-  assert.equal(cisTourName(item("trip_plan tp:x · line 1", 1, tour(null), 5)), "Lantern Ridge Trek — 5 Days");
-  assert.equal(cisTourName(item("Lantern Ridge Trek — 5 Days", 1, tour(null), 5)), null);
-  assert.equal(cisTourName(item("Arrival", 1, tour("Arrival"))), null, "one-day items carry the day title");
+test("an item that is not a day copy names its tour unless its title already does", () => {
+  const notCompared = tour(null, { day_number: null });
+  assert.equal(cisTourName(item("trip_plan tp:x · line 1", 1, notCompared, 5)), "Lantern Ridge Trek — 5 Days");
+  assert.equal(cisTourName(item("Lantern Ridge Trek — 5 Days", 1, notCompared, 5)), null);
+  // A one-day B2B line of an older case, or a one-day TripPlanner leg: not a day copy, so the tour is named too.
+  assert.equal(cisTourName(item("trip_plan tp:x · line 1", 1, notCompared)), "Lantern Ridge Trek — 5 Days");
+  assert.equal(cisTourName(item("Lakeside lantern evening", 1, notCompared)), "Lantern Ridge Trek — 5 Days");
+  assert.equal(cisTourName(item("Arrival", 1, tour("Arrival", { day_number: 1 }))), null, "day copies carry the day title");
   assert.equal(cisTourName(item("Own leg", 1, null, 3)), null);
 });

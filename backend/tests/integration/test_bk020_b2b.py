@@ -85,6 +85,7 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.b2b_partners")
     await conn.execute("DELETE FROM booking.trip_plan_components")
     await conn.execute("DELETE FROM booking.trip_plans WHERE source_id = $1", SOURCE_ID)
+    await conn.execute("DELETE FROM catalog.stub_parsed_day WHERE source_id = $1", SOURCE_ID)
     await conn.execute("DELETE FROM catalog.v_tour WHERE source_id = $1", SOURCE_ID)
     await purge_supply(conn)
     await conn.execute("DELETE FROM booking.supplier_contracts")
@@ -414,6 +415,17 @@ async def test_departures_quote_hold_confirm(
     )
     assert [r["title"] for r in titles] == ["Hanoi 1D", "Hanoi Emerald · Deluxe"]
     assert all(r["notes"].startswith("Agency line ") for r in titles)
+    # AA-1013 review: the one-day plan line is titled with the tour, not a CIS day, so the read-back never flags it,
+    # even when CIS day 1 of that (one-day) tour has another title.
+    await admin.execute(
+        "INSERT INTO catalog.v_tour_day (source_id, day_number, title, body, places) VALUES ($1, 1, $2, '', NULL)",
+        SOURCE_ID,
+        "Old Quarter lantern walk",
+    )
+    read = await _ok(await c.get(f"/trip-cases/{case['code']}/versions/1/items", headers=boss))
+    assert [(i["cis"] or {}).get("tour_title") for i in read["items"]] == ["Hanoi 1D", None]
+    assert read["items"][0]["cis"]["day_number"] is None
+    assert not any((i["cis"] or {}).get("changed") for i in read["items"])
     assert version["total_price"] == D(quote["total_b2b_price"]["amount"]) and version["fx_rate_locked"] == 1
     costs = await admin.fetch(
         "SELECT i.position, i.hotel_room_type_id::text AS room, c.net_amount, c.net_currency"

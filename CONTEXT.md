@@ -65,7 +65,8 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. **Proposal
   item read-back** (AA-1013, `app/trip_cases/cis_readback.py`): every items response gives each item made from a
   CIS tour `cis` (tour title and `v_tour.updated_at`; for a tour copied day by day, the CIS day it stands for, today's
-  day title and `changed`), read live (one `v_tour` read, one `v_tour_day` read by `tour_id = ANY`), fail soft
+  day title and `changed`; B2B confirm items, TripPlanner legs, items titled with the tour and a lone one-day item of a
+  multi-day CIS tour are never compared), read live (one `v_tour` read, one `v_tour_day` read by `tour_id = ANY`), fail soft
   (`cis` null). Stored titles never change by themselves: the builder offers "Refresh from CIS" on a draft (a normal
   items save by staff), a sent or approved version keeps what the customer saw. Also
   feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
@@ -1382,7 +1383,7 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   (`GET /booking/trip-cases/{ref}`: the CIS tour country of each keyed leg, then the countries of the inquiry's
   route-day places; read live, fail soft). AA-1013: the builder and the customer-style preview show "CIS has newer
   text for this tour" when an item's CIS day title moved on (the builder: "CIS now: …" per item and Refresh from CIS on
-  a draft); an item spanning days names its CIS tour; the preview's day column is a `minmax(0, 1fr)` track (it
+  a draft); an item that is not a day copy (a leg, a B2B line, one-day ones included) names its CIS tour; the preview's day column is a `minmax(0, 1fr)` track (it
   scrolled sideways by 257 px at 390). The Proposals tab rows have Preview / Send / Discard draft. A sent or
   approved version's price panel shows the saved total, channel, FX lock and dates and asks for no live quote; a
   read-only session's 403 on the quote (`e2e_read_only`, `preview_read_only`) is explained, not shown as a role

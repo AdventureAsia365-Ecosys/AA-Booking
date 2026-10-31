@@ -297,7 +297,7 @@ export interface VersionItemCis {
   tour_title: string | null;
   tour_updated_at: string | null;
   day_number: number | null;
-  /** Today's CIS title of that day; null when the item is not compared (multi-day) or CIS has no title. */
+  /** Today's CIS title of that day; null when the item is not a day copy (a leg, a B2B line) or CIS has no title. */
   title: string | null;
   /** The stored title differs from `title` (whitespace aside). */
   changed: boolean;

@@ -8,6 +8,8 @@ export interface CisReadback {
   source_id: string;
   tour_title: string | null;
   tour_updated_at: string | null;
+  /** The CIS day the item stands for; null when the item is not a day-by-day copy of the tour. */
+  day_number?: number | null;
   title: string | null;
 }
 
@@ -28,11 +30,12 @@ export function cisNewTitle(item: WithCis): string | null {
   return next;
 }
 
-/** The tour name to show under an item that spans days (a TripPlanner leg, a B2B trip plan line), when its title does
- *  not already say it; null for one-day items (their title is the CIS day) and items without a tour. */
+/** The tour name to show under an item that is not a day-by-day copy of its tour (a TripPlanner leg, a B2B trip plan
+ *  line, one-day ones included), when its title does not already say it; null for day copies (their title is the CIS
+ *  day, `cis.day_number` set) and items without a tour. */
 export function cisTourName(item: WithCis): string | null {
   const name = item.cis?.tour_title;
-  if (!name || item.day_to <= item.day_from) return null;
+  if (!name || item.cis?.day_number != null) return null;
   return squash(name) === squash(item.title) ? null : name;
 }
 

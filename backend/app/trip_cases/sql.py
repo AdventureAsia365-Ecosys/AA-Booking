@@ -71,6 +71,11 @@ def leg_title(snapshot: dict[str, Any] | None, source_tour_id: str) -> str:
         name = day["name"].strip()
         if name:
             return name[:500]
+    return leg_fallback_title(source_tour_id)
+
+
+def leg_fallback_title(source_tour_id: str) -> str:
+    """The title of a leg whose tour has no named snapshot day (``app.trip_cases.cis_readback`` never compares it)."""
     return f"AA tour {source_tour_id}"[:500]
 
 

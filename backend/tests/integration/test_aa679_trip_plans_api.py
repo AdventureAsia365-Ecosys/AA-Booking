@@ -5,6 +5,7 @@ that leaves the catalog dropping out of every read."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 import asyncpg
@@ -317,6 +318,40 @@ async def test_items_read_back_a_cis_rewrite_and_staff_refresh_them(
         assert soft.status_code == 200 and [i["cis"] for i in soft.json()["items"]] == [None, None, None]
     finally:
         await admin.execute("GRANT SELECT ON catalog.v_tour TO booking")
+
+
+async def test_one_day_tripplanner_legs_are_not_read_as_cis_day_copies(
+    client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    """AA-1013 review: a one-day TripPlanner leg is titled from the TripPlanner snapshot (or "AA tour <key>"), not
+    with a CIS day title, so a version prefilled from legs never says CIS has newer text: a lone one-day leg of a
+    3-day CIS tour, and a one-day CIS tour whose leg has no named snapshot day."""
+    c, cis = client
+    snapshot = {"days": [{"day": 1, "source_tour_id": BHUTAN_A, "name": "Paro valley evening"}], "custom_days": []}
+    customer = await admin.fetchval(
+        "INSERT INTO booking.customers (name, email) VALUES ('Lead', 'lead-1013@example.com') RETURNING id"
+    )
+    case = await admin.fetchrow(
+        "INSERT INTO booking.trip_cases (customer_id, source_system, inquiry_snapshot, currency)"
+        " VALUES ($1, 'tripplanner', $2::jsonb, 'USD') RETURNING id::text AS id, code",
+        customer,
+        json.dumps(snapshot),
+    )
+    await admin.executemany(
+        "INSERT INTO booking.trip_case_legs (trip_case_id, position, source_tour_id, day_from, day_to)"
+        " VALUES ($1::uuid, $2, $3, $4, $5)",
+        [(case["id"], 1, BHUTAN_A, 1, 1), (case["id"], 2, LAOS, 2, 2)],
+    )
+    sales = _auth(cis, SALES)
+    made = await c.post(f"/trip-cases/{case['code']}/versions", json={}, headers=sales)
+    assert made.status_code == 201, made.text
+    got = (await c.get(f"/trip-cases/{case['code']}/versions/1/items", headers=sales)).json()["items"]
+    assert [i["title"] for i in got] == ["Paro valley evening", f"AA tour {LAOS}"]
+    # CIS day 1 of each tour says something else ("Arrive in Paro", "Luang Prabang"); neither leg is a day copy.
+    assert [(i["cis"]["tour_title"], i["cis"]["day_number"], i["cis"]["changed"]) for i in got] == [
+        ("Bhutan Dragon Trails", None, False),
+        ("Mekong Valley", None, False),
+    ]
 
 
 async def test_tour_leaving_the_catalog_drops_out(
