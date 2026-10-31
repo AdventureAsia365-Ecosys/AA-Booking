@@ -400,11 +400,20 @@ async def test_departures_quote_hold_confirm(
         "currency": "USD",
     }
     version = await admin.fetchrow(
-        "SELECT id::text AS id, is_approved, channel, total_price, currency, fx_rate_locked, is_sent_to_customer"
-        " FROM booking.trip_case_versions WHERE trip_case_id = $1::uuid",
+        "SELECT id::text AS id, is_approved, channel, total_price, currency, fx_rate_locked, is_sent_to_customer,"
+        " title, notes FROM booking.trip_case_versions WHERE trip_case_id = $1::uuid",
         case["id"],
     )
     assert version["is_approved"] and version["channel"] == "b2b" and not version["is_sent_to_customer"]
+    # AA-1013: the version and items read as what was sold (the CIS tour, the hotel room), not component ids.
+    assert (version["title"], version["notes"]) == ("Hanoi 1D", "Agency proposal PRO-1 v1")
+    titles = await admin.fetch(
+        "SELECT title, notes FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid"
+        " ORDER BY position",
+        version["id"],
+    )
+    assert [r["title"] for r in titles] == ["Hanoi 1D", "Hanoi Emerald · Deluxe"]
+    assert all(r["notes"].startswith("Agency line ") for r in titles)
     assert version["total_price"] == D(quote["total_b2b_price"]["amount"]) and version["fx_rate_locked"] == 1
     costs = await admin.fetch(
         "SELECT i.position, i.hotel_room_type_id::text AS room, c.net_amount, c.net_currency"

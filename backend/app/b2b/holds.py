@@ -110,6 +110,14 @@ SELECT q.currency::text AS currency, q.fx_rate_per_usd, q.fx_buffer_pct, q.fx_as
 FROM booking.b2b_quotes q WHERE q.id = $1::uuid
 """
 HOLD_PRICES_SQL = "SELECT ql.line_ref, ql.b2b_price FROM booking.b2b_quote_lines ql WHERE ql.quote_id = $1::uuid"
+# AA-1013: the names staff read on the B2B case's items (the tour, the hotel room, the service), not component ids.
+PLAN_TITLES_SQL = "SELECT source_id, title::text AS title FROM catalog.v_tour WHERE source_id = ANY($1::text[])"
+ROOM_TITLES_SQL = (
+    "SELECT t.id::text AS id, h.name || ' · ' || t.name AS title FROM booking.hotel_room_types t"
+    " JOIN booking.hotels h ON h.id = t.hotel_id WHERE t.id = ANY($1::uuid[])"
+)
+SERVICE_TITLES_SQL = "SELECT id::text AS id, title FROM booking.services WHERE id = ANY($1::uuid[])"
+KIND_LABELS = {"trip_plan": "Trip plan", "hotel_room": "Hotel room"}
 QUOTE_LINES_SQL = """
 SELECT line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult, pax_child,
        departure_id::text AS departure_id, net_cost_usd, supplier_rate_ids::text[] AS supplier_rate_ids
@@ -675,6 +683,39 @@ async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[An
     return rows
 
 
+async def _line_titles(conn: asyncpg.Connection, lines: list[Any], plan_source: dict[str, str]) -> dict[int, str]:
+    """{line_no: the item title}: a trip plan line = the CIS tour title (``catalog.v_tour``), a room line = "hotel ·
+    room type", a service line = the service title (AA-1013). A name that cannot be read falls back to the kind and
+    the catalog key (a trip plan) or the kind alone; a catalog read error never fails the confirm (it already read
+    the catalog once to check the tour is served)."""
+    parsed = {r["line_no"]: parse_component(r["component_id"]) for r in lines}
+    wanted: dict[str, set[str]] = {PREFIX_PLAN: set(), PREFIX_ROOM: set(), PREFIX_SERVICE: set()}
+    for prefix, ident in parsed.values():
+        wanted[prefix].add(plan_source.get(ident, "") if prefix == PREFIX_PLAN else ident)
+    wanted[PREFIX_PLAN].discard("")
+    names: dict[tuple[str, str], str] = {}
+    if wanted[PREFIX_PLAN]:
+        try:
+            async with conn.transaction():  # a savepoint: a catalog error must not abort the confirm
+                rows = await conn.fetch(PLAN_TITLES_SQL, sorted(wanted[PREFIX_PLAN]))
+        except (asyncpg.PostgresError, TimeoutError) as exc:
+            log.warning("b2b_confirm_tour_titles_unread error=%s", type(exc).__name__)
+            rows = []
+        names |= {(PREFIX_PLAN, r["source_id"]): r["title"] for r in rows if (r["title"] or "").strip()}
+    for prefix, statement in ((PREFIX_ROOM, ROOM_TITLES_SQL), (PREFIX_SERVICE, SERVICE_TITLES_SQL)):
+        if wanted[prefix]:
+            rows = await conn.fetch(statement, sorted(wanted[prefix]))
+            names |= {(prefix, r["id"]): r["title"] for r in rows if (r["title"] or "").strip()}
+    out: dict[int, str] = {}
+    for line in lines:
+        prefix, ident = parsed[line["line_no"]]
+        key = plan_source.get(ident, ident) if prefix == PREFIX_PLAN else ident
+        kind = KIND_LABELS.get(line["component_kind"], str(line["component_kind"]).replace("_", " ").capitalize())
+        fallback = f"{kind} {key}" if prefix == PREFIX_PLAN else kind
+        out[line["line_no"]] = " ".join((names.get((prefix, key)) or fallback).split())
+    return out
+
+
 async def _open_case(
     conn: asyncpg.Connection, caller: Caller, hold: Any, quote: Any, lines: list[Any]
 ) -> tuple[str, str]:
@@ -717,12 +758,20 @@ async def _open_case(
         quote["currency"],
         f"{CASE_KEY_PREFIX}{hold['id']}",
     )
+    titles = await _line_titles(conn, lines, plan_source)
+    # AA-1013: the version reads as the trip sold (the first trip plan line's tour, else the first line); the agency's
+    # proposal ref and version stay findable in the version notes (and the case's source_id).
+    headline = next(
+        (titles[r["line_no"]] for r in lines if parse_component(r["component_id"])[0] == PREFIX_PLAN),
+        titles[lines[0]["line_no"]],
+    )
     version_id = await conn.fetchval(
-        "INSERT INTO booking.trip_case_versions (trip_case_id, version_number, title, total_price, currency, channel,"
-        " valid_until, fx_rate_locked, fx_as_of) VALUES ($1::uuid, 1, $2, $3, $4, 'b2b', $5, $6, $7)"
+        "INSERT INTO booking.trip_case_versions (trip_case_id, version_number, title, notes, total_price, currency,"
+        " channel, valid_until, fx_rate_locked, fx_as_of) VALUES ($1::uuid, 1, $2, $3, $4, $5, 'b2b', $6, $7, $8)"
         " RETURNING id::text",
         case["id"],
-        f"B2B {hold['proposal_ref']} v{hold['proposal_version']}"[:200],
+        headline[:200],
+        f"Agency proposal {hold['proposal_ref']} v{hold['proposal_version']}"[:5000],
         quote["total_b2b_price"],
         quote["currency"],
         quote["valid_until"].date(),
@@ -734,14 +783,15 @@ async def _open_case(
         day_from = (line["service_date"] - start).days + 1
         item_id = await conn.fetchval(
             "INSERT INTO booking.trip_case_version_itinerary (trip_case_version_id, position, title, day_from, day_to,"
-            " source_tour_id, hotel_room_type_id, service_id) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8::uuid)"
-            " RETURNING id::text",
+            " source_tour_id, notes, hotel_room_type_id, service_id)"
+            " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9::uuid) RETURNING id::text",
             version_id,
             line["line_no"],
-            f"{line['component_kind']} {line['component_id']} · line {line['line_ref']}"[:500],
+            titles[line["line_no"]][:500],
             day_from,
             day_from + _span(line, plan_days) - 1,
             plan_source.get(ident) if prefix == PREFIX_PLAN else None,
+            f"Agency line {line['line_ref']}"[:5000],
             ident if prefix == PREFIX_ROOM else None,
             ident if prefix == PREFIX_SERVICE else None,
         )
