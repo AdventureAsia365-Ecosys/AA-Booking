@@ -6,6 +6,8 @@
 //   TC-000101  a TripPlanner custom trip in proposal_sent: no legs, countries derived from the legs API field, the
 //              inquiry carries a message / budget / travel window; V1 superseded, V2 approved (locked price, items),
 //              V3 draft with items and net costs (live quote → 403 e2e_read_only, as on the audit's E2E session).
+//              V4 (items only, not in the case's version list; AA-1013): a draft copied day by day from a CIS tour
+//              that CIS has since rewritten (two stale day titles) plus a multi-day item of a second tour.
 //   TC-000102  a new inquiry (Convert / Decline dialogs).
 //   /trip-checks  25 rows over a few trips with progress, tab counts, sales owners.
 //
@@ -126,7 +128,56 @@ function items(n: number, count: number): VersionItem[] {
   }));
 }
 
+// AA-1013: CIS rewrote "Lantern Ridge" after V4 was made (days 1 and 3); day 2 is unchanged.
+export const READBACK_VERSION = 4;
+const LANTERN = { source_id: "LR-5D", tour_title: "Lantern Ridge Trek and the Seven Springs Monastery — 5 Days", tour_updated_at: NOW };
+const READBACK_ITEMS: [string, number, number, VersionItem["cis"]][] = [
+  [
+    "Arrival at Lantern Ridge and transfer to the lakeside lodge above the old salt road",
+    1,
+    1,
+    { ...LANTERN, day_number: 1, title: "Lantern Ridge arrival and the lakeside lodge transfer", changed: true },
+  ],
+  ["Upper lake walk", 2, 2, { ...LANTERN, day_number: 2, title: "Upper lake walk", changed: false }],
+  [
+    "Ridge crossing to the monastery of the seven springs above the cloud line",
+    3,
+    3,
+    { ...LANTERN, day_number: 3, title: "Seven Springs monastery ridge crossing", changed: true },
+  ],
+  [
+    "Hotel room · line 4",
+    4,
+    6,
+    { source_id: "SB-3D", tour_title: "Salt Bay Escape — 3 Days", tour_updated_at: EARLIER, day_number: null, title: null, changed: false },
+  ],
+];
+
+function readbackVersion(): VersionWithItems {
+  const v: Partial<CaseVersion> = version(READBACK_VERSION, "draft", READBACK_ITEMS.length);
+  delete v.item_count;
+  return {
+    ...(v as Omit<CaseVersion, "item_count">),
+    title: "Lantern Ridge Trek and the Seven Springs Monastery — 5 Days",
+    items: READBACK_ITEMS.map(([title, day_from, day_to, cis], i) => ({
+      id: `aaaa4000-0000-4000-8000-${pad(i, 12)}`,
+      position: i + 1,
+      title,
+      day_from,
+      day_to,
+      source_tour_id: cis?.source_id ?? null,
+      notes: null,
+      costs: [],
+      hotel_room_type_id: null,
+      service_id: null,
+      supply: null,
+      cis,
+    })),
+  };
+}
+
 function versionWithItems(n: number): VersionWithItems | null {
+  if (n === READBACK_VERSION) return readbackVersion();
   const v = VERSIONS.find((x) => x.version_number === n);
   if (!v) return null;
   const { item_count, ...rest } = v;

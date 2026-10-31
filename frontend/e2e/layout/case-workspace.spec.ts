@@ -15,12 +15,16 @@
 //   - Convert / Decline dialogs keep their buttons in the Modal footer band;
 //   - kit buttons (AA-994 S6d): the case tabs are a kit tab list (counts, arrow keys), the status menu trigger and its
 //     items keep their ARIA, the builder's row actions are a labelled group of kit icon buttons.
+//   - proposal read-back after a CIS rewrite (AA-1013): the preview and the builder of a draft whose CIS day titles
+//     moved on show the notice; "Refresh from CIS" copies today's titles into the draft (nothing is written until
+//     Save); a multi-day item names its tour; the customer-style preview never scrolls sideways at 390 (it did by
+//     257 px), in light and dark.
 // Shots: $LAYOUT_SHOTS_DIR (default e2e/layout/results) as slice4-<name>-<width>.png.
 
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { CUSTOM_CASE, INQUIRY_CASE, caseAnswer } from "./case-fixtures";
+import { CUSTOM_CASE, INQUIRY_CASE, READBACK_VERSION, caseAnswer } from "./case-fixtures";
 import { answer, CLOCK } from "./fixtures";
 import { OUT } from "./paths";
 
@@ -150,11 +154,17 @@ async function shot(page: Page, name: string, width: number) {
 }
 
 const ROW = '[data-testid="kit-datatable-row"]';
+const NOTICE = '[data-testid="cis-updated-notice"]';
 const PAGES = [
   { name: "case-overview", url: `/cases/${CUSTOM_CASE}`, ready: '[data-testid="trip-facts"]', table: false },
   { name: "case-proposals", url: `/cases/${CUSTOM_CASE}?tab=proposals`, ready: ROW, table: true },
   { name: "builder-draft", url: `/cases/${CUSTOM_CASE}/proposals/3`, ready: '[data-testid="quote-read-only"]', table: false },
   { name: "builder-locked", url: `/cases/${CUSTOM_CASE}/proposals/2`, ready: '[data-testid="locked-price"]', table: false },
+  // AA-1013: the customer-style preview (long titles must wrap, not widen the page) and the read-back notice.
+  { name: "preview-draft", url: `/cases/${CUSTOM_CASE}/proposals/3/preview`, ready: "article", table: false },
+  { name: "preview-locked", url: `/cases/${CUSTOM_CASE}/proposals/2/preview`, ready: "article", table: false },
+  { name: "preview-cis-updated", url: `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}/preview`, ready: NOTICE, table: false },
+  { name: "builder-cis-updated", url: `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}`, ready: NOTICE, table: false },
   // The trip-checks table width at 1440 (Status cut at the card edge) is audit slice 1 (PR #126: truncated Check /
   // Customer / Owner cells); here the progress chip must not make the Trip case column wider (behaviour test below).
   { name: "trip-checks", url: "/trip-checks", ready: '[data-testid="trip-progress"]', table: false },
@@ -186,6 +196,58 @@ for (const width of [1440, 390] as const) {
     }
   });
 }
+
+// AA-1013: the read-back preview in dark too (the notice uses the warning tokens), at both widths.
+for (const width of [1440, 390] as const) {
+  test.describe(`proposal read-back at ${width}, dark`, () => {
+    test.use(
+      width === 1440
+        ? { viewport: { width, height: 900 }, colorScheme: "dark" }
+        : { viewport: { width, height: 844 }, colorScheme: "dark", isMobile: true, hasTouch: true },
+    );
+    test(`preview-cis-updated at ${width} dark: fits, console clean`, async ({ page, baseURL }) => {
+      const c = await prepare(page, baseURL!);
+      await open(page, `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}/preview`, NOTICE, c);
+      const m = await measure(page);
+      await shot(page, "preview-cis-updated-dark", width);
+      pageChecks(m, c);
+    });
+  });
+}
+
+test.describe("proposal read-back after a CIS rewrite", () => {
+  test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+
+  test("preview: the notice names the tour; a multi-day item names its tour; nothing is offered to write", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}/preview`, NOTICE, c);
+    const notice = page.getByTestId("cis-updated-notice");
+    await expect(notice).toContainText("CIS has newer text for this tour");
+    await expect(notice).toContainText("2 item titles differ");
+    await expect(notice).toContainText("Lantern Ridge Trek and the Seven Springs Monastery — 5 Days");
+    await expect(notice).toContainText("Refresh from CIS");
+    await expect(page.getByText("Salt Bay Escape — 3 Days")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh from CIS" })).toHaveCount(0);
+    expect(c.posts).toEqual([]);
+  });
+
+  test("builder: Refresh from CIS copies today's titles into the draft and waits for Save", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}`, NOTICE, c);
+    await expect(page.getByTestId("cis-new-title")).toHaveCount(2);
+    await expect(page.getByTestId("cis-new-title").first()).toContainText("CIS now: Lantern Ridge arrival and the lakeside lodge transfer");
+    await shot(page, "builder-cis-updated-before", 1440);
+    await page.getByRole("button", { name: "Refresh from CIS" }).click();
+    await expect(page.getByTestId("cis-updated-notice")).toHaveCount(0);
+    await expect(page.getByTestId("cis-new-title")).toHaveCount(0);
+    await expect(page.getByText("Lantern Ridge arrival and the lakeside lodge transfer", { exact: true })).toBeVisible();
+    await expect(page.getByText("Seven Springs monastery ridge crossing", { exact: true })).toBeVisible();
+    await expect(page.getByText("Upper lake walk", { exact: true })).toBeVisible();
+    await expect(page.getByText("Unsaved changes")).toBeVisible();
+    await shot(page, "builder-cis-updated-after", 1440);
+    expect(c.posts, "a refresh writes nothing until Save").toEqual([]);
+  });
+});
 
 test.describe("slice 4 behaviour at 1440", () => {
   test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });

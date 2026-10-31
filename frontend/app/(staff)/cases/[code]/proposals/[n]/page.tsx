@@ -12,6 +12,8 @@
 // AA-996 (Figma audit items 11, 12): a sent or approved version shows its saved price (total, channel, FX lock, sent /
 // approved dates) instead of a live quote; a read-only session's 403 on the quote is explained (PricePanel); "Record
 // approval" is refused for a version with no items (the API answers 422 version_empty too).
+// AA-1013: items made from a CIS tour carry what CIS says today (`cis`); when a day title moved on, a notice names the
+// tour and, on an editable draft, "Refresh from CIS" copies today's titles into the draft (Save keeps them).
 
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -30,6 +32,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   Send,
   Trash2,
@@ -79,6 +82,8 @@ import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { CostLinesEditor, FxNotice, PriceSettings, QuoteResult, useQuotePreview, type PriceSettingsValue } from "@/ui/booking/PricePanel";
 import { dayDate, useVersion } from "@/app/(staff)/_parts/useVersion";
 import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
+import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
+import { cisNewTitle, cisTourName, cisUpdates, refreshFromCis } from "@/ui/booking/cisReadback";
 import { ItemDrawer, type ItemDraftFields } from "./ItemDrawer";
 
 const TERMINAL = ["completed", "cancelled"];
@@ -254,6 +259,12 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const setCosts = (key: string, costs: CostLine[]) => setItem(key, { costs });
   const newCost = (): CostLine => ({ key: newKey("cost"), net_amount: "", net_currency: c.currency ?? "USD", supplier_note: "" });
 
+  const cisNow = cisUpdates(items);
+  const refreshCis = () => {
+    setItems((list) => refreshFromCis(list));
+    toast.success(`${cisNow.count} title(s) copied from CIS. Save to keep them.`);
+  };
+
   const groups = groupByDay(items, extraDays);
   const lastDay = groups.length;
   const editing = drawer?.mode === "edit" ? items.find((it) => it.key === drawer.key) : undefined;
@@ -393,7 +404,25 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           </div>
         )}
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <CisUpdatedNotice
+          summary={cisNow}
+          hint={
+            editable
+              ? "Refresh copies today's CIS titles into this draft; nothing is saved until you press Save."
+              : locked
+                ? "This version stays as it was sent. Create a new version from the case and refresh it there."
+                : "Only an editable draft can be refreshed."
+          }
+          action={
+            editable ? (
+              <Button size="sm" variant="secondary" onClick={refreshCis}>
+                <RefreshCw size={13} /> Refresh from CIS
+              </Button>
+            ) : undefined
+          }
+        />
+
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           {/* ── Day timeline ── */}
           <Section
             title="Itinerary"
@@ -756,6 +785,8 @@ function ItemCard({
   // Per-line selling amounts only: the API returns no per-item total, and summing decimal strings in floating
   // point here could disagree with the server by a cent (S236 review finding 10).
   const priced = sellAmounts.filter((a): a is string => a != null);
+  const cisTitle = cisNewTitle(item);
+  const cisTour = cisTourName(item);
   return (
     <div
       draggable={editable}
@@ -780,7 +811,7 @@ function ItemCard({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-ink">{item.title}</span>
+          <span className="min-w-0 break-words text-sm font-medium text-ink">{item.title}</span>
           <span className="rounded-full bg-accent-tint px-2 py-0.5 text-[11px] font-semibold text-accent-deep">
             {item.day_to > item.day_from ? `Days ${item.day_from}–${item.day_to}` : `Day ${item.day_from}`}
           </span>
@@ -792,6 +823,12 @@ function ItemCard({
           )}
           {!item.id && <span className="text-[11px] font-semibold text-warning">New</span>}
         </div>
+        {cisTour && <p className="mt-1 break-words text-[12.5px] text-muted">Tour: {cisTour}</p>}
+        {cisTitle && (
+          <p className="mt-1 break-words text-[12.5px] text-warning" data-testid="cis-new-title">
+            CIS now: <span className="font-medium">{cisTitle}</span>
+          </p>
+        )}
         {item.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] text-muted">{item.notes}</p>}
         {item.supply?.description && (
           <p className="mt-1 line-clamp-2 text-[12.5px] text-muted" title="Published in CIS for this hotel / service">
