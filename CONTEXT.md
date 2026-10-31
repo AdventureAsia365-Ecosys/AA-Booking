@@ -7,7 +7,7 @@ status: active
 owner: nghiep
 audience: [engineer, agent]
 applies_to: [aa-booking-api, aa-booking-admin]
-last_reviewed: 2026-10-27
+last_reviewed: 2026-10-31
 review_every_days: 90
 related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 ---
@@ -62,7 +62,12 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   notifications. Both are feature-detected: without CIS 274 Booking degrades to `v_tour` alone. **Supply content
   read-back** (AA-835 S4, root ADR 0004a decision 4, CIS migration 278): `catalog.v_supply_content`, read live
   (`app/supply/content.py`): the hotel / service detail shows what CIS published (status, text, photo URLs, the CIS
-  `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. Also
+  `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. **Proposal
+  item read-back** (AA-1013, `app/trip_cases/cis_readback.py`): every items response gives each item made from a
+  CIS tour `cis` (tour title and `v_tour.updated_at`; for a tour copied day by day, the CIS day it stands for, today's
+  day title and `changed`), read live (one `v_tour` read, one `v_tour_day` read by `tour_id = ANY`), fail soft
+  (`cis` null). Stored titles never change by themselves: the builder offers "Refresh from CIS" on a draft (a normal
+  items save by staff), a sent or approved version keeps what the customer saw. Also
   feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
   CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request.
   `catalog.v_tour_place_name` (CIS 298, AA-996: list destinations; the names and positions of `v_tour_place` without
@@ -493,7 +498,10 @@ send, OTP) is not built: those still write rows only.
   commercial record: one transaction opens a **B2B trip case** (`channel = 'b2b'`, `customer_id` NULL,
   `party_tenant_id` = the agency, `source_system = 'crm'`, `source_id` = the proposal ref, status `confirmed` inserted
   directly, `idempotency_key = b2b_hold:<hold id>`), **one approved version** (V1, channel `b2b`, the quote's total,
-  currency and FX lock) with one item and one cost row per line (net from the quote), sets the hold `confirmed`, then
+  currency and FX lock) with one item and one cost row per line (net from the quote; AA-1013: the item title is what
+  was sold, the CIS tour title of a trip plan line from `catalog.v_tour`, "hotel · room type" or the service title,
+  falling back to the kind; the version title is the first trip plan line's tour; the agency proposal ref / version
+  and each line ref go to the version / item notes), sets the hold `confirmed`, then
   the hold lines `available` → `confirmed` (so their `line.confirmed` events name the booking); `on_request` lines go
   to the B2B desk with their answer deadline (AA-975, below). Expired / released → 410
   `hold_expired`; wrong hash → 409; a departure cancelled since the hold → 422 `sold_out`; a replay returns the same
@@ -1372,7 +1380,10 @@ after the business review. Today Booking makes no AI calls, so this is a rule fo
   column, a custom trip's empty legs card is one line, the TripPlanner inquiry panel shows the client's message,
   budget, travel window, style and party when the snapshot carries them, and Countries falls back to `leg_countries`
   (`GET /booking/trip-cases/{ref}`: the CIS tour country of each keyed leg, then the countries of the inquiry's
-  route-day places; read live, fail soft). The Proposals tab rows have Preview / Send / Discard draft. A sent or
+  route-day places; read live, fail soft). AA-1013: the builder and the customer-style preview show "CIS has newer
+  text for this tour" when an item's CIS day title moved on (the builder: "CIS now: …" per item and Refresh from CIS on
+  a draft); an item spanning days names its CIS tour; the preview's day column is a `minmax(0, 1fr)` track (it
+  scrolled sideways by 257 px at 390). The Proposals tab rows have Preview / Send / Discard draft. A sent or
   approved version's price panel shows the saved total, channel, FX lock and dates and asks for no live quote; a
   read-only session's 403 on the quote (`e2e_read_only`, `preview_read_only`) is explained, not shown as a role
   problem. Approving a version with no items is 422 `version_empty`. Convert / Decline dialogs use the Modal footer.
