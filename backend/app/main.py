@@ -17,7 +17,8 @@ verifier, keys prefetched in the background like the others).
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
 (``app.jobs.worker``) as one background task of this process — never from a request path — and, next to it, the
-backlog metrics sampler (``app.jobs.metrics``, AA-751: ``AA/Jobs/Booking`` to CloudWatch every 5 min).
+backlog sampler (``app.jobs.metrics``, AA-751) with its in-app checks (``app.jobs.ops_checks``, S263: e-mail on the
+alerts topic, no CloudWatch metric).
 
 Observability (AA-871, ``app.observability``): JSON log lines on stdout (stdlib and structlog calls alike), a request id
 per request (``X-Request-ID`` in, or generated; echoed on every response and bound to every log line), and Sentry when
@@ -143,7 +144,7 @@ def create_app(
                 no_release=retention_jobs.NOT_RELEASED,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
-            # Independent of the worker task (AA-751): a stuck worker loop must still show in the metrics.
+            # Independent of the worker task (AA-751): a stuck worker loop must still show in the job checks.
             sampler_task = asyncio.create_task(JobMetricsSampler(db.pool).run_forever(stop), name="booking-job-metrics")
         yield
         stop.set()

@@ -1,5 +1,5 @@
-"""Backlog metrics sampler (AA-751 B5): the pure sample rule, the metric payload, and the never-raise loop.
-The SQL runs against Postgres in tests/integration/test_job_metrics.py."""
+"""Backlog sampler (AA-751 B5; S263 checks instead of CloudWatch): the pure sample rule, the hand-off to the in-app
+checks, and the never-raise loop. The SQL runs against Postgres in tests/integration/test_job_metrics.py."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 
 from app.jobs import metrics
 from app.jobs.kinds import DEFAULT_EXPECTED_SECONDS, EXPECTED_SECONDS, expected_seconds, overdue_after_seconds
-from app.jobs.metrics import JobMetricsSampler, Sample, backlog_sample, metric_data
+from app.jobs.metrics import JobMetricsSampler, Sample, backlog_sample
 from tests.unit.fakes import ScriptedConn
 
 
@@ -58,39 +58,22 @@ def test_unknown_attempt_age_is_healthy_and_negative_ages_clamp() -> None:
     assert (s.oldest_queued_age_s, s.overdue_running, s.due_queued_age_s) == (0.0, 0, 0.0)
 
 
-def test_metric_data_has_no_dimensions_and_the_alarm_units() -> None:
-    assert metric_data(Sample(901.0, 2, 3, 901.0)) == [
-        {"MetricName": "OldestQueuedAgeSeconds", "Value": 901.0, "Unit": "Seconds"},
-        {"MetricName": "OverdueRunningJobs", "Value": 2.0, "Unit": "Count"},
-    ]
+def test_no_cloudwatch_left() -> None:
+    """S263: the AA/Jobs/Booking metrics and their alarms are gone (app.jobs.ops_checks instead)."""
+    for name in ("metric_data", "cloudwatch_client", "NAMESPACE", "CLOUDWATCH_REGION"):
+        assert not hasattr(metrics, name)
 
 
-def test_cloudwatch_client_uses_short_timeouts_and_one_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
-    import boto3
-
-    seen: dict[str, Any] = {}
-
-    def fake_client(service: str, **kw: Any) -> str:
-        seen.update(kw, service=service)
-        return "client"
-
-    monkeypatch.setattr(boto3, "client", fake_client)
-    assert metrics.cloudwatch_client() == "client"
-    config = seen["config"]
-    assert (seen["service"], seen["region_name"]) == ("cloudwatch", "us-west-1")
-    assert (config.connect_timeout, config.read_timeout, config.retries) == (3, 5, {"max_attempts": 1})
-
-
-class FakeCloudWatch:
+class FakePublisher:
     def __init__(self, error: Exception | None = None) -> None:
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[list[Any]] = []
         self.error = error
 
-    def put_metric_data(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(kwargs)
+    async def alert(self, pool: Any, found: list[Any], now: Any = None) -> dict[str, str]:
+        self.calls.append(found)
         if self.error:
             raise self.error
-        return {}
+        return {f.check: "sent" for f in found}
 
 
 def _pool(conn: ScriptedConn):
@@ -110,62 +93,57 @@ def _conn(oldest: Any = 1000.0, running: Any = ()) -> ScriptedConn:
 
 
 @pytest.mark.asyncio
-async def test_sample_once_puts_one_call_in_the_booking_namespace(caplog: pytest.LogCaptureFixture) -> None:
-    cw = FakeCloudWatch()
-    made: list[int] = []
-
-    def factory() -> FakeCloudWatch:
-        made.append(1)
-        return cw
-
-    sampler = JobMetricsSampler(_pool(_conn(1000.0, [("bk_inquiry_pull", 700.0)])), client_factory=factory)
+async def test_sample_once_hands_the_findings_to_the_publisher(caplog: pytest.LogCaptureFixture) -> None:
+    pub = FakePublisher()
+    sampler = JobMetricsSampler(_pool(_conn(1000.0, [("bk_inquiry_pull", 700.0)])), publisher=pub)  # type: ignore[arg-type]
     caplog.set_level(logging.INFO, logger="app.jobs.metrics")
     sample = await sampler.sample_once()
     assert sample == Sample(1000.0, 1, 1, 1000.0)
-    await sampler.sample_once()
-    assert len(made) == 1  # the client is created once and reused
-    assert len(cw.calls) == 2
-    assert cw.calls[0] == {"Namespace": "AA/Jobs/Booking", "MetricData": metric_data(sample)}
-    assert "ops_metrics_sampled namespace=AA/Jobs/Booking oldest_queued_age_s=1000" in caplog.text
-    assert "overdue_running_jobs=1 running=1" in caplog.text
+    assert [f.check for f in pub.calls[0]] == ["jobs_stuck", "jobs_overdue"]
+    assert "ops_metrics_sampled oldest_queued_age_s=1000 overdue_running_jobs=1 running=1" in caplog.text
+    assert "checks=jobs_overdue:sent,jobs_stuck:sent" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_sample_once_never_raises(caplog: pytest.LogCaptureFixture) -> None:
-    cw = FakeCloudWatch()
-    broken_read = JobMetricsSampler(_pool(_conn(oldest=ConnectionError("db down"))), client_factory=lambda: cw)
+async def test_a_healthy_sample_checks_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    pub = FakePublisher()
+    caplog.set_level(logging.INFO, logger="app.jobs.metrics")
+    await JobMetricsSampler(_pool(_conn(None, [])), publisher=pub).sample_once()  # type: ignore[arg-type]
+    assert pub.calls == [[]] and "checks=ok" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sample_once_never_raises_on_a_failed_read(caplog: pytest.LogCaptureFixture) -> None:
+    pub = FakePublisher()
+    broken_read = JobMetricsSampler(_pool(_conn(oldest=ConnectionError("db down"))), publisher=pub)  # type: ignore[arg-type]
     assert await broken_read.sample_once() is None
-    assert cw.calls == []  # no datapoint at all when the read fails (that is what sampling-stopped sees)
+    assert pub.calls == []  # nothing to check when the read fails
 
     async def no_pool() -> Any:
         raise OSError("connect refused")
 
-    assert await JobMetricsSampler(no_pool, client_factory=lambda: cw).sample_once() is None
-
-    denied = JobMetricsSampler(_pool(_conn()), client_factory=lambda: FakeCloudWatch(PermissionError("AccessDenied")))
-    assert await denied.sample_once() is None
-
-    def factory_fails() -> FakeCloudWatch:
-        raise RuntimeError("no credentials")
-
-    assert await JobMetricsSampler(_pool(_conn()), client_factory=factory_fails).sample_once() is None
+    assert await JobMetricsSampler(no_pool, publisher=pub).sample_once() is None  # type: ignore[arg-type]
     assert "stage=read error=ConnectionError" in caplog.text
-    assert "stage=put error=PermissionError: AccessDenied" in caplog.text
+
+
+def test_default_publisher_reads_the_topic_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALERTS_TOPIC_ARN", "topic-placeholder")
+    assert JobMetricsSampler(_pool(_conn()))._publisher.configured
 
 
 @pytest.mark.asyncio
 async def test_run_forever_samples_at_once_then_every_period_until_stop() -> None:
-    cw = FakeCloudWatch()
-    sampler = JobMetricsSampler(_pool(_conn()), every_s=0.01, client_factory=lambda: cw)
+    pub = FakePublisher()
+    sampler = JobMetricsSampler(_pool(_conn()), every_s=0.01, publisher=pub)  # type: ignore[arg-type]
     stop = asyncio.Event()
     task = asyncio.create_task(sampler.run_forever(stop))
     for _ in range(200):
-        if len(cw.calls) >= 3:
+        if len(pub.calls) >= 3:
             break
         await asyncio.sleep(0.01)
     stop.set()
     await asyncio.wait_for(task, timeout=1)
-    assert len(cw.calls) >= 3
+    assert len(pub.calls) >= 3
 
 
 @pytest.mark.asyncio
@@ -176,7 +154,7 @@ async def test_run_forever_keeps_going_after_failures_and_stops_on_cancel() -> N
         reads.append(1)
         raise OSError("down")
 
-    sampler = JobMetricsSampler(flaky, every_s=0.01, client_factory=FakeCloudWatch)
+    sampler = JobMetricsSampler(flaky, every_s=0.01, publisher=FakePublisher())  # type: ignore[arg-type]
     task = asyncio.create_task(sampler.run_forever(asyncio.Event()))
     for _ in range(200):
         if len(reads) >= 3:
