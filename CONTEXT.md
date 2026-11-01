@@ -1320,6 +1320,11 @@ must disclose AI at the start of each session. Source: Anthropic Usage Policy hi
 (effective 12/11/2026); proposal wording in root `docs/legal/tenant-terms-ai-clause-draft.md` §5, may be tightened
 after the business review. Today Booking makes no AI calls, so this is a rule for future features.
 
+Booking has no AI calls; any future call goes through the shared AI core gateway (root ADR 0009: route, budget, one
+ledger row per call), never a direct provider call. `backend/tests/unit/test_gateway_bypass.py` (AA-642 L6) fails CI
+on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `backend/app`, `backend/scripts` or
+`frontend/`.
+
 ## Staff admin frontend (AA-683)
 
 - `frontend/` is a Next.js app for Booking staff (UI spec S236). The browser only talks to its own BFF.
