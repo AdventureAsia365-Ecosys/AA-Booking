@@ -200,7 +200,8 @@ backend/
                            release on shutdown, AA-751); kinds.py (EXPECTED_SECONDS per kind, DEPLOY_GATE_EXEMPT,
                            DEPLOY_BLOCKING_KINDS, TEST_KINDS); noop_sleep.py (Dev-only test kind bk_noop_sleep, only
                            with JOB_TEST_KINDS, AA-993 G4 proof) +
-                           metrics.py (backlog metrics sampler, AA/Jobs/Booking to CloudWatch, AA-751)
+                           metrics.py (backlog sampler, AA-751) + ops_checks.py (S263 in-app job checks -> alerts
+                           SNS topic, once per check per UTC day; ledger kind bk_ops_alert)
   app/retention/           AA-825 retention kinds bk_retention_job / bk_retention_inbox_redact: policy (windows),
                            redact (inbox payload PII), archive (S3 JSONL.gz), runner (batched count/delete/redact),
                            jobs (modes, handlers, daily schedule hook, admin status)
@@ -802,15 +803,18 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   `cancelled` (never back to `queued`). Nothing in Booking sets it yet (no staff cancel endpoint); a running job is not
   interrupted by it.
 - **Per-attempt start:** each claim writes `progress.attempt_started_at`; `started_at` keeps the first attempt's time.
-- **Backlog metrics (AA-751, `app/jobs/metrics.py`).** A second lifespan task, next to the worker and only when it runs,
-  sends one `PutMetricData` to CloudWatch namespace `AA/Jobs/Booking` (no dimensions) every 300 s:
-  `OldestQueuedAgeSeconds` = age of the oldest due queued row without a cancel request (any kind), but **0 while a
-  non-overdue job is running** (the worker is serial); `OverdueRunningJobs` = running rows whose current attempt is older
+- **Backlog checks (AA-751 `app/jobs/metrics.py`; S263 alert diet, AA-1025, `app/jobs/ops_checks.py`).** A second
+  lifespan task, next to the worker and only when it runs, reads two values from `booking.job` every 300 s:
+  `oldest_queued_age_s` = age of the oldest due queued row without a cancel request (any kind), but **0 while a
+  non-overdue job is running** (the worker is serial); `overdue_running` = running rows whose current attempt is older
   than 2 x `EXPECTED_SECONDS[kind]` (`app/jobs/kinds.py`, default 300 s; every handled kind must be listed, a unit test
   checks it). It reads `booking.job` directly (never through the queue), never raises, and is cancelled on shutdown
-  before the pool closes. AA-CIS-Infra owns the IAM grant (task role, namespace `AA/Jobs/Booking` only) and the three
-  alarms `<booking prefix>-jobs-queue-age` (> 900 s), `-jobs-overdue-running` (> 0) and `-jobs-sampling-stopped` (no
-  sample for 45 min, which also fires while the service is scaled to 0 or `WORKER_ENABLED` is off).
+  before the pool closes. Until S263 these were CloudWatch metrics `AA/Jobs/Booking` with three Infra alarms; now the
+  task checks them itself: `jobs_stuck` (> 900 s) and `jobs_overdue` (> 0) publish one e-mail per check per UTC day to
+  the platform alerts SNS topic (env `ALERTS_TOPIC_ARN`, task role `sns:Publish`, both from AA-CIS-Infra). The dedupe
+  is a ledger row in `booking.job`: kind `bk_ops_alert`, status `succeeded`, idempotency key
+  `bk_ops_alert:<check>:<UTC day>` (`queue.record_alert`; a failed publish deletes it, `queue.forget_alert`). No
+  worker claims those rows (never queued). The service being down is the Infra alarm `aa-booking-<env>-no-healthy-task`.
 - **Deploy gate (AA-751 B3/B4; meaning changed by AA-993 G5, design D1.4).** `GET /booking/ops/deploy-gate`
   returns `{active, by_status, by_kind, safe_to_deploy, exempt_kinds, blocking_kinds, blocking_running, blocking_due,
   blocked_by}`.

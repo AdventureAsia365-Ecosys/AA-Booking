@@ -1,4 +1,4 @@
-"""Backlog metrics SQL on a real PostgreSQL, as role ``booking`` (AA-751 B5, plan §5 "Booking"): due vs not-due vs
+"""Backlog sample SQL and the S263 alert ledger on a real PostgreSQL, as role ``booking`` (AA-751 B5): due vs not-due vs
 cancel-requested queued rows, the per-attempt age of running rows, and the "healthy running job zeroes the queue age"
 rule end to end through :func:`app.jobs.metrics.read_sample`."""
 
@@ -10,7 +10,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
-from app.jobs import queue
+from app.jobs import ops_checks, queue
 from app.jobs.metrics import JobMetricsSampler, read_sample
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -102,20 +102,40 @@ async def test_claim_stamp_feeds_the_sample(admin: asyncpg.Connection, pool: asy
     assert (s.oldest_queued_age_s, s.overdue_running, s.running) == (0.0, 0, 1)
 
 
-async def test_sampler_publishes_what_it_read(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+async def test_sampler_alerts_once_a_day_with_a_ledger_row(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    """S263: a stuck queue mails the alerts topic once; the ledger row (succeeded, never claimed) holds the day."""
     await queued(admin, "bk_x6_probe", "20 minutes")
     calls: list[dict] = []
 
-    class CW:
-        def put_metric_data(self, **kw: object) -> dict:
+    class Sns:
+        def publish(self, **kw: object) -> dict:
             calls.append(kw)
             return {}
 
     async def provide() -> asyncpg.Pool:
         return pool
 
-    sample = await JobMetricsSampler(provide, client_factory=CW).sample_once()
+    pub = ops_checks.AlertPublisher("topic-placeholder", environment="test", client_factory=Sns)
+    sampler = JobMetricsSampler(provide, publisher=pub)
+    sample = await sampler.sample_once()
     assert sample is not None and sample.oldest_queued_age_s >= 1195
-    ((call,),) = [calls]
-    assert call["Namespace"] == "AA/Jobs/Booking"
-    assert [d["MetricName"] for d in call["MetricData"]] == ["OldestQueuedAgeSeconds", "OverdueRunningJobs"]
+    await sampler.sample_once()
+    assert len(calls) == 1 and calls[0]["Subject"] == "[AA-Booking test] Ops check: Job queue stuck"
+    row = await admin.fetchrow(
+        "SELECT status, idempotency_key, finished_at IS NOT NULL AS finished, result FROM booking.job WHERE kind = $1",
+        ops_checks.OPS_ALERT_KIND,
+    )
+    assert row["status"] == "succeeded" and row["finished"]
+    assert row["idempotency_key"] == ops_checks.alert_key("jobs_stuck")
+    # never claimable, never counted as backlog
+    assert await queue.claim(pool, "w-1", [ops_checks.OPS_ALERT_KIND], 60) is None
+    assert (await read_sample(pool)).oldest_queued_age_s >= 1195
+
+
+async def test_forget_alert_reopens_the_day(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    key = ops_checks.alert_key("jobs_overdue")
+    first = await queue.record_alert(pool, ops_checks.OPS_ALERT_KIND, key, {"check": "jobs_overdue"})
+    assert first is not None
+    assert await queue.record_alert(pool, ops_checks.OPS_ALERT_KIND, key, {}) is None
+    await queue.forget_alert(pool, first)
+    assert await queue.record_alert(pool, ops_checks.OPS_ALERT_KIND, key, {}) is not None
