@@ -7,7 +7,7 @@ status: active
 owner: nghiep
 audience: [engineer, agent]
 applies_to: [aa-booking-api, aa-booking-admin]
-last_reviewed: 2026-10-31
+last_reviewed: 2026-11-01
 review_every_days: 90
 related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 ---
@@ -38,6 +38,12 @@ Design sources, in order:
 3. Root ADR 0002 — only CIS writes content; Booking reads published views only.
 4. `AA-Ecosys/docs/database/schema-ownership.md` — who owns which schema and version key.
 5. ERD v2 — `AA-Ecosys/docs/AAA/erd-v2/` (target data model; built in slices, see below).
+6. Root ADR 0017 — migrations ship in the app PR: an expand file is applied on Dev with no hand step, a contract file
+   waits for a manual DB Migrate apply (see "Database rules").
+7. Root ADR 0018 — lean AWS account model: Dev stays on acc2 (`aa-nonprod`); prod will be its own account `aa-prod`
+   with its own Booking service, schema and roles, built at go-live.
+8. Root ADR 0009 decision 13 — Booking makes no AI call; when it needs one it goes through CIS jobs or the shared AI
+   gateway core (see "AI boundary").
 
 ## Role in the ecosystem
 
@@ -266,7 +272,11 @@ docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md,
                            AA-683.md, AA-751.md, AA-751-release.md, AA-751-metrics.md, AA-751-B3-B4.md, AA-810.md,
                            AA-811.md, AA-822.md, AA-823.md, AA-825.md, AA-871.md, AA-891.md, AA-972.md, AA-973.md,
                            AA-974.md, AA-835.md, AA-682.md, AA-993.md)
-.github/workflows/         ci.yml (5 required checks + non-required Frontend Build and Vendored CIS copies), deploy-dev.yml,
+.github/workflows/         ci.yml (5 required checks + non-required Frontend Build, Vendored CIS copies and Migration
+                           preflight, AA-993 M4b: expand / contract class, number = main max + 1, no edit of a copied
+                           file), deploy-dev.yml (its Schema gate job waits until /booking/health/ready lists every
+                           bk- key the commit needs), migration-sync-wake.yml (after a push to main touching
+                           migrations/, rings the AA-CIS-Infra Migration Sync doorbell),
                            post-deploy-verify.yml (AA-993: called by deploy-dev.yml, also dispatchable with expected_sha),
                            release-please.yml (AA-891: release PR + tag, App token of aa-ecosys-ci-bot),
                            docs-lint.yml (AA-888: front-matter, ADR index, single-line AWS CLI, offline links; weekly
@@ -861,7 +871,7 @@ status shows it in its own `override` bucket and the audit summary starts with `
   bk-004 missing, is not ready); otherwise 503 with `db` = `ok` | `error` | `not_configured` (plus
   `missing_schema_versions` when the DB answers). Bodies never contain the DSN or error messages. Whenever the
   schema read succeeds (200 or 503) the body also carries `registered_keys`: every registered `bk-NNN`, sorted
-  (AA-993 M4a, root ADR 0017 d7; read by the coming Deploy Dev `schema-gate`). Every body also carries `storage`
+  (AA-993 M4a, root ADR 0017 d7; read by the Deploy Dev `schema-gate` job). Every body also carries `storage`
   (AA-682): `{"supply_media": …, "ops_docs": …}`, each `configured` or `not_configured` (the bucket env is set on the
   task or not; the bucket name is never shown). Informational only: it never makes the API not ready, since the
   routes without a bucket still work and the upload routes answer 503 themselves.
@@ -874,9 +884,13 @@ status shows it in its own `override` bucket and the audit summary starts with `
 ## Database rules
 
 - Migrations live in `migrations/`, are reviewed here, then **byte-copied** to
-  `AA-CIS-Infra/db/migrations/booking/` and applied by the **DB Migrate** workflow (check → apply).
-  Never applied from a laptop. Apply a migration before merging code that needs it, then add it to
-  `REQUIRED_SCHEMA_VERSIONS`.
+  `AA-CIS-Infra/db/migrations/booking/` (Migration Sync opens the copy PR) and applied on Dev. Never applied from a
+  laptop. Root ADR 0017 sorts each file into one of two classes: **expand** (first line `-- migrate: expand`; new
+  tables, nullable columns, plain indexes and the like) ships in the code PR and is applied by Infra's Migration Apply
+  with no hand step (bk-034 was the first); **contract** (anything else: constraints on existing tables, cross-owner
+  grants, data rows) merges as a migration-only PR first and waits for a manual DB Migrate apply before the code that
+  needs it merges (MIG-4). Add a key to `REQUIRED_SCHEMA_VERSIONS` only when the code reads its shape; Deploy Dev's
+  Schema gate then waits until Dev has it.
 - **Owner of `booking.*` = NOLOGIN role `bk_owner` from bk-014** (X1, ADR 0008 decision 6; created by
   AA-CIS-Infra `db/migrations/roles/001`, granted to the RDS master). Until bk-014 DB Migrate ran every
   file as the RDS master `aa_cis_admin`, which owned everything (default privileges `FOR ROLE
@@ -1244,6 +1258,16 @@ evidence) and `v_trip_check_board` (`payment_verified`); settings above. Tags in
 `bill_to_email` pii:contact, `bill_to_address` pii:address, `reference` pii:payment, notes / terms / reasons
 pii:free_text). In `REQUIRED_SCHEMA_VERSIONS` (code PR): apply bk-028 before the code deploys.
 
+### `bk-029` (AA-996 Booking state of CIS countries and destinations — needs `bk-001`, `bk-003`, `bk-005`)
+
+`country_profiles` (one row per ISO country of `countries` once staff change something: `status` active | inactive,
+`area`, `internal_notes`, `status_reason`) and `destination_profiles` (one row per CIS place, keyed by
+`catalog.v_destination.destination_id`, checked against the view on every write; no FK across schemas). No row =
+active. Content stays in CIS: names, coordinates, photos and descriptions are read live, nothing is copied. Role
+`booking` never deletes them (soft state only); the status is informational for staff (lists, filters, badges) and
+does not yet block a supplier place pick or a proposal item. Current-state rows (history in `audit_logs`): no DM-7.1
+row. Not in `REQUIRED_SCHEMA_VERSIONS` (AA-996's call).
+
 ### `bk-030` (AA-682 S4 supplier bills and payouts — needs `bk-003`, `bk-008`, `bk-026`, `bk-028`)
 
 `supplier_bills` (BIL- code, received → approved (maker-checker CHECK + guard, ≥ 1 line, lines = amount) → paid
@@ -1281,6 +1305,19 @@ query reads `supplier_id`): apply it before the code deploys. The from price (ch
 valid, USD first) is derived on read; `booking.v_from_prices` (contract `price.from.v1`) is still to come, and the B2B
 parity read keeps the bk-009 price hint until then.
 
+### `bk-033` (AA-996 trip plan margin width — needs `bk-032`)
+
+Widens `trip_plan_prices.effective_margin` from NUMERIC(6, 4) to NUMERIC(12, 4), the width the API and its tests were
+written for (a high override could overflow the old column). It ships as its own file because bk-032 had already been
+copied and applied with the old width: an applied file is never edited. Changes no shape the code reads, so not in
+`REQUIRED_SCHEMA_VERSIONS`.
+
+### `bk-034` (AA-993 itinerary source tour index — needs `bk-003`)
+
+An index on `trip_case_version_itinerary (source_tour_id)`, the one lookup of the catalog lifecycle "affected trip
+cases" read without one. The first **expand** file of this repo (root ADR 0017): it shipped in the code PR and was
+applied on Dev by Migration Apply with no hand step. In `REQUIRED_SCHEMA_VERSIONS`.
+
 ### `bk-035` (AA-1003 R2 inquiry inbox key view — needs `bk-001`, `bk-003`, `bk-017` and Infra `rl-001`)
 
 `v_ops_inquiry_inbox (source, idempotency_key, status, received_at, processed_at, has_trip_case)`: one row per
@@ -1292,9 +1329,9 @@ each inquiry not received, parked or failed with its age, and each one received 
 SELECT. A **contract** file (the cross-owner grant is not expand, root ADR 0017): manual DB Migrate apply. Not in
 `REQUIRED_SCHEMA_VERSIONS` (no Booking code reads it).
 
-Waiting for decisions: `trip_case_countries` / `areas` / `country_profiles` (O7,
-ISO mapping), `v_from_prices` and catalog-backed version item types (AA-679 follow-up),
-operations S5 (My Payments: AA-682).
+Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
+places shipped as `country_profiles` / `destination_profiles`, bk-029), `v_from_prices` and catalog-backed version item
+types (AA-679 follow-up). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
 
 ## Out of scope today
 
@@ -1304,7 +1341,7 @@ of AA-682 are written but `booking.customer.v1` serves payments only; critic not
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
 sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11),
-`v_from_prices`, destinations / countries pages, rate-sheet upload (rates are entered one by one under a draft
+`v_from_prices`, rate-sheet upload (rates are entered one by one under a draft
 contract), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
@@ -1318,7 +1355,10 @@ recommendation, with authority to change it, before it is sent, **and** the trav
 used. AI-drafted proposals and quotes stay behind the existing staff review before sending. Any traveller-facing chat
 must disclose AI at the start of each session. Source: Anthropic Usage Policy high-risk use case requirements
 (effective 12/11/2026); proposal wording in root `docs/legal/tenant-terms-ai-clause-draft.md` §5, may be tightened
-after the business review. Today Booking makes no AI calls, so this is a rule for future features.
+after the business review. Today Booking makes no AI calls, so this is a rule for future features. When a feature
+needs AI it goes through CIS jobs (as the supply content writer does, AA-835) or the shared AI gateway core of
+AA-CIS-App (`shared/aa_llm/`, vendored), so every call is budgeted and written to the shared ledger (root ADR 0009
+decision 13); never a provider SDK called directly.
 
 ## Staff admin frontend (AA-683)
 
