@@ -6,7 +6,9 @@
 //   - nav model from ui/nav.tsx (role- and wave-filtered), logo label "Booking";
 //   - active item = `--aa-side-panel` pill with gold icon + text (Figma; spec §1.2 row "Sidebar active pill");
 //   - footer = staff card (initials, name, Booking role) with a sign-out button, then Settings + collapse;
-//   - AA-996: the `[` key does nothing in the compact density window (the sidebar is the forced icon rail there).
+//   - AA-996: the `[` key does nothing in the compact density window (the sidebar is the forced icon rail there);
+//   - S264: each group folds (kit core NavGroup + useNavGroups, scope "booking"): folded unless the user opened it, the
+//     group of the current page open on arrival; the icon rail (collapsed, or the compact window) shows every item.
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -14,7 +16,10 @@ import { ChevronsLeft, ChevronsRight, LogOut } from "lucide-react";
 import { K, alpha, sans, serif } from "../core/tokens";
 import { LOGO_SRC } from "../core/brand";
 import { SETTINGS_ENTRY, navActive, visibleGroups, type NavEntry } from "./nav";
-import { useSidebarCollapsed } from "../core/useSidebar";
+import { useNavGroups, useSidebarCollapsed } from "../core/useSidebar";
+import { NavGroup } from "../core/NavGroup";
+import { navGroupId } from "../core/sidebarStore";
+import { useMediaQuery } from "../core/useMediaQuery";
 import { staffDisplay, useStaff } from "./StaffContext";
 import { signOut } from "./signOut";
 import { COMPACT_QUERY } from "../booking/DataTable";
@@ -26,6 +31,11 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
   const { name, initials, roleLabel } = staffDisplay(staff);
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const groups = visibleGroups(staff.role);
+  // The icon rail: collapsed, or the compact density window (forced rail, app/globals.css); never the phone drawer.
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const rail = (collapsed || compact) && !drawerOpen;
+  const activeGroup = groups.find((g) => g.items.some((n) => navActive(n, pathname)));
+  const navGroups = useNavGroups("booking", activeGroup ? navGroupId(activeGroup.label) : null, pathname);
 
   // `[` toggles collapse, ignored while typing. AA-996: also ignored in the compact density window (768-1199 px), where
   // the sidebar is forced to its icon rail and the toggle button is hidden (app/globals.css): a toggle there would change
@@ -128,28 +138,25 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
 
       {/* Nav */}
       <nav aria-label="Primary" style={{ flex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
-        {groups.map((group) => (
-          <div key={group.label}>
-            <div
-              className="aa-sidebar-group-title"
-              style={{
-                fontSize: 9.5,
-                textTransform: "uppercase",
-                letterSpacing: "0.16em",
-                color: "var(--aa-side-text3)",
-                padding: "0 10px 8px",
-                fontWeight: 600,
-              }}
+        {groups.map((group) => {
+          const id = navGroupId(group.label);
+          return (
+            <NavGroup
+              key={group.label}
+              id={id}
+              label={group.label}
+              open={navGroups.isOpen(id)}
+              onToggle={() => navGroups.toggle(id)}
+              rail={rail}
+              active={group.items.some((n) => navActive(n, pathname))}
+              itemsStyle={{ gap: 2 }}
             >
-              {group.label}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {group.items.map((n) => (
                 <NavItem key={n.href} entry={n} active={navActive(n, pathname)} onClick={() => go(n.href)} />
               ))}
-            </div>
-          </div>
-        ))}
+            </NavGroup>
+          );
+        })}
       </nav>
 
       {/* Settings, staff card, collapse */}
