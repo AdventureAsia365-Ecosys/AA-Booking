@@ -1338,7 +1338,8 @@ SELECT. A **contract** file (the cross-owner grant is not expand, root ADR 0017)
 Root ADR 0019 d8 (B2B-only model): `REVOKE INSERT` from role `booking` on the four B2C traveller tables
 `customers`, `customer_identities`, `customer_otps`, `customer_sessions`. SELECT, UPDATE and DELETE stay (staff read
 the frozen rows; retention and erasure redact and delete them). Guard: refuses while INSERT is still granted on a table
-that got a row in the last hour (the intake is still on); once revoked a re-run is a no-op. A **contract** file
+that got a row in the last hour (the intake is still on), on the first apply only (keyed on the registry row, so a
+full replay that grants INSERT again next to recent test rows still applies). A **contract** file
 (privileges of existing tables): migration-only PR, applied by Migration Apply when the job tables are idle. Not in
 `REQUIRED_SCHEMA_VERSIONS`. The frozen B2C code keeps its integration tests through the conftest fixture
 `b2c_insert_regranted` (INSERT given back for the test only). The tables are dropped later under the destructive-ops
