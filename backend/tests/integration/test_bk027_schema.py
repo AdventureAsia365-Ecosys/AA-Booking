@@ -20,7 +20,8 @@ import pytest_asyncio
 from tests.integration import ops
 from tests.integration.conftest import apply_migrations
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "027_trip_checks_lifecycle.sql"
 STAFF = "it-682-checks"

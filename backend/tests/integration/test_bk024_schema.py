@@ -50,6 +50,8 @@ async def test_registered_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> Non
     await admin.execute("SET ROLE bk_owner")
     try:
         await admin.execute(MIGRATION.read_text(encoding="utf-8"))
+        # AA-1034: bk-036 (a later file) revokes the INSERT that this file grants; restate it, as the live state has it.
+        await admin.execute("REVOKE INSERT ON booking.customer_identities FROM booking")
     finally:
         await admin.execute("RESET ROLE")
     assert await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint") == before
@@ -106,8 +108,9 @@ async def test_grants(admin: asyncpg.Connection) -> None:
             "SELECT has_column_privilege('booking', 'booking.customer_identities', $1, 'UPDATE')", col
         )
 
-    assert await table("booking", "SELECT") and await table("booking", "INSERT")
-    for priv in ("UPDATE", "DELETE", "TRUNCATE"):
+    assert await table("booking", "SELECT")
+    # AA-1034: bk-036 revoked the INSERT this file granted (the B2C tables are frozen, root ADR 0019 d8).
+    for priv in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
         assert not await table("booking", priv), priv
     assert await column("customer_id")
     for col in ("iss", "sub", "created_at"):
@@ -157,6 +160,7 @@ async def test_identity_key_shape_and_cascade(admin: asyncpg.Connection) -> None
             raise _Rollback
 
 
+@pytest.mark.usefixtures("b2c_insert_regranted")  # AA-1034 R0: bk-036 revoked INSERT on the B2C tables
 async def test_role_booking_inserts_and_repoints_but_never_deletes(migrated_booking_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_booking_dsn)
     try:

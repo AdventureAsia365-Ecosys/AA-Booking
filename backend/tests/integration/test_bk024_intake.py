@@ -18,7 +18,8 @@ from app.inquiry.contract import parse
 from tests import inquiry_samples as samples
 from tests.integration.test_bk002_intake import admin, drain, pool, publish  # noqa: F401 (fixtures)
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
 
 
 def _email() -> str:

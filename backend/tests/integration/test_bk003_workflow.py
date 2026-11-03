@@ -26,7 +26,8 @@ from app.trip_cases import service, versions
 from app.trip_cases.versions import Item
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
 
 TABLES = (
     "booking.trip_case_version_itinerary, booking.trip_case_versions, booking.staff_assignments, "

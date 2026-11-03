@@ -1333,6 +1333,18 @@ each inquiry not received, parked or failed with its age, and each one received 
 SELECT. A **contract** file (the cross-owner grant is not expand, root ADR 0017): manual DB Migrate apply. Not in
 `REQUIRED_SCHEMA_VERSIONS` (no Booking code reads it).
 
+### `bk-036` (AA-1034 R0 B2C freeze — needs `bk-001`, `bk-024`)
+
+Root ADR 0019 d8 (B2B-only model): `REVOKE INSERT` from role `booking` on the four B2C traveller tables
+`customers`, `customer_identities`, `customer_otps`, `customer_sessions`. SELECT, UPDATE and DELETE stay (staff read
+the frozen rows; retention and erasure redact and delete them). Guard: refuses while INSERT is still granted on a table
+that got a row in the last hour (the intake is still on), on the first apply only (keyed on the registry row, so a
+full replay that grants INSERT again next to recent test rows still applies). A **contract** file
+(privileges of existing tables): migration-only PR, applied by Migration Apply when the job tables are idle. Not in
+`REQUIRED_SCHEMA_VERSIONS`. The frozen B2C code keeps its integration tests through the conftest fixture
+`b2c_insert_regranted` (INSERT given back for the test only). The tables are dropped later under the destructive-ops
+DRY RUN procedure.
+
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029), `v_from_prices` and catalog-backed version item
 types (AA-679 follow-up). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
