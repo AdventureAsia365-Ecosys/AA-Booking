@@ -288,6 +288,8 @@ export interface VersionItemSupply {
   /** AA-835: the description / highlights CIS **published** for it; null / [] otherwise (draft, stale, none). */
   description?: string | null;
   highlights?: string[];
+  /** AA-1040: the AI mark of that published text (null when none, or before CIS serves it). */
+  ai?: import("@/ui/booking/aiMark").AiMark | null;
 }
 
 /** AA-1013: what the CIS catalog says today about the tour (and day) a version item was made from. Read live on every

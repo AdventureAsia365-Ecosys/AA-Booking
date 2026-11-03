@@ -551,6 +551,8 @@ const CIS_CONTENT: SupplyContent = {
   highlights: ["Riverside garden terrace and saltwater pool", "Ten minutes on foot to the Japanese Covered Bridge", "Bicycles to borrow"],
   photo_urls: [],
   edit_url: "/admin/supply-content/5b0d1c7e-2f4a-4c55-9a43-7f1f0c2b9e10",
+  // AA-1040: the CIS 366 mark (a staff edit of the writer's draft) — the panel shows the "AI-assisted" badge
+  ai: { ai_generated: true, generator: "Adventure Asia supply content writer", model: null, generated_at: "2026-10-02T03:00:00+00:00", human_edited: true },
 };
 
 function supplyMedia(i: number, entity: "hotel" | "service"): SupplyMedia {

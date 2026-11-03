@@ -19,6 +19,9 @@ export * from "./core/Toast";
 export * from "./core/csv";
 export * from "./core/savedViews";
 export { Providers } from "./core/Providers";
+// AA-1040 (EU AI Act Art. 50): the one notice under AI-written text; `form="badge"` is the short "AI-assisted" label.
+export { AiNotice, type AiNoticeForm } from "./core/AiNotice";
+export { aiTextAttrs, showsAiBadge, type AiMark } from "./booking/aiMark";
 export { useSidebarCollapsed } from "./core/useSidebar";
 export { useMediaQuery, useIsPhone, PHONE_QUERY } from "./core/useMediaQuery";
 // AA-994 S4a parts, upstreamed from the former ui/booking copies (same props, so pages did not change).

@@ -18,6 +18,14 @@ What a row says (CIS owns the meaning): ``content_status`` ``draft | in_review |
 (``none`` here when CIS holds no row for the entity yet); the text and ``photo_urls`` are non-null only while
 published; ``edit_url`` is the CIS admin path of the entity (``/admin/supply-content/<id>``). The link is built from
 that path only, never from Booking data, and a path of any other shape is dropped. Photo URLs must be ``https://``.
+
+**AI mark** (AA-1040, EU AI Act Art. 50(2); CIS 366): the published text is drafted by the CIS writer stage
+``supply_content_writer`` and reviewed by AA staff, so it carries a machine-readable mark: ``ai`` =
+``{ai_generated, generator, model, generated_at, human_edited}`` (the shape of the CIS tour mark), from the view's
+``ai_generated`` / ``ai_generated_at`` / ``ai_human_edited``. Detected separately from the nine columns above
+(:data:`MARK_VIEW`): before CIS 366 the content is served as before with ``ai: null`` (not known), and the staff UI
+still shows the "AI-assisted" badge on CIS text (every published text starts as a writer draft). A text a person
+wrote from scratch has ``ai_generated: false``. Unpublished rows carry ``ai: null`` like their text.
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -49,6 +58,10 @@ CONTENT_VIEW = View(
         "edit_url",
     ),
 )
+# AA-1040: the CIS 366 mark columns, detected on their own so the read-back keeps working without them.
+MARK_VIEW = View("catalog", "v_supply_content", ("ai_generated", "ai_generated_at", "ai_human_edited"))
+# The generator named in the mark (the CIS writer stage supply_content_writer); the model is recorded CIS-side only.
+GENERATOR = "Adventure Asia supply content writer"
 NO_CONTENT = "none"
 PUBLISHED = "published"
 EDIT_PATH = re.compile(r"/admin/supply-content/[A-Za-z0-9_-]{1,64}")
@@ -64,10 +77,42 @@ READ_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, TimeoutError)
 CONTENT_SQL = """
     SELECT c.entity_type::text AS entity_type, c.source_id::text AS source_id, c.content_status::text AS content_status,
            c.content_version, c.description::text AS description, to_jsonb(c.highlights)::text AS highlights,
-           to_jsonb(c.photo_urls)::text AS photo_urls, c.edit_url::text AS edit_url
+           to_jsonb(c.photo_urls)::text AS photo_urls, c.edit_url::text AS edit_url{mark}
     FROM catalog.v_supply_content c
     WHERE c.source_system::text = 'booking'
 """
+# CIS 366 types: boolean, timestamptz, boolean (generated_at goes out as ISO 8601, see :func:`ai_mark`).
+MARK_COLUMNS = ", c.ai_generated, c.ai_generated_at, c.ai_human_edited"
+
+
+async def _content_sql(conn: asyncpg.Connection) -> tuple[str, bool]:
+    """The read-back SELECT, with the AI mark columns once CIS 366 serves them."""
+    marked = await view_ready(conn, MARK_VIEW)
+    return CONTENT_SQL.format(mark=MARK_COLUMNS if marked else ""), marked
+
+
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, datetime) else str(value)
+
+
+def ai_mark(row: Any, marked: bool) -> dict[str, Any] | None:
+    """The AI mark of a published row; ``None`` when the view does not serve the mark yet or says nothing."""
+    if not marked:
+        return None
+    generated = row.get("ai_generated")
+    if generated is None:
+        return None
+    if not generated:
+        return {"ai_generated": False, "generator": None, "model": None, "generated_at": None, "human_edited": None}
+    return {
+        "ai_generated": True,
+        "generator": GENERATOR,
+        "model": None,
+        "generated_at": _iso(row.get("ai_generated_at")),
+        "human_edited": bool(row.get("ai_human_edited")),
+    }
 
 
 def _texts(raw: str | None, *, limit: int, https_only: bool = False) -> list[str]:
@@ -87,7 +132,7 @@ def _edit_path(raw: Any) -> str | None:
     return raw if isinstance(raw, str) and EDIT_PATH.fullmatch(raw) else None
 
 
-def _content(row: Any) -> dict[str, Any]:
+def _content(row: Any, marked: bool = False) -> dict[str, Any]:
     published = row["content_status"] == PUBLISHED
     return {
         "content_status": row["content_status"],
@@ -96,6 +141,7 @@ def _content(row: Any) -> dict[str, Any]:
         "highlights": _texts(row["highlights"], limit=MAX_HIGHLIGHTS) if published else [],
         "photo_urls": _texts(row["photo_urls"], limit=MAX_PHOTOS, https_only=True) if published else [],
         "edit_url": _edit_path(row["edit_url"]),
+        "ai": ai_mark(row, marked) if published else None,
     }
 
 
@@ -106,6 +152,7 @@ EMPTY = {
     "highlights": [],
     "photo_urls": [],
     "edit_url": None,
+    "ai": None,
 }
 
 
@@ -114,29 +161,31 @@ async def read_content(conn: asyncpg.Connection, entity_type: str, entity_id: st
     if not await view_ready(conn, CONTENT_VIEW):
         return None
     try:
+        sql, marked = await _content_sql(conn)
         async with conn.transaction():  # a savepoint inside a caller's transaction
             row = await conn.fetchrow(
-                f"{CONTENT_SQL} AND c.source_id::text = $1 AND c.entity_type::text = $2",  # noqa: S608 — constant
+                f"{sql} AND c.source_id::text = $1 AND c.entity_type::text = $2",  # noqa: S608 — constant
                 entity_id,
                 entity_type,
             )
     except READ_ERRORS as exc:
         log.warning("catalog.v_supply_content unreadable, content omitted: %s", type(exc).__name__)
         return None
-    return dict(EMPTY) if row is None else _content(row)
+    return dict(EMPTY) if row is None else _content(row, marked)
 
 
 async def published_texts(
     conn: asyncpg.Connection, refs: set[tuple[str, str]]
 ) -> dict[tuple[str, str], dict[str, Any]]:
-    """``{(entity_type, entity_id): {description, highlights}}`` of the **published** entities among ``refs``;
+    """``{(entity_type, entity_id): {description, highlights, ai}}`` of the **published** entities among ``refs``;
     ``{}`` while the read-back is off or the view cannot be read (fail soft)."""
     if not refs or not await view_ready(conn, CONTENT_VIEW):
         return {}
     try:
+        sql, marked = await _content_sql(conn)
         async with conn.transaction():
             rows = await conn.fetch(
-                f"{CONTENT_SQL} AND c.source_id::text = ANY($1::text[])"  # noqa: S608 — constant
+                f"{sql} AND c.source_id::text = ANY($1::text[])"  # noqa: S608 — constant
                 " AND c.content_status::text = 'published'",
                 sorted({entity_id for _, entity_id in refs}),
             )
@@ -150,13 +199,15 @@ async def published_texts(
             out[key] = {
                 "description": row["description"],
                 "highlights": _texts(row["highlights"], limit=MAX_HIGHLIGHTS),
+                "ai": ai_mark(row, marked),
             }
     return out
 
 
 async def attach_to_items(conn: asyncpg.Connection, items: list[dict[str, Any]]) -> None:
     """Give each version item that books a room type or a service the published description and highlights of its
-    hotel / service (``supply.description`` / ``supply.highlights``; null / [] when CIS has not published any)."""
+    hotel / service (``supply.description`` / ``supply.highlights`` and, AA-1040, ``supply.ai``; null / [] / null when
+    CIS has not published any)."""
     booked = [item["supply"] for item in items if item.get("supply")]
     if not booked:
         return
@@ -167,3 +218,4 @@ async def attach_to_items(conn: asyncpg.Connection, items: list[dict[str, Any]])
         text = texts.get((supply.get("entity_type"), supply.get("entity_id")), {})
         supply["description"] = text.get("description")
         supply["highlights"] = text.get("highlights", [])
+        supply["ai"] = text.get("ai")

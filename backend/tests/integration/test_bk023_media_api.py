@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import struct
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -286,6 +287,7 @@ async def test_read_back_and_published_text_on_proposal_items(
         "highlights": ["Garden"],
         "photo_urls": ["https://img.example/a.webp"],
         "edit_url": "/admin/supply-content/11111111-1111-4111-8111-111111111111",
+        "ai": None,  # the stand-in has no CIS 366 mark columns yet (added at the end of this test)
     }
     svc_page = await _ok(await c.get(f"/services/{svc['code']}", headers=sales))
     assert svc_page["content"]["content_status"] == "draft" and svc_page["content"]["description"] is None
@@ -318,6 +320,25 @@ async def test_read_back_and_published_text_on_proposal_items(
     )
     saved = await _ok(await c.put(f"{base}/items", json={"items": items}, headers=sales))
     assert saved["items"][0]["supply"]["description"] == "A quiet garden hotel."
+
+    # AA-1040 (CIS 366): the view appends the AI mark; Booking detects the three columns and serves `ai`.
+    await admin.execute(
+        "ALTER TABLE catalog.v_supply_content ADD COLUMN ai_generated boolean,"
+        " ADD COLUMN ai_generated_at timestamptz, ADD COLUMN ai_human_edited boolean"
+    )
+    await admin.execute(
+        "UPDATE catalog.v_supply_content SET ai_generated = true, ai_generated_at = '2026-10-02 03:00:00+00',"
+        " ai_human_edited = true WHERE source_id = $1::uuid",
+        hotel["id"],
+    )
+    liveness.reset_cache()
+    ai = (await _ok(await c.get(f"/hotels/{hotel['code']}", headers=sales)))["content"]["ai"]
+    assert ai["ai_generated"] is True and ai["human_edited"] is True and ai["model"] is None
+    assert ai["generator"] == "Adventure Asia supply content writer"
+    assert datetime.fromisoformat(ai["generated_at"]) == datetime(2026, 10, 2, 3, 0, tzinfo=UTC)
+    got = await _ok(await c.get(f"{base}/items", headers=sales))
+    assert got["items"][0]["supply"]["ai"] == ai
+    assert got["items"][1]["supply"]["ai"] is None  # the service has no published text
 
 
 async def test_hotel_list_photo_summary(
