@@ -287,7 +287,7 @@ async def test_read_back_and_published_text_on_proposal_items(
         "highlights": ["Garden"],
         "photo_urls": ["https://img.example/a.webp"],
         "edit_url": "/admin/supply-content/11111111-1111-4111-8111-111111111111",
-        "ai": None,  # the stand-in has no CIS 366 mark columns yet (added at the end of this test)
+        "ai": None,  # the stand-in has no CIS 358 mark columns yet (added at the end of this test)
     }
     svc_page = await _ok(await c.get(f"/services/{svc['code']}", headers=sales))
     assert svc_page["content"]["content_status"] == "draft" and svc_page["content"]["description"] is None
@@ -321,7 +321,7 @@ async def test_read_back_and_published_text_on_proposal_items(
     saved = await _ok(await c.put(f"{base}/items", json={"items": items}, headers=sales))
     assert saved["items"][0]["supply"]["description"] == "A quiet garden hotel."
 
-    # AA-1040 (CIS 366): the view appends the AI mark; Booking detects the three columns and serves `ai`.
+    # AA-1040 (CIS 358): the view appends the AI mark; Booking detects the three columns and serves `ai`.
     await admin.execute(
         "ALTER TABLE catalog.v_supply_content ADD COLUMN ai_generated boolean,"
         " ADD COLUMN ai_generated_at timestamptz, ADD COLUMN ai_human_edited boolean"

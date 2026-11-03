@@ -1,5 +1,5 @@
 // ui/booking/aiMark.ts — AA-1040 (EU AI Act Art. 50): the AI mark of the CIS supply text Booking shows (hotel and
-// service descriptions drafted by the CIS writer stage supply_content_writer, reviewed and published in CIS; CIS 366
+// service descriptions drafted by the CIS writer stage supply_content_writer, reviewed and published in CIS; CIS 358
 // serves the mark on catalog.v_supply_content). Pure helpers, tested by aiMark.test.mjs.
 
 /** The machine-readable mark of CIS text (the API's `content.ai` / `supply.ai`). `ai_generated` false = a person wrote
@@ -15,7 +15,7 @@ export interface AiMark {
 
 /** Whether CIS text shown to staff gets the kit "AI-assisted" badge: every published supply text starts as a draft of
  *  the CIS writer, so the badge shows unless CIS says a person wrote it from scratch (`ai_generated: false`). A null
- *  mark (CIS 366 not served yet) keeps the badge. No text, no badge. */
+ *  mark (CIS 358 not served yet) keeps the badge. No text, no badge. */
 export function showsAiBadge(text: string | null | undefined, ai: AiMark | null | undefined): boolean {
   return Boolean(text) && ai?.ai_generated !== false;
 }

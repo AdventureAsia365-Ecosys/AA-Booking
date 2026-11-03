@@ -69,9 +69,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   read-back** (AA-835 S4, root ADR 0004a decision 4, CIS migration 278): `catalog.v_supply_content`, read live
   (`app/supply/content.py`): the hotel / service detail shows what CIS published (status, text, photo URLs, the CIS
   `edit_url` path for "Edit in CIS") and proposal items carry only **published** description and highlights. **AI mark**
-  (AA-1040, EU AI Act Art. 50; CIS 366): the published text is drafted by the CIS writer `supply_content_writer`, so
+  (AA-1040, EU AI Act Art. 50; CIS 358): the published text is drafted by the CIS writer `supply_content_writer`, so
   `content.ai` and `supply.ai` = `{ai_generated, generator, model: null, generated_at, human_edited}` from the view's
-  `ai_generated` / `ai_generated_at` / `ai_human_edited` (detected on their own, `MARK_VIEW`: before 366 `ai` is null);
+  `ai_generated` / `ai_generated_at` / `ai_human_edited` (detected on their own, `MARK_VIEW`: before 358 `ai` is null);
   the staff UI shows the kit `AiNotice` badge and `data-ai-*` attributes on that text (`ui/booking/aiMark.ts`: badge
   unless CIS says a person wrote it from scratch) in the hotel / service CIS panel, the service form and the
   proposal builder and preview. **Proposal

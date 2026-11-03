@@ -19,11 +19,11 @@ What a row says (CIS owns the meaning): ``content_status`` ``draft | in_review |
 published; ``edit_url`` is the CIS admin path of the entity (``/admin/supply-content/<id>``). The link is built from
 that path only, never from Booking data, and a path of any other shape is dropped. Photo URLs must be ``https://``.
 
-**AI mark** (AA-1040, EU AI Act Art. 50(2); CIS 366): the published text is drafted by the CIS writer stage
+**AI mark** (AA-1040, EU AI Act Art. 50(2); CIS 358): the published text is drafted by the CIS writer stage
 ``supply_content_writer`` and reviewed by AA staff, so it carries a machine-readable mark: ``ai`` =
 ``{ai_generated, generator, model, generated_at, human_edited}`` (the shape of the CIS tour mark), from the view's
 ``ai_generated`` / ``ai_generated_at`` / ``ai_human_edited``. Detected separately from the nine columns above
-(:data:`MARK_VIEW`): before CIS 366 the content is served as before with ``ai: null`` (not known), and the staff UI
+(:data:`MARK_VIEW`): before CIS 358 the content is served as before with ``ai: null`` (not known), and the staff UI
 still shows the "AI-assisted" badge on CIS text (every published text starts as a writer draft). A text a person
 wrote from scratch has ``ai_generated: false``. Unpublished rows carry ``ai: null`` like their text.
 """
@@ -58,7 +58,7 @@ CONTENT_VIEW = View(
         "edit_url",
     ),
 )
-# AA-1040: the CIS 366 mark columns, detected on their own so the read-back keeps working without them.
+# AA-1040: the CIS 358 mark columns, detected on their own so the read-back keeps working without them.
 MARK_VIEW = View("catalog", "v_supply_content", ("ai_generated", "ai_generated_at", "ai_human_edited"))
 # The generator named in the mark (the CIS writer stage supply_content_writer); the model is recorded CIS-side only.
 GENERATOR = "Adventure Asia supply content writer"
@@ -81,12 +81,12 @@ CONTENT_SQL = """
     FROM catalog.v_supply_content c
     WHERE c.source_system::text = 'booking'
 """
-# CIS 366 types: boolean, timestamptz, boolean (generated_at goes out as ISO 8601, see :func:`ai_mark`).
+# CIS 358 types: boolean, timestamptz, boolean (generated_at goes out as ISO 8601, see :func:`ai_mark`).
 MARK_COLUMNS = ", c.ai_generated, c.ai_generated_at, c.ai_human_edited"
 
 
 async def _content_sql(conn: asyncpg.Connection) -> tuple[str, bool]:
-    """The read-back SELECT, with the AI mark columns once CIS 366 serves them."""
+    """The read-back SELECT, with the AI mark columns once CIS 358 serves them."""
     marked = await view_ready(conn, MARK_VIEW)
     return CONTENT_SQL.format(mark=MARK_COLUMNS if marked else ""), marked
 

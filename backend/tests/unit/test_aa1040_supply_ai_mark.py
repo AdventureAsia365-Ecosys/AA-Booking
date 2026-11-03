@@ -1,7 +1,7 @@
 """AA-1040 (EU AI Act Art. 50(2)) — the machine-readable AI mark of the CIS supply text Booking shows.
 
-CIS 366 appends ai_generated / ai_generated_at / ai_human_edited to catalog.v_supply_content. Booking detects the
-three columns separately from the read-back's own nine (app.supply.content.MARK_VIEW): before 366 the content is
+CIS 358 appends ai_generated / ai_generated_at / ai_human_edited to catalog.v_supply_content. Booking detects the
+three columns separately from the read-back's own nine (app.supply.content.MARK_VIEW): before 358 the content is
 served as before with ``ai: null``; after it, a published row carries ``ai`` = {ai_generated, generator, model,
 generated_at, human_edited}; an unpublished row never does. The hotel / service detail and the proposal items carry
 it. The SQL against a stand-in view on PostgreSQL is tests/integration/test_bk023_media_api.py."""
@@ -94,7 +94,7 @@ async def test_unpublished_rows_carry_no_mark(status: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_before_cis_366_the_content_is_served_without_the_mark() -> None:
+async def test_before_cis_358_the_content_is_served_without_the_mark() -> None:
     conn = conn_with(content_row(), marked=False)
     out = await content.read_content(conn, "hotel", HID)
     assert out is not None and out["description"] == "A quiet garden hotel." and out["ai"] is None

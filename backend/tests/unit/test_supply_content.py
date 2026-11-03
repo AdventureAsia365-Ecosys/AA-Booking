@@ -61,7 +61,7 @@ async def test_published_row() -> None:
         "highlights": ["Garden", "Pool"],
         "photo_urls": ["https://img.example/a.webp"],
         "edit_url": "/admin/supply-content/42",
-        "ai": None,  # the row carries no CIS 366 mark (tests/unit/test_aa1040_supply_ai_mark.py)
+        "ai": None,  # the row carries no CIS 358 mark (tests/unit/test_aa1040_supply_ai_mark.py)
     }
     assert conn.sql(CONTENT_ONE) == [(HID, "hotel")]
 
