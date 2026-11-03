@@ -16,8 +16,12 @@ One run (a worker maintenance hook queues one per :data:`SLOT_SECONDS` slot whil
 - a row whose name, status or client differs, or that the job never projected (``projected_at`` NULL, bk-037) ->
   updated, ``projected_at`` = now (``billing_currency`` and ``credit_terms_ref`` are Booking's commercial terms and
   stay as staff set them; ``created_by`` / ``updated_by`` reference staff users and are left alone);
-- a row whose tenant left the view (erased in CIS) -> ``suspended`` (rows are never deleted: role ``booking`` has no
-  DELETE, and a quote or hold may reference the partner);
+- a row the job projected before (``projected_at`` set) whose tenant left the view (erased in CIS) -> ``suspended``
+  (rows are never deleted: role ``booking`` has no DELETE, and a quote or hold may reference the partner);
+- **adoption guard**: a row staff registered (``projected_at`` NULL) whose tenant is not in the view (no CIS tenant
+  yet, for example a CRM-seeded agency or the AA-972 synthetic partner) is left exactly as it is, counted
+  ``awaiting_cis`` and still staff-editable; the job never stamps ``projected_at`` on a row it did not derive from a CIS
+  tenant. It is adopted on the first run after CIS holds its tenant;
 - each change writes one ``booking.audit_logs`` row (``actor_type = system``, actor ``system:bk_tenant_pull``,
   ``b2b_partner.projected`` / ``.suspended`` / ``.reactivated``).
 
@@ -112,17 +116,16 @@ async def run(pool: asyncpg.Pool, client_id: str) -> dict[str, Any]:
     async with pool.acquire() as conn:
         if not await liveness.view_ready(conn, VIEW):
             return {"outcome": "skipped", "reason": f"{VIEW.qualified} not readable (CIS 357)"}
-    counts = {"created": 0, "updated": 0, "suspended_gone": 0, "unchanged": 0, "internal_skipped": 0}
+    counts = {"created": 0, "updated": 0, "suspended_gone": 0, "unchanged": 0, "internal_skipped": 0,
+              "awaiting_cis": 0}  # fmt: skip
     async with pool.acquire() as conn, conn.transaction():
         accounts = await conn.fetch(ACCOUNTS_SQL)
         partners = {r["tenant_id"]: dict(r) for r in await conn.fetch(PARTNERS_SQL)}
-        seen = set()
         for account in accounts:
             tenant_id = account["tenant_id"]
             if account["kind"] == "internal":
                 counts["internal_skipped"] += 1
                 continue
-            seen.add(tenant_id)
             want = desired(account, client_id)
             row = partners.get(tenant_id)
             if row is None:
@@ -144,14 +147,24 @@ async def run(pool: asyncpg.Pool, client_id: str) -> dict[str, Any]:
                          changed)  # fmt: skip
             counts["updated"] += 1
         in_cis = {a["tenant_id"] for a in accounts}
+        awaiting: list[str] = []
         for tenant_id, row in partners.items():
-            if tenant_id in seen or row["status"] == "suspended":
+            if tenant_id in in_cis:  # projected above, or a row of an internal tenant (stays as it is)
                 continue
-            if tenant_id not in in_cis:  # gone from CIS (a row of an internal tenant stays as it is)
-                await conn.execute(UPDATE_SQL, row["id"], row["agency_name"], "suspended", row["m2m_client_id"])
-                await _audit(conn, row["id"], row["agency_name"], "b2b_partner.suspended", {"status": row["status"]},
-                             {"status": "suspended"})  # fmt: skip
-                counts["suspended_gone"] += 1
+            if row["projected_at"] is None:  # adoption guard: never derived from a CIS tenant, staff keep it
+                awaiting.append(str(tenant_id))
+                continue
+            if row["status"] == "suspended":
+                continue
+            # a projected row whose tenant left CIS (erased): suspended, never deleted
+            await conn.execute(UPDATE_SQL, row["id"], row["agency_name"], "suspended", row["m2m_client_id"])
+            await _audit(conn, row["id"], row["agency_name"], "b2b_partner.suspended", {"status": row["status"]},
+                         {"status": "suspended"})  # fmt: skip
+            counts["suspended_gone"] += 1
+        counts["awaiting_cis"] = len(awaiting)
+    if awaiting:
+        log.info("bk_tenant_pull_awaiting_cis: %d staff rows without a CIS tenant: %s", len(awaiting),
+                 ", ".join(sorted(awaiting)[:20]))  # fmt: skip
     if counts["created"] or counts["updated"] or counts["suspended_gone"]:
         log.info("bk_tenant_pull: %s", counts)
     return {"outcome": "ok", "tenants": len(accounts), **counts}

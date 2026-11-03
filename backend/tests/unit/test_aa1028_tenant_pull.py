@@ -1,5 +1,6 @@
 """bk_tenant_pull without a database (AA-1028 R1 slice 2): the projection rules, the audit actions, the run on a
-scripted connection (not configured, no view, create / adopt / update / unchanged / gone / internal), the schedule and
+scripted connection (not configured, no view, create / adopt / update / unchanged / gone / internal / awaiting
+CIS), the schedule and
 the staff edit guard on a projected row. The same rules on PostgreSQL: tests/integration/test_aa1028_tenant_pull.py."""
 
 from __future__ import annotations
@@ -90,17 +91,21 @@ async def test_run_projects_every_tenant() -> None:
         partner(T5, name="Quillfeather Tours", projected=False),
         partner(uuid.UUID(int=99)),  # gone from CIS
         partner(uuid.UUID(int=98), status="suspended"),  # gone and already suspended
+        partner(uuid.UUID(int=97), projected=False),  # a staff row with no CIS tenant: left alone (adoption guard)
+        partner(uuid.UUID(int=96), status="suspended", projected=False),  # the same, already suspended by staff
     ]
     c = conn(accounts, rows)
     handler = tenant_pull.build_handler(CLIENT)
     out = await handler(c, Job("j", tenant_pull.KIND, {}, 1, 3))  # type: ignore[arg-type]
     assert out == {"outcome": "ok", "tenants": 5, "created": 1, "updated": 2, "suspended_gone": 1, "unchanged": 1,
-                   "internal_skipped": 1}  # fmt: skip
+                   "internal_skipped": 1, "awaiting_cis": 2}  # fmt: skip
     assert c.sql("INSERT INTO booking.b2b_partners") == [(T1, "Zephyr Trails", "active", "USD", CLIENT)]
     updates = c.sql("UPDATE booking.b2b_partners")
     assert (partner(T3)["id"], "Zephyr Trails", "suspended", CLIENT) in updates
     assert (partner(T5)["id"], "Quillfeather Tours", "active", CLIENT) in updates  # adopted
     assert (partner(uuid.UUID(int=99))["id"], "Zephyr Trails", "suspended", CLIENT) in updates
+    assert not [u for u in updates if u[0] in {partner(uuid.UUID(int=97))["id"], partner(uuid.UUID(int=96))["id"]}]
+    assert len(updates) == 3
     actions = [args[3] for args in c.sql("INSERT INTO booking.audit_logs")]
     assert sorted(actions) == ["b2b_partner.created", "b2b_partner.projected", "b2b_partner.suspended",
                                "b2b_partner.suspended"]  # fmt: skip

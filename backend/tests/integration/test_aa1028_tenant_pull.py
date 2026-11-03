@@ -10,7 +10,10 @@ and dropped after (lessons.md: stand-ins only around the code that needs them). 
 - a second run with nothing new writes nothing; a CIS suspension / a lost trade.book suspends, a reinstatement
   reactivates (audited), a tenant gone from CIS is suspended, never deleted;
 - staff can no longer change the projected fields of a projected row (409 ``projected_from_cis``), only Booking's
-  commercial terms; a row staff registered that the pull never touched stays editable.
+  commercial terms;
+- adoption guard: a row staff registered for a tenant CIS does not hold (a CRM-seeded agency, the AA-972 synthetic
+  partner) stays active, unstamped and staff-editable across runs (``awaiting_cis``), and is adopted once CIS holds
+  its tenant.
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ ADD = (
 @pytest_asyncio.fixture
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
-    # Other modules' partners stay as they are: the pull suspends rows whose tenant is not in the view.
+    # Other modules' partners stay as they are (the pull may adopt or suspend rows of tenants these tests add).
     statuses = await conn.fetch("SELECT id, status, updated_by FROM booking.b2b_partners")
     try:
         yield conn
@@ -163,9 +166,43 @@ async def test_projected_rows_are_read_only_for_staff(view: asyncpg.Connection, 
         async with conn.transaction():
             out = await partners.update_partner(conn, staff, projected["id"], {"credit_terms_ref": "NET-30"})
         assert out["credit_terms_ref"] == "NET-30" and out["status"] == "active"
-    # the hand-made row (tenant not in CIS) is suspended by the pull, and from then on it is a projected row too
+    # the hand-made row (tenant not in CIS) is left alone by the pull: never stamped, still staff-editable
     assert made["status"] == "active" and made["projected_at"] is None
-    assert (await _row(view, manual))["status"] == "suspended"
+    kept = await _row(view, manual)
+    assert kept["status"] == "active" and kept["projected_at"] is None
+
+
+async def test_a_staff_row_without_a_cis_tenant_is_left_alone(view: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    manual = uuid.uuid4()  # like 'Lu hanh Sen Vang' (CRM-seeded) or the AA-972 synthetic partner: no CIS tenant
+    staff = SimpleNamespace(cis_user_id=None)
+    async with pool.acquire() as conn, conn.transaction():
+        made = await partners.create_partner(conn, staff, {"tenant_id": str(manual), "agency_name": "Golden Lotus",
+                                                           "m2m_client_id": "staffClient"})  # fmt: skip
+    for _ in range(2):
+        out = await tenant_pull.run(pool, CLIENT)
+        assert out["outcome"] == "ok" and out["awaiting_cis"] >= 1  # rows of earlier tests may be suspended here
+        kept = await _row(view, manual)
+        assert kept["status"] == "active" and kept["projected_at"] is None and kept["m2m_client_id"] == "staffClient"
+    assert await _audit(view, made["id"]) == ["b2b_partner.created"]  # the staff create only, nothing from the job
+    # staff still own every field of it
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            out = await partners.update_partner(conn, staff, made["id"], {"status": "suspended"})
+        assert out["status"] == "suspended"
+        async with conn.transaction():
+            out = await partners.update_partner(conn, staff, made["id"], {"status": "active", "agency_name": "Lotus"})
+        assert out["status"] == "active" and out["agency_name"] == "Lotus"
+    # once CIS holds the tenant, the next run adopts the row
+    await view.execute(ADD, manual, "Golden Lotus Travel", "active", True, "agency", True)
+    adopted = await tenant_pull.run(pool, CLIENT)
+    assert adopted["updated"] >= 1
+    row = await _row(view, manual)
+    assert row["projected_at"] is not None and row["agency_name"] == "Golden Lotus Travel"
+    assert row["m2m_client_id"] == CLIENT and row["status"] == "active"
+    # and only now does its tenant leaving CIS suspend it
+    await view.execute("DELETE FROM catalog.v_tenant_account_v1 WHERE tenant_id = $1", manual)
+    gone = await tenant_pull.run(pool, CLIENT)
+    assert gone["suspended_gone"] >= 1 and (await _row(view, manual))["status"] == "suspended"
 
 
 async def test_the_schedule_queues_one_run_per_slot(view: asyncpg.Connection, pool: asyncpg.Pool) -> None:
