@@ -22,6 +22,7 @@ import { ApiError, api } from "@/lib/api/client";
 import { settingsFromApi } from "@/lib/bookingConfig";
 import {
   PageFrame,
+  AiNotice,
   Button,
   Code,
   DateText,
@@ -40,6 +41,7 @@ import { dayDate, itemsByDay, useVersion } from "@/app/(staff)/_parts/useVersion
 import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisTourName, cisUpdates } from "@/ui/booking/cisReadback";
+import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 
 const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
 
@@ -226,7 +228,12 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                               {it.notes && <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-body">{it.notes}</p>}
                               {it.supply?.description && (
                                 <div className="mt-1.5 text-[13px] leading-relaxed text-body">
-                                  <p className="whitespace-pre-line">{it.supply.description}</p>
+                                  {showsAiBadge(it.supply.description, it.supply.ai) && (
+                                    <AiNotice form="badge" testId="proposal-preview-ai-badge" style={{ marginBottom: 4 }} />
+                                  )}
+                                  <p className="whitespace-pre-line" {...aiTextAttrs(it.supply.description, it.supply.ai)}>
+                                    {it.supply.description}
+                                  </p>
                                   {(it.supply.highlights?.length ?? 0) > 0 && (
                                     <ul className="mt-1 list-disc pl-5">
                                       {(it.supply.highlights ?? []).map((h) => (

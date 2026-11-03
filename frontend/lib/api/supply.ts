@@ -99,6 +99,8 @@ export interface SupplyContent {
   highlights: string[];
   photo_urls: string[];
   edit_url: string | null;
+  /** AA-1040: the AI mark of the published text; null while unpublished or before CIS serves it. */
+  ai?: import("@/ui/booking/aiMark").AiMark | null;
 }
 
 export interface HotelDetail extends Hotel {

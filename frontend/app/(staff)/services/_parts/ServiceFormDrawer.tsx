@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { SERVICE_TYPES, supplyApi, type ServiceBody, type ServiceDetail, type ServiceType, type ServiceUnit } from "@/lib/api/supply";
-import { Input, Select, Textarea, FormDrawer, useStaff, useToast } from "@/ui";
+import { AiNotice, aiTextAttrs, showsAiBadge, Input, Select, Textarea, FormDrawer, useStaff, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { CATEGORY_FOR, SERVICE_TYPE_LABEL, SERVICE_UNIT_OPTIONS, SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
@@ -244,7 +244,14 @@ function ServiceCisContent({ service }: { service?: ServiceDetail }) {
       <CisField label="Status">{CONTENT_STATUS_LABEL[content.content_status] ?? content.content_status}</CisField>
       <CisField label="Highlights">{content.highlights.length ? content.highlights.join(" · ") : null}</CisField>
       <CisField label="Description" multiline wide>
-        {content.description}
+        {content.description ? (
+          <>
+            {showsAiBadge(content.description, content.ai) && (
+              <AiNotice form="badge" testId="service-form-ai-badge" style={{ marginRight: 6 }} />
+            )}
+            <span {...aiTextAttrs(content.description, content.ai)}>{content.description}</span>
+          </>
+        ) : null}
       </CisField>
     </CisFieldset>
   );

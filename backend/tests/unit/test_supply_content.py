@@ -61,6 +61,7 @@ async def test_published_row() -> None:
         "highlights": ["Garden", "Pool"],
         "photo_urls": ["https://img.example/a.webp"],
         "edit_url": "/admin/supply-content/42",
+        "ai": None,  # the row carries no CIS 358 mark (tests/unit/test_aa1040_supply_ai_mark.py)
     }
     assert conn.sql(CONTENT_ONE) == [(HID, "hotel")]
 
@@ -119,7 +120,9 @@ async def test_published_texts_match_type_and_id() -> None:
     ]
     conn = ready(ScriptedConn()).on(CONTENT_MANY, rows)
     out = await content.published_texts(conn, {("hotel", HID), ("hotel", SID)})
-    assert out == {("hotel", HID): {"description": "A quiet garden hotel.", "highlights": ["Garden", "Pool"]}}
+    assert out == {
+        ("hotel", HID): {"description": "A quiet garden hotel.", "highlights": ["Garden", "Pool"], "ai": None}
+    }
     assert "content_status::text = 'published'" in conn.calls[-1][0]
     assert conn.sql(CONTENT_MANY) == [([HID, SID],)]
 

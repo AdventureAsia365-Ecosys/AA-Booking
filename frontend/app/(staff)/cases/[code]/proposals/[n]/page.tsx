@@ -59,6 +59,7 @@ import {
   Input,
   Textarea,
   PageFrame,
+  AiNotice,
   Button,
   Code,
   ConfirmDialog,
@@ -84,6 +85,7 @@ import { dayDate, useVersion } from "@/app/(staff)/_parts/useVersion";
 import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisNewTitle, cisTourName, cisUpdates, refreshFromCis } from "@/ui/booking/cisReadback";
+import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 import { ItemDrawer, type ItemDraftFields } from "./ItemDrawer";
 
 const TERMINAL = ["completed", "cancelled"];
@@ -833,7 +835,10 @@ function ItemCard({
         {item.supply?.description && (
           <p className="mt-1 line-clamp-2 text-[12.5px] text-muted" title="Published in CIS for this hotel / service">
             <span className="font-medium text-body">From CIS: </span>
-            {item.supply.description}
+            {showsAiBadge(item.supply.description, item.supply.ai) && (
+              <AiNotice form="badge" testId="proposal-item-ai-badge" style={{ marginRight: 6, verticalAlign: "middle" }} />
+            )}
+            <span {...aiTextAttrs(item.supply.description, item.supply.ai)}>{item.supply.description}</span>
           </p>
         )}
         {item.costs.length > 0 && (

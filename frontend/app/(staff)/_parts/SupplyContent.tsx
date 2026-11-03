@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, ImagePlus, ShieldCheck, Trash2 } from "lucide-react";
 import { CIS_ADMIN_URL } from "@/lib/config";
 import { MEDIA_TYPES, supplyApi, type MediaType, type SupplyContent, type SupplyMedia } from "@/lib/api/supply";
-import { Button, ConfirmDialog, DateText, FromCisTag, Pill, Skeleton, useToast, type BookingTone } from "@/ui";
+import { AiNotice, aiTextAttrs, showsAiBadge, Button, ConfirmDialog, DateText, FromCisTag, Pill, Skeleton, useToast, type BookingTone } from "@/ui";
 import { supplyError } from "./supply";
 
 type Kind = "hotel" | "service";
@@ -59,9 +59,18 @@ export function CisContentPanel({ content }: { content: SupplyContent | null | u
         <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
           <Pill tone={meta.tone}>{meta.label}</Pill>
           {content.content_version != null && <span>Version {content.content_version}</span>}
+          {/* AA-1040: drafted by the CIS writer model and reviewed in CIS; machine mark on the text below */}
+          {showsAiBadge(content.description, content.ai) && <AiNotice form="badge" testId="cis-content-ai-badge" />}
           <span className="basis-full sm:basis-auto">{meta.hint}</span>
         </p>
-        {content.description && <p className="whitespace-pre-line text-[13.5px] leading-relaxed text-body">{content.description}</p>}
+        {content.description && (
+          <p
+            className="whitespace-pre-line text-[13.5px] leading-relaxed text-body"
+            {...aiTextAttrs(content.description, content.ai)}
+          >
+            {content.description}
+          </p>
+        )}
         {content.highlights.length > 0 && (
           <ul className="list-disc pl-5 text-[13px] text-body">
             {content.highlights.map((h) => (

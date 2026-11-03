@@ -83,7 +83,9 @@ FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = $1 AND c.relname = $2
 """
 
-_ready: dict[str, tuple[bool, float]] = {}
+# Keyed by the View itself (schema, name and the column set), so two features that detect different columns of one
+# view (AA-1040: the supply content and its AI mark) never share an answer.
+_ready: dict[View, tuple[bool, float]] = {}
 
 
 def reset_cache() -> None:
@@ -94,7 +96,7 @@ def reset_cache() -> None:
 async def view_ready(conn: asyncpg.Connection, view: View) -> bool:
     """True when ``view`` exists with its columns and role ``booking`` may read it (cached ``CACHE_SECONDS``)."""
     now = time.monotonic()
-    cached = _ready.get(view.qualified)
+    cached = _ready.get(view)
     if cached is not None and cached[1] > now:
         return cached[0]
     ready = bool(await conn.fetchval(VIEW_READY_SQL, view.schema, view.name, list(view.columns)))
@@ -105,7 +107,7 @@ async def view_ready(conn: asyncpg.Connection, view: View) -> bool:
             log.warning(
                 "catalog_view_unready view=%s (its CIS migration not applied, or no grant): degraded", view.qualified
             )
-    _ready[view.qualified] = (ready, now + CACHE_SECONDS)
+    _ready[view] = (ready, now + CACHE_SECONDS)
     return ready
 
 
