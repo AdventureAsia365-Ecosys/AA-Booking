@@ -38,7 +38,8 @@ class Recorder:
 @pytest.fixture
 def make_client():
     def _make(staff: Staff = SALES) -> TestClient:
-        app = create_app(Settings(database_url=None, environment="test"))
+        # AA-1034 R0: the frozen B2C routes stay tested with the intake on (test_aa1034_b2c_off.py covers off).
+        app = create_app(Settings(database_url=None, environment="test", b2c_intake_enabled=True))
         app.dependency_overrides[current_staff] = lambda: staff
         app.dependency_overrides[get_pool] = lambda: ScriptedConn()
         return TestClient(app)

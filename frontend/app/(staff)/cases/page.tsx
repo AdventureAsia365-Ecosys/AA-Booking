@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowRight, Plus } from "lucide-react";
 import { api } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
 import { useOffsetPage, PAGE_SIZES } from "@/lib/useOffsetPage";
 import {
@@ -123,7 +124,8 @@ export default function TripCasesPage() {
       title="Trip cases"
       description="Every inquiry and booking in one list, from the first TripPlanner inquiry to the trip itself."
       actions={
-        canWrite ? (
+        // AA-1034 R0: staff-made customer cases are part of the frozen B2C intake (root ADR 0019).
+        B2C_INTAKE_OPEN && canWrite ? (
           <Link
             href="/cases/new"
             className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.06em] text-on-accent hover:bg-accent-deep"

@@ -36,6 +36,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from app import b2c
 from app.auth import customer as customer_auth
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
@@ -142,6 +143,8 @@ def create_app(
                     OutboxSequencer(),
                 ),
                 no_release=retention_jobs.NOT_RELEASED,
+                # AA-1034 R0 (root ADR 0019 d8): the TripPlanner intake is off unless B2C_INTAKE_ENABLED is on.
+                disabled_kinds=frozenset() if settings.b2c_intake_enabled else b2c.INTAKE_KINDS,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
             # Independent of the worker task (AA-751): a stuck worker loop must still show in the job checks.

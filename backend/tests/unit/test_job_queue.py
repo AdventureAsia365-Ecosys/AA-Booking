@@ -95,3 +95,12 @@ async def test_reap_and_prune_return_counts() -> None:
     assert "status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END" in end_sql
     assert await queue.reap(ScriptedConn()) == {"requeued": 0, "failed": 0, "cancelled": 0}
     assert await queue.prune(ScriptedConn([("DELETE FROM booking.job", 4)]), "bk_inquiry_pull", 7) == 4
+
+
+async def test_cancel_queued_ends_only_queued_rows_of_the_kinds() -> None:
+    conn = ScriptedConn([("SET status = 'cancelled', error = $2", [{"id": "j1"}, {"id": "j2"}])])
+    assert await queue.cancel_queued(conn, ["bk_inquiry_pull"], "off") == 2
+    ((sql, args),) = conn.calls
+    assert "WHERE status = 'queued' AND kind = ANY($1::text[])" in sql and "finished_at = now()" in sql
+    assert args == (["bk_inquiry_pull"], "off")
+    assert await queue.cancel_queued(ScriptedConn(), ["bk_inquiry_pull"], "off") == 0

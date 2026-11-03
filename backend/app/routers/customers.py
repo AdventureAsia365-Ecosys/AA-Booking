@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import b2c
 from app.auth.staff import Staff, get_pool, require
 from app.customers import service
 from app.routers.trip_cases import Email, NewCustomer
@@ -50,7 +51,8 @@ async def list_customers(
 
 
 @router.post("/customers", status_code=201)
-async def create_customer(body: NewCustomer, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def create_customer(body: NewCustomer, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
+    b2c.refuse_new_customer(request)  # AA-1034 R0: 410 b2b_only while the B2C intake is off
     async with pool.acquire() as conn, conn.transaction():
         created = await service.create_lead(conn, staff, body.model_dump())
         return await service.get_customer(conn, created["id"])

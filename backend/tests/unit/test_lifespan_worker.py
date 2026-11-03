@@ -25,8 +25,10 @@ class FakeWorker:
         recurring: tuple = (),
         hooks: tuple = (),
         no_release: frozenset = frozenset(),
+        disabled_kinds: frozenset = frozenset(),
     ) -> None:
         self.handlers, self.recurring, self.hooks, self.no_release = handlers, recurring, hooks, no_release
+        self.disabled_kinds = disabled_kinds
         self.started = self.stopped = False
         FakeWorker.instances.append(self)
 
@@ -95,6 +97,8 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
     ]
     # AA-751: retention runs keep no progress checkpoint, so a shutdown fails them instead of releasing them.
     assert worker.no_release == {"bk_retention_job", "bk_retention_inbox_redact"}
+    # AA-1034 R0: B2C_INTAKE_ENABLED is off by default, so the worker switches the TripPlanner intake off.
+    assert worker.disabled_kinds == {"bk_inquiry_pull", "bk_inquiry_process"}
     # AA-751: the backlog metrics sampler runs for the app lifetime too and is cancelled on shutdown.
     (sampler,) = FakeSampler.instances
     assert sampler.started and sampler.cancelled
@@ -120,3 +124,12 @@ def test_worker_not_started(kw: dict) -> None:
         client.get("/booking/health")
     assert FakeWorker.instances == []
     assert FakeSampler.instances == []
+
+
+@pytest.mark.parametrize(("enabled", "disabled"), [(False, {"bk_inquiry_pull", "bk_inquiry_process"}), (True, set())])
+def test_b2c_intake_flag_switches_the_intake_kinds(enabled: bool, disabled: set[str]) -> None:
+    """AA-1034 R0 (root ADR 0019 d8): the worker gets the intake kinds as switched off unless the flag is on."""
+    with TestClient(_app(worker_enabled=True, b2c_intake_enabled=enabled)):
+        pass
+    (worker,) = FakeWorker.instances
+    assert set(worker.disabled_kinds) == disabled

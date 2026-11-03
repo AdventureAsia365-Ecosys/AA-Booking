@@ -84,7 +84,10 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
 ) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    # AA-1034 R0: the frozen B2C path (a case with a new lead) stays tested with the intake on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
+    )
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     try:

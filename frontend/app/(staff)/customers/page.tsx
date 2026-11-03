@@ -10,6 +10,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Archive, Ban, Briefcase, Eye, Plus, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import type { CustomerSummary } from "@/lib/api/types";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { Button, CustomerStatusBadge, DataTable, DateText, FilterBar, PageFrame, PersonCell, Pill, Section, useCan, useUrlFilters, RowMenu, type RowMenuItem } from "@/ui";
@@ -47,7 +48,7 @@ export default function CustomersPage() {
 
   function menuFor(c: CustomerSummary): RowMenuItem[] {
     const items: RowMenuItem[] = [{ label: "View profile", icon: <Eye size={15} />, onSelect: () => router.push(`/customers/${customerRef(c)}`) }];
-    if (canCreateCase && !c.is_blocked) {
+    if (B2C_INTAKE_OPEN && canCreateCase && !c.is_blocked) {
       items.push({ label: "New trip case", icon: <Briefcase size={15} />, onSelect: () => router.push(`/cases/new?customer=${customerRef(c)}`) });
     }
     if (actions.canAdmin) {
@@ -75,8 +76,14 @@ export default function CustomersPage() {
   return (
     <PageFrame
       title="Customers"
-      description="Everyone who asked us for a trip: TripPlanner leads, verified customers and past clients."
+      description={
+        B2C_INTAKE_OPEN
+          ? "Everyone who asked us for a trip: TripPlanner leads, verified customers and past clients."
+          : "Travellers recorded before the B2B-only model. Kept read-only: Booking no longer takes new leads."
+      }
       actions={
+        // AA-1034 R0 (root ADR 0019 d8): no new lead while the B2C intake is off.
+        B2C_INTAKE_OPEN &&
         canWrite && (
           <Button variant="primary" onClick={() => setNewLead(true)}>
             <Plus size={15} /> New lead
@@ -120,7 +127,9 @@ export default function CustomersPage() {
             filtered
               ? "Change the search or the filters, or reset them to see everyone."
               : tab.key === "all"
-                ? "Leads arrive from TripPlanner inquiries. Add a phone or e-mail lead with New lead."
+                ? B2C_INTAKE_OPEN
+                  ? "Leads arrive from TripPlanner inquiries. Add a phone or e-mail lead with New lead."
+                  : "Booking no longer takes new traveller leads."
                 : "Customers move between tabs as their trip cases progress."
           }
           onRowClick={(r) => router.push(`/customers/${customerRef(r)}`)}

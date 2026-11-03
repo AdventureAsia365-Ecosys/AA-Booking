@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import type { CustomerSummary } from "@/lib/api/types";
 import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
 import { Input, Select, Button, Modal, SegmentedControl, fieldName, useToast, DateField } from "@/ui";
@@ -23,7 +24,8 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
-  const [target, setTarget] = useState<Target>("new_case");
+  // AA-1034 R0 (root ADR 0019 d8): a new customer case is the frozen B2C intake; only "existing case" stays.
+  const [target, setTarget] = useState<Target>(B2C_INTAKE_OPEN ? "new_case" : "existing_case");
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [lead, setLead] = useState<LeadInput>(EMPTY_LEAD);
@@ -108,16 +110,18 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
           <span className="font-medium text-ink">{plan.title}</span>, titled from CIS. It is not priced: add cost lines and
           price it in the builder.
         </p>
-        <SegmentedControl
-          appearance="chips"
-          label="Target"
-          options={[
-            { value: "new_case", label: "New trip case" },
-            { value: "existing_case", label: "Add to an existing case" },
-          ]}
-          value={target}
-          onChange={setTarget}
-        />
+        {B2C_INTAKE_OPEN && (
+          <SegmentedControl
+            appearance="chips"
+            label="Target"
+            options={[
+              { value: "new_case", label: "New trip case" },
+              { value: "existing_case", label: "Add to an existing case" },
+            ]}
+            value={target}
+            onChange={setTarget}
+          />
+        )}
 
         {target === "new_case" ? (
           <>

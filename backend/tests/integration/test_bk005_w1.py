@@ -661,7 +661,10 @@ async def test_bk005_privileges_and_settings(pool: asyncpg.Pool) -> None:
 
 
 async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
+    # AA-1034 R0: the frozen B2C routes (new leads) stay tested with the intake on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", b2c_intake_enabled=True
+    )
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     boss = {"Authorization": f"Bearer {cis.token(sub='boss', cis_role='admin')}"}

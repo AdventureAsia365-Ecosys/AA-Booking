@@ -11,9 +11,10 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app import b2c
 from app.auth.staff import Staff, get_pool, require
 from app.pricing import engine
 from app.trip_cases import service, versions
@@ -224,7 +225,9 @@ async def list_trip_cases(
 
 
 @router.post("/trip-cases", status_code=201)
-async def create_trip_case(body: CaseCreate, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def create_trip_case(body: CaseCreate, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
+    if body.new_customer is not None:
+        b2c.refuse_new_customer(request)  # AA-1034 R0: no new traveller record while the B2C intake is off
     data = body.model_dump()
     data["customer_id"] = str(body.customer_id) if body.customer_id else None
     async with pool.acquire() as conn, conn.transaction():

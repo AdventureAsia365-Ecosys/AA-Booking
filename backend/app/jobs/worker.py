@@ -17,6 +17,11 @@ Shutdown (AA-751, data standards C6.2c): the lifespan sets ``stop`` and gives th
 requested, ``failed`` after ``MAX_RELEASES``), instead of staying ``running`` until its lease expires. A kind
 in ``no_release`` (it keeps no progress checkpoint, so running it again could repeat work an approval capped, e.g.
 the retention kinds) is failed at once instead, which is what the reaper did to it before.
+
+Switched-off kinds (AA-1034 R0, root ADR 0019 d8): a kind in ``disabled_kinds`` (the B2C intake while
+``B2C_INTAKE_ENABLED`` is off, ``app.b2c``) is taken out of the handlers and the recurring schedule, so it is neither
+scheduled nor claimed, and each maintenance pass cancels its queued rows (:func:`app.jobs.queue.cancel_queued`) so a
+leftover row cannot sit due and trip the ``jobs_stuck`` check. The worker logs the switched-off kinds once, at start.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ MaintenanceHook = Callable[[asyncpg.Pool], Awaitable[Any]]
 
 ERROR_MAX_CHARS = 2000
 NOT_RELEASED_ERROR = "stopped mid-run on shutdown; this kind is not run again (no progress checkpoint)"
+DISABLED_ERROR = "kind switched off (B2C intake off, B2B-only model, root ADR 0019); not run"
 
 
 def _report_failed(job: Job, exc: BaseException, status: str) -> None:
@@ -88,6 +94,7 @@ class Worker:
         recurring: tuple[Recurring, ...] = (),
         hooks: tuple[MaintenanceHook, ...] = (),
         no_release: frozenset[str] = frozenset(),
+        disabled_kinds: frozenset[str] = frozenset(),
         worker_id: str | None = None,
         poll_seconds: float = 2.0,
         lease_seconds: int = 300,
@@ -97,8 +104,9 @@ class Worker:
         if unknown:
             raise ValueError(f"recurring kinds without a handler: {sorted(unknown)}")
         self._pool = pool
-        self._handlers = handlers
-        self._recurring = recurring
+        self._disabled = frozenset(disabled_kinds)
+        self._handlers = {k: h for k, h in handlers.items() if k not in self._disabled}
+        self._recurring = tuple(r for r in recurring if r.kind not in self._disabled)
         self._hooks = hooks
         self._no_release = no_release
         self.worker_id = worker_id or default_worker_id()
@@ -111,6 +119,10 @@ class Worker:
         reaped = await queue.reap(pool)
         if any(reaped.values()):
             log.warning("job reaper: %s", reaped)
+        if self._disabled:
+            cancelled = await queue.cancel_queued(pool, sorted(self._disabled), DISABLED_ERROR)
+            if cancelled:
+                log.warning("cancelled %d queued job(s) of switched-off kinds %s", cancelled, sorted(self._disabled))
         for rec in self._recurring:
             if await queue.enqueue(pool, rec.kind, {}, delay_seconds=rec.every_seconds, max_attempts=3):
                 log.debug("scheduled %s in %.0fs", rec.kind, rec.every_seconds)
@@ -185,6 +197,8 @@ class Worker:
 
     async def run_forever(self, stop: asyncio.Event) -> None:
         log.info("job worker %s started (kinds: %s)", self.worker_id, sorted(self._handlers))
+        if self._disabled:
+            log.info("job kinds switched off (not scheduled, not claimed): %s", sorted(self._disabled))
         delay = self._poll_seconds
         while not stop.is_set():
             try:

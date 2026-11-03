@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Archive, Ban, Briefcase, CalendarDays, FileText, Hash, Inbox, MapPin, Pencil, Plane, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import type { CustomerDetail, TripCaseListItem } from "@/lib/api/types";
 import {
   PageFrame,
@@ -108,7 +109,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 <Pencil size={14} /> Edit profile
               </Button>
             )}
-            {canCreateCase && !c.is_blocked && (
+            {B2C_INTAKE_OPEN && canCreateCase && !c.is_blocked && (
               <Link
                 href={newCaseHref}
                 className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"

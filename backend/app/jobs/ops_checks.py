@@ -60,8 +60,8 @@ def findings(sample: Any) -> list[Finding]:
                 "Job queue stuck",
                 f"the oldest due booking.job row has waited {int(sample.oldest_queued_age_s)} s and no healthy job is"
                 " running",
-                "Check that the worker runs (WORKER_ENABLED, the bk_inquiry_pull row) and read the queued rows on the"
-                " staff admin Jobs page and the ECS log.",
+                "Check that the worker runs (WORKER_ENABLED; a bk_inquiry_pull row exists only with B2C_INTAKE_ENABLED)"
+                " and read the queued rows on the staff admin Jobs page and the ECS log.",
                 {"oldest_queued_age_s": int(sample.oldest_queued_age_s), "running": sample.running},
             )
         )

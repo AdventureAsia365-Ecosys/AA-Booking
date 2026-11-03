@@ -13,6 +13,11 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
 - ``WORKER_ENABLED``: ``true`` / ``false``. Runs the ``booking.job`` worker loop inside the API
   process (Dev, AA-681 slice 2). Default: on when ``ENVIRONMENT`` is ``dev`` and ``DATABASE_URL``
   is set, off otherwise (tests and local runs start it explicitly).
+- ``B2C_INTAKE_ENABLED``: ``true`` / ``false``, default **off** (root ADR 0019 d8, AA-1034 R0: Adventure Asia sells to
+  partner agencies only). Off: the worker neither schedules nor claims ``bk_inquiry_pull`` / ``bk_inquiry_process``
+  and cancels their queued rows (``app.jobs.worker``), and every staff path that would create a B2C customer
+  (``POST /booking/customers``, a trip case with ``new_customer``) answers 410 ``b2b_only`` (``app.b2c``). A code
+  default, not set on Dev; ``true`` turns the frozen B2C intake back on (bk-036 must then be undone too).
 - ``CIS_JWKS_URL``: JWKS of the CIS staff login (ADR 0004 O1, AA-680). Default: the Dev value
   ``https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json``.
 - ``STAFF_JWT_ISSUER``: expected ``iss`` of staff JWTs. Default: ``https://api-cis.lumiguides.it.com``.
@@ -131,6 +136,8 @@ class Settings:
     # AA-993 G4 proof: JOB_TEST_KINDS registers the Dev-only test kind bk_noop_sleep (app.jobs.noop_sleep). Like the
     # CIS env of the same name, any value other than 1/true/yes/on means off (never a start-up error).
     job_test_kinds: bool = False
+    # AA-1034 R0 (root ADR 0019 d8): the frozen B2C intake (TripPlanner inquiries, staff-made leads). Off by default.
+    b2c_intake_enabled: bool = False
     cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
     staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
     staff_notify_email: str = ""
@@ -283,6 +290,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
         ),
         job_test_kinds=(env.get("JOB_TEST_KINDS") or "").strip().lower() in TRUE_VALUES,
+        b2c_intake_enabled=_flag(env.get("B2C_INTAKE_ENABLED"), False, "B2C_INTAKE_ENABLED"),
         cis_jwks_url=(env.get("CIS_JWKS_URL") or DEFAULT_CIS_JWKS_URL).strip(),
         staff_jwt_issuer=(env.get("STAFF_JWT_ISSUER") or DEFAULT_STAFF_JWT_ISSUER).strip(),
         staff_notify_email=(env.get("STAFF_NOTIFY_EMAIL") or "").strip(),
