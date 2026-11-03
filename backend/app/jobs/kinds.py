@@ -57,6 +57,9 @@ EXPECTED_SECONDS: dict[str, int] = {
     # AA-682 S2 (bk-027): daily, batches of 200 cases / reminders; not exempt (a run takes seconds).
     "bk_case_lifecycle": 300,
     "bk_ops_reminders": 120,
+    # AA-1028 R1 slice 2: the CIS tenant account projection into booking.b2b_partners, one run per 5-minute slot while
+    # catalog.v_tenant_account_v1 is readable (tens of rows, one transaction); not exempt (seconds).
+    "bk_tenant_pull": 120,
     # AA-993 G4 proof (test-only, JOB_TEST_KINDS): sleeps up to 3600 s.
     "bk_noop_sleep": 3660,
 }

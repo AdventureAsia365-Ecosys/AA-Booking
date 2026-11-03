@@ -52,6 +52,8 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-032",  # AA-996 slice 2: trip_plans.supplier_id (read by every trip plan query), trip_plan_prices
     # bk-033 (AA-996 effective_margin width) changes no shape read here.
     "bk-034",  # AA-993: itinerary source_tour_id index (lifecycle read; first expand file, auto-applied before deploy)
+    # bk-035 (AA-1003 ops inquiry view) is read by CIS only; bk-036 (AA-1034 REVOKE) changes no shape read here.
+    "bk-037",  # AA-1028 R1 slice 2: b2b_partners.projected_at (bk_tenant_pull, staff partner reads; MIG-4)
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

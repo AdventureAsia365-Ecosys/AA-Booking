@@ -42,6 +42,7 @@ from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
 from app.b2b import expiry as b2b_expiry
+from app.b2b import tenant_pull
 from app.b2b.errors import B2BError, b2b_error_handler, validation_error_handler
 from app.catalog import lifecycle as tour_lifecycle
 from app.db import Database
@@ -126,6 +127,8 @@ def create_app(
                 **b2b_expiry.HANDLERS,
                 **tour_lifecycle.HANDLERS,
                 **ops_lifecycle.HANDLERS,
+                # AA-1028 R1 slice 2: booking.b2b_partners, the projection of every CIS tenant (catalog view, CIS 357).
+                tenant_pull.KIND: tenant_pull.build_handler(settings.cognito_m2m_crm_client_id),
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }
@@ -137,6 +140,7 @@ def create_app(
                     retention_jobs.DailySchedule(),
                     b2b_expiry.ExpirySchedule(),
                     tour_lifecycle.PullSchedule(),
+                    tenant_pull.TenantPullSchedule(),
                     # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
                     ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.

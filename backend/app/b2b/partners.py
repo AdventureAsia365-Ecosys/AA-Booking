@@ -5,6 +5,12 @@ A partner row lets an agency's calls through ``booking.b2b.v1``: the CRM sends t
 ``m2m_client_id``. Rows are never deleted (role ``booking`` has no DELETE): ``status = suspended`` stops the agency's
 calls at once (403 ``unknown_partner``). Every write adds one ``booking.audit_logs`` row (``entity_type =
 'b2b_partner'``). Permission ``b2b.admin`` (Booking admin only).
+
+AA-1028 R1 slice 2 (root ADR 0019 d1 / d9): ``bk_tenant_pull`` (:mod:`app.b2b.tenant_pull`) projects every CIS tenant
+into this table. On a row it has written (``projected_at`` set, bk-037), ``agency_name``, ``status`` and
+``m2m_client_id`` are read-only for staff (409 ``projected_from_cis``: change the tenant in CIS); ``billing_currency``
+and ``credit_terms_ref`` stay Booking's commercial terms. A row staff registered that the pull never touched stays
+editable as before.
 """
 
 from __future__ import annotations
@@ -18,10 +24,17 @@ from app.auth.staff import Staff
 from app.errors import Conflict, Invalid, NotFound
 
 EDITABLE = ("agency_name", "status", "billing_currency", "credit_terms_ref", "m2m_client_id")
+# AA-1028: the fields bk_tenant_pull projects from the CIS tenant account (read-only on a projected row).
+PROJECTED = frozenset({"agency_name", "status", "m2m_client_id"})
 COLUMNS = """
     id::text AS id, tenant_id::text AS tenant_id, agency_name, status, billing_currency::text AS billing_currency,
-    credit_terms_ref, m2m_client_id, created_by, updated_by, created_at, updated_at
+    credit_terms_ref, m2m_client_id, created_by, updated_by, created_at, updated_at, projected_at
 """
+
+
+def projected(row: dict[str, Any]) -> bool:
+    """True when bk_tenant_pull wrote the row (it is then the projection of a CIS tenant, bk-037)."""
+    return row.get("projected_at") is not None
 
 
 async def list_partners(conn: asyncpg.Connection) -> dict[str, Any]:
@@ -100,6 +113,11 @@ async def update_partner(
     changed = {k: v for k, v in changes.items() if before[k] != v}
     if not changed:
         return before
+    if projected(before) and PROJECTED & set(changed):
+        raise Conflict(
+            "projected_from_cis",
+            f"{', '.join(sorted(PROJECTED & set(changed)))} follow the CIS tenant account; change the tenant in CIS",
+        )
     sets = ", ".join(f"{k} = ${i}" for i, k in enumerate(changed, start=2))
     try:
         row = await conn.fetchrow(
