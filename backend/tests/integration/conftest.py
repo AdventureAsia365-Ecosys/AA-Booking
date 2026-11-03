@@ -179,6 +179,39 @@ def migrated_booking_dsn(migrated_admin_dsn: str) -> str:
     return booking_dsn(migrated_admin_dsn)
 
 
+# ── AA-1034 R0: the frozen B2C tables (bk-036 REVOKEs INSERT on them from role booking) ──────────────────────────
+# The B2C code (TripPlanner intake, staff leads, traveller sign-in) stays in the repo until the tables are dropped, so
+# its tests keep running: a module that exercises it marks itself with `b2c_insert_regranted`, which gives role
+# booking INSERT back for the test and takes it away again afterwards (the bk-036 state). tests/integration/
+# test_bk036_schema.py tests the revoke itself.
+B2C_TABLES = ("customers", "customer_identities", "customer_otps", "customer_sessions")
+
+
+async def _set_b2c_insert(admin_dsn: str, grant: bool) -> None:
+    conn = await asyncpg.connect(admin_dsn)
+    try:
+        async with as_booking_owner(conn):
+            verb = "GRANT INSERT ON {} TO booking" if grant else "REVOKE INSERT ON {} FROM booking"
+            await conn.execute(verb.format(", ".join(f"booking.{t}" for t in B2C_TABLES)))
+    finally:
+        await conn.close()
+
+
+def _run_set_b2c_insert(admin_dsn: str, grant: bool) -> None:
+    # A fresh event loop in its own thread: a sync fixture may run while pytest-asyncio owns the test's loop.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(asyncio.run, _set_b2c_insert(admin_dsn, grant)).result()
+
+
+@pytest.fixture
+def b2c_insert_regranted(migrated_admin_dsn: str) -> Iterator[None]:
+    _run_set_b2c_insert(migrated_admin_dsn, True)
+    try:
+        yield
+    finally:
+        _run_set_b2c_insert(migrated_admin_dsn, False)
+
+
 # ── AA-996 perf guard: every catalog read of every route a test exercises ─────
 # Every Database a test builds records its statements; at teardown each statement that reads a parse-backed catalog
 # view (v_tour_day, v_tour_place_name, v_tour_place, _tour_day_text) is EXPLAINed once per session against the stub,

@@ -28,7 +28,8 @@ from tests import inquiry_samples as samples
 from tests.integration.test_bk002_intake import INTAKE_TABLES, drain, publish
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
 
 ADMIN_ID, SALES_ID = "it-retention-admin", "it-retention-sales"
 R = "/booking/retention"

@@ -78,6 +78,7 @@ async def test_default_privileges_cover_future_tables(migrated_admin_dsn: str, m
         await admin.close()
 
 
+@pytest.mark.usefixtures("b2c_insert_regranted")  # AA-1034 R0: bk-036 revoked INSERT on the B2C tables
 async def test_booking_role_reads_and_writes_its_tables(migrated_booking_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_booking_dsn)
     try:
@@ -133,6 +134,7 @@ async def test_view_shows_only_booking_versions(migrated_booking_dsn: str) -> No
         await conn.close()
 
 
+@pytest.mark.usefixtures("b2c_insert_regranted")  # AA-1034 R0: bk-036 revoked INSERT on the B2C tables
 async def test_customer_constraints(migrated_booking_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_booking_dsn)
     try:

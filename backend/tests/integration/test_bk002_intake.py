@@ -22,7 +22,8 @@ from app.notifications import staff_email
 from app.settings import Settings
 from tests import inquiry_samples as samples
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
 
 INTAKE_TABLES = (
     "booking.notifications, booking.trip_case_legs, booking.trip_cases, booking.inbox_cursor, "

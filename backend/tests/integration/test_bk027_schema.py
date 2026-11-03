@@ -20,7 +20,8 @@ import pytest_asyncio
 from tests.integration import ops
 from tests.integration.conftest import apply_migrations
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "027_trip_checks_lifecycle.sql"
 STAFF = "it-682-checks"
@@ -56,6 +57,12 @@ async def _checks(conn: asyncpg.Connection, case_id: str) -> dict[str, Any]:
     return {r["code"]: dict(r) for r in rows if r["code"] != "custom"}
 
 
+# The later files a re-run of bk-027 must replay (bk-028 replaces v_trip_check_board). Not bk-036 (AA-1034): it only
+# revokes INSERT on the B2C tables, which this module's b2c_insert_regranted fixture gives back for the test, so its
+# guard (a recent customer row while INSERT is granted) would refuse the replay.
+LATER = [n for n in range(28, 1000) if n != 36]
+
+
 async def _as_owner(conn: asyncpg.Connection, sql: str, *args: Any) -> Any:
     await conn.execute("SET ROLE bk_owner")
     try:
@@ -71,7 +78,7 @@ async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> No
     finally:
         await admin.execute("RESET ROLE")
     # The re-run put back the bk-027 body of v_trip_check_board, which bk-028 replaces: replay the later files.
-    await apply_migrations(admin, only=range(28, 1000))
+    await apply_migrations(admin, only=LATER)
     assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-027'") == 1
     for rel in ("trip_case_checks", "v_trip_check_board"):
         owner = await admin.fetchval(
@@ -270,7 +277,7 @@ async def test_backfill_seeds_sold_cases_only(admin: asyncpg.Connection, app_con
     )
     await app_conn.execute("UPDATE booking.trip_cases SET status = 'pre_departure' WHERE id = $1::uuid", started["id"])
     await _as_owner(admin, MIGRATION.read_text(encoding="utf-8"))
-    await apply_migrations(admin, only=range(28, 1000))  # bk-028 replaces v_trip_check_board again
+    await apply_migrations(admin, only=LATER)  # bk-028 replaces v_trip_check_board again
     assert len(await _checks(app_conn, sold["id"])) == 3
     b2b = await _checks(app_conn, started["id"])
     assert len(b2b) == 3 and b2b["emergency_contact"]["status"] == "not_applicable"
