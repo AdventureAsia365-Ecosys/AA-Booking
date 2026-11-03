@@ -312,6 +312,12 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
 `.release-please-manifest.json`, AA-891), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
 (optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
 `STAFF_JWT_ISSUER` (optional; the CIS bridge, default the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
+`B2C_INTAKE_ENABLED` (optional, default **off**, not set on Dev; AA-1034 R0, root ADR 0019 d8 B2B-only model): off, the
+worker neither schedules nor claims `bk_inquiry_pull` / `bk_inquiry_process` and cancels their queued rows
+(`Worker(disabled_kinds=...)`, `app/b2c.py`), and every staff path that would create a traveller record
+(`POST /booking/customers`, a trip case or trip-plan case with `new_customer`) answers 410 `b2b_only`. bk-036 revokes
+INSERT on the `booking.customer*` tables from role `booking` as the database half of the freeze. The staff admin hides
+the same entry points unless the build sets `NEXT_PUBLIC_B2C_INTAKE=on` (`frontend/lib/config.ts`).
 Cognito (AA-680, all optional and **not set on Dev**, defaults are code constants in `app/auth/identity_config.py`):
 `COGNITO_WORKFORCE_ISSUER`, `COGNITO_BOOKING_STAFF_CLIENT_ID`, `COGNITO_BREAKGLASS_CLIENT_ID` (same names as CIS).
 E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inquiry e-mail; empty = no e-mail),

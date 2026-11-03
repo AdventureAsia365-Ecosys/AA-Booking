@@ -33,10 +33,10 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app import catalog
+from app import b2c, catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import departures, plan_components
 from app.catalog import geo, trip_plan_prices, trip_plans
@@ -327,9 +327,13 @@ async def put_trip_plan_prices(
 
 
 @router.post("/trip-plans/{source_id}/trip-cases", status_code=201)
-async def use_trip_plan(body: UseForTripCase, source_id: SourceId, staff: CanStartCase, pool: Pool) -> dict[str, Any]:
+async def use_trip_plan(
+    body: UseForTripCase, source_id: SourceId, staff: CanStartCase, pool: Pool, request: Request
+) -> dict[str, Any]:
     if not staff.can("version.write"):
         raise HTTPException(status_code=403, detail="forbidden")
+    if body.new_customer is not None:
+        b2c.refuse_new_customer(request)  # AA-1034 R0: no new traveller record while the B2C intake is off
     data = body.model_dump()
     if data.get("customer_id"):
         data["customer_id"] = str(data["customer_id"])

@@ -23,6 +23,7 @@ class FakeQueue:
         self.reaped = {"requeued": 0, "failed": 0, "cancelled": 0}
         self.beat_ok = True
         self.release_status: str | BaseException = "queued"
+        self.cancelled_queued = 0
 
     async def reap(self, pool: Any) -> dict[str, int]:
         self.events.append(("reap",))
@@ -54,6 +55,10 @@ class FakeQueue:
             raise self.release_status
         return self.release_status
 
+    async def cancel_queued(self, pool: Any, kinds: list[str], reason: str) -> int:
+        self.events.append(("cancel_queued", tuple(kinds), reason))
+        return self.cancelled_queued
+
     async def heartbeat(self, pool: Any, job_id: str, worker_id: str, lease: int) -> bool:
         self.events.append(("beat", job_id))
         if isinstance(self.beat_ok, BaseException):
@@ -64,7 +69,7 @@ class FakeQueue:
 @pytest.fixture
 def fq(monkeypatch: pytest.MonkeyPatch) -> FakeQueue:
     fake = FakeQueue()
-    for name in ("reap", "enqueue", "prune", "claim", "complete", "fail", "release", "heartbeat"):
+    for name in ("reap", "enqueue", "prune", "claim", "complete", "fail", "release", "heartbeat", "cancel_queued"):
         monkeypatch.setattr(worker_module.queue, name, getattr(fake, name))
     return fake
 
@@ -229,3 +234,37 @@ async def test_wait_for_timeout_waits_for_the_release(fq: FakeQueue) -> None:
         await asyncio.wait_for(task, timeout=0.05)
     assert ("release", "j1", "w") in fq.events
     assert task.cancelled()
+
+
+# ── AA-1034 R0: switched-off kinds (the B2C intake while B2C_INTAKE_ENABLED is off) ─────────────────────────────
+
+
+async def test_disabled_kinds_are_neither_scheduled_nor_claimed(fq: FakeQueue) -> None:
+    w = Worker(
+        provide,
+        {"bk_a": ok_handler, "bk_pull": ok_handler, "bk_proc": ok_handler},
+        recurring=(Recurring("bk_pull", 60), Recurring("bk_a", 30)),
+        disabled_kinds=frozenset({"bk_pull", "bk_proc"}),
+    )
+    fq.cancelled_queued = 2
+    await w.run_once()
+    assert ("enqueue", "bk_pull", 60) not in fq.events
+    assert ("enqueue", "bk_a", 30) in fq.events
+    assert ("cancel_queued", ("bk_proc", "bk_pull"), worker_module.DISABLED_ERROR) in fq.events
+    claims = [e for e in fq.events if e[0] == "claim"]
+    assert claims == [("claim", ("bk_a",))]
+
+
+async def test_no_cancel_sweep_without_disabled_kinds(fq: FakeQueue) -> None:
+    await Worker(provide, {"bk_a": ok_handler}, recurring=(Recurring("bk_a", 30),)).run_once()
+    assert not [e for e in fq.events if e[0] == "cancel_queued"]
+
+
+async def test_the_switched_off_kinds_are_logged_once_at_start(fq: FakeQueue, caplog: pytest.LogCaptureFixture) -> None:
+    w = Worker(provide, {"bk_a": ok_handler, "bk_pull": ok_handler}, disabled_kinds=frozenset({"bk_pull"}))
+    stop = asyncio.Event()
+    stop.set()
+    with caplog.at_level("INFO", logger=worker_module.__name__):
+        await w.run_forever(stop)
+    lines = [r.getMessage() for r in caplog.records if "switched off" in r.getMessage()]
+    assert lines == ["job kinds switched off (not scheduled, not claimed): ['bk_pull']"]

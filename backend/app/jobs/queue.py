@@ -126,6 +126,21 @@ async def claim(pool: asyncpg.Pool, worker_id: str, kinds: list[str], lease_seco
     return Job(row["id"], row["kind"], _payload(row["payload"]), row["attempt"], row["max_attempts"])
 
 
+async def cancel_queued(pool: asyncpg.Pool, kinds: list[str], reason: str) -> int:
+    """AA-1034 R0: end every queued row of ``kinds`` (switched-off kinds no worker claims) as ``cancelled`` with
+    ``reason``. A running row is left to finish (or to the reaper). Returns how many rows were cancelled."""
+    rows = await pool.fetch(
+        """
+        UPDATE booking.job SET status = 'cancelled', error = $2, finished_at = now()
+        WHERE status = 'queued' AND kind = ANY($1::text[])
+        RETURNING id
+        """,
+        kinds,
+        reason,
+    )
+    return len(rows)
+
+
 async def heartbeat(pool: asyncpg.Pool, job_id: str, worker_id: str, lease_seconds: int) -> bool:
     """Extend the lease. False when the job is no longer ours (reaped or finished elsewhere)."""
     row = await pool.fetchval(

@@ -33,6 +33,12 @@ class Conflict(ServiceError):
     status_code = 409
 
 
+class Gone(ServiceError):
+    """The feature was switched off for good (e.g. the B2C intake under root ADR 0019, ``app.b2c``)."""
+
+    status_code = 410
+
+
 class Invalid(ServiceError):
     status_code = 422
 

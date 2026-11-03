@@ -26,6 +26,11 @@ export function cisApiUrl(): string {
 /** CIS admin web app, for "Managed in CIS" / "Open CIS admin" links. */
 export const CIS_ADMIN_URL = trimSlash(process.env.NEXT_PUBLIC_CIS_ADMIN_URL || DEV_CIS_ADMIN_URL);
 
+/** AA-1034 R0 (root ADR 0019 d8, B2B-only model): the frozen B2C intake (new leads, staff-made customer cases,
+ *  TripPlanner inquiries) is hidden unless NEXT_PUBLIC_B2C_INTAKE is "on" at build time. The API refuses the same
+ *  writes with 410 `b2b_only` while its own flag (B2C_INTAKE_ENABLED) is off. */
+export const B2C_INTAKE_OPEN = process.env.NEXT_PUBLIC_B2C_INTAKE === "on";
+
 /** CIS console entry point. CIS middleware sends /admin/dashboard to the role's landing page (admin:
  *  Overview, reviewer/content: Review Queue); the bare origin redirects to Upload for every role. */
 export const CIS_CONSOLE_PATH = "/admin/dashboard";

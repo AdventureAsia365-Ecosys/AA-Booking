@@ -11,11 +11,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Building2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import type { CustomerSummary } from "@/lib/api/types";
-import { Input, Select, Textarea, PageFrame, Button, Section, useCan, useStaff, useToast, fieldName, DateField } from "@/ui";
+import { Input, Select, Textarea, PageFrame, Button, EmptyState, Section, useCan, useStaff, useToast, fieldName, DateField } from "@/ui";
 import { CURRENCIES, Field, inputCls, paxErrors, textareaCls, toInt } from "../_parts/fields";
 import { CountryPicker } from "../_parts/CountryPicker";
 import { StaffSelect } from "../_parts/StaffSelect";
@@ -89,6 +90,26 @@ export default function NewTripCasePage() {
     return (
       <PageFrame width="full">
         <QueryError error={new ApiError("forbidden", 403)} what="creating trip cases" />
+      </PageFrame>
+    );
+  }
+
+  // AA-1034 R0 (root ADR 0019 d8): a staff-made customer case is part of the frozen B2C intake; an old link lands here.
+  if (!B2C_INTAKE_OPEN) {
+    return (
+      <PageFrame title="Create new trip case">
+        <Section>
+          <EmptyState
+            icon={<Building2 size={28} />}
+            title="Trip cases come from partner agencies"
+            description="Adventure Asia works with partner agencies only, so Booking no longer opens cases for individual travellers. Partner bookings arrive through the B2B desk."
+            action={
+              <Link href="/cases" className="text-[13px] font-semibold text-accent-deep hover:underline">
+                Back to trip cases
+              </Link>
+            }
+          />
+        </Section>
       </PageFrame>
     );
   }

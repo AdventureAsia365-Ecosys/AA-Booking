@@ -20,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowRight, Hammer, Hotel, Inbox, Lock, Send, UserCheck, UserPlus } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { supplierBookingsApi } from "@/lib/api/supplierBookings";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
 import { canSeePage } from "@/lib/rbac";
@@ -49,6 +50,10 @@ import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 const IN_PROGRESS: TripCaseStatus[] = ["discovery", "building"];
 /** Every status that still needs work (the summary's `open` uses the same rule). */
 const OPEN_STATUSES = STATUS_PHASES.flatMap((p) => p.statuses).filter((s) => s !== "completed");
+
+const EMPTY_CASES = B2C_INTAKE_OPEN
+  ? "Inquiries from TripPlanner and cases created by staff appear here."
+  : "Partner agency bookings appear here.";
 
 const casesHref = (statuses: readonly string[]) => `/cases?status=${encodeURIComponent(statuses.join(","))}`;
 
@@ -161,15 +166,18 @@ function SalesDashboard({ role }: { role: string }) {
   return (
     <>
       <div className="aa-kpi-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <TileLink href={casesHref(["new_inquiry"])} label="New inquiries: open the inquiry list">
-          <KpiTile
-            label="New inquiries"
-            icon={<Inbox size={16} />}
-            value={v((x) => x.new_inquiry)}
-            hint={s ? (s.new_inquiry > 0 ? "Needs attention" : "Nothing waiting") : undefined}
-            hintTone={s && s.new_inquiry > 0 ? "danger" : "neutral"}
-          />
-        </TileLink>
+        {/* AA-1034 R0: TripPlanner inquiries are the frozen B2C intake (root ADR 0019), so the tile is hidden. */}
+        {B2C_INTAKE_OPEN && (
+          <TileLink href={casesHref(["new_inquiry"])} label="New inquiries: open the inquiry list">
+            <KpiTile
+              label="New inquiries"
+              icon={<Inbox size={16} />}
+              value={v((x) => x.new_inquiry)}
+              hint={s ? (s.new_inquiry > 0 ? "Needs attention" : "Nothing waiting") : undefined}
+              hintTone={s && s.new_inquiry > 0 ? "danger" : "neutral"}
+            />
+          </TileLink>
+        )}
         <TileLink href={casesHref(IN_PROGRESS)} label="In progress: open the cases being worked on">
           <KpiTile
             label="In progress"
@@ -262,7 +270,7 @@ function SalesDashboard({ role }: { role: string }) {
               pageSize={5}
               pageSizeOptions={[5]}
               emptyTitle="No trip cases yet"
-              emptyDescription="Inquiries from TripPlanner and cases created by staff appear here."
+              emptyDescription={EMPTY_CASES}
               onRowClick={(r) => router.push(`/cases/${encodeURIComponent(r.code)}`)}
               tableMinWidth={760}
             />
@@ -353,7 +361,7 @@ function RecentCards({
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
   if (!items?.length) {
     return (
-      <EmptyState title="No trip cases yet" description="Inquiries from TripPlanner and cases created by staff appear here." />
+      <EmptyState title="No trip cases yet" description={EMPTY_CASES} />
     );
   }
   return (
