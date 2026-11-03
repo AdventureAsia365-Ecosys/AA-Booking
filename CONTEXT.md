@@ -104,8 +104,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   with rights, customers, B2B partners / holds; aggregates only) and `booking.v_ops_trip_plan_keys` (catalog key +
   sellable of each plan; no plan id, no `conf:commercial` column), SELECT to `cis_app`; the CIS admin page
   `/admin/data-coverage` reads them. **Inquiry handoff** (AA-1003, `bk-035`): `booking.v_ops_inquiry_inbox` (source,
-  hand-off key, status, received / processed time, has a trip case; no payload or customer), SELECT to `cis_app`; the
-  CIS TP-03 check reads it. No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
+  hand-off key, status, received / processed time, has a trip case; no payload or customer), SELECT to `cis_app`; no CIS
+  reader since 2026-11-03 (CIS retired TP-03 with the B2B-only model, root ADR 0019; the view goes with the B2C drop).
+  No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
   `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
   API `/booking/b2b/v1` takes only client-credentials tokens of the Cognito M2M pool `aa-m2m-<env>` plus the agency's
@@ -1333,7 +1334,9 @@ applied on Dev by Migration Apply with no hand step. In `REQUIRED_SCHEMA_VERSION
 `v_ops_inquiry_inbox (source, idempotency_key, status, received_at, processed_at, has_trip_case)`: one row per
 `inbox_events` row of contract `inquiry.submitted` received in the last 30 days, with whether a trip case carries the
 same `idempotency_key` (a soft-deleted case counts). Keys, states and timestamps only: no payload, no `error` text, no
-customer, no case id. The CIS TP-03 handoff check matches it with `tripplanner.v_ops_inquiry_keys` (tp-022) to name
+customer, no case id. The CIS TP-03 handoff check matched it (until 2026-11-03: TP-03 is retired with the B2B-only
+model, root ADR 0019, and CIS reads the view no more; it is dropped with the B2C tables)
+with `tripplanner.v_ops_inquiry_keys` (tp-022) to name
 each inquiry not received, parked or failed with its age, and each one received with no trip case after 24 h
 (contract `ops.overview.v1`, key view; columns append-only). Owned by `bk_owner`; role `booking` SELECT only; `cis_app`
 SELECT. A **contract** file (the cross-owner grant is not expand, root ADR 0017): manual DB Migrate apply. Not in
