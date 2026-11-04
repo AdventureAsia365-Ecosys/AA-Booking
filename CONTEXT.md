@@ -415,8 +415,13 @@ send, OTP) is not built: those still write rows only.
     `admin_users.id`, the role in `cis_role` (`admin|reviewer|content`). Removed by AA-680 PR-4 (`BRIDGE_ENABLED`).
 - **WORKFORCE identity (bk-016).** The Booking role is the first `booking-*` group in the order `booking-admin` →
   `admin`, `booking-sales` → `sales`, `booking-contracting` → `contracting`, `booking-content_creator` →
-  `content_creator`, re-read on **every** request (a change is written and audited `staff.role_synced`); no
-  `booking-*` group = 403 `no_booking_role`, nothing written. `cis_role` = the highest `cis-*` group (informational).
+  `content_creator`, `booking-finance` → `finance` (AA-1035 R2, root ADR 0019 d3 / d9; bk-038 lets the row hold it),
+  re-read on **every** request (a change is written and audited `staff.role_synced`); no
+  `booking-*` group = 403 `no_booking_role`, nothing written. `cis_role` = the highest `cis-*` group (informational;
+  the R2 CIS groups included, `cis-reviewer` read as `content`). **Finance** issues invoices and records payments
+  (`billing.read`, `billing.write`; verifying a payment stays `admin`, design D6) and sees nothing else; it comes only
+  from the group, which the CIS Staff page grants through `shared.staff_app_grant` role `finance` (CIS 363), never
+  from the bridge (`ROLE_FROM_CIS` has no finance entry; CIS mints no bridge token for its R2 roles).
   The row is found by `(cognito_iss, cognito_sub)` only and never rebound. No row → one is created, active, keyed
   `'cog:' || sub` (`email` from the token, `name` = the e-mail local part; audited `staff.provisioned`). Bridge-era rows
   keep their CIS key: AA-CIS-Infra `db/scripts/aa680_link_staff_cognito.py` links them once from `shared.admin_users`.
@@ -978,7 +983,8 @@ email/phone unique among **verified** live customers only; `trip_cases` (ERD v2 
 
 ### `bk-003` (AA-680 staff half + AA-681 slice 3)
 
-`staff_users` (thin profile keyed by `cis_user_id` = JWT `sub`; role `admin|sales|contracting|content_creator`,
+`staff_users` (thin profile keyed by `cis_user_id` = JWT `sub`; role `admin|sales|contracting|content_creator`
+(`|finance` since bk-038, AA-1035),
 `active`), `trip_case_status_transitions` (read-only for the app; pre-sale edges only: `new_inquiry → discovery →
 building → proposal_sent`, back-steps `building → discovery`, `proposal_sent → building`, `→ cancelled` from those
 four) + a trigger rejecting other edges + `trip_case_status_history` written by trigger (actor/reason from

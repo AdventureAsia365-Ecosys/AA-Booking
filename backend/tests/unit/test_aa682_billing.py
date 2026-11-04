@@ -238,3 +238,22 @@ def test_invoice_actions() -> None:
     part = invoices.actions({"status": "partially_paid", "balance": "1680.00"}, sales)
     assert not part["cancel"] and part["remind"] and part["record_payment"]
     assert not any(invoices.actions({"status": "sent", "balance": "1.00"}, staff("contracting")).values())
+
+
+def test_finance_issues_invoices_and_records_payments_but_does_not_verify() -> None:
+    """AA-1035 R2 (root ADR 0019 d9): finance gates the invoice and payment routes; verifying stays admin (D6)."""
+    fin = staff("finance")
+    assert fin.can("billing.read") and fin.can("billing.write")
+    assert not fin.can("payment.verify")
+    for other in (
+        "trip_case.read",
+        "customer.read",
+        "pricing.read",
+        "supply.read",
+        "staff.admin",
+        "audit.read",
+        "bill.read",
+        "payout.write",
+    ):
+        assert not fin.can(other), other
+    assert not staff("finance", preview=True).can("billing.read")

@@ -6,7 +6,9 @@
 // so a page a role cannot use is never offered and, if typed in, shows a "no access" state instead
 // of a wall of 403 errors. Same pattern as CIS lib/rbac.ts (PAGE_RULES + canSeePage).
 
-export const STAFF_ROLES = ["admin", "sales", "contracting", "content_creator"] as const;
+// AA-1035 R2 (root ADR 0019 d3 / d9): finance issues invoices and records payments; the role comes only from the
+// WORKFORCE group booking-finance (backend app/auth/staff.py, bk-038).
+export const STAFF_ROLES = ["admin", "sales", "contracting", "content_creator", "finance"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const ROLE_LABEL: Record<StaffRole, string> = {
@@ -14,6 +16,7 @@ export const ROLE_LABEL: Record<StaffRole, string> = {
   sales: "Sales",
   contracting: "Contracting",
   content_creator: "Content creator",
+  finance: "Finance",
 };
 
 export function isStaffRole(value: unknown): value is StaffRole {
@@ -24,6 +27,7 @@ const ALL: readonly StaffRole[] = STAFF_ROLES;
 const A: StaffRole = "admin";
 const S: StaffRole = "sales";
 const C: StaffRole = "contracting";
+const F: StaffRole = "finance";
 
 export interface PageRule {
   /** Path pattern; `:x` matches one segment, a trailing `/*` matches the rest. */
@@ -64,8 +68,9 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/catalog/*", roles: ALL },
   // Operations (W3)
   // AA-682 S4: contracting opens /billing for its Supplier bills tab only (API bill.*; invoices stay billing.read).
-  { pattern: "/billing", roles: [A, S, C] },
-  { pattern: "/billing/*", roles: [A, S] },
+  // AA-1035: finance works the invoices and payments (API billing.read / billing.write; verifying stays admin).
+  { pattern: "/billing", roles: [A, S, C, F] },
+  { pattern: "/billing/*", roles: [A, S, F] },
   // Trip checks (AA-682 S2): every operational role (API ops.read / ops.write).
   { pattern: "/trip-checks", roles: [A, S, C] },
   // B2B desk (AA-975): on-request lines and departure incidents; every operational role (API b2b_desk.*).
