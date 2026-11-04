@@ -38,19 +38,33 @@ def test_windows_cut_at_rate_bounds_shifted_by_the_day() -> None:
         cs.Span(ROOM, date(2027, 1, 1), date(2027, 3, 10)),  # day 3 night: a start on 03-08 is its last night
         cs.Span(ROOM, date(2027, 3, 11), date(2027, 6, 30)),
     ]
-    wins = cs.windows(DAY, date(2027, 4, 30), parts, spans)
+    wins = cs.windows(DAY, parts, spans)
+    # Anchored on the rate validity (not on DAY): the window running on DAY starts where its rates start.
     assert [(w.start, w.end) for w in wins] == [
-        (date(2027, 3, 1), date(2027, 3, 8)),
+        (date(2027, 1, 1), date(2027, 3, 8)),
         (date(2027, 3, 9), date(2027, 3, 31)),
-        (date(2027, 4, 1), date(2027, 4, 30)),
+        (date(2027, 4, 1), date(2027, 6, 28)),
+        (date(2027, 6, 29), date(2027, 6, 30)),  # day 3 is past the room rates: priced as incomplete, no row
     ]
+
+
+def test_windows_do_not_move_with_the_day() -> None:
+    parts = [cs.Part(1, None, GUIDE), cs.Part(2, ROOM, None)]
+    spans = [cs.Span(GUIDE, date(2027, 1, 1), cs.FOREVER), cs.Span(ROOM, date(2027, 1, 1), date(2027, 5, 31))]
+    day_one = cs.windows(DAY, parts, spans)
+    assert cs.windows(DAY + timedelta(days=1), parts, spans) == day_one  # same inputs next day: same windows
+    assert day_one[-1].end == cs.FOREVER  # an open-ended rate: no overflow, no end derived from the day
+    # Only a window that is over drops out.
+    later = cs.windows(date(2027, 6, 1), parts, spans)
+    assert later == [w for w in day_one if w.end >= date(2027, 6, 1)] and len(later) < len(day_one)
 
 
 def test_horizon() -> None:
     assert cs.horizon(DAY, []) is None
     assert cs.horizon(DAY, [cs.Span(ROOM, DAY, DAY - timedelta(days=1))]) is None
     assert cs.horizon(DAY, [cs.Span(ROOM, DAY, date(2027, 4, 1))]) == date(2027, 4, 1)
-    assert cs.horizon(DAY, [cs.Span(ROOM, DAY, cs.FOREVER)]) == DAY + timedelta(days=cs.HORIZON_DAYS)
+    assert cs.horizon(DAY, [cs.Span(ROOM, DAY, cs.FOREVER)]) == cs.FOREVER
+    assert cs.windows(DAY, [cs.Part(1, ROOM, None)], [cs.Span(ROOM, date(2026, 1, 1), date(2026, 12, 31))]) == []
 
 
 def _found(parts: list[cs.Part], wins: list[cs.Window], pick: Any) -> dict[RateAsk, Any]:
@@ -165,12 +179,32 @@ def test_assemble_keeps_hand_rows_and_drops_overlapping_computed_rows() -> None:
     nets = [cs.NetRow(DAY, DAY + timedelta(days=60), lo, hi, D("100"), "USD", "Low", False) for lo, hi in cs.PAX_BANDS]
     computed, _ = cs.priced_rows(nets, _pricing(b2b=RULE_B2B))
     final, counts = cs.assemble([hand, overridden, stale], computed, _pricing(b2b=RULE_B2B))
-    assert counts == {"kept": 2, "computed": 4, "shadowed": 2, "truncated": 0}
+    assert counts == {"kept": 2, "computed": 4, "shadowed": 2, "trimmed": 0, "truncated": 0}
     assert [r["position"] for r in final] == list(range(1, 7))
     assert final[0]["created_by"] == "staff-1" and final[0]["amount"] == D("200.00")
     assert final[0]["rrp_amount"] == D("250.00")  # a hand b2b row gets today's RRP too
     assert all(r["created_by"] is None for r in final[2:])
     assert {(r["pax_min"], r["pax_max"]) for r in final[2:]} == {(1, 1), (5, 6), (7, 10), (11, None)}
+
+
+def test_a_hand_row_that_is_over_trims_a_computed_row_instead_of_hiding_it() -> None:
+    # Computed windows start where the rates start, so a computed row may begin before today.
+    past = _stored(valid_from=DAY - timedelta(days=40), valid_to=DAY - timedelta(days=11))
+    ahead = _stored(
+        position=2, pax_min=3, pax_max=4, valid_from=DAY + timedelta(days=5), valid_to=DAY + timedelta(days=9)
+    )
+    nets = [cs.NetRow(DAY - timedelta(days=30), DAY + timedelta(days=60), lo, hi, D("100"), "USD", "Low", False)
+            for lo, hi in ((2, 2), (3, 4))]  # fmt: skip
+    computed, _ = cs.priced_rows(nets, _pricing(b2b=RULE_B2B))
+    final, counts = cs.assemble([past, ahead], computed, _pricing(b2b=RULE_B2B))
+    assert counts == {"kept": 2, "computed": 1, "shadowed": 1, "trimmed": 1, "truncated": 0}
+    two = next(r for r in final if r["computed"])
+    assert (two["pax_min"], two["valid_from"], two["valid_to"]) == (
+        2,
+        DAY - timedelta(days=10),
+        DAY + timedelta(days=60),
+    )
+    assert computed[0]["valid_from"] == DAY - timedelta(days=30)  # the input row is not changed in place
 
 
 def test_assemble_caps_the_set_at_max_rows() -> None:

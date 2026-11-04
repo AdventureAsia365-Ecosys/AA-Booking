@@ -8,7 +8,10 @@ end to end with an invented fixture rate sheet (invented supplier, hotel, servic
    published by a second; a b2b rule with an RRP markup is entered and approved; the plan gets its components.
 3. ``bk_price_recompute`` fills the matrix: computed rows per window x pax band for b2b, the RRP, the dated history;
    ``booking.v_from_prices`` serves the from price to role ``tripplanner``; price parity reads it; a staff override
-   is kept by the next recompute; a second recompute with nothing new changes nothing.
+   is kept by the next recompute; a second recompute with nothing new changes nothing, on the same day or later ones
+   (the windows are anchored on the rate validity).
+4. A plan priced by hand only (b2b rows, no components) is recomputed too: its RRP is filled and follows a newly
+   approved markup.
 """
 
 from __future__ import annotations
@@ -240,7 +243,7 @@ def _sheet(s: dict[str, str]) -> bytes:
     )
 
 
-async def _rule(pool: asyncpg.Pool) -> None:
+async def _rule(pool: asyncpg.Pool, markup: str = "0.25", valid_from: date = TODAY) -> None:
     async with pool.acquire() as conn, conn.transaction():
         rule = await policy.create_rule(
             conn,
@@ -251,9 +254,9 @@ async def _rule(pool: asyncpg.Pool) -> None:
                 "floor_margin": Decimal("0.10"),
                 "peak_uplift_pts": Decimal("0"),
                 "card_fee_pct": Decimal("0.03"),
-                "valid_from": TODAY,
+                "valid_from": valid_from,
                 "note": "it-1029",
-                "rrp_markup_pct": Decimal("0.25"),
+                "rrp_markup_pct": Decimal(markup),
             },
             today=TODAY,
         )
@@ -365,6 +368,17 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
         assert len(history) >= len(rows) and all(h["change_source"] == "cost_sheet" for h in history)
     assert (await cost_sheet.run(pool))["changed"] == 0  # nothing new: nothing written
 
+    # The next day with the same rates: the windows are anchored on the rate validity, so nothing moves (no history
+    # copy, no updated_at bump for the products feed).
+    trail = "SELECT count(*) FROM booking.trip_plan_price_history WHERE trip_plan_id = $1::uuid"
+    stamp = "SELECT updated_at FROM booking.trip_plans WHERE id = $1::uuid"
+    history_rows, updated_at = await admin.fetchval(trail, plan_id), await admin.fetchval(stamp, plan_id)
+    for later in (1, 2, 30):
+        out = await cost_sheet.run(pool, plan_id, on=TODAY + timedelta(days=later))
+        assert (out["changed"], out["unchanged"], out["failed"]) == (0, 1, 0)
+    assert await admin.fetchval(trail, plan_id) == history_rows
+    assert await admin.fetchval(stamp, plan_id) == updated_at
+
     # Price parity reads the RRP (the plan must be sellable for the B2B read).
     await admin.execute("UPDATE booking.trip_plans SET sellable = true WHERE id = $1::uuid", plan_id)
     parity = await reads.price_parity(pool, source_id=TOUR, currency="USD", on=TODAY)
@@ -424,3 +438,62 @@ async def test_recompute_without_rates_or_rule_writes_nothing(admin: asyncpg.Con
     await trip_plan_sync.run(pool)
     out = await cost_sheet.run(pool, on=date(2031, 1, 1))
     assert out["failed"] == 0 and out["changed"] == 0
+
+
+async def test_a_plan_priced_by_hand_gets_its_rrp_and_follows_a_new_markup(
+    admin: asyncpg.Connection, pool: asyncpg.Pool
+) -> None:
+    """A plan with b2b rows entered by staff and no components: a row written before bk-039 (no RRP) gets one, and a
+    newly approved markup re-prices the RRP that booking.v_from_prices serves."""
+    await _tours(admin)
+    await trip_plan_sync.run(pool)
+    await _rule(pool)
+    hand = {
+        "channel": "b2b",
+        "season": "Low",
+        "peak": False,
+        "valid_from": TODAY,
+        "valid_to": YEAR_END,
+        "pax_min": 1,
+        "pax_max": None,
+        "currency": "USD",
+        "amount": Decimal("400.00"),
+        "net_amount": None,
+        "net_currency": None,
+    }
+    async with pool.acquire() as conn, conn.transaction():
+        await trip_plan_prices.replace_prices(conn, _staff(MAKER), STAFF_TOUR, [hand])
+    plan_id = await admin.fetchval("SELECT id::text FROM booking.trip_plans WHERE source_id = $1", STAFF_TOUR)
+    async with admin.transaction():  # a row written before bk-039 has no RRP
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute(
+            "UPDATE booking.trip_plan_prices SET rrp_amount = NULL WHERE trip_plan_id = $1::uuid", plan_id
+        )
+
+    async def served() -> str | None:
+        await admin.execute("SET ROLE tripplanner")
+        try:
+            return await admin.fetchval(
+                "SELECT amount::text AS amount FROM booking.v_from_prices"
+                " WHERE source_system = 'cis' AND source_id = $1",
+                STAFF_TOUR,
+            )
+        finally:
+            await admin.execute("RESET ROLE")
+
+    assert await served() is None  # a hand row without an RRP: no from price
+    out = await cost_sheet.run(pool, plan_id)
+    assert (out["plans"], out["changed"], out["reasons"]) == (1, 1, {"no_components": 1})
+    assert await served() == "500.00"  # 400 x 1.25
+
+    await _rule(pool, markup="0.40", valid_from=TODAY + timedelta(days=1))
+    assert (await cost_sheet.run(pool, plan_id, on=TODAY + timedelta(days=1)))["changed"] == 1
+    assert await served() == "560.00"  # 400 x 1.40
+    row = await admin.fetchrow(
+        "SELECT amount, computed, created_by FROM booking.trip_plan_prices WHERE trip_plan_id = $1::uuid", plan_id
+    )
+    assert dict(row) == {"amount": Decimal("400.00"), "computed": False, "created_by": MAKER}  # the hand row kept
+
+    # The job's plan list includes the plan (no component, no computed row: only its b2b row).
+    listed = {r["source_id"] for r in await admin.fetch(cost_sheet.PLANS_SQL, None)}
+    assert STAFF_TOUR in listed

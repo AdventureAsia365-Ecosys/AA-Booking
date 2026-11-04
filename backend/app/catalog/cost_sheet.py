@@ -16,25 +16,34 @@ band's smallest party (fixed costs are shared by fewer people there, so the pric
 - divided by the party, rounded to the cent. Rates in one currency keep it (an FX change then re-prices the row); mixed
   currencies are summed in USD at the approved plain rate in force.
 
-**Windows.** Start dates from today to the end of the latest rate in force (at most :data:`HORIZON_DAYS` ahead) are cut
-wherever a component's rate validity starts or ends (shifted by its day offset), so every window prices the same rates
-for every departure in it; neighbouring windows with the same nets, season and peak are merged. A window or band with a
-component without a rate in force gets no row (never a guessed or zero net). The season label = the labels of the rates
+**Windows.** Start dates are cut wherever a component's rate validity starts or ends (shifted by its day offset), from
+the earliest cut to the end of the latest rate, so every window prices the same rates for every departure in it;
+windows over before the recompute day are left out (at most :data:`MAX_SEGMENTS` windows, the latest left out first)
+and neighbouring windows with the same nets, season and peak are merged. The windows are anchored on the rate
+validity, never on today, so a recompute on the next day with the same inputs computes the same rows and writes
+nothing (no daily history copies, no false ``updated_at`` move for the products feed); a row changes only when a rate,
+rule or FX rate changes or a window ends. A window or band with a component without a rate in force gets no row
+(never a guessed or zero net). The season label = the labels of the rates
 used for 2 travellers; ``peak`` when one of them says "peak" (the rule's peak uplift then applies).
 
-**Channels.** ``b2b`` and ``fixed_departure`` (root ADR 0019: the B2C channels are retired), each only while an
-approved rule of that channel is in force today; the selling currency is USD (b16). The b2b rows carry the suggested
-retail price (``rrp_amount``) when the b2b rule has an RRP markup (b15).
+**Channels.** ``b2b`` and ``fixed_departure`` (root ADR 0019: the B2C channels are retired; the approved AA-1029
+re-scope and the R4 milestone keep these two, fixed departures being sold to agencies too), each only while an
+approved rule of that channel is in force on the recompute day; the selling currency is USD (b16). The b2b rows carry
+the suggested retail price (``rrp_amount``) when the b2b rule has an RRP markup (b15).
 
 **Writing** (:func:`recompute_plan`, one transaction per plan, the plan row locked): the plan's hand rows (not
 ``computed``, or computed and ``overridden`` by staff) are kept as they are (their RRP refreshed), the computed rows
 are replaced, a computed row overlapping a hand row of its channel and currency is left out, and the set is stored with
 ``app.catalog.trip_plan_prices.store`` (audit ``trip_plan.prices_recomputed``, dated history ``cost_sheet``) only when
-it changed. At most ``MAX_ROWS`` rows: the latest windows are left out first (``truncated``).
+it changed. A computed row that overlaps only a hand row already over (ended before the recompute day) starts the day
+after it instead of being left out (``trimmed``). At most ``MAX_ROWS`` rows: the latest windows are left out first
+(``truncated``).
 
-**The job** ``bk_price_recompute`` (:func:`run`): every plan with a component or a computed row, or one plan
+**The job** ``bk_price_recompute`` (:func:`run`): every plan with a component, a computed row or a ``b2b`` row (a
+plan priced by hand gets its RRP filled and refreshed under the b2b rule's markup in force), or one plan
 (``payload.plan_id``). Queued by :class:`RecomputeSchedule` whenever the watermark of its inputs moves (approvals of
-rules and FX rates, contract and rate edits, plan and component changes, and the UTC day, so the windows roll daily);
+rules and FX rates, contract and rate edits, plan and component changes, and the UTC day, so a rule or FX rate dated
+to start today and a window that ended are picked up; an unchanged day writes nothing);
 staff can also recompute one plan at once (``POST …/prices/recompute``).
 """
 
@@ -67,7 +76,6 @@ ACTION = "trip_plan.prices_recomputed"
 PAX_BANDS: tuple[tuple[int, int | None], ...] = ((1, 1), (2, 2), (3, 4), (5, 6), (7, 10), (11, None))
 CHANNELS: tuple[engine.Channel, ...] = (engine.Channel.B2B, engine.Channel.FIXED_DEPARTURE)
 SELLING_CURRENCY = engine.BASE_CURRENCY
-HORIZON_DAYS = 365
 MAX_SEGMENTS = 60
 FOREVER = date(9999, 12, 31)
 SEASON_MAX = 80
@@ -95,7 +103,8 @@ PLANS_SQL = """
 SELECT p.id::text AS id, p.source_id FROM booking.trip_plans p
 WHERE ($1::uuid IS NULL OR p.id = $1::uuid)
   AND (EXISTS (SELECT 1 FROM booking.trip_plan_components c WHERE c.trip_plan_id = p.id)
-       OR EXISTS (SELECT 1 FROM booking.trip_plan_prices r WHERE r.trip_plan_id = p.id AND r.computed))
+       OR EXISTS (SELECT 1 FROM booking.trip_plan_prices r
+                  WHERE r.trip_plan_id = p.id AND (r.computed OR r.channel = 'b2b')))
 ORDER BY p.source_id
 """
 LOCK_SQL = "SELECT id::text AS id, source_id FROM booking.trip_plans WHERE id = $1::uuid FOR UPDATE"
@@ -181,30 +190,37 @@ def room_mix(party: int, max_occupancy: int | None) -> list[tuple[int, int]]:
     return [(pax, n) for pax, n in mix if n]
 
 
-def windows(start: date, end: date, parts: Sequence[Part], spans: Iterable[Span]) -> list[Window]:
-    """Start-date windows in ``[start, end]`` inside which every component prices the same rates."""
+def windows(today: date, parts: Sequence[Part], spans: Sequence[Span]) -> list[Window]:
+    """Start-date windows inside which every component prices the same rates, anchored on the rate validity (cut at
+    every rate start and end shifted by the component's day offset, up to the end of the latest rate), without the
+    ones over before ``today``. Nothing in them depends on ``today`` but which windows are over, so the same inputs
+    on the next day give the same windows."""
+    end = horizon(today, spans)
+    if end is None:
+        return []
     by_item: dict[str, list[Span]] = {}
     for span in spans:
         by_item.setdefault(span.item, []).append(span)
-    cuts = {start}
+    cuts: set[date] = set()
     for part in parts:
         shift = timedelta(days=part.offset)
         for span in by_item.get(part.item, ()):
-            for day in (span.start - shift, span.stop + timedelta(days=1) - shift):
-                if start < day <= end:
-                    cuts.add(day)
-    ordered = sorted(cuts)
+            cuts.add(span.start - shift)
+            if span.stop < FOREVER:  # an open-ended rate has no end to cut at (and FOREVER + 1 day overflows)
+                cuts.add(span.stop + timedelta(days=1) - shift)
+    ordered = sorted(day for day in cuts if day <= end)
+    if not ordered:
+        return []
     out = [Window(day, nxt - timedelta(days=1)) for day, nxt in zip(ordered, ordered[1:], strict=False)]
     out.append(Window(ordered[-1], end))
-    return out
+    return [w for w in out if w.end >= today]
 
 
 def horizon(today: date, spans: Iterable[Span]) -> date | None:
-    """The last start date worth pricing: the end of the latest rate, at most HORIZON_DAYS ahead; None = no rate."""
+    """The last start date worth pricing: the end of the latest rate (``FOREVER`` when open-ended); None = every rate
+    is over before ``today``. Never derived from ``today``, so it does not move day by day."""
     stops = [s.stop for s in spans if s.stop >= today]
-    if not stops:
-        return None
-    return min(max(stops), today + timedelta(days=HORIZON_DAYS))
+    return max(stops) if stops else None
 
 
 def asks(wins: Sequence[Window], parts: Sequence[Part]) -> list[RateAsk]:
@@ -406,12 +422,29 @@ def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str
     return out, refused
 
 
+def fit(row: dict[str, Any], kept: Sequence[dict[str, Any]], today: date) -> dict[str, Any] | None:
+    """The computed row as it fits beside the hand rows: started the day after each hand row it overlaps that is over
+    before ``today`` (the computed windows are anchored on the rate validity and may start in the past), or None when
+    a hand row still in force or ahead overlaps it (the hand row wins)."""
+    out = row
+    for hand in sorted(kept, key=lambda k: k["valid_to"]):
+        if not overlaps(out, hand):
+            continue
+        if hand["valid_to"] < today and hand["valid_to"] < out["valid_to"]:
+            out = {**out, "valid_from": hand["valid_to"] + timedelta(days=1)}
+            continue
+        return None
+    return out
+
+
 def assemble(
     existing: Sequence[dict[str, Any]], computed: Sequence[dict[str, Any]], pricing: Pricing
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Hand rows first (kept), then the computed rows that fit; positions 1..n. Returns the set and counters."""
     kept = [kept_row(r, pricing) for r in existing if not r["computed"] or r["overridden"]]
-    fitting = [r for r in computed if not any(overlaps(r, k) for k in kept)]
+    fitted = [(r, fit(r, kept, pricing.on)) for r in computed]
+    fitting = [f for _, f in fitted if f is not None]
+    trimmed = sum(1 for r, f in fitted if f is not None and f is not r)
     room = max(prices.MAX_ROWS - len(kept), 0)
     fitting.sort(key=lambda r: (r["valid_from"], r["channel"], r["pax_min"]))
     truncated = max(len(fitting) - room, 0)
@@ -424,6 +457,7 @@ def assemble(
         "kept": len(kept),
         "computed": len(chosen),
         "shadowed": len(computed) - len(fitting),
+        "trimmed": trimmed,
         "truncated": truncated,
     }
 
@@ -454,11 +488,10 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
         Span(r["room_type_id"] or r["service_id"], r["start"], r["stop"])
         for r in await conn.fetch(SPANS_SQL, rooms, services)
     ]
-    end = horizon(pricing.on, spans)
-    if end is None:
+    wins = windows(pricing.on, parts, spans)[:MAX_SEGMENTS]
+    if not wins:
         info["reason"] = "no_rates"
         return [], info
-    wins = windows(pricing.on, end, parts, spans)[:MAX_SEGMENTS]
     info["windows"] = len(wins)
     wanted = asks(wins, parts)
     found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
@@ -497,8 +530,8 @@ def today() -> date:
 
 
 async def run(pool: asyncpg.Pool, plan_id: str | None = None, *, on: date | None = None) -> dict[str, Any]:
-    """Recompute every plan with a component or a computed row (or one plan). One transaction per plan; a plan that
-    fails is counted and the run raises at the end so the job is retried (the others are stored)."""
+    """Recompute every plan with a component, a computed row or a b2b row (or one plan). One transaction per plan; a
+    plan that fails is counted and the run raises at the end so the job is retried (the others are stored)."""
     day = on or today()
     async with pool.acquire() as conn:
         pricing = await load_pricing(conn, day)

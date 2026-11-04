@@ -627,10 +627,13 @@ Loading supplier rates makes prices flow with no hand step after the plan's comp
    and column and nothing is written while one is left.
 3. **Cost sheet** (`app/catalog/cost_sheet.py`): net per person per start-date window x pax band (1, 2, 3–4, 5–6,
    7–10, 11+; the band's smallest party) from the plan's components (rooms: doubles + a single when odd; services per
-   unit) and the rates in force (the B2B quote's choice), windows cut at rate validity edges shifted by the day offset
-   and merged when equal; priced by the engine per channel with a rule in force (`b2b`, `fixed_departure`; USD);
-   `peak` when a rate's season says "peak". Computed rows replace the computed rows; hand rows and overrides are kept;
-   a computed row that overlaps a hand row is left out; at most 200 rows (latest windows dropped first).
+   unit) and the rates in force (the B2B quote's choice), windows cut at rate validity edges shifted by the day offset,
+   anchored on the rate validity (never on today: the same inputs the next day write nothing; windows already over are
+   left out) and merged when equal; priced by the engine per channel with a rule in force (`b2b`, `fixed_departure`;
+   USD); `peak` when a rate's season says "peak". Computed rows replace the computed rows; hand rows and overrides are
+   kept; a computed row that overlaps a hand row is left out (or starts after one already over); at most 200 rows
+   (latest windows dropped first). The job covers every plan with a component, a computed row or a b2b row, so hand
+   priced plans get their RRP too.
 4. **RRP**: every b2b row carries `rrp_amount` = round up(amount x (1 + `rrp_markup_pct` of the b2b rule in force)),
    the suggested retail price (ADR 0019 b15: net + 25 %). Agency tier discounts are AA-1030.
 5. **From price**: `booking.v_from_prices` (price.from.v1) and every staff / parity read: the cheapest RRP for 2
