@@ -1364,6 +1364,23 @@ full replay that grants INSERT again next to recent test rows still applies). A 
 `b2c_insert_regranted` (INSERT given back for the test only). The tables are dropped later under the destructive-ops
 DRY RUN procedure.
 
+### `bk-039` (AA-1029 R4 tour price chain — needs `bk-004`, `bk-009`, `bk-032` and the role `tripplanner`)
+
+Root ADR 0005 d3 / d6 / d7 as amended by root ADR 0019 b15. `pricing_rules.rrp_markup_pct` (b2b rows only, CHECK;
+0.2500 = the suggested retail price is the agency net price + 25 %; policy data, approved like every rule).
+`trip_plans.synced_at` (the bridge job `bk_trip_plan_sync` created or matched the plan from `catalog.v_tour`) and the
+reviewed **reference price** kept from the CIS source text (`reference_price_raw`, parsed `reference_amount` /
+`reference_currency`, `reference_reviewed_by` / `_at`; reference only, never a selling price). `trip_plan_prices.computed`
+(written by the cost sheet job `bk_price_recompute`; a recompute replaces computed rows that are not overridden and
+keeps every hand row) and `rrp_amount` (b2b rows). `trip_plan_price_history`: the dated price list (each change closes
+the open rows, `effective_to`, and inserts the new set; role `booking` SELECT, INSERT and UPDATE of `effective_to`
+only; DM-7.1 row in the root data standards). The contract view `booking.v_from_prices` (price.from.v1, root
+`docs/contracts/price.from.v1.md`): per catalog key, the cheapest RRP per person for 2 travellers among the b2b rows
+still valid, USD first; never a net, an agency price or a margin; SELECT to `booking` and `tripplanner` (+ USAGE on
+schema `booking`, consumer grant in Infra `db/owners.yaml`). A **contract** file (ALTERs, CHECKs, a cross-owner grant):
+migration-only PR, applied on Dev by Infra Migration Apply when the job tables are idle; the code PR adds it to
+`REQUIRED_SCHEMA_VERSIONS`.
+
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029), `v_from_prices` and catalog-backed version item
 types (AA-679 follow-up). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
