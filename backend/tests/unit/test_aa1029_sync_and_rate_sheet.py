@@ -151,3 +151,36 @@ async def test_rrp_markup_is_b2b_only() -> None:
         await policy.create_rule(_Conn(), staff, data, today=date(2027, 1, 1))  # type: ignore[arg-type]
     assert exc.value.code == "rrp_markup_b2b_only"
     assert engine.Channel.B2B.value == "b2b"
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────
+
+
+def _client() -> Any:
+    from fastapi.testclient import TestClient
+
+    from app.auth.staff import Staff, current_staff
+    from app.main import create_app
+    from app.settings import Settings
+    from tests.unit.fakes import ScriptedConn
+    from tests.unit.test_pricing_api import ScriptedDatabase
+
+    app = create_app(Settings(database_url=None, environment="test"), ScriptedDatabase(ScriptedConn()))
+    app.dependency_overrides[current_staff] = lambda: Staff("9", None, "C", "contracting", True, "reviewer")
+    return TestClient(app)
+
+
+def test_template_route_serves_the_workbook() -> None:
+    with _client() as client:
+        res = client.get("/booking/rate-sheets/template")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert {p.code for p in rs.parse(res.content).problems} == {"required", "no_rates"}
+
+
+def test_upload_route_refuses_bad_base64_before_any_read() -> None:
+    with _client() as client:
+        res = client.post("/booking/suppliers/SUP-000001/rate-sheets", json={"data_base64": "not base64!"})
+        too_big = client.post("/booking/suppliers/SUP-000001/rate-sheets", json={"data_base64": "A" * 3_000_000})
+    assert res.status_code == 422 and res.json()["detail"] == "rate_sheet_not_xlsx"
+    assert too_big.status_code == 422  # over the body cap

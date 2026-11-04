@@ -8,12 +8,14 @@ Excel import into a draft contract, ``app/supply/rate_sheet.py``). Publishing a 
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import date
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth.staff import Staff, get_pool, require
@@ -193,6 +195,7 @@ async def patch_contract(body: ContractPatch, contract_id: ContractId, staff: Ca
 # ── Rate-sheet Excel import (AA-1029, root ADR 0005 d7 / d8) ─────────────────
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+RATE_SHEET_B64_MAX = (rate_sheet.MAX_BYTES * 4) // 3 + 4
 
 
 @router.get("/rate-sheets/template")
@@ -205,18 +208,35 @@ async def rate_sheet_template(_: CanRead) -> Response:
     )
 
 
+class RateSheetUpload(BaseModel):
+    """The filled template as base64 (the staff BFF forwards JSON bodies only, like supplier photos)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data_base64: str = Field(min_length=4, max_length=RATE_SHEET_B64_MAX)
+    filename: str | None = Field(default=None, max_length=200)
+
+
 @router.post("/suppliers/{supplier_ref}/rate-sheets")
 async def import_rate_sheet(
-    request: Request,
+    body: RateSheetUpload,
     supplier_ref: SupplierRef,
     staff: CanWrite,
     pool: Pool,
     dry_run: Annotated[bool, Query(description="validate and preview only; nothing is written")] = False,
 ) -> dict[str, Any]:
-    """Upload a filled template (the raw .xlsx bytes as the body). Creates one DRAFT contract with its rates, or 422
-    ``rate_sheet_invalid`` with every problem by sheet, row and column; a second person publishes the draft."""
-    body = await request.body()
-    if len(body) > rate_sheet.MAX_BYTES:
-        raise Invalid("rate_sheet_too_large", "a rate sheet is at most 2 MB")
+    """Upload a filled template. Creates one DRAFT contract with its rates, or 422 ``rate_sheet_invalid`` with every
+    problem by sheet, row and column; a second person publishes the draft."""
+    data = decode_sheet(body.data_base64)
     async with pool.acquire() as conn, conn.transaction():
-        return await rate_sheet.import_sheet(conn, staff, supplier_ref, body, dry_run=dry_run)
+        return await rate_sheet.import_sheet(conn, staff, supplier_ref, data, dry_run=dry_run)
+
+
+def decode_sheet(text: str) -> bytes:
+    try:
+        data = base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError):
+        raise Invalid("rate_sheet_not_xlsx", "the upload is not valid base64") from None
+    if len(data) > rate_sheet.MAX_BYTES:
+        raise Invalid("rate_sheet_too_large", "a rate sheet is at most 2 MB")
+    return data

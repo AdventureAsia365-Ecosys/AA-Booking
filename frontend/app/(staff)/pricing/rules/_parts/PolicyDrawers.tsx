@@ -53,13 +53,14 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({
-    channel: "b2c_tailor_made" as Channel,
+    channel: "b2b" as Channel,
     target: "",
     floor: "",
     peak: "3",
     card: "3",
     valid_from: todayUtc(),
     note: "",
+    rrp: "25",
   });
   const [localError, setLocalError] = useState<string | null>(null);
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -79,7 +80,9 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
     const floor = percentToFraction(form.floor);
     const peak = percentToFraction(form.peak, true);
     const card = percentToFraction(form.card, true);
-    if (!target || !floor || !peak || !card) {
+    // AA-1029 (root ADR 0019 b15): the suggested retail price markup, b2b rules only; empty = no RRP published.
+    const rrp = form.channel === "b2b" && form.rrp.trim() ? percentToFraction(form.rrp) : undefined;
+    if (!target || !floor || !peak || !card || rrp === null) {
       setLocalError("Enter each percentage as a number from 0 to 99.99, for example 30 or 2.5.");
       return;
     }
@@ -96,6 +99,7 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
       card_fee_pct: card,
       valid_from: form.valid_from,
       note: form.note.trim() || undefined,
+      ...(rrp ? { rrp_markup_pct: rrp } : {}),
     });
   }
 
@@ -139,6 +143,15 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
           <PercentInput value={form.card} onChange={set("card")} />
         </FormField>
       </div>
+      {form.channel === "b2b" && (
+        <FormField
+          label="Suggested retail price markup"
+          hint="Added to the agency price to give the suggested retail price TripPlanner shows (25 = price + 25 %). Empty = no suggested price."
+          error={errorFor(fe, "rrp_markup_pct")}
+        >
+          <PercentInput value={form.rrp} onChange={set("rrp")} />
+        </FormField>
+      )}
       <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
         <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
       </FormField>

@@ -9,6 +9,7 @@
 // (Figma "Pricing" card: per-person prices by channel, season and pax band, PriceMatrixEditor). The price hint stays
 // as a free "from" guide for plans without a matrix. The supplier select lists the first 100 active suppliers (the
 // API page cap); a search box above it (debounced `q`) finds the others, and the picked supplier stays listed.
+// AA-1029: the price chain panel (from price, CIS reference price, recompute from rates, history) sits above the matrix.
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +22,7 @@ import { draftsFrom, draftsToBody, type DraftError, type PriceDraft } from "@/ui
 import { CisField, CisFieldset } from "../../../_parts/CisFields";
 import { CIS_EDITOR_ROLES } from "./shared";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
+import { PriceChainPanel } from "./PriceChainPanel";
 import { PriceMatrixEditor } from "./PriceMatrixEditor";
 
 const textareaCls = "min-h-[96px] w-full";
@@ -272,6 +274,8 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         ) : prices.isError ? (
           <p className="text-[13px] text-danger">The price matrix could not be loaded. Save the other fields, then reopen.</p>
         ) : (
+          <>
+          {prices.data && <PriceChainPanel sourceId={plan.source_id} matrix={prices.data} dirty={pricesDirty} />}
           <PriceMatrixEditor
             rows={rows}
             onChange={(next) => {
@@ -284,6 +288,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             saved={prices.data?.items ?? []}
             today={today}
           />
+          </>
         ))}
       {needReason && (
         <FormField label="Reason for prices below the floor" required hint="Kept in the audit log with the price matrix.">

@@ -55,6 +55,8 @@ export interface PriceDraft {
   amount: string;
   net_amount: string;
   net_currency: string;
+  /** A row the cost sheet wrote (AA-1029): sent back as such while it keeps its net cost. */
+  computed: boolean;
 }
 
 export interface PriceRowBody {
@@ -69,6 +71,7 @@ export interface PriceRowBody {
   amount: string | null;
   net_amount: string | null;
   net_currency: string | null;
+  computed: boolean;
 }
 
 export interface DraftError {
@@ -103,7 +106,7 @@ export function newDraft(after?: PriceDraft, today?: string): PriceDraft {
   seq += 1;
   const year = Number((today ?? "2026-01-01").slice(0, 4)) + 1;
   if (after) {
-    const next: PriceDraft = { ...after, key: `new-${seq}`, season: "", peak: false, amount: "", net_amount: "" };
+    const next: PriceDraft = { ...after, key: `new-${seq}`, season: "", peak: false, amount: "", net_amount: "", computed: false };
     const from = isoDayMs(after.valid_from);
     const to = isoDayMs(after.valid_to);
     if (from !== null && to !== null && to >= from) {
@@ -117,7 +120,7 @@ export function newDraft(after?: PriceDraft, today?: string): PriceDraft {
   }
   return {
     key: `new-${seq}`,
-    channel: "b2c_tailor_made",
+    channel: "b2b",
     season: "",
     peak: false,
     valid_from: `${year}-01-01`,
@@ -128,6 +131,7 @@ export function newDraft(after?: PriceDraft, today?: string): PriceDraft {
     amount: "",
     net_amount: "",
     net_currency: "USD",
+    computed: false,
   };
 }
 
@@ -149,6 +153,7 @@ export function draftsFrom(
     net_currency: string | null;
     priced: boolean;
     overridden?: boolean;
+    computed?: boolean;
   }[],
 ): PriceDraft[] {
   return rows.map((r) => ({
@@ -164,6 +169,7 @@ export function draftsFrom(
     amount: r.priced && !r.overridden ? "" : r.amount,
     net_amount: r.net_amount ?? "",
     net_currency: r.net_currency ?? "USD",
+    computed: Boolean(r.computed),
   }));
 }
 
@@ -207,6 +213,8 @@ export function draftsToBody(drafts: PriceDraft[]): { items: PriceRowBody[]; err
       amount: amount || null,
       net_amount: net || null,
       net_currency: net ? d.net_currency : null,
+      // A cost sheet row stays one only while it keeps its net cost (the API refuses a computed row without one).
+      computed: d.computed && Boolean(net),
     });
   });
   if (!errors.length) {

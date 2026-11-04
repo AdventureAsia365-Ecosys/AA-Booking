@@ -145,6 +145,12 @@ export function PricingRulesView() {
     },
     { id: "peak", header: "Peak uplift", accessorFn: (r) => Number(r.peak_uplift_pts), cell: ({ row }) => `+${pct(row.original.peak_uplift_pts).replace("%", "")} pts` },
     { id: "card", header: "Card fee", accessorFn: (r) => Number(r.card_fee_pct), cell: ({ row }) => pct(row.original.card_fee_pct) },
+    {
+      id: "rrp",
+      header: "RRP markup",
+      accessorFn: (r) => Number(r.rrp_markup_pct ?? -1),
+      cell: ({ row }) => (row.original.rrp_markup_pct ? `+${pct(row.original.rrp_markup_pct)}` : "—"),
+    },
     { id: "valid_from", header: "Valid from", accessorKey: "valid_from", cell: ({ row }) => <DateText value={row.original.valid_from} /> },
     {
       id: "status",

@@ -5654,6 +5654,35 @@
         "title": "RateFields",
         "type": "object"
       },
+      "RateSheetUpload": {
+        "additionalProperties": false,
+        "description": "The filled template as base64 (the staff BFF forwards JSON bodies only, like supplier photos).",
+        "properties": {
+          "data_base64": {
+            "maxLength": 2796206,
+            "minLength": 4,
+            "title": "Data Base64",
+            "type": "string"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          }
+        },
+        "required": [
+          "data_base64"
+        ],
+        "title": "RateSheetUpload",
+        "type": "object"
+      },
       "ReadBody": {
         "additionalProperties": false,
         "properties": {
@@ -17196,7 +17225,7 @@
     },
     "/booking/suppliers/{supplier_ref}/rate-sheets": {
       "post": {
-        "description": "Upload a filled template (the raw .xlsx bytes as the body). Creates one DRAFT contract with its rates, or 422\n``rate_sheet_invalid`` with every problem by sheet, row and column; a second person publishes the draft.",
+        "description": "Upload a filled template. Creates one DRAFT contract with its rates, or 422 ``rate_sheet_invalid`` with every\nproblem by sheet, row and column; a second person publishes the draft.",
         "operationId": "import_rate_sheet_booking_suppliers__supplier_ref__rate_sheets_post",
         "parameters": [
           {
@@ -17225,6 +17254,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateSheetUpload"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

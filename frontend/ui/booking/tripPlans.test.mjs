@@ -31,14 +31,16 @@ test("paxBandLabel and marginLabel", () => {
 
 const row = (over = {}) => ({ ...newDraft(undefined, "2026-10-28"), amount: "1450", ...over });
 
-test("a fresh row is next year's 2-pax B2C USD row; the next row copies band and channel", () => {
+test("a fresh row is next year's 2-pax b2b USD row; the next row copies band and channel", () => {
   const first = newDraft(undefined, "2026-10-28");
   assert.equal(first.valid_from, "2027-01-01");
   assert.equal(first.valid_to, "2027-12-31");
   assert.equal(first.pax_min, "2");
-  assert.equal(first.channel, "b2c_tailor_made");
-  const next = newDraft({ ...first, channel: "b2b", amount: "9", season: "Low" });
-  assert.equal(next.channel, "b2b");
+  assert.equal(first.channel, "b2b"); // the B2C channels are retired (root ADR 0019)
+  assert.equal(first.computed, false);
+  const next = newDraft({ ...first, channel: "fixed_departure", amount: "9", season: "Low", computed: true });
+  assert.equal(next.channel, "fixed_departure");
+  assert.equal(next.computed, false);
   assert.equal(next.amount, "");
   assert.equal(next.season, "");
   assert.notEqual(next.key, first.key);
@@ -62,7 +64,7 @@ test("the next row starts the next season, so it never overlaps the last one", (
 test("draftsToBody builds the PUT rows", () => {
   const { items, errors } = draftsToBody([
     row({ season: " Low ", pax_max: "" }),
-    row({ channel: "b2b", amount: "", net_amount: "670", net_currency: "VND" }),
+    row({ channel: "fixed_departure", amount: "", net_amount: "670", net_currency: "VND", computed: true }),
   ]);
   assert.deepEqual(errors, []);
   assert.equal(items[0].season, "Low");
@@ -72,6 +74,9 @@ test("draftsToBody builds the PUT rows", () => {
   assert.equal(items[1].amount, null);
   assert.equal(items[1].net_amount, "670");
   assert.equal(items[1].net_currency, "VND");
+  assert.equal(items[0].computed, false);
+  assert.equal(items[1].computed, true); // a cost sheet row with its net cost stays one
+  assert.equal(draftsToBody([row({ computed: true })]).items[0].computed, false); // without a net cost it cannot
 });
 
 test("draftsToBody refuses what the API refuses", () => {
@@ -104,4 +109,7 @@ test("draftsFrom blanks a computed price (computed again on save) and keeps an o
   assert.equal(hand.season, "");
   assert.equal(priced.amount, "");
   assert.equal(priced.net_amount, "670.00");
+  const [sheet] = draftsFrom([{ ...base, amount: "185.00", net_amount: "150.00", net_currency: "USD", priced: true, computed: true }]);
+  assert.equal(sheet.computed, true);
+  assert.equal(hand.computed, false);
 });

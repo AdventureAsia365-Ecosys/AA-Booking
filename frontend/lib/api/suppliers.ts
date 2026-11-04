@@ -14,7 +14,7 @@
 //                                   (publish by a second person: 403 maker_checker)
 //   GET   /booking/catalog/destinations?q=&country=&limit=                        CIS places   (any staff)
 
-import { bkGet, bkSend } from "./client";
+import { BFF_BASE, bkGet, bkSend } from "./client";
 import type { IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
@@ -158,6 +158,47 @@ export interface CatalogPlace {
 
 export type Changed<T> = T & { changed: string[] };
 
+/** One problem of an uploaded rate sheet (AA-1029): where it is and what is wrong. */
+export interface RateSheetProblem {
+  sheet: string;
+  row: number | null;
+  column: string | null;
+  code: string;
+  message: string;
+}
+
+export interface RateSheetPreviewRow {
+  sheet: string;
+  row: number;
+  hotel_room_type_id: string | null;
+  service_id: string | null;
+  unit: string;
+  season: string | null;
+  valid_from: IsoDate | null;
+  valid_to: IsoDate | null;
+  meal_plan: string | null;
+  pax_min: number | null;
+  pax_max: number | null;
+  net_amount: string;
+  notes: string | null;
+}
+
+export interface RateSheetResult {
+  dry_run: boolean;
+  supplier: { id: string; code: string };
+  contract: { id?: string; status?: string; title: string | null; valid_from?: IsoDate | null; valid_to?: IsoDate | null; currency?: string | null };
+  rates: RateSheetPreviewRow[];
+  ignored_sheets: string[];
+  imported?: number;
+}
+
+/** The empty AA rate-sheet workbook, as a Blob to save. */
+async function rateSheetTemplate(): Promise<Blob> {
+  const res = await fetch(`${BFF_BASE}/rate-sheets/template`, { cache: "no-store" });
+  if (!res.ok) throw new Error("The template could not be downloaded.");
+  return res.blob();
+}
+
 export const suppliersApi = {
   list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number } = {}) =>
     bkGet<SupplierList>("suppliers", q),
@@ -173,4 +214,10 @@ export const suppliersApi = {
   updateContract: (id: string, body: ContractBody | { status: "published" | "expired" }) =>
     bkSend<Changed<SupplierContract>>(`contracts/${enc(id)}`, { method: "PATCH", body }),
   places: (q: { q?: string; country?: string; limit?: number }) => bkGet<{ items: CatalogPlace[] }>("catalog/destinations", q),
+  rateSheetTemplate,
+  /** AA-1029: check (dryRun) or import a filled rate sheet into a draft contract of this supplier. */
+  importRateSheet: (ref: string, dataBase64: string, filename: string, dryRun: boolean) =>
+    bkSend<RateSheetResult>(`suppliers/${enc(ref)}/rate-sheets${dryRun ? "?dry_run=true" : ""}`, {
+      body: { data_base64: dataBase64, filename },
+    }),
 };

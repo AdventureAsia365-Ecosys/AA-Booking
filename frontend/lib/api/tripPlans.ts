@@ -169,12 +169,40 @@ export interface PriceRow {
   priced: boolean;
   /** A priced row whose amount is a sales override of the computed price. */
   overridden: boolean;
+  /** Written by the cost sheet from the plan's components and the supplier rates in force (AA-1029). A recompute
+   *  replaces it unless it is overridden. */
+  computed: boolean;
+  /** b2b rows: the suggested retail price per person (the agency price + the b2b rule's RRP markup). */
+  rrp_amount: DecimalString | null;
+}
+
+/** The CIS source price text of the tour, kept as a reference only (never a selling price). */
+export interface ReferencePrice {
+  raw: string;
+  amount: DecimalString | null;
+  currency: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+
+/** One change of the matrix in the dated price history. */
+export interface PriceChange {
+  at: string;
+  change_source: "staff" | "cost_sheet";
+  changed_by: string;
+  rows: number;
 }
 
 export interface PriceMatrix {
   source_id: string;
   items: PriceRow[];
   from_price: FromPrice | null;
+  reference: ReferencePrice | null;
+  changes: PriceChange[];
+}
+
+export interface RecomputeResult extends PriceMatrix {
+  recompute: { outcome: string; computed?: number; kept?: number; reason?: string | null; unpriced_cells?: number };
 }
 
 export interface PriceRowInput {
@@ -190,6 +218,8 @@ export interface PriceRowInput {
   amount: string | null;
   net_amount: string | null;
   net_currency: string | null;
+  /** A cost sheet row sent back as read; with an amount it becomes an override the next recompute keeps. */
+  computed?: boolean;
 }
 
 export interface PricesBody {
@@ -224,6 +254,10 @@ export const tripPlansApi = {
   prices: (sourceId: string) => bkGet<PriceMatrix>(`catalog/trip-plans/${enc(sourceId)}/prices`),
   savePrices: (sourceId: string, body: PricesBody) =>
     bkSend<PriceMatrix>(`catalog/trip-plans/${enc(sourceId)}/prices`, { method: "PUT", body }),
+  recomputePrices: (sourceId: string) =>
+    bkSend<RecomputeResult>(`catalog/trip-plans/${enc(sourceId)}/prices/recompute`, { body: {} }),
+  reviewReference: (sourceId: string) =>
+    bkSend<PriceMatrix>(`catalog/trip-plans/${enc(sourceId)}/reference/review`, { body: {} }),
   useForTripCase: (sourceId: string, body: Record<string, unknown>) =>
     bkSend<UseForTripCaseResult>(`catalog/trip-plans/${enc(sourceId)}/trip-cases`, { body }),
 };

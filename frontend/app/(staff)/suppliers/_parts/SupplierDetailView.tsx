@@ -2,20 +2,21 @@
 // app/(staff)/suppliers/_parts/SupplierDetailView.tsx — Supplier detail (W2, AA-822; module spec 08 screen 4 + conflict
 // 7): header (name, status, code, categories, location), actions Edit profile / Deactivate | Activate (supply.write),
 // tabs Profile (basic information, contact, location, recent activity from the audit log) and Contracts (draft →
-// published by a second person → expired) and Rates (net rates per contract, AA-823 bk-010; rate-sheet upload is a later
-// slice) and Bookings (AA-682 S1, supplier bookings of sold trips) and Bills (AA-682 S4, bk-030: this supplier's bills,
-// the bill drawer and payouts; bill.read). Reads need supply.read.
+// published by a second person → expired; "Import rate sheet" fills a draft from the Excel template, AA-1029) and Rates
+// (net rates per contract, AA-823 bk-010) and Bookings (AA-682 S1, supplier bookings of sold trips) and Bills (AA-682
+// S4, bk-030: this supplier's bills, the bill drawer and payouts; bill.read). Reads need supply.read.
 
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Ban, CalendarDays, CheckCircle2, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag } from "lucide-react";
+import { Ban, CalendarDays, CheckCircle2, FileSpreadsheet, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
 import { Button, Code, ConfirmDialog, DataTable, PageFrame, DateText, EmptyState, ErrorState, FromCisTag, Section, useStaff, useToast, RowMenu, type RowMenuItem } from "@/ui";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { ContractDrawer } from "./ContractDrawer";
+import { RateSheetDrawer } from "./RateSheetDrawer";
 import { RatesTab } from "./RatesTab";
 import { SupplierBookingsTab } from "./SupplierBookingsTab";
 import { SupplierBillsList } from "@/app/(staff)/billing/_parts/SupplierBills";
@@ -221,6 +222,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const toast = useToast();
   const list = useQuery({ queryKey: ["supplier", s.code, "contracts"], queryFn: () => suppliersApi.contracts(s.code) });
   const [drawer, setDrawer] = useState<{ contract?: SupplierContract } | null>(null);
+  const [importing, setImporting] = useState(false);
   const [move, setMove] = useState<Move>(null);
 
   const run = useMutation({
@@ -349,9 +351,14 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       actions={
         canWrite &&
         s.status === "active" && (
-          <Button variant="primary" onClick={() => setDrawer({})}>
-            <Plus size={15} /> New contract
-          </Button>
+          <span className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setImporting(true)}>
+              <FileSpreadsheet size={15} /> Import rate sheet
+            </Button>
+            <Button variant="primary" onClick={() => setDrawer({})}>
+              <Plus size={15} /> New contract
+            </Button>
+          </span>
         )
       }
     >
@@ -372,6 +379,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
         />
       </div>
       {drawer && <ContractDrawer supplierRef={s.code} contract={drawer.contract} onClose={() => setDrawer(null)} />}
+      {importing && <RateSheetDrawer supplierRef={s.code} onClose={() => setImporting(false)} />}
       <ConfirmDialog
         open={move !== null}
         onClose={() => setMove(null)}
