@@ -114,7 +114,8 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   reader since 2026-11-03 (CIS retired TP-03 with the B2B-only model, root ADR 0019; the view goes with the B2C drop).
   **Public from price** (AA-1029, bk-039, contract `price.from.v1`): `booking.v_from_prices` (per catalog key, the
   cheapest suggested retail price per person for 2 travellers among the b2b rows still valid; no net, agency price or
-  margin), SELECT to role `tripplanner` (+ USAGE on schema `booking`) for the TripPlanner tour page.
+  margin), SELECT to role `tripplanner` (+ USAGE on schema `booking`) for the TripPlanner tour page, and to `cis_app`
+  (bk-040) for the agency Content studio Marketplace (CIS `GET /v1/tours/pool` attaches it to each pool row).
   No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
   `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
@@ -1430,6 +1431,14 @@ still valid, USD first; never a net, an agency price or a margin; SELECT to `boo
 schema `booking`, consumer grant in Infra `db/owners.yaml`). A **contract** file (ALTERs, CHECKs, a cross-owner grant):
 migration-only PR, applied on Dev by Infra Migration Apply when the job tables are idle; the code PR adds it to
 `REQUIRED_SCHEMA_VERSIONS`.
+
+### `bk-040` (AA-1029 portal slice — needs `bk-039` and the role `cis_app`)
+
+`GRANT SELECT ON booking.v_from_prices TO cis_app` (USAGE on schema `booking` held since bk-017): the CIS pool read of
+the agency Content studio Marketplace shows the public "from" price (contract `price.from.v1`). The view reads its base
+tables with `bk_owner`'s rights, so `cis_app` still reads no price table (guarded in the file). A **contract** file (a
+cross-owner grant, Infra `db/owners.yaml` consumer grant + isolation probe cell): migration-only PR, applied on Dev by
+Infra Migration Apply when the job tables are idle. No Booking code reads it: not in `REQUIRED_SCHEMA_VERSIONS`.
 
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679

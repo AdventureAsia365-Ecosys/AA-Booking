@@ -129,7 +129,10 @@ async def test_grants(admin: asyncpg.Connection) -> None:
     assert await admin.fetchval("SELECT has_schema_privilege('tripplanner', 'booking', 'USAGE')")
     for table in ("booking.trip_plans", "booking.trip_plan_prices", history, "booking.pricing_rules"):
         assert not await admin.fetchval("SELECT has_table_privilege('tripplanner', $1, 'SELECT')", table), table
-    assert not await admin.fetchval("SELECT has_table_privilege('cis_app', 'booking.v_from_prices', 'SELECT')")
+    # bk-040 (AA-1029 portal slice) grants the view to cis_app too (test_bk040_from_prices_cis_reader.py); the price
+    # tables behind it stay closed to it.
+    for table in ("booking.trip_plans", "booking.trip_plan_prices", history, "booking.pricing_rules"):
+        assert not await admin.fetchval("SELECT has_table_privilege('cis_app', $1, 'SELECT')", table), table
     for privilege in ("INSERT", "UPDATE", "DELETE"):
         assert not await admin.fetchval(
             "SELECT has_table_privilege('booking', 'booking.v_from_prices', $1)", privilege
