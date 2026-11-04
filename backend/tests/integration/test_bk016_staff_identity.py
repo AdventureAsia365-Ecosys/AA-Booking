@@ -60,7 +60,8 @@ async def test_first_sign_in_creates_a_cog_row_then_the_role_follows_the_group(
     )
     assert first.status_code == 200 and again.status_code == 200 and promoted.status_code == 200
     assert first.json()["cis_user_id"] == f"cog:{sub}" and first.json()["role"] == "sales"
-    assert promoted.json()["role"] == "admin" and promoted.json()["cis_role"] == "reviewer"
+    # AA-1035: cis-reviewer is an alias of content for one release
+    assert promoted.json()["role"] == "admin" and promoted.json()["cis_role"] == "content"
     row = await admin.fetchrow("SELECT * FROM booking.staff_users WHERE cis_user_id = $1", f"cog:{sub}")
     assert (row["cognito_iss"], row["cognito_sub"], row["email"], row["name"], row["active"]) == (
         WORKFORCE_ISSUER,

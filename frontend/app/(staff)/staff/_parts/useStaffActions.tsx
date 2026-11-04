@@ -23,6 +23,7 @@ export const ROLE_HELP: Record<StaffRole, string> = {
   sales: "Trip cases, proposals and customers.",
   contracting: "Reads trip cases and customers; suppliers, rates and pricing from wave 2.",
   content_creator: "Dashboard and the CIS catalog, read-only; content itself is written in CIS.",
+  finance: "Invoices and payments; verifying a payment stays with an admin. Given on the CIS Staff page.",
 };
 
 export function staffErrorText(err: unknown): string {

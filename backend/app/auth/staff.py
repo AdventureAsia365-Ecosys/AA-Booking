@@ -28,6 +28,11 @@ client: any request other than GET / HEAD / OPTIONS is 403 ``e2e_read_only`` bef
 Reads keep the admin permissions. The match is on the access token's ``email`` claim, which the WORKFORCE pre token
 trigger sets to the normalised address; lower-casing here can only cap more sessions, never fewer.
 
+**Finance (AA-1035 R2, root ADR 0019 d3 / d9).** ``finance`` issues invoices and records payments (``billing.read``,
+``billing.write``). It comes ONLY from the WORKFORCE group ``booking-finance`` (granted on the CIS Staff page through
+``shared.staff_app_grant`` role ``finance``); the CIS -> Booking bridge never yields it (:data:`ROLE_FROM_CIS` has no
+finance entry and CIS mints no bridge token for its new roles).
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -51,7 +56,7 @@ from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
 
-STAFF_ROLES = ("admin", "sales", "contracting", "content_creator")
+STAFF_ROLES = ("admin", "sales", "contracting", "content_creator", "finance")  # finance: AA-1035, bk-038
 # BRIDGE: CIS role (bridge token cis_role) → Booking role on first provisioning (ERD v2 identity note).
 ROLE_FROM_CIS = {"admin": "admin", "reviewer": "sales", "content": "content_creator"}
 AUTO_ACTIVE_CIS_ROLES = frozenset({"admin"})
@@ -63,11 +68,19 @@ BOOKING_GROUP_ROLES: tuple[tuple[str, str], ...] = (
     ("booking-sales", "sales"),
     ("booking-contracting", "contracting"),
     ("booking-content_creator", "content_creator"),
+    ("booking-finance", "finance"),  # AA-1035 R2 (identity.tf precedence 75)
 )
-# WORKFORCE: the informational cis_role column = the highest cis-* group, if any.
+# WORKFORCE: the informational cis_role column = the highest cis-* group, if any (the CIS API's GROUP_ROLES order;
+# AA-1035: the six R2 groups, and cis-reviewer is an alias of content for one release).
 CIS_GROUP_ROLES: tuple[tuple[str, str], ...] = (
     ("cis-admin", "admin"),
-    ("cis-reviewer", "reviewer"),
+    ("cis-content_lead", "content_lead"),
+    ("cis-ai_ops", "ai_ops"),
+    ("cis-customer_success", "customer_success"),
+    ("cis-finance", "finance"),
+    ("cis-reviewer", "content"),
+    ("cis-tenant_qa", "tenant_qa"),
+    ("cis-support", "support"),
     ("cis-content", "content"),
 )
 # Prefix of the staff key of rows created on a WORKFORCE sign-in (bk-016 staff_users_cognito_key_chk).
@@ -112,8 +125,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # Billing (bk-028, AA-682 S3): customer invoices and manual payments. Sales draft, send and record; only an admin
     # verifies a payment, and never one they recorded (maker-checker, design D6). Contracting does not see customer
     # money (design §5). Not in preview sessions (critic note 8: bill-to snapshots and payment references).
-    "billing.read": frozenset({"admin", "sales"}),
-    "billing.write": frozenset({"admin", "sales"}),
+    # AA-1035 R2 (root ADR 0019 d9): finance issues invoices and records payments; verifying stays admin (design D6).
+    "billing.read": frozenset({"admin", "sales", "finance"}),
+    "billing.write": frozenset({"admin", "sales", "finance"}),
     "payment.verify": frozenset({"admin"}),
     # Supplier bills and payouts (bk-030, AA-682 S4, design §5): every operational role reads them; contracting (who
     # books suppliers) and admin enter and approve bills, never their own (maker-checker); only an admin records a

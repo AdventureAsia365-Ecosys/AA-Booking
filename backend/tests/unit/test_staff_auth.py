@@ -468,3 +468,36 @@ def test_admin_cannot_change_the_role_of_a_linked_row_but_can_suspend_it() -> No
         )
     assert r.status_code == 200
     assert r.json()["active"] is False and r.json()["role"] == "sales"
+
+
+# ── AA-1035 R2 (root ADR 0019 d3 / d9): the finance role ─────────────────────────────────────────────────────────
+
+
+def test_finance_comes_from_the_booking_finance_group() -> None:
+    assert booking_role(("booking-finance",)) == "finance"
+    assert booking_role(("booking-finance", "booking-sales")) == "sales"  # identity.tf precedence: sales 50, finance 75
+    cis = LocalCis()
+    conn = ScriptedConn().on(
+        "INSERT INTO booking.staff_users", lambda *a: cognito_row(role=a[3], cis_role=a[4], last_seen_at=NOW)
+    )
+    with client(conn, cis) as c:
+        r = c.get("/booking/staff/me", headers=auth(cis.workforce.token(["booking-finance", "cis-finance"])))
+    assert r.status_code == 200 and r.json()["role"] == "finance"
+    insert = conn.sql("INSERT INTO booking.staff_users")[0]
+    assert insert[3:5] == ("finance", "finance")  # role from booking-finance, cis_role from cis-finance
+
+
+def test_the_bridge_never_yields_finance() -> None:
+    """The finance role is read from cognito:groups only; the CIS -> Booking bridge maps no CIS role to it."""
+    from app.auth.staff import ROLE_FROM_CIS
+
+    assert "finance" not in ROLE_FROM_CIS.values()
+    assert "finance" not in ROLE_FROM_CIS  # a bridge token with cis_role finance is 403 unknown_cis_role
+
+
+def test_r2_cis_groups_fill_the_informational_cis_role() -> None:
+    from app.auth.staff import cis_role_from_groups
+
+    assert cis_role_from_groups(("cis-customer_success",)) == "customer_success"
+    assert cis_role_from_groups(("cis-reviewer",)) == "content"  # the alias (CIS 363)
+    assert cis_role_from_groups(("cis-content", "cis-content_lead")) == "content_lead"
