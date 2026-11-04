@@ -185,6 +185,14 @@ def round_price(amount: Decimal, currency: str) -> Decimal:
     return (steps * increment).quantize(CENT)
 
 
+def rrp_price(amount: Decimal, markup: Decimal, currency: str) -> Decimal:
+    """Suggested retail price (root ADR 0019 b15): the agency net price plus the RRP markup (a markup on that price,
+    not a margin: 0.25 makes 800 -> 1,000), rounded UP to the currency's increment like every customer-facing price."""
+    if not markup.is_finite() or markup < ZERO:
+        raise PricingError("the RRP markup must be zero or positive")
+    return round_price(amount * (ONE + markup), currency)
+
+
 def effective_margin(net_usd: Decimal, sell_usd: Decimal, card_fee_pct: Decimal) -> Decimal:
     """Margin left after the card fee: ``1 - fee - net / sell``. Full precision."""
     if sell_usd <= ZERO:

@@ -745,11 +745,17 @@ function tripPlanDetail(sourceId: string): TripPlanDetail {
 
 const PRICE_MATRIX: PriceMatrix = {
   source_id: "",
-  from_price: { amount: "12485.00", currency: "USD", basis: "per_person", season: "Low season" },
+  // AA-1029: the from price is the suggested retail price of the cheapest b2b row for 2 (root ADR 0019 b15).
+  from_price: { amount: "15610.00", currency: "USD", basis: "per_person", season: "Low season" },
   items: [
-    { position: 1, channel: "b2c_tailor_made", season: "Low season", peak: false, valid_from: "2027-01-01", valid_to: "2027-04-30", pax_min: 2, pax_max: 2, currency: "USD", amount: "12485.00", net_amount: "8365.00", net_currency: "USD", effective_margin: "0.3000", priced_on: "2026-10-20", priced: true, overridden: false },
-    { position: 2, channel: "b2c_tailor_made", season: "Low season", peak: false, valid_from: "2027-01-01", valid_to: "2027-04-30", pax_min: 3, pax_max: 4, currency: "USD", amount: "10950.00", net_amount: null, net_currency: null, effective_margin: null, priced_on: null, priced: false, overridden: false },
-    { position: 3, channel: "fixed_departure", season: "Tet holiday peak", peak: true, valid_from: "2027-02-01", valid_to: "2027-02-20", pax_min: 11, pax_max: null, currency: "EUR", amount: "11250.00", net_amount: "185000000.00", net_currency: "VND", effective_margin: "0.1890", priced_on: "2026-10-20", priced: true, overridden: true },
+    { position: 1, channel: "b2b", season: "Low season", peak: false, valid_from: "2027-01-01", valid_to: "2027-04-30", pax_min: 2, pax_max: 2, currency: "USD", amount: "12485.00", net_amount: "8365.00", net_currency: "USD", effective_margin: "0.3000", priced_on: "2026-10-20", priced: true, overridden: false, computed: true, rrp_amount: "15610.00" },
+    { position: 2, channel: "b2b", season: "Low season", peak: false, valid_from: "2027-01-01", valid_to: "2027-04-30", pax_min: 3, pax_max: 4, currency: "USD", amount: "10950.00", net_amount: null, net_currency: null, effective_margin: null, priced_on: null, priced: false, overridden: false, computed: false, rrp_amount: "13690.00" },
+    { position: 3, channel: "fixed_departure", season: "Tet holiday peak", peak: true, valid_from: "2027-02-01", valid_to: "2027-02-20", pax_min: 11, pax_max: null, currency: "EUR", amount: "11250.00", net_amount: "185000000.00", net_currency: "VND", effective_margin: "0.1890", priced_on: "2026-10-20", priced: true, overridden: true, computed: true, rrp_amount: null },
+  ],
+  reference: { raw: "from USD 12,900 per person", amount: "12900.00", currency: "USD", reviewed_by: null, reviewed_at: null },
+  changes: [
+    { at: "2026-10-20T08:00:00Z", change_source: "cost_sheet", changed_by: "system:bk_price_recompute", rows: 3 },
+    { at: "2026-10-18T08:00:00Z", change_source: "staff", changed_by: "u-001", rows: 2 },
   ],
 };
 

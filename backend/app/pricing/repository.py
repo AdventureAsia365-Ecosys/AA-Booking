@@ -10,12 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from app.pricing.engine import BASE_CURRENCY, Channel, FxRate, PricingRule
 
 RULE_SQL = """
-SELECT r.channel, r.target_margin, r.floor_margin, r.peak_uplift_pts, r.card_fee_pct, r.valid_from
+SELECT r.channel, r.target_margin, r.floor_margin, r.peak_uplift_pts, r.card_fee_pct, r.valid_from,
+       r.rrp_markup_pct
 FROM booking.pricing_rules r
 JOIN booking.policy_approvals a ON a.pricing_rule_id = r.id
 WHERE r.channel = $1 AND r.valid_from <= $2
@@ -36,6 +38,9 @@ ORDER BY f.currency, f.as_of DESC
 class DatedRule:
     rule: PricingRule
     valid_from: date
+    # bk-039 (AA-1029, root ADR 0019 b15): b2b rule only, the suggested retail price markup on the agency net price
+    # (0.25 = RRP is net + 25 %); None = this rule publishes no RRP.
+    rrp_markup_pct: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,7 @@ async def rule_in_force(conn: Any, channel: Channel, on: date) -> DatedRule | No
             card_fee_pct=row["card_fee_pct"],
         ),
         valid_from=row["valid_from"],
+        rrp_markup_pct=row.get("rrp_markup_pct"),
     )
 
 

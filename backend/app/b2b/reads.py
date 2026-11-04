@@ -12,10 +12,13 @@
   (a removal shows only in a periodic full resync).
 - **FX rates**: the approved ``booking.fx_rates`` row in force on the asked date for every currency (plain rate, no
   buffer): the R17 "Booking's approved rates" source.
-- **Price parity** (ADR 0005a decision 1, warn never block): the plan's public "from" price per person from the bk-009
-  price hint when its basis is ``per_person``, converted to the asked currency (hint currency → USD at the plain rate
-  → asked currency x rate x (1 + buffer)), rounded up to the cent. ``null`` when there is no per-person hint or no
-  approved rate. Booking never compares or refuses anything: the CRM warns when its sell price is below.
+- **Price parity** (ADR 0005a decision 1, warn never block): the plan's public "from" price per person. Since AA-1029
+  (bk-039, ADR 0019 b15) it is read from the price matrix: the suggested retail price of booking.v_from_prices (the
+  cheapest b2b RRP for 2 travellers still valid, ``app.catalog.trip_plan_prices.FROM_PRICE_SQL``); a plan with no
+  such row falls back to the bk-009 price hint when its basis is ``per_person``. Converted to the asked currency
+  (source currency → USD at the plain rate → asked currency x rate x (1 + buffer)), rounded up to the cent. ``null``
+  when there is neither or no approved rate. Booking never compares or refuses anything: the CRM warns when its sell
+  price is below.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import asyncpg
 from app.b2b.components import components_by_plan
 from app.b2b.errors import B2BError
 from app.b2b.quotes import ceil_cents, money
-from app.catalog import liveness
+from app.catalog import liveness, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
 from app.pricing import engine, repository
 
@@ -102,12 +105,14 @@ WHERE f.as_of <= $1
 ORDER BY f.currency, f.as_of DESC
 """
 
-PLAN_HINT_SQL = """
-SELECT p.price_hint_amount, p.price_hint_currency::text AS price_hint_currency, p.price_hint_basis
+PLAN_HINT_SQL = f"""
+SELECT p.price_hint_amount, p.price_hint_currency::text AS price_hint_currency, p.price_hint_basis,
+       fp.amount AS from_amount, fp.currency AS from_currency
 FROM booking.trip_plans p
+LEFT JOIN LATERAL ({trip_plan_prices.FROM_PRICE_SQL.format(plan="p.id")}) fp ON true
 WHERE p.source_system = $1 AND p.source_id = $2 AND p.sellable
   AND EXISTS (SELECT 1 FROM catalog.v_tour t WHERE t.source_system = p.source_system AND t.source_id = p.source_id)
-"""
+"""  # noqa: S608 — constant fragments
 
 
 def _encode_cursor(source_id: str) -> str:
@@ -180,9 +185,13 @@ async def price_parity(pool: asyncpg.Pool, *, source_id: str, currency: str, on:
         if plan is None:
             raise B2BError("not_found", "no sellable trip plan with this key")
         from_price = None
-        if plan["price_hint_basis"] == "per_person" and plan["price_hint_amount"] is not None:
-            hint_currency = plan["price_hint_currency"].strip()
-            amount = plan["price_hint_amount"]
+        source: tuple[Decimal, str] | None = None
+        if plan.get("from_amount") is not None:
+            source = (Decimal(str(plan["from_amount"])), str(plan["from_currency"]).strip())
+        elif plan["price_hint_basis"] == "per_person" and plan["price_hint_amount"] is not None:
+            source = (plan["price_hint_amount"], plan["price_hint_currency"].strip())
+        if source is not None:
+            amount, hint_currency = source
             if hint_currency != currency:
                 dated = await repository.fx_rates_in_force(conn, {hint_currency, currency}, on)
                 rates = {code: d.rate for code, d in dated.items()}

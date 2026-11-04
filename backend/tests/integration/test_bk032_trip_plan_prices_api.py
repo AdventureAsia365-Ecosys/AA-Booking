@@ -46,6 +46,11 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-996p %'")
         await conn.execute("DELETE FROM booking.policy_approvals WHERE fx_rate_id IS NOT NULL")
         await conn.execute("DELETE FROM booking.fx_rates")
+        await conn.execute(
+            "DELETE FROM booking.policy_approvals WHERE pricing_rule_id IN"
+            " (SELECT id FROM booking.pricing_rules WHERE note = 'it-996p rrp')"
+        )
+        await conn.execute("DELETE FROM booking.pricing_rules WHERE note = 'it-996p rrp'")
     finally:
         await conn.execute("RESET ROLE")
     await conn.execute("DELETE FROM catalog.v_tour WHERE source_id = ANY($1)", [PLAN, OTHER])
@@ -201,7 +206,30 @@ async def test_price_matrix_by_hand_and_from_price(
     url = f"/catalog/trip-plans/{PLAN}/prices"
 
     empty = await c.get(url, headers=sales)
-    assert empty.status_code == 200 and empty.json() == {"source_id": PLAN, "items": [], "from_price": None}
+    assert empty.status_code == 200 and empty.json() == {
+        "source_id": PLAN,
+        "items": [],
+        "from_price": None,
+        "reference": None,
+        "changes": [],
+    }
+    # AA-1029 (root ADR 0019 b15): the from price is the RRP of a b2b row, under the b2b rule's RRP markup.
+    await admin.execute("SET ROLE bk_owner")
+    try:
+        rule = await admin.fetchval(
+            "INSERT INTO booking.pricing_rules (channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct,"
+            " valid_from, note, created_by, rrp_markup_pct) VALUES ('b2b', 0.15, 0.10, 0, 0.03, current_date,"
+            " 'it-996p rrp', $1, 0.25) RETURNING id",
+            MAKER,
+        )
+        await admin.execute(
+            "INSERT INTO booking.policy_approvals (entity_type, pricing_rule_id, approved_by)"
+            " VALUES ('pricing_rule', $1, $2)",
+            rule,
+            CHECKER,
+        )
+    finally:
+        await admin.execute("RESET ROLE")
     no_plan = await c.put(url, json={"items": [_row()]}, headers=contracting)
     assert no_plan.status_code == 404 and no_plan.json()["detail"] == "trip_plan_not_found"
     assert (
@@ -221,8 +249,9 @@ async def test_price_matrix_by_hand_and_from_price(
     assert [r["position"] for r in out["items"]] == [1, 2, 3, 4, 5]
     assert out["items"][1]["amount"] == "1250.00" and out["items"][4]["pax_max"] is None
     assert all(r["priced"] is False and r["effective_margin"] is None for r in out["items"])
-    # B2C, covers 2 pax, still valid, USD first: the 2-pax low season row (EUR 1300 and b2b 1100 do not count).
-    assert out["from_price"] == {"amount": "1450.00", "currency": "USD", "basis": "per_person", "season": "Low"}
+    # The b2b row covers 2 pax: its RRP 1100 x 1.25 = 1375 is the from price (the B2C rows do not count any more).
+    assert out["items"][4]["rrp_amount"] == "1375.00" and out["items"][0]["rrp_amount"] is None
+    assert out["from_price"] == {"amount": "1375.00", "currency": "USD", "basis": "per_person", "season": "Low"}
     assert (await c.get(url, headers=sales)).json() == out
 
     # The same set again writes nothing.
@@ -247,7 +276,7 @@ async def test_price_matrix_by_hand_and_from_price(
 
     # The list shows the from price; a content creator sees none.
     listed = (await c.get("/catalog/trip-plans", params={"q": "VN-5D"}, headers=sales)).json()["items"][0]
-    assert listed["from_price"]["amount"] == "1450.00"
+    assert listed["from_price"]["amount"] == "1375.00"
     assert (await c.get("/catalog/trip-plans", params={"q": "VN-5D"}, headers=content)).json()["items"][0][
         "from_price"
     ] is None

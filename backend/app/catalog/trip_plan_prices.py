@@ -16,9 +16,16 @@ and one selling currency. Two ways to fill a row, both on the existing pricing m
 only when something changed. Rows of one channel and currency may not overlap (dates and pax bands), so a day and a
 party size have one price per channel and currency. The plan must have its commercial row (``PUT …/commercial``).
 
-The **from price** (ADR 0005 decision 6: lowest per-person B2C price for 2 pax) is derived on read: the cheapest row
-of a B2C channel whose pax band covers 2 and that is still valid today, USD first. ``booking.v_from_prices`` (contract
-price.from.v1) is a later key.
+AA-1029 (bk-039, root ADR 0019 b15): the cost sheet job (``app.catalog.cost_sheet``) writes **computed** rows from the
+plan's components and the supplier rates in force; a staff PUT may send them back (``computed: true``, with their net
+cost) and keeps them computed, an amount sent with one makes it overridden (a hand row the next recompute keeps). Every
+**b2b** row carries ``rrp_amount``, the suggested retail price = round up(amount x (1 + the b2b rule's
+``rrp_markup_pct``)), when the rule in force has a markup. Every change of the set is also written to the dated price
+history (``app.catalog.price_history``).
+
+The **from price** (ADR 0005 decision 6 as amended by ADR 0019 b15) = the cheapest RRP per person of a b2b row whose pax
+band covers 2 and that is still valid today, USD first: the same choice as the contract view ``booking.v_from_prices``
+(price.from.v1, bk-039), which TripPlanner reads.
 
 Prices and net costs are commercial data: only staff with ``pricing.read`` read them (admin, sales, contracting);
 ``trip_plan.write`` (admin, contracting) replaces them.
@@ -35,12 +42,13 @@ import asyncpg
 
 from app import audit
 from app.auth.staff import Staff
-from app.errors import Forbidden, Invalid, NotFound, Unavailable
-from app.pricing import engine
+from app.catalog import price_history
+from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
+from app.pricing import engine, repository
 from app.pricing import service as pricing
 
 MAX_ROWS = 200
-B2C_CHANNELS = ("b2c_tailor_made", "fixed_departure")
+FROM_CHANNEL = engine.Channel.B2B.value
 FROM_PAX = 2
 # ``amount`` is NUMERIC(12, 2); a margin at or below -100 % is refused as a typo (see ``_check_priced``).
 MAX_AMOUNT = Decimal("10000000000")
@@ -59,26 +67,29 @@ KEY_FIELDS = (
     "net_amount",
     "net_currency",
     "overridden",
+    "computed",
+    "rrp_amount",
 )
 
 ROWS_SQL = """
 SELECT pr.position, pr.channel, pr.season, pr.peak, pr.valid_from, pr.valid_to, pr.pax_min, pr.pax_max,
        pr.currency::text AS currency, pr.amount::text AS amount, pr.net_amount::text AS net_amount,
        pr.net_currency::text AS net_currency, pr.effective_margin::text AS effective_margin, pr.priced_on,
-       pr.overridden
+       pr.overridden, pr.computed, pr.rrp_amount::text AS rrp_amount, pr.created_by
 FROM booking.trip_plan_prices pr
 WHERE pr.trip_plan_id = $1::uuid
 ORDER BY pr.position
 """
 
-# The from price of one plan; ``{plan}`` is the uuid expression of the plan (a bind or an outer column).
+# The from price of one plan (the RRP of booking.v_from_prices, bk-039); ``{plan}`` is the uuid expression of the plan
+# (a bind or an outer column).
 FROM_PRICE_SQL = f"""
-SELECT fp.amount::text AS amount, fp.currency::text AS currency, fp.season
+SELECT fp.rrp_amount::text AS amount, fp.currency::text AS currency, fp.season
 FROM booking.trip_plan_prices fp
-WHERE fp.trip_plan_id = {{plan}} AND fp.channel IN ({", ".join(f"'{c}'" for c in B2C_CHANNELS)})
+WHERE fp.trip_plan_id = {{plan}} AND fp.channel = '{FROM_CHANNEL}' AND fp.rrp_amount IS NOT NULL
   AND fp.pax_min <= {FROM_PAX} AND (fp.pax_max IS NULL OR fp.pax_max >= {FROM_PAX})
   AND fp.valid_to >= (now() AT TIME ZONE 'UTC')::date
-ORDER BY (fp.currency = 'USD') DESC, fp.amount, fp.valid_from
+ORDER BY (fp.currency = 'USD') DESC, fp.rrp_amount, fp.valid_from
 LIMIT 1
 """  # noqa: S608 — constants only, no input
 
@@ -110,6 +121,7 @@ class Row:
     amount: Decimal | None
     net_amount: Decimal | None
     net_currency: str | None
+    computed: bool = False
 
     def overlaps(self, other: Row) -> bool:
         if (self.channel, self.currency) != (other.channel, other.currency):
@@ -143,6 +155,7 @@ def normalise(rows: list[dict[str, Any]]) -> list[Row]:
             amount=raw.get("amount"),
             net_amount=raw.get("net_amount"),
             net_currency=raw.get("net_currency"),
+            computed=bool(raw.get("computed")),
         )
         if row.valid_to < row.valid_from:
             raise Invalid("invalid_validity", f"row {n}: valid_to is before valid_from", row=n)
@@ -154,6 +167,8 @@ def normalise(rows: list[dict[str, Any]]) -> list[Row]:
             raise Invalid("invalid_net_cost", f"row {n}: give the net cost with its currency, or neither", row=n)
         if row.net_amount is None and row.amount is None:
             raise Invalid("price_missing", f"row {n}: enter a price, or a net cost to price it from", row=n)
+        if row.computed and row.net_amount is None:
+            raise Invalid("computed_needs_net", f"row {n}: a cost sheet row keeps its net cost", row=n)
         for earlier in out:
             if row.overlaps(earlier):
                 raise Invalid(
@@ -221,6 +236,7 @@ def _row_out(record: Any) -> dict[str, Any]:
     if out["net_currency"]:
         out["net_currency"] = out["net_currency"].strip()
     out["priced"] = out["net_amount"] is not None
+    out["computed"] = bool(out.get("computed"))
     return out
 
 
@@ -230,10 +246,41 @@ async def list_prices(conn: asyncpg.Connection, staff: Staff, source_id: str) ->
         raise Forbidden("forbidden", "prices are commercial data (pricing.read)")
     plan = await _plan(conn, source_id)
     if plan is None:
-        return {"source_id": source_id, "items": [], "from_price": None}
+        return {"source_id": source_id, "items": [], "from_price": None, "reference": None, "changes": []}
     rows = [_row_out(r) for r in await conn.fetch(ROWS_SQL, plan["id"])]
     best = await conn.fetchrow(FROM_PRICE_SQL.format(plan="$1::uuid"), plan["id"])
-    return {"source_id": source_id, "items": rows, "from_price": from_price(dict(best) if best else None)}
+    ref = await conn.fetchrow(REFERENCE_SQL, plan["id"])
+    return {
+        "source_id": source_id,
+        "items": rows,
+        "from_price": from_price(dict(best) if best else None),
+        # AA-1029 (ADR 0005 d7): the CIS source price text, reference only (never a selling price).
+        "reference": reference_out(dict(ref)) if ref else None,
+        "changes": [
+            {**c, "rows": int(c["rows"])} for c in await price_history.changes(conn, plan["id"], CHANGES_SHOWN)
+        ],
+    }
+
+
+REFERENCE_SQL = """
+SELECT reference_price_raw, reference_amount::text AS reference_amount, reference_currency::text AS reference_currency,
+       reference_reviewed_by, reference_reviewed_at, synced_at
+FROM booking.trip_plans WHERE id = $1::uuid
+"""
+CHANGES_SHOWN = 20
+
+
+def reference_out(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The reviewed reference price of a plan, or None when CIS gave no source price text."""
+    if not row.get("reference_price_raw"):
+        return None
+    return {
+        "raw": row["reference_price_raw"],
+        "amount": row["reference_amount"],
+        "currency": (row["reference_currency"] or "").strip() or None,
+        "reviewed_by": row["reference_reviewed_by"],
+        "reviewed_at": row["reference_reviewed_at"],
+    }
 
 
 def _comparable(row: dict[str, Any]) -> tuple[Any, ...]:
@@ -253,6 +300,8 @@ def _comparable(row: dict[str, Any]) -> tuple[Any, ...]:
         dec(row["net_amount"]),
         (row["net_currency"] or "").strip() or None,
         bool(row["overridden"]),
+        bool(row.get("computed")),
+        dec(row.get("rrp_amount")),
     )
 
 
@@ -276,6 +325,7 @@ async def replace_prices(
 
     final: list[dict[str, Any]] = []
     below: list[int] = []
+    markup = await _b2b_markup(conn, norm, day)
     for row in norm:
         amount, margin, priced_on = row.amount, None, None
         if row.net_amount is not None:
@@ -302,6 +352,8 @@ async def replace_prices(
                 "effective_margin": margin,
                 "priced_on": priced_on,
                 "overridden": row.net_amount is not None and row.amount is not None,
+                "computed": row.computed,
+                "rrp_amount": rrp_for(row.channel, amount, row.currency, markup),
             }
         )
     if below and not reason:
@@ -310,39 +362,147 @@ async def replace_prices(
             f"row(s) {', '.join(map(str, below))} are below the channel floor; give a reason",
             rows=below,
         )
-
-    before = [dict(r) for r in await conn.fetch(ROWS_SQL, plan_id)]
-    if [_comparable(r) for r in before] != [_comparable(r) for r in final]:
-        await conn.execute("DELETE FROM booking.trip_plan_prices WHERE trip_plan_id = $1::uuid", plan_id)
-        await conn.executemany(
-            "INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, season, peak, valid_from, valid_to,"
-            " pax_min, pax_max, currency, amount, net_amount, net_currency, effective_margin, priced_on, overridden,"
-            " created_by)"
-            " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
-            [(plan_id, *r.values(), staff.cis_user_id) for r in final],
-        )
-        # The plan's updated_at moves with any commercial change (the products feed reads it, AA-972).
-        await conn.execute("UPDATE booking.trip_plans SET updated_at = now() WHERE id = $1::uuid", plan_id)
-        await audit.record(
-            conn,
-            actor_type="staff",
-            actor_ref=staff.cis_user_id,
-            action="trip_plan.prices_replaced",
-            entity_type="trip_plan",
-            entity_id=plan_id,
-            before={"rows": [_audit_row(r) for r in before]},
-            after={
-                "source_id": source_id,
-                "rows": [_audit_row(r) for r in final],
-                "below_floor_rows": below,
-                "below_floor_reason": reason if below else None,
-            },
-            entity_label=source_id[:80],
-            summary=f"Price matrix: {len(before)} -> {len(final)} rows"
-            + (f" (below floor: {reason})" if below else ""),
-        )
+    await store(
+        conn,
+        plan_id,
+        source_id,
+        final,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        created_by=staff.cis_user_id,
+        action="trip_plan.prices_replaced",
+        extra={"below_floor_rows": below, "below_floor_reason": reason if below else None},
+        summary_suffix=f" (below floor: {reason})" if below else "",
+    )
     return await list_prices(conn, staff, source_id)
 
 
+async def _b2b_markup(conn: asyncpg.Connection, rows: list[Row], day: date) -> Decimal | None:
+    """The RRP markup of the b2b rule in force on ``day`` (None without a b2b row, a rule or a markup)."""
+    if not any(r.channel == FROM_CHANNEL for r in rows):
+        return None
+    try:
+        dated = await repository.rule_in_force(conn, engine.Channel.B2B, day)
+    except Exception:  # noqa: BLE001 — a stored rule the engine refuses: the rows still save, without an RRP
+        return None
+    return dated.rrp_markup_pct if dated is not None else None
+
+
+def rrp_for(channel: str, amount: Decimal, currency: str, markup: Decimal | None) -> Decimal | None:
+    """The suggested retail price of a b2b row (root ADR 0019 b15), else None."""
+    if channel != FROM_CHANNEL or markup is None:
+        return None
+    try:
+        return engine.rrp_price(amount, markup, currency)
+    except engine.PricingError:
+        return None
+
+
+INSERT_SQL = """
+INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, season, peak, valid_from, valid_to, pax_min,
+    pax_max, currency, amount, net_amount, net_currency, effective_margin, priced_on, overridden, computed, rrp_amount,
+    created_by)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+"""
+INSERT_FIELDS = (
+    "position",
+    "channel",
+    "season",
+    "peak",
+    "valid_from",
+    "valid_to",
+    "pax_min",
+    "pax_max",
+    "currency",
+    "amount",
+    "net_amount",
+    "net_currency",
+    "effective_margin",
+    "priced_on",
+    "overridden",
+    "computed",
+    "rrp_amount",
+)
+
+
+async def store(
+    conn: asyncpg.Connection,
+    plan_id: str,
+    source_id: str,
+    final: list[dict[str, Any]],
+    *,
+    actor_type: str,
+    actor_ref: str,
+    created_by: str | None,
+    action: str,
+    extra: dict[str, Any] | None = None,
+    summary_suffix: str = "",
+) -> bool:
+    """Replace the plan's matrix with ``final`` when it differs: delete + insert, the plan's ``updated_at``, one audit
+    row and the dated history, in the caller's transaction. Returns True when something changed."""
+    before = [dict(r) for r in await conn.fetch(ROWS_SQL, plan_id)]
+    # The same rows in another order are the same price list (a recompute lists hand rows first): no rewrite.
+    if sorted(map(_comparable, before), key=repr) == sorted(map(_comparable, final), key=repr):
+        return False
+    await conn.execute("DELETE FROM booking.trip_plan_prices WHERE trip_plan_id = $1::uuid", plan_id)
+    # A row kept from the set before keeps its author (the cost sheet keeps staff rows); new rows take created_by.
+    await conn.executemany(
+        INSERT_SQL, [(plan_id, *(r[f] for f in INSERT_FIELDS), r.get("created_by", created_by)) for r in final]
+    )
+    # The plan's updated_at moves with any commercial change (the products feed reads it, AA-972).
+    await conn.execute("UPDATE booking.trip_plans SET updated_at = now() WHERE id = $1::uuid", plan_id)
+    await audit.record(
+        conn,
+        actor_type=actor_type,
+        actor_ref=actor_ref,
+        action=action,
+        entity_type="trip_plan",
+        entity_id=plan_id,
+        before={"rows": [_audit_row(r) for r in before]},
+        after={"source_id": source_id, "rows": [_audit_row(r) for r in final], **(extra or {})},
+        entity_label=source_id[:80],
+        summary=f"Price matrix: {len(before)} -> {len(final)} rows{summary_suffix}",
+    )
+    await price_history.record(
+        conn,
+        plan_id,
+        final,
+        source="cost_sheet" if actor_type == "system" else "staff",
+        by=actor_ref,
+    )
+    return True
+
+
 def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {k: row[k] for k in (*KEY_FIELDS, "effective_margin")}
+    return {k: row.get(k) for k in (*KEY_FIELDS, "effective_margin")}
+
+
+async def review_reference(conn: asyncpg.Connection, staff: Staff, source_id: str) -> None:
+    """Mark the plan's reference price (the CIS source price text) reviewed; audited. 404 / 409 when there is none."""
+    plan = await conn.fetchrow(
+        "SELECT id::text AS id, reference_price_raw, reference_reviewed_at FROM booking.trip_plans"
+        " WHERE source_system = 'cis' AND source_id = $1 FOR UPDATE",
+        source_id,
+    )
+    if plan is None:
+        raise NotFound("trip_plan_not_found", "this tour has no trip plan yet")
+    if not plan["reference_price_raw"]:
+        raise Conflict("no_reference", "CIS gave no source price for this tour")
+    if plan["reference_reviewed_at"] is not None:
+        return
+    await conn.execute(
+        "UPDATE booking.trip_plans SET reference_reviewed_by = $2, reference_reviewed_at = now() WHERE id = $1::uuid",
+        plan["id"],
+        staff.cis_user_id,
+    )
+    await audit.record(
+        conn,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        action="trip_plan.reference_reviewed",
+        entity_type="trip_plan",
+        entity_id=plan["id"],
+        after={"reference_price_raw": plan["reference_price_raw"]},
+        entity_label=source_id[:80],
+        summary="Reviewed the CIS source price (reference only)",
+    )

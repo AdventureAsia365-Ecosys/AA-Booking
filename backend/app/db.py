@@ -55,6 +55,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     # bk-035 (AA-1003 ops inquiry view) is read by CIS only; bk-036 (AA-1034 REVOKE) changes no shape read here.
     "bk-037",  # AA-1028 R1 slice 2: b2b_partners.projected_at (bk_tenant_pull, staff partner reads; MIG-4)
     "bk-038",  # AA-1035 R2: staff_users_role_chk allows finance (a booking-finance sign-in writes it; MIG-4)
+    "bk-039",  # AA-1029 R4: price chain columns, trip_plan_price_history, v_from_prices (read by every price query)
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

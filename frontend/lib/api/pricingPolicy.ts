@@ -44,6 +44,8 @@ export interface PricingRuleRow extends PolicyRowBase {
   card_fee_pct: DecimalString;
   valid_from: IsoDate;
   note: string | null;
+  /** b2b rules only (AA-1029): the suggested retail price markup on the agency net price ("0.2500" = net + 25 %). */
+  rrp_markup_pct?: DecimalString | null;
 }
 
 export interface FxRateRow extends PolicyRowBase {
@@ -69,6 +71,7 @@ export interface NewRuleBody {
   card_fee_pct: string;
   valid_from: IsoDate;
   note?: string;
+  rrp_markup_pct?: string;
 }
 
 export interface NewFxRateBody {

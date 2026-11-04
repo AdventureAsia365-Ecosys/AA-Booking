@@ -4952,6 +4952,12 @@
           "channel": {
             "$ref": "#/components/schemas/Channel"
           },
+          "computed": {
+            "default": false,
+            "description": "a cost sheet row sent back as read; with an amount it becomes overridden",
+            "title": "Computed",
+            "type": "boolean"
+          },
           "currency": {
             "default": "USD",
             "pattern": "^[A-Z]{3}$",
@@ -5648,6 +5654,35 @@
         "title": "RateFields",
         "type": "object"
       },
+      "RateSheetUpload": {
+        "additionalProperties": false,
+        "description": "The filled template as base64 (the staff BFF forwards JSON bodies only, like supplier photos).",
+        "properties": {
+          "data_base64": {
+            "maxLength": 2796206,
+            "minLength": 4,
+            "title": "Data Base64",
+            "type": "string"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          }
+        },
+        "required": [
+          "data_base64"
+        ],
+        "title": "RateSheetUpload",
+        "type": "object"
+      },
       "ReadBody": {
         "additionalProperties": false,
         "properties": {
@@ -5963,6 +5998,23 @@
             ],
             "default": "0",
             "title": "Peak Uplift Pts"
+          },
+          "rrp_markup_pct": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 10.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,2}|(?=[\\d.]{1,7}0*$)\\d{0,2}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rrp Markup Pct"
           },
           "target_margin": {
             "anyOf": [
@@ -10165,6 +10217,184 @@
         ]
       }
     },
+    "/booking/catalog/trip-plans/{source_id}/prices/history": {
+      "get": {
+        "description": "AA-1029 (bk-039): the plan's price list as it was in force at ``at``, from the dated history.",
+        "operationId": "trip_plan_price_history_booking_catalog_trip_plans__source_id__prices_history_get",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "the price list in force at this time (default now)",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "the price list in force at this time (default now)",
+              "title": "At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Trip Plan Price History Booking Catalog Trip Plans  Source Id  Prices History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trip Plan Price History",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/prices/recompute": {
+      "post": {
+        "description": "AA-1029: run the cost sheet of this plan now (the same as the bk_price_recompute job does for every plan).",
+        "operationId": "recompute_trip_plan_prices_booking_catalog_trip_plans__source_id__prices_recompute_post",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Recompute Trip Plan Prices Booking Catalog Trip Plans  Source Id  Prices Recompute Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Recompute Trip Plan Prices",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/reference/review": {
+      "post": {
+        "description": "AA-1029 (ADR 0005 d7): mark the CIS source price text of this plan as reviewed (reference only).",
+        "operationId": "review_trip_plan_reference_booking_catalog_trip_plans__source_id__reference_review_post",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Review Trip Plan Reference Booking Catalog Trip Plans  Source Id  Reference Review Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Trip Plan Reference",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
     "/booking/catalog/trip-plans/{source_id}/trip-cases": {
       "post": {
         "operationId": "use_trip_plan_booking_catalog_trip_plans__source_id__trip_cases_post",
@@ -13753,6 +13983,31 @@
         ]
       }
     },
+    "/booking/rate-sheets/template": {
+      "get": {
+        "description": "The empty AA rate-sheet workbook (Contract sheet + one sheet per service type).",
+        "operationId": "rate_sheet_template_booking_rate_sheets_template_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rate Sheet Template",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
     "/booking/rates/{rate_id}": {
       "delete": {
         "operationId": "delete_rate_booking_rates__rate_id__delete",
@@ -16963,6 +17218,82 @@
           }
         ],
         "summary": "Deactivate Supplier",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/booking/suppliers/{supplier_ref}/rate-sheets": {
+      "post": {
+        "description": "Upload a filled template. Creates one DRAFT contract with its rates, or 422 ``rate_sheet_invalid`` with every\nproblem by sheet, row and column; a second person publishes the draft.",
+        "operationId": "import_rate_sheet_booking_suppliers__supplier_ref__rate_sheets_post",
+        "parameters": [
+          {
+            "description": "Supplier UUID or code (SUP-000123)",
+            "in": "path",
+            "name": "supplier_ref",
+            "required": true,
+            "schema": {
+              "description": "Supplier UUID or code (SUP-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Supplier Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "validate and preview only; nothing is written",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "validate and preview only; nothing is written",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateSheetUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Rate Sheet Booking Suppliers  Supplier Ref  Rate Sheets Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Rate Sheet",
         "tags": [
           "suppliers"
         ]

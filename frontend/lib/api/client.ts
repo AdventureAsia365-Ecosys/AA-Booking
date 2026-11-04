@@ -42,12 +42,15 @@ export class ApiError extends Error {
   code: string;
   /** FastAPI 422 field errors, for inline form messages. */
   fieldErrors: FieldError[];
-  constructor(message: string, status: number, code = "", fieldErrors: FieldError[] = []) {
+  /** The whole JSON error body (extra fields such as a rate sheet's `errors` list, AA-1029). */
+  body: Record<string, unknown>;
+  constructor(message: string, status: number, code = "", fieldErrors: FieldError[] = [], body: Record<string, unknown> = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fieldErrors = fieldErrors;
+    this.body = body;
   }
 }
 
@@ -76,8 +79,10 @@ async function parse<T>(res: Response): Promise<T> {
   let code = "";
   let message = "";
   let fieldErrors: FieldError[] = [];
+  let whole: Record<string, unknown> = {};
   try {
     const body = (await res.json()) as { detail?: unknown; message?: unknown };
+    if (body && typeof body === "object") whole = body as Record<string, unknown>;
     if (typeof body.detail === "string") code = body.detail;
     if (Array.isArray(body.detail)) fieldErrors = body.detail as FieldError[];
     if (typeof body.message === "string") message = body.message;
@@ -96,7 +101,7 @@ async function parse<T>(res: Response): Promise<T> {
               ? "The Booking service is not answering. Try again in a moment."
               : code || `Request failed (${res.status})`;
   }
-  return Promise.reject(new ApiError(message, res.status, code, fieldErrors));
+  return Promise.reject(new ApiError(message, res.status, code, fieldErrors, whole));
 }
 
 export async function bkGet<T>(path: string, query?: Query): Promise<T> {

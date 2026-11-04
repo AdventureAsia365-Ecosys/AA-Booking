@@ -5,11 +5,13 @@
 // currency and the price per person. A row may instead carry the net cost per person: the API prices it on save with
 // the channel's rule, the approved FX rate and the rounding of quote-preview (a price typed next to a net cost is a
 // sales override). Rows of one channel and currency may not overlap (checked here and in the API).
+// AA-1029: rows the cost sheet wrote from the plan's components and the supplier rates carry a "Cost sheet" badge (a
+// price typed on one makes it an override the next recompute keeps); b2b rows show their suggested retail price.
 
 import { Plus, Trash2 } from "lucide-react";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import type { PriceRow } from "@/lib/api/tripPlans";
-import { Checkbox, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
+import { Badge, Checkbox, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
 
@@ -69,6 +71,11 @@ export function PriceMatrixEditor({
                   · {CHANNEL_SHORT[r.channel]}
                   {band && ` · ${band}`}
                 </span>
+                {r.computed && (
+                  <Badge tone={r.amount.trim() ? "warning" : "info"} style={{ marginLeft: 8 }}>
+                    {r.amount.trim() ? "Cost sheet · override" : "Cost sheet"}
+                  </Badge>
+                )}
               </span>
               <IconButton
                 variant="plain"
@@ -144,6 +151,11 @@ export function PriceMatrixEditor({
                 Saved: <Money amount={last.amount} currency={last.currency} /> {last.overridden ? "(override)" : "from the net cost"}
                 {marginLabel(last.effective_margin) && ` · margin ${marginLabel(last.effective_margin)}`}
                 {last.priced_on && ` · priced ${formatDay(last.priced_on)}`}
+              </p>
+            )}
+            {last?.rrp_amount && (
+              <p className="mt-1 text-xs text-muted">
+                Suggested retail price: <Money amount={last.rrp_amount} currency={last.currency} /> per person
               </p>
             )}
             {rowError && <p className="mt-2 text-xs text-danger">{rowError}</p>}

@@ -112,6 +112,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   `/admin/data-coverage` reads them. **Inquiry handoff** (AA-1003, `bk-035`): `booking.v_ops_inquiry_inbox` (source,
   hand-off key, status, received / processed time, has a trip case; no payload or customer), SELECT to `cis_app`; no CIS
   reader since 2026-11-03 (CIS retired TP-03 with the B2B-only model, root ADR 0019; the view goes with the B2C drop).
+  **Public from price** (AA-1029, bk-039, contract `price.from.v1`): `booking.v_from_prices` (per catalog key, the
+  cheapest suggested retail price per person for 2 travellers among the b2b rows still valid; no net, agency price or
+  margin), SELECT to role `tripplanner` (+ USAGE on schema `booking`) for the TripPlanner tour page.
   No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
   `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
@@ -243,7 +246,14 @@ backend/
                            + destinations (v_tour_day places), first-photo cover fallback, from_price (LATERAL per row)
   app/catalog/trip_plan_prices.py  AA-996 (bk-032): the per-person price matrix of a plan; rows by hand or priced
                            from a net cost with app.pricing.service (quote-preview's rule / FX / rounding); PUT
-                           replaces the set (audited), no overlaps per channel + currency; from price (B2C, 2 pax)
+                           replaces the set (audited), no overlaps per channel + currency; AA-1029: computed rows,
+                           the b2b RRP, store() shared with the cost sheet, from price = b2b RRP for 2 pax
+  app/catalog/trip_plan_sync.py  AA-1029: bk_trip_plan_sync (catalog.v_tour keys -> a plan per tour, the CIS reference
+                           price text when catalog.v_tour_price_reference_v1 is readable) + SyncSchedule
+  app/catalog/cost_sheet.py  AA-1029: bk_price_recompute (components x rates in force -> computed matrix rows per
+                           window x pax band, priced by the rules in force, hand rows kept) + RecomputeSchedule
+  app/catalog/price_history.py  AA-1029 (bk-039): dated price history (close open rows, insert the new set; as_of)
+  app/supply/rate_sheet.py AA-1029: supplier rate-sheet Excel import (openpyxl, read-only) into a draft contract
   app/catalog/liveness.py  AA-986 L5: served state of a catalog key (served | retired | paused | not_in_catalog) from
                            v_tour + v_tour_retired, feature detection of the CIS 274 views, strict / soft reads
   app/catalog/lifecycle.py AA-986 L5: bk_tour_lifecycle_pull (outbox → inbox → staff notifications) + PullSchedule
@@ -495,8 +505,9 @@ send, OTP) is not built: those still write rows only.
   configured, JWKS never loaded or pricing data missing 503 `unavailable`; bad input 422 `invalid`.
 - **Routes (AA-972)**: `GET /products` (sellable trip plans still in `catalog.v_tour`, with their bookable components
   `rt:<room type>`, `sv:<service>`, and `tp:<plan>` for the whole plan), `POST /quotes`, `GET /fx-rates` (approved
-  rates in force on a date, plain), `GET /price-parity` (the public "from" price per person from the bk-009 price hint,
-  warn-only; `null` without a per-person hint or rate). **AA-973**: `GET /departures`, `POST /holds`,
+  rates in force on a date, plain), `GET /price-parity` (the public "from" price per person: since AA-1029 the
+  suggested retail price of the matrix, `booking.v_from_prices`, else the bk-009 per-person price hint; warn-only;
+  `null` without either or a rate). **AA-973**: `GET /departures`, `POST /holds`,
   `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). **AA-974**: VND quotes, `POST /holds/{id}/extend`,
   the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below). **AA-975**:
   `GET /events` (below).
@@ -602,6 +613,37 @@ send, OTP) is not built: those still write rows only.
   AA-682 (design D13, one action both ways): a line that a live supplier booking covers is answered by that booking
   (its confirm accepts the line, its decline declines it, through `desk.answer_line` in the same transaction); the desk
   answers such a line 409 `answer_from_suppliers_tab` and lists the booking code (`supplier_booking`).
+
+## Tour price chain (AA-1029; root ADR 0005 d3 / d6 / d7, ADR 0019 b15)
+
+Loading supplier rates makes prices flow with no hand step after the plan's components are set:
+
+1. **Bridge**: `bk_trip_plan_sync` gives every `catalog.v_tour` key a trip plan (not sellable: selling stays a staff
+   decision) and keeps the CIS source price text as a reviewed **reference** (never a price).
+2. **Rates**: a supplier rate sheet (`GET /booking/rate-sheets/template`, `POST /booking/suppliers/{ref}/rate-sheets`
+   with the .xlsx as base64, `?dry_run=true` to check) becomes a draft contract with its rates (`create_contract` /
+   `create_rate`, so the same checks and audit); a second person publishes it (maker-checker). Items are matched to
+   the supplier's existing hotels (code + room type name) and services (code); every problem is reported by sheet, row
+   and column and nothing is written while one is left.
+3. **Cost sheet** (`app/catalog/cost_sheet.py`): net per person per start-date window x pax band (1, 2, 3–4, 5–6,
+   7–10, 11+; the band's smallest party) from the plan's components (rooms: doubles + a single when odd; services per
+   unit) and the rates in force (the B2B quote's choice), windows cut at rate validity edges shifted by the day offset,
+   anchored on the rate validity (never on today: the same inputs the next day write nothing; windows already over are
+   left out) and merged when equal; priced by the engine per channel with a rule in force (`b2b`, `fixed_departure`;
+   USD); `peak` when a rate's season says "peak". Computed rows replace the computed rows; hand rows and overrides are
+   kept; a computed row that overlaps a hand row is left out (or starts after one already over); at most 200 rows
+   (latest windows dropped first). The job covers every plan with a component, a computed row or a b2b row, so hand
+   priced plans get their RRP too.
+4. **RRP**: every b2b row carries `rrp_amount` = round up(amount x (1 + `rrp_markup_pct` of the b2b rule in force)),
+   the suggested retail price (ADR 0019 b15: net + 25 %). Agency tier discounts are AA-1030.
+5. **From price**: `booking.v_from_prices` (price.from.v1) and every staff / parity read: the cheapest RRP for 2
+   travellers still valid, USD first.
+6. **History**: every matrix change (staff or cost sheet) closes the open rows of `trip_plan_price_history` and inserts
+   the new set (`GET …/prices/history?at=`).
+
+Staff: the commercial drawer shows the from price, the reference (Mark reviewed) and "Recompute from rates"
+(`POST …/prices/recompute`); cost sheet rows carry a badge; the b2b rule takes the RRP markup; suppliers have
+"Import rate sheet".
 
 ## Trip checks and the case lifecycle (AA-682 S2, bk-027; S252 design §3.2, §4, §9)
 
@@ -860,6 +902,8 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. |
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
 | `bk_tenant_pull` | AA-1028 R1 slice 2 (root ADR 0019 d1 / d9): queued by a maintenance hook once per 5-minute slot while `catalog.v_tenant_account_v1` (CIS 357, feature-detected) is readable; `not_configured` without `COGNITO_M2M_CRM_CLIENT_ID`. One transaction: every CIS tenant except kind `internal` gets one `booking.b2b_partners` row (name, `active` only while in service with `trade.book`, else `suspended`; `m2m_client_id` = the AA-Partner client; USD on insert); a changed row is updated; a row it projected before whose tenant left CIS is suspended (never deleted); adoption guard: a staff-registered row (`projected_at` NULL) whose tenant CIS does not hold (CRM-seeded agencies, the AA-972 synthetic partner) is left untouched and staff-editable, counted `awaiting_cis`, and adopted once CIS holds the tenant; `projected_at` (bk-037) marks every row it derived from a CIS tenant; one audit row per change (`system:bk_tenant_pull`). Not deploy-gate exempt (seconds). |
+| `bk_trip_plan_sync` | AA-1029 R4 (root ADR 0005 d3 / d7): queued by a maintenance hook once per 15-minute slot while `catalog.v_tour` is readable. One transaction: every catalog key without a plan gets one (`sellable = false`, `synced_at`, `created_by` NULL; `INSERT … ON CONFLICT DO NOTHING`); a staff plan of a key in the catalog gets `synced_at` once; a plan whose tour left the catalog is left alone. With `catalog.v_tour_price_reference_v1` readable (feature-detected), the CIS source price text is kept on the plan with the parsed amount / currency (reference only), a changed text clears the review. One audit row per run that changed something (`system:bk_trip_plan_sync`, `trip_plan.synced`). Not deploy-gate exempt (seconds). |
+| `bk_price_recompute` | AA-1029 R4 (root ADR 0005 d3, ADR 0019 b15): queued by a maintenance hook whenever the watermark of its inputs moves (approvals, contract / rate / plan edits, component count, the UTC day; key = its hash). For every plan with a component or a computed row, one transaction each: the cost sheet (see "Tour price chain"), hand rows kept, the set stored only when it changed (audit `trip_plan.prices_recomputed`, dated history `cost_sheet`). A plan that fails is counted and the run raises at the end (retried; the others are stored). Payload `{plan_id?}`. Not deploy-gate exempt (seconds to a minute). |
 | `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). |
 | `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). S3 (bk-028): `payment.due_soon` (a schedule row of a sent invoice due within `payment_due_soon_days`) and `invoice.overdue` (past due, at the steps of `payment_overdue_reminder_days` [1, 7], the highest step reached), each one staff row (the case's sales owner, else the shared queue) + one customer My Trips row (no e-mail); read in the ops time zone. S4 (bk-030): `supplier_bill.due` (a received or approved bill due within `supplier_bill_due_soon_days`, then once more when overdue; shared staff queue). Never writes money. Not deploy-gate exempt. |
 | `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
@@ -1388,8 +1432,8 @@ migration-only PR, applied on Dev by Infra Migration Apply when the job tables a
 `REQUIRED_SCHEMA_VERSIONS`.
 
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
-places shipped as `country_profiles` / `destination_profiles`, bk-029), `v_from_prices` and catalog-backed version item
-types (AA-679 follow-up). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
+places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679
+follow-up). `v_from_prices` shipped with bk-039 (AA-1029). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
 
 ## Out of scope today
 
@@ -1398,9 +1442,10 @@ agency settlement (B2B cases have no customer invoice, CRM O-10), a customer not
 of AA-682 are written but `booking.customer.v1` serves payments only; critic note 11),
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog
-sync (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986), catalog titles on trip case legs (Q11),
-`v_from_prices`, rate-sheet upload (rates are entered one by one under a draft
-contract), contract document upload, supplier hard delete,
+sync of content (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986; the
+AA-1029 bridge copies catalog keys and the reference price text only), catalog titles on trip case legs (Q11),
+supply facts from a rate sheet (the import only prices existing hotels / services), the tax table (ADR 0005 d10),
+agency tier discounts (ADR 0019 b15, AA-1030), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
 project `aa-booking-admin` exists since S236, root `frontend/`).

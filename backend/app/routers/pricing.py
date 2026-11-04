@@ -175,6 +175,10 @@ class RuleCreate(BaseModel):
     card_fee_pct: Ratio = Decimal("0")
     valid_from: date
     note: str | None = Field(default=None, max_length=500)
+    # bk-039 (AA-1029, root ADR 0019 b15): b2b only, the suggested retail price markup on the agency net price.
+    rrp_markup_pct: (
+        Annotated[Decimal, Field(ge=0, lt=10, max_digits=6, decimal_places=4, allow_inf_nan=False)] | None
+    ) = None
 
 
 class FxRateCreate(BaseModel):

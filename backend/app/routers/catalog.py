@@ -10,7 +10,9 @@ Sellable trip plans (AA-679, S237 decision D4, bk-009):
 ``GET …/{source_id}`` is one tour with its CIS days and photos plus the commercial row.
 ``PUT …/{source_id}/commercial`` upserts the commercial row (``trip_plan.write``: admin, contracting).
 ``GET …/{source_id}/prices`` (``pricing.read``) and ``PUT …/{source_id}/prices`` (``trip_plan.write``, replaces the
-set) keep the plan's per-person price matrix (bk-032, AA-996; ``app/catalog/trip_plan_prices.py``).
+set) keep the plan's per-person price matrix (bk-032, AA-996; ``app/catalog/trip_plan_prices.py``). AA-1029 (bk-039):
+``POST …/prices/recompute`` runs the plan's cost sheet now, ``GET …/prices/history?at=`` reads the dated price list,
+``POST …/reference/review`` marks the CIS source price text reviewed (``trip_plan.write``).
 ``POST …/{source_id}/trip-cases`` starts a trip case, or a new version of an existing case, from a sellable plan
 (``trip_case.write`` + ``version.write``: admin, sales).
 ``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
@@ -28,7 +30,7 @@ change only the Booking state (status, reason, area, notes; soft, nothing is del
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -39,7 +41,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app import b2c, catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import departures, plan_components
-from app.catalog import geo, trip_plan_prices, trip_plans
+from app.catalog import cost_sheet, geo, price_history, trip_plan_prices, trip_plans
+from app.errors import NotFound
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
 from app.trip_cases import service
@@ -115,6 +118,9 @@ class PriceRowIn(BaseModel):
     amount: PerPerson | None = Field(default=None, description="price per person; with a net cost, an override")
     net_amount: NetCost | None = Field(default=None, description="net cost per person to price the row from")
     net_currency: Currency | None = None
+    computed: bool = Field(
+        default=False, description="a cost sheet row sent back as read; with an amount it becomes overridden"
+    )
 
 
 class PricesBody(BaseModel):
@@ -324,6 +330,51 @@ async def put_trip_plan_prices(
             [r.model_dump() for r in body.items],
             below_floor_reason=body.below_floor_reason,
         )
+
+
+@router.post("/trip-plans/{source_id}/prices/recompute")
+async def recompute_trip_plan_prices(source_id: SourceId, staff: CanWritePlans, pool: Pool) -> dict[str, Any]:
+    """AA-1029: run the cost sheet of this plan now (the same as the bk_price_recompute job does for every plan)."""
+    async with pool.acquire() as conn:
+        plan_id = await conn.fetchval(
+            "SELECT id::text FROM booking.trip_plans WHERE source_system = 'cis' AND source_id = $1", source_id
+        )
+    if plan_id is None:
+        raise NotFound("trip_plan_not_found", "this tour has no trip plan yet")
+    day = cost_sheet.today()
+    async with pool.acquire() as conn:
+        pricing = await cost_sheet.load_pricing(conn, day)
+    async with pool.acquire() as conn, conn.transaction():
+        result = await cost_sheet.recompute_plan(conn, plan_id, pricing)
+    async with pool.acquire() as conn:
+        return {"recompute": result, **(await trip_plan_prices.list_prices(conn, staff, source_id))}
+
+
+@router.get("/trip-plans/{source_id}/prices/history")
+async def trip_plan_price_history(
+    source_id: SourceId,
+    staff: CanReadPrices,
+    pool: Pool,
+    at: Annotated[datetime | None, Query(description="the price list in force at this time (default now)")] = None,
+) -> dict[str, Any]:
+    """AA-1029 (bk-039): the plan's price list as it was in force at ``at``, from the dated history."""
+    when = at or datetime.now(UTC)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    async with pool.acquire() as conn:
+        plan_id = await conn.fetchval(
+            "SELECT id::text FROM booking.trip_plans WHERE source_system = 'cis' AND source_id = $1", source_id
+        )
+        rows = await price_history.as_of(conn, plan_id, when) if plan_id else []
+    return {"source_id": source_id, "at": when, "items": rows}
+
+
+@router.post("/trip-plans/{source_id}/reference/review")
+async def review_trip_plan_reference(source_id: SourceId, staff: CanWritePlans, pool: Pool) -> dict[str, Any]:
+    """AA-1029 (ADR 0005 d7): mark the CIS source price text of this plan as reviewed (reference only)."""
+    async with pool.acquire() as conn, conn.transaction():
+        await trip_plan_prices.review_reference(conn, staff, source_id)
+        return await trip_plan_prices.list_prices(conn, staff, source_id)
 
 
 @router.post("/trip-plans/{source_id}/trip-cases", status_code=201)
