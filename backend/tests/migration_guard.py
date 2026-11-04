@@ -22,7 +22,8 @@ Every Booking migration must:
 - revoke INSERT/UPDATE/DELETE from role ``booking`` on every view it creates;
 - grant to role ``booking`` only, with one exception: a contract read of another app's runtime role
   (``CONSUMER_ROLES``, root ADR 0008 §5) may get ``USAGE ON SCHEMA booking`` and ``SELECT`` on views named
-  ``booking.v_*`` (bk-017, AA-858: ``cis_app`` reads the ops overview aggregates). Never a table, never
+  ``booking.v_*`` (bk-017, AA-858: ``cis_app`` reads the ops overview aggregates; bk-039, AA-1029: ``tripplanner``
+  reads the public "from" price ``booking.v_from_prices``, contract price.from.v1). Never a table, never
   another privilege; the grant is mirrored in AA-CIS-Infra ``db/owners.yaml`` ``consumer_grants``.
 
 The checks are regexes over the SQL with comments removed and string literals blanked, so they
@@ -42,7 +43,7 @@ OWNER_ROLE = "bk_owner"  # NOLOGIN owner of schema booking from bk-014 on (Infra
 OWNER_TRANSFER = 14  # bk-014 hands every booking.* object from MASTER_ROLE to OWNER_ROLE
 APP_ROLE = "booking"
 # Other apps' runtime roles that may read a Booking contract view (USAGE on the schema + SELECT on booking.v_*).
-CONSUMER_ROLES = frozenset({"cis_app"})
+CONSUMER_ROLES = frozenset({"cis_app", "tripplanner"})
 
 
 def migration_role(number: int) -> str:

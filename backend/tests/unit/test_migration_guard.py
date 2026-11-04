@@ -68,7 +68,7 @@ def test_good_example_passes() -> None:
         (GOOD.replace("COMMIT;", "UPDATE shared.tenants SET name = 'x';\nCOMMIT;"), "dml-target"),
         (GOOD.replace("COMMIT;", "TRUNCATE shared.job;\nCOMMIT;"), "dml-target"),
         (GOOD.replace("COMMIT;", "GRANT SELECT ON shared.destinations TO booking;\nCOMMIT;"), "grant"),
-        (GOOD.replace("COMMIT;", "GRANT SELECT ON booking.t TO tripplanner;\nCOMMIT;"), "grant"),
+        (GOOD.replace("COMMIT;", "GRANT SELECT ON booking.t TO tripplanner;\nCOMMIT;"), "consumer-grant"),
         (GOOD.replace("COMMIT;", "GRANT SELECT ON booking.t TO PUBLIC;\nCOMMIT;"), "no-public-grant"),
         (GOOD.replace("COMMIT;", "SELECT * FROM shared.admin_users;\nCOMMIT;"), "foreign-schema"),
         (GOOD.replace("COMMIT;", "CREATE ROLE booking LOGIN PASSWORD 'secret';\nCOMMIT;"), "no-password"),
@@ -152,6 +152,11 @@ def test_views_must_be_read_only_for_the_app() -> None:
         ("GRANT SELECT ON ALL TABLES IN SCHEMA booking TO cis_app;", False),
         ("GRANT EXECUTE ON FUNCTION booking.f() TO cis_app;", False),
         ("GRANT SELECT ON booking.v_ops_a TO aa_app_user;", False),  # not a consumer role
+        # bk-039 (AA-1029): TripPlanner reads the public from price (contract price.from.v1), nothing else.
+        ("GRANT USAGE ON SCHEMA booking TO tripplanner;", True),
+        ("GRANT SELECT ON booking.v_from_prices TO tripplanner;", True),
+        ("GRANT SELECT ON booking.trip_plan_prices TO tripplanner;", False),
+        ("GRANT INSERT ON booking.v_from_prices TO tripplanner;", False),
     ],
 )
 def test_consumer_role_gets_only_contract_view_reads(statement: str, ok: bool) -> None:
