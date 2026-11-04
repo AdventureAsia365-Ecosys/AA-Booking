@@ -26,7 +26,16 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.pricing import engine
 
 MAX_ROWS = 500
-RULE_FIELDS = ("channel", "target_margin", "floor_margin", "peak_uplift_pts", "card_fee_pct", "valid_from", "note")
+RULE_FIELDS = (
+    "channel",
+    "target_margin",
+    "floor_margin",
+    "peak_uplift_pts",
+    "card_fee_pct",
+    "valid_from",
+    "note",
+    "rrp_markup_pct",
+)
 FX_FIELDS = ("currency", "rate_per_usd", "buffer_pct", "as_of", "source")
 
 _STATUS = """
@@ -47,7 +56,7 @@ WITH in_force AS (
     ORDER BY r.channel, r.valid_from DESC
 )
 SELECT p.id::text AS id, p.channel, p.target_margin, p.floor_margin, p.peak_uplift_pts, p.card_fee_pct,
-       p.valid_from, p.note, p.created_at, p.created_by, cs.name AS created_by_name,
+       p.valid_from, p.note, p.rrp_markup_pct, p.created_at, p.created_by, cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
        {_STATUS.format(day="valid_from")} AS status
 FROM booking.pricing_rules p
@@ -134,6 +143,7 @@ def _rule(row: Any, staff: Staff) -> dict[str, Any]:
         "card_fee_pct": row["card_fee_pct"],
         "valid_from": row["valid_from"],
         "note": row["note"],
+        "rrp_markup_pct": row.get("rrp_markup_pct"),
     }
 
 
@@ -195,12 +205,18 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
     except engine.PricingError as exc:
         raise Invalid("invalid_rule", str(exc)) from None
     note = (data.get("note") or "").strip() or None
+    markup = data.get("rrp_markup_pct")
+    if markup is not None and channel is not engine.Channel.B2B:
+        # bk-039 (AA-1029, root ADR 0019 b15): the RRP is the agency net price + the markup, so only the b2b rule
+        # carries it (the table CHECK says the same).
+        raise Invalid("rrp_markup_b2b_only", "the RRP markup belongs to the b2b rule")
     try:
         rule_id = await conn.fetchval(
             """
             INSERT INTO booking.pricing_rules
-                (channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct, valid_from, note, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct, valid_from, note, created_by,
+                 rrp_markup_pct)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id::text
             """,
             channel.value,
@@ -211,6 +227,7 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
             data["valid_from"],
             note,
             staff.cis_user_id,
+            markup,
         )
     except asyncpg.UniqueViolationError:
         raise Conflict(
@@ -230,7 +247,8 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
         after={k: row[k] for k in RULE_FIELDS},
         entity_label=label,
         summary=f"New pricing rule {label}: target {_pct(data['target_margin'])}, floor {_pct(data['floor_margin'])}"
-        " (pending approval)",
+        + (f", RRP markup {_pct(markup)}" if markup is not None else "")
+        + " (pending approval)",
     )
     return row
 

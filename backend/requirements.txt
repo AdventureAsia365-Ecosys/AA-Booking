@@ -15,3 +15,6 @@ botocore==1.43.49
 structlog==25.5.0
 # Error tracking (AA-871), same SDK as AA-CIS-App; off unless SENTRY_DSN is set.
 sentry-sdk[fastapi]==2.70.0
+# Supplier rate-sheet Excel import (AA-1029, app/supply/rate_sheet.py): read-only, values-only reads of the AA template.
+openpyxl==3.1.5
+et-xmlfile==2.0.0

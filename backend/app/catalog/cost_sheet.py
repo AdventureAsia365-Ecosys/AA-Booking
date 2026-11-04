@@ -1,0 +1,563 @@
+"""The cost sheet of a trip plan (root ADR 0005 decision 3, AA-1029 R4): its price matrix computed from its bookable
+components (``booking.trip_plan_components``) and the supplier rates in force, priced per channel by the existing
+engine, recomputed whenever a rate, a pricing rule or an FX rate changes. Hand rows are kept.
+
+**Net cost per person**, per **start date** window x **pax band** (1, 2, 3-4, 5-6, 7-10, 11+; ADR 0005 d3), for the
+band's smallest party (fixed costs are shared by fewer people there, so the price covers the whole band):
+
+- a room component on day ``n`` = one night on ``start + n - 1`` for the party's room mix (``party // 2`` doubles plus
+  a single when the party is odd; singles only on a room type that holds one), the rate's pax band matched against the
+  room's occupancy, times the rooms of that occupancy;
+- a service component on day ``n`` = the service's rate on ``start + n - 1`` for the party, ``person`` x party,
+  ``group`` / ``vehicle`` / ``day`` x 1 (one day of a ``day`` service);
+- the same rate choice as a B2B quote (``app.supply.rates.rates_in_force_many``: published contract, both validities
+  cover the day, newest ``valid_from``, then a pax band, then the lowest net), so a quote of the plan and its matrix
+  agree;
+- divided by the party, rounded to the cent. Rates in one currency keep it (an FX change then re-prices the row); mixed
+  currencies are summed in USD at the approved plain rate in force.
+
+**Windows.** Start dates from today to the end of the latest rate in force (at most :data:`HORIZON_DAYS` ahead) are cut
+wherever a component's rate validity starts or ends (shifted by its day offset), so every window prices the same rates
+for every departure in it; neighbouring windows with the same nets, season and peak are merged. A window or band with a
+component without a rate in force gets no row (never a guessed or zero net). The season label = the labels of the rates
+used for 2 travellers; ``peak`` when one of them says "peak" (the rule's peak uplift then applies).
+
+**Channels.** ``b2b`` and ``fixed_departure`` (root ADR 0019: the B2C channels are retired), each only while an
+approved rule of that channel is in force today; the selling currency is USD (b16). The b2b rows carry the suggested
+retail price (``rrp_amount``) when the b2b rule has an RRP markup (b15).
+
+**Writing** (:func:`recompute_plan`, one transaction per plan, the plan row locked): the plan's hand rows (not
+``computed``, or computed and ``overridden`` by staff) are kept as they are (their RRP refreshed), the computed rows
+are replaced, a computed row overlapping a hand row of its channel and currency is left out, and the set is stored with
+``app.catalog.trip_plan_prices.store`` (audit ``trip_plan.prices_recomputed``, dated history ``cost_sheet``) only when
+it changed. At most ``MAX_ROWS`` rows: the latest windows are left out first (``truncated``).
+
+**The job** ``bk_price_recompute`` (:func:`run`): every plan with a component or a computed row, or one plan
+(``payload.plan_id``). Queued by :class:`RecomputeSchedule` whenever the watermark of its inputs moves (approvals of
+rules and FX rates, contract and rate edits, plan and component changes, and the UTC day, so the windows roll daily);
+staff can also recompute one plan at once (``POST …/prices/recompute``).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
+
+import asyncpg
+
+from app.catalog import trip_plan_prices as prices
+from app.jobs import queue
+from app.jobs.queue import Job
+from app.pricing import engine, repository
+from app.supply.rates import RateAsk, rates_in_force_many
+
+log = logging.getLogger(__name__)
+
+KIND = "bk_price_recompute"
+ACTOR = "system:bk_price_recompute"
+SCHEDULER = "system:price_recompute"
+MAX_ATTEMPTS = 3
+ACTION = "trip_plan.prices_recomputed"
+
+PAX_BANDS: tuple[tuple[int, int | None], ...] = ((1, 1), (2, 2), (3, 4), (5, 6), (7, 10), (11, None))
+CHANNELS: tuple[engine.Channel, ...] = (engine.Channel.B2B, engine.Channel.FIXED_DEPARTURE)
+SELLING_CURRENCY = engine.BASE_CURRENCY
+HORIZON_DAYS = 365
+MAX_SEGMENTS = 60
+FOREVER = date(9999, 12, 31)
+SEASON_MAX = 80
+CENT = Decimal("0.01")
+
+COMPONENTS_SQL = """
+SELECT c.day_no, c.hotel_room_type_id::text AS room_type_id, c.service_id::text AS service_id, rt.max_occupancy,
+       coalesce(rt.status, s.status) AS status, coalesce(h.status, 'active') AS hotel_status
+FROM booking.trip_plan_components c
+LEFT JOIN booking.hotel_room_types rt ON rt.id = c.hotel_room_type_id
+LEFT JOIN booking.hotels h ON h.id = rt.hotel_id
+LEFT JOIN booking.services s ON s.id = c.service_id
+WHERE c.trip_plan_id = $1::uuid
+ORDER BY c.day_no, coalesce(c.hotel_room_type_id, c.service_id)
+"""
+# Validity spans of every published rate of the plan's items (the rate's validity inside its contract's).
+SPANS_SQL = """
+SELECT x.hotel_room_type_id::text AS room_type_id, x.service_id::text AS service_id,
+       greatest(x.valid_from, k.valid_from) AS start,
+       least(coalesce(x.valid_to, '9999-12-31'::date), coalesce(k.valid_to, '9999-12-31'::date)) AS stop
+FROM booking.supplier_rates x JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
+WHERE k.status = 'published' AND (x.hotel_room_type_id = ANY($1::uuid[]) OR x.service_id = ANY($2::uuid[]))
+"""
+PLANS_SQL = """
+SELECT p.id::text AS id, p.source_id FROM booking.trip_plans p
+WHERE ($1::uuid IS NULL OR p.id = $1::uuid)
+  AND (EXISTS (SELECT 1 FROM booking.trip_plan_components c WHERE c.trip_plan_id = p.id)
+       OR EXISTS (SELECT 1 FROM booking.trip_plan_prices r WHERE r.trip_plan_id = p.id AND r.computed))
+ORDER BY p.source_id
+"""
+LOCK_SQL = "SELECT id::text AS id, source_id FROM booking.trip_plans WHERE id = $1::uuid FOR UPDATE"
+# What a recompute depends on; a change of any part queues one run (the idempotency key is the hash).
+WATERMARK_SQL = """
+SELECT concat_ws('|',
+    (SELECT count(*) || ':' || coalesce(max(approved_at)::text, '') FROM booking.policy_approvals),
+    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.supplier_contracts),
+    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.supplier_rates),
+    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.trip_plans),
+    (SELECT count(*) FROM booking.trip_plan_components),
+    (now() AT TIME ZONE 'UTC')::date::text) AS mark
+"""
+
+
+# ── Pure part ────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Part:
+    """One component of the plan: a room type or a service on a day."""
+
+    day_no: int
+    room_type_id: str | None
+    service_id: str | None
+    max_occupancy: int | None = None
+
+    @property
+    def item(self) -> str:
+        return self.room_type_id or self.service_id or ""
+
+    @property
+    def offset(self) -> int:
+        return self.day_no - 1
+
+
+@dataclass(frozen=True)
+class Span:
+    item: str
+    start: date
+    stop: date
+
+
+@dataclass(frozen=True)
+class Window:
+    start: date
+    end: date
+
+
+@dataclass(frozen=True)
+class NetRow:
+    """One computed net cost per person (before pricing)."""
+
+    valid_from: date
+    valid_to: date
+    pax_min: int
+    pax_max: int | None
+    net_amount: Decimal
+    net_currency: str
+    season: str | None
+    peak: bool
+
+
+@dataclass
+class Cell:
+    """The cost of one window and band while it is summed."""
+
+    costs: dict[str, Decimal] = field(default_factory=dict)
+    seasons: set[str] = field(default_factory=set)
+    complete: bool = True
+
+    def add(self, amount: Decimal, currency: str, season: str | None) -> None:
+        self.costs[currency] = self.costs.get(currency, Decimal(0)) + amount
+        if season:
+            self.seasons.add(season.strip())
+
+
+def room_mix(party: int, max_occupancy: int | None) -> list[tuple[int, int]]:
+    """``[(occupancy, rooms)]`` for a party: doubles plus a single when odd; singles on a one-person room type."""
+    if max_occupancy is not None and max_occupancy < 2:
+        return [(1, party)]
+    mix = [(2, party // 2), (1, party % 2)]
+    return [(pax, n) for pax, n in mix if n]
+
+
+def windows(start: date, end: date, parts: Sequence[Part], spans: Iterable[Span]) -> list[Window]:
+    """Start-date windows in ``[start, end]`` inside which every component prices the same rates."""
+    by_item: dict[str, list[Span]] = {}
+    for span in spans:
+        by_item.setdefault(span.item, []).append(span)
+    cuts = {start}
+    for part in parts:
+        shift = timedelta(days=part.offset)
+        for span in by_item.get(part.item, ()):
+            for day in (span.start - shift, span.stop + timedelta(days=1) - shift):
+                if start < day <= end:
+                    cuts.add(day)
+    ordered = sorted(cuts)
+    out = [Window(day, nxt - timedelta(days=1)) for day, nxt in zip(ordered, ordered[1:], strict=False)]
+    out.append(Window(ordered[-1], end))
+    return out
+
+
+def horizon(today: date, spans: Iterable[Span]) -> date | None:
+    """The last start date worth pricing: the end of the latest rate, at most HORIZON_DAYS ahead; None = no rate."""
+    stops = [s.stop for s in spans if s.stop >= today]
+    if not stops:
+        return None
+    return min(max(stops), today + timedelta(days=HORIZON_DAYS))
+
+
+def asks(wins: Sequence[Window], parts: Sequence[Part]) -> list[RateAsk]:
+    """Every rate lookup the windows x bands x components need (the batched query dedupes repeats)."""
+    out: list[RateAsk] = []
+    for win in wins:
+        for low, _ in PAX_BANDS:
+            for part in parts:
+                on = win.start + timedelta(days=part.offset)
+                if part.room_type_id:
+                    for occupancy, _rooms in room_mix(low, part.max_occupancy):
+                        out.append(RateAsk(part.room_type_id, None, on, occupancy))
+                else:
+                    out.append(RateAsk(None, part.service_id, on, low))
+    return out
+
+
+def cells(
+    wins: Sequence[Window], parts: Sequence[Part], found: dict[RateAsk, dict[str, Any] | None]
+) -> list[list[Cell]]:
+    """``[window][band]`` cost cells from the rates found for :func:`asks`."""
+    grid: list[list[Cell]] = []
+    for win in wins:
+        row: list[Cell] = []
+        for low, _ in PAX_BANDS:
+            cell = Cell()
+            for part in parts:
+                on = win.start + timedelta(days=part.offset)
+                if part.room_type_id:
+                    for occupancy, rooms in room_mix(low, part.max_occupancy):
+                        rate = found.get(RateAsk(part.room_type_id, None, on, occupancy))
+                        if rate is None:
+                            cell.complete = False
+                            continue
+                        cell.add(Decimal(str(rate["net_amount"])) * rooms, rate["currency"], rate.get("season"))
+                else:
+                    rate = found.get(RateAsk(None, part.service_id, on, low))
+                    if rate is None:
+                        cell.complete = False
+                        continue
+                    qty = low if rate["unit"] == "person" else 1
+                    cell.add(Decimal(str(rate["net_amount"])) * qty, rate["currency"], rate.get("season"))
+            row.append(cell)
+        grid.append(row)
+    return grid
+
+
+def per_person(cell: Cell, party: int, fx: dict[str, engine.FxRate]) -> tuple[Decimal, str] | None:
+    """The net cost per person of a complete cell, in its one currency or in USD; None when it cannot be priced."""
+    if not cell.complete or not cell.costs:
+        return None
+    if len(cell.costs) == 1:
+        ((currency, total),) = cell.costs.items()
+    else:
+        try:
+            total = sum((engine.to_usd(a, c, fx) for c, a in cell.costs.items()), Decimal(0))
+        except engine.MissingFxRate:
+            return None
+        currency = engine.BASE_CURRENCY
+    return (total / party).quantize(CENT, rounding=ROUND_HALF_UP), currency
+
+
+def season_label(cell: Cell) -> tuple[str | None, bool]:
+    labels = sorted(cell.seasons)
+    label = " / ".join(labels)[:SEASON_MAX] or None
+    return label, any("peak" in s.lower() for s in labels)
+
+
+def net_rows(
+    wins: Sequence[Window], grid: Sequence[Sequence[Cell]], fx: dict[str, engine.FxRate]
+) -> tuple[list[NetRow], int]:
+    """Merge the windows whose nets, season and peak match; returns the rows and the count of unpriced cells."""
+    unpriced = 0
+    keyed: list[tuple[Window, tuple[Any, ...], str | None, bool]] = []
+    two = next(i for i, (low, _) in enumerate(PAX_BANDS) if low == 2)
+    for win, row in zip(wins, grid, strict=True):
+        nets = []
+        for (low, _), cell in zip(PAX_BANDS, row, strict=True):
+            value = per_person(cell, low, fx)
+            unpriced += value is None
+            nets.append(value)
+        season, peak = season_label(row[two])
+        keyed.append((win, tuple(nets), season, peak))
+    merged: list[tuple[Window, tuple[Any, ...], str | None, bool]] = []
+    for win, nets, season, peak in keyed:
+        if merged and merged[-1][1:] == (nets, season, peak) and merged[-1][0].end + timedelta(days=1) == win.start:
+            merged[-1] = (Window(merged[-1][0].start, win.end), nets, season, peak)
+        else:
+            merged.append((win, nets, season, peak))
+    out: list[NetRow] = []
+    for win, nets, season, peak in merged:
+        for (low, high), value in zip(PAX_BANDS, nets, strict=True):
+            if value is not None:
+                out.append(NetRow(win.start, win.end, low, high, value[0], value[1], season, peak))
+    return out, unpriced
+
+
+def overlaps(row: dict[str, Any], other: dict[str, Any]) -> bool:
+    if (row["channel"], row["currency"].strip()) != (other["channel"], other["currency"].strip()):
+        return False
+    dates = row["valid_from"] <= other["valid_to"] and other["valid_from"] <= row["valid_to"]
+    top, other_top = row["pax_max"] or 999, other["pax_max"] or 999
+    return dates and row["pax_min"] <= other_top and other["pax_min"] <= top
+
+
+# ── Database part ────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Pricing:
+    """The rules and FX rates in force for one recompute day (read once per run)."""
+
+    on: date
+    rules: dict[engine.Channel, repository.DatedRule]
+    fx: dict[str, engine.FxRate]
+
+    @property
+    def markup(self) -> Decimal | None:
+        rule = self.rules.get(engine.Channel.B2B)
+        return rule.rrp_markup_pct if rule else None
+
+
+async def load_pricing(conn: asyncpg.Connection, on: date) -> Pricing:
+    rules: dict[engine.Channel, repository.DatedRule] = {}
+    for channel in CHANNELS:
+        dated = await repository.rule_in_force(conn, channel, on)
+        if dated is not None:
+            rules[channel] = dated
+    codes = await conn.fetch("SELECT DISTINCT currency::text AS c FROM booking.fx_rates")
+    dated_fx = await repository.fx_rates_in_force(conn, [r["c"].strip() for r in codes], on)
+    return Pricing(on=on, rules=rules, fx={c: d.rate for c, d in dated_fx.items()})
+
+
+def _dec(value: Any) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
+
+
+def kept_row(row: dict[str, Any], pricing: Pricing) -> dict[str, Any]:
+    """A hand row as the matrix holds it, typed for the insert, with its RRP under today's markup."""
+    out = {
+        **row,
+        "currency": row["currency"].strip(),
+        "net_currency": (row["net_currency"] or "").strip() or None,
+        "amount": _dec(row["amount"]),
+        "net_amount": _dec(row["net_amount"]),
+        "effective_margin": _dec(row["effective_margin"]),
+        "computed": bool(row["computed"]),
+        "overridden": bool(row["overridden"]),
+    }
+    assert out["amount"] is not None  # noqa: S101 — amount is NOT NULL
+    out["rrp_amount"] = prices.rrp_for(out["channel"], out["amount"], out["currency"], pricing.markup)
+    return out
+
+
+def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str, Any]], int]:
+    """Price every net row for every channel with a rule in force; returns the rows and the count refused."""
+    out: list[dict[str, Any]] = []
+    refused = 0
+    for channel in CHANNELS:
+        dated = pricing.rules.get(channel)
+        if dated is None:
+            continue
+        for net in nets:
+            try:
+                quote = engine.price_quote(
+                    [engine.CostLine(net.net_amount, net.net_currency)],
+                    dated.rule,
+                    currency=SELLING_CURRENCY,
+                    peak=net.peak,
+                    rates=pricing.fx,
+                )
+            except engine.PricingError:
+                refused += 1
+                continue
+            if quote.final_total <= 0 or quote.final_total >= prices.MAX_AMOUNT:
+                refused += 1
+                continue
+            out.append(
+                {
+                    "channel": channel.value,
+                    "season": net.season,
+                    "peak": net.peak,
+                    "valid_from": net.valid_from,
+                    "valid_to": net.valid_to,
+                    "pax_min": net.pax_min,
+                    "pax_max": net.pax_max,
+                    "currency": SELLING_CURRENCY,
+                    "amount": quote.final_total,
+                    "net_amount": net.net_amount,
+                    "net_currency": net.net_currency,
+                    "effective_margin": quote.effective_margin,
+                    "priced_on": pricing.on,
+                    "overridden": False,
+                    "computed": True,
+                    "rrp_amount": prices.rrp_for(channel.value, quote.final_total, SELLING_CURRENCY, pricing.markup),
+                    "created_by": None,
+                }
+            )
+    return out, refused
+
+
+def assemble(
+    existing: Sequence[dict[str, Any]], computed: Sequence[dict[str, Any]], pricing: Pricing
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Hand rows first (kept), then the computed rows that fit; positions 1..n. Returns the set and counters."""
+    kept = [kept_row(r, pricing) for r in existing if not r["computed"] or r["overridden"]]
+    fitting = [r for r in computed if not any(overlaps(r, k) for k in kept)]
+    room = max(prices.MAX_ROWS - len(kept), 0)
+    fitting.sort(key=lambda r: (r["valid_from"], r["channel"], r["pax_min"]))
+    truncated = max(len(fitting) - room, 0)
+    chosen = fitting[:room]
+    chosen.sort(key=lambda r: (r["channel"], r["valid_from"], r["pax_min"]))
+    final = [*kept, *chosen]
+    for i, row in enumerate(final, start=1):
+        row["position"] = i
+    return final, {
+        "kept": len(kept),
+        "computed": len(chosen),
+        "shadowed": len(computed) - len(fitting),
+        "truncated": truncated,
+    }
+
+
+async def _parts(conn: asyncpg.Connection, plan_id: str) -> tuple[list[Part], bool]:
+    rows = await conn.fetch(COMPONENTS_SQL, plan_id)
+    active = all(r["status"] == "active" and r["hotel_status"] == "active" for r in rows)
+    parts = [Part(int(r["day_no"]), r["room_type_id"], r["service_id"], r["max_occupancy"]) for r in rows]
+    return parts, active
+
+
+async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> tuple[list[dict[str, Any]], dict]:
+    """The computed rows of one plan and why some are missing (no DB write)."""
+    info: dict[str, Any] = {"windows": 0, "unpriced_cells": 0, "refused": 0, "reason": None}
+    parts, active = await _parts(conn, plan_id)
+    if not parts:
+        info["reason"] = "no_components"
+        return [], info
+    if not active:
+        info["reason"] = "inactive_component"
+        return [], info
+    if not pricing.rules:
+        info["reason"] = "no_rule"
+        return [], info
+    rooms = sorted({p.room_type_id for p in parts if p.room_type_id})
+    services = sorted({p.service_id for p in parts if p.service_id})
+    spans = [
+        Span(r["room_type_id"] or r["service_id"], r["start"], r["stop"])
+        for r in await conn.fetch(SPANS_SQL, rooms, services)
+    ]
+    end = horizon(pricing.on, spans)
+    if end is None:
+        info["reason"] = "no_rates"
+        return [], info
+    wins = windows(pricing.on, end, parts, spans)[:MAX_SEGMENTS]
+    info["windows"] = len(wins)
+    wanted = asks(wins, parts)
+    found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
+    nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx)
+    rows, info["refused"] = priced_rows(nets, pricing)
+    if not rows:
+        info["reason"] = "no_rates"
+    return rows, info
+
+
+async def recompute_plan(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> dict[str, Any]:
+    """Recompute and store one plan's computed rows (call inside a transaction)."""
+    plan = await conn.fetchrow(LOCK_SQL, plan_id)
+    if plan is None:
+        return {"outcome": "not_found"}
+    computed, info = await compute(conn, plan_id, pricing)
+    existing = [dict(r) for r in await conn.fetch(prices.ROWS_SQL, plan_id)]
+    final, counts = assemble(existing, computed, pricing)
+    changed = await prices.store(
+        conn,
+        plan_id,
+        plan["source_id"],
+        final,
+        actor_type="system",
+        actor_ref=ACTOR,
+        created_by=None,
+        action=ACTION,
+        extra={"computed_rows": counts["computed"], "reason": info["reason"]},
+        summary_suffix=" (cost sheet)",
+    )
+    return {"outcome": "changed" if changed else "unchanged", **counts, **info}
+
+
+def today() -> date:
+    return datetime.now(UTC).date()
+
+
+async def run(pool: asyncpg.Pool, plan_id: str | None = None, *, on: date | None = None) -> dict[str, Any]:
+    """Recompute every plan with a component or a computed row (or one plan). One transaction per plan; a plan that
+    fails is counted and the run raises at the end so the job is retried (the others are stored)."""
+    day = on or today()
+    async with pool.acquire() as conn:
+        pricing = await load_pricing(conn, day)
+        plans = await conn.fetch(PLANS_SQL, plan_id)
+    totals: dict[str, int] = {"plans": len(plans), "changed": 0, "unchanged": 0, "failed": 0, "computed_rows": 0}
+    reasons: dict[str, int] = {}
+    errors: list[str] = []
+    for plan in plans:
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                out = await recompute_plan(conn, plan["id"], pricing)
+        except Exception as exc:  # noqa: BLE001 — one bad plan must not stop the others; raised below
+            totals["failed"] += 1
+            errors.append(f"{plan['source_id']}: {type(exc).__name__}")
+            log.warning("bk_price_recompute plan %s failed: %s", plan["source_id"], type(exc).__name__)
+            continue
+        totals[out["outcome"]] = totals.get(out["outcome"], 0) + 1
+        totals["computed_rows"] += int(out.get("computed", 0))
+        if out.get("reason"):
+            reasons[out["reason"]] = reasons.get(out["reason"], 0) + 1
+    result = {
+        "outcome": "ok",
+        "priced_on": day.isoformat(),
+        "rules": sorted(c.value for c in pricing.rules),
+        "rrp_markup": None if pricing.markup is None else str(pricing.markup),
+        **totals,
+        "reasons": reasons,
+    }
+    if errors:
+        raise RuntimeError(f"{len(errors)} plan(s) failed: {'; '.join(errors[:10])}")
+    if totals["changed"]:
+        log.info("bk_price_recompute: %s", result)
+    return result
+
+
+async def handle(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
+    plan_id = (job.payload or {}).get("plan_id")
+    return await run(pool, str(plan_id) if plan_id else None)
+
+
+HANDLERS = {KIND: handle}
+
+
+class RecomputeSchedule:
+    """Worker maintenance hook: one ``bk_price_recompute`` run per new watermark of its inputs (see the module doc);
+    the idempotency key is the watermark's hash, so a watermark is run once whatever the number of workers."""
+
+    def __init__(self, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+        self._now = now
+        self._done: str | None = None
+
+    async def __call__(self, pool: asyncpg.Pool) -> str | None:
+        async with pool.acquire() as conn:
+            mark = await conn.fetchval(WATERMARK_SQL)
+        key = f"{KIND}:wm:{hashlib.sha256(str(mark).encode()).hexdigest()[:32]}"
+        if key == self._done:
+            return None
+        job_id = await queue.enqueue(
+            pool, KIND, {"trigger": "watermark"}, idempotency_key=key, max_attempts=MAX_ATTEMPTS, created_by=SCHEDULER
+        )
+        self._done = key
+        return job_id

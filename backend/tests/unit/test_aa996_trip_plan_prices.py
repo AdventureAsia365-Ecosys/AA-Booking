@@ -106,11 +106,12 @@ def test_from_price_shape() -> None:
     }
 
 
-def test_from_price_sql_counts_b2c_rows_for_two_pax() -> None:
+def test_from_price_sql_reads_the_b2b_rrp_for_two_pax() -> None:
+    # AA-1029 (root ADR 0019 b15): the from price is the suggested retail price of a b2b row, as booking.v_from_prices.
     sql = " ".join(prices.FROM_PRICE_SQL.format(plan="$1::uuid").split())
-    assert "fp.channel IN ('b2c_tailor_made', 'fixed_departure')" in sql
+    assert "fp.channel = 'b2b' AND fp.rrp_amount IS NOT NULL" in sql
     assert "fp.pax_min <= 2 AND (fp.pax_max IS NULL OR fp.pax_max >= 2)" in sql
-    assert "ORDER BY (fp.currency = 'USD') DESC, fp.amount" in sql
+    assert "ORDER BY (fp.currency = 'USD') DESC, fp.rrp_amount" in sql
 
 
 # ── Service ──────────────────────────────────────────────────────────────────
@@ -160,6 +161,8 @@ async def test_list_needs_pricing_read_and_is_empty_without_a_plan() -> None:
         "source_id": SOURCE_ID,
         "items": [],
         "from_price": None,
+        "reference": None,  # AA-1029
+        "changes": [],
     }
 
 

@@ -1,7 +1,9 @@
 """Supplier and supplier contract endpoints for staff (bk-008, AA-822; UI spec §6.3, module spec 08).
 
 Permissions: ``supply.read`` (admin, contracting, sales) for every GET; ``supply.write`` (admin, contracting) for
-every write. Publishing a contract also needs a second person (maker-checker, ADR 0005 d8): 403 ``maker_checker``.
+every write. AA-1029: ``GET /booking/rate-sheets/template`` and ``POST /booking/suppliers/{ref}/rate-sheets`` (the
+Excel import into a draft contract, ``app/supply/rate_sheet.py``). Publishing a contract also needs a second person
+(maker-checker, ADR 0005 d8): 403 ``maker_checker``.
 """
 
 from __future__ import annotations
@@ -11,12 +13,14 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth.staff import Staff, get_pool, require
+from app.errors import Invalid
 from app.routers.trip_cases import Email
 from app.suppliers import service
+from app.supply import rate_sheet
 
 router = APIRouter(prefix="/booking", tags=["suppliers"])
 
@@ -184,3 +188,35 @@ async def get_contract(contract_id: ContractId, _: CanRead, pool: Pool) -> dict[
 async def patch_contract(body: ContractPatch, contract_id: ContractId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await service.update_contract(conn, staff, contract_id, _payload(body))
+
+
+# ── Rate-sheet Excel import (AA-1029, root ADR 0005 d7 / d8) ─────────────────
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.get("/rate-sheets/template")
+async def rate_sheet_template(_: CanRead) -> Response:
+    """The empty AA rate-sheet workbook (Contract sheet + one sheet per service type)."""
+    return Response(
+        content=rate_sheet.template(),
+        media_type=XLSX,
+        headers={"Content-Disposition": 'attachment; filename="aa-rate-sheet-template.xlsx"'},
+    )
+
+
+@router.post("/suppliers/{supplier_ref}/rate-sheets")
+async def import_rate_sheet(
+    request: Request,
+    supplier_ref: SupplierRef,
+    staff: CanWrite,
+    pool: Pool,
+    dry_run: Annotated[bool, Query(description="validate and preview only; nothing is written")] = False,
+) -> dict[str, Any]:
+    """Upload a filled template (the raw .xlsx bytes as the body). Creates one DRAFT contract with its rates, or 422
+    ``rate_sheet_invalid`` with every problem by sheet, row and column; a second person publishes the draft."""
+    body = await request.body()
+    if len(body) > rate_sheet.MAX_BYTES:
+        raise Invalid("rate_sheet_too_large", "a rate sheet is at most 2 MB")
+    async with pool.acquire() as conn, conn.transaction():
+        return await rate_sheet.import_sheet(conn, staff, supplier_ref, body, dry_run=dry_run)

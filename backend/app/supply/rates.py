@@ -133,11 +133,11 @@ class RateAsk:
 # The same choice as rate_in_force (in force on the day, pax band, RATE_ORDER), for many asks in one round trip
 # (AA-972 review: a B2B quote must not run one query per night or component).
 RATES_MANY_SQL = f"""
-SELECT a.n, r.id, r.unit, r.net_amount, r.currency
+SELECT a.n, r.id, r.unit, r.net_amount, r.currency, r.season
 FROM unnest($1::uuid[], $2::uuid[], $3::date[], $4::int[]) WITH ORDINALITY
      AS a(room_type_id, service_id, on_day, pax, n)
 LEFT JOIN LATERAL (
-    SELECT x.id::text AS id, x.unit, x.net_amount::text AS net_amount, x.currency::text AS currency
+    SELECT x.id::text AS id, x.unit, x.net_amount::text AS net_amount, x.currency::text AS currency, x.season
     FROM booking.supplier_rates x JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
     WHERE (x.hotel_room_type_id = a.room_type_id OR x.service_id = a.service_id)
       AND {RATE_IN_FORCE_ON.format(day="a.on_day")}
@@ -151,7 +151,7 @@ ORDER BY a.n
 async def rates_in_force_many(conn: asyncpg.Connection, asks: list[RateAsk]) -> list[dict[str, Any] | None]:
     """The rate in force for every ask (same order; None where none), in one query. Duplicate asks are looked up once.
 
-    Each found rate has ``id``, ``unit``, ``net_amount`` (text) and ``currency`` (stripped).
+    Each found rate has ``id``, ``unit``, ``net_amount`` (text), ``currency`` (stripped) and ``season`` (its label).
     """
     unique = list(dict.fromkeys(asks))
     if not unique:
@@ -171,6 +171,7 @@ async def rates_in_force_many(conn: asyncpg.Connection, asks: list[RateAsk]) -> 
                 "unit": row["unit"],
                 "net_amount": row["net_amount"],
                 "currency": str(row["currency"]).strip(),
+                "season": row.get("season"),
             }
     by_ask = {ask: found.get(i) for i, ask in enumerate(unique, start=1)}
     return [by_ask[a] for a in asks]

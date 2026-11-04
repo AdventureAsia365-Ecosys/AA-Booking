@@ -60,6 +60,10 @@ EXPECTED_SECONDS: dict[str, int] = {
     # AA-1028 R1 slice 2: the CIS tenant account projection into booking.b2b_partners, one run per 5-minute slot while
     # catalog.v_tenant_account_v1 is readable (tens of rows, one transaction); not exempt (seconds).
     "bk_tenant_pull": 120,
+    # AA-1029 R4: the catalog bridge (one INSERT ... ON CONFLICT of ~1,000 keys per 15-minute slot) and the cost sheet
+    # (every plan with components, one transaction each, batched rate reads); not exempt (seconds to a minute).
+    "bk_trip_plan_sync": 120,
+    "bk_price_recompute": 600,
     # AA-993 G4 proof (test-only, JOB_TEST_KINDS): sleeps up to 3600 s.
     "bk_noop_sleep": 3660,
 }
