@@ -43,8 +43,8 @@ from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
 from app.b2b import expiry as b2b_expiry
 from app.b2b import tenant_pull
-from app.catalog import cost_sheet, trip_plan_sync
 from app.b2b.errors import B2BError, b2b_error_handler, validation_error_handler
+from app.catalog import cost_sheet, trip_plan_sync
 from app.catalog import lifecycle as tour_lifecycle
 from app.db import Database
 from app.errors import ServiceError, service_error_handler

@@ -262,7 +262,11 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
         for label, have in (
             ("Hotel code" if sheet == HOTEL_SHEET else "Service code", rate.hotel_code or rate.service_code),
             ("Room type", rate.room_type if sheet == HOTEL_SHEET else True),
-            ("Net", "net_amount" in rate.values or any(p.row == n and p.column == "Net" for p in problems)),
+            (
+                "Net",
+                "net_amount" in rate.values
+                or any(p.sheet == sheet and p.row == n and p.column == "Net" for p in problems),
+            ),
         ):
             if not have:
                 problems.append(Problem(sheet, n, label, "required", f"{label} is required"))

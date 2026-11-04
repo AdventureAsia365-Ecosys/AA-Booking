@@ -441,7 +441,8 @@ async def store(
     """Replace the plan's matrix with ``final`` when it differs: delete + insert, the plan's ``updated_at``, one audit
     row and the dated history, in the caller's transaction. Returns True when something changed."""
     before = [dict(r) for r in await conn.fetch(ROWS_SQL, plan_id)]
-    if [_comparable(r) for r in before] == [_comparable(r) for r in final]:
+    # The same rows in another order are the same price list (a recompute lists hand rows first): no rewrite.
+    if sorted(map(_comparable, before), key=repr) == sorted(map(_comparable, final), key=repr):
         return False
     await conn.execute("DELETE FROM booking.trip_plan_prices WHERE trip_plan_id = $1::uuid", plan_id)
     # A row kept from the set before keeps its author (the cost sheet keeps staff rows); new rows take created_by.
