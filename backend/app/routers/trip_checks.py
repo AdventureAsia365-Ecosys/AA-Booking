@@ -21,9 +21,10 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import b2c
 from app.auth.staff import Staff, get_pool, require
 from app.ops import lifecycle
 from app.ops import trip_checks as service
@@ -94,14 +95,18 @@ async def case_checks(ref: CaseRef, staff: CanRead, pool: Pool) -> dict[str, Any
 
 
 @router.post("/trip-cases/{ref}/checks", status_code=201)
-async def add_check(body: NewCheck, ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def add_check(body: NewCheck, ref: CaseRef, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, ref)  # AA-1037: a b2c case is read-only
         return await service.create_custom(conn, staff, ref, body.model_dump())
 
 
 @router.patch("/trip-checks/{check_id}")
-async def patch_check(body: CheckChanges, check_id: CheckId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def patch_check(
+    body: CheckChanges, check_id: CheckId, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_check_write(request, conn, str(check_id))  # AA-1037: a b2c case is read-only
         return await service.update(conn, staff, str(check_id), body.model_dump(exclude_unset=True))
 
 

@@ -17,6 +17,11 @@ another body is 409 ``idempotency_conflict``. No payment provider: money is mark
   ``GET|PATCH /payments/{ref}`` · ``POST /payments/{ref}/verify | void``.
 - ``GET /billing/summary``: the /billing KPIs.
 
+AA-1037 (root ADR 0019 d8): ``booking.invoices`` and ``booking.payments`` are B2C-only and frozen. While
+``B2C_INTAKE_ENABLED`` is off (the default) every write route above answers 410 ``b2b_only`` before any read or write
+(``app.b2c.refuse_b2c_write``), and the reads answer every ``actions`` flag false and ``invoiceable`` false, so the
+staff admin offers no button the API would refuse. The reads stay until the B2C tables are dropped.
+
 Evidence files: ``POST /ops-files`` with ``kind = payment_evidence``, ``entity_type = payment``
 (``routers.supplier_bookings``).
 """
@@ -28,9 +33,10 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, Path, Query, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import b2c
 from app.auth.staff import Staff, get_pool, require
 from app.ops import invoices, payments
 
@@ -127,6 +133,11 @@ def _dump(model: BaseModel, **kw: Any) -> dict[str, Any]:
     return model.model_dump(**kw)
 
 
+def _view(request: Request, out: dict[str, Any]) -> dict[str, Any]:
+    """AA-1037: while the B2C part is off, a read offers no write (every ``actions`` flag false, not invoiceable)."""
+    return out if b2c.writes_open(request) else b2c.frozen_view(out)
+
+
 # ── Invoices ─────────────────────────────────────────────────────────────────
 
 
@@ -134,6 +145,7 @@ def _dump(model: BaseModel, **kw: Any) -> dict[str, Any]:
 async def list_invoices(
     staff: CanRead,
     pool: Pool,
+    request: Request,
     status: Annotated[
         Literal["draft", "sent", "partially_paid", "paid", "cancelled", "open", "all"] | None, Query()
     ] = None,
@@ -146,7 +158,7 @@ async def list_invoices(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await invoices.list_invoices(
+        out = await invoices.list_invoices(
             conn,
             staff,
             status=status,
@@ -158,6 +170,7 @@ async def list_invoices(
             limit=limit,
             offset=offset,
         )
+    return _view(request, out)
 
 
 @router.get("/billing/summary")
@@ -167,15 +180,22 @@ async def billing_summary(_: CanRead, pool: Pool) -> dict[str, Any]:
 
 
 @router.get("/trip-cases/{ref}/billing")
-async def case_billing(ref: CaseRef, staff: CanRead, pool: Pool) -> dict[str, Any]:
+async def case_billing(ref: CaseRef, staff: CanRead, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await invoices.for_case(conn, staff, ref)
+        return _view(request, await invoices.for_case(conn, staff, ref))
 
 
 @router.post("/trip-cases/{ref}/invoices", status_code=201)
 async def create_invoice(
-    body: NewInvoice, ref: CaseRef, staff: CanWrite, pool: Pool, response: Response, key: IdempotencyKey = None
+    body: NewInvoice,
+    ref: CaseRef,
+    staff: CanWrite,
+    pool: Pool,
+    request: Request,
+    response: Response,
+    key: IdempotencyKey = None,
 ) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: booking.invoices is B2C-only (root ADR 0019 d8)
     async with pool.acquire() as conn, conn.transaction():
         out, replayed = await invoices.create(conn, staff, ref, _dump(body), key)
     if replayed:
@@ -184,43 +204,55 @@ async def create_invoice(
 
 
 @router.get("/invoices/{number}")
-async def get_invoice(number: Number, staff: CanRead, pool: Pool) -> dict[str, Any]:
+async def get_invoice(number: Number, staff: CanRead, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await invoices.get_invoice(conn, staff, number)
+        return _view(request, await invoices.get_invoice(conn, staff, number))
 
 
 @router.patch("/invoices/{number}")
-async def patch_invoice(body: InvoiceChanges, number: Number, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def patch_invoice(
+    body: InvoiceChanges, number: Number, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.update_draft(conn, staff, number, _dump(body, exclude_unset=True))
 
 
 @router.delete("/invoices/{number}")
-async def delete_invoice(number: Number, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def delete_invoice(number: Number, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.delete_draft(conn, staff, number)
 
 
 @router.post("/invoices/{number}/send")
-async def send_invoice(number: Number, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def send_invoice(number: Number, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.send(conn, staff, number)
 
 
 @router.post("/invoices/{number}/cancel")
-async def cancel_invoice(body: ReasonIn, number: Number, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def cancel_invoice(
+    body: ReasonIn, number: Number, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.cancel(conn, staff, number, body.reason)
 
 
 @router.post("/invoices/{number}/amend")
-async def amend_invoice(body: Amendment, number: Number, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def amend_invoice(
+    body: Amendment, number: Number, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.amend(conn, staff, number, _dump(body, exclude_unset=True))
 
 
 @router.post("/invoices/{number}/remind")
-async def remind_invoice(number: Number, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def remind_invoice(number: Number, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.remind(conn, staff, number)
 
@@ -230,8 +262,15 @@ async def remind_invoice(number: Number, staff: CanWrite, pool: Pool) -> dict[st
 
 @router.post("/invoices/{number}/payments", status_code=201)
 async def record_payment(
-    body: NewPayment, number: Number, staff: CanWrite, pool: Pool, response: Response, key: IdempotencyKey = None
+    body: NewPayment,
+    number: Number,
+    staff: CanWrite,
+    pool: Pool,
+    request: Request,
+    response: Response,
+    key: IdempotencyKey = None,
 ) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: booking.payments is B2C-only
     async with pool.acquire() as conn, conn.transaction():
         out, replayed = await payments.record(conn, staff, number, _dump(body), key)
     if replayed:
@@ -243,6 +282,7 @@ async def record_payment(
 async def list_payments(
     staff: CanRead,
     pool: Pool,
+    request: Request,
     state: Annotated[Literal["recorded", "verified", "voided"] | None, Query()] = None,
     kind: Annotated[Literal["receipt", "refund"] | None, Query()] = None,
     method: Annotated[Literal["bank_transfer", "card_offline", "cash", "other"] | None, Query()] = None,
@@ -257,7 +297,7 @@ async def list_payments(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await payments.list_payments(
+        out = await payments.list_payments(
             conn,
             staff,
             state=state,
@@ -271,27 +311,33 @@ async def list_payments(
             limit=limit,
             offset=offset,
         )
+    return _view(request, out)
 
 
 @router.get("/payments/{ref}")
-async def get_payment(ref: Ref, staff: CanRead, pool: Pool) -> dict[str, Any]:
+async def get_payment(ref: Ref, staff: CanRead, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await payments.get_payment(conn, staff, ref)
+        return _view(request, await payments.get_payment(conn, staff, ref))
 
 
 @router.patch("/payments/{ref}")
-async def patch_payment(body: PaymentChanges, ref: Ref, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def patch_payment(
+    body: PaymentChanges, ref: Ref, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await payments.update(conn, staff, ref, _dump(body, exclude_unset=True))
 
 
 @router.post("/payments/{ref}/verify")
-async def verify_payment(ref: Ref, staff: CanVerify, pool: Pool) -> dict[str, Any]:
+async def verify_payment(ref: Ref, staff: CanVerify, pool: Pool, request: Request) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await payments.verify(conn, staff, ref)
 
 
 @router.post("/payments/{ref}/void")
-async def void_payment(body: ReasonIn, ref: Ref, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def void_payment(body: ReasonIn, ref: Ref, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await payments.void(conn, staff, ref, body.reason)

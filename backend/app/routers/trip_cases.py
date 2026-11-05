@@ -226,8 +226,9 @@ async def list_trip_cases(
 
 @router.post("/trip-cases", status_code=201)
 async def create_trip_case(body: CaseCreate, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
-    if body.new_customer is not None:
-        b2c.refuse_new_customer(request)  # AA-1034 R0: no new traveller record while the B2C intake is off
+    # AA-1034 R0 / AA-1037: a staff-made case is always for a customer (new or existing), a B2C case; B2B cases come
+    # only from the B2B confirm path (POST /booking/b2b/v1/holds/{id}/confirm).
+    b2c.refuse_b2c_write(request)
     data = body.model_dump()
     data["customer_id"] = str(body.customer_id) if body.customer_id else None
     async with pool.acquire() as conn, conn.transaction():
@@ -262,20 +263,41 @@ async def trip_case_activity(
 
 
 @router.patch("/trip-cases/{case_ref}")
-async def patch_trip_case(body: CasePatch, case_ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def patch_trip_case(
+    body: CasePatch,
+    case_ref: CaseRef,
+    staff: CanWrite,
+    pool: Pool,
+    request: Request,
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await service.update_case(conn, staff, case_ref, body.model_dump(exclude_unset=True))
 
 
 @router.post("/trip-cases/{case_ref}/status")
-async def change_trip_case_status(body: StatusChange, case_ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def change_trip_case_status(
+    body: StatusChange,
+    case_ref: CaseRef,
+    staff: CanWrite,
+    pool: Pool,
+    request: Request,
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await service.change_status(conn, staff, case_ref, body.to_status, body.reason)
 
 
 @router.post("/trip-cases/{case_ref}/assign")
-async def assign_trip_case(body: AssignBody, case_ref: CaseRef, staff: CanAssign, pool: Pool) -> dict[str, Any]:
+async def assign_trip_case(
+    body: AssignBody,
+    case_ref: CaseRef,
+    staff: CanAssign,
+    pool: Pool,
+    request: Request,
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await service.assign(conn, staff, case_ref, body.cis_user_id, body.role)
 
 
@@ -284,9 +306,11 @@ async def create_trip_case_version(
     case_ref: CaseRef,
     staff: CanWriteVersions,
     pool: Pool,
+    request: Request,
     body: VersionCreate | None = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.create_version(conn, staff, case_ref, body.notes if body else None)
 
 
@@ -298,17 +322,28 @@ async def get_version(case_ref: CaseRef, version_number: VersionNumber, _: CanRe
 
 @router.patch("/trip-cases/{case_ref}/versions/{version_number}")
 async def patch_version(
-    body: VersionPatch, case_ref: CaseRef, version_number: VersionNumber, staff: CanWriteVersions, pool: Pool
+    body: VersionPatch,
+    case_ref: CaseRef,
+    version_number: VersionNumber,
+    staff: CanWriteVersions,
+    pool: Pool,
+    request: Request,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.update_version(conn, staff, case_ref, version_number, body.model_dump(exclude_unset=True))
 
 
 @router.delete("/trip-cases/{case_ref}/versions/{version_number}", status_code=204)
 async def delete_version(
-    case_ref: CaseRef, version_number: VersionNumber, staff: CanWriteVersions, pool: Pool
+    case_ref: CaseRef,
+    version_number: VersionNumber,
+    staff: CanWriteVersions,
+    pool: Pool,
+    request: Request,
 ) -> Response:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         await versions.delete_version(conn, staff, case_ref, version_number)
     return Response(status_code=204)
 
@@ -321,7 +356,12 @@ async def get_version_items(case_ref: CaseRef, version_number: VersionNumber, _:
 
 @router.put("/trip-cases/{case_ref}/versions/{version_number}/items")
 async def put_version_items(
-    body: ItemsPut, case_ref: CaseRef, version_number: VersionNumber, staff: CanWriteVersions, pool: Pool
+    body: ItemsPut,
+    case_ref: CaseRef,
+    version_number: VersionNumber,
+    staff: CanWriteVersions,
+    pool: Pool,
+    request: Request,
 ) -> dict[str, Any]:
     items = [
         versions.Item(
@@ -348,15 +388,22 @@ async def put_version_items(
         for item in body.items
     ]
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.replace_items(conn, staff, case_ref, version_number, items)
 
 
 @router.post("/trip-cases/{case_ref}/versions/{version_number}/price")
 async def price_version(
-    body: PriceBody, case_ref: CaseRef, version_number: VersionNumber, staff: CanPriceVersions, pool: Pool
+    body: PriceBody,
+    case_ref: CaseRef,
+    version_number: VersionNumber,
+    staff: CanPriceVersions,
+    pool: Pool,
+    request: Request,
 ) -> dict[str, Any]:
     """Price a draft from its stored net cost lines (same engine as quote-preview) and save the total."""
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.price_version(
             conn,
             staff,
@@ -372,9 +419,15 @@ async def price_version(
 
 @router.post("/trip-cases/{case_ref}/versions/{version_number}/send")
 async def send_version(
-    body: SendBody, case_ref: CaseRef, version_number: VersionNumber, staff: CanWriteVersions, pool: Pool
+    body: SendBody,
+    case_ref: CaseRef,
+    version_number: VersionNumber,
+    staff: CanWriteVersions,
+    pool: Pool,
+    request: Request,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.send_version(
             conn,
             staff,
@@ -393,9 +446,11 @@ async def approve_version(
     version_number: VersionNumber,
     staff: CanWriteVersions,
     pool: Pool,
+    request: Request,
     body: ApproveBody | None = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.approve_version(conn, staff, case_ref, version_number, body.note if body else None)
 
 

@@ -52,10 +52,17 @@ run); each case in a savepoint, so one refusal never undoes another case's move.
 
 The schedule state is read in the ops time zone (the transaction's ``TimeZone``). No job here ever writes money
 (design §9): reminders only.
+
+**B2C frozen** (AA-1037, root ADR 0019 d8): while ``B2C_INTAKE_ENABLED`` is off (the default; :func:`build_handlers`
+takes it from the settings), both kinds leave the B2C part alone: the lifecycle moves only ``channel = 'b2b'`` cases,
+the supplier and trip-check reminders name only B2B cases, and the customer payment reminders (``booking.invoices``
+is B2C-only) do not run. The DM-7 clearing of trip-check personal data above is retention and still covers every case.
+Each result says ``"b2c": "frozen" | "open"``.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import uuid
@@ -69,7 +76,7 @@ import asyncpg
 from app import audit, pilot
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.jobs.worker import PermanentError
+from app.jobs.worker import Handler, PermanentError
 from app.notifications import service as notifications
 
 log = logging.getLogger(__name__)
@@ -265,6 +272,7 @@ SELECT tc.id::text AS id FROM booking.trip_cases tc
  WHERE tc.deleted_at IS NULL AND tc.status = ANY($1::text[])
    AND (tc.start_date IS NULL OR tc.start_date - $2::int <= $3::date)
    AND tc.id > $4::uuid AND ($5::uuid[] IS NULL OR tc.id = ANY($5::uuid[]))
+   AND ($7::boolean OR tc.channel = 'b2b')
  ORDER BY tc.id
  LIMIT $6
 """
@@ -426,9 +434,13 @@ async def run_lifecycle(
     today: date | None = None,
     batch: int = BATCH,
     max_batches: int = MAX_BATCHES,
+    b2c_open: bool = False,
 ) -> dict[str, Any]:
     """One pass over the open sold cases: plan (and, live, apply) the travel moves; count (and, live, clear) the
-    emergency contacts past their keep window. ``today`` defaults to the ops date."""
+    emergency contacts past their keep window. ``today`` defaults to the ops date.
+
+    AA-1037 (root ADR 0019 d8): unless ``b2c_open`` (``B2C_INTAKE_ENABLED``), only B2B cases move; a ``b2c`` case is
+    frozen and never a candidate. The DM-7 clearing of trip-check personal data is retention and covers every case."""
     async with pool.acquire() as conn:
         tz = await ops_timezone(conn)
         rules = await policy(conn)
@@ -450,6 +462,7 @@ async def run_lifecycle(
                     after,
                     case_ids,
                     batch,
+                    b2c_open,
                 )
             ]
             if not ids:
@@ -476,6 +489,7 @@ async def run_lifecycle(
         "today": today.isoformat(),
         "timezone": tz,
         "scoped": case_ids is not None,
+        "b2c": _b2c_label(b2c_open),
         "candidates": tally.candidates,
         "moves": tally.moves,
         "moved_cases": tally.moved_cases,
@@ -524,13 +538,13 @@ async def _clear(
     return {"cleared_checks": checks, "cleared_cases": len(cases)}
 
 
-async def handle_lifecycle(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
+async def handle_lifecycle(pool: asyncpg.Pool, job: Job, *, b2c_open: bool = False) -> dict[str, Any]:
     payload = job.payload or {}
     case_ids = _case_ids(payload)
     async with pool.acquire() as conn:
         live_done = bool(await conn.fetchval(LIVE_DONE_SQL, KIND))
     mode, reason = decide_mode(payload, live_done)
-    result = await run_lifecycle(pool, mode=mode, case_ids=case_ids)
+    result = await run_lifecycle(pool, mode=mode, case_ids=case_ids, b2c_open=b2c_open)
     result.update({"reason": reason, "trigger": payload.get("trigger", "manual")})
     log.info(
         "case_lifecycle mode=%s moves=%s blocked=%s refused=%s cleared=%s",
@@ -554,6 +568,7 @@ SELECT sb.id::text AS id, sb.code, sb.requested_at, sb.requested_by, tc.id::text
   LEFT JOIN booking.staff_users st ON st.cis_user_id = sb.requested_by
  WHERE sb.status = 'requested' AND sb.requested_at < now() - make_interval(days => $1)
    AND tc.deleted_at IS NULL AND tc.status NOT IN ('cancelled', 'completed')
+   AND ($3::boolean OR tc.channel = 'b2b')
  ORDER BY sb.requested_at
  LIMIT $2
 """
@@ -565,6 +580,7 @@ SELECT k.id::text AS id, k.code, k.title, k.due_date, k.assignee_ref, (st.active
   LEFT JOIN booking.staff_users st ON st.cis_user_id = k.assignee_ref
  WHERE k.status = 'open' AND k.due_date IS NOT NULL AND k.due_date <= $1::date
    AND tc.deleted_at IS NULL AND tc.status = ANY($2::text[])
+   AND ($4::boolean OR tc.channel = 'b2b')
  ORDER BY k.due_date, k.id
  LIMIT $3
 """
@@ -600,6 +616,14 @@ CHECK_LABEL = {
 }
 
 
+NO_PAYMENT_REMINDERS = {"payments_due_soon": 0, "payments_overdue": 0, "payments_notified": 0, "customer_rows": 0}
+
+
+def _b2c_label(b2c_open: bool) -> str:
+    """The job result says whether B2C rows were in scope (AA-1037): ``open`` or ``frozen``."""
+    return "open" if b2c_open else "frozen"
+
+
 def overdue_step(days_overdue: int | None, steps: tuple[int, ...]) -> int | None:
     """The highest reminder step an overdue row has reached (None before the first)."""
     if days_overdue is None:
@@ -629,7 +653,7 @@ async def _payment_reminders(conn: asyncpg.Connection, limit: int) -> dict[str, 
         await conn.fetchval("SELECT value FROM booking.settings WHERE key = 'payment_overdue_reminder_days'")
     )
     rows = await conn.fetch(PAYMENTS_DUE_SQL, limit)
-    counts = {"payments_due_soon": 0, "payments_overdue": 0, "payments_notified": 0, "customer_rows": 0}
+    counts = dict(NO_PAYMENT_REMINDERS)
     for r in rows:
         amount = f"{r['remaining_amount']} {r['currency'].strip()}"
         when = r["due_date"].isoformat()
@@ -716,7 +740,11 @@ async def _bill_reminders(conn: asyncpg.Connection, today: date, soon_days: int,
     return {"bills_due": len(rows), "bills_notified": notified}
 
 
-async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit: int = 1000) -> dict[str, Any]:
+async def run_reminders(
+    pool: asyncpg.Pool, *, today: date | None = None, limit: int = 1000, b2c_open: bool = False
+) -> dict[str, Any]:
+    """AA-1037 (root ADR 0019 d8): unless ``b2c_open``, supplier and trip-check reminders cover B2B cases only, and
+    the customer payment reminders (``booking.invoices`` is B2C-only; they also write customer feed rows) are off."""
     async with pool.acquire() as conn:
         tz = await ops_timezone(conn)
         rules = await policy(conn)
@@ -725,7 +753,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
     waiting = due = 0
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT set_config('TimeZone', $1, true)", tz)
-        rows = await conn.fetch(WAITING_SQL, rules["supplier_answer_days"], limit)
+        rows = await conn.fetch(WAITING_SQL, rules["supplier_answer_days"], limit, b2c_open)
         for r in rows:
             asked = r["requested_at"].astimezone(UTC)
             if await notifications.notify_staff_once(
@@ -742,7 +770,7 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
             ):
                 waiting += 1
         horizon = today + timedelta(days=rules["trip_check_reminder_days"])
-        checks = await conn.fetch(CHECKS_DUE_SQL, horizon, list(ACTIVE), limit)
+        checks = await conn.fetch(CHECKS_DUE_SQL, horizon, list(ACTIVE), limit, b2c_open)
         for k in checks:
             what = k["title"] if k["code"] == "custom" else CHECK_LABEL[k["code"]]
             late = k["due_date"] < today
@@ -758,11 +786,12 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
                 recipient_ref=k["assignee_ref"] if k["assignee_active"] else None,
             ):
                 due += 1
-        payments = await _payment_reminders(conn, limit)
+        payments = await _payment_reminders(conn, limit) if b2c_open else dict(NO_PAYMENT_REMINDERS)
         bills = await _bill_reminders(conn, today, rules["supplier_bill_due_soon_days"], limit)
     return {
         "today": today.isoformat(),
         "timezone": tz,
+        "b2c": _b2c_label(b2c_open),
         "supplier_waiting": len(rows),
         "supplier_waiting_notified": waiting,
         "checks_due": len(checks),
@@ -772,8 +801,8 @@ async def run_reminders(pool: asyncpg.Pool, *, today: date | None = None, limit:
     }
 
 
-async def handle_reminders(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
-    result = await run_reminders(pool)
+async def handle_reminders(pool: asyncpg.Pool, job: Job, *, b2c_open: bool = False) -> dict[str, Any]:
+    result = await run_reminders(pool, b2c_open=b2c_open)
     result["trigger"] = (job.payload or {}).get("trigger", "manual")
     log.info(
         "ops_reminders waiting=%s checks_due=%s payments=%s customer_rows=%s bills=%s",
@@ -786,7 +815,12 @@ async def handle_reminders(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:
     return result
 
 
-HANDLERS = {KIND: handle_lifecycle, REMINDERS_KIND: handle_reminders}
+def build_handlers(b2c_open: bool) -> dict[str, Handler]:
+    """The two kinds for the worker; ``b2c_open`` is ``settings.b2c_intake_enabled`` (AA-1037: off = B2C frozen)."""
+    return {
+        KIND: functools.partial(handle_lifecycle, b2c_open=b2c_open),
+        REMINDERS_KIND: functools.partial(handle_reminders, b2c_open=b2c_open),
+    }
 
 
 # ── Schedule and enqueue ─────────────────────────────────────────────────────

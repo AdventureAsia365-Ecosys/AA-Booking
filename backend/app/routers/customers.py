@@ -1,4 +1,10 @@
-"""Customer endpoints for staff (S236 UI spec §4.12): directory, detail, manual lead, edit / block, archive."""
+"""Customer endpoints for staff (S236 UI spec §4.12): directory, detail, manual lead, edit / block, archive.
+
+AA-1037 (root ADR 0019 d8): customers are B2C records and frozen. While ``B2C_INTAKE_ENABLED`` is off (the default)
+the lead, edit / block and archive routes answer 410 ``b2b_only`` before any read or write; the directory and the
+detail stay readable until the drop. A traveller's erasure (DM-6.7) is not a staff edit: it runs as a reviewed DB
+Migrate ``run-script`` under the DRY RUN procedure (root ``docs/legal/dsar-erasure-runbook.md``).
+"""
 
 from __future__ import annotations
 
@@ -65,13 +71,17 @@ async def get_customer(customer_ref: CustomerRef, _: CanRead, pool: Pool) -> dic
 
 
 @router.patch("/customers/{customer_ref}")
-async def patch_customer(body: CustomerPatch, customer_ref: CustomerRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def patch_customer(
+    body: CustomerPatch, customer_ref: CustomerRef, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
+    b2c.refuse_b2c_write(request)  # AA-1037: customers are frozen B2C records (erasure is a DB Migrate script)
     async with pool.acquire() as conn, conn.transaction():
         return await service.update_customer(conn, staff, customer_ref, body.model_dump(exclude_unset=True))
 
 
 @router.delete("/customers/{customer_ref}", status_code=204)
-async def archive_customer(customer_ref: CustomerRef, staff: CanAdmin, pool: Pool) -> Response:
+async def archive_customer(customer_ref: CustomerRef, staff: CanAdmin, pool: Pool, request: Request) -> Response:
+    b2c.refuse_b2c_write(request)  # AA-1037: archiving also cancels the customer's new cases (B2C writes)
     async with pool.acquire() as conn, conn.transaction():
         await service.archive_customer(conn, staff, customer_ref)
     return Response(status_code=204)

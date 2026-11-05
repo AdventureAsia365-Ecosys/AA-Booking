@@ -1,7 +1,8 @@
 """AA-1034 R0 (root ADR 0019 d8): with B2C_INTAKE_ENABLED off (the default) no staff route creates a traveller record.
 
-Every route that would insert into ``booking.customers`` answers 410 ``b2b_only`` before the service is called; reading,
-editing and archiving customers and opening a case for an existing customer keep working.
+Every route that would insert into ``booking.customers`` answers 410 ``b2b_only`` before the service is called. Since
+AA-1037 editing and archiving customers and opening a case for an existing customer are refused too
+(``test_aa1037_b2c_writes_off.py``); reading customers keeps working.
 """
 
 from __future__ import annotations
@@ -90,11 +91,16 @@ def test_trip_plan_use_with_a_new_customer_answers_410(stubs: dict[str, Recorder
     assert stubs["use_for_trip_case"].calls == []
 
 
-def test_existing_customer_paths_keep_working(stubs: dict[str, Recorder]) -> None:
+def test_existing_customer_paths_are_frozen_too(stubs: dict[str, Recorder]) -> None:
+    """AA-1037 (R0 follow-up): a case for an existing customer and a customer edit are B2C writes as well."""
     c = client()
-    assert c.post("/booking/trip-cases", json={"customer_id": CUSTOMER_ID}).status_code == 201
-    assert c.patch("/booking/customers/CUS-000001", json={"name": "Redacted"}).status_code == 200
-    assert stubs["create_case"].calls and stubs["update_customer"].calls
+    assert c.post("/booking/trip-cases", json={"customer_id": CUSTOMER_ID}).status_code == 410
+    assert c.patch("/booking/customers/CUS-000001", json={"name": "Redacted"}).status_code == 410
+    assert c.get("/booking/customers/CUS-000001").status_code == 200  # reads stay
+    assert stubs["create_case"].calls == [] and stubs["update_customer"].calls == []
+    on = client(b2c_intake_enabled=True)
+    assert on.post("/booking/trip-cases", json={"customer_id": CUSTOMER_ID}).status_code == 201
+    assert on.patch("/booking/customers/CUS-000001", json={"name": "Redacted"}).status_code == 200
 
 
 def test_the_flag_on_restores_the_intake(stubs: dict[str, Recorder]) -> None:
