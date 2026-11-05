@@ -9,7 +9,7 @@ skip the pilot tenant.
   clears them;
 - ``bk_retention_inbox_redact``: an old processed inbox row whose trip case belongs to the pilot keeps its payload, the
   other agency's row is redacted; the result says one pilot tenant was skipped;
-- without the view nothing is skipped (fail-open, logged).
+- without the view the pilot is unknown (None): fail closed, the callers skip their destructive step.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ async def test_pilot_tenants_reads_the_marker(admin: asyncpg.Connection, pool: a
     await admin.execute(DROP)
     liveness.reset_cache()
     async with pool.acquire() as conn:
-        assert await pilot.pilot_tenants(conn) == []  # fail-open without the view
+        assert await pilot.pilot_tenants(conn) is None  # fail closed without the view: the pilot is unknown
 
 
 async def test_case_lifecycle_never_clears_the_pilot_tenants_check_notes(

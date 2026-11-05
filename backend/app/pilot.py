@@ -14,9 +14,11 @@ The other kinds are not clean-up of tenant data: ``bk_retention_job`` deletes fi
 data), ``bk_b2b_hold_expire`` applies the hold's own expiry, ``bk_tenant_pull`` / the price and plan jobs project CIS
 state, the reminders only notify, the case moves follow the travel dates.
 
-Fail-open when the view cannot be read (a missing grant or CIS 357 not applied): the job runs as before and logs
-``pilot_view_unreadable``. Both clean-ups only reach rows 90 days past a trip end or an inquiry, longer than the pilot
-(at most 8 weeks), so data written during the pilot is never in reach even then.
+Fail-closed when the view cannot be read (a missing grant, CIS 357 not applied, a database error): the pilot is then
+unknown (:func:`pilot_tenants` returns None), so the destructive step does not run: the case-lifecycle clearing is
+skipped (``clear_skipped_pilot_unknown``) and a retention run of a table with tenant data stays a DRY RUN
+(``pilot_unknown``); the job logs ``pilot_view_unreadable``. Both clean-ups only reach rows 90 days past a trip end or
+an inquiry, longer than the pilot (at most 8 weeks), so a skipped day costs nothing.
 """
 
 from __future__ import annotations
@@ -35,13 +37,20 @@ VIEW = liveness.View("catalog", "v_tenant_account_v1", ("tenant_id", "is_pilot")
 PILOT_SQL = f"SELECT tenant_id FROM {VIEW.qualified} WHERE is_pilot ORDER BY tenant_id"  # noqa: S608 — fixed name
 
 
-async def pilot_tenants(conn: asyncpg.Connection | asyncpg.Pool) -> list[uuid.UUID]:
-    """The pilot tenant ids (at most one: CIS ``tenants_one_pilot_key``); empty when there is none or the view is not
-    readable."""
-    if not await liveness.view_ready(conn, VIEW):
-        log.warning("pilot_view_unreadable view=%s", VIEW.qualified)
-        return []
-    return [uuid.UUID(str(r["tenant_id"])) for r in await conn.fetch(PILOT_SQL)]
+async def pilot_tenants(conn: asyncpg.Connection | asyncpg.Pool) -> list[uuid.UUID] | None:
+    """The pilot tenant ids (at most one: CIS ``tenants_one_pilot_key``; empty when there is none), or None when the
+    view cannot be read (the pilot is unknown: the caller skips its destructive step)."""
+    try:
+        if not await liveness.view_ready(conn, VIEW):
+            log.warning("pilot_view_unreadable view=%s: clean-up skipped", VIEW.qualified)
+            return None
+        rows = await conn.fetch(PILOT_SQL)
+    except (asyncpg.PostgresError, OSError) as exc:
+        log.warning(
+            "pilot_view_unreadable view=%s error_class=%s: clean-up skipped", VIEW.qualified, type(exc).__name__
+        )
+        return None
+    return [uuid.UUID(str(r["tenant_id"])) for r in rows]
 
 
 def uuid_array_literal(ids: list[Any]) -> str:

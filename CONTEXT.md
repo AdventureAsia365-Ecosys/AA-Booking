@@ -914,8 +914,9 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 **The pilot tenant** (AA-969 part 2, root ADR 0019 d16, `app/pilot.py`): the one real agency allowed on Dev for at
 most 8 weeks, read from the CIS contract view `catalog.v_tenant_account_v1` (`is_pilot`, feature-detected). The two
 clean-up paths that change tenant data on a schedule skip it: `bk_case_lifecycle`'s clearing of trip-check contacts
-and notes, and `bk_retention_inbox_redact` (an inbox row whose trip case is the pilot tenant's). Fail-open (logged
-`pilot_view_unreadable`) when the view is unreadable: both only reach rows 90 days old, longer than the pilot. The other
+and notes, and `bk_retention_inbox_redact` (an inbox row whose trip case is the pilot tenant's). Fail-closed (logged
+`pilot_view_unreadable`) when the view is unreadable: the pilot is unknown, so the clearing is skipped that run and the
+inbox redaction stays a DRY RUN (`pilot_unknown`). The other
 kinds do not clean up tenant data (job-row retention, hold expiry, projections, reminders, the case moves).
 
 Retention runs (both kinds, `app/retention/jobs.py`, DM-7.2): a manual run is a **DRY RUN** unless it says

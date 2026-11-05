@@ -24,7 +24,7 @@ session ``TimeZone`` to it, so the guard's ``current_date`` is the same day what
 It also clears, once the trip ended ``emergency_contact_keep_days`` (90) ago, the emergency contact and the notes of the
 case's trip checks (data standards DM-7 row of ``trip_case_checks``) and stamps ``cleared_at``. AA-969 (root ADR 0019
 d16): never for a case of the pilot tenant (``party_tenant_id``, :mod:`app.pilot`); its checks wait until the pilot
-marker is cleared.
+marker is cleared. When the pilot cannot be read the clearing is skipped for that run (``clear_skipped_pilot_unknown``).
 
 Modes (DM-7.2 style): a manual run is a **DRY RUN** unless its payload says ``"dry_run": false``; a scheduled run is a
 DRY RUN until one live run over every case (no ``case_ids``) has succeeded. A DRY RUN writes nothing but its job result:
@@ -495,6 +495,8 @@ async def _clear(
     pilot tenant's cases, AA-969 d16)."""
     async with pool.acquire() as conn:
         pilots = await pilot.pilot_tenants(conn)
+    if pilots is None:  # fail closed: the pilot is unknown, nothing is cleared (counted 0) this run
+        return {"cleared_checks": 0, "cleared_cases": 0, "clear_skipped_pilot_unknown": 1}
     if not live:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(CLEAR_COUNT_SQL, keep_days, today, case_ids, pilots)
