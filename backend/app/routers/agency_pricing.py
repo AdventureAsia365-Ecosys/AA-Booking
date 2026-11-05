@@ -8,6 +8,11 @@ manage the dated discount rows with maker-checker, like the pricing rules (``app
 ``/booking/pricing/partner-terms`` lists every B2B partner with its tier and discount today; ``PATCH /{partner_id}``
 moves a partner to another tier (audited). Reads need ``pricing.read``, writes ``pricing.write``. Service:
 ``app.b2b.agency_pricing``.
+
+AA-1030 G3: ``GET /booking/pricing/partner-tariffs/{partner_id}`` is one partner's tariff (its own price per tour,
+season and pax band, priced by the quote engine, ``app.b2b.tariff``) as JSON, or as the CSV the agency downloads from
+``GET /booking/b2b/v1/tariff`` (``?format=csv``); ``pricing.read``. The JSON also lists the matrix rows that cannot be
+quoted (``unpriced``, with the reason) and the rate card behind each row.
 """
 
 from __future__ import annotations
@@ -15,14 +20,16 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.staff import Staff, get_pool, require
-from app.b2b import agency_pricing
+from app.b2b import agency_pricing, tariff
+from app.b2b.errors import B2BError
+from app.errors import Invalid, NotFound, Unavailable
 
 router = APIRouter(prefix="/booking/pricing", tags=["pricing"])
 
@@ -179,3 +186,53 @@ async def set_partner_tier(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await agency_pricing.set_partner_tier(conn, staff, str(partner_id), body.tier_code, today=_today())
+
+
+# ── Agency tariff (AA-1030 G3) ───────────────────────────────────────────────
+
+PARTNER_SQL = """
+SELECT p.id::text AS id, p.agency_name, p.status, p.billing_currency::text AS billing_currency, p.tier_code,
+       t.label AS tier_label
+FROM booking.b2b_partners p JOIN booking.partner_tiers t ON t.code = p.tier_code
+WHERE p.id = $1::uuid
+"""
+
+
+@router.get(
+    "/partner-tariffs/{partner_id}",
+    responses={200: {"content": {"application/json": {}, "text/csv": {}}}},
+)
+async def get_partner_tariff(
+    partner_id: uuid.UUID,
+    _: CanPrice,
+    pool: Pool,
+    currency: Annotated[str, Query(pattern=r"^[A-Z]{3}$")] = "USD",
+    source_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+    format: Annotated[Literal["json", "csv"], Query()] = "json",  # noqa: A002 — the query parameter's name
+) -> Any:
+    today = _today()
+    async with pool.acquire() as conn:
+        partner = await conn.fetchrow(PARTNER_SQL, str(partner_id))
+        if partner is None:
+            raise NotFound("partner_not_found", "no B2B partner with this id")
+        try:
+            body = await tariff.build(
+                conn, partner_id=str(partner_id), currency=currency, on=today, source_id=source_id
+            )
+        except B2BError as exc:
+            if exc.error == "invalid":
+                raise Invalid("invalid_currency", exc.message) from None
+            raise Unavailable("tariff_unavailable", exc.message) from None
+    if format == "csv":
+        name = tariff.filename(partner["agency_name"], currency, today)
+        return Response(
+            tariff.to_csv(body),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"},
+        )
+    return {
+        **body,
+        "partner": {
+            k: partner[k] for k in ("id", "agency_name", "status", "billing_currency", "tier_code", "tier_label")
+        },
+    }

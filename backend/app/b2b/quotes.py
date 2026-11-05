@@ -205,7 +205,7 @@ async def _valid_hours(conn: asyncpg.Connection) -> int:
 
 
 async def _pricing_data(
-    conn: asyncpg.Connection, currencies: set[str], on: date
+    conn: asyncpg.Connection, currencies: set[str], on: date, *, require_all: bool = True
 ) -> tuple[repository.DatedRule, dict[str, repository.DatedFxRate]]:
     try:
         rule = await repository.rule_in_force(conn, engine.Channel.B2B, on)
@@ -215,7 +215,9 @@ async def _pricing_data(
         raise B2BError("unavailable", "pricing data is not available") from None
     if rule is None:
         raise B2BError("unavailable", "no B2B pricing rule in force")
-    missing = sorted(c for c in currencies if c != engine.BASE_CURRENCY and c not in rates)
+    # require_all=False (the agency tariff): the caller checks the quote currency; a cost currency without a rate
+    # leaves only the lines that need it unpriced (engine.MissingFxRate in price_line).
+    missing = sorted(c for c in currencies if require_all and c != engine.BASE_CURRENCY and c not in rates)
     if missing:
         raise B2BError("unavailable", f"no approved FX rate for {', '.join(missing)}")
     return rule, rates
@@ -226,6 +228,75 @@ def _lock(currency: str, rates: dict[str, repository.DatedFxRate], on: date) -> 
         return FxLock(currency, engine.ONE, engine.ZERO, on, USD_SOURCE)
     dated = rates[currency]
     return FxLock(currency, dated.rate.rate_per_usd, dated.rate.buffer_pct, dated.as_of, dated.source[:64])
+
+
+@dataclass(frozen=True)
+class PriceBasis:
+    """What a partner's B2B lines are priced with on one day in one quote currency: the ``b2b`` rule in force, the
+    approved FX rates, the quote currency's FX lock and the partner's agency terms (AA-1030). One basis, one formula
+    (:func:`price_line`) for ``POST /quotes`` and the agency tariff (``app.b2b.tariff``, AA-1030 G3)."""
+
+    on: date
+    currency: str
+    rule: repository.DatedRule
+    rates: dict[str, engine.FxRate]
+    fx: FxLock
+    terms: agency_pricing.AgencyTerms
+
+    @property
+    def margin(self) -> Decimal:
+        return self.rule.rule.margin(peak=False)
+
+
+@dataclass(frozen=True)
+class LinePrice:
+    """One priced line: the net behind it (USD, never serialised), the agency discount and card, the ``b2b_price``."""
+
+    net_usd: Decimal
+    discount: Decimal
+    rate_card_id: str | None
+    b2b_price: Decimal
+
+
+async def price_basis(
+    conn: asyncpg.Connection,
+    *,
+    partner_id: str,
+    currency: str,
+    cost_currencies: set[str],
+    on: date,
+    require_all: bool = True,
+) -> PriceBasis:
+    """The basis of a partner's prices on ``on``; B2BError ``unavailable`` without a rule or a needed FX rate (with
+    ``require_all=False`` only the quote currency's rate is needed)."""
+    rule, rates = await _pricing_data(conn, {currency, *cost_currencies}, on, require_all=require_all)
+    if currency != engine.BASE_CURRENCY and currency not in rates:
+        raise B2BError("unavailable", f"no approved FX rate for {currency}")
+    return PriceBasis(
+        on=on,
+        currency=currency,
+        rule=rule,
+        rates={code: dated.rate for code, dated in rates.items()},
+        fx=_lock(currency, rates, on),
+        terms=await agency_pricing.terms_for(conn, partner_id, on),
+    )
+
+
+def price_line(basis: PriceBasis, cost: LineCost, plan_id: str | None) -> LinePrice:
+    """The ``b2b_price`` of one line: its nets to USD, the rule's price (``net / (1 - margin - card fee)``) in the quote
+    currency, less the partner's discount for the line's plan, rounded up (:func:`round_line`). Raises
+    ``engine.PricingError`` (a missing FX rate, a bad rule)."""
+    net_usd = sum((engine.to_usd(amount, cur, basis.rates) for amount, cur in cost.costs), start=engine.ZERO)
+    sell = engine.from_usd(
+        engine.sell_price_usd(net_usd, basis.margin, basis.rule.rule.card_fee_pct), basis.rates.get(basis.currency)
+    )
+    discount, card_id = basis.terms.discount_for(plan_id)
+    return LinePrice(
+        net_usd=net_usd,
+        discount=discount,
+        rate_card_id=card_id,
+        b2b_price=round_line(agency_pricing.apply_discount(sell, discount), basis.currency),
+    )
 
 
 async def create_quote(
@@ -269,25 +340,24 @@ async def create_quote(
             today=on,
             exclude_hold=own_hold,
         )
-        currencies = {currency, *(cur for lc in costs for _, cur in lc.costs)}
-        rule, rates = await _pricing_data(conn, currencies, on)
-        fx = _lock(currency, rates, on)
-        engine_rates = {code: dated.rate for code, dated in rates.items()}
-        margin = rule.rule.margin(peak=False)
-        sell_rate = engine_rates.get(currency)
-        terms = await agency_pricing.terms_for(conn, partner_id, on)
+        basis = await price_basis(
+            conn,
+            partner_id=partner_id,
+            currency=currency,
+            cost_currencies={cur for lc in costs for _, cur in lc.costs},
+            on=on,
+        )
+        fx, rule, margin, terms = basis.fx, basis.rule, basis.margin, basis.terms
 
         priced: list[dict[str, Any]] = []
         for no, (line, lc, (availability, departure_id, _)) in enumerate(
             zip(lines, costs, seats, strict=True), start=1
         ):
-            try:
-                net_usd = sum((engine.to_usd(amount, cur, engine_rates) for amount, cur in lc.costs), start=engine.ZERO)
-                sell = engine.from_usd(engine.sell_price_usd(net_usd, margin, rule.rule.card_fee_pct), sell_rate)
-            except engine.PricingError as exc:
-                raise B2BError("unavailable", f"line {line.ask.line_ref}: {exc}") from None
             ask = line.ask
-            discount, card_id = terms.discount_for(_line_plan(ask.component_id))
+            try:
+                price = price_line(basis, lc, _line_plan(ask.component_id))
+            except engine.PricingError as exc:
+                raise B2BError("unavailable", f"line {ask.line_ref}: {exc}") from None
             priced.append(
                 {
                     "line_no": no,
@@ -303,11 +373,11 @@ async def create_quote(
                     "unit": UNIT,
                     "availability": availability,
                     "departure_id": departure_id,
-                    "b2b_price": round_line(agency_pricing.apply_discount(sell, discount), currency),
-                    "net_cost_usd": net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+                    "b2b_price": price.b2b_price,
+                    "net_cost_usd": price.net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
                     "supplier_rate_ids": lc.rate_ids,
-                    "agency_discount_pct": discount,
-                    "rate_card_id": card_id,
+                    "agency_discount_pct": price.discount,
+                    "rate_card_id": price.rate_card_id,
                 }
             )
         total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
