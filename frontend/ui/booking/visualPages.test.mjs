@@ -5,7 +5,8 @@
 //   2. slugs are unique and file-name safe; staff pages render the kit frame unless they say otherwise;
 //   3. changed-pages.mjs: a page folder touches its pages, a private folder its parent's, app/layout.tsx / ui / the
 //      visual files every page, a backend file none;
-//   4. selectPages: public vs staff vs all, the gallery only in a gallery run, the planted pages only in the self-test.
+//   4. selectPages: public vs staff vs all, the gallery only in a gallery run, the planted pages only in the self-test;
+//   5. expectedOutcome: the mocked run keeps the 404 page; a deployed host (signed out) expects the /login redirect.
 
 import assert from "node:assert/strict";
 import { readdirSync, statSync } from "node:fs";
@@ -15,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const FRONTEND = fileURLToPath(new URL("../..", import.meta.url));
 const VISUAL = join(FRONTEND, "e2e", "visual");
-const { PAGES, EXCLUDED, selectPages } = await import(pathToFileURL(join(VISUAL, "pages.ts")).href);
+const { PAGES, EXCLUDED, selectPages, expectedOutcome } = await import(pathToFileURL(join(VISUAL, "pages.ts")).href);
 const { changedSlugs } = await import(pathToFileURL(join(VISUAL, "changed-pages.mjs")).href);
 
 function appRoutes(dir = join(FRONTEND, "app")) {
@@ -81,4 +82,23 @@ test("selectPages: public / staff / all, the gallery only in a gallery run, the 
   assert.deepEqual(staff, ["hotels"]);
   const self = selectPages(PAGES, { auth: "all", slugs: "all", gallery: true, selftest: true }).map((p) => p.slug);
   assert.deepEqual(self, ["selftest-document", "selftest-frame"]);
+});
+
+test("expectedOutcome: the mock keeps 404, a deployed host (no session) lands on /login", () => {
+  const bySlug = Object.fromEntries(PAGES.map((p) => [p.slug, p]));
+  // Vercel Deploy runs 42006934840..42013253500: proxy.ts answers a signed-out unknown path with a 307 to
+  // /login?next=<path>, and page.goto returns the final response, so 404 can never be the deployed answer.
+  assert.deepEqual(expectedOutcome(bySlug["not-found"], false), { status: 404, finalPath: null });
+  assert.deepEqual(expectedOutcome(bySlug["not-found"], true), { status: 200, finalPath: "/login" });
+  assert.deepEqual(expectedOutcome(bySlug.login, true), { status: 200, finalPath: null });
+  assert.deepEqual(expectedOutcome(bySlug.hotels, false), { status: 200, finalPath: null });
+  for (const p of PAGES.filter((x) => x.deployed)) {
+    assert.equal(p.auth, "public", `${p.slug}: only public pages are captured on a deployed host`);
+    assert.ok(p.deployed.why.length > 20, `${p.slug}: the deployed expectation needs a real reason`);
+    assert.match(p.deployed.finalPath, /^\/[a-z0-9/-]*$/, `${p.slug}: a path, no query`);
+  }
+  // Every public page has a defined answer on a host.
+  for (const p of selectPages(PAGES, { auth: "public", slugs: "all", gallery: false, selftest: false })) {
+    assert.ok(Number.isInteger(expectedOutcome(p, true).status), p.slug);
+  }
 });

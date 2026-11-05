@@ -26,7 +26,11 @@ if (process.argv.includes("--selftest")) {
 writeFileSync(`${OUT}/report.json`, JSON.stringify(rows, null, 1));
 const reasons = (r) => {
   const out = [];
-  if (r.status !== (r.page === "not-found" ? 404 : 200)) out.push(`HTTP ${r.status}`);
+  // expectedStatus / expectedPath: what visual.spec.ts asserted (pages.ts expectedOutcome; a deployed host redirects
+  // the signed-out unknown path to /login). An older report without them: 404 for not-found, else 200.
+  const want = r.expectedStatus ?? (r.page === "not-found" ? 404 : 200);
+  if (r.status !== want) out.push(`HTTP ${r.status}`);
+  if (r.expectedPath && r.finalPath !== r.expectedPath) out.push(`landed on ${r.finalPath}`);
   if (r.appliedTheme !== r.theme) out.push(`theme ${r.appliedTheme}`);
   if (docOverflow(r)) out.push(`overflow ${r.overflow.doc - r.overflow.vw}px`);
   if (frameOverflow(r)) out.push(`frame overflow ${r.overflow.frames[0].scrollWidth - r.overflow.frames[0].clientWidth}px`);
