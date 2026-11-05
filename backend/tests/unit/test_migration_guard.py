@@ -36,7 +36,10 @@ def test_every_migration_passes_the_guard(path: Path) -> None:
 
 # Numbers taken by an open parallel branch: a gap is allowed only for these. Remove an entry once that
 # branch is merged (the file is then here and the gap is gone).
-RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {16: "AA-680 bk-016 staff Cognito identity (feat/aa680-cognito-staff)"}
+RESERVED_ON_OTHER_BRANCHES: dict[int, str] = {
+    16: "AA-680 bk-016 staff Cognito identity (feat/aa680-cognito-staff)",
+    43: "AA-1030 bk-043 partner price tiers (feat/aa-1030-agency-price-tiers)",
+}
 
 
 def test_migration_numbers_are_unique_and_contiguous() -> None:
