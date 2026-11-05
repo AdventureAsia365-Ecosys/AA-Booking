@@ -88,7 +88,7 @@ function TileLink({ href, label, children }: { href: string; label: string; chil
     <Link
       href={href}
       aria-label={label}
-      className="block min-w-0 rounded-lg outline-none [&>div]:h-full transition hover:-translate-y-px hover:shadow-[0_6px_18px_rgba(0,0,0,0.06)] focus-visible:ring-2 focus-visible:ring-accent-border"
+      className="block min-w-0 rounded-lg outline-none [&>div]:h-full transition hover:-translate-y-px hover:shadow-kit-md focus-visible:ring-2 focus-visible:ring-accent-border"
     >
       {children}
     </Link>

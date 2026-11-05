@@ -60,7 +60,7 @@ export default async function LoginPage({
           <img src="/assets/adventure-asia-logo.png" alt="Adventure Asia" width={72} height={46} className="mx-auto h-auto w-[72px]" />
           <p className="mt-3 font-script text-[40px] leading-none text-accent">Welcome back</p>
         </div>
-        <div className="rounded-lg border border-line bg-card px-7 py-8 shadow-[0_20px_60px_rgba(31,41,51,0.10)] sm:px-9">
+        <div className="rounded-lg border border-line bg-card px-7 py-8 shadow-kit-lg sm:px-9">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-deep">Booking · staff</p>
           <h1 className="mt-1 font-display text-[26px] font-semibold leading-tight text-ink">Sign in to Booking</h1>
           <p className="mt-1.5 text-[13px] text-muted">
