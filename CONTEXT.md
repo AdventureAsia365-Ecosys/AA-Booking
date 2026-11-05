@@ -653,7 +653,7 @@ Staff: the commercial drawer shows the from price, the reference (Mark reviewed)
 (`POST …/prices/recompute`); cost sheet rows carry a badge; the b2b rule takes the RRP markup; suppliers have
 "Import rate sheet".
 
-## Agency price tiers (AA-1030, bk-045; root ADR 0019 b15)
+## Agency price tiers (AA-1030, bk-043; root ADR 0019 b15)
 
 Every B2B partner has a **tier** (`b2b_partners.tier_code`, default `standard`; seeded standard / silver / gold). A
 tier's **discount** is a dated, append-only row (`partner_tier_discounts`), in force once a second person approved it
@@ -1449,11 +1449,11 @@ full replay that grants INSERT again next to recent test rows still applies). A 
 `b2c_insert_regranted` (INSERT given back for the test only). The tables are dropped later under the destructive-ops
 DRY RUN procedure.
 
-### `bk-045` (AA-1030 R4 agency price tiers — needs `bk-009`, `bk-019`)
+### `bk-043` (AA-1030 R4 agency price tiers — needs `bk-009`, `bk-019`)
 
 Root ADR 0019 b15. `partner_tiers` (code, label, sort order; seeded standard / silver / gold), `partner_tier_discounts`
 (dated discount of a tier on the b2b price, append-only; seeded 0 / 3 / 6 % from 2026-11-01, approved as
-`seed:bk-045`), `partner_rate_cards` (a partner's contract discount for the whole catalogue or one trip plan,
+`seed:bk-043`), `partner_rate_cards` (a partner's contract discount for the whole catalogue or one trip plan,
 `valid_from` .. `valid_to`, append-only), `partner_price_approvals` (the second-person approvals of both, with a
 maker-checker trigger; a table of its own because bk-007 / bk-021 re-add the `policy_approvals` entity CHECK when
 replayed), `b2b_partners.tier_code` (default `standard`, FK), and what a quote was priced with

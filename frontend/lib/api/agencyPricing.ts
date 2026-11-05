@@ -1,5 +1,5 @@
 // lib/api/agencyPricing.ts
-// AA-1030 (bk-045) — typed calls for Pricing → Agency tiers (backend routers/agency_pricing.py, app/b2b/agency_pricing.py).
+// AA-1030 (bk-043) — typed calls for Pricing → Agency tiers (backend routers/agency_pricing.py, app/b2b/agency_pricing.py).
 // Root ADR 0019 b15: every B2B partner has a tier whose approved discount is taken off the agency (b2b) price; an
 // optional contract rate card overrides it. Discount rows and rate cards are append-only and maker-checker (a second
 // person approves); moving a partner to another tier is audited.

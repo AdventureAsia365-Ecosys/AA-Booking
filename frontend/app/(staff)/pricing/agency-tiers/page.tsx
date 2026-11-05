@@ -1,4 +1,4 @@
-// app/(staff)/pricing/agency-tiers/page.tsx: Agency tiers (AA-1030, bk-045; root ADR 0019 b15).
+// app/(staff)/pricing/agency-tiers/page.tsx: Agency tiers (AA-1030, bk-043; root ADR 0019 b15).
 // Server shell for the metadata; the page itself is the client view in _parts.
 
 import type { Metadata } from "next";

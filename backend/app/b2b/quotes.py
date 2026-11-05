@@ -22,7 +22,7 @@
   every hold under the departure lock); counting it would answer ``sold_out`` for seats the same client holds.
 - **Served tours only** (AA-986 L5, root ADR 0015): a ``tp:`` line whose tour is not served (retired, paused or not
   in ``catalog.v_tour``) is 409 ``tour_not_served`` before anything is priced (``app.b2b.served``).
-- **Agency tier / rate card** (AA-1030, bk-045, root ADR 0019 b15, ``app.b2b.agency_pricing``): each line's
+- **Agency tier / rate card** (AA-1030, bk-043, root ADR 0019 b15, ``app.b2b.agency_pricing``): each line's
   ``b2b_price`` is the rule's price less the partner's discount in force on the quote day (the plan's contract rate
   card, else a catalogue card, else the tier's approved discount), then rounded up. The quote stores the tier and its
   discount, each line the discount applied and the card behind it. A line with a discount hashes it

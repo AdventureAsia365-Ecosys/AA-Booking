@@ -1,6 +1,6 @@
 "use client";
 // app/(staff)/pricing/agency-tiers/_parts/AgencyDrawers.tsx — "New tier", "New tier discount" and "New rate card"
-// drawers (AA-1030, bk-045). Staff type percentages ("3" for 3 %); the API takes fractions ("0.0300"). A discount or a
+// drawers (AA-1030, bk-043). Staff type percentages ("3" for 3 %); the API takes fractions ("0.0300"). A discount or a
 // rate card is saved PENDING; the toast says a second person has to approve it. A rate card is either a discount or an
 // END card (no discount: from its first day it ends the contract rate of its scope, back to the tier); the Rate cards
 // tab opens this drawer pre-filled as an end card from a card's "End" button. The API owns every check (discount under

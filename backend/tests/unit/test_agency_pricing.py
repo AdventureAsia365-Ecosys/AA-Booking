@@ -1,4 +1,4 @@
-"""AA-1030 (bk-045): agency price tiers and rate cards with a scripted connection — which discount a line gets, the
+"""AA-1030 (bk-043): agency price tiers and rate cards with a scripted connection — which discount a line gets, the
 quote priced with it (stored and hashed; a 0 % partner hashes as before), the margin left under the b2b rule, and the
 staff routes (permissions, maker-checker, tier assignment audit).
 
@@ -120,7 +120,7 @@ def _quote(conn: ScriptedConn) -> dict[str, Any]:
 
 def test_tier_discount_lowers_every_line_and_is_stored() -> None:
     standard = _quote(_conn().on(TERMS_FRAGMENT, {"tier_code": "standard", "tier_discount": D("0")}))
-    plain = _quote(_conn())  # no tier row read at all (a partner from before bk-045 reads as standard)
+    plain = _quote(_conn())  # no tier row read at all (a partner from before bk-043 reads as standard)
     assert standard["price_hash"] == plain["price_hash"]  # a 0 % line hashes as before
     conn = _conn().on(TERMS_FRAGMENT, {"tier_code": "silver", "tier_discount": D("0.0300")})
     silver = _quote(conn)

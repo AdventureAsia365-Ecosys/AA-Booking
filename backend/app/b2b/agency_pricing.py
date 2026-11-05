@@ -1,4 +1,4 @@
-"""Agency price tiers and contract rate cards (AA-1030, bk-045; root ADR 0019 b15, ADR 0005a decision 1).
+"""Agency price tiers and contract rate cards (AA-1030, bk-043; root ADR 0019 b15, ADR 0005a decision 1).
 
 ADR 0019 b15: one net price per tour per season, three agency tiers with a percentage discount set per contract
 (0 / 3 / 6 % to start, policy data editable later) and a suggested retail price (RRP) = net + 25 % (AA-1029). Here
@@ -24,7 +24,7 @@ the RRP (``price.from.v1``, the public "from" price) stays the same for every ag
   in force and flags it below the floor (:func:`margin_after_discount`).
 
 Staff admin (``/booking/pricing/partner-*``, ``app.routers.agency_pricing``): reads ``pricing.read``, writes and
-approvals ``pricing.write``; the creator of a discount or card row cannot approve it (403 ``own_row``, and the bk-045
+approvals ``pricing.write``; the creator of a discount or card row cannot approve it (403 ``own_row``, and the bk-043
 trigger). Assigning a partner's tier is audited (``b2b_partner.tier_changed``); it changes no rate, so it needs no
 second person.
 """
@@ -45,7 +45,7 @@ from app.pricing import engine, repository
 from app.pricing import policy as pricing_policy
 
 MAX_ROWS = 500
-MAX_DISCOUNT = Decimal("0.5")  # the bk-045 CHECK: below half the price
+MAX_DISCOUNT = Decimal("0.5")  # the bk-043 CHECK: below half the price
 ZERO = Decimal("0")
 DEFAULT_TIER = "standard"
 
@@ -515,7 +515,7 @@ async def _approve(conn: asyncpg.Connection, staff: Staff, entity_type: str, row
         await conn.execute(APPROVE_SQL[entity_type], row_id, staff.cis_user_id)
     except asyncpg.UniqueViolationError:  # approved concurrently by someone else
         raise Conflict("already_approved", "this row is already approved") from None
-    except asyncpg.CheckViolationError:  # the bk-045 trigger: same rule as above, enforced by the DB
+    except asyncpg.CheckViolationError:  # the bk-043 trigger: same rule as above, enforced by the DB
         raise Forbidden("own_row", "maker-checker: a second person must approve a row you created") from None
 
 

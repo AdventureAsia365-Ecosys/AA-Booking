@@ -1,5 +1,5 @@
 "use client";
-// app/(staff)/pricing/agency-tiers/_parts/AgencyTiersView.tsx — Pricing → Agency tiers (AA-1030, bk-045; root ADR 0019
+// app/(staff)/pricing/agency-tiers/_parts/AgencyTiersView.tsx — Pricing → Agency tiers (AA-1030, bk-043; root ADR 0019
 // b15). Three tabs: Tiers (the discount each tier takes off the agency price today, the margin it leaves under the
 // b2b rule with a below-floor warning, and the dated discount rows with maker-checker), Agencies (every B2B partner
 // with its tier, moved with one select; audited) and Rate cards (a partner's contract discount, for every tour or

@@ -1,7 +1,7 @@
-"""AA-1030 (bk-045) end to end on a real PostgreSQL, as role ``booking``: two invented partners on different tiers get
-different B2B prices for the same tour (root ADR 0019 b15 starting discounts, approved by the bk-045 seed), a contract
+"""AA-1030 (bk-043) end to end on a real PostgreSQL, as role ``booking``: two invented partners on different tiers get
+different B2B prices for the same tour (root ADR 0019 b15 starting discounts, approved by the bk-043 seed), a contract
 rate card overrides the tier only once a second person approved it, a new tier discount is pending until approved,
-and the staff reads show the tier, the discount and the margin left. Schema checks: ``test_bk045_schema.py``.
+and the staff reads show the tier, the discount and the margin left. Schema checks: ``test_bk043_schema.py``.
 """
 
 from __future__ import annotations

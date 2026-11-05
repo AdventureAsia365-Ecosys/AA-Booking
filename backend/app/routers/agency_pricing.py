@@ -1,4 +1,4 @@
-"""Staff endpoints for agency price tiers and contract rate cards (AA-1030, bk-045; root ADR 0019 b15).
+"""Staff endpoints for agency price tiers and contract rate cards (AA-1030, bk-043; root ADR 0019 b15).
 
 ``/booking/pricing/partner-tiers`` lists the tiers with the discount in force and the margin it leaves under the
 ``b2b`` rule; ``POST`` adds a tier, ``PATCH /{code}`` relabels or reorders one. ``/booking/pricing/partner-tier-
