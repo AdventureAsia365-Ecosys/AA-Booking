@@ -22,7 +22,10 @@ compares the windows with the last live run).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
+
+from app.pilot import uuid_array_literal
 
 JOB_KIND = "bk_retention_job"
 INBOX_KIND = "bk_retention_inbox_redact"
@@ -66,6 +69,10 @@ class Spec:
     ts_col: str  # retention column; (ts_col, id) is indexed (bk-012)
     action: str  # 'delete' | 'redact'
     parts: tuple[Part, ...]
+    # AA-969 (root ADR 0019 d16): a predicate on alias ``t`` that leaves the pilot tenant's rows out; ``{pilots}`` is
+    # replaced at run time by a validated uuid[] literal (app.pilot.uuid_array_literal). Empty = the table holds no
+    # tenant data.
+    pilot_where: str = ""
 
     def windows(self) -> dict[str, int]:
         return {p.name: p.window_days for p in self.parts}
@@ -90,10 +97,23 @@ INBOX_SPEC = Spec(
     ts_col="received_at",
     action="redact",
     parts=(Part("payload_pii", 90, "t.redacted_at IS NULL AND t.status <> 'received'"),),
+    pilot_where=(
+        "NOT EXISTS (SELECT 1 FROM booking.trip_cases pc"
+        " WHERE pc.inbox_event_id = t.id AND pc.party_tenant_id = ANY({pilots}))"
+    ),
 )
 
 SPECS: dict[str, Spec] = {s.kind: s for s in (JOB_SPEC, INBOX_SPEC)}
 KINDS: tuple[str, ...] = tuple(SPECS)
+
+
+def without_pilots(spec: Spec, pilots: list[Any]) -> Spec:
+    """``spec`` with every part's predicate also leaving the pilot tenants' rows out (unchanged when there is no pilot
+    or the table holds no tenant data)."""
+    if not pilots or not spec.pilot_where:
+        return spec
+    guard = spec.pilot_where.format(pilots=uuid_array_literal(pilots))
+    return replace(spec, parts=tuple(replace(p, where=f"({p.where}) AND {guard}") for p in spec.parts))
 
 
 def spec_for(kind: str) -> Spec:

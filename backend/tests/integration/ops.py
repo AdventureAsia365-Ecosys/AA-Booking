@@ -435,3 +435,23 @@ async def payout(
         SHA,
         by,
     )
+
+
+# AA-969 (root ADR 0019 d16): Booking's clean-ups fail closed while the pilot marker view (CIS 357
+# catalog.v_tenant_account_v1) is unreadable, so tests of those clean-ups stand in an empty one ("no pilot") around
+# each test, like test_aa969_pilot_skip.py does with a pilot row.
+TENANT_ACCOUNT_COLUMNS = (
+    "tenant_id uuid, name text, account_status text, suspend_reason text, in_service boolean, kind text, "
+    "is_pilot boolean, trade_book boolean"
+)
+TENANT_ACCOUNT_DROP = "DROP TABLE IF EXISTS catalog.v_tenant_account_v1"
+TENANT_ACCOUNT_STUB = (
+    f"CREATE TABLE catalog.v_tenant_account_v1 ({TENANT_ACCOUNT_COLUMNS}); "
+    "GRANT SELECT ON catalog.v_tenant_account_v1 TO booking;"
+)
+
+
+async def no_pilot_view(conn: asyncpg.Connection) -> None:
+    """An empty stand-in of the CIS tenant account view: the pilot is known (there is none)."""
+    await conn.execute(TENANT_ACCOUNT_DROP)
+    await conn.execute(TENANT_ACCOUNT_STUB)
