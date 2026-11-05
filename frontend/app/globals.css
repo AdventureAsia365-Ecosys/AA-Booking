@@ -211,3 +211,19 @@ body {
     radial-gradient(900px 600px at 0% 100%, color-mix(in srgb, var(--bk-accent-line) 22%, transparent), transparent 60%),
     var(--aa-bg);
 }
+
+/* AA-1030 G3 — printing a staff page (the agency tariff's Print button): the page only, without the shell (sidebar,
+   topbar, phone bottom nav) or the controls marked `bk-no-print`, and the scroll region unclipped so every row prints. */
+@media print {
+  .aa-shell-sidebar,
+  .aa-topbar,
+  .aa-bottom-nav,
+  .aa-admin-backdrop,
+  .bk-no-print {
+    display: none !important;
+  }
+  .aa-admin-main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+}

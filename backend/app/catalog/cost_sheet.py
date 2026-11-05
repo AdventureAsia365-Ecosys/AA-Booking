@@ -190,14 +190,10 @@ def room_mix(party: int, max_occupancy: int | None) -> list[tuple[int, int]]:
     return [(pax, n) for pax, n in mix if n]
 
 
-def windows(today: date, parts: Sequence[Part], spans: Sequence[Span]) -> list[Window]:
-    """Start-date windows inside which every component prices the same rates, anchored on the rate validity (cut at
-    every rate start and end shifted by the component's day offset, up to the end of the latest rate), without the
-    ones over before ``today``. Nothing in them depends on ``today`` but which windows are over, so the same inputs
-    on the next day give the same windows."""
-    end = horizon(today, spans)
-    if end is None:
-        return []
+def rate_cuts(parts: Sequence[Part], spans: Sequence[Span]) -> set[date]:
+    """The start dates where the rates a departure of the plan uses can change: every rate validity start and the day
+    after every end, shifted back by the component's day offset. Between two cuts every departure prices the same
+    rates (``app.b2b.tariff`` splits the matrix windows at them too)."""
     by_item: dict[str, list[Span]] = {}
     for span in spans:
         by_item.setdefault(span.item, []).append(span)
@@ -208,7 +204,18 @@ def windows(today: date, parts: Sequence[Part], spans: Sequence[Span]) -> list[W
             cuts.add(span.start - shift)
             if span.stop < FOREVER:  # an open-ended rate has no end to cut at (and FOREVER + 1 day overflows)
                 cuts.add(span.stop + timedelta(days=1) - shift)
-    ordered = sorted(day for day in cuts if day <= end)
+    return cuts
+
+
+def windows(today: date, parts: Sequence[Part], spans: Sequence[Span]) -> list[Window]:
+    """Start-date windows inside which every component prices the same rates, anchored on the rate validity (cut at
+    every rate start and end shifted by the component's day offset, up to the end of the latest rate), without the
+    ones over before ``today``. Nothing in them depends on ``today`` but which windows are over, so the same inputs
+    on the next day give the same windows."""
+    end = horizon(today, spans)
+    if end is None:
+        return []
+    ordered = sorted(day for day in rate_cuts(parts, spans) if day <= end)
     if not ordered:
         return []
     out = [Window(day, nxt - timedelta(days=1)) for day, nxt in zip(ordered, ordered[1:], strict=False)]

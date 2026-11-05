@@ -3,11 +3,13 @@
 // b15). Three tabs: Tiers (the discount each tier takes off the agency price today, the margin it leaves under the
 // b2b rule with a below-floor warning, and the dated discount rows with maker-checker), Agencies (every B2B partner
 // with its tier, moved with one select; audited) and Rate cards (a partner's contract discount, for every tour or
-// one tour, with maker-checker; an approved card is ended by an end card, from its "End" button). Reads need pricing.read; writes and approvals pricing.write, and the API refuses an
+// one tour, with maker-checker; an approved card is ended by an end card, from its "End" button). AA-1030 G3: each agency
+// row links to its tariff (../tariff, printable, CSV). Reads need pricing.read; writes and approvals pricing.write, and the API refuses an
 // approval by the row's creator (403 own_row): the Approve button follows each row's `can_approve`.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -248,6 +250,21 @@ export function AgencyTiersView() {
       header: "Off the agency price",
       accessorFn: (r) => Number(r.effective_discount),
       cell: ({ row }) => <strong className="tabular-nums text-ink">{pct(row.original.effective_discount)}</strong>,
+    },
+    {
+      // AA-1030 G3: the agency's own price per tour, season and pax band (printable, CSV).
+      id: "tariff",
+      header: "Tariff",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Link
+          href={`/pricing/agency-tiers/tariff?partner=${encodeURIComponent(row.original.id)}`}
+          onClick={(e) => e.stopPropagation()}
+          className="whitespace-nowrap text-[13px] font-semibold text-accent-deep hover:underline"
+        >
+          View tariff
+        </Link>
+      ),
     },
   ];
 

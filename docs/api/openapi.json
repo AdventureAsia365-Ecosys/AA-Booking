@@ -7757,6 +7757,184 @@
         "title": "SupplierFields",
         "type": "object"
       },
+      "Tariff": {
+        "additionalProperties": false,
+        "description": "1.4 (AA-1030 G3). The calling agency's own tariff: its price per tour, season and pax band.",
+        "properties": {
+          "basis": {
+            "const": "per_person_band_min_twin_share",
+            "title": "Basis",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "fx": {
+            "$ref": "#/components/schemas/FxLock"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TariffItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "priced_on": {
+            "format": "date",
+            "title": "Priced On",
+            "type": "string"
+          },
+          "tier_code": {
+            "maxLength": 32,
+            "title": "Tier Code",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "currency",
+          "priced_on",
+          "basis",
+          "tier_code",
+          "fx",
+          "items",
+          "truncated"
+        ],
+        "title": "Tariff",
+        "type": "object"
+      },
+      "TariffItem": {
+        "additionalProperties": false,
+        "description": "1.4 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every\ndeparture from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's\n``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``).",
+        "properties": {
+          "agency_discount_pct": {
+            "pattern": "^\\d+(\\.\\d{1,4})?$",
+            "title": "Agency Discount Pct",
+            "type": "string"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "duration_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Days"
+          },
+          "pax_max": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pax Max"
+          },
+          "pax_min": {
+            "minimum": 1.0,
+            "title": "Pax Min",
+            "type": "integer"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "price_per_person": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "priced_for_date": {
+            "format": "date",
+            "title": "Priced For Date",
+            "type": "string"
+          },
+          "priced_for_pax": {
+            "minimum": 1.0,
+            "title": "Priced For Pax",
+            "type": "integer"
+          },
+          "rrp_per_person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "season": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "tour": {
+            "$ref": "#/components/schemas/TourKey"
+          },
+          "valid_from": {
+            "format": "date",
+            "title": "Valid From",
+            "type": "string"
+          },
+          "valid_to": {
+            "format": "date",
+            "title": "Valid To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tour",
+          "valid_from",
+          "valid_to",
+          "pax_min",
+          "priced_for_pax",
+          "priced_for_date",
+          "price",
+          "price_per_person",
+          "agency_discount_pct"
+        ],
+        "title": "TariffItem",
+        "type": "object"
+      },
       "TaxRuleChanges": {
         "additionalProperties": false,
         "properties": {
@@ -11571,6 +11749,111 @@
           }
         ],
         "summary": "Create Quote",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/tariff": {
+      "get": {
+        "description": "1.4 (AA-1030 G3): the agency's own price per tour, season and pax band (``app.b2b.tariff``); ``format=csv``\nanswers the same rows as a CSV file.",
+        "operationId": "get_tariff_booking_b2b_v1_tariff_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "default": "USD",
+              "pattern": "^[A-Z]{3}$",
+              "title": "Currency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tariff"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "Get Tariff",
         "tags": [
           "b2b"
         ]
@@ -17182,6 +17465,98 @@
           }
         ],
         "summary": "Approve Rate Card",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/partner-tariffs/{partner_id}": {
+      "get": {
+        "operationId": "get_partner_tariff_booking_pricing_partner_tariffs__partner_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "partner_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Partner Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "default": "USD",
+              "pattern": "^[A-Z]{3}$",
+              "title": "Currency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Partner Tariff Booking Pricing Partner Tariffs  Partner Id  Get"
+                }
+              },
+              "text/csv": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Partner Tariff",
         "tags": [
           "pricing"
         ]

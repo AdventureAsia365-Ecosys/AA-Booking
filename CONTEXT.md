@@ -546,7 +546,8 @@ send, OTP) is not built: those still write rows only.
   `null` without either or a rate). **AA-973**: `GET /departures`, `POST /holds`,
   `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). **AA-974**: VND quotes, `POST /holds/{id}/extend`,
   the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below). **AA-975**:
-  `GET /events` (below).
+  `GET /events` (below). **AA-1030 G3 (contract 1.4)**: `GET /tariff` (scope `read`; `?currency=`, `?source_id=`,
+  `?format=csv`): the calling agency's own tariff (see "Agency price tiers").
 - **Departures and seats (AA-973)**: a departure is a start date of a trip plan with a seat `capacity`, a status
   (`scheduled` ↔ `guaranteed`, `cancelled` final) and `auto_confirm`; staff keep them under
   `/booking/catalog/trip-plans/{source_id}/departures` (capacity never below held + sold, audited, edits touch the
@@ -718,6 +719,23 @@ adds it to the `price_hash`; a 0 % line hashes as before. The **RRP and the publ
 `/price-parity`) stay the same for every agency: the RRP is the public price, the discount is the agency's margin.
 **Floor (warn, never block)**: a discount can take AA's margin under the b2b rule's floor; nothing is capped, the
 Agency tiers page shows the margin left per tier under the rule in force and flags it.
+
+**Agency tariff (AA-1030 G3)** (`app.b2b.tariff`): one partner's own price per tour, season and pax band, the grid
+of the price matrix (every `b2b` row of a sellable, served plan still valid today; one row per window x band, the USD
+row first), each window from today at the earliest and **cut wherever a supplier rate of a component starts or ends**
+(`cost_sheet.rate_cuts`, the cost sheet's own cuts: hand and overridden rows keep the window staff gave them and a
+computed row is only cut as of its last recompute), neighbouring pieces with the same price joined back, so every
+departure date of a tariff row prices the same; priced by the **quote engine itself**: the plan's `tp:` line for the
+band's smallest party (all adults, default room mix) on the row's first day (`priced_for_date` = `valid_from`), through `components.price_lines` and `quotes.price_line` with
+the partner's `quotes.PriceBasis` (b2b rule, FX, agency terms in force today). So `price` = what `POST /quotes`
+answers for that party and day; `price_per_person` = it / party, rounded up like a line. Not the matrix `amount`
+(rounded to 5 USD, peak uplift; quotes never read it); the row's public RRP is shown as it is. Rows a quote cannot
+price (no components, no rate in force, no FX rate for a cost currency) are left out of the agency's tariff and listed
+with the reason for staff. Staff `GET /booking/pricing/partner-tariffs/{partner_id}` (`pricing.read`; JSON with
+`partner`, `unpriced`, each row's `rate_card_id`; `?format=csv`) and the agency `GET /booking/b2b/v1/tariff`; both CSVs
+are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pricing → Agency tiers → Agencies →
+"View tariff" (`/pricing/agency-tiers/tariff?partner=<id>`: currency, Download CSV, Print; the print stylesheet in
+`app/globals.css` hides the shell).
 
 ## Trip checks and the case lifecycle (AA-682 S2, bk-027; S252 design §3.2, §4, §9)
 

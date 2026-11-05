@@ -479,6 +479,7 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/events",
         "/booking/b2b/v1/bookings/{booking_id}/confirmation",  # 1.3 (AA-1037 G2)
         "/booking/b2b/v1/terms",  # 1.3 (AA-1037 G6)
+        "/booking/b2b/v1/tariff",  # 1.4 (AA-1030 G3)
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -500,6 +501,7 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "EventPage",
         "BookingConfirmation",
         "PartnerTerms",
+        "Tariff",
     }
     keys: set[str] = set()
     pending, seen = list(refs), set()
