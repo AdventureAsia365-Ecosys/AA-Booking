@@ -377,7 +377,7 @@ async def review_trip_plan_reference(source_id: SourceId, staff: CanWritePlans, 
         return await trip_plan_prices.list_prices(conn, staff, source_id)
 
 
-@router.post("/trip-plans/{source_id}/trip-cases", status_code=201)
+@router.post("/trip-plans/{source_id}/trip-cases", status_code=201, responses=b2c.GONE_RESPONSE)
 async def use_trip_plan(
     body: UseForTripCase, source_id: SourceId, staff: CanStartCase, pool: Pool, request: Request
 ) -> dict[str, Any]:

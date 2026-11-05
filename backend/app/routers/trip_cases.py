@@ -224,7 +224,7 @@ async def list_trip_cases(
         )
 
 
-@router.post("/trip-cases", status_code=201)
+@router.post("/trip-cases", status_code=201, responses=b2c.GONE_RESPONSE)
 async def create_trip_case(body: CaseCreate, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     # AA-1034 R0 / AA-1037: a staff-made case is always for a customer (new or existing), a B2C case; B2B cases come
     # only from the B2B confirm path (POST /booking/b2b/v1/holds/{id}/confirm).
@@ -262,7 +262,7 @@ async def trip_case_activity(
         return await service.activity(conn, case_ref, before=before, limit=limit)
 
 
-@router.patch("/trip-cases/{case_ref}")
+@router.patch("/trip-cases/{case_ref}", responses=b2c.GONE_RESPONSE)
 async def patch_trip_case(
     body: CasePatch,
     case_ref: CaseRef,
@@ -275,7 +275,7 @@ async def patch_trip_case(
         return await service.update_case(conn, staff, case_ref, body.model_dump(exclude_unset=True))
 
 
-@router.post("/trip-cases/{case_ref}/status")
+@router.post("/trip-cases/{case_ref}/status", responses=b2c.GONE_RESPONSE)
 async def change_trip_case_status(
     body: StatusChange,
     case_ref: CaseRef,
@@ -288,7 +288,7 @@ async def change_trip_case_status(
         return await service.change_status(conn, staff, case_ref, body.to_status, body.reason)
 
 
-@router.post("/trip-cases/{case_ref}/assign")
+@router.post("/trip-cases/{case_ref}/assign", responses=b2c.GONE_RESPONSE)
 async def assign_trip_case(
     body: AssignBody,
     case_ref: CaseRef,
@@ -301,7 +301,7 @@ async def assign_trip_case(
         return await service.assign(conn, staff, case_ref, body.cis_user_id, body.role)
 
 
-@router.post("/trip-cases/{case_ref}/versions", status_code=201)
+@router.post("/trip-cases/{case_ref}/versions", status_code=201, responses=b2c.GONE_RESPONSE)
 async def create_trip_case_version(
     case_ref: CaseRef,
     staff: CanWriteVersions,
@@ -320,7 +320,7 @@ async def get_version(case_ref: CaseRef, version_number: VersionNumber, _: CanRe
         return await versions.get_version(conn, case_ref, version_number)
 
 
-@router.patch("/trip-cases/{case_ref}/versions/{version_number}")
+@router.patch("/trip-cases/{case_ref}/versions/{version_number}", responses=b2c.GONE_RESPONSE)
 async def patch_version(
     body: VersionPatch,
     case_ref: CaseRef,
@@ -334,7 +334,7 @@ async def patch_version(
         return await versions.update_version(conn, staff, case_ref, version_number, body.model_dump(exclude_unset=True))
 
 
-@router.delete("/trip-cases/{case_ref}/versions/{version_number}", status_code=204)
+@router.delete("/trip-cases/{case_ref}/versions/{version_number}", status_code=204, responses=b2c.GONE_RESPONSE)
 async def delete_version(
     case_ref: CaseRef,
     version_number: VersionNumber,
@@ -354,7 +354,7 @@ async def get_version_items(case_ref: CaseRef, version_number: VersionNumber, _:
         return await versions.get_items(conn, case_ref, version_number)
 
 
-@router.put("/trip-cases/{case_ref}/versions/{version_number}/items")
+@router.put("/trip-cases/{case_ref}/versions/{version_number}/items", responses=b2c.GONE_RESPONSE)
 async def put_version_items(
     body: ItemsPut,
     case_ref: CaseRef,
@@ -392,7 +392,7 @@ async def put_version_items(
         return await versions.replace_items(conn, staff, case_ref, version_number, items)
 
 
-@router.post("/trip-cases/{case_ref}/versions/{version_number}/price")
+@router.post("/trip-cases/{case_ref}/versions/{version_number}/price", responses=b2c.GONE_RESPONSE)
 async def price_version(
     body: PriceBody,
     case_ref: CaseRef,
@@ -417,7 +417,7 @@ async def price_version(
         )
 
 
-@router.post("/trip-cases/{case_ref}/versions/{version_number}/send")
+@router.post("/trip-cases/{case_ref}/versions/{version_number}/send", responses=b2c.GONE_RESPONSE)
 async def send_version(
     body: SendBody,
     case_ref: CaseRef,
@@ -440,7 +440,7 @@ async def send_version(
         )
 
 
-@router.post("/trip-cases/{case_ref}/versions/{version_number}/approve")
+@router.post("/trip-cases/{case_ref}/versions/{version_number}/approve", responses=b2c.GONE_RESPONSE)
 async def approve_version(
     case_ref: CaseRef,
     version_number: VersionNumber,

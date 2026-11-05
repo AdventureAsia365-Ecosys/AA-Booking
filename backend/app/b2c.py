@@ -40,6 +40,14 @@ MESSAGE = (
     "Partner bookings arrive through the B2B API."
 )
 
+# The 410 every guarded route may answer, for the OpenAPI document (``responses=b2c.GONE_RESPONSE``).
+GONE_RESPONSE: dict[int | str, dict[str, Any]] = {
+    410: {
+        "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was"
+        " written"
+    }
+}
+
 # The channel of the trip case a write would touch, by the case itself or by a record of the case. A ref that matches
 # nothing reads NULL: the service then answers its own 404.
 _CASE_BY_ID = "SELECT channel FROM booking.trip_cases WHERE id = $1::uuid AND deleted_at IS NULL"

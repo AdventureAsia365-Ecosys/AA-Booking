@@ -13819,6 +13819,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -14348,6 +14351,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -14391,6 +14397,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -14503,6 +14512,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -15515,6 +15527,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -15627,6 +15642,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -15690,6 +15708,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -15752,6 +15773,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -15835,6 +15859,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -15888,6 +15915,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -15940,6 +15970,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -16221,6 +16254,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -16334,6 +16370,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -16836,6 +16875,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -16888,6 +16930,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -16951,6 +16996,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -20417,6 +20465,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -20478,6 +20529,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -20541,6 +20595,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -20603,6 +20660,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -20654,6 +20714,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -20716,6 +20779,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -22056,6 +22122,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22197,6 +22266,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -22345,6 +22417,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22407,6 +22482,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -22478,6 +22556,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22532,6 +22613,9 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -22667,6 +22751,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22747,6 +22834,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -22884,6 +22974,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22959,6 +23052,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23032,6 +23128,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -23200,6 +23299,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23281,6 +23383,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -23396,6 +23501,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -23448,6 +23556,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {
@@ -23740,6 +23851,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
           },
           "422": {
             "content": {

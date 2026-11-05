@@ -94,14 +94,14 @@ async def case_checks(ref: CaseRef, staff: CanRead, pool: Pool) -> dict[str, Any
         return await service.list_for_case(conn, staff, ref)
 
 
-@router.post("/trip-cases/{ref}/checks", status_code=201)
+@router.post("/trip-cases/{ref}/checks", status_code=201, responses=b2c.GONE_RESPONSE)
 async def add_check(body: NewCheck, ref: CaseRef, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         await b2c.refuse_b2c_case_write(request, conn, ref)  # AA-1037: a b2c case is read-only
         return await service.create_custom(conn, staff, ref, body.model_dump())
 
 
-@router.patch("/trip-checks/{check_id}")
+@router.patch("/trip-checks/{check_id}", responses=b2c.GONE_RESPONSE)
 async def patch_check(
     body: CheckChanges, check_id: CheckId, staff: CanWrite, pool: Pool, request: Request
 ) -> dict[str, Any]:

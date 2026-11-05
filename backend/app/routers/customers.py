@@ -56,7 +56,7 @@ async def list_customers(
         )
 
 
-@router.post("/customers", status_code=201)
+@router.post("/customers", status_code=201, responses=b2c.GONE_RESPONSE)
 async def create_customer(body: NewCustomer, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     b2c.refuse_new_customer(request)  # AA-1034 R0: 410 b2b_only while the B2C intake is off
     async with pool.acquire() as conn, conn.transaction():
@@ -70,7 +70,7 @@ async def get_customer(customer_ref: CustomerRef, _: CanRead, pool: Pool) -> dic
         return await service.get_customer(conn, customer_ref)
 
 
-@router.patch("/customers/{customer_ref}")
+@router.patch("/customers/{customer_ref}", responses=b2c.GONE_RESPONSE)
 async def patch_customer(
     body: CustomerPatch, customer_ref: CustomerRef, staff: CanWrite, pool: Pool, request: Request
 ) -> dict[str, Any]:
@@ -79,7 +79,7 @@ async def patch_customer(
         return await service.update_customer(conn, staff, customer_ref, body.model_dump(exclude_unset=True))
 
 
-@router.delete("/customers/{customer_ref}", status_code=204)
+@router.delete("/customers/{customer_ref}", status_code=204, responses=b2c.GONE_RESPONSE)
 async def archive_customer(customer_ref: CustomerRef, staff: CanAdmin, pool: Pool, request: Request) -> Response:
     b2c.refuse_b2c_write(request)  # AA-1037: archiving also cancels the customer's new cases (B2C writes)
     async with pool.acquire() as conn, conn.transaction():

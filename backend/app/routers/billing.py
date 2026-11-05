@@ -185,7 +185,7 @@ async def case_billing(ref: CaseRef, staff: CanRead, pool: Pool, request: Reques
         return _view(request, await invoices.for_case(conn, staff, ref))
 
 
-@router.post("/trip-cases/{ref}/invoices", status_code=201)
+@router.post("/trip-cases/{ref}/invoices", status_code=201, responses=b2c.GONE_RESPONSE)
 async def create_invoice(
     body: NewInvoice,
     ref: CaseRef,
@@ -209,7 +209,7 @@ async def get_invoice(number: Number, staff: CanRead, pool: Pool, request: Reque
         return _view(request, await invoices.get_invoice(conn, staff, number))
 
 
-@router.patch("/invoices/{number}")
+@router.patch("/invoices/{number}", responses=b2c.GONE_RESPONSE)
 async def patch_invoice(
     body: InvoiceChanges, number: Number, staff: CanWrite, pool: Pool, request: Request
 ) -> dict[str, Any]:
@@ -218,21 +218,21 @@ async def patch_invoice(
         return await invoices.update_draft(conn, staff, number, _dump(body, exclude_unset=True))
 
 
-@router.delete("/invoices/{number}")
+@router.delete("/invoices/{number}", responses=b2c.GONE_RESPONSE)
 async def delete_invoice(number: Number, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.delete_draft(conn, staff, number)
 
 
-@router.post("/invoices/{number}/send")
+@router.post("/invoices/{number}/send", responses=b2c.GONE_RESPONSE)
 async def send_invoice(number: Number, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await invoices.send(conn, staff, number)
 
 
-@router.post("/invoices/{number}/cancel")
+@router.post("/invoices/{number}/cancel", responses=b2c.GONE_RESPONSE)
 async def cancel_invoice(
     body: ReasonIn, number: Number, staff: CanWrite, pool: Pool, request: Request
 ) -> dict[str, Any]:
@@ -241,7 +241,7 @@ async def cancel_invoice(
         return await invoices.cancel(conn, staff, number, body.reason)
 
 
-@router.post("/invoices/{number}/amend")
+@router.post("/invoices/{number}/amend", responses=b2c.GONE_RESPONSE)
 async def amend_invoice(
     body: Amendment, number: Number, staff: CanWrite, pool: Pool, request: Request
 ) -> dict[str, Any]:
@@ -250,7 +250,7 @@ async def amend_invoice(
         return await invoices.amend(conn, staff, number, _dump(body, exclude_unset=True))
 
 
-@router.post("/invoices/{number}/remind")
+@router.post("/invoices/{number}/remind", responses=b2c.GONE_RESPONSE)
 async def remind_invoice(number: Number, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
@@ -260,7 +260,7 @@ async def remind_invoice(number: Number, staff: CanWrite, pool: Pool, request: R
 # ── Payments ─────────────────────────────────────────────────────────────────
 
 
-@router.post("/invoices/{number}/payments", status_code=201)
+@router.post("/invoices/{number}/payments", status_code=201, responses=b2c.GONE_RESPONSE)
 async def record_payment(
     body: NewPayment,
     number: Number,
@@ -320,7 +320,7 @@ async def get_payment(ref: Ref, staff: CanRead, pool: Pool, request: Request) ->
         return _view(request, await payments.get_payment(conn, staff, ref))
 
 
-@router.patch("/payments/{ref}")
+@router.patch("/payments/{ref}", responses=b2c.GONE_RESPONSE)
 async def patch_payment(
     body: PaymentChanges, ref: Ref, staff: CanWrite, pool: Pool, request: Request
 ) -> dict[str, Any]:
@@ -329,14 +329,14 @@ async def patch_payment(
         return await payments.update(conn, staff, ref, _dump(body, exclude_unset=True))
 
 
-@router.post("/payments/{ref}/verify")
+@router.post("/payments/{ref}/verify", responses=b2c.GONE_RESPONSE)
 async def verify_payment(ref: Ref, staff: CanVerify, pool: Pool, request: Request) -> dict[str, Any]:
     b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():
         return await payments.verify(conn, staff, ref)
 
 
-@router.post("/payments/{ref}/void")
+@router.post("/payments/{ref}/void", responses=b2c.GONE_RESPONSE)
 async def void_payment(body: ReasonIn, ref: Ref, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     b2c.refuse_b2c_write(request)  # AA-1037: B2C billing is read-only
     async with pool.acquire() as conn, conn.transaction():

@@ -439,3 +439,30 @@ async def test_handlers_pass_the_switch_to_the_runs(monkeypatch: pytest.MonkeyPa
     await handlers[lifecycle.KIND](ScriptedConn(), job)
     await handlers[lifecycle.REMINDERS_KIND](ScriptedConn(), job)
     assert seen == [False, False]
+
+
+# Routers whose every write touches a B2C record or a trip case (a b2c case among them): each write route must declare
+# the 410, so a new write route there without a guard fails here (the guard itself is tested per route above).
+GUARDED_PREFIXES = (
+    "/booking/invoices",
+    "/booking/payments",
+    "/booking/customers",
+    "/booking/trip-cases",
+    "/booking/trip-checks",
+    "/booking/supplier-bookings",
+    "/booking/ops-files",
+)
+
+
+def test_every_write_on_b2c_records_and_trip_cases_documents_the_410() -> None:
+    spec = create_app(Settings(database_url=None, environment="test")).openapi()
+    writes = [
+        (method.upper(), path, op)
+        for path, ops in spec["paths"].items()
+        if path.startswith(GUARDED_PREFIXES) or path.endswith("/trip-plans/{source_id}/trip-cases")
+        for method, op in ops.items()
+        if method in {"post", "patch", "put", "delete"}
+    ]
+    assert len(writes) >= len(B2C_ONLY) + len(CASE_ROUTES) - 1
+    missing = [(m, p) for m, p, op in writes if "410" not in op.get("responses", {})]
+    assert missing == []
