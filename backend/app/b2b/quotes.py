@@ -6,7 +6,9 @@
   Missing = 503 ``unavailable`` (AA-side data; the CRM shows an indicative price and allows no deposit).
 - **Formula**: the AA-810 engine's building blocks (``app.pricing.engine``): every net to USD at the plain rate, sell
   ``= net / (1 - margin - card fee)`` with the rule's margin (``peak = false``), then to the quote currency x rate x
-  (1 + buffer). One formula for B2C and B2B (memo seam 7): no second engine.
+  (1 + buffer). One formula for B2C and B2B (memo seam 7): no second engine. The per-line step is
+  :func:`price_line` over a :class:`PriceBasis` (:func:`price_basis`), shared with the agency tariff (AA-1030 G3,
+  ``app.b2b.tariff``), so a tariff row is exactly what a quote of that party and day charges.
 - **Rounding** (:func:`round_line`): each line's ``b2b_price`` is rounded UP to the cent (never lowers the margin),
   a VND line UP to 1,000 VND (AA-974, :data:`LINE_INCREMENTS`); ``total_b2b_price`` is the exact sum of the lines.
   The B2C "total up to 5" rule does not apply: a B2B price is not customer-facing (the agency sets its own price).
