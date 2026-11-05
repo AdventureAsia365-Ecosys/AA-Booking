@@ -174,7 +174,9 @@ backend/
                            departure row lock, line availability, staff departure edits), holds.py (place / read /
                            release / confirm → B2B trip case + approved version), expiry.py (bk_b2b_hold_expire job + hook);
                            AA-974: holds.py also extend once + re-hold limit, cancellation.py (fee policies: tiers,
-                           in force, staff admin; cancel / dry run → b2b_cancellations)
+                           in force, staff admin; cancel / dry run → b2b_cancellations); AA-1030: agency_pricing.py
+                           (partner tiers, tier discounts, contract rate cards: the discount a quote line gets,
+                           maker-checker staff admin, partner tier assignment)
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
                            /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
                            /bookings/{id}/cancel (AA-974)
@@ -277,6 +279,9 @@ backend/
   app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules,
                            /booking/pricing/fx-rates and /booking/pricing/cancellation-policies (AA-974), POST
                            …/{id}/approve (reads pricing.read, writes pricing.write)
+  app/routers/agency_pricing.py  AA-1030: /booking/pricing/partner-tiers (GET, POST, PATCH /{code}),
+                           /partner-tier-discounts and /partner-rate-cards (GET, POST, POST /{id}/approve),
+                           /partner-terms (GET, PATCH /{partner_id}: the partner's tier); pricing.read / pricing.write
   app/pricing/service.py   rule + FX in force + engine, shared by quote-preview and POST …/versions/{n}/price
   app/routers/suppliers.py /booking/suppliers* (list, summary, detail, create, edit, deactivate/activate, contracts)
                            and /booking/contracts/{id} (edit a draft, publish, expire) — supply.read / supply.write
@@ -472,7 +477,9 @@ send, OTP) is not built: those still write rows only.
   (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
   are read with `supply.read` and replaced with `trip_plan.write`; its fixed departures (AA-973) the same pair; its
   price matrix and supplier (AA-996, bk-032) are read with `pricing.read` and written with `trip_plan.write`; B2B
-  cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules.
+  cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules;
+  agency price tiers, tier discounts and partner rate cards (AA-1030) the same pair and maker-checker, and moving a
+  partner to another tier is `pricing.write` (audited, no second person: it changes no rate).
   Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
   contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
   needs `b2b_desk.write`; net amounts in the responses need `pricing.read`. Trip checks and the lifecycle runs (AA-682
@@ -653,7 +660,7 @@ Loading supplier rates makes prices flow with no hand step after the plan's comp
    (latest windows dropped first). The job covers every plan with a component, a computed row or a b2b row, so hand
    priced plans get their RRP too.
 4. **RRP**: every b2b row carries `rrp_amount` = round up(amount x (1 + `rrp_markup_pct` of the b2b rule in force)),
-   the suggested retail price (ADR 0019 b15: net + 25 %). Agency tier discounts are AA-1030.
+   the suggested retail price (ADR 0019 b15: net + 25 %). Agency tier discounts: see "Agency price tiers" below.
 5. **From price**: `booking.v_from_prices` (price.from.v1) and every staff / parity read: the cheapest RRP for 2
    travellers still valid, USD first.
 6. **History**: every matrix change (staff or cost sheet) closes the open rows of `trip_plan_price_history` and inserts
@@ -662,6 +669,25 @@ Loading supplier rates makes prices flow with no hand step after the plan's comp
 Staff: the commercial drawer shows the from price, the reference (Mark reviewed) and "Recompute from rates"
 (`POST …/prices/recompute`); cost sheet rows carry a badge; the b2b rule takes the RRP markup; suppliers have
 "Import rate sheet".
+
+## Agency price tiers (AA-1030, bk-043; root ADR 0019 b15)
+
+Every B2B partner has a **tier** (`b2b_partners.tier_code`, default `standard`; seeded standard / silver / gold). A
+tier's **discount** is a dated, append-only row (`partner_tier_discounts`), in force once a second person approved it
+(`partner_price_approvals`): the newest approved row dated on or before the day; none = 0 %. Starting values 0 / 3 /
+6 % (ADR 0019 b15, policy data, changed by a new row + approval in Booking admin, Pricing → Agency tiers). An optional
+**contract rate card** (`partner_rate_cards`) gives one partner its own discount for the whole catalogue or one trip
+plan, `valid_from` .. `valid_to`, approved the same way; while in force it overrides the tier (a plan card beats a
+catalogue card; a 0 % card still overrides). Cards are append-only, so a card is **ended** by an **end card**
+(`discount_pct` NULL, same partner and scope, approved the same way): from its `valid_from` that scope has no contract
+rate (a plan line falls back to the catalogue card, then the tier); on one day an end card beats a discount card.
+
+A B2B quote line's `b2b_price` = round up(the b2b rule's price x (1 - discount)) (`app.b2b.agency_pricing`,
+`app.b2b.quotes`); the quote stores the tier and its discount, each line its discount and card. A line with a discount
+adds it to the `price_hash`; a 0 % line hashes as before. The **RRP and the public "from" price** (`price.from.v1`,
+`/price-parity`) stay the same for every agency: the RRP is the public price, the discount is the agency's margin.
+**Floor (warn, never block)**: a discount can take AA's margin under the b2b rule's floor; nothing is capped, the
+Agency tiers page shows the margin left per tier under the rule in force and flags it.
 
 ## Trip checks and the case lifecycle (AA-682 S2, bk-027; S252 design §3.2, §4, §9)
 
@@ -1441,6 +1467,18 @@ full replay that grants INSERT again next to recent test rows still applies). A 
 `REQUIRED_SCHEMA_VERSIONS`. The frozen B2C code keeps its integration tests through the conftest fixture
 `b2c_insert_regranted` (INSERT given back for the test only). The tables are dropped later under the destructive-ops
 DRY RUN procedure.
+
+### `bk-043` (AA-1030 R4 agency price tiers — needs `bk-009`, `bk-019`)
+
+Root ADR 0019 b15. `partner_tiers` (code, label, sort order; seeded standard / silver / gold), `partner_tier_discounts`
+(dated discount of a tier on the b2b price, append-only; seeded 0 / 3 / 6 % from 2026-11-01, approved as
+`seed:bk-043`), `partner_rate_cards` (a partner's contract discount for the whole catalogue or one trip plan,
+`valid_from` .. `valid_to`, append-only), `partner_price_approvals` (the second-person approvals of both, with a
+maker-checker trigger; a table of its own because bk-007 / bk-021 re-add the `policy_approvals` entity CHECK when
+replayed), `b2b_partners.tier_code` (default `standard`, FK), and what a quote was priced with
+(`b2b_quotes.partner_tier_code` / `tier_discount_pct`, `b2b_quote_lines.agency_discount_pct` / `rate_card_id`). DM-7.1
+rows in the root data standards. A **contract** file: migration-only PR, applied on Dev by Infra Migration Apply when the
+job tables are idle; the code PR adds it to `REQUIRED_SCHEMA_VERSIONS`.
 
 ### `bk-039` (AA-1029 R4 tour price chain — needs `bk-004`, `bk-009`, `bk-032` and the role `tripplanner`)
 
