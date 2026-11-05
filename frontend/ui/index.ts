@@ -66,6 +66,8 @@ export { useThemeChoice, useResolvedTheme } from "./local/useTheme";
 // ── Booking components (UI spec §5) ────────────────────────────────────────────────────────────────────────────
 // PageFrame: the kit frame with the Booking defaults (wide column, Booking gutter); see ui/booking/PageFrame.tsx.
 export { PageFrame } from "./booking/PageFrame";
+// AA-1008 (S6e): the kit shell frame (ui/local/AdminShell.tsx is the Booking configuration of it).
+export { ShellFrame, useShell, type ShellControls } from "./core/ShellFrame";
 export { TimeField } from "./booking/TimeField";
 export * from "./booking/dates";
 export * from "./booking/StatusBadge";

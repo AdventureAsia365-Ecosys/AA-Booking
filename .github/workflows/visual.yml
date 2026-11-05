@@ -1,0 +1,246 @@
+name: Visual
+
+# AA-1008 (S1d/S2c; root ADR 0016 decision 9, re-scoped by ADR 0019 d23: the frontends leave Vercel, so the per-PR run
+# needs no preview) — the visual run of the Booking staff admin from GitHub's network, never the agent machine's IP.
+# Every changed page (frontend/e2e/visual/changed-pages.mjs over the diff; a ui / lib / shell change = every page) at
+# 1440 x 900 and 390 x 844, light and dark, asserting: no page-level horizontal overflow (the document AND the kit
+# frame, which scrolls on its own), 0 console errors, no failed same-origin request, no API call without a layout-mock
+# fixture, the kit frame present, the theme applied. Screenshots + report.json are the artifact
+# `visual-booking-<target>-<run id>` (14 days); the job summary and one PR comment carry the page x 4 table.
+# Report-only: no required check (H3, the tech lead's branch-protection step, makes it required later).
+#
+# Jobs:
+#   pr        pull_request (frontend / workflow files) and dispatch without base_url: `next build` and `next start` with
+#             KIT_GALLERY=1 in the runner, the Booking API mocked by the AA-910 layout harness (e2e/layout/fixtures.ts
+#             answers /api/booking/*, e2e/layout/stub-api.mjs the one server-side call; an unsigned session cookie that
+#             proxy.ts only decodes, production auth unchanged): the staff and public pages that changed + the gated
+#             kit gallery (every core component, the ShellFrame demo included). It first runs the SELF-TEST: the
+#             gallery with a planted overflow (document and frame) must make the run fail, and summary.mjs --selftest
+#             checks that each planted capture was caught; a self-test that passes is red.
+#   deployed  workflow_call from vercel-deploy.yml after the production deploy and its smoke, and dispatch from main
+#             with base_url: the public pages (login, 404) on the deployed host. Staff pages are not captured there:
+#             Booking has no E2E sign-in from CI yet (root ADR 0016 plan, hand steps H4 / H5); the per-PR run covers
+#             them on the mocked API.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/visual.yml"
+  workflow_call:
+    inputs:
+      base_url:
+        description: "The deployed host to capture"
+        required: true
+        type: string
+      sha:
+        description: "The deployed commit"
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Deployed host (https://booking.lumiguides.it.com, dispatch from main); empty = the next start run"
+        required: false
+        type: string
+        default: ""
+      pages:
+        description: "Comma list of page slugs (frontend/e2e/visual/pages.ts) or all"
+        required: false
+        type: string
+        default: "all"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: visual-${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.base_url || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pr:
+    name: Visual (next start, mocked API + kit gallery)
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.base_url == '')
+    # Pinned: ubuntu-latest became Ubuntu 26.04 (19/10/2026), where Playwright has no chromium build (S253).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      # The gated kit gallery route answers only on a KIT_GALLERY=1 server (playwright.config.ts passes it to next start).
+      KIT_GALLERY: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Changed pages
+        id: pages
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PAGES: ${{ inputs.pages }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            SLUGS=$(node --experimental-strip-types --no-warnings e2e/visual/changed-pages.mjs "origin/$BASE_REF" HEAD)
+          else
+            SLUGS=${PAGES:-all}
+          fi
+          echo "slugs=$SLUGS" >> "$GITHUB_OUTPUT"
+          echo "Changed pages: ${SLUGS:-none}"
+
+      - name: Install dependencies and Chromium
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Build (next build)
+        run: npm run build
+
+      # The planted overflow (document and frame) must be caught: the Playwright run must fail and every planted
+      # capture must show its overflow in the report. A green self-test means the assertion is broken.
+      - name: Self-test (a planted overflow must fail the run)
+        env:
+          VISUAL_SELFTEST: "1"
+        run: |
+          if npx playwright test --project=visual-1440 --project=visual-390 --reporter=line; then
+            echo "::error::the planted-overflow pages passed the visual checks: the overflow assertion is broken"
+            exit 1
+          fi
+          node e2e/visual/summary.mjs --selftest
+          rm -rf e2e/visual/results
+
+      - name: Capture and check
+        env:
+          VISUAL_AUTH: all
+          VISUAL_GALLERY: "1"
+          VISUAL_SLUGS: ${{ steps.pages.outputs.slugs }}
+        run: npx playwright test --project=visual-1440 --project=visual-390 --reporter=list
+
+      - name: Summary
+        if: always()
+        env:
+          SLUGS: ${{ steps.pages.outputs.slugs }}
+        run: |
+          mkdir -p e2e/visual/results
+          {
+            echo "### Visual — next start (mocked API + kit gallery)"
+            echo ""
+            node e2e/visual/summary.mjs
+            echo ""
+            echo "Changed pages: \`${SLUGS:-none}\`. Staff pages run on the layout-mock API (fixture data, frozen clock)."
+          } | tee e2e/visual/results/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-booking-pr-${{ github.run_id }}
+          path: |
+            frontend/e2e/visual/results/shots/*.png
+            frontend/e2e/visual/results/report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # One comment per PR (marker), edited in place. All values reach `run:` through env.
+      - name: Comment the summary on the PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          MARKER="<!-- visual-run -->"
+          BODY=$(printf '%s\n%s\n\n[Run and screenshots](%s)\n' "$MARKER" "$(cat e2e/visual/results/summary.md)" "$RUN_URL")
+          EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                       --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" 2>/dev/null | head -n1 || true)
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" >/dev/null
+          fi
+
+  deployed:
+    name: Visual (deployed host, public pages)
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' || inputs.base_url != '') && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      VISUAL_BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - name: Only the Booking admin hosts
+        working-directory: .
+        env:
+          URL: ${{ inputs.base_url }}
+        run: |
+          case "${URL%/}" in
+            https://booking.lumiguides.it.com|https://booking-preview.lumiguides.it.com) echo "Visual run on $URL" ;;
+            *) echo "::error::base_url must be https://booking.lumiguides.it.com or https://booking-preview.lumiguides.it.com (got $URL)"; exit 1 ;;
+          esac
+
+      # Runs only from main (job condition), so the checkout is main's commit. No npm cache after checking out a
+      # given ref (cache-poisoning path, CodeQL high, #103 review), like the smoke job of vercel-deploy.yml.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies and Chromium
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Capture the public pages
+        env:
+          VISUAL_AUTH: public
+          VISUAL_SLUGS: ${{ inputs.pages || 'all' }}
+        run: npx playwright test --project=visual-1440 --project=visual-390 --reporter=list --pass-with-no-tests
+
+      - name: Summary
+        if: always()
+        run: |
+          mkdir -p e2e/visual/results
+          {
+            echo "### Visual — $VISUAL_BASE_URL (public pages)"
+            echo ""
+            node e2e/visual/summary.mjs
+            echo ""
+            echo "Staff pages are captured by the per-PR run on the mocked API (no Booking E2E sign-in from CI yet)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-booking-production-${{ github.run_id }}
+          path: |
+            frontend/e2e/visual/results/shots/*.png
+            frontend/e2e/visual/results/report.json
+          if-no-files-found: warn
+          retention-days: 14
