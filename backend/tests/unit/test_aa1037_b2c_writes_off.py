@@ -292,6 +292,8 @@ def test_supplier_bill_files_stay_open(stubs: dict[str, Recorder]) -> None:
         ({"entity_type": "supplier_booking", "channel": "b2c"}, True),
         ({"entity_type": "supplier_booking", "channel": "b2b"}, False),
         ({"entity_type": "supplier_bill", "channel": None}, False),
+        ({"entity_type": "supplier_bill", "channel": "b2c"}, False),  # AA's payable, like its upload
+        ({"entity_type": "supplier_payout", "channel": "b2c"}, False),
         (None, False),
     ],
 )

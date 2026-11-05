@@ -137,11 +137,15 @@ async def refuse_b2c_file_upload(request: Request, conn: asyncpg.Connection, ent
 
 
 async def refuse_b2c_file_remove(request: Request, conn: asyncpg.Connection, file_id: str) -> None:
-    """The same for removing an ops file: by its entity type, or by the channel of the case it belongs to."""
+    """The same for removing an ops file, with the upload's rule: payment evidence, or a supplier booking's file on a
+    ``b2c`` case. Supplier bill and payout files stay open whatever the case (AA's own payables)."""
     if writes_open(request):
         return
     row: Any = await conn.fetchrow(_FILE_CASE, file_id)
-    if row is not None and (row["entity_type"] in B2C_FILE_ENTITIES or row["channel"] == "b2c"):
+    if row is None:
+        return
+    on_b2c_booking = row["entity_type"] == "supplier_booking" and row["channel"] == "b2c"
+    if row["entity_type"] in B2C_FILE_ENTITIES or on_b2c_booking:
         raise _gone()
 
 
