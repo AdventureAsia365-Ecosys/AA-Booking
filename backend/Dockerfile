@@ -11,6 +11,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GIT_SHA=${GIT_SHA} \
     APP_VERSION=${APP_VERSION}
 
+# Security fixes the base image does not carry yet (Trivy fails the build on a fixable HIGH/CRITICAL finding):
+# upgrade the Debian packages already installed, install nothing new.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt ./
