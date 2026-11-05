@@ -426,6 +426,9 @@ async def test_departures_quote_hold_confirm(
     assert [(i["cis"] or {}).get("tour_title") for i in read["items"]] == ["Hanoi 1D", None]
     assert read["items"][0]["cis"]["day_number"] is None
     assert not any((i["cis"] or {}).get("changed") for i in read["items"])
+    # AA-1037: the cross-case proposal list names the case's channel, so the staff admin keeps the B2B row writable.
+    listed = await _ok(await c.get(f"/versions?q={case['code']}", headers=boss))
+    assert [(v["trip_case_channel"], v["channel"]) for v in listed["items"]] == [("b2b", "b2b")]
     assert version["total_price"] == D(quote["total_b2b_price"]["amount"]) and version["fx_rate_locked"] == 1
     costs = await admin.fetch(
         "SELECT i.position, i.hotel_room_type_id::text AS room, c.net_amount, c.net_currency"

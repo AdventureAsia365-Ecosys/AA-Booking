@@ -305,6 +305,7 @@ async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, 
         with pytest.raises(Conflict) as superseded:
             await versions.approve_version(conn, boss, case["code"], 1, None)
     assert {v["version_number"]: v["badge"] for v in listed["items"]} == {1: "superseded", 2: "sent"}
+    assert {v["trip_case_channel"] for v in listed["items"]} == {"b2c"}  # AA-1037: an inquiry case is a b2c case
     assert superseded.value.code == "version_superseded"
     # AA-910: the derived "superseded" badge leaves a trail (real VERSION_BADGE SQL, not a scripted answer).
     trail = await admin.fetch(
