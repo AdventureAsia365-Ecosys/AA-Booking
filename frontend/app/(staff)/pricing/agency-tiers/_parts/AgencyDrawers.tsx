@@ -1,8 +1,10 @@
 "use client";
 // app/(staff)/pricing/agency-tiers/_parts/AgencyDrawers.tsx — "New tier", "New tier discount" and "New rate card"
 // drawers (AA-1030, bk-045). Staff type percentages ("3" for 3 %); the API takes fractions ("0.0300"). A discount or a
-// rate card is saved PENDING; the toast says a second person has to approve it. The API owns every check (discount
-// under 50 %, valid_to on or after valid_from, one row per tier / partner scope and date): its 422 / 409 show inline.
+// rate card is saved PENDING; the toast says a second person has to approve it. A rate card is either a discount or an
+// END card (no discount: from its first day it ends the contract rate of its scope, back to the tier); the Rate cards
+// tab opens this drawer pre-filled as an end card from a card's "End" button. The API owns every check (discount under
+// 50 %, valid_to on or after valid_from, one row per tier / partner scope, kind and date): its 422 / 409 show inline.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -137,12 +139,27 @@ export function NewTierDiscountDrawer({ tiers, initialTier, onClose }: { tiers: 
   );
 }
 
-export function NewRateCardDrawer({ partners, initialPartner, onClose }: { partners: PartnerTerms[]; initialPartner?: string; onClose: () => void }) {
+export type RateCardKind = "discount" | "end";
+
+export function NewRateCardDrawer({
+  partners,
+  initialPartner,
+  initialTour,
+  initialKind = "discount",
+  onClose,
+}: {
+  partners: PartnerTerms[];
+  initialPartner?: string;
+  initialTour?: string;
+  initialKind?: RateCardKind;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({
     partner: initialPartner ?? partners[0]?.id ?? "",
-    tour: "",
+    kind: initialKind,
+    tour: initialTour ?? "",
     pct: "",
     valid_from: todayUtc(),
     valid_to: "",
@@ -152,16 +169,21 @@ export function NewRateCardDrawer({ partners, initialPartner, onClose }: { partn
   const [localError, setLocalError] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: agencyPricingApi.createRateCard,
-    onSuccess: () => {
+    onSuccess: (_row, body) => {
       qc.invalidateQueries({ queryKey: ["agency-pricing"] });
-      toast.success("Rate card saved as Pending approval. A second person has to approve it before quotes use it.");
+      toast.success(
+        body.discount_pct === null
+          ? "End card saved as Pending approval. Once a second person approves it, the agency is back on its tier from that day."
+          : "Rate card saved as Pending approval. A second person has to approve it before quotes use it.",
+      );
       onClose();
     },
   });
+  const ending = form.kind === "end";
   function submit() {
-    const pct = discountFraction(form.pct);
-    if (!form.partner || pct === null) {
-      setLocalError("Pick the agency and enter the discount as a percentage from 0 to 49.99.");
+    const pct = ending ? null : discountFraction(form.pct);
+    if (!form.partner || (!ending && pct === null)) {
+      setLocalError(ending ? "Pick the agency." : "Pick the agency and enter the discount as a percentage from 0 to 49.99.");
       return;
     }
     if (form.valid_to && form.valid_to < form.valid_from) {
@@ -184,17 +206,18 @@ export function NewRateCardDrawer({ partners, initialPartner, onClose }: { partn
     <FormDrawer
       open
       onClose={onClose}
-      title="New contract rate card"
+      title={ending ? "End a contract rate" : "New contract rate card"}
       submitLabel="Save as pending"
       onSubmit={submit}
       busy={create.isPending}
-      dirty={!!(form.pct || form.tour || form.ref || form.note)}
+      dirty={!!(form.pct || form.tour || form.ref || form.note) || form.kind !== initialKind}
       error={localError ?? errorText(create.error)}
       fieldErrors={fe}
     >
       <p className="text-[13px] text-muted">
         A rate card gives one agency its contract discount instead of the tier discount, for every tour or for one tour. A card
-        for one tour wins over a card for every tour. A second person approves it before quotes use it.
+        for one tour wins over a card for every tour. An end card stops the contract rate of the same agency and tours from
+        its first day, and the agency is back on its tier. A second person approves either before quotes use it.
       </p>
       <FormField label="Agency" required error={errorFor(fe, "partner_id")}>
         <Select className={inputCls} value={form.partner} onChange={(e) => setForm({ ...form, partner: e.target.value })}>
@@ -208,14 +231,26 @@ export function NewRateCardDrawer({ partners, initialPartner, onClose }: { partn
       <FormField label="Tour key" hint="Empty = every tour. Otherwise the catalog key of one tour (Trip Plans)." error={errorFor(fe, "source_id")}>
         <Input className={`${inputCls} font-mono`} maxLength={128} value={form.tour} onChange={(e) => setForm({ ...form, tour: e.target.value })} />
       </FormField>
-      <FormField label="Discount on the agency price" required error={errorFor(fe, "discount_pct")}>
-        <PercentInput value={form.pct} onChange={(v) => setForm({ ...form, pct: v })} />
+      <FormField label="Card" required>
+        <Select className={inputCls} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as RateCardKind })}>
+          <option value="discount">Contract discount</option>
+          <option value="end">End the contract rate (back to the tier)</option>
+        </Select>
       </FormField>
+      {!ending && (
+        <FormField label="Discount on the agency price" required error={errorFor(fe, "discount_pct")}>
+          <PercentInput value={form.pct} onChange={(v) => setForm({ ...form, pct: v })} />
+        </FormField>
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
+        <FormField label={ending ? "Ends from" : "Valid from"} required error={errorFor(fe, "valid_from")}>
           <DateField className={inputCls} value={form.valid_from} onChange={(v) => setForm({ ...form, valid_from: v })} />
         </FormField>
-        <FormField label="Valid to" hint="Empty = no end date." error={errorFor(fe, "valid_to")}>
+        <FormField
+          label="Valid to"
+          hint={ending ? "Empty = for good. A date brings back the earlier card after it." : "Empty = no end date."}
+          error={errorFor(fe, "valid_to")}
+        >
           <DateField className={inputCls} value={form.valid_to} onChange={(v) => setForm({ ...form, valid_to: v })} />
         </FormField>
       </div>

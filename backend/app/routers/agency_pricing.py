@@ -3,7 +3,8 @@
 ``/booking/pricing/partner-tiers`` lists the tiers with the discount in force and the margin it leaves under the
 ``b2b`` rule; ``POST`` adds a tier, ``PATCH /{code}`` relabels or reorders one. ``/booking/pricing/partner-tier-
 discounts`` and ``/booking/pricing/partner-rate-cards`` (GET list, POST new pending row, POST ``/{id}/approve``)
-manage the dated discount rows with maker-checker, like the pricing rules (``app.routers.pricing``).
+manage the dated discount rows with maker-checker, like the pricing rules (``app.routers.pricing``); a rate card with
+``discount_pct: null`` is an end card (ends the contract rate of its scope, back to the tier).
 ``/booking/pricing/partner-terms`` lists every B2B partner with its tier and discount today; ``PATCH /{partner_id}``
 moves a partner to another tier (audited). Reads need ``pricing.read``, writes ``pricing.write``. Service:
 ``app.b2b.agency_pricing``.
@@ -66,7 +67,8 @@ class RateCardCreate(BaseModel):
 
     partner_id: uuid.UUID
     source_id: str | None = Field(default=None, min_length=1, max_length=128)
-    discount_pct: Discount
+    # Required; null = an end card (ends the contract rate of this scope from valid_from, back to the tier).
+    discount_pct: Discount | None
     valid_from: date
     valid_to: date | None = None
     contract_ref: str | None = Field(default=None, max_length=120)

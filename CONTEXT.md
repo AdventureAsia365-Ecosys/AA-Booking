@@ -661,7 +661,9 @@ tier's **discount** is a dated, append-only row (`partner_tier_discounts`), in f
 6 % (ADR 0019 b15, policy data, changed by a new row + approval in Booking admin, Pricing → Agency tiers). An optional
 **contract rate card** (`partner_rate_cards`) gives one partner its own discount for the whole catalogue or one trip
 plan, `valid_from` .. `valid_to`, approved the same way; while in force it overrides the tier (a plan card beats a
-catalogue card).
+catalogue card; a 0 % card still overrides). Cards are append-only, so a card is **ended** by an **end card**
+(`discount_pct` NULL, same partner and scope, approved the same way): from its `valid_from` that scope has no contract
+rate (a plan line falls back to the catalogue card, then the tier); on one day an end card beats a discount card.
 
 A B2B quote line's `b2b_price` = round up(the b2b rule's price x (1 - discount)) (`app.b2b.agency_pricing`,
 `app.b2b.quotes`); the quote stores the tier and its discount, each line its discount and card. A line with a discount

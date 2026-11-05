@@ -150,6 +150,27 @@ async def test_two_partners_on_different_tiers_get_different_prices(
     ]
     assert _prices(await _quote(c, m2m, TENANT_SILVER, lines)) == ["70.98", "23.66"]  # another agency is untouched
 
+    # The card is open-ended in effect until an end card is approved: from the same day, the agency is back on its
+    # tier (an end card beats a discount card of its scope on one day). Pending first, maker-checker as for cards.
+    end_body = {"partner_id": ids[TENANT_GOLD], "source_id": SOURCE_ID, "discount_pct": None,
+                "valid_from": TODAY.isoformat(), "contract_ref": "Invented contract 12"}  # fmt: skip
+    end = await _ok(await c.post("/pricing/partner-rate-cards", json=end_body, headers=maker), 201)
+    assert end["ends_contract_rate"] is True and end["status"] == "pending"
+    assert _prices(await _quote(c, m2m, TENANT_GOLD, lines)) == ["65.86", "22.93"]  # pending changes nothing
+    ended = await _ok(await c.post(f"/pricing/partner-rate-cards/{end['id']}/approve", headers=checker))
+    assert ended["status"] == "in_force"
+    back = await _quote(c, m2m, TENANT_GOLD, lines)
+    assert _prices(back) == ["68.79", "22.93"]  # the gold tier again
+    assert (
+        await admin.fetchval(
+            "SELECT count(*) FROM booking.b2b_quote_lines WHERE quote_id = $1::uuid AND rate_card_id IS NOT NULL",
+            back["quote_id"],
+        )
+        == 0
+    )
+    cards = await _ok(await c.get(f"/pricing/partner-rate-cards?partner_id={ids[TENANT_GOLD]}", headers=sales))
+    assert {r["id"]: r["status"] for r in cards["items"]} == {end["id"]: "in_force", card["id"]: "superseded"}
+
     # A new silver discount: pending, then approved by a second person, then in force.
     new = {"tier_code": "silver", "discount_pct": "0.05", "valid_from": TODAY.isoformat(), "note": "Invented review"}
     row = await _ok(await c.post("/pricing/partner-tier-discounts", json=new, headers=maker), 201)

@@ -762,6 +762,7 @@ const RATE_CARDS: Listed<RateCardRow> = {
       ["in_force", "e1000000-0000-4000-8000-000000000101", "0.0800"],
       ["in_force", null, "0.0450"],
       ["expired", null, "0.0400"],
+      ["scheduled", "e1000000-0000-4000-8000-000000000101", null],
     ] as const
   ).map(([status, source, discount], i) => ({
     id: `rc-${i}`,
@@ -776,6 +777,7 @@ const RATE_CARDS: Listed<RateCardRow> = {
     trip_plan_id: source ? "tp-1" : null,
     source_id: source,
     discount_pct: discount,
+    ends_contract_rate: discount === null,
     valid_from: "2026-10-01",
     valid_to: status === "expired" ? "2026-09-30" : "2027-09-30",
     contract_ref: "Invented contract BB-2026-07",

@@ -52,6 +52,40 @@ def test_plan_card_beats_catalogue_card_beats_tier() -> None:
     assert plan_only.discount_for(None) == (D("0.03"), None)
 
 
+def test_end_card_ends_the_contract_rate_of_its_scope() -> None:
+    # An open-ended catalogue card, then an approved end card of the same scope (the in-force read returns only the
+    # end card for that scope): the partner is back on the tier.
+    ended = AgencyTerms(tier_code="gold", tier_discount=D("0.06"), cards=(Card("end-all", None, None),))
+    assert ended.discount_for(PLAN) == (D("0.06"), None)
+    assert ended.discount_for(None) == (D("0.06"), None)
+    assert ended.cards[0].ends
+    # A plan card ended while a catalogue card stays: the plan line falls back to the catalogue card.
+    plan_ended = AgencyTerms(
+        tier_code="gold",
+        tier_discount=D("0.06"),
+        cards=(Card("card-all", None, D("0.04")), Card("end-plan", PLAN, None)),
+    )
+    assert plan_ended.discount_for(PLAN) == (D("0.04"), "card-all")
+    # The catalogue card ended, a plan card stays: only that plan keeps its rate.
+    all_ended = AgencyTerms(
+        tier_code="silver",
+        tier_discount=D("0.03"),
+        cards=(Card("end-all", None, None), Card("card-plan", PLAN, D("0.08"))),
+    )
+    assert all_ended.discount_for(PLAN) == (D("0.08"), "card-plan")
+    assert all_ended.discount_for("another-plan") == (D("0.03"), None)
+
+
+@pytest.mark.asyncio
+async def test_cards_in_force_put_an_end_card_first_on_one_day() -> None:
+    conn = ScriptedConn()
+    conn.on(TERMS_FRAGMENT, {"tier_code": "gold", "tier_discount": D("0.0600")})
+    conn.on(CARDS_FRAGMENT, [{"id": "end-all", "trip_plan_id": None, "discount_pct": None}])
+    terms = await agency_pricing.terms_for(conn, PARTNER_ID, date(2026, 11, 5))
+    assert terms.discount_for(PLAN) == (D("0.0600"), None)
+    assert "(c.discount_pct IS NULL) DESC" in agency_pricing.CARDS_IN_FORCE_SQL
+
+
 def test_apply_discount_and_margin_left() -> None:
     assert agency_pricing.apply_discount(D("100"), D("0")) == D("100")
     assert agency_pricing.apply_discount(D("100"), D("0.06")) == D("94.00")
@@ -280,6 +314,24 @@ def test_create_rate_card_for_one_tour_and_approve() -> None:
     assert _staff_client(listed, SALES).get("/booking/pricing/partner-rate-cards").json()["items"][0]["status"] == (
         "expired"
     )
+
+
+def test_end_card_is_created_pending_with_no_discount() -> None:
+    conn = ScriptedConn().on("SELECT agency_name FROM booking.b2b_partners", {"agency_name": "Invented Agency"})
+    conn.on("INSERT INTO booking.partner_rate_cards", PLAN)
+    conn.on("FROM booking.partner_rate_cards p JOIN booking.b2b_partners", _card_row(discount_pct=None))
+    body = {"partner_id": PARTNER_ID, "discount_pct": None, "valid_from": "2027-01-01", "contract_ref": "Invented 1"}
+    resp = _staff_client(conn, ADMIN).post("/booking/pricing/partner-rate-cards", json=body)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["ends_contract_rate"] is True and resp.json()["discount_pct"] is None
+    [insert] = conn.sql("INSERT INTO booking.partner_rate_cards")
+    assert insert[:3] == (PARTNER_ID, None, None)
+    [audit_args] = conn.sql("INSERT INTO booking.audit_logs")
+    assert any("ends the contract rate" in str(a) for a in audit_args)
+    missing = {"partner_id": PARTNER_ID, "valid_from": "2027-01-01"}  # discount_pct must be sent (null = end)
+    assert _staff_client(ScriptedConn(), ADMIN).post(
+        "/booking/pricing/partner-rate-cards", json=missing
+    ).status_code == (422)
 
 
 def test_tier_create_and_relabel() -> None:

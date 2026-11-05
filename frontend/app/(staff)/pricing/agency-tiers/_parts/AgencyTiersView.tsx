@@ -3,7 +3,7 @@
 // b15). Three tabs: Tiers (the discount each tier takes off the agency price today, the margin it leaves under the
 // b2b rule with a below-floor warning, and the dated discount rows with maker-checker), Agencies (every B2B partner
 // with its tier, moved with one select; audited) and Rate cards (a partner's contract discount, for every tour or
-// one tour, with maker-checker). Reads need pricing.read; writes and approvals pricing.write, and the API refuses an
+// one tour, with maker-checker; an approved card is ended by an end card, from its "End" button). Reads need pricing.read; writes and approvals pricing.write, and the API refuses an
 // approval by the row's creator (403 own_row): the Approve button follows each row's `can_approve`.
 
 import { useMemo, useState } from "react";
@@ -35,7 +35,7 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { SavedTabs } from "../../../_parts/SavedTabs";
-import { NewRateCardDrawer, NewTierDiscountDrawer, NewTierDrawer } from "./AgencyDrawers";
+import { NewRateCardDrawer, NewTierDiscountDrawer, NewTierDrawer, type RateCardKind } from "./AgencyDrawers";
 
 const STATUS_META: Record<AgencyRowStatus, { label: string; tone: BookingTone; help: string }> = {
   pending: { label: "Pending", tone: "warning", help: "Waiting for a second person. Not used for prices." },
@@ -64,6 +64,12 @@ function approveErrorText(err: unknown): string {
 
 type Approving = { kind: "discount"; row: TierDiscountRow } | { kind: "card"; row: RateCardRow } | null;
 type DrawerKind = "tier" | "discount" | "card" | null;
+type CardPrefill = { partner: string; tour?: string; kind: RateCardKind } | null;
+
+/** The discount of a rate card row, or what an end card does. */
+function cardTerms(row: RateCardRow): string {
+  return row.discount_pct === null ? "Ends contract rate" : pct(row.discount_pct);
+}
 
 export function AgencyTiersView() {
   const canWrite = useCan("pricing.write");
@@ -73,6 +79,7 @@ export function AgencyTiersView() {
   const tab = get("tab") === "agencies" ? "agencies" : get("tab") === "cards" ? "cards" : "tiers";
   const [drawer, setDrawer] = useState<DrawerKind>(null);
   const [approving, setApproving] = useState<Approving>(null);
+  const [cardPrefill, setCardPrefill] = useState<CardPrefill>(null);
 
   const tiers = useQuery({ queryKey: ["agency-pricing", "tiers"], queryFn: () => agencyPricingApi.tiers() });
   const discounts = useQuery({ queryKey: ["agency-pricing", "discounts"], queryFn: () => agencyPricingApi.discounts() });
@@ -259,7 +266,13 @@ export function AgencyTiersView() {
           "Every tour"
         ),
     },
-    { id: "discount", header: "Discount", accessorFn: (r) => Number(r.discount_pct), cell: ({ row }) => pct(row.original.discount_pct) },
+    {
+      id: "discount",
+      header: "Discount",
+      accessorFn: (r) => (r.discount_pct === null ? -1 : Number(r.discount_pct)),
+      cell: ({ row }) =>
+        row.original.discount_pct === null ? <span className="text-[13px] text-muted">{cardTerms(row.original)}</span> : cardTerms(row.original),
+    },
     {
       id: "validity",
       header: "Valid",
@@ -283,6 +296,24 @@ export function AgencyTiersView() {
     },
     { id: "ref", header: "Contract", accessorFn: (r) => r.contract_ref ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.contract_ref ?? "—"}</span> },
     { id: "entered", header: "Entered by", accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => personText(row.original.created_by) },
+    {
+      id: "end",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) =>
+        canWrite && row.original.discount_pct !== null && (row.original.status === "in_force" || row.original.status === "scheduled") ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Add an end card for this agency and tours (back to the tier); a second person approves it"
+            onClick={() =>
+              setCardPrefill({ partner: row.original.partner_id, tour: row.original.source_id ?? undefined, kind: "end" })
+            }
+          >
+            End
+          </Button>
+        ) : null,
+    },
   ];
 
   const pendingCount = discountRows.filter((r) => r.status === "pending").length;
@@ -384,7 +415,10 @@ export function AgencyTiersView() {
         </Section>
       )}
       {tab === "cards" && (
-        <Section title="Contract rate cards" description="A card in force replaces the agency's tier discount; a card for one tour wins over a card for every tour.">
+        <Section
+          title="Contract rate cards"
+          description="A card in force replaces the agency's tier discount; a card for one tour wins over a card for every tour. To stop a card, add an end card (End): the agency is back on its tier from that day."
+        >
           <DataTable<RateCardRow>
             tableId="agency-rate-cards"
             data={cardRows}
@@ -415,6 +449,13 @@ export function AgencyTiersView() {
               <strong className="text-ink">{pct(approving.row.discount_pct)}</strong> off the agency price from{" "}
               <DateText value={approving.row.valid_from} />? Quotes priced on or after that day use it.
             </>
+          ) : approving?.kind === "card" && approving.row.discount_pct === null ? (
+            <>
+              Approve ending the contract rate of <strong className="text-ink">{approving.row.agency_name}</strong> on{" "}
+              {approving.row.source_id ? "one tour" : "every tour"} from <DateText value={approving.row.valid_from} />? From
+              that day the agency&apos;s quotes use its tier discount again
+              {approving.row.source_id ? " (or its card for every tour)" : ""}.
+            </>
           ) : approving?.kind === "card" ? (
             <>
               Approve <strong className="text-ink">{pct(approving.row.discount_pct)}</strong> for{" "}
@@ -428,6 +469,15 @@ export function AgencyTiersView() {
       {drawer === "tier" && <NewTierDrawer onClose={() => setDrawer(null)} />}
       {drawer === "discount" && <NewTierDiscountDrawer tiers={tierRows} onClose={() => setDrawer(null)} />}
       {drawer === "card" && <NewRateCardDrawer partners={partnerRows} onClose={() => setDrawer(null)} />}
+      {cardPrefill && (
+        <NewRateCardDrawer
+          partners={partnerRows}
+          initialPartner={cardPrefill.partner}
+          initialTour={cardPrefill.tour}
+          initialKind={cardPrefill.kind}
+          onClose={() => setCardPrefill(null)}
+        />
+      )}
     </PageFrame>
   );
 }

@@ -11,7 +11,12 @@ the RRP (``price.from.v1``, the public "from" price) stays the same for every ag
   day = the newest approved row of the tier dated on or before it. No approved row = 0 %.
 - **Contract rate card** (``booking.partner_rate_cards``): an optional discount of one partner, for the whole
   catalogue or one trip plan, ``valid_from`` .. ``valid_to``, approved the same way. A card in force overrides the
-  tier; a plan card beats a catalogue card; among cards of one scope the newest ``valid_from`` wins.
+  tier; a plan card beats a catalogue card; among cards of one scope the newest ``valid_from`` wins (on one day an end
+  card first).
+- **End card** (``discount_pct`` NULL): a card that ends the contract rate of its scope from its ``valid_from`` (the
+  plan line falls back to the catalogue card, then to the tier). Cards are append-only, so this is how an open-ended
+  card is ended (contract over, card approved by mistake); it goes through the same maker-checker. A 0 % card is not
+  an end: it still overrides the tier.
 - **Applied** (:func:`terms_for` → :meth:`AgencyTerms.discount_for`): ``b2b_price = round_up(sell x (1 - discount))``
   per quote line (``app.b2b.quotes``); the line stores the discount and the card behind it.
 - **Floor** (warn, never block): a discount can take AA's margin below the ``b2b`` rule's floor. Nothing is capped
@@ -57,20 +62,26 @@ SELECT p.tier_code,
 FROM booking.b2b_partners p
 WHERE p.id = $1::uuid
 """
-CARDS_IN_FORCE_SQL = """
+# Among the approved cards of one scope in force on the day: the newest valid_from, an end card first on one day.
+CARD_ORDER = "c.valid_from DESC, (c.discount_pct IS NULL) DESC, c.created_at DESC"
+CARDS_IN_FORCE_SQL = f"""
 SELECT DISTINCT ON (c.trip_plan_id) c.id::text AS id, c.trip_plan_id::text AS trip_plan_id, c.discount_pct
 FROM booking.partner_rate_cards c
 JOIN booking.partner_price_approvals a ON a.partner_rate_card_id = c.id
 WHERE c.partner_id = $1::uuid AND c.valid_from <= $2 AND (c.valid_to IS NULL OR c.valid_to >= $2)
-ORDER BY c.trip_plan_id, c.valid_from DESC, c.created_at DESC
-"""
+ORDER BY c.trip_plan_id, {CARD_ORDER}
+"""  # noqa: S608 — constant fragment
 
 
 @dataclass(frozen=True)
 class Card:
     id: str
     trip_plan_id: str | None
-    discount_pct: Decimal
+    discount_pct: Decimal | None  # None = an end card: no contract rate for this scope
+
+    @property
+    def ends(self) -> bool:
+        return self.discount_pct is None
 
 
 @dataclass(frozen=True)
@@ -82,11 +93,12 @@ class AgencyTerms:
     cards: tuple[Card, ...] = ()
 
     def discount_for(self, plan_id: str | None) -> tuple[Decimal, str | None]:
-        """``(discount, rate_card_id)`` of a line: the plan's card, else the catalogue card, else the tier."""
+        """``(discount, rate_card_id)`` of a line: the plan's card, else the catalogue card, else the tier. An end card
+        in force for a scope means no card there (the next one down applies)."""
         by_plan = {c.trip_plan_id: c for c in self.cards}
-        card = (by_plan.get(plan_id) if plan_id else None) or by_plan.get(None)
-        if card is not None:
-            return card.discount_pct, card.id
+        for card in (by_plan.get(plan_id) if plan_id else None, by_plan.get(None)):
+            if card is not None and card.discount_pct is not None:
+                return card.discount_pct, card.id
         return self.tier_discount, None
 
 
@@ -278,7 +290,7 @@ WITH in_force AS (
     FROM booking.partner_rate_cards c
     JOIN booking.partner_price_approvals ap ON ap.partner_rate_card_id = c.id
     WHERE c.valid_from <= $1 AND (c.valid_to IS NULL OR c.valid_to >= $1)
-    ORDER BY c.partner_id, c.trip_plan_id, c.valid_from DESC, c.created_at DESC
+    ORDER BY c.partner_id, c.trip_plan_id, {CARD_ORDER}
 )
 SELECT p.id::text AS id, p.partner_id::text AS partner_id, bp.agency_name, p.trip_plan_id::text AS trip_plan_id,
        tp.source_id, p.discount_pct, p.valid_from, p.valid_to, p.contract_ref, p.note, p.created_at, p.created_by,
@@ -328,6 +340,7 @@ def _card_row(row: Any, staff: Staff) -> dict[str, Any]:
         "trip_plan_id": row["trip_plan_id"],
         "source_id": row["source_id"],
         "discount_pct": row["discount_pct"],
+        "ends_contract_rate": row["discount_pct"] is None,
         "valid_from": row["valid_from"],
         "valid_to": row["valid_to"],
         "contract_ref": row["contract_ref"],
@@ -365,6 +378,10 @@ async def _card_by_id(conn: asyncpg.Connection, staff: Staff, row_id: str, today
 
 def _pct(value: Decimal) -> str:
     return f"{(value * 100).normalize():f}%"
+
+
+def _card_terms(value: Decimal | None) -> str:
+    return "ends the contract rate (back to the tier)" if value is None else _pct(value)
 
 
 def _check_discount(value: Decimal) -> None:
@@ -426,14 +443,16 @@ async def _plan_id(conn: asyncpg.Connection, source_id: str | None) -> str | Non
 async def create_rate_card(
     conn: asyncpg.Connection, staff: Staff, data: dict[str, Any], *, today: date
 ) -> dict[str, Any]:
-    """A new pending contract rate card. ``data``: partner_id, source_id (None = the whole catalogue), discount_pct,
-    valid_from, valid_to (None = open-ended), contract_ref, note."""
+    """A new pending contract rate card. ``data``: partner_id, source_id (None = the whole catalogue), discount_pct
+    (None = an end card: ends the contract rate of that scope from valid_from), valid_from, valid_to (None =
+    open-ended), contract_ref, note."""
     partner = await conn.fetchrow(
         "SELECT agency_name FROM booking.b2b_partners WHERE id = $1::uuid", data["partner_id"]
     )
     if partner is None:
         raise NotFound("partner_not_found", "no B2B partner with this id")
-    _check_discount(data["discount_pct"])
+    if data["discount_pct"] is not None:
+        _check_discount(data["discount_pct"])
     if data.get("valid_to") is not None and data["valid_to"] < data["valid_from"]:
         raise Invalid("invalid_validity", "valid_to is on or after valid_from")
     plan_id = await _plan_id(conn, data.get("source_id"))
@@ -454,7 +473,9 @@ async def create_rate_card(
         )
     except asyncpg.UniqueViolationError:
         raise Conflict(
-            "rate_card_exists", f"a card for this partner and scope dated {data['valid_from']} exists; use another date"
+            "rate_card_exists",
+            f"a {'end' if data['discount_pct'] is None else 'discount'} card for this partner and scope dated"
+            f" {data['valid_from']} exists; use another date",
         ) from None
     except asyncpg.CheckViolationError:
         raise Invalid("invalid_rate_card", "the card breaks a partner_rate_cards check") from None
@@ -472,7 +493,7 @@ async def create_rate_card(
             for k in ("partner_id", "source_id", "discount_pct", "valid_from", "valid_to", "contract_ref", "note")
         },
         entity_label=label,
-        summary=f"New rate card {label}: {_pct(data['discount_pct'])} (pending approval)",
+        summary=f"New rate card {label}: {_card_terms(data['discount_pct'])} (pending approval)",
     )
     return row
 
@@ -538,7 +559,7 @@ async def approve_rate_card(conn: asyncpg.Connection, staff: Staff, row_id: str,
 
 # ── Staff admin: partners and their tier ────────────────────────────────────
 
-PARTNER_TERMS_SQL = """
+PARTNER_TERMS_SQL = f"""
 SELECT p.id::text AS id, p.agency_name, p.status, p.billing_currency::text AS billing_currency, p.tier_code,
        t.label AS tier_label, p.projected_at IS NOT NULL AS projected,
        (SELECT d.discount_pct
@@ -551,17 +572,20 @@ SELECT p.id::text AS id, p.agency_name, p.status, p.billing_currency::text AS bi
           JOIN booking.partner_price_approvals a ON a.partner_rate_card_id = c.id
          WHERE c.partner_id = p.id AND c.trip_plan_id IS NULL AND c.valid_from <= $1
            AND (c.valid_to IS NULL OR c.valid_to >= $1)
-         ORDER BY c.valid_from DESC, c.created_at DESC LIMIT 1) AS card_discount,
-       (SELECT count(*)
-          FROM booking.partner_rate_cards c
-          JOIN booking.partner_price_approvals a ON a.partner_rate_card_id = c.id
-         WHERE c.partner_id = p.id AND c.trip_plan_id IS NOT NULL AND c.valid_from <= $1
-           AND (c.valid_to IS NULL OR c.valid_to >= $1)) AS plan_cards
+         ORDER BY {CARD_ORDER} LIMIT 1) AS card_discount,
+       (SELECT count(*) FROM (
+            SELECT DISTINCT ON (c.trip_plan_id) c.discount_pct
+              FROM booking.partner_rate_cards c
+              JOIN booking.partner_price_approvals a ON a.partner_rate_card_id = c.id
+             WHERE c.partner_id = p.id AND c.trip_plan_id IS NOT NULL AND c.valid_from <= $1
+               AND (c.valid_to IS NULL OR c.valid_to >= $1)
+             ORDER BY c.trip_plan_id, {CARD_ORDER}) plan_card
+         WHERE plan_card.discount_pct IS NOT NULL) AS plan_cards
 FROM booking.b2b_partners p
 JOIN booking.partner_tiers t ON t.code = p.tier_code
 WHERE ($2::uuid IS NULL OR p.id = $2)
 ORDER BY lower(p.agency_name), p.id
-"""
+"""  # noqa: S608 — constant fragment
 
 
 def _terms_row(r: Any) -> dict[str, Any]:

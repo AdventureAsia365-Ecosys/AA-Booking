@@ -75,7 +75,9 @@ export interface RateCardRow extends ApprovedRowBase {
   trip_plan_id: string | null;
   /** Catalog tour key of a one-tour card; null = the whole catalogue. */
   source_id: string | null;
-  discount_pct: DecimalString;
+  /** null = an end card: from valid_from it ends the contract rate of its scope (back to the tier). */
+  discount_pct: DecimalString | null;
+  ends_contract_rate: boolean;
   valid_from: IsoDate;
   valid_to: IsoDate | null;
   contract_ref: string | null;
@@ -118,7 +120,8 @@ export interface NewTierDiscountBody {
 export interface NewRateCardBody {
   partner_id: string;
   source_id?: string;
-  discount_pct: string;
+  /** Always sent; null = an end card. */
+  discount_pct: string | null;
   valid_from: IsoDate;
   valid_to?: IsoDate;
   contract_ref?: string;
