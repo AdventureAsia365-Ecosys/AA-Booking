@@ -24,6 +24,7 @@ STATUS: dict[str, int] = {
     "not_found": 404,
     "price_changed": 409,
     "extend_limit": 409,
+    "credit_hold_overdue": 409,  # AA-1037 G4: the agency's AA invoices are overdue past its credit terms
     "tour_not_served": 409,  # AA-986 L5 (ADR 0015 decision 5): the tour left the catalog (retired / paused)
     "hold_expired": 410,
     "invalid": 422,

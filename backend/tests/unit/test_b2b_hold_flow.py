@@ -185,6 +185,7 @@ async def test_place_counts_seats_per_line_and_audits() -> None:
         "expires_at": (NOW + timedelta(hours=48)).isoformat(),
         "extended_count": 0,
         "lines": [{"line_ref": "L1", "line_status": "available"}, {"line_ref": "L2", "line_status": "on_request"}],
+        "cancellation_policy": None,  # 1.3: no approved policy scripted
     }
     [insert] = conn.sql("INSERT INTO booking.b2b_holds")
     assert insert[:6] == (PARTNER_ID, "crm-client", QUOTE, "P-1", 1, "key-0001")

@@ -89,7 +89,8 @@ EFFECTIVE_STATUS = "CASE WHEN h.status = 'active' AND h.expires_at <= now() THEN
 HOLD_SQL = f"""
 SELECT h.id::text AS id, h.partner_id::text AS partner_id, h.quote_id::text AS quote_id, h.proposal_ref,
        h.proposal_version, h.idempotency_key, h.status AS stored_status, {EFFECTIVE_STATUS} AS status, h.expires_at,
-       h.extended_count, h.extend_idempotency_key, h.trip_case_id::text AS trip_case_id, h.deposit_ref
+       h.extended_count, h.extend_idempotency_key, h.trip_case_id::text AS trip_case_id, h.deposit_ref,
+       h.cancellation_policy_id::text AS cancellation_policy_id, h.confirmed_at
 FROM booking.b2b_holds h
 """  # noqa: S608 — constant fragment
 LINES_SQL = """
@@ -109,7 +110,17 @@ SELECT q.currency::text AS currency, q.fx_rate_per_usd, q.fx_buffer_pct, q.fx_as
        q.price_hash::text AS price_hash
 FROM booking.b2b_quotes q WHERE q.id = $1::uuid
 """
-HOLD_PRICES_SQL = "SELECT ql.line_ref, ql.b2b_price FROM booking.b2b_quote_lines ql WHERE ql.quote_id = $1::uuid"
+HOLD_PRICES_SQL = (
+    "SELECT ql.line_no, ql.line_ref, ql.component_id, ql.b2b_price FROM booking.b2b_quote_lines ql"
+    " WHERE ql.quote_id = $1::uuid"
+)
+# AA-1037 G4 (credit stop): the agency's billing status (bk-042, the same view CIS reads). past_due = its oldest
+# overdue agency invoice is past the agency's suspend_after_days (billing_terms, else the default row).
+BILLING_STATUS_SQL = """
+SELECT status, oldest_overdue_days, overdue_invoices, suspend_after_days
+FROM booking.v_tenant_billing_status WHERE tenant_id = $1::uuid
+"""
+CREDIT_STOP_STATUS = "past_due"
 # AA-1013: the names staff read on the B2B case's items (the tour, the hotel room, the service), not component ids.
 PLAN_TITLES_SQL = "SELECT source_id, title::text AS title FROM catalog.v_tour WHERE source_id = ANY($1::text[])"
 ROOM_TITLES_SQL = (
@@ -237,7 +248,8 @@ async def _hold_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
     out only when the quote row cannot be read (never on a hold this API made)."""
     lines = await conn.fetch(LINES_SQL, hold["id"])
     quote = await conn.fetchrow(HOLD_QUOTE_SQL, hold["quote_id"])
-    prices = {r["line_ref"]: r.get("b2b_price") for r in await conn.fetch(HOLD_PRICES_SQL, hold["quote_id"])}
+    quote_lines = await conn.fetch(HOLD_PRICES_SQL, hold["quote_id"])
+    prices = {r["line_ref"]: r.get("b2b_price") for r in quote_lines}
     out: dict[str, Any] = {
         "hold_id": hold["id"],
         "quote_id": hold["quote_id"],
@@ -245,6 +257,7 @@ async def _hold_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
         "expires_at": hold["expires_at"].isoformat(),
         "extended_count": int(hold["extended_count"]),
         "lines": [{"line_ref": r["line_ref"], "line_status": r["held_as"]} for r in lines],
+        "cancellation_policy": await _hold_policy(conn, hold, quote_lines),
     }
     if quote is None:
         return out
@@ -270,6 +283,45 @@ async def _hold_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
         if price is not None:
             line["b2b_price"] = quotes.money(Decimal(price), currency)
     return out
+
+
+async def _hold_policy(conn: asyncpg.Connection, hold: Any, quote_lines: list[Any]) -> dict[str, Any] | None:
+    """AA-1037 G1 (contract 1.3): a confirmed hold shows the policy locked on it (what its cancel charges by); any
+    other hold the policy a confirm today would lock. None when no approved policy applies."""
+    if hold.get("stored_status") == "confirmed":
+        policy = await cancellation.policy_of_booking(
+            conn,
+            policy_id=hold.get("cancellation_policy_id"),
+            quote_id=hold["quote_id"],
+            confirmed_at=hold.get("confirmed_at"),
+        )
+        return cancellation.policy_out(policy, basis=cancellation.BASIS_LOCKED)
+    if not quote_lines:
+        return None
+    policy = await cancellation.policy_for_lines(conn, quote_lines, datetime.now(UTC).date())
+    return cancellation.policy_out(policy, basis=cancellation.BASIS_TODAY)
+
+
+async def check_credit(conn: asyncpg.Connection, caller: Caller) -> None:
+    """AA-1037 G4 (credit stop, like a wholesaler suspending credit on overdue invoices): while the agency's billing
+    status is ``past_due`` (bk-042 ``booking.v_tenant_billing_status``: its oldest overdue agency invoice is past
+    ``suspend_after_days``), a new hold is 409 ``credit_hold_overdue``. Replays and confirms of holds placed before
+    are still answered, and the status clears as soon as the payments that settle the invoices are approved."""
+    row = await conn.fetchrow(BILLING_STATUS_SQL, caller.tenant_id)
+    if row is None or row["status"] != CREDIT_STOP_STATUS:
+        return
+    log.info(
+        "b2b_hold_credit_stop partner=%s overdue_days=%s invoices=%s",
+        caller.partner_id,
+        row["oldest_overdue_days"],
+        row["overdue_invoices"],
+    )
+    raise B2BError(
+        "credit_hold_overdue",
+        f"new holds are paused: {int(row['overdue_invoices'])} AA invoice(s) overdue, the oldest by"
+        f" {int(row['oldest_overdue_days'])} days (credit terms: {row['suspend_after_days']} days);"
+        " holds resume once the overdue invoices are paid",
+    )
 
 
 async def _find(conn: asyncpg.Connection, caller: Caller, hold_id: str, *, lock: bool = False) -> Any:
@@ -394,6 +446,9 @@ async def _create(
             )
         return await _hold_out(conn, current)
 
+    # AA-1037 G4: no new hold while the agency's AA invoices are overdue past its credit terms (replays above still
+    # answer).
+    await check_credit(conn, caller)
     lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
     # AA-986 L5: no new hold on a tour that left the catalog (a replay above still answers with its hold).
     await served.require_served(conn, [(r["line_ref"], r["component_id"]) for r in lines])

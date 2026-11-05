@@ -30,6 +30,10 @@
   discount, each line the discount applied and the card behind it. A line with a discount hashes it
   (``agency_discount``, ``rate_card_id``); a line without one hashes exactly as before, so a standard (0 %) partner's
   hash is unchanged.
+- **Cancellation policy** (AA-1037 G1, contract 1.3): the answer carries ``cancellation_policy``, the fee schedule a
+  confirm today would lock (``app.b2b.cancellation``: the plan of the first ``tp:`` line, else the B2B default), so
+  the agency sees the fees before it books. Not hashed: the policy is locked at confirm, not at the quote; null when
+  no approved policy is in force.
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -46,7 +50,7 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import agency_pricing, departures, served
+from app.b2b import agency_pricing, cancellation, departures, served
 from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, repository
@@ -388,6 +392,7 @@ async def create_quote(
             currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total, rounding=rounding
         )
         valid_until = now + timedelta(hours=await _valid_hours(conn))
+        policy = await cancellation.policy_for_lines(conn, priced, on)
 
         async with conn.transaction():
             quote_id = await conn.fetchval(
@@ -480,4 +485,5 @@ async def create_quote(
             for p in priced
         ],
         "total_b2b_price": money(total, currency),
+        "cancellation_policy": cancellation.policy_out(policy, basis=cancellation.BASIS_TODAY),
     }

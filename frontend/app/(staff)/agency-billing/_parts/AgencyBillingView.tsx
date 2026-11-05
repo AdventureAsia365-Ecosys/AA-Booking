@@ -2,7 +2,8 @@
 // app/(staff)/agency-billing/_parts/AgencyBillingView.tsx — Operations → Agency billing (AA-1037 R4, bk-041 / bk-042;
 // root ADR 0019 d9, b14 / b16 / b17). Every invoice from AA to an agency: the software fee (AAS- numbers) and the tour
 // settlement (AAT- numbers). Four tabs (URL key `tab`):
-//   Invoices   GET /agency-invoices (kind, status, q), paged on the server; "Run drafts" queues a draft job for a month.
+//   Invoices   GET /agency-invoices (kind, status, q), paged on the server; "Run drafts" queues a draft job for a month;
+//              "Export for accountant" downloads the invoices or payments of a period as CSV (AA-1037 extras G5).
 //   Payments   GET /agency-payments: payments waiting for the second person (approve / reject; never the recorder).
 //   Agencies   GET /agency-billing/status: each agency's billing status (the view CIS reads to warn and suspend).
 //   Settings   the issuing billing entity, tax rules and payment terms (data rows, never code; BO-15..17).
@@ -18,6 +19,8 @@ import {
   agencyBillingApi,
   overdueText,
   periodLabel,
+  saveBlob,
+  type ExportWhat,
   type AgencyInvoice,
   type AgencyPayment,
   type BillingStatusRow,
@@ -120,6 +123,7 @@ function InvoicesTab() {
   const paging = useOffsetPage();
   const canWrite = useCan("agency_billing.write");
   const [runOpen, setRunOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const list = useQuery({
     queryKey: ["agency-billing", "invoices", kind, status, q, paging.pageIndex, paging.pageSize],
     queryFn: () =>
@@ -128,7 +132,12 @@ function InvoicesTab() {
   return (
     <Section
       title="Invoices"
-      actions={canWrite ? <Button variant="primary" onClick={() => setRunOpen(true)}>Run drafts</Button> : undefined}
+      actions={
+        <span className="flex flex-wrap gap-2">
+          <Button variant="ghost" onClick={() => setExportOpen(true)}>Export for accountant</Button>
+          {canWrite && <Button variant="primary" onClick={() => setRunOpen(true)}>Run drafts</Button>}
+        </span>
+      }
     >
       <div className="mb-3 flex flex-wrap gap-3">
         <Field label="Kind">
@@ -173,7 +182,64 @@ function InvoicesTab() {
         tableMinWidth={980}
       />
       <RunDraftsModal open={runOpen} onClose={() => setRunOpen(false)} />
+      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} />
     </Section>
+  );
+}
+
+function monthBounds(): { from: string; to: string } {
+  const now = new Date();
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+  return { from: first.toISOString().slice(0, 10), to: last.toISOString().slice(0, 10) };
+}
+
+// AA-1037 extras G5: one CSV of the invoices issued, or the payments received, in a period (at most 366 days).
+function ExportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const toast = useToast();
+  const [what, setWhat] = useState<ExportWhat>("invoices");
+  const [range, setRange] = useState(monthBounds);
+  const run = useMutation({
+    mutationFn: () => agencyBillingApi.exportCsv(what, range.from, range.to),
+    onSuccess: (blob) => {
+      saveBlob(blob, `agency-${what}-${range.from}_${range.to}.csv`);
+      onClose();
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(range.from) && /^\d{4}-\d{2}-\d{2}$/.test(range.to) && range.from <= range.to;
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Export for the accountant"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={run.isPending || !valid} onClick={() => run.mutate()}>
+            {run.isPending ? "Preparing…" : "Download CSV"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <Field label="What" hint="Invoices: issued in the period (paid and void included, no drafts). Payments: received in the period, every status.">
+          <Select
+            value={what}
+            onChange={(e) => setWhat(e.target.value as ExportWhat)}
+            options={[{ value: "invoices", label: "Invoices" }, { value: "payments", label: "Payments" }]}
+          />
+        </Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="From">
+            <Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          </Field>
+          <Field label="To (included)">
+            <Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+          </Field>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

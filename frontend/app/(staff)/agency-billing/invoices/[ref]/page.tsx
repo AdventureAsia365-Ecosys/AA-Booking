@@ -4,7 +4,8 @@
 // issuer and bill-to copies, the tax rule in force, the due date), Delete. Issued: the legal VAT e-invoice number the
 // accountant issued in the e-invoice software (recorded once), Record payment (maker; a document reference is required),
 // Void (no approved payment). Payments: approve / reject by a second person (never the recorder). The money state is
-// derived by the database: the invoice turns paid when approved payments cover it.
+// derived by the database: the invoice turns paid when approved payments cover it. Reminders (AA-1037 extras G4): the
+// overdue e-mails the daily job sent (or skipped) for this invoice, one per step.
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -20,6 +21,7 @@ import {
   type AgencyInvoiceLine,
   type AgencyPayment,
   type AgencyPaymentMethod,
+  type InvoiceReminder,
 } from "@/lib/api/agencyBilling";
 import {
   Button,
@@ -192,6 +194,7 @@ function InvoiceView({ inv }: { inv: AgencyInvoiceDetail }) {
         )}
       </Section>
       <PaymentsSection inv={inv} onChange={refresh} />
+      {(inv.reminders?.length ?? 0) > 0 && <RemindersSection reminders={inv.reminders ?? []} />}
       <ConfirmDialog
         open={voidOpen}
         onClose={() => setVoidOpen(false)}
@@ -362,5 +365,38 @@ function RecordPaymentDrawer({ inv, open, onClose, onDone }: { inv: AgencyInvoic
         </Field>
       </div>
     </FormDrawer>
+  );
+}
+
+const REMINDER_COLUMNS: ColumnDef<InvoiceReminder, unknown>[] = [
+  {
+    id: "step",
+    header: "Step",
+    cell: ({ row }) => (row.original.step_kind === "credit_stop" ? `Holds paused (${row.original.step_days} d)` : `Reminder (${row.original.step_days} d)`),
+  },
+  { id: "overdue", header: "Days overdue", cell: ({ row }) => row.original.days_overdue },
+  {
+    id: "outcome",
+    header: "Outcome",
+    cell: ({ row }) =>
+      row.original.outcome === "sent"
+        ? `Sent to ${row.original.sent_to ?? "—"}${row.original.redirected ? " (staff inbox, test environment)" : ""}`
+        : "Not sent: no billing e-mail on the invoice",
+  },
+  { id: "at", header: "When", cell: ({ row }) => <DateText value={row.original.created_at} /> },
+];
+
+function RemindersSection({ reminders }: { reminders: InvoiceReminder[] }) {
+  return (
+    <Section title="Reminders" description="Overdue e-mails sent by the daily job, at most one per step.">
+      <DataTable<InvoiceReminder>
+        searchable={false}
+        tableId="agency-invoice-reminders"
+        data={reminders}
+        columns={REMINDER_COLUMNS}
+        getRowId={(r) => String(r.step_days)}
+        emptyTitle="No reminder"
+      />
+    </Section>
   );
 }

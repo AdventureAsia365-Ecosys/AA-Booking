@@ -19,7 +19,7 @@ const PAYMENT_STATUS: Record<AgencyPaymentStatus, { label: string; tone: Booking
 const HEALTH: Record<BillingHealth, { label: string; tone: BookingTone; help: string }> = {
   ok: { label: "OK", tone: "success", help: "Nothing overdue past the warning days" },
   warn: { label: "Warning", tone: "warning", help: "Overdue past the warning days: the agency is warned" },
-  past_due: { label: "Past due", tone: "danger", help: "Overdue past the suspend days: the account is suspended" },
+  past_due: { label: "Past due", tone: "danger", help: "Overdue past the suspend days: the account is suspended and new booking holds are paused" },
 };
 
 export function InvoiceStatusPill({ status, overdueDays = 0 }: { status: AgencyInvoiceStatus; overdueDays?: number }) {
