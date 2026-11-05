@@ -24,12 +24,28 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from app.catalog import liveness
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
 from app.ops import lifecycle as lc
 from tests.integration import ops
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _no_pilot_view(migrated_admin_dsn: str) -> AsyncIterator[None]:
+    """AA-969 d16: the clean-ups here fail closed without the pilot marker view: an empty one says "no pilot"."""
+    conn = await asyncpg.connect(migrated_admin_dsn)
+    try:
+        await ops.no_pilot_view(conn)
+        liveness.reset_cache()
+        yield
+    finally:
+        await conn.execute(ops.TENANT_ACCOUNT_DROP)
+        liveness.reset_cache()
+        await conn.close()
+
 
 SALES = "it-682-life"
 

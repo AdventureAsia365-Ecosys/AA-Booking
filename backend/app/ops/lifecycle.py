@@ -22,7 +22,9 @@ date is a fact); their count travels in the notice and the result. **Dates are r
 session ``TimeZone`` to it, so the guard's ``current_date`` is the same day whatever the server or pool zone.
 
 It also clears, once the trip ended ``emergency_contact_keep_days`` (90) ago, the emergency contact and the notes of the
-case's trip checks (data standards DM-7 row of ``trip_case_checks``) and stamps ``cleared_at``.
+case's trip checks (data standards DM-7 row of ``trip_case_checks``) and stamps ``cleared_at``. AA-969 (root ADR 0019
+d16): never for a case of the pilot tenant (``party_tenant_id``, :mod:`app.pilot`); its checks wait until the pilot
+marker is cleared. When the pilot cannot be read the clearing is skipped for that run (``clear_skipped_pilot_unknown``).
 
 Modes (DM-7.2 style): a manual run is a **DRY RUN** unless its payload says ``"dry_run": false``; a scheduled run is a
 DRY RUN until one live run over every case (no ``case_ids``) has succeeded. A DRY RUN writes nothing but its job result:
@@ -64,7 +66,7 @@ from typing import Any
 
 import asyncpg
 
-from app import audit
+from app import audit, pilot
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
@@ -279,6 +281,7 @@ CLEAR_WHERE = """
     AND (k.emergency_contact_name IS NOT NULL OR k.emergency_contact_phone IS NOT NULL OR k.note IS NOT NULL)
     AND coalesce(tc.end_date, tc.start_date) + $1::int < $2::date
     AND ($3::uuid[] IS NULL OR tc.id = ANY($3::uuid[]))
+    AND (tc.party_tenant_id IS NULL OR NOT (tc.party_tenant_id = ANY($4::uuid[])))
 """
 CLEAR_COUNT_SQL = f"""
 SELECT count(*)::int AS checks, count(DISTINCT k.trip_case_id)::int AS cases
@@ -290,7 +293,7 @@ WITH due AS (
     SELECT k.id FROM booking.trip_case_checks k JOIN booking.trip_cases tc ON tc.id = k.trip_case_id
      WHERE {CLEAR_WHERE}
      ORDER BY k.id
-     LIMIT $4
+     LIMIT $5
      FOR UPDATE OF k SKIP LOCKED
 )
 UPDATE booking.trip_case_checks k
@@ -488,15 +491,20 @@ async def run_lifecycle(
 async def _clear(
     pool: asyncpg.Pool, *, live: bool, case_ids: list[str] | None, today: date, keep_days: int
 ) -> dict[str, int]:
-    """DM-7: the emergency contact and the notes of the checks of a trip that ended ``keep_days`` ago."""
+    """DM-7: the emergency contact and the notes of the checks of a trip that ended ``keep_days`` ago (never of the
+    pilot tenant's cases, AA-969 d16)."""
+    async with pool.acquire() as conn:
+        pilots = await pilot.pilot_tenants(conn)
+    if pilots is None:  # fail closed: the pilot is unknown, nothing is cleared (counted 0) this run
+        return {"cleared_checks": 0, "cleared_cases": 0, "clear_skipped_pilot_unknown": 1}
     if not live:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(CLEAR_COUNT_SQL, keep_days, today, case_ids)
+            row = await conn.fetchrow(CLEAR_COUNT_SQL, keep_days, today, case_ids, pilots)
         return {"cleared_checks": row["checks"], "cleared_cases": row["cases"]}
     checks, cases = 0, set()
     for _ in range(MAX_BATCHES):
         async with pool.acquire() as conn, conn.transaction():
-            rows = await conn.fetch(CLEAR_SQL, keep_days, today, case_ids, BATCH)
+            rows = await conn.fetch(CLEAR_SQL, keep_days, today, case_ids, pilots, BATCH)
             touched = sorted({r["trip_case_id"] for r in rows} - cases)
             for case_id in touched:
                 await audit.record(
