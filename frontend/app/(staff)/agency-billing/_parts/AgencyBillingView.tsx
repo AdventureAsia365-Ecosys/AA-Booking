@@ -2,8 +2,10 @@
 // app/(staff)/agency-billing/_parts/AgencyBillingView.tsx — Operations → Agency billing (AA-1037 R4, bk-041 / bk-042;
 // root ADR 0019 d9, b14 / b16 / b17). Every invoice from AA to an agency: the software fee (AAS- numbers) and the tour
 // settlement (AAT- numbers). Four tabs (URL key `tab`):
-//   Invoices   GET /agency-invoices (kind, status, q), paged on the server; "Run drafts" queues a draft job for a month;
-//              "Export for accountant" downloads the invoices or payments of a period as CSV (AA-1037 extras G5).
+//   Invoices   GET /agency-invoices (kind, status, q, tenant_id), paged on the server; "Run drafts" queues a draft job
+//              for a month; "Export for accountant" downloads the invoices or payments of a period as CSV (AA-1037
+//              extras G5). `?tenant=<CIS tenant uuid>` (the CIS Tenant 360 "Open in Booking" link) shows one agency's
+//              invoices, with a removable chip naming the agency (ui/booking/agencyFilter.ts).
 //   Payments   GET /agency-payments: payments waiting for the second person (approve / reject; never the recorder).
 //   Agencies   GET /agency-billing/status: each agency's billing status (the view CIS reads to warn and suspend).
 //   Settings   the issuing billing entity, tax rules and payment terms (data rows, never code; BO-15..17).
@@ -13,6 +15,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
+import { X } from "lucide-react";
 import {
   AGENCY_PAYMENT_METHOD_LABEL,
   KIND_LABEL,
@@ -27,8 +30,10 @@ import {
   type InvoiceKind,
 } from "@/lib/api/agencyBilling";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
+import { agencyFilterLabel, tenantFilter } from "@/ui/booking/agencyFilter";
 import {
   Button,
+  ChipButton,
   ConfirmDialog,
   DataTable,
   DateText,
@@ -120,15 +125,26 @@ function InvoicesTab() {
   const kind = get("kind");
   const status = get("status");
   const q = get("q");
+  const tenant = tenantFilter(get("tenant"));
   const paging = useOffsetPage();
   const canWrite = useCan("agency_billing.write");
   const [runOpen, setRunOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const list = useQuery({
-    queryKey: ["agency-billing", "invoices", kind, status, q, paging.pageIndex, paging.pageSize],
+    queryKey: ["agency-billing", "invoices", kind, status, q, tenant, paging.pageIndex, paging.pageSize],
     queryFn: () =>
-      agencyBillingApi.invoices({ kind, status: status || "all", q, limit: paging.pageSize, offset: paging.pageIndex * paging.pageSize }),
+      agencyBillingApi.invoices({
+        kind,
+        status: status || "all",
+        tenant_id: tenant ?? undefined,
+        q,
+        limit: paging.pageSize,
+        offset: paging.pageIndex * paging.pageSize,
+      }),
   });
+  // The chip's agency name: every partner has a billing status row (the Agencies tab reads the same query).
+  const agencies = useQuery({ queryKey: ["agency-billing", "status"], queryFn: agencyBillingApi.status, enabled: tenant !== null });
+  const agencyName = tenant ? agencyFilterLabel(tenant, agencies.data?.items, list.data?.items) : "";
   return (
     <Section
       title="Invoices"
@@ -165,6 +181,14 @@ function InvoicesTab() {
         <Field label="Search">
           <Input defaultValue={q} placeholder="Number, agency or e-invoice number" onBlur={(e) => set("q", e.target.value.trim() || null)} />
         </Field>
+        {tenant && (
+          <Field label="Agency" as="div">
+            <ChipButton selected ariaLabel={`${agencyName}: remove the agency filter`} title="Show every agency" onClick={() => set("tenant", null)}>
+              <span className="block max-w-[220px] truncate">{agencyName}</span>
+              <X size={14} aria-hidden="true" />
+            </ChipButton>
+          </Field>
+        )}
       </div>
       <DataTable<AgencyInvoice>
         searchable={false}

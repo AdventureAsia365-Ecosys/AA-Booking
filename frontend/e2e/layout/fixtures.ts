@@ -59,6 +59,24 @@ import type { BillingSummary, InvoiceStatus, InvoiceSummary, Kpi, Page as Billin
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
+import type {
+  AgencyInvoice,
+  AgencyInvoiceDetail,
+  AgencyInvoiceLine,
+  AgencyInvoiceStatus,
+  AgencyPayment,
+  AgencyPaymentStatus,
+  BillingEntity,
+  BillingHealth,
+  BillingStatusRow,
+  BillingTerms,
+  DraftRun,
+  InvoiceKind,
+  Page as AgencyBillingPage,
+  Summary as AgencyBillingSummary,
+  TaxRule,
+  TermsClause,
+} from "../../lib/api/agencyBilling";
 import staffMeJson from "./staff-me.json";
 
 /** The browser clock during the check (layout.spec.ts freezes it with page.clock.setFixedTime): the run gives the same
@@ -1280,6 +1298,272 @@ const LIFECYCLE_RUNS: LifecycleRun[] = range(3).map((i) => ({
   error: null,
 }));
 
+// ── Agency billing (AA-1037: Agency billing tabs + an agency invoice; the visual run's fixture) ───────────────────────
+// Invented agencies (tenant ids with letters in every group: no long digit run, lesson 179), every billing status
+// (ok / warn / past_due), both invoice kinds (AAS- software fee, AAT- tour settlement), both currencies (VND amounts
+// are the widest money strings), drafts without a number, an overdue issued invoice, paid and void rows, payments in
+// every state and an invented issuing entity with an invented payment line. The admin of staff-me.json holds every
+// agency billing permission, so the write and approve controls show.
+const AB_AGENCIES: { tenant_id: string; agency_name: string; health: BillingHealth; country: string }[] = [
+  { tenant_id: "a1b2c3d4-e5f6-4a7b-8c9d-ab10cdef001a", agency_name: "Lotus Lantern Travel and Heritage Journeys Company Limited", health: "past_due", country: "VN" },
+  { tenant_id: "b1b2c3d4-e5f6-4a7b-8c9d-ab10cdef002a", agency_name: "Heron Coast Journeys", health: "warn", country: "TH" },
+  { tenant_id: "c1b2c3d4-e5f6-4a7b-8c9d-ab10cdef003a", agency_name: "Blue Bamboo Holidays", health: "ok", country: "VN" },
+  { tenant_id: "d1b2c3d4-e5f6-4a7b-8c9d-ab10cdef004a", agency_name: "Northern Pass Tours and Mountain Trekking Specialists", health: "ok", country: "LA" },
+  { tenant_id: "e1b2c3d4-e5f6-4a7b-8c9d-ab10cdef005a", agency_name: "Quiet Lagoon Expeditions", health: "ok", country: "KH" },
+  { tenant_id: "f1b2c3d4-e5f6-4a7b-8c9d-ab10cdef006a", agency_name: "Paper Crane Family Travel", health: "past_due", country: "VN" },
+];
+const AB_STATUSES: AgencyInvoiceStatus[] = ["issued", "issued", "draft", "paid", "void"];
+const abId = (prefix: string, i: number) => `${prefix}0000000-ab10-4037-8000-f1c7e0a${String(i).padStart(5, "0")}`;
+
+/** One agency invoice: even rows the software fee (USD), odd rows the tour settlement (VND, wider). */
+function agencyInvoice(i: number): AgencyInvoice {
+  const settlement = i % 2 === 1;
+  const kind: InvoiceKind = settlement ? "settlement" : "saas";
+  const status = AB_STATUSES[i % AB_STATUSES.length];
+  const agency = AB_AGENCIES[i % AB_AGENCIES.length];
+  const n = Math.floor(i / 2) + 1;
+  const number = status === "draft" ? null : `${settlement ? "AAT" : "AAS"}-2026-${pad(n)}`;
+  const currency = settlement ? "VND" : "USD";
+  const total = settlement ? "1284500000" : "1299.00";
+  const paid = status === "paid" ? total : status === "issued" && i % 3 === 0 ? (settlement ? "385350000" : "299.00") : "0";
+  const balance = status === "issued" ? (settlement ? (i % 3 === 0 ? "899150000" : total) : i % 3 === 0 ? "1000.00" : total) : "0";
+  const overdue = status === "issued" && i % 4 === 0 ? 9 + i : 0;
+  return {
+    id: abId("a", i),
+    number,
+    party_tenant_id: agency.tenant_id,
+    agency_name: agency.agency_name,
+    invoice_kind: kind,
+    status,
+    period_start: settlement ? "2026-09-01" : "2026-10-01",
+    period_end: settlement ? "2026-09-30" : "2026-10-31",
+    currency,
+    subtotal: settlement ? total : "1180.91",
+    tax_rate: settlement ? "0.0000" : "0.1000",
+    tax_amount: settlement ? "0" : "118.09",
+    total,
+    paid,
+    waiting: status === "issued" && i % 5 === 3 ? (settlement ? "120000000" : "500.00") : "0",
+    balance,
+    overdue_days: overdue,
+    issued_on: status === "draft" ? null : "2026-10-01",
+    due_date: status === "draft" ? null : overdue ? "2026-10-14" : "2026-10-31",
+    issued_by: status === "draft" ? null : "u-002",
+    e_invoice_no: status === "paid" ? `DEMO-EINV-${pad(n, 4)}` : null,
+    staff_note: null,
+    void_reason: status === "void" ? "Billed twice for the same month; the corrected invoice replaces it" : null,
+    footer_wording: settlement ? null : "Invented footer: tax treatment wording printed under the totals of the software fee invoice.",
+    issuer: { code: "DEMO-ISSUER", legal_entity: AB_ENTITY_NAME, payment_instructions: AB_PAYMENT_LINE },
+    bill_to: { legal_entity_name: agency.agency_name, agency_name: agency.agency_name, tax_id: "DEMO-TAX-0420", billing_country: agency.country },
+    source: i % 7 === 6 ? "staff" : "job",
+    created_at: EARLIER,
+  };
+}
+const AB_ENTITY_NAME = "Example Issuer Trading and Travel Services Company Limited";
+const AB_PAYMENT_LINE = "Bank transfer to Example Bank, account name Example Issuer, account EXAMPLE-ACCOUNT-01; put the invoice number in the reference.";
+
+function agencyPayment(i: number): AgencyPayment {
+  const inv = agencyInvoice((i * 3) % ROWS);
+  const status: AgencyPaymentStatus = (["recorded", "approved", "rejected"] as const)[i % 3];
+  return {
+    id: abId("b", i),
+    invoice_id: inv.id,
+    invoice_number: inv.number ?? `AAS-2026-${pad(i + 1)}`,
+    invoice_kind: inv.invoice_kind,
+    agency_name: inv.agency_name,
+    amount: inv.currency === "VND" ? "385350000" : "299.00",
+    currency: inv.currency,
+    method: (["bank_transfer", "cash", "card_offline", "other"] as const)[i % 4],
+    received_on: "2026-10-12",
+    reference: `Example Bank transfer DEMO-REF-${pad(i + 1, 4)}`,
+    document_ref: `Bank statement line DEMO-STMT-${pad(i + 1, 4)}`,
+    note: null,
+    status,
+    // Row 4 was recorded by the signed-in admin: "Another person approves" instead of the buttons.
+    recorded_by: i === 3 ? "u-layout" : `u-${pad((i % 4) + 1, 3)}`,
+    recorded_at: EARLIER,
+    approved_by: status === "approved" ? "u-003" : null,
+    rejected_by: status === "rejected" ? "u-003" : null,
+    reject_reason: status === "rejected" ? "Not on the bank statement of the received date" : null,
+  };
+}
+
+/** The agency invoice page: AAS- = the software fee, AAT- = the tour settlement; issued and 9 days overdue. */
+function agencyInvoiceDetail(ref: string): AgencyInvoiceDetail {
+  const settlement = ref.toUpperCase().startsWith("AAT");
+  const base = agencyInvoice(settlement ? 1 : 0);
+  const currency = base.currency;
+  const lines: AgencyInvoiceLine[] = settlement
+    ? range(6).map((i) => ({
+        line_no: i + 1,
+        line_role: (["deposit", "balance", "full", "cancellation_fee", "deposit", "adjustment"] as const)[i],
+        product: null,
+        plan_key: null,
+        source_hold_id: i < 5 ? abId("c", i) : null,
+        trip_case_code: i < 5 ? `TC-${pad(i + 1)}` : null,
+        description: i < 5 ? `Invented Highlands and Hidden Lagoons Discovery Journey ${i + 1}, departure 14 Jan 2027, 4 travellers` : "Goodwill credit agreed with the agency",
+        quantity: "1",
+        unit_price: i < 5 ? "256900000" : "-1000000",
+        amount: i < 5 ? "256900000" : "-1000000",
+        voided: i === 4,
+      }))
+    : [
+        { role: "subscription", product: "content", plan: "content.starter", text: "Content studio, starter plan, October 2026", qty: "1", unit: "299.00" },
+        { role: "extra_seats", product: "content", plan: "content.starter", text: "Extra staff seats above the plan, October 2026", qty: "7", unit: "125.13" },
+        { role: "adjustment", product: null, plan: null, text: "First-month onboarding discount agreed in the invented contract", qty: "1", unit: "-1.00" },
+      ].map((l, i) => ({
+        line_no: i + 1,
+        line_role: l.role,
+        product: l.product,
+        plan_key: l.plan,
+        source_hold_id: null,
+        trip_case_code: null,
+        description: l.text,
+        quantity: l.qty,
+        unit_price: l.unit,
+        amount: (Number(l.qty) * Number(l.unit)).toFixed(2),
+        voided: false,
+      }));
+  const pay = (i: number, status: AgencyPaymentStatus, by: string): AgencyPayment => ({
+    ...agencyPayment(i),
+    invoice_id: base.id,
+    invoice_number: ref,
+    invoice_kind: base.invoice_kind,
+    agency_name: base.agency_name,
+    currency,
+    amount: settlement ? "385350000" : "299.00",
+    status,
+    recorded_by: by,
+    approved_by: status === "approved" ? "u-003" : null,
+    rejected_by: status === "rejected" ? "u-003" : null,
+    reject_reason: status === "rejected" ? "Not on the bank statement of the received date" : null,
+  });
+  return {
+    ...base,
+    number: ref,
+    status: "issued",
+    overdue_days: 9,
+    due_date: "2026-10-14",
+    e_invoice_no: null,
+    lines,
+    payments: [pay(0, "approved", "u-002"), pay(1, "recorded", "u-002"), pay(2, "rejected", "u-004")],
+    reminders: [
+      { step_days: 1, step_kind: "reminder", days_overdue: 1, outcome: "sent", skip_reason: null, sent_to: "staff.inbox@example.test", redirected: true, created_at: NOW },
+      { step_days: 7, step_kind: "reminder", days_overdue: 7, outcome: "skipped", skip_reason: "no_billing_email", sent_to: null, redirected: false, created_at: NOW },
+    ],
+  };
+}
+
+const AB_SUMMARY: AgencyBillingSummary = {
+  by_currency: [
+    { currency: "USD", drafts: 4, open: "18450.00", overdue: "3897.00", waiting: "500.00" },
+    { currency: "VND", drafts: 2, open: "8991500000", overdue: "1284500000", waiting: "120000000" },
+  ],
+};
+const AB_NOTHING_OVERDUE: Record<string, string> = {};
+const AB_STATUS_ROWS: BillingStatusRow[] = AB_AGENCIES.map((a, i): BillingStatusRow => ({
+  tenant_id: a.tenant_id,
+  agency_name: a.agency_name,
+  partner_status: a.health === "past_due" ? "suspended" : "active",
+  status: a.health,
+  oldest_overdue_days: a.health === "ok" ? 0 : a.health === "warn" ? 3 : 21 + i,
+  overdue_invoices: a.health === "ok" ? 0 : a.health === "warn" ? 1 : 3,
+  // The API sends a JSON object; one row keeps the string form the view may send (overdueText reads both).
+  overdue_amount: a.health === "ok" ? AB_NOTHING_OVERDUE : i === 5 ? JSON.stringify({ USD: "1299.00", VND: "1284500000" }) : { USD: "3897.00", VND: "2569000000" },
+  paid_through: i % 3 === 2 ? null : "2026-10-31",
+  warn_after_days: i === 1 ? 1 : 7,
+  suspend_after_days: i === 1 ? 2 : 21,
+}));
+const AB_RUNS: DraftRun[] = range(3).map((i) => ({
+  id: abId("d", i),
+  kind: i % 2 ? "bk_settlement_draft" : "bk_saas_invoice_draft",
+  status: "succeeded",
+  payload: { period: i % 2 ? "2026-09" : "2026-10", trigger: "schedule" },
+  result: { agencies: 6, drafted: 4, failed: 0 },
+  error: null,
+  created_by: "system:schedule",
+  created_at: EARLIER,
+  finished_at: EARLIER,
+}));
+const AB_ENTITIES: BillingEntity[] = [
+  {
+    id: abId("e", 0),
+    code: "DEMO-ISSUER",
+    legal_entity: AB_ENTITY_NAME,
+    tax_code: "DEMO-TAX-0001",
+    registered_office: "12 Invented Riverside Street, Example Ward, Example City",
+    country_iso2: "VN",
+    invoice_inbox: "invoices@example.test",
+    payment_instructions: AB_PAYMENT_LINE,
+    is_default: true,
+    active: true,
+  },
+  {
+    id: abId("e", 1),
+    code: "DEMO-ISSUER-TWO",
+    legal_entity: "Second Example Issuer Regional Services Limited",
+    tax_code: null,
+    registered_office: null,
+    country_iso2: "TH",
+    invoice_inbox: null,
+    payment_instructions: null,
+    is_default: false,
+    active: true,
+  },
+  {
+    id: abId("e", 2),
+    code: "DEMO-OLD",
+    legal_entity: "Former Example Issuer Company",
+    tax_code: null,
+    registered_office: null,
+    country_iso2: "VN",
+    invoice_inbox: null,
+    payment_instructions: null,
+    is_default: false,
+    active: false,
+  },
+];
+const AB_TAX_RULES: TaxRule[] = [
+  { id: abId("f", 0), code: "VAT10-SAAS-VN", invoice_kind: "saas", recipient_country: "VN", rate: "0.1000", line_wording: "VAT 10% on the software fee (invented wording)", footer_wording: "Invented footer wording for the domestic software fee.", effective_from: "2026-07-01", effective_to: null, active: true },
+  { id: abId("f", 1), code: "EXPORT-ZERO", invoice_kind: "saas", recipient_country: null, rate: "0.0000", line_wording: "Service supplied abroad, zero rate (invented wording)", footer_wording: null, effective_from: "2026-07-01", effective_to: null, active: true },
+  { id: abId("f", 2), code: "SETTLEMENT-NONE", invoice_kind: "settlement", recipient_country: null, rate: "0.0000", line_wording: "No tax line on the tour settlement", footer_wording: null, effective_from: "2026-07-01", effective_to: "2026-12-31", active: false },
+];
+const AB_TERMS: BillingTerms[] = [
+  { id: abId("1", 0), party_tenant_id: null, agency_name: null, deposit_pct: "0.3000", balance_days_before_departure: 45, saas_due_days: 14, settlement_due_days: 7, warn_after_days: 7, suspend_after_days: 21, saas_currency: "USD" },
+  { id: abId("1", 1), party_tenant_id: AB_AGENCIES[1].tenant_id, agency_name: AB_AGENCIES[1].agency_name, deposit_pct: "0.3000", balance_days_before_departure: 30, saas_due_days: 14, settlement_due_days: 7, warn_after_days: 1, suspend_after_days: 2, saas_currency: "USD" },
+  { id: abId("1", 2), party_tenant_id: AB_AGENCIES[3].tenant_id, agency_name: AB_AGENCIES[3].agency_name, deposit_pct: "0.2500", balance_days_before_departure: 60, saas_due_days: 30, settlement_due_days: 14, warn_after_days: 14, suspend_after_days: 45, saas_currency: "USD" },
+];
+const AB_CLAUSES: TermsClause[] = [
+  {
+    id: abId("2", 0),
+    code: "price_error",
+    position: 10,
+    title: "Clearly wrong prices",
+    body: "When a price shown to the agency is clearly wrong (for example a missing digit), AA tells the agency within two working days and offers the corrected price.\nThe agency may then cancel the booking free of charge within the window below.",
+    free_cancel_days: 3,
+    status: "approved",
+    version: 2,
+    updated_at: EARLIER,
+    updated_by: "u-002",
+    approved_by: "u-layout",
+    approved_at: NOW,
+  },
+  {
+    id: abId("2", 1),
+    code: "late_payment",
+    position: 20,
+    title: "Late payment and new holds",
+    body: "Past the suspend days of the agency's payment terms, new booking holds are paused until the overdue invoices are paid and approved.",
+    free_cancel_days: null,
+    status: "draft",
+    version: 1,
+    updated_at: NOW,
+    updated_by: "u-002",
+    approved_by: null,
+    approved_at: null,
+  },
+];
+
 export type FixtureAnswer = { status: number; body: unknown };
 
 const ok = (body: unknown): FixtureAnswer => ({ status: 200, body });
@@ -1378,6 +1662,26 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "payments") return ok(billingPage(range(ROWS).map(payment), 58));
   if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));
+
+  // AA-1037: Agency billing (the four tabs) and an agency invoice; `tenant_id` filters like the API (the CIS deep link).
+  if (p === "agency-invoices/summary") return ok(AB_SUMMARY);
+  if (p === "agency-invoices") {
+    const tenant = query.get("tenant_id");
+    const rows = range(ROWS * 3).map(agencyInvoice).filter((r) => !tenant || r.party_tenant_id === tenant);
+    return ok({ items: rows.slice(0, ROWS), total: tenant ? rows.length : 47 } satisfies AgencyBillingPage<AgencyInvoice>);
+  }
+  if (at(0) === "agency-invoices" && seg.length === 2) return ok(agencyInvoiceDetail(at(1)));
+  if (p === "agency-payments") {
+    const state = query.get("state") || "recorded";
+    const rows = range(ROWS * 3).map(agencyPayment).filter((r) => state === "all" || r.status === state);
+    return ok({ items: rows.slice(0, ROWS), total: state === "all" ? 38 : 13 } satisfies AgencyBillingPage<AgencyPayment>);
+  }
+  if (p === "agency-billing/status") return ok({ items: AB_STATUS_ROWS });
+  if (p === "agency-billing/runs") return ok({ items: AB_RUNS });
+  if (p === "billing-entities") return ok({ items: AB_ENTITIES });
+  if (p === "tax-rules") return ok({ items: AB_TAX_RULES });
+  if (p === "billing-terms") return ok({ items: AB_TERMS });
+  if (p === "partner-terms-clauses") return ok({ items: AB_CLAUSES });
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "prices") return ok({ ...PRICE_MATRIX, source_id: at(2) });
