@@ -360,7 +360,8 @@ worker neither schedules nor claims `bk_inquiry_pull` / `bk_inquiry_process` and
 (`Worker(disabled_kinds=...)`, `app/b2c.py`), and every staff path that would create a traveller record
 (`POST /booking/customers`, a trip case or trip-plan case with `new_customer`) answers 410 `b2b_only`. bk-036 revokes
 INSERT on the `booking.customer*` tables from role `booking` as the database half of the freeze. The staff admin hides
-the same entry points unless the build sets `NEXT_PUBLIC_B2C_INTAKE=on` (`frontend/lib/config.ts`).
+the same entry points unless the build sets `NEXT_PUBLIC_B2C_INTAKE=on` (`frontend/lib/config.ts`). AA-1037 widens
+the same switch to every B2C write: see "The B2C part is read-only".
 Cognito (AA-680, all optional and **not set on Dev**, defaults are code constants in `app/auth/identity_config.py`):
 `COGNITO_WORKFORCE_ISSUER`, `COGNITO_BOOKING_STAFF_CLIENT_ID`, `COGNITO_BREAKGLASS_CLIENT_ID` (same names as CIS).
 E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inquiry e-mail; empty = no e-mail),
@@ -438,6 +439,47 @@ invoice, recorded once per (invoice, step) in `booking.agency_invoice_reminder` 
 reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). Bounce/complaint suppression in Booking
 tables is not built yet (the SES configuration set's account suppression list applies). Customer e-mail (proposal
 send, OTP) is not built: those still write rows only.
+
+## The B2C part is read-only (AA-1034 R0, AA-1037; root ADR 0019 d8)
+
+Adventure Asia sells to partner agencies only. Until the B2C tables are dropped (a destructive-ops DRY RUN, later),
+the B2C part of Booking is **read-only** while `B2C_INTAKE_ENABLED` is off (the default; one switch reverts all of it,
+`app/b2c.py`). B2B cases come only from the B2B confirm path (`POST /booking/b2b/v1/holds/{id}/confirm`).
+
+- **Refused before any read or write of the service, 410 `{"detail": "b2b_only", ...}`** (the same code and message as the
+  R0 intake refusal; each route lists the 410 in `docs/api/openapi.json`):
+  - routes that only exist for B2C (`b2c.refuse_b2c_write`, the first call of the handler): `POST /customers`,
+    `PATCH` / `DELETE /customers/{ref}`; `POST /trip-cases` (a staff-made case is always for a customer);
+    `POST /trip-plans/{source_id}/trip-cases` for a new case; every customer invoice and payment write:
+    `POST /trip-cases/{ref}/invoices`, `PATCH` / `DELETE /invoices/{number}`, `POST /invoices/{number}/send`,
+    `/cancel`, `/amend`, `/remind`, `/payments`, `PATCH /payments/{ref}`, `POST /payments/{ref}/verify`, `/void`
+    (`booking.invoices` and `booking.payments` are B2C-only);
+  - routes shared with B2B cases, refused only for a `channel = 'b2c'` case (`b2c.refuse_b2c_case_write` and its
+    siblings read only the case's channel, then the service answers its usual 404 for an unknown ref):
+    `PATCH /trip-cases/{ref}`, `POST .../status`, `.../assign`, the proposal versions (`POST .../versions`,
+    `PATCH` / `DELETE .../versions/{n}`, `PUT .../items`, `POST .../price`, `.../send`, `.../approve`), an existing
+    case in `POST /trip-plans/{source_id}/trip-cases`, supplier bookings (`generate`, create, `PATCH`, `request`,
+    `confirm`, `decline`, `cancel`, `rerequest`), trip checks (`POST /trip-cases/{ref}/checks`,
+    `PATCH /trip-checks/{id}`) and operations files (`POST /ops-files` for payment evidence or a b2c case's supplier
+    booking, `POST /ops-files/{id}/remove` on those files).
+- **Stays open**: every GET (the billing reads come back with every `actions` flag false and `invoiceable` false,
+  reason `b2b_only`, so the pages draw no write button); supplier bills and payouts (AA's own payables, even for a
+  past B2C trip); the B2B API and the B2B desk; catalog, supply and pricing.
+- **Jobs**: `bk_inquiry_pull` / `bk_inquiry_process` are neither scheduled nor claimed (R0), so nothing queues
+  `bk_notify_email` (it only reads and sends the staff e-mail of a new inquiry). `bk_case_lifecycle` moves only B2B
+  cases and `bk_ops_reminders` names only B2B cases and skips the customer payment reminders (each result says
+  `"b2c": "frozen"`). Retention is not a staff write and keeps running on every row: the DM-7 clearing of trip-check
+  emergency contacts (`bk_case_lifecycle`), `bk_retention_inbox_redact`, and the DM-6.7 traveller erasure, a reviewed
+  DB Migrate `run-script` (root `docs/legal/dsar-erasure-runbook.md`).
+- **No DB backstop yet**: a `trip_cases` CHECK `channel = 'b2b'` `NOT VALID` would also refuse every UPDATE of an old
+  b2c row, the erasure script's redaction of `notes` / `inquiry_snapshot` included. The b2b-only CHECK comes with the
+  B2C drop (DRY RUN lane), once the b2c rows are handled.
+- **Staff admin**: the same switch at build time (`NEXT_PUBLIC_B2C_INTAKE`, `frontend/ui/booking/b2cFrozen.ts`) takes
+  the B2C-only write permissions out of the staff profile (`billing.write`, `payment.verify`, `customer.write`,
+  `customer.admin`) and, inside a b2c case, the case, version and operations writes too; a b2c case shows a
+  "Read-only" pill. The nav leads with B2B (Partners = Agency billing > Agencies, Settlement = Agency billing, B2B
+  desk) and moves Customers and Payments & Invoices to the "B2C records (read-only)" group; the phone bottom nav
+  shows the B2B desk instead of Customers.
 
 ## Staff authentication and permissions (AA-680; root ADR 0006 / 0006a, ADR 0004 O1)
 
