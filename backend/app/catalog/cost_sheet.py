@@ -91,9 +91,10 @@ LEFT JOIN booking.services s ON s.id = c.service_id
 WHERE c.trip_plan_id = $1::uuid
 ORDER BY c.day_no, coalesce(c.hotel_room_type_id, c.service_id)
 """
-# Validity spans of every published rate of the plan's items (the rate's validity inside its contract's).
+# Validity spans of every published rate of the plan's items (the rate's validity inside its contract's); also read by
+# the price readiness report (``app.catalog.price_readiness``), which uses the currency too.
 SPANS_SQL = """
-SELECT x.hotel_room_type_id::text AS room_type_id, x.service_id::text AS service_id,
+SELECT x.hotel_room_type_id::text AS room_type_id, x.service_id::text AS service_id, x.currency::text AS currency,
        greatest(x.valid_from, k.valid_from) AS start,
        least(coalesce(x.valid_to, '9999-12-31'::date), coalesce(k.valid_to, '9999-12-31'::date)) AS stop
 FROM booking.supplier_rates x JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
@@ -120,7 +121,30 @@ SELECT concat_ws('|',
 """
 
 
+# Why a plan gets no computed row (``compute`` info ``reason``; the price readiness report uses the same words).
+NO_COMPONENTS = "no_components"
+INACTIVE_COMPONENT = "inactive_component"
+NO_RULE = "no_rule"
+NO_RATES = "no_rates"
+
+
 # ── Pure part ────────────────────────────────────────────────────────────────
+
+
+def component_active(row: Any) -> bool:
+    """A component prices only while its room type (and hotel) or service is active."""
+    return row["status"] == "active" and row["hotel_status"] == "active"
+
+
+def blocking_reason(parts: int, active: bool, has_rule: bool) -> str | None:
+    """The first reason, in the cost sheet's order, that stops a plan before any rate is read; None = read the rates."""
+    if not parts:
+        return NO_COMPONENTS
+    if not active:
+        return INACTIVE_COMPONENT
+    if not has_rule:
+        return NO_RULE
+    return None
 
 
 @dataclass(frozen=True)
@@ -471,7 +495,7 @@ def assemble(
 
 async def _parts(conn: asyncpg.Connection, plan_id: str) -> tuple[list[Part], bool]:
     rows = await conn.fetch(COMPONENTS_SQL, plan_id)
-    active = all(r["status"] == "active" and r["hotel_status"] == "active" for r in rows)
+    active = all(component_active(r) for r in rows)
     parts = [Part(int(r["day_no"]), r["room_type_id"], r["service_id"], r["max_occupancy"]) for r in rows]
     return parts, active
 
@@ -480,14 +504,8 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
     """The computed rows of one plan and why some are missing (no DB write)."""
     info: dict[str, Any] = {"windows": 0, "unpriced_cells": 0, "refused": 0, "reason": None}
     parts, active = await _parts(conn, plan_id)
-    if not parts:
-        info["reason"] = "no_components"
-        return [], info
-    if not active:
-        info["reason"] = "inactive_component"
-        return [], info
-    if not pricing.rules:
-        info["reason"] = "no_rule"
+    if reason := blocking_reason(len(parts), active, bool(pricing.rules)):
+        info["reason"] = reason
         return [], info
     rooms = sorted({p.room_type_id for p in parts if p.room_type_id})
     services = sorted({p.service_id for p in parts if p.service_id})
@@ -497,7 +515,7 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
     ]
     wins = windows(pricing.on, parts, spans)[:MAX_SEGMENTS]
     if not wins:
-        info["reason"] = "no_rates"
+        info["reason"] = NO_RATES
         return [], info
     info["windows"] = len(wins)
     wanted = asks(wins, parts)
@@ -505,7 +523,7 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
     nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx)
     rows, info["refused"] = priced_rows(nets, pricing)
     if not rows:
-        info["reason"] = "no_rates"
+        info["reason"] = NO_RATES
     return rows, info
 
 

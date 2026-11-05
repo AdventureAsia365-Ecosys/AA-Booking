@@ -13,6 +13,9 @@ Sellable trip plans (AA-679, S237 decision D4, bk-009):
 set) keep the plan's per-person price matrix (bk-032, AA-996; ``app/catalog/trip_plan_prices.py``). AA-1029 (bk-039):
 ``POST …/prices/recompute`` runs the plan's cost sheet now, ``GET …/prices/history?at=`` reads the dated price list,
 ``POST …/reference/review`` marks the CIS source price text reviewed (``trip_plan.write``).
+``GET /booking/catalog/price-readiness`` (``pricing.read``, AA-1029) is the catalog-wide price readiness report: per
+plan its status (priced, hand priced, or why the cost sheet cannot price it) with ``?status=&country=&q=`` filters, as
+JSON or a staff CSV (``?format=csv``, fixed columns, never a net or a margin; ``app/catalog/price_readiness.py``).
 ``POST …/{source_id}/trip-cases`` starts a trip case, or a new version of an existing case, from a sellable plan
 (``trip_case.write`` + ``version.write``: admin, sales).
 ``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
@@ -35,13 +38,13 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import b2c, catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import departures, plan_components
-from app.catalog import cost_sheet, geo, price_history, trip_plan_prices, trip_plans
+from app.catalog import cost_sheet, geo, price_history, price_readiness, trip_plan_prices, trip_plans
 from app.errors import NotFound
 from app.pricing import engine
 from app.routers.trip_cases import CountryCode, Currency, NewCustomer
@@ -59,6 +62,9 @@ CanReadPrices = Annotated[Staff, Depends(require("pricing.read"))]
 CanAdminCatalog = Annotated[Staff, Depends(require("catalog.admin"))]
 IsoCode = Annotated[str, Path(pattern=r"^[A-Za-z]{2}$", description="ISO 3166-1 alpha-2 country code")]
 GeoStatus = Literal["active", "inactive"]
+ReadinessStatus = Literal[
+    "priced", "hand_priced", "missing_rates", "missing_fx", "no_rule", "no_components", "inactive_component"
+]
 
 
 def _source_id(source_id: Annotated[uuid.UUID, Path(description="CIS catalog source_id (catalog.tour.v1)")]) -> str:
@@ -290,6 +296,35 @@ async def list_trip_plans(
             limit=limit,
             offset=offset,
         )
+
+
+@router.get(
+    "/price-readiness",
+    responses={200: {"content": {"application/json": {}, "text/csv": {"schema": {"type": "string"}}}}},
+)
+async def price_readiness_report(
+    _: CanReadPrices,
+    pool: Pool,
+    status: ReadinessStatus | None = None,
+    country: Annotated[str | None, Query(max_length=100, description="country name as the catalog gives it")] = None,
+    q: Annotated[str | None, Query(max_length=200, description="part of the title or the tour key")] = None,
+    format: Annotated[Literal["json", "csv"], Query()] = "json",  # noqa: A002 — the query parameter's name
+) -> Any:
+    """AA-1029: which trip plans price and why the others do not (see ``app/catalog/price_readiness.py``). The
+    summary counts every plan; ``items`` are the plans that match the filters."""
+    day = cost_sheet.today()
+    async with pool.acquire() as conn:
+        report = await price_readiness.build(conn, on=day, status=status, country=country, q=q)
+    if format == "csv":
+        return Response(
+            price_readiness.to_csv(report),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{price_readiness.filename(day)}"',
+                "Cache-Control": "no-store",
+            },
+        )
+    return report
 
 
 @router.get("/trip-plans/facets")
