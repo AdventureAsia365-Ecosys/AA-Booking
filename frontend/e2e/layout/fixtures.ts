@@ -51,7 +51,7 @@ import type {
   SupplyMedia,
 } from "../../lib/api/supply";
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
-import type { Listed, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
+import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
@@ -754,6 +754,54 @@ function partnerTerms(i: number): PartnerTerms {
     effective_discount: card ?? discount,
   };
 }
+// AA-1030 G3: an agency tariff, six pax bands x two windows of four invented tours (long titles), one row unpriced.
+const TARIFF_BANDS: [number, number | null][] = [[1, 1], [2, 2], [3, 4], [5, 6], [7, 10], [11, null]];
+const TARIFF: PartnerTariff = {
+  partner: { id: "pt-1", agency_name: "Heron Coast Journeys 2", status: "active", billing_currency: "USD", tier_code: "silver", tier_label: "Silver" },
+  currency: "USD",
+  priced_on: "2026-10-23",
+  basis: "per_person_band_min_twin_share",
+  tier_code: "silver",
+  fx: { base_currency: "USD", quote_currency: "USD", rate_per_usd: "1", rate_date: "2026-10-23", source: "base" },
+  items: range(4).flatMap((t) =>
+    ["2027-01-01", "2027-04-01"].flatMap((from, w) =>
+      TARIFF_BANDS.map(([min, max], b) => {
+        const each = 420 - b * 35 + w * 20 + t * 15;
+        return {
+          tour: { source_system: "cis" as const, source_id: `tour-${t}` },
+          title: `Invented Highlands and Hidden Lagoons Discovery Journey ${t + 1}`,
+          country: "Invented Land",
+          duration_days: 4 + t,
+          season: w ? "Green season (shoulder months)" : "High",
+          valid_from: from,
+          valid_to: w ? "2027-09-30" : "2027-03-31",
+          pax_min: min,
+          pax_max: max,
+          priced_for_pax: min,
+          priced_for_date: from,
+          price: { amount: `${each * min}.00`, currency: "USD" },
+          price_per_person: { amount: `${each}.00`, currency: "USD" },
+          agency_discount_pct: t === 2 ? "0.0800" : "0.0300",
+          rate_card_id: t === 2 ? "card-1" : null,
+          rrp_per_person: { amount: `${Math.ceil((each * 1.25) / 5) * 5}.00`, currency: "USD" },
+        };
+      }),
+    ),
+  ),
+  unpriced: [
+    {
+      tour: { source_system: "cis", source_id: "tour-9" },
+      title: "Invented Coastal Villages by Bicycle",
+      season: null,
+      valid_from: "2027-01-01",
+      valid_to: "2027-06-30",
+      pax_min: 1,
+      pax_max: 1,
+      reason: "no rate in force on 2027-01-01 for 1 per room",
+    },
+  ],
+  truncated: false,
+};
 const RATE_CARDS: Listed<RateCardRow> = {
   today: "2026-10-23",
   items: (
@@ -1307,6 +1355,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "pricing/partner-tier-discounts") return ok(TIER_DISCOUNTS);
   if (p === "pricing/partner-terms") return ok({ today: "2026-10-23", items: range(ROWS).map(partnerTerms) });
   if (p === "pricing/partner-rate-cards") return ok(RATE_CARDS);
+  if (p.startsWith("pricing/partner-tariffs/")) return ok(TARIFF);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {

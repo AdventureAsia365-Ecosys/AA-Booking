@@ -14,8 +14,9 @@
 //   POST  /booking/pricing/partner-rate-cards/{id}/approve     approve (403 own_row for the creator)    (pricing.write)
 //   GET   /booking/pricing/partner-terms                       partners with tier and discount today    (pricing.read)
 //   PATCH /booking/pricing/partner-terms/{partner_id}          move a partner to another tier           (pricing.write)
+//   GET   /booking/pricing/partner-tariffs/{partner_id}        the agency's tariff (G3), JSON or CSV     (pricing.read)
 
-import { bkGet, bkSend } from "./client";
+import { ApiError, BFF_BASE, bkGet, bkSend, buildQuery } from "./client";
 import type { PolicyPerson } from "./pricingPolicy";
 import type { DecimalString, IsoDate, IsoDateTime } from "./types";
 
@@ -128,6 +129,70 @@ export interface NewRateCardBody {
   note?: string;
 }
 
+/** Money as the API sends it: a decimal string and an ISO currency. */
+export interface ApiMoney {
+  amount: DecimalString;
+  currency: string;
+}
+
+/** One price matrix window x pax band of a tour, priced as a B2B quote of the band's smallest party (AA-1030 G3). */
+export interface TariffItem {
+  tour: { source_system: "cis"; source_id: string };
+  title: string | null;
+  country: string | null;
+  duration_days: number | null;
+  season: string | null;
+  valid_from: IsoDate;
+  valid_to: IsoDate;
+  pax_min: number;
+  /** null = and more. */
+  pax_max: number | null;
+  priced_for_pax: number;
+  priced_for_date: IsoDate;
+  /** What a quote of `priced_for_pax` travellers charges (the whole line). */
+  price: ApiMoney;
+  price_per_person: ApiMoney;
+  agency_discount_pct: DecimalString;
+  /** The contract rate card behind the discount; null = the tier's discount. */
+  rate_card_id: string | null;
+  rrp_per_person: ApiMoney | null;
+}
+
+export interface UnpricedTariffRow {
+  tour: { source_system: "cis"; source_id: string };
+  title: string | null;
+  season: string | null;
+  valid_from: IsoDate;
+  valid_to: IsoDate;
+  pax_min: number;
+  pax_max: number | null;
+  reason: string;
+}
+
+export interface PartnerTariff {
+  partner: { id: string; agency_name: string; status: string; billing_currency: string; tier_code: string; tier_label: string };
+  currency: string;
+  priced_on: IsoDate;
+  basis: string;
+  tier_code: string;
+  fx: { base_currency: string; quote_currency: string; rate_per_usd: string; rate_date: IsoDate; source: string };
+  items: TariffItem[];
+  unpriced: UnpricedTariffRow[];
+  truncated: boolean;
+}
+
+/** The quote currencies of booking.b2b.v1 (app/b2b/quotes.py QUOTE_CURRENCIES). */
+export const TARIFF_CURRENCIES = ["USD", "EUR", "GBP", "AUD", "SGD", "VND"] as const;
+
+/** The agency's tariff as the CSV file it downloads itself (same columns), with the server's file name. */
+async function tariffCsv(partnerId: string, currency: string): Promise<{ blob: Blob; filename: string }> {
+  const query = buildQuery({ currency, format: "csv" });
+  const res = await fetch(`${BFF_BASE}/pricing/partner-tariffs/${enc(partnerId)}${query}`, { cache: "no-store" });
+  if (!res.ok) throw new ApiError("The tariff could not be downloaded.", res.status);
+  const named = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "");
+  return { blob: await res.blob(), filename: named?.[1] ?? `aa-tariff-${currency.toLowerCase()}.csv` };
+}
+
 export const agencyPricingApi = {
   tiers: () => bkGet<TierList>("pricing/partner-tiers"),
   createTier: (body: NewTierBody) => bkSend<PartnerTier>("pricing/partner-tiers", { body }),
@@ -140,4 +205,7 @@ export const agencyPricingApi = {
   partnerTerms: () => bkGet<Listed<PartnerTerms>>("pricing/partner-terms"),
   setPartnerTier: (partnerId: string, tierCode: string) =>
     bkSend<PartnerTerms>(`pricing/partner-terms/${enc(partnerId)}`, { method: "PATCH", body: { tier_code: tierCode } }),
+  tariff: (partnerId: string, currency: string) =>
+    bkGet<PartnerTariff>(`pricing/partner-tariffs/${enc(partnerId)}`, { currency }),
+  tariffCsv,
 };
