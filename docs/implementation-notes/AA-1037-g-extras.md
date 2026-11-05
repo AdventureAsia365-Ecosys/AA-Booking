@@ -65,8 +65,11 @@ lead approved G1, G2, G4, G5 and G6 in S269 (G3, the tariff export, belongs to A
 - **Merge order**: root PR (contract 1.3 + DM-7.1 rows for the two tables) -> Booking migration-only PR bk-044 (after
   bk-041 / bk-042 / bk-043 are on main; renumber to main max + 1 if the slot moved: `git grep '044_'` and `bk-044`) ->
   Infra copy (expand, auto-applied) -> this code PR (readiness bk-044), rebased on main after #186 / #187.
-- `tests/unit/test_migration_guard.py::test_migration_numbers_are_unique_and_contiguous` fails on this branch until
-  bk-043 (lane l9) is on main: the numbers are contiguous only on top of it.
+- bk-043 (AA-1030 partner price tiers, lane l9) is reserved in `RESERVED_ON_OTHER_BRANCHES` of
+  `tests/unit/test_migration_guard.py` on both Booking branches, so the contiguity unit test is green before bk-043
+  lands (the entry is harmless once it does, like the bk-016 one). The CI Migration preflight still refuses 044 while
+  main max is 042 ("not main max + 1"): the bk-043 PR must merge first. If the bk-043 lane is dropped or lands after
+  this one, renumber bk-044 to main max + 1 here, in the migration PR, in the readiness key and in the Infra copy.
 - Dev check: SES must be configured (`SES_FROM_ADDRESS`, `STAFF_NOTIFY_EMAIL`) for reminders to send; otherwise the
   daily run is `skipped` and writes nothing.
 - The HTML confirmation is served from the API host as an attachment (never rendered inline by the admin).
