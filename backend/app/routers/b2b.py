@@ -283,8 +283,9 @@ class PriceParity(Strict):
 
 
 class TariffItem(Strict):
-    """1.3 (AA-1030 G3). One price matrix window x pax band of a tour, priced as ``POST /quotes`` would price the
-    plan's ``tp:`` line for the band's smallest party on ``priced_for_date``."""
+    """1.3 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every
+    departure from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's
+    ``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``)."""
 
     tour: TourKey
     title: str | None = Field(default=None, max_length=500)

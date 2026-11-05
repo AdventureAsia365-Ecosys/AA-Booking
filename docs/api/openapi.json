@@ -6848,7 +6848,7 @@
       },
       "TariffItem": {
         "additionalProperties": false,
-        "description": "1.3 (AA-1030 G3). One price matrix window x pax band of a tour, priced as ``POST /quotes`` would price the\nplan's ``tp:`` line for the band's smallest party on ``priced_for_date``.",
+        "description": "1.3 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every\ndeparture from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's\n``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``).",
         "properties": {
           "agency_discount_pct": {
             "pattern": "^\\d+(\\.\\d{1,4})?$",

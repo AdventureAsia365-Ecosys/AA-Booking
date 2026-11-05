@@ -1,8 +1,9 @@
 "use client";
 // app/(staff)/pricing/agency-tiers/_parts/TariffView.tsx — Pricing → Agency tiers → Tariff (AA-1030 G3).
 // One agency's own price per tour, season and pax band (GET /booking/pricing/partner-tariffs/{partner_id}): every b2b
-// window x pax band of the price matrix, priced by the B2B quote engine for the band's smallest party with the
-// agency's tier or contract discount, so a quote answers the same amount. "Download CSV" saves the file the agency
+// window x pax band of the price matrix, cut wherever a supplier rate changes (so every departure date of a row's
+// travel dates prices the same), priced by the B2B quote engine for the band's smallest party with the agency's tier
+// or contract discount, so a quote answers the same amount. "Download CSV" saves the file the agency
 // downloads itself from booking.b2b.v1 GET /tariff; "Print" prints this page (the print stylesheet in globals.css
 // hides the shell and the toolbar). Rows the quote engine cannot price are listed apart with the reason (staff only).
 
@@ -19,8 +20,14 @@ function band(min: number, max: number | null): string {
   return min === max ? `${min}` : `${min}–${max}`;
 }
 
-function rowId(r: { tour: { source_id: string }; valid_from: string; pax_min: number }): string {
-  return `${r.tour.source_id}|${r.valid_from}|${r.pax_min}`;
+function rowId(r: {
+  tour: { source_id: string };
+  valid_from: string;
+  valid_to: string;
+  pax_min: number;
+  pax_max: number | null;
+}): string {
+  return `${r.tour.source_id}|${r.valid_from}|${r.valid_to}|${r.pax_min}|${r.pax_max ?? ""}`;
 }
 
 function Tour({ row }: { row: { title: string | null; tour: { source_id: string }; country?: string | null; duration_days?: number | null } }) {
@@ -152,7 +159,7 @@ export function TariffView() {
       title={partner ? `Tariff: ${partner.agency_name}` : "Agency tariff"}
       description={
         partner
-          ? `${partner.tier_label} tier. Prices as a B2B quote on ${data?.priced_on ?? "today"} would charge them, per person for the smallest group of each band sharing twin rooms. Prices follow supplier rates, rules and exchange rates; the quote is binding.`
+          ? `${partner.tier_label} tier. Prices as a B2B quote on ${data?.priced_on ?? "today"} would charge them, per person for the smallest group of each band sharing twin rooms, for a departure on any of the row's travel dates. Prices follow supplier rates, rules and exchange rates; the quote is binding.`
           : "The agency's own price per tour, season and number of travellers."
       }
       actions={

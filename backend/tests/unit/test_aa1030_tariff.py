@@ -6,16 +6,16 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal as D
 from typing import Any
 
 import pytest
 
 from app.b2b import agency_pricing, quotes, tariff
-from app.b2b.components import MAX_RATE_LOOKUPS, LineAsk, LineCost
+from app.b2b.components import MAX_RATE_LOOKUPS, PLAN_COMPONENTS_SQL, LineAsk, LineCost
 from app.b2b.errors import B2BError
-from app.catalog import liveness
+from app.catalog import cost_sheet, liveness
 from app.pricing import engine, repository
 
 ON = date(2026, 11, 5)
@@ -55,11 +55,22 @@ def _row(plan: str, source_id: str, pax_min: int, pax_max: int | None, **extra: 
 
 
 class Conn:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
+    """The matrix rows, and (optional) plan components and rate spans for the cuts at rate changes."""
+
+    def __init__(
+        self, rows: list[dict[str, Any]], parts: list[dict[str, Any]] | None = None, spans: list[dict[str, Any]] = ()
+    ) -> None:
         self.rows = rows
+        self.parts = parts or []
+        self.spans = list(spans)
         self.asked: list[tuple[Any, ...]] = []
 
     async def fetch(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+        if sql == PLAN_COMPONENTS_SQL:
+            return [p for p in self.parts if p["trip_plan_id"] in args[0]]
+        if sql == cost_sheet.SPANS_SQL:
+            return self.spans
+        assert sql == tariff.ROWS_SQL
         self.asked.append(args)
         return self.rows[: args[2]]
 
@@ -122,6 +133,7 @@ async def test_every_band_is_priced_by_the_quote_formula_with_the_partner_discou
     assert out["items"][1]["price_per_person"] == {"amount": "90.00", "currency": "USD"}
     assert [i["rate_card_id"] for i in out["items"]] == ["card-1", "card-1", None]
     assert out["items"][0]["priced_for_date"] == ON  # the window has started: priced today
+    assert (out["items"][0]["valid_from"], out["items"][0]["valid_to"]) == (ON, date(2027, 3, 31))  # from today
     assert out["tier_code"] == "silver" and out["unpriced"] == [] and out["truncated"] is False
 
 
@@ -184,9 +196,9 @@ async def test_a_currency_that_is_not_a_quote_currency_is_refused(wired: dict[st
 
 def test_chunks_stay_within_the_quote_lookup_budget() -> None:
     big = _row(PLAN_A, "tour-a", 2, 2, components=MAX_RATE_LOOKUPS // 4)  # 500 lookups a cell
-    cells = [tariff.Cell(no=n, row=big, party=2, on=ON) for n in range(1, 6)]
+    cells = [tariff.Cell(no=n, row=big, party=2, on=ON, end=ON) for n in range(1, 6)]
     assert [len(group) for group in tariff.chunks(cells)] == [2, 2, 1]
-    huge = tariff.Cell(no=9, row=_row(PLAN_A, "t", 2, 2, components=MAX_RATE_LOOKUPS), party=2, on=ON)
+    huge = tariff.Cell(no=9, row=_row(PLAN_A, "t", 2, 2, components=MAX_RATE_LOOKUPS), party=2, on=ON, end=ON)
     assert [len(g) for g in tariff.chunks([huge, *cells[:1]])] == [1, 1]  # alone; price_lines then refuses it
 
 
@@ -233,3 +245,106 @@ def test_the_file_name_is_ascii() -> None:
         == "aa-tariff-invented-lotus-co-l-t-vnd-2026-11-05.csv"
     )
     assert tariff.filename("!!!", "USD", ON) == "aa-tariff-agency-usd-2026-11-05.csv"
+
+
+ROOM = "33333333-3333-4333-8333-333333333333"
+TRANSFER = "44444444-4444-4444-8444-444444444444"
+PARTS = [
+    {"trip_plan_id": PLAN_A, "day_no": 1, "room_type_id": ROOM, "service_id": None},
+    {"trip_plan_id": PLAN_A, "day_no": 2, "room_type_id": None, "service_id": TRANSFER},
+]
+
+
+def _span(item: str, start: date, stop: date) -> dict[str, Any]:
+    return {"room_type_id": item if item == ROOM else None, "service_id": item if item == TRANSFER else None,
+            "start": start, "stop": stop}  # fmt: skip
+
+
+@pytest.mark.asyncio
+async def test_a_hand_window_over_a_rate_change_is_cut_there_and_each_piece_is_priced_on_its_first_day(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand (or overridden) b2b row is never re-cut by the cost sheet: one year over a room rate change on
+    2027-06-01 (and a transfer rate on day 2 that changes on 2027-09-01, so departures from 2027-08-31 use it; the
+    31 December departure needs a transfer on 1 January 2028, which has no rate). Each piece is priced on its own
+    first day, where a quote of any departure in it answers the same price."""
+    net = {date(2027, 1, 1): D("82"), date(2027, 6, 1): D("164"), date(2027, 8, 31): D("164")}
+    asked: list[date] = []
+
+    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+        asked.extend(a.service_date for a in asks)
+        for a in asks:
+            if a.service_date not in net:
+                raise B2BError("invalid", f"line {a.line_ref}: no rate in force on {a.service_date + timedelta(1)}")
+        return [LineCost(kind="trip_plan", costs=[(net[a.service_date] * a.adult, "USD")]) for a in asks]
+
+    monkeypatch.setattr(tariff, "price_lines", price_lines)
+    spans = [
+        _span(ROOM, date(2027, 1, 1), date(2027, 5, 31)),
+        _span(ROOM, date(2027, 6, 1), date(2027, 12, 31)),
+        _span(TRANSFER, date(2027, 1, 1), date(2027, 8, 31)),
+        _span(TRANSFER, date(2027, 9, 1), date(2027, 12, 31)),
+    ]
+    hand = _row(PLAN_A, "tour-a", 2, 2, valid_from=date(2027, 1, 1), valid_to=date(2027, 12, 31), season="Hand")
+    out = await tariff.build(Conn([hand], PARTS, spans), partner_id="p", currency="USD", on=ON)
+
+    assert sorted(set(asked)) == [date(2027, 1, 1), date(2027, 6, 1), date(2027, 8, 31), date(2027, 12, 31)]
+    got = [(i["valid_from"], i["valid_to"], i["priced_for_date"], i["price"]["amount"], i["season"])
+           for i in out["items"]]  # fmt: skip
+    # 2027-06-01 .. 2027-08-30 and 2027-08-31 .. 2027-12-30 price the same (equal transfer nets): joined back.
+    assert got == [
+        (date(2027, 1, 1), date(2027, 5, 31), date(2027, 1, 1), "200.00", "Hand"),
+        (date(2027, 6, 1), date(2027, 12, 30), date(2027, 6, 1), "400.00", "Hand"),
+    ]
+    assert [(u["valid_from"], u["valid_to"], u["reason"]) for u in out["unpriced"]] == [
+        (date(2027, 12, 31), date(2027, 12, 31), "no rate in force on 2028-01-01")
+    ]
+    rows = list(csv.DictReader(io.StringIO(tariff.to_csv(out))))
+    assert [(r["valid_from"], r["valid_to"], r["price_for_party"]) for r in rows] == [
+        ("2027-01-01", "2027-05-31", "200.00"),
+        ("2027-06-01", "2027-12-30", "400.00"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_piece_that_cannot_be_quoted_is_listed_alone_and_the_cells_are_capped(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+        for a in asks:
+            if a.service_date >= date(2027, 6, 1):
+                raise B2BError("invalid", f"line {a.line_ref}: no rate in force on {a.service_date}")
+        return [LineCost(kind="trip_plan", costs=[(D("82") * a.adult, "USD")]) for a in asks]
+
+    monkeypatch.setattr(tariff, "price_lines", price_lines)
+    spans = [_span(ROOM, date(2027, 1, 1), date(2027, 5, 31)), _span(TRANSFER, date(2027, 1, 1), cost_sheet.FOREVER)]
+    hand = _row(PLAN_A, "tour-a", 2, 2, valid_from=date(2027, 1, 1), valid_to=date(2027, 12, 31))
+    out = await tariff.build(Conn([hand], PARTS, spans), partner_id="p", currency="USD", on=ON)
+    assert [(i["valid_from"], i["valid_to"]) for i in out["items"]] == [(date(2027, 1, 1), date(2027, 5, 31))]
+    assert [(u["valid_from"], u["valid_to"]) for u in out["unpriced"]] == [(date(2027, 6, 1), date(2027, 12, 31))]
+
+    monkeypatch.setattr(tariff, "MAX_CELLS", 1)
+    out = await tariff.build(Conn([hand], PARTS, spans), partner_id="p", currency="USD", on=ON)
+    assert len(out["items"]) == 1 and out["unpriced"] == [] and out["truncated"] is True
+
+
+def test_pieces_cut_a_window_at_the_cuts_inside_it() -> None:
+    start, end = date(2027, 1, 1), date(2027, 12, 31)
+    assert tariff.pieces(start, end, []) == [(start, end)]
+    cuts = [date(2026, 12, 1), start, date(2027, 6, 1), date(2027, 6, 1), date(2028, 1, 1), end]
+    assert tariff.pieces(start, end, cuts) == [
+        (start, date(2027, 5, 31)),
+        (date(2027, 6, 1), end - timedelta(days=1)),
+        (end, end),
+    ]
+
+
+def test_the_cost_sheet_windows_use_the_same_cuts() -> None:
+    parts = [cost_sheet.Part(1, ROOM, None), cost_sheet.Part(2, None, TRANSFER)]
+    spans = [
+        cost_sheet.Span(ROOM, date(2027, 1, 1), date(2027, 5, 31)),
+        cost_sheet.Span(TRANSFER, date(2027, 1, 1), cost_sheet.FOREVER),
+    ]
+    assert cost_sheet.rate_cuts(parts, spans) == {date(2027, 1, 1), date(2027, 6, 1), date(2026, 12, 31)}
+    wins = cost_sheet.windows(ON, parts, spans)
+    assert {w.start for w in wins} <= cost_sheet.rate_cuts(parts, spans)

@@ -1,16 +1,22 @@
 """The agency tariff: one partner's own price per tour, season and pax band (AA-1030 G3; root research note
 ``docs/research/2026-11-05-asian-trails-b2b-benchmark``, AA's answer to a "Cloud Tariff").
 
-- **Grid = the price matrix.** One tariff row per ``b2b`` row of ``booking.trip_plan_prices`` (bk-032 / bk-039) still
-  valid on the day (``valid_to`` >= today): its season label, validity window and pax band. Only sellable trip plans
-  whose tour is served (in ``catalog.v_tour``, not retired or paused: ``app.catalog.liveness``), the same set
-  ``GET /products`` offers. A window and band held in several currencies is listed once (the USD row first).
+- **Grid = the price matrix, cut where a rate changes.** The ``b2b`` rows of ``booking.trip_plan_prices`` (bk-032 /
+  bk-039) still valid on the day (``valid_to`` >= today) give the season label, the pax band and the window, from
+  today at the earliest. Each window is then split at every date where a supplier rate of one of the plan's
+  components starts or ends (:func:`app.catalog.cost_sheet.rate_cuts`, the cost sheet's own cuts), because only the
+  cost sheet's computed rows are cut there, and only as of their last recompute: a hand row (not ``computed``) or a
+  row staff ``overridden`` keeps whatever window staff gave it, and may span a rate change. So every departure date
+  of a tariff row's ``valid_from`` .. ``valid_to`` uses the same rates and a quote of any of them answers the row's
+  price; neighbouring pieces of one window that price the same are joined back. Only sellable trip plans whose tour
+  is served (in ``catalog.v_tour``, not retired or paused: ``app.catalog.liveness``), the same set ``GET /products``
+  offers. A window and band held in several currencies is listed once (the USD row first).
 - **Price = what ``POST /quotes`` charges.** Each row is priced by the quote engine itself (``app.b2b.components.
   price_lines`` for the plan's ``tp:`` line, then ``app.b2b.quotes.price_line`` with the partner's
-  :class:`~app.b2b.quotes.PriceBasis`): the plan's components at the supplier rates in force on the row's first
-  bookable day (the window start, or today when the window has started; the cost sheet cuts windows where a rate
-  changes, so every day of a window prices the same), for the band's smallest party (all adults, the default room
-  mix: doubles plus a single when odd), at the ``b2b`` rule, less the partner's discount in force today (its plan
+  :class:`~app.b2b.quotes.PriceBasis`): the plan's components at the supplier rates in force on the tariff row's
+  first day (``priced_for_date`` = ``valid_from``; any day of the row prices the same, see above), for the band's
+  smallest party (all adults, the default room mix: doubles plus a single when odd), at the ``b2b`` rule, less the
+  partner's discount in force today (its plan
   rate card, else its catalogue card, else its tier: ``app.b2b.agency_pricing``), rounded up like a quote line.
   ``price`` is that line's ``b2b_price`` for the party (a quote of that party on that day answers the same amount);
   ``price_per_person`` is it divided by the party, rounded up the same way. No second formula: a tariff row and a
@@ -34,18 +40,26 @@ from __future__ import annotations
 import csv
 import io
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
 import asyncpg
 
 from app.b2b import quotes
-from app.b2b.components import MAX_RATE_LOOKUPS, PREFIX_PLAN, LineAsk, LineCost, component_id, price_lines
+from app.b2b.components import (
+    MAX_RATE_LOOKUPS,
+    PLAN_COMPONENTS_SQL,
+    PREFIX_PLAN,
+    LineAsk,
+    LineCost,
+    component_id,
+    price_lines,
+)
 from app.b2b.errors import B2BError
-from app.catalog import liveness
+from app.catalog import cost_sheet, liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.pricing import engine
 
@@ -53,6 +67,7 @@ SOURCE_SYSTEM = "cis"
 CHANNEL = engine.Channel.B2B.value
 BASIS = "per_person_band_min_twin_share"
 MAX_ROWS = 3000  # matrix rows per tariff (the read stops there and says so: ``truncated``)
+MAX_CELLS = 6000  # tariff rows once the windows are cut at rate changes (``truncated`` too)
 # Rate lookups a tp: line of the plan needs for the band's party: one per service, up to two room mixes per room.
 LOOKUPS_PER_COMPONENT = 2
 
@@ -95,12 +110,15 @@ FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 @dataclass(frozen=True)
 class Cell:
-    """One matrix row to price: the plan's ``tp:`` line for the band's smallest party on the row's first day."""
+    """One piece of a matrix row to price (``on`` .. ``end``, inside one rate span of every component): the plan's
+    ``tp:`` line for the band's smallest party on its first day. ``row_no`` = the matrix row it comes from."""
 
     no: int
     row: Any
     party: int
     on: date
+    end: date
+    row_no: int = 0
 
     @property
     def ask(self) -> LineAsk:
@@ -117,6 +135,34 @@ class Cell:
     @property
     def lookups(self) -> int:
         return max(1, int(self.row["components"]) * LOOKUPS_PER_COMPONENT)
+
+
+def pieces(start: date, end: date, cuts: Iterable[date]) -> list[tuple[date, date]]:
+    """``start`` .. ``end`` split at every cut inside it (a cut is the first day of a new piece)."""
+    inner = sorted({cut for cut in cuts if start < cut <= end})
+    bounds = [start, *inner]
+    ends = [cut - timedelta(days=1) for cut in inner] + [end]
+    return list(zip(bounds, ends, strict=True))
+
+
+async def rate_cuts(conn: asyncpg.Connection, plan_ids: Sequence[str]) -> dict[str, set[date]]:
+    """``{plan id: the start dates where a rate of its components starts or ends}`` in two queries (the plans'
+    components, then the validity spans of every published rate of their items: the cost sheet's own query)."""
+    if not plan_ids:
+        return {}
+    parts: dict[str, list[cost_sheet.Part]] = {}
+    for r in await conn.fetch(PLAN_COMPONENTS_SQL, sorted(set(plan_ids))):
+        part = cost_sheet.Part(int(r["day_no"]), r["room_type_id"], r["service_id"])
+        parts.setdefault(r["trip_plan_id"], []).append(part)
+    rooms = sorted({p.room_type_id for ps in parts.values() for p in ps if p.room_type_id})
+    services = sorted({p.service_id for ps in parts.values() for p in ps if p.service_id})
+    if not rooms and not services:
+        return {}
+    spans = [
+        cost_sheet.Span(r["room_type_id"] or r["service_id"], r["start"], r["stop"])
+        for r in await conn.fetch(cost_sheet.SPANS_SQL, rooms, services)
+    ]
+    return {plan: cost_sheet.rate_cuts(ps, spans) for plan, ps in parts.items()}
 
 
 def per_person(price: Decimal, party: int, currency: str) -> Decimal:
@@ -189,14 +235,21 @@ async def build(
         raise B2BError("unavailable", "the catalog is not readable right now", retry_after_s=60) from None
     truncated = len(rows) > limit
     rows = [r for r in rows[:limit] if (state := served.get(r["source_id"])) is not None and state.served]
+    cuts = await rate_cuts(conn, [r["plan_id"] for r in rows if r["components"]])
 
     cells: list[Cell] = []
     unpriced: list[dict[str, Any]] = []
-    for no, row in enumerate(rows, start=1):
+    for row_no, row in enumerate(rows, start=1):
+        start = max(row["valid_from"], on)
         if not row["components"]:
-            unpriced.append(_unpriced(row, "the trip plan has no bookable components"))
+            unpriced.append(_unpriced(row, start, row["valid_to"], "the trip plan has no bookable components"))
             continue
-        cells.append(Cell(no=no, row=row, party=int(row["pax_min"]), on=max(row["valid_from"], on)))
+        for first, last in pieces(start, row["valid_to"], cuts.get(row["plan_id"], ())):
+            if len(cells) == MAX_CELLS:
+                truncated = True
+                break
+            cell = Cell(no=len(cells) + 1, row=row, party=int(row["pax_min"]), on=first, end=last, row_no=row_no)
+            cells.append(cell)
     costs = await _costs(conn, cells)
     basis = await quotes.price_basis(
         conn,
@@ -207,18 +260,20 @@ async def build(
         require_all=False,
     )
 
-    items: list[dict[str, Any]] = []
+    items: list[tuple[int, dict[str, Any]]] = []
+    refused: list[tuple[int, dict[str, Any]]] = []
     for cell in cells:
         cost = costs[cell.no]
         if isinstance(cost, str):
-            unpriced.append(_unpriced(cell.row, cost))
+            refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, cost)))
             continue
         try:
             price = quotes.price_line(basis, cost, cell.row["plan_id"])
         except engine.PricingError as exc:
-            unpriced.append(_unpriced(cell.row, str(exc)))
+            refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, str(exc))))
             continue
-        items.append(_item(cell, price, currency))
+        items.append((cell.row_no, _item(cell, price, currency)))
+    unpriced.extend(_joined(refused, ("reason",)))
     return {
         "currency": currency,
         "priced_on": on,
@@ -231,35 +286,57 @@ async def build(
             "rate_date": basis.fx.as_of.isoformat(),
             "source": basis.fx.source,
         },
-        "items": items,
+        "items": _joined(items, SAME_PRICE),
         "unpriced": unpriced,
         "truncated": truncated,
     }
 
 
-def _tour(row: Any) -> dict[str, Any]:
+# Two neighbouring pieces of one matrix row with these equal are one tariff row (the later one's valid_to kept).
+SAME_PRICE = ("price", "price_per_person", "agency_discount_pct", "rate_card_id")
+
+
+def _joined(pieces_of: Sequence[tuple[int, dict[str, Any]]], same: Sequence[str]) -> list[dict[str, Any]]:
+    """Join the neighbouring pieces of one matrix row that answer the same (``same`` keys), in order."""
+    out: list[dict[str, Any]] = []
+    last_row = None
+    for row_no, entry in pieces_of:
+        prev = out[-1] if out and last_row == row_no else None
+        if (
+            prev is not None
+            and prev["valid_to"] + timedelta(days=1) == entry["valid_from"]
+            and all(prev[k] == entry[k] for k in same)
+        ):
+            prev["valid_to"] = entry["valid_to"]
+        else:
+            out.append(dict(entry))
+        last_row = row_no
+    return out
+
+
+def _tour(row: Any, start: date, end: date) -> dict[str, Any]:
     return {
         "tour": {"source_system": SOURCE_SYSTEM, "source_id": row["source_id"]},
         "title": row["title"],
         "country": row["country"],
         "duration_days": row["duration_days"],
         "season": row["season"],
-        "valid_from": row["valid_from"],
-        "valid_to": row["valid_to"],
+        "valid_from": start,
+        "valid_to": end,
         "pax_min": row["pax_min"],
         "pax_max": row["pax_max"],
     }
 
 
-def _unpriced(row: Any, reason: str) -> dict[str, Any]:
-    return {**_tour(row), "reason": reason[:300]}
+def _unpriced(row: Any, start: date, end: date, reason: str) -> dict[str, Any]:
+    return {**_tour(row, start, end), "reason": reason[:300]}
 
 
 def _item(cell: Cell, price: quotes.LinePrice, currency: str) -> dict[str, Any]:
     row = cell.row
     rrp_currency = (row["rrp_currency"] or "").strip()
     return {
-        **_tour(row),
+        **_tour(row, cell.on, cell.end),
         "priced_for_pax": cell.party,
         "priced_for_date": cell.on,
         "price": quotes.money(price.b2b_price, currency),

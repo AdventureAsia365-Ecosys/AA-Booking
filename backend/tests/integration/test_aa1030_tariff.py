@@ -4,7 +4,8 @@ Three invented agencies (standard, silver with a catalogue rate card, gold with 
 one invented tour (the price matrix the cost sheet computes from the plan's components); every row of every tariff is
 then quoted through the B2B API for the row's party and day, and the quote line's ``b2b_price``, discount and rate card
 must be the tariff's. The agency read (``GET /b2b/v1/tariff``, JSON and CSV) is the staff read without the staff-only
-fields, and two agencies on different tiers get different tariffs.
+fields, and two agencies on different tiers get different tariffs. A hand b2b row (never re-cut by the cost sheet)
+over a supplier rate change is cut there, and a quote of a departure on either side answers its piece's price.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal as D
 from typing import Any
 
@@ -26,8 +27,10 @@ from tests.integration.test_bk019_b2b import (  # noqa: F401 — fixtures used b
     ADMIN,
     CHECKER,
     MAKER,
+    PUBLISH,
     SALES,
     SOURCE_ID,
+    _insert,
     _ok,
     _staff,
     admin,
@@ -184,3 +187,66 @@ async def test_the_tariff_is_what_a_quote_charges(
     # A plan taken off sale leaves every tariff.
     await admin.execute("UPDATE booking.trip_plans SET sellable = false WHERE id = $1::uuid", plan_id)
     assert (await _ok(await c.get(url.format(ids[TENANT_GOLD]), headers=sales)))["items"] == []
+
+
+async def test_a_hand_row_over_a_rate_change_is_cut_there(
+    client: tuple[httpx.AsyncClient, LocalCis, LocalM2M],  # noqa: F811
+    admin: asyncpg.Connection,  # noqa: F811
+    supply: dict[str, str],  # noqa: F811
+    tiers_clean: None,  # noqa: F811
+    matrix_clean: None,
+) -> None:
+    c, cis, m2m = client
+    boss, sales, maker = _staff(cis, ADMIN), _staff(cis, SALES), _staff(cis, MAKER)
+    body = {"tenant_id": TENANT_STANDARD, "agency_name": "Invented Kestrel Tours", "m2m_client_id": CRM_CLIENT}
+    partner = (await _ok(await c.post("/b2b-partners", json=body, headers=boss), 201))["id"]
+    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
+    items = {
+        "items": [{"day_no": 1, "hotel_room_type_id": supply["room"]}, {"day_no": 1, "service_id": supply["service"]}]
+    }
+    plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
+        "trip_plan_id"
+    ]
+    # A second published contract: the room at 1,500,000 VND a night from 1 June 2027 (the newest rate wins).
+    supplier = await admin.fetchval("SELECT supplier_id::text FROM booking.hotels WHERE id = (SELECT hotel_id FROM"
+                                    " booking.hotel_room_types WHERE id = $1::uuid)", supply["room"])  # fmt: skip
+    summer = await _insert(
+        admin, "supplier_contracts", supplier_id=supplier, title="Invented summer 2027", valid_from=date(2027, 6, 1),
+        valid_to=date(2027, 12, 31), currency="VND", created_by=MAKER,
+    )  # fmt: skip
+    await _insert(
+        admin, "supplier_rates", supplier_contract_id=summer, valid_from=date(2027, 6, 1),
+        valid_to=date(2027, 12, 31), hotel_room_type_id=supply["room"], unit="room_night", net_amount=1_500_000,
+        currency="VND", created_by=MAKER,
+    )  # fmt: skip
+    await admin.execute(PUBLISH, summer, CHECKER)
+    # A hand b2b row (not computed) for two travellers over the whole year, set by staff before the rate changed.
+    await admin.execute(
+        "INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, season, peak, valid_from, valid_to,"
+        " pax_min, pax_max, currency, amount, overridden, computed, created_by)"
+        " VALUES ($1::uuid, 1, 'b2b', 'Invented hand season', false, $2, $3, 2, 2, 'USD', 120, false, false, $4)",
+        plan_id,
+        date(2027, 1, 1),
+        date(2027, 12, 31),
+        MAKER,
+    )
+
+    tariff = await _ok(await c.get(f"/pricing/partner-tariffs/{partner}", headers=sales))
+    got = [(i["valid_from"], i["valid_to"], i["priced_for_date"], i["season"]) for i in tariff["items"]]
+    assert got == [
+        ("2027-01-01", "2027-05-31", "2027-01-01", "Invented hand season"),
+        ("2027-06-01", "2027-12-31", "2027-06-01", "Invented hand season"),
+    ]
+    winter, summer_item = tariff["items"]
+    assert D(summer_item["price"]["amount"]) > D(winter["price"]["amount"]) and tariff["unpriced"] == []
+    # A departure anywhere in a piece is quoted at that piece's price (March and July, not only the first days).
+    for item, day in ((winter, "2027-03-17"), (summer_item, "2027-07-15")):
+        quote = await _quote_row(c, m2m, TENANT_STANDARD, plan_id, {**item, "priced_for_date": day}, "USD")
+        assert quote["lines"][0]["b2b_price"] == item["price"], (day, item)
+    rows = list(csv.DictReader(io.StringIO((await c.get(f"/pricing/partner-tariffs/{partner}",
+                                                        params={"format": "csv"}, headers=sales)).text)))  # fmt: skip
+    assert [(r["valid_from"], r["valid_to"], r["price_for_party"]) for r in rows] == [
+        ("2027-01-01", "2027-05-31", winter["price"]["amount"]),
+        ("2027-06-01", "2027-12-31", summer_item["price"]["amount"]),
+    ]

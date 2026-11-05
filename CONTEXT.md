@@ -675,8 +675,11 @@ Agency tiers page shows the margin left per tier under the rule in force and fla
 
 **Agency tariff (AA-1030 G3)** (`app.b2b.tariff`): one partner's own price per tour, season and pax band, the grid
 of the price matrix (every `b2b` row of a sellable, served plan still valid today; one row per window x band, the USD
-row first) priced by the **quote engine itself**: the plan's `tp:` line for the band's smallest party (all adults,
-default room mix) on the window's first bookable day, through `components.price_lines` and `quotes.price_line` with
+row first), each window from today at the earliest and **cut wherever a supplier rate of a component starts or ends**
+(`cost_sheet.rate_cuts`, the cost sheet's own cuts: hand and overridden rows keep the window staff gave them and a
+computed row is only cut as of its last recompute), neighbouring pieces with the same price joined back, so every
+departure date of a tariff row prices the same; priced by the **quote engine itself**: the plan's `tp:` line for the
+band's smallest party (all adults, default room mix) on the row's first day (`priced_for_date` = `valid_from`), through `components.price_lines` and `quotes.price_line` with
 the partner's `quotes.PriceBasis` (b2b rule, FX, agency terms in force today). So `price` = what `POST /quotes`
 answers for that party and day; `price_per_person` = it / party, rounded up like a line. Not the matrix `amount`
 (rounded to 5 USD, peak uplift; quotes never read it); the row's public RRP is shown as it is. Rows a quote cannot
