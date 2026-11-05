@@ -1,6 +1,6 @@
 """AA-1037 R4 slice 1 on a real PostgreSQL (bk-041 / bk-042), as role ``booking``: the slice's Done-when end to end.
 
-- SaaS: the draft job reads the CIS subscriptions (``catalog.v_tenant_billing_v1``, CIS 381, stood in by a table of
+- SaaS: the draft job reads the CIS subscriptions (``catalog.v_tenant_billing_v1``, CIS 377, stood in by a table of
   its exact columns around each test) and writes one draft per agency and month; a re-run changes nothing; issue gives
   the next AAS- number with the CIS bill-to snapshot; the e-invoice number is recorded once; finance A records a
   payment (Idempotency-Key replay), A approving is 403 ``maker_checker``, finance B approves -> paid, and the billing
@@ -43,7 +43,7 @@ CIS_ROLE = {FIN_A: "reviewer", FIN_B: "reviewer", SALES: "reviewer"}  # the row'
 CLIENT = "aa1037client"
 NAME = "it-1037"
 # Copied verbatim from the closing check of CIS api/migrations/381_tenant_billing_catalog_view.sql.
-CIS_381_COLUMNS = (
+CIS_377_COLUMNS = (
     "tenant_id uuid, name text, kind text, legal_entity_name text, tax_id text, billing_email text, "
     "billing_address text, billing_country text, product text, plan_key text, plan_name text, "
     "price_usd_monthly numeric(10,2), price_unit text, seats_included integer, price_extra_seat_usd numeric(10,2), "
@@ -91,11 +91,11 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await purge(conn)
     await ops.staff(conn, (FIN_A, "finance"), (FIN_B, "finance"), (SALES, "sales"))
-    await conn.execute(f"CREATE TABLE catalog.v_tenant_billing_v1 ({CIS_381_COLUMNS})")
+    await conn.execute(f"CREATE TABLE catalog.v_tenant_billing_v1 ({CIS_377_COLUMNS})")
     await conn.execute("GRANT SELECT ON catalog.v_tenant_billing_v1 TO booking")
-    assert await conn.fetchval(COLUMNS_SQL, cis_view.VIEW.qualified) == CIS_381_COLUMNS
-    missing = set(cis_view.COLUMNS) - {c.split(" ", 1)[0] for c in CIS_381_COLUMNS.split(", ")}
-    assert not missing, f"Booking selects {missing} that CIS 381 does not have"
+    assert await conn.fetchval(COLUMNS_SQL, cis_view.VIEW.qualified) == CIS_377_COLUMNS
+    missing = set(cis_view.COLUMNS) - {c.split(" ", 1)[0] for c in CIS_377_COLUMNS.split(", ")}
+    assert not missing, f"Booking selects {missing} that CIS 377 does not have"
     liveness.reset_cache()
     try:
         yield conn

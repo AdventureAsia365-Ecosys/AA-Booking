@@ -1,10 +1,10 @@
-"""The CIS read of agency billing: ``catalog.v_tenant_billing_v1`` (CIS 381, contract tenant.entitlements.v1, the
+"""The CIS read of agency billing: ``catalog.v_tenant_billing_v1`` (CIS 377, contract tenant.entitlements.v1, the
 billing part for Booking). One row per tenant and subscription (a tenant without one has a single row with NULL
 subscription columns): the bill-to fields CIS holds as the account master (root ADR 0019 d1 / d9: Booking takes a
 snapshot at issue) and each subscription with its plan price.
 
 Read as role ``booking`` like ``catalog.v_tenant_account_v1`` (no HTTP, no secret). Feature-detected
-(:func:`app.catalog.liveness.view_ready`): without CIS 381 the SaaS draft answers ``skipped`` and an issue snapshots
+(:func:`app.catalog.liveness.view_ready`): without CIS 377 the SaaS draft answers ``skipped`` and an issue snapshots
 only the agency name Booking holds (``bill_to.source = 'booking'``)."""
 
 from __future__ import annotations

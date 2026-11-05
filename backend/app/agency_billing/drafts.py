@@ -8,7 +8,7 @@ a day, the SaaS draft of the **current** month (start of period, d9) and the set
 (the closed month); staff can run either for any month (``POST /booking/agency-billing/runs``).
 
 **SaaS** (:func:`run_saas`): the live subscriptions (``active``, ``past_due``) of every agency from the CIS view
-``catalog.v_tenant_billing_v1`` (CIS 381; without it the run is ``skipped``). Per subscription one ``subscription``
+``catalog.v_tenant_billing_v1`` (CIS 377; without it the run is ``skipped``). Per subscription one ``subscription``
 line: the plan's monthly USD price x seats for a per-seat plan (else x 1); a per-tenant / per-site plan with more seats
 than included adds an ``extra_seats`` line. A plan without a price (Enterprise: contract price) gets a zero line and is
 counted ``price_missing`` (finance adds the price as an adjustment on the draft). The invoice currency is the agency's
@@ -265,7 +265,7 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
     start, end = parse_period(period, default=today)
     async with pool.acquire() as conn:
         if not await cis.ready(conn):
-            return {"outcome": "skipped", "reason": f"{cis.VIEW.qualified} not readable (CIS 381)"}
+            return {"outcome": "skipped", "reason": f"{cis.VIEW.qualified} not readable (CIS 377)"}
         subs = await cis.subscriptions(conn, [tenant_id] if tenant_id else None)
         partners = {r["tenant_id"]: r["agency_name"] for r in await conn.fetch(
             "SELECT tenant_id, agency_name FROM booking.b2b_partners")}  # fmt: skip
