@@ -19,8 +19,13 @@ export interface VisualPage {
   auth: "public" | "staff";
   /** The page renders the kit frame (`[data-kit-frame]`, PageFrame); default true. */
   frame?: boolean;
-  /** The document's expected HTTP status (default 200). */
+  /** The document's expected HTTP status (default 200) on the mocked `next start` run. */
   status?: number;
+  /**
+   * On a deployed host (VISUAL_BASE_URL set) the page answers differently: the final status and final path after the
+   * redirects Playwright follows (page.goto returns the LAST response), and why. Without it, the same as the mock.
+   */
+  deployed?: { status: number; finalPath: string; why: string };
   gallery?: boolean;
   /** "document" or "frame": the planted overflow the self-test expects the run to catch. */
   selftest?: "document" | "frame";
@@ -28,7 +33,14 @@ export interface VisualPage {
 
 export const PAGES: VisualPage[] = [
   { slug: "login", route: "/login", path: "/login", auth: "public", frame: false },
-  { slug: "not-found", route: "(not-found)", path: "/this-page-does-not-exist", auth: "public", frame: false, status: 404 },
+  {
+    slug: "not-found", route: "(not-found)", path: "/this-page-does-not-exist", auth: "public", frame: false, status: 404,
+    deployed: {
+      status: 200,
+      finalPath: "/login",
+      why: "signed out, the deployed proxy.ts sends every path but /login to /login?next=<path> (a 307), so the 404 page is only reachable with a session; the mocked run sets one and keeps the 404 check",
+    },
+  },
   { slug: "kit-gallery", route: "/kit-gallery", path: "/kit-gallery", auth: "public", gallery: true },
   { slug: "selftest-document", route: "/kit-gallery", path: "/kit-gallery?plant=overflow", auth: "public", gallery: true, selftest: "document" },
   { slug: "selftest-frame", route: "/kit-gallery", path: "/kit-gallery?plant=frame", auth: "public", gallery: true, selftest: "frame" },
@@ -73,6 +85,15 @@ export function selectPages(pages: VisualPage[], opts: { auth: "public" | "staff
     if (opts.auth !== "all" && p.auth !== opts.auth) return false;
     return wanted === null || wanted.has(p.slug);
   });
+}
+
+/**
+ * What one page must answer: the final document status and, when a redirect is expected, the final path. `onHost` is
+ * a deployed host (VISUAL_BASE_URL set, no session); otherwise the mocked `next start` run (session cookie set).
+ */
+export function expectedOutcome(page: VisualPage, onHost: boolean): { status: number; finalPath: string | null } {
+  if (onHost && page.deployed) return { status: page.deployed.status, finalPath: page.deployed.finalPath };
+  return { status: page.status ?? 200, finalPath: null };
 }
 
 /** Routes with a page.tsx that the run does not open, each with its reason. */

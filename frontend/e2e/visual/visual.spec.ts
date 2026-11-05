@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { answer, CLOCK } from "../layout/fixtures";
-import { PAGES, selectPages } from "./pages";
+import { expectedOutcome, PAGES, selectPages } from "./pages";
 
 const THEMES = ["light", "dark"] as const;
 const OUT = path.join(__dirname, "results");
@@ -133,10 +133,12 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
         }
       }, theme);
       const docUrl = new URL(p.path, origin).toString();
+      // AA-1008 H3: on a deployed host a signed-out unknown path is redirected to /login (pages.ts `deployed`).
+      const want = expectedOutcome(p, HOST !== null);
       page.on("console", (m) => {
         if (m.type() !== "error" || allowed(ALLOW.console, m.text())) return;
         // Chromium logs the document's own non-200 answer ("Failed to load resource: … 404"): expected on the 404 page.
-        if (p.status && m.location().url === docUrl && m.text().startsWith("Failed to load resource")) return;
+        if (want.status !== 200 && m.location().url === docUrl && m.text().startsWith("Failed to load resource")) return;
         consoleErrors.push(m.text().slice(0, 300));
       });
       page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 300)}`));
@@ -150,7 +152,7 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
         if (r.status() >= 300 && r.status() < 400) return;
         if (!url.startsWith(origin) || allowed(ALLOW.requests, url)) return;
         if (url.includes("/api/booking/") && r.status() === 501 && !HOST) return; // counted as unmocked
-        const expected = url === docUrl ? (p.status ?? 200) : null;
+        const expected = url === docUrl ? want.status : null;
         if (expected !== null ? r.status() !== expected : r.status() >= 400) failed.push(`${r.status()} ${url}`);
       });
 
@@ -159,6 +161,7 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await page.evaluate(() => document.fonts.ready.then(() => true));
 
+      const finalPath = new URL(page.url()).pathname;
       const appliedTheme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
       const hasFrame = (await page.locator("[data-kit-frame]").count()) > 0;
       const overflow = await probeOverflow(page);
@@ -171,12 +174,14 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
 
       const result = {
         page: p.slug, path: p.path, auth: p.auth, viewport, theme, selftest: p.selftest ?? null,
-        status: res?.status() ?? null, appliedTheme, hasFrame, frameExpected: p.frame !== false, overflow, consoleErrors, failedRequests: failed, unmocked,
+        status: res?.status() ?? null, expectedStatus: want.status, finalPath, expectedPath: want.finalPath, appliedTheme, hasFrame, frameExpected: p.frame !== false, overflow, consoleErrors, failedRequests: failed, unmocked,
       };
       fs.mkdirSync(REPORT_DIR, { recursive: true });
       fs.writeFileSync(path.join(REPORT_DIR, `${name}.json`), JSON.stringify(result, null, 1));
 
-      expect.soft(res?.status(), "document status").toBe(p.status ?? 200);
+      // page.goto's response is the LAST one after redirects: on a redirected page that is the target's status.
+      expect.soft(res?.status(), "document status").toBe(want.status);
+      if (want.finalPath) expect.soft(finalPath, "the page redirects to").toBe(want.finalPath);
       expect.soft(appliedTheme, "data-theme on <html>").toBe(theme);
       if (p.frame !== false) expect.soft(hasFrame, "the kit frame [data-kit-frame] is on the page").toBe(true);
       expect.soft(overflow.doc, `page scrolls sideways: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.vw + 1);
