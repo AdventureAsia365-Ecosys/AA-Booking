@@ -73,8 +73,11 @@ async function mock(page: Page, origin: string, unmocked: string[]) {
 
 /** The overflow probe: the document and every kit frame, with the five widest offenders. */
 async function probeOverflow(page: Page) {
-  return page.evaluate(() => {
-    const vw = window.innerWidth;
+  // The configured viewport width, not window.innerWidth: a mobile (isMobile) page that overflows widens its layout
+  // viewport to the content, so innerWidth grows with the overflow and the document never looks wider than it.
+  const width = page.viewportSize()?.width ?? 0;
+  return page.evaluate((configured) => {
+    const vw = configured || window.innerWidth;
     const doc = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
     const name = (el: Element) =>
       el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "") +
@@ -93,7 +96,7 @@ async function probeOverflow(page: Page) {
       .slice(0, 5)
       .map((el) => `${name(el)} (right ${Math.round(el.getBoundingClientRect().right)})`);
     return { doc, vw, frames, offenders };
-  });
+  }, width);
 }
 
 /** Grow the viewport height to the tallest inner scroll region (bounded), so a full-page PNG shows the whole page. */
