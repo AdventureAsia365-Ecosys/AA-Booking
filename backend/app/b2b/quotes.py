@@ -22,6 +22,12 @@
   every hold under the departure lock); counting it would answer ``sold_out`` for seats the same client holds.
 - **Served tours only** (AA-986 L5, root ADR 0015): a ``tp:`` line whose tour is not served (retired, paused or not
   in ``catalog.v_tour``) is 409 ``tour_not_served`` before anything is priced (``app.b2b.served``).
+- **Agency tier / rate card** (AA-1030, bk-045, root ADR 0019 b15, ``app.b2b.agency_pricing``): each line's
+  ``b2b_price`` is the rule's price less the partner's discount in force on the quote day (the plan's contract rate
+  card, else a catalogue card, else the tier's approved discount), then rounded up. The quote stores the tier and its
+  discount, each line the discount applied and the card behind it. A line with a discount hashes it
+  (``agency_discount``, ``rate_card_id``); a line without one hashes exactly as before, so a standard (0 %) partner's
+  hash is unchanged.
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -38,8 +44,8 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import departures, served
-from app.b2b.components import LineAsk, LineCost, price_lines
+from app.b2b import agency_pricing, departures, served
+from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, repository
 
@@ -162,6 +168,7 @@ def price_hash(
                 "availability": line["availability"],
                 "departure_id": line["departure_id"],
                 "b2b_price": format(line["b2b_price"], "f"),
+                **_discount_hash(line),
             }
             for line in lines
         ],
@@ -169,6 +176,23 @@ def price_hash(
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def _discount_hash(line: dict[str, Any]) -> dict[str, Any]:
+    """AA-1030: the agency discount of a line, hashed only when there is one (a 0 % line hashes as before)."""
+    discount = line.get("agency_discount_pct") or engine.ZERO
+    if discount == engine.ZERO:
+        return {}
+    return {"agency_discount": decimal_text(discount), "rate_card_id": line.get("rate_card_id")}
+
+
+def _line_plan(component_id: str) -> str | None:
+    """The trip plan id of a ``tp:`` line (a plan rate card applies to it), else None."""
+    try:
+        prefix, ident = parse_component(component_id)
+    except ValueError:
+        return None
+    return ident if prefix == PREFIX_PLAN else None
 
 
 async def _valid_hours(conn: asyncpg.Connection) -> int:
@@ -251,6 +275,7 @@ async def create_quote(
         engine_rates = {code: dated.rate for code, dated in rates.items()}
         margin = rule.rule.margin(peak=False)
         sell_rate = engine_rates.get(currency)
+        terms = await agency_pricing.terms_for(conn, partner_id, on)
 
         priced: list[dict[str, Any]] = []
         for no, (line, lc, (availability, departure_id, _)) in enumerate(
@@ -262,6 +287,7 @@ async def create_quote(
             except engine.PricingError as exc:
                 raise B2BError("unavailable", f"line {line.ask.line_ref}: {exc}") from None
             ask = line.ask
+            discount, card_id = terms.discount_for(_line_plan(ask.component_id))
             priced.append(
                 {
                     "line_no": no,
@@ -277,9 +303,11 @@ async def create_quote(
                     "unit": UNIT,
                     "availability": availability,
                     "departure_id": departure_id,
-                    "b2b_price": round_line(sell, currency),
+                    "b2b_price": round_line(agency_pricing.apply_discount(sell, discount), currency),
                     "net_cost_usd": net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
                     "supplier_rate_ids": lc.rate_ids,
+                    "agency_discount_pct": discount,
+                    "rate_card_id": card_id,
                 }
             )
         total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
@@ -295,8 +323,10 @@ async def create_quote(
                 INSERT INTO booking.b2b_quotes
                     (partner_id, m2m_client_id, proposal_ref, proposal_version, currency, fx_rate_per_usd,
                      fx_buffer_pct, fx_as_of, fx_source, pricing_rule_valid_from, margin_applied, card_fee_pct,
-                     rounding, priced_on, total_b2b_price, price_hash, valid_until, created_at)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                     rounding, priced_on, total_b2b_price, price_hash, valid_until, created_at, partner_tier_code,
+                     tier_discount_pct)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                        $20)
                 RETURNING id::text
                 """,
                 partner_id,
@@ -317,15 +347,17 @@ async def create_quote(
                 digest,
                 valid_until,
                 now,
+                terms.tier_code,
+                terms.tier_discount,
             )
             await conn.executemany(
                 """
                 INSERT INTO booking.b2b_quote_lines
                     (quote_id, line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult,
                      pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids,
-                     departure_id)
+                     departure_id, agency_discount_pct, rate_card_id)
                 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[],
-                        $17::uuid)
+                        $17::uuid, $18, $19::uuid)
                 """,
                 [
                     (
@@ -346,6 +378,8 @@ async def create_quote(
                         p["net_cost_usd"],
                         p["supplier_rate_ids"],
                         p["departure_id"],
+                        p["agency_discount_pct"],
+                        p["rate_card_id"],
                     )
                     for p in priced
                 ],
