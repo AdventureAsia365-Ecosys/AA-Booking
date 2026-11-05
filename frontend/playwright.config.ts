@@ -22,12 +22,29 @@
 //     With SMOKE_BASE_URL set no local server is started (nothing to build).
 // Run:   npm run test:smoke-public   (defaults to https://booking.lumiguides.it.com; SMOKE_BASE_URL=<url> to change)
 // Shots: SMOKE_SHOTS_DIR=<dir> (default e2e/smoke-public/results).
+//
+//   • "visual-1440" / "visual-390" (AA-1008, root ADR 0016 decision 9) — e2e/visual/visual.spec.ts: every selected page
+//     at 1440 x 900 and 390 x 844, light and dark: no horizontal overflow (document and kit frame), 0 console errors,
+//     no failed request, the kit frame, a PNG. Without VISUAL_BASE_URL it runs on the same local server and mocked API
+//     as layout-mock (staff pages included); with it, the public pages of a deployed host. KIT_GALLERY=1 on the local
+//     server serves the gated kit gallery route (the per-PR run and its planted-overflow self-test).
+// Run:   npm run build && KIT_GALLERY=1 VISUAL_GALLERY=1 npx playwright test --project=visual-1440 --project=visual-390
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.LAYOUT_PORT || 3199);
 const STUB_PORT = Number(process.env.LAYOUT_STUB_PORT || 55481);
 // AA-993 V5: set → the smoke-public project runs against this deployed URL and no local server is started.
 const SMOKE_BASE_URL = process.env.SMOKE_BASE_URL?.replace(/\/+$/, "");
+// AA-1008: set → the visual projects capture this deployed host (public pages) and no local server is started.
+const VISUAL_BASE_URL = process.env.VISUAL_BASE_URL?.replace(/\/+$/, "");
+const VISUAL_USE = {
+  ...devices["Desktop Chrome"],
+  reducedMotion: "reduce" as const,
+  screenshot: "off" as const,
+  trace: "off" as const,
+  // Scrollbars on (lesson S239): headless hides them, so a frame that fits by 2 px would pass here and scroll on screen.
+  launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] },
+};
 
 export default defineConfig({
   testDir: "./e2e",
@@ -64,8 +81,22 @@ export default defineConfig({
       retries: process.env.CI ? 2 : 0,
       use: { ...devices["Desktop Chrome"], baseURL: SMOKE_BASE_URL },
     },
+    {
+      name: "visual-1440",
+      testMatch: /visual\/.*\.spec\.ts$/,
+      outputDir: "./e2e/visual/results/test-output",
+      timeout: 120_000,
+      use: { ...VISUAL_USE, viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "visual-390",
+      testMatch: /visual\/.*\.spec\.ts$/,
+      outputDir: "./e2e/visual/results/test-output",
+      timeout: 120_000,
+      use: { ...VISUAL_USE, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+    },
   ],
-  webServer: SMOKE_BASE_URL ? undefined : [
+  webServer: SMOKE_BASE_URL || VISUAL_BASE_URL ? undefined : [
     {
       command: `node e2e/layout/stub-api.mjs ${STUB_PORT}`,
       url: `http://127.0.0.1:${STUB_PORT}/health`,
@@ -78,7 +109,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${PORT}/login`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { BOOKING_API_URL: `http://127.0.0.1:${STUB_PORT}`, NEXT_TELEMETRY_DISABLED: "1" },
+      env: { BOOKING_API_URL: `http://127.0.0.1:${STUB_PORT}`, NEXT_TELEMETRY_DISABLED: "1", KIT_GALLERY: process.env.KIT_GALLERY ?? "" },
       stdout: "ignore",
       stderr: "pipe",
     },

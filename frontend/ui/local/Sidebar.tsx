@@ -61,7 +61,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
 
   return (
     <aside
-      className={`aa-admin-sidebar aa-shell-sidebar${drawerOpen ? " aa-admin-sidebar--open" : ""}`}
+      className="aa-admin-sidebar aa-shell-sidebar"
       data-testid="admin-sidebar"
       data-collapsed={collapsed ? "true" : "false"}
       style={{

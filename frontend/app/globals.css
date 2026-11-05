@@ -63,6 +63,11 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  /* AA-1008 (S6f): the kit elevation tokens as utilities (shadow-kit-sm / -md / -lg), in place of arbitrary rgba()
+     shadows in page code; both themes come from tokens.css. */
+  --shadow-kit-sm: var(--aa-shadow-sm);
+  --shadow-kit-md: var(--aa-shadow-md);
+  --shadow-kit-lg: var(--aa-shadow-lg);
 }
 
 html,
