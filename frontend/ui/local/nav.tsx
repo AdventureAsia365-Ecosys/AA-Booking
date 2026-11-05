@@ -13,6 +13,7 @@ import {
   Bell,
   Briefcase,
   Building,
+  Building2,
   Calculator,
   CalendarDays,
   ClipboardList,
@@ -30,11 +31,13 @@ import {
   Store,
   Users,
 } from "lucide-react";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { canSeePage } from "@/lib/rbac";
+import { hrefPath, navActive, type NavMatch } from "./navMatch";
 
 export type Wave = 1 | 2 | 3;
 
-export interface NavEntry {
+export interface NavEntry extends NavMatch {
   href: string;
   label: string;
   icon: React.ReactNode;
@@ -44,6 +47,10 @@ export interface NavEntry {
   shipped: boolean;
   /** Other routes that belong to this entry (active-state matching). */
   also?: string[];
+  /** AA-1037: an entry that opens one tab of a page (`href` carries `?tab=<tab>`) is active only on that tab. */
+  tab?: string;
+  /** AA-1037: the entry of the page itself is not active on these tabs (another entry stands for them). */
+  notTabs?: string[];
 }
 
 export interface NavGroup {
@@ -53,56 +60,88 @@ export interface NavGroup {
 
 const ICON = 16;
 
-export const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Overview",
-    items: [{ href: "/", label: "Dashboard", icon: <LayoutGrid size={ICON} />, wave: 1, shipped: true }],
-  },
-  {
-    label: "Sales",
-    items: [
-      { href: "/cases", label: "Trip Cases", icon: <Briefcase size={ICON} />, wave: 1, shipped: true },
-      { href: "/proposals", label: "Proposals", icon: <MapIcon size={ICON} />, wave: 1, shipped: true },
-      { href: "/customers", label: "Customers", icon: <Users size={ICON} />, wave: 1, shipped: true },
-      { href: "/pricing/calculator", label: "Pricing calculator", icon: <Calculator size={ICON} />, wave: 1, shipped: true },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { href: "/billing", label: "Payments & Invoices", icon: <CreditCard size={ICON} />, wave: 3, shipped: true },
-      { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: true },
-      { href: "/b2b-desk", label: "B2B desk", icon: <Handshake size={ICON} />, wave: 3, shipped: true },
-      // AA-1037 R4: every invoice from AA to an agency (software fee + tour settlement).
-      { href: "/agency-billing", label: "Agency billing", icon: <Landmark size={ICON} />, wave: 3, shipped: true },
-    ],
-  },
-  {
-    label: "Supply",
-    items: [
-      { href: "/suppliers", label: "Suppliers", icon: <Store size={ICON} />, wave: 2, shipped: true },
-      { href: "/hotels", label: "Hotels", icon: <Building size={ICON} />, wave: 2, shipped: true },
-      { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2, shipped: true },
-      { href: "/pricing/rules", label: "Pricing rules & FX", icon: <Percent size={ICON} />, wave: 2, shipped: true },
-      { href: "/pricing/agency-tiers", label: "Agency tiers", icon: <Award size={ICON} />, wave: 2, shipped: true },
-    ],
-  },
-  {
-    label: "Catalog (from CIS)",
-    items: [
-      { href: "/catalog/trip-plans", label: "Trip Plans", icon: <CalendarDays size={ICON} />, wave: 2, shipped: true },
-      { href: "/catalog/destinations", label: "Destinations", icon: <MapPin size={ICON} />, wave: 2, shipped: true },
-      { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2, shipped: true },
-    ],
-  },
-  {
-    label: "Admin",
-    items: [
-      { href: "/staff", label: "Staff", icon: <Shield size={ICON} />, wave: 1, shipped: true },
-      { href: "/audit-log", label: "Audit Log", icon: <ClipboardList size={ICON} />, wave: 2, shipped: true },
-    ],
-  },
-];
+// AA-1037 (root ADR 0019 d8, B2B-only model): partner agencies first. "Partners" is the Agencies tab of Agency billing
+// (each agency's billing status), "Settlement" the rest of it (software fee and tour settlement invoices, payments).
+const B2B_GROUP: NavGroup = {
+  label: "B2B",
+  items: [
+    {
+      href: "/agency-billing?tab=agencies",
+      label: "Partners",
+      icon: <Building2 size={ICON} />,
+      wave: 3,
+      shipped: true,
+      tab: "agencies",
+    },
+    { href: "/agency-billing", label: "Settlement", icon: <Landmark size={ICON} />, wave: 3, shipped: true, notTabs: ["agencies"] },
+    { href: "/b2b-desk", label: "B2B desk", icon: <Handshake size={ICON} />, wave: 3, shipped: true },
+  ],
+};
+
+const CUSTOMERS: NavEntry = { href: "/customers", label: "Customers", icon: <Users size={ICON} />, wave: 1, shipped: true };
+const CUSTOMER_BILLING: NavEntry = {
+  href: "/billing",
+  label: "Payments & Invoices",
+  icon: <CreditCard size={ICON} />,
+  wave: 3,
+  shipped: true,
+};
+
+/** The nav groups for a build: with the B2C part closed (the default) the B2C records (customers, customer invoices
+ *  and payments) move to a read-only group near the end; open, they sit in Sales and Operations as before. */
+export function navGroups(b2cOpen: boolean): NavGroup[] {
+  return [
+    {
+      label: "Overview",
+      items: [{ href: "/", label: "Dashboard", icon: <LayoutGrid size={ICON} />, wave: 1, shipped: true }],
+    },
+    B2B_GROUP,
+    {
+      label: "Sales",
+      items: [
+        { href: "/cases", label: "Trip Cases", icon: <Briefcase size={ICON} />, wave: 1, shipped: true },
+        { href: "/proposals", label: "Proposals", icon: <MapIcon size={ICON} />, wave: 1, shipped: true },
+        ...(b2cOpen ? [CUSTOMERS] : []),
+        { href: "/pricing/calculator", label: "Pricing calculator", icon: <Calculator size={ICON} />, wave: 1, shipped: true },
+      ],
+    },
+    {
+      label: "Operations",
+      items: [
+        ...(b2cOpen ? [CUSTOMER_BILLING] : []),
+        { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: true },
+      ],
+    },
+    {
+      label: "Supply",
+      items: [
+        { href: "/suppliers", label: "Suppliers", icon: <Store size={ICON} />, wave: 2, shipped: true },
+        { href: "/hotels", label: "Hotels", icon: <Building size={ICON} />, wave: 2, shipped: true },
+        { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2, shipped: true },
+        { href: "/pricing/rules", label: "Pricing rules & FX", icon: <Percent size={ICON} />, wave: 2, shipped: true },
+        { href: "/pricing/agency-tiers", label: "Agency tiers", icon: <Award size={ICON} />, wave: 2, shipped: true },
+      ],
+    },
+    {
+      label: "Catalog (from CIS)",
+      items: [
+        { href: "/catalog/trip-plans", label: "Trip Plans", icon: <CalendarDays size={ICON} />, wave: 2, shipped: true },
+        { href: "/catalog/destinations", label: "Destinations", icon: <MapPin size={ICON} />, wave: 2, shipped: true },
+        { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2, shipped: true },
+      ],
+    },
+    ...(b2cOpen ? [] : [{ label: "B2C records (read-only)", items: [CUSTOMERS, CUSTOMER_BILLING] }]),
+    {
+      label: "Admin",
+      items: [
+        { href: "/staff", label: "Staff", icon: <Shield size={ICON} />, wave: 1, shipped: true },
+        { href: "/audit-log", label: "Audit Log", icon: <ClipboardList size={ICON} />, wave: 2, shipped: true },
+      ],
+    },
+  ];
+}
+
+export const NAV_GROUPS: NavGroup[] = navGroups(B2C_INTAKE_OPEN);
 
 /** Footer / avatar-menu entry (all roles). */
 export const SETTINGS_ENTRY: NavEntry = {
@@ -125,13 +164,10 @@ export const NOTIFICATIONS_ENTRY: NavEntry = {
 /** Every route (all waves), used for titles even when the nav hides the item. */
 const ALL_ENTRIES: NavEntry[] = [...NAV_GROUPS.flatMap((g) => g.items), SETTINGS_ENTRY, NOTIFICATIONS_ENTRY];
 
-export function navActive(entry: Pick<NavEntry, "href" | "also">, pathname: string): boolean {
-  const all = [entry.href, ...(entry.also ?? [])];
-  return all.some((h) => (h === "/" ? pathname === "/" : pathname === h || pathname.startsWith(h + "/")));
-}
+export { hrefPath, navActive } from "./navMatch";
 
 export function isVisible(entry: NavEntry, role: string | null | undefined): boolean {
-  return entry.shipped && canSeePage(role, entry.href);
+  return entry.shipped && canSeePage(role, hrefPath(entry.href));
 }
 
 /** Nav groups filtered for a role (empty groups dropped). */
@@ -144,7 +180,7 @@ export function visibleGroups(role: string | null | undefined): NavGroup[] {
 /** Flat list of visible entries plus Notifications and Settings (command palette). */
 export function allEntries(role: string | null | undefined): NavEntry[] {
   return [...visibleGroups(role).flatMap((g) => g.items), NOTIFICATIONS_ENTRY, SETTINGS_ENTRY].filter((e) =>
-    canSeePage(role, e.href),
+    canSeePage(role, hrefPath(e.href)),
   );
 }
 
