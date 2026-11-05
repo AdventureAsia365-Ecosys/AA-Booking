@@ -37,6 +37,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from app import b2c
+from app.agency_billing import drafts as agency_drafts
 from app.auth import customer as customer_auth
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
@@ -60,6 +61,7 @@ from app.ops import lifecycle as ops_lifecycle
 from app.outbox import OutboxSequencer
 from app.retention import jobs as retention_jobs
 from app.routers import (
+    agency_billing,
     b2b,
     b2b_desk,
     b2b_partners,
@@ -133,6 +135,8 @@ def create_app(
                 # AA-1029 R4: every published CIS tour gets a trip plan; the cost sheet prices plans from the rates.
                 **trip_plan_sync.HANDLERS,
                 **cost_sheet.HANDLERS,
+                # AA-1037 R4: the agency invoice drafts (software fee from the CIS subscription, tour settlement).
+                **agency_drafts.HANDLERS,
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }
@@ -147,6 +151,8 @@ def create_app(
                     tenant_pull.TenantPullSchedule(),
                     trip_plan_sync.SyncSchedule(),
                     cost_sheet.RecomputeSchedule(),
+                    # AA-1037 R4: daily, the SaaS draft of this month and the settlement draft of the closed month.
+                    agency_drafts.DraftSchedule(),
                     # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
                     ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.
@@ -220,6 +226,7 @@ def create_app(
     app.include_router(billing.router)
     app.include_router(supplier_bills.router)
     app.include_router(customer.router)
+    app.include_router(agency_billing.router)
     return app
 
 

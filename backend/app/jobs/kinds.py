@@ -64,6 +64,9 @@ EXPECTED_SECONDS: dict[str, int] = {
     # (every plan with components, one transaction each, batched rate reads); not exempt (seconds to a minute).
     "bk_trip_plan_sync": 120,
     "bk_price_recompute": 600,
+    # AA-1037 R4: the agency invoice drafts (one transaction per agency, tens of agencies); not exempt (seconds).
+    "bk_saas_invoice_draft": 300,
+    "bk_settlement_draft": 300,
     # AA-993 G4 proof (test-only, JOB_TEST_KINDS): sleeps up to 3600 s.
     "bk_noop_sleep": 3660,
 }

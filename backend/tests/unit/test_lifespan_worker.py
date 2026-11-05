@@ -86,6 +86,8 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "bk_tenant_pull",  # AA-1028 R1 slice 2
         "bk_trip_plan_sync",  # AA-1029 R4: every published CIS tour gets a trip plan
         "bk_price_recompute",  # AA-1029 R4: the cost sheet
+        "bk_saas_invoice_draft",  # AA-1037 R4: the agency software fee drafts
+        "bk_settlement_draft",  # AA-1037 R4: the agency tour settlement drafts
     }
     assert [r.kind for r in worker.recurring] == ["bk_inquiry_pull"]
     # AA-825 daily retention runs; AA-973 B2B hold expiry when a hold is due; AA-986 L5 the CIS lifecycle outbox pull
@@ -98,6 +100,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "TenantPullSchedule",  # AA-1028 R1 slice 2: the CIS tenant account projection
         "SyncSchedule",  # AA-1029 R4: the catalog bridge, one run per 15-minute slot
         "RecomputeSchedule",  # AA-1029 R4: the cost sheet, one run per watermark of its inputs
+        "DraftSchedule",  # AA-1037 R4: the agency invoice drafts, once a day
         "OpsDailySchedule",
         "OutboxSequencer",
     ]
