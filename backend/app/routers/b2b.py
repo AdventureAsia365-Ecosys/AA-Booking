@@ -8,7 +8,11 @@ AA-972 serves ``GET /products``, ``POST /quotes``, ``GET /fx-rates`` and ``GET /
 ``GET /departures``, ``POST /holds``, ``GET`` / ``DELETE /holds/{hold_id}`` and ``POST /holds/{hold_id}/confirm``
 (``app.b2b.departures``, ``app.b2b.holds``); AA-974 the commercial rules: VND quotes, ``POST /holds/{hold_id}/extend``
 (once), the 429 re-hold limit on ``POST /holds`` and ``POST /bookings/{booking_id}/cancel`` (+ ``?dry_run=true``,
-``app.b2b.cancellation``); AA-975 the event feed ``GET /events`` (``app.b2b.events``, outbox bk-022).
+``app.b2b.cancellation``); AA-975 the event feed ``GET /events`` (``app.b2b.events``, outbox bk-022). AA-1037 R4
+extras (contract minor 1.3): the cancellation policy on every quote and hold answer (G1), the booking confirmation
+``GET /bookings/{booking_id}/confirmation`` (JSON or a printable HTML file, no traveller names; G2), 409
+``credit_hold_overdue`` on ``POST /holds`` while the agency's AA invoices are overdue past its terms (G4) and the
+agency's terms ``GET /terms`` (payment terms, credit status, default cancellation policy, approved clauses; G6).
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -20,13 +24,14 @@ from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.m2m import SCOPE_BOOK, SCOPE_HOLD, SCOPE_QUOTE, SCOPE_READ
-from app.b2b import cancellation, departures, events, holds, quotes, reads
+from app.b2b import cancellation, confirmation, departures, events, holds, quotes, reads, terms
 from app.b2b.access import B2BContext, require_scope
 from app.b2b.components import LineAsk, RoomAsk
-from app.b2b.errors import PREFIX
+from app.b2b.errors import PREFIX, B2BError
 
 router = APIRouter(prefix=PREFIX, tags=["b2b"])
 
@@ -153,6 +158,23 @@ class QuoteLine(Strict):
     departure_id: str | None = Field(default=None, max_length=64)
 
 
+Pct = Annotated[str, Field(pattern=r"^\d+(\.\d{1,2})?$")]
+
+
+class PolicyTier(Strict):
+    min_days: int = Field(ge=0, le=730)
+    fee_pct: Pct
+
+
+class CancellationPolicy(Strict):
+    """1.3 (AA-1037 G1): the fee schedule of a cancel. ``in_force_today`` = what a confirm today would lock;
+    ``locked`` = locked on the confirmed booking (its cancel charges by it). Tiers by ``min_days`` descending."""
+
+    policy_id: str = Field(max_length=64)
+    basis: Literal["in_force_today", "locked"]
+    tiers: list[PolicyTier] = Field(min_length=1, max_length=20)
+
+
 class Quote(Strict):
     quote_id: str = Field(max_length=64)
     currency: Currency
@@ -161,6 +183,8 @@ class Quote(Strict):
     price_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     lines: list[QuoteLine]
     total_b2b_price: Money
+    # 1.3 (AA-1037 G1): the policy a confirm today would lock; null when no approved policy is in force.
+    cancellation_policy: CancellationPolicy | None = None
 
 
 class FxRate(Strict):
@@ -210,6 +234,8 @@ class Hold(Strict):
     price_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     currency: Currency | None = None
     fx: FxLock | None = None
+    # 1.3 (AA-1037 G1): locked on a confirmed hold, else the one in force today.
+    cancellation_policy: CancellationPolicy | None = None
 
 
 class BookingLine(Strict):
@@ -272,6 +298,85 @@ class Event(Strict):
 class EventPage(Strict):
     items: list[Event]
     next_cursor: str = Field(max_length=200)
+
+
+class Travellers(Strict):
+    adult: int = Field(ge=0)
+    child: int = Field(ge=0)
+    infant: int = Field(ge=0)
+
+
+class ConfirmationRoom(Strict):
+    occupancy: Literal["single", "double", "twin", "triple", "family"]
+    count: int = Field(ge=1)
+
+
+class ConfirmationLine(Strict):
+    line_ref: str = Field(max_length=64)
+    title: str = Field(max_length=500)
+    kind: Kind
+    service_date: date
+    nights: int | None = Field(default=None, ge=1)
+    pax: Travellers
+    rooms: list[ConfirmationRoom]
+    status: Literal["confirmed", "on_request", "declined", "cancelled"]
+    supplier_confirmations: list[str]
+
+
+class BookingConfirmation(Strict):
+    """1.3 (AA-1037 G2): the booking confirmation of a "Book with AA" booking. No traveller names, no prices."""
+
+    booking_id: str = Field(max_length=64)
+    trip_case_code: str = Field(max_length=32)
+    hold_id: str = Field(max_length=64)
+    proposal_ref: str = Field(max_length=64)
+    proposal_version: int = Field(ge=1)
+    status: Literal["confirmed", "cancelled"]
+    issuer: str | None = Field(default=None, max_length=300)
+    issued_at: datetime
+    confirmed_at: datetime | None
+    cancelled_at: datetime | None
+    start_date: date | None
+    end_date: date | None
+    travellers: Travellers
+    lines: list[ConfirmationLine]
+    cancellation_policy: CancellationPolicy | None
+
+
+class PaymentTerms(Strict):
+    deposit_pct: Pct
+    balance_days_before_departure: int = Field(ge=0)
+    settlement_due_days: int = Field(ge=0)
+
+
+class CreditStatus(Strict):
+    status: Literal["ok", "warn", "past_due"]
+    holds_paused: bool
+    overdue_invoices: int = Field(ge=0)
+    oldest_overdue_days: int = Field(ge=0)
+    overdue_amount: list[Money]
+    warn_after_days: int | None = None
+    suspend_after_days: int | None = None
+
+
+class TermsClause(Strict):
+    code: str = Field(max_length=40)
+    title: str = Field(max_length=120)
+    body: str = Field(max_length=4000)
+    free_cancel_days: int | None = Field(default=None, ge=0)
+    version: int = Field(ge=1)
+    approved_at: datetime
+
+
+class PartnerTerms(Strict):
+    """1.3 (AA-1037 G6): the agency's terms with AA as data: payment terms, credit status, the default cancellation
+    policy in force and the approved clauses (a draft clause is never shown)."""
+
+    as_of: date
+    payment: PaymentTerms | None
+    credit: CreditStatus
+    cancellation_policy: CancellationPolicy | None
+    clauses: list[TermsClause]
 
 
 class PriceParity(Strict):
@@ -424,3 +529,28 @@ async def cancel_booking(
         dry_run=dry_run,
         idempotency_key=idempotency_key,
     )
+
+
+@router.get(
+    "/bookings/{booking_id}/confirmation",
+    response_model=BookingConfirmation,
+    responses={200: {"content": {"text/html": {"schema": {"type": "string"}}}}},
+)
+async def get_booking_confirmation(
+    booking_id: Annotated[str, Path(min_length=1, max_length=64)],
+    ctx: CanRead,
+    format: Literal["json", "html"] = "json",
+) -> dict | HTMLResponse:
+    async with ctx.pool.acquire() as conn:
+        doc = await confirmation.load(conn, booking_id, partner_id=ctx.partner_id, now=datetime.now(UTC))
+    if doc is None:
+        raise B2BError("not_found", "booking not found")
+    if format == "html":
+        return confirmation.html_response(doc)
+    return confirmation.public(doc)
+
+
+@router.get("/terms", response_model=PartnerTerms)
+async def get_partner_terms(ctx: CanRead) -> dict:
+    async with ctx.pool.acquire() as conn:
+        return await terms.partner_terms(conn, tenant_id=str(ctx.partner["tenant_id"]), today=datetime.now(UTC).date())

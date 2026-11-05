@@ -180,9 +180,9 @@ async def policy_in_force(
 
 def first_plan(lines: Sequence[Any]) -> str | None:
     """The trip plan of the first ``tp:`` line (by line number), the booking's tour."""
-    for line in sorted(lines, key=lambda r: r["line_no"]):
+    for line in sorted(lines, key=lambda r: r.get("line_no") or 0):
         try:
-            prefix, ident = parse_component(line["component_id"])
+            prefix, ident = parse_component(line.get("component_id") or "")
         except ValueError:
             continue
         if prefix == PREFIX_PLAN:
@@ -195,6 +195,35 @@ async def policy_for_lines(
 ) -> Policy | None:
     """The policy a booking of these quote lines is cancelled under, as in force on ``on`` (the confirm day)."""
     return await policy_in_force(conn, first_plan(lines), on, approved_by=approved_by)
+
+
+# AA-1037 G1 (booking.b2b.v1 1.3): the policy a quote or hold answer shows. ``in_force_today`` = the policy a confirm
+# today would lock (a later confirm locks the one in force on its own day); ``locked`` = the policy locked on a
+# confirmed hold, the one its cancel charges by.
+BASIS_TODAY = "in_force_today"
+BASIS_LOCKED = "locked"
+
+
+def policy_out(policy: Policy | None, *, basis: str) -> dict[str, Any] | None:
+    """The contract ``CancellationPolicy``: id, basis and the tiers (``min_days`` descending, ``fee_pct`` text)."""
+    if policy is None:
+        return None
+    return {"policy_id": policy.id, "basis": basis, "tiers": tiers_out(policy.tiers)}
+
+
+async def policy_of_booking(
+    conn: asyncpg.Connection, *, policy_id: str | None, quote_id: str, confirmed_at: datetime | None
+) -> Policy | None:
+    """The policy a confirmed booking is cancelled under: the one locked on its hold, else (a hold confirmed before
+    the policy was locked) the one in force at the confirm among the rows approved by then."""
+    if policy_id:
+        row = await conn.fetchrow(BY_ID_SQL, policy_id)
+        if row is not None:
+            return _policy(row)
+    at = confirmed_at or datetime.now(UTC)
+    return await policy_for_lines(
+        conn, await conn.fetch(QUOTE_LINES_SQL, quote_id), at.astimezone(UTC).date(), approved_by=at
+    )
 
 
 # ── Cancel (POST /booking/b2b/v1/bookings/{id}/cancel) ───────────────────────
@@ -271,19 +300,14 @@ def _stored(booking_id: str, row: Any) -> dict[str, Any]:
 
 
 async def _booking_policy(conn: asyncpg.Connection, booking: Any) -> Policy:
-    if booking["cancellation_policy_id"]:
-        row = await conn.fetchrow(BY_ID_SQL, booking["cancellation_policy_id"])
-        if row is not None:
-            return _policy(row)
     # No locked policy (confirmed by the AA-973 code after bk-021 was applied; bk-021 backfills the older ones): the
     # one in force at the confirm, counting only rows approved by then, so a row approved later (even backdated)
     # never re-prices the booking.
-    confirmed_at = booking["confirmed_at"] or datetime.now(UTC)
-    found = await policy_for_lines(
+    found = await policy_of_booking(
         conn,
-        await conn.fetch(QUOTE_LINES_SQL, booking["quote_id"]),
-        confirmed_at.astimezone(UTC).date(),
-        approved_by=confirmed_at,
+        policy_id=booking["cancellation_policy_id"],
+        quote_id=booking["quote_id"],
+        confirmed_at=booking["confirmed_at"],
     )
     if found is None:
         raise B2BError("unavailable", "no cancellation policy is in force for this booking")

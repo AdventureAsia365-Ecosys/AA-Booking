@@ -22,7 +22,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.agency_billing import cis, config
+from app.agency_billing import cis, config, reminders
 from app.errors import Conflict, Invalid, NotFound
 from app.ops.money import line_amount, looks_like_card_number
 
@@ -149,7 +149,8 @@ async def get(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
             inv["id"],
         )
     ]
-    return {**inv, "lines": lines, "payments": payments}
+    # AA-1037 G4: the overdue reminder steps already handled (bk-044).
+    return {**inv, "lines": lines, "payments": payments, "reminders": await reminders.for_invoice(conn, inv["id"])}
 
 
 async def recompute(conn: asyncpg.Connection, invoice_id: str) -> None:
