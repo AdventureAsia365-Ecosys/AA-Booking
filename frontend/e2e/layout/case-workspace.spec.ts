@@ -19,6 +19,11 @@
 //     moved on show the notice; "Refresh from CIS" copies today's titles into the draft (nothing is written until
 //     Save); a multi-day item names its tour; the customer-style preview never scrolls sideways at 390 (it did by
 //     257 px), in light and dark.
+// AA-1037 (root ADR 0019 d8): the fixture cases are b2c, so their write affordances (status menu, Convert / Decline,
+// proposal row actions, the builder's edit controls) are checked only on a build with the B2C part open
+// (NEXT_PUBLIC_B2C_INTAKE=on); the default (closed) build checks instead that every route of a b2c case (workspace,
+// builder, preview), the cross-case /proposals rows and the /trip-checks drawer offer no write, while a B2B row keeps
+// its actions.
 // Shots: $LAYOUT_SHOTS_DIR (default e2e/layout/results) as slice4-<name>-<width>.png.
 
 import fs from "node:fs";
@@ -27,6 +32,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { CUSTOM_CASE, INQUIRY_CASE, READBACK_VERSION, caseAnswer } from "./case-fixtures";
 import { answer, CLOCK } from "./fixtures";
 import { OUT } from "./paths";
+
+const B2C_OPEN = process.env.NEXT_PUBLIC_B2C_INTAKE === "on";
+const OPEN_ONLY = "a b2c case is read-only while the B2C part is closed (AA-1037)";
 
 type Collected = { unmocked: string[]; consoleErrors: string[]; posts: string[] };
 
@@ -225,13 +233,15 @@ test.describe("proposal read-back after a CIS rewrite", () => {
     await expect(notice).toContainText("CIS has newer text for this tour");
     await expect(notice).toContainText("2 item titles differ");
     await expect(notice).toContainText("Lantern Ridge Trek and the Seven Springs Monastery — 5 Days");
-    await expect(notice).toContainText("Refresh from CIS");
-    await expect(page.getByText("Salt Bay Escape — 3 Days")).toBeVisible();
+    // A closed build: the b2c case gives no version.write, so the notice names no action of its own (AA-1037).
+    await expect(notice).toContainText(B2C_OPEN ? "Refresh from CIS" : "Staff who edit proposals can refresh the titles");
+    await expect(page.getByText("Salt Bay Escape — 3 Days").first()).toBeVisible(); // one line per day it spans
     await expect(page.getByRole("button", { name: "Refresh from CIS" })).toHaveCount(0);
     expect(c.posts).toEqual([]);
   });
 
   test("builder: Refresh from CIS copies today's titles into the draft and waits for Save", async ({ page, baseURL }) => {
+    test.skip(!B2C_OPEN, OPEN_ONLY);
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}`, NOTICE, c);
     await expect(page.getByTestId("cis-new-title")).toHaveCount(2);
@@ -278,6 +288,7 @@ test.describe("slice 4 behaviour at 1440", () => {
   });
 
   test("proposals tab: row actions follow the version state", async ({ page, baseURL }) => {
+    test.skip(!B2C_OPEN, OPEN_ONLY);
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${CUSTOM_CASE}?tab=proposals`, ROW, c);
     await expect(page.getByTestId("version-actions")).toHaveCount(3);
@@ -295,6 +306,7 @@ test.describe("slice 4 behaviour at 1440", () => {
   });
 
   test("builder: read-only quote explained, locked version shows the saved price", async ({ page, baseURL }) => {
+    test.skip(!B2C_OPEN, OPEN_ONLY);
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${CUSTOM_CASE}/proposals/3`, '[data-testid="quote-read-only"]', c);
     await expect(page.getByTestId("quote-read-only")).toContainText("Live quote not available in this session");
@@ -369,6 +381,7 @@ test.describe("slice 4 behaviour at 1440", () => {
   });
 
   test("kit buttons: case tabs, status menu, builder controls", async ({ page, baseURL }) => {
+    test.skip(!B2C_OPEN, OPEN_ONLY);
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${CUSTOM_CASE}`, '[data-testid="trip-facts"]', c);
     const tabs = page.getByRole("tablist", { name: "Trip case sections" });
@@ -403,6 +416,7 @@ test.describe("slice 4 behaviour at 1440", () => {
   });
 
   test("convert and decline dialogs keep their buttons in the footer band", async ({ page, baseURL }) => {
+    test.skip(!B2C_OPEN, OPEN_ONLY);
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${INQUIRY_CASE}`, '[data-testid="trip-facts"]', c);
     for (const [open, action] of [
@@ -420,6 +434,58 @@ test.describe("slice 4 behaviour at 1440", () => {
       await expect(dialog).toHaveCount(0);
     }
     expect(c.posts, "nothing was written").toEqual([]);
+    expect(c.consoleErrors).toEqual([]);
+  });
+});
+
+test.describe("AA-1037: a b2c case offers no write while the B2C part is closed", () => {
+  test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+  test.skip(B2C_OPEN, "the B2C part is open in this build");
+
+  test("workspace, builder and preview of a b2c case are read-only", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, `/cases/${CUSTOM_CASE}`, '[data-testid="case-read-only"]', c);
+    await expect(page.getByRole("button", { name: /Change status/ })).toHaveCount(0);
+
+    await open(page, `/cases/${CUSTOM_CASE}/proposals/3`, '[data-testid="builder-read-only"]', c);
+    await expect(page.getByTestId("builder-read-only")).toContainText("Read-only: Adventure Asia works with partner agencies only");
+    for (const name of [/^Save$/, /^Send to customer$/, /^Record approval$/, /^Title & notes$/, /^Add another day$/, /^Refresh from CIS$/]) {
+      await expect(page.locator("main").getByRole("button", { name }), String(name)).toHaveCount(0);
+    }
+    await expect(page.getByRole("group", { name: /^Actions for / })).toHaveCount(0);
+    await shot(page, "aa1037-builder-b2c-closed", 1440);
+
+    await open(page, `/cases/${CUSTOM_CASE}/proposals/3/preview`, "article", c);
+    await expect(page.locator("main").getByRole("button", { name: /Send to customer/ })).toHaveCount(0);
+    expect(c.posts.filter((p) => !p.includes("quote-preview")), "nothing was written").toEqual([]);
+    expect(c.unmocked).toEqual([]);
+    expect(c.consoleErrors).toEqual([]);
+  });
+
+  test("/proposals: a b2c row offers no write, a B2B row keeps its actions", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, "/proposals", ROW, c);
+    // Fixture rows: TC-000004 is the B2B case (i % 7 === 3), TC-000001 a b2c one.
+    await expect(page.getByRole("button", { name: "New version of TC-000004" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New version of TC-000001" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Send TC-000001 V/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Delete TC-000001 V/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Open builder for TC-000001 V/ })).toBeVisible();
+    expect(c.posts, "nothing was written").toEqual([]);
+    expect(c.unmocked).toEqual([]);
+    expect(c.consoleErrors).toEqual([]);
+  });
+
+  test("/trip-checks: the drawer of a b2c trip's check is read-only", async ({ page, baseURL }) => {
+    const c = await prepare(page, baseURL!);
+    await open(page, "/trip-checks", ROW, c);
+    await page.locator(ROW).first().click(); // TC-000001, a b2c trip
+    const drawer = page.getByRole("dialog");
+    await expect(drawer).toContainText("Read-only: Adventure Asia works with partner agencies only");
+    await expect(drawer.getByRole("button", { name: "Save check" })).toHaveCount(0);
+    await expect(drawer.getByRole("combobox").first()).toBeDisabled();
+    expect(c.posts, "nothing was written").toEqual([]);
+    expect(c.unmocked).toEqual([]);
     expect(c.consoleErrors).toEqual([]);
   });
 });

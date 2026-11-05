@@ -132,7 +132,10 @@ async def test_b2c_blocked_not_paid_notified_once(admin: asyncpg.Connection, poo
         sold["id"],
         today + timedelta(days=10),
     )
-    first = await lc.run_lifecycle(pool, mode="live", case_ids=[sold["id"]])
+    # AA-1037: while the B2C switch is off (the default) a b2c case is frozen: not even a candidate.
+    frozen = await lc.run_lifecycle(pool, mode="live", case_ids=[sold["id"]])
+    assert frozen["candidates"] == 0 and frozen["notified"] == 0 and frozen["b2c"] == "frozen"
+    first = await lc.run_lifecycle(pool, mode="live", case_ids=[sold["id"]], b2c_open=True)
     assert first["blocked"] == 1 and first["notified"] == 1 and first["moves"]["pre_departure"] == 0
     assert first["blocked_cases"][0]["reasons"] == ["not_booked", "not_paid"]
     note = await admin.fetchrow(
@@ -141,11 +144,11 @@ async def test_b2c_blocked_not_paid_notified_once(admin: asyncpg.Connection, poo
         sold["id"],
     )
     assert "cannot move to Pre-departure" in note["title"] and '"open_checks": 3' in note["data"]
-    second = await lc.run_lifecycle(pool, mode="live", case_ids=[sold["id"]])
+    second = await lc.run_lifecycle(pool, mode="live", case_ids=[sold["id"]], b2c_open=True)
     assert second["blocked"] == 1 and second["notified"] == 0
     assert await _status(admin, sold["id"]) == "confirmed"
     # The DRY RUN reports the same gate and notifies nobody.
-    dry = await lc.run_lifecycle(pool, mode="dry_run", case_ids=[sold["id"]])
+    dry = await lc.run_lifecycle(pool, mode="dry_run", case_ids=[sold["id"]], b2c_open=True)
     assert dry["blocked"] == 1 and dry["notified"] == 0
 
 
@@ -253,7 +256,16 @@ async def test_ops_reminders_once(admin: asyncpg.Connection, pool: asyncpg.Pool)
         sold["id"],
         today,
     )
-    first = await lc.run_reminders(pool)
+    # AA-1037: frozen (the default), the b2c case gets no reminder.
+    frozen = await lc.run_reminders(pool)
+    assert frozen["b2c"] == "frozen"
+    assert not await admin.fetchval(
+        "SELECT count(*) FROM booking.notifications WHERE type IN ('supplier_booking.waiting', 'trip_check.due')"
+        " AND (entity_id = $1::uuid OR entity_id = $2::uuid)",
+        booking,
+        sold["id"],
+    )
+    first = await lc.run_reminders(pool, b2c_open=True)
     assert first["supplier_waiting_notified"] >= 1 and first["checks_due_notified"] >= 1
     rows = await admin.fetch(
         "SELECT type, recipient_ref, entity_id::text AS entity_id, data ->> 'check_id' AS check_id"
@@ -267,11 +279,11 @@ async def test_ops_reminders_once(admin: asyncpg.Connection, pool: asyncpg.Pool)
         ("trip_check.due", SALES),
     }
     assert next(r for r in rows if r["type"] == "trip_check.due")["check_id"] == check
-    second = await lc.run_reminders(pool)
+    second = await lc.run_reminders(pool, b2c_open=True)
     assert second["supplier_waiting_notified"] == 0 and second["checks_due_notified"] == 0
     # A new due date reminds again.
     await admin.execute("UPDATE booking.trip_case_checks SET due_date = due_date - 1 WHERE id = $1::uuid", check)
-    assert (await lc.run_reminders(pool))["checks_due_notified"] == 1
+    assert (await lc.run_reminders(pool, b2c_open=True))["checks_due_notified"] == 1
 
 
 async def test_handler_scoped_runs_and_payload(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:

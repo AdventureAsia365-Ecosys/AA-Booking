@@ -377,18 +377,21 @@ async def review_trip_plan_reference(source_id: SourceId, staff: CanWritePlans, 
         return await trip_plan_prices.list_prices(conn, staff, source_id)
 
 
-@router.post("/trip-plans/{source_id}/trip-cases", status_code=201)
+@router.post("/trip-plans/{source_id}/trip-cases", status_code=201, responses=b2c.GONE_RESPONSE)
 async def use_trip_plan(
     body: UseForTripCase, source_id: SourceId, staff: CanStartCase, pool: Pool, request: Request
 ) -> dict[str, Any]:
     if not staff.can("version.write"):
         raise HTTPException(status_code=403, detail="forbidden")
-    if body.new_customer is not None:
-        b2c.refuse_new_customer(request)  # AA-1034 R0: no new traveller record while the B2C intake is off
+    if body.trip_case is None:
+        # AA-1034 R0 / AA-1037: a new case here is always for a customer (new or existing), a B2C case.
+        b2c.refuse_b2c_write(request)
     data = body.model_dump()
     if data.get("customer_id"):
         data["customer_id"] = str(data["customer_id"])
     async with pool.acquire() as conn, conn.transaction():
+        if body.trip_case is not None:
+            await b2c.refuse_b2c_case_write(request, conn, body.trip_case)  # AA-1037: a b2c case is read-only
         return await trip_plans.use_for_trip_case(conn, staff, source_id, data)
 
 

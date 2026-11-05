@@ -467,8 +467,8 @@ class Recorder:
         return self.result
 
 
-def make_client(staff: Staff) -> TestClient:
-    app = create_app(Settings(database_url=None, environment="test"))
+def make_client(staff: Staff, **settings: Any) -> TestClient:
+    app = create_app(Settings(database_url=None, environment="test", **settings))
     app.dependency_overrides[current_staff] = lambda: staff
     app.dependency_overrides[get_pool] = lambda: ScriptedConn()
     return TestClient(app)
@@ -514,7 +514,11 @@ def test_routes_map_arguments_and_permissions(monkeypatch: pytest.MonkeyPatch) -
 
     use_url = f"/booking/catalog/trip-plans/{SOURCE_ID}/trip-cases"
     customer = "55555555-5555-4555-8555-555555555555"
-    assert make_client(SALES).post(use_url, json={"customer_id": customer}).status_code == 201
+    # AA-1037: a new case here is a customer (B2C) case: 410 b2b_only while B2C_INTAKE_ENABLED is off.
+    assert make_client(SALES).post(use_url, json={"customer_id": customer}).status_code == 410
+    assert use.calls == []
+    b2c_on = make_client(SALES, b2c_intake_enabled=True)
+    assert b2c_on.post(use_url, json={"customer_id": customer}).status_code == 201
     assert use.calls[0][0][2]["customer_id"] == customer and use.calls[0][0][2]["currency"] == "USD"
     assert make_client(SALES).post(use_url, json={"trip_case": "TC-000001"}).status_code == 201
     assert make_client(CONTRACTING).post(use_url, json={"customer_id": customer}).status_code == 403

@@ -13,7 +13,7 @@
 //
 // Nothing here is real: names, codes and e-mails are invented (example.test domains).
 
-import type { CaseVersion, TripCaseDetail, TripCaseStatus, VersionItem, VersionWithItems } from "../../lib/api/types";
+import type { CaseVersion, SettingsResponse, TripCaseDetail, TripCaseStatus, VersionItem, VersionWithItems } from "../../lib/api/types";
 import type { TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { FixtureAnswer } from "./fixtures";
 
@@ -248,6 +248,10 @@ export function caseAnswer(method: string, path: string): FixtureAnswer | null {
     return v ? ok(v) : { status: 404, body: { detail: "version_not_found" } };
   }
   if (p === "trip-checks") return ok(CHECK_PAGE);
+  // The proposal preview (and the send modal) read the deposit and quote validity settings.
+  if (p === "settings") {
+    return ok({ values: { deposit_pct: 30, quote_validity_days: 14 }, items: [] } satisfies SettingsResponse);
+  }
   if (p === "case-lifecycle/runs") return ok({ items: [], scheduled_mode: "live", schedule_utc_hour: 1 });
   return null;
 }

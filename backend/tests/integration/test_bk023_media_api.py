@@ -131,7 +131,10 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
 ) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis, FakeStore]]:
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
+    )
     db, cis, store = Database(settings), LocalCis(), FakeStore()
     app = create_app(settings, db, cis.verifier(), media_store=store)
     try:

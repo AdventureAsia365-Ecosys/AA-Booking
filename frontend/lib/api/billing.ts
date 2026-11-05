@@ -18,6 +18,8 @@
 // No payment provider: staff mark money by hand, a second person verifies (design D6). An invoice is a proforma
 // payment request; the customer sees it in My Trips (no e-mail).
 
+import { B2C_INTAKE_OPEN } from "@/lib/config";
+import { frozenView } from "@/ui/booking/b2cFrozen";
 import { bkGet, bkSend } from "./client";
 import type { OpsFile } from "./supplierBookings";
 import type { DecimalString, IsoDate, IsoDateTime } from "./types";
@@ -44,6 +46,7 @@ export const SCHEDULE_KIND_LABEL: Record<ScheduleKind, string> = {
   other: "Other",
 };
 export const CASE_BLOCK_REASON: Record<string, string> = {
+  b2b_only: "Customer billing is read-only: Adventure Asia works with partner agencies only.",
   b2b_no_invoice: "A B2B trip has no customer invoice: the agency settles outside this module.",
   invoice_exists: "This trip already has an invoice.",
   case_not_invoiceable: "Invoices are made for a confirmed trip.",
@@ -261,6 +264,12 @@ export function newIdempotencyKey(prefix: string): string {
   return `${prefix}-${rand}`;
 }
 
+/** AA-1037 (root ADR 0019 d8): customer invoices and payments are read-only while the B2C part is closed (the API
+ *  answers 410 b2b_only to every write and sends these flags off too): no read offers a write. */
+function b2cRead<T>(read: Promise<T>): Promise<T> {
+  return B2C_INTAKE_OPEN ? read : read.then((value) => frozenView(value));
+}
+
 export const billingApi = {
   invoices: (q: {
     status?: string;
@@ -271,9 +280,9 @@ export const billingApi = {
     to?: string;
     limit?: number;
     offset?: number;
-  }) => bkGet<Page<InvoiceSummary>>("invoices", q),
-  invoice: (number: string) => bkGet<InvoiceDetail>(`invoices/${enc(number)}`),
-  forCase: (ref: string) => bkGet<CaseBilling>(`trip-cases/${enc(ref)}/billing`),
+  }) => b2cRead(bkGet<Page<InvoiceSummary>>("invoices", q)),
+  invoice: (number: string) => b2cRead(bkGet<InvoiceDetail>(`invoices/${enc(number)}`)),
+  forCase: (ref: string) => b2cRead(bkGet<CaseBilling>(`trip-cases/${enc(ref)}/billing`)),
   summary: () => bkGet<BillingSummary>("billing/summary"),
   create: (ref: string, body: NewInvoice, idempotencyKey: string) =>
     bkSend<InvoiceDetail & { replayed: boolean }>(`trip-cases/${enc(ref)}/invoices`, { body, idempotencyKey }),
@@ -298,8 +307,8 @@ export const billingApi = {
     to?: string;
     limit?: number;
     offset?: number;
-  }) => bkGet<Page<Payment>>("payments", q),
-  payment: (ref: string) => bkGet<Payment>(`payments/${enc(ref)}`),
+  }) => b2cRead(bkGet<Page<Payment>>("payments", q)),
+  payment: (ref: string) => b2cRead(bkGet<Payment>(`payments/${enc(ref)}`)),
   updatePayment: (ref: string, body: { reference?: string | null; note?: string | null }) =>
     bkSend<Payment & { changed: string[] }>(`payments/${enc(ref)}`, { method: "PATCH", body }),
   verify: (ref: string) => bkSend<Payment>(`payments/${enc(ref)}/verify`),

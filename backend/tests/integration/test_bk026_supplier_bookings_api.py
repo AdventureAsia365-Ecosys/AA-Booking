@@ -69,7 +69,8 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 
 def _app(dsn: str, store: FakeOpsStore | None) -> tuple[Any, Database, LocalCis]:
-    settings = Settings(database_url=dsn, db_ssl="disable", environment="test", git_sha="ci")
+    # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
+    settings = Settings(database_url=dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True)
     db, cis = Database(settings), LocalCis()
     return create_app(settings, db, cis.verifier(), ops_store=store), db, cis
 

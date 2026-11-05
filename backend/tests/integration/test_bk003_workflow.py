@@ -279,7 +279,10 @@ async def test_staff_uuid_ids_fill_audit_actor_id(pool: asyncpg.Pool, admin: asy
 
 async def test_http_flow_with_a_cis_token(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
     """JWT (local RSA key) → provisioning → trip case endpoints, through the real app and pool."""
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
+    # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", b2c_intake_enabled=True
+    )
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     boss = {"Authorization": f"Bearer {cis.token(sub='boss', cis_role='admin')}"}

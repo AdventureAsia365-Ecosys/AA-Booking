@@ -3,6 +3,9 @@
 // (fixtures.ts; nothing is sent: every write would be an unmocked call and fail the test):
 //   - Remind on an invoice opens a confirm (Figma SEND REMAINDER) instead of posting at once; Cancel closes it.
 //   - Deactivate a staff member requires a reason (Figma BLOCK ADMIN "Blockage Reason"; stored in the audit row).
+// AA-1037 (root ADR 0019 d8): customer invoices are read-only while the B2C part is closed (NEXT_PUBLIC_B2C_INTAKE unset,
+// the default build): the invoice then shows no Remind (nor any other write) and the Remind dialog is checked only on a
+// build with the B2C part open.
 // At 1440 x 900 and 390 x 844: the dialog fits, the page never scrolls sideways, the console stays clean.
 
 import fs from "node:fs";
@@ -10,6 +13,8 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { answer, CLOCK } from "./fixtures";
 import { OUT } from "./paths";
+
+const B2C_OPEN = process.env.NEXT_PUBLIC_B2C_INTAKE === "on";
 
 function fakeAccessToken(): string {
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
@@ -73,7 +78,22 @@ for (const v of VIEWPORTS) {
   test.describe(`AA-996 dialogs at ${v.name}`, () => {
     test.use({ viewport: v.viewport, colorScheme: "light", isMobile: v.mobile, hasTouch: v.mobile });
 
+    test(`a customer invoice is read-only while the B2C part is closed (${v.name})`, async ({ page, baseURL }) => {
+      test.skip(B2C_OPEN, "the B2C part is open in this build");
+      const seen = await prepare(page, baseURL!);
+      await page.goto("/billing/invoices/INV-000004", { waitUntil: "domcontentloaded" });
+      await expect(page.getByTestId("invoice-totals")).toBeVisible({ timeout: 15_000 });
+      for (const name of ["Edit", "Send", "Record payment", "Amend", "Remind", "Cancel invoice", "Delete draft"]) {
+        await expect(page.locator("main").getByRole("button", { name, exact: true }), name).toHaveCount(0);
+      }
+      await pageFits(page);
+      expect(seen.writes).toEqual([]);
+      expect(seen.unmocked).toEqual([]);
+      expect(seen.consoleErrors).toEqual([]);
+    });
+
     test(`invoice Remind asks first and sends nothing until confirmed (${v.name})`, async ({ page, baseURL }) => {
+      test.skip(!B2C_OPEN, "customer invoices are read-only while the B2C part is closed (AA-1037)");
       const seen = await prepare(page, baseURL!);
       await page.goto("/billing/invoices/INV-000004", { waitUntil: "domcontentloaded" });
       await expect(page.getByTestId("invoice-totals")).toBeVisible({ timeout: 15_000 });

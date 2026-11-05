@@ -131,7 +131,8 @@ def create_app(
                 **retention_jobs.build_handlers(),
                 **b2b_expiry.HANDLERS,
                 **tour_lifecycle.HANDLERS,
-                **ops_lifecycle.HANDLERS,
+                # AA-1037: off, the case lifecycle and the reminders leave the frozen B2C cases and invoices alone.
+                **ops_lifecycle.build_handlers(settings.b2c_intake_enabled),
                 # AA-1028 R1 slice 2: booking.b2b_partners, the projection of every CIS tenant (catalog view, CIS 357).
                 tenant_pull.KIND: tenant_pull.build_handler(settings.cognito_m2m_crm_client_id),
                 # AA-1029 R4: every published CIS tour gets a trip plan; the cost sheet prices plans from the rates.

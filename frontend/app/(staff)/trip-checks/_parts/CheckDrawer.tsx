@@ -6,12 +6,16 @@
 // PATCH /booking/trip-checks/{id} sends only the fields that changed. Read-only without ops.write, on a cancelled or
 // completed trip, and for the contact once it was cleared after the trip.
 // Also exports NewCheckDrawer (POST /booking/trip-cases/{ref}/checks: a custom check).
+// AA-1037 (root ADR 0019 d8): a check of a b2c trip is read-only while the B2C part is closed (the API answers 410
+// b2b_only to PATCH /trip-checks/{id}), whichever page opens the drawer.
 
 import { useState } from "react";
 import Link from "next/link";
 import { checkProgress } from "@/ui/booking/caseFacts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type FieldError } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
+import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import type { TripCaseStatus } from "@/lib/api/types";
 import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type CheckChanges, type TripCheck, type TripCheckStatus } from "@/lib/api/tripChecks";
 import { Input, Select, Textarea, DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast, DateField } from "@/ui";
@@ -159,7 +163,8 @@ function CheckDrawerBody({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const canWrite = useCan("ops.write") && writable;
+  const frozen = isFrozenCase(check.trip_case.channel, B2C_INTAKE_OPEN);
+  const canWrite = useCan("ops.write") && writable && !frozen;
   const [form, setForm] = useState<Form>(() => formOf(check));
   const changes = diff(check, form);
   const dirty = Object.keys(changes).length > 0;
@@ -208,7 +213,11 @@ function CheckDrawerBody({
       {showCase && <TripContext check={check} />}
       {!canWrite && (
         <p className="rounded-md border border-line bg-panel px-3 py-2 text-[13px] text-muted">
-          {writable ? "Read only: changing checks needs the operations role." : "This trip is closed: its checks are read only."}
+          {frozen
+            ? B2C_READ_ONLY_NOTE
+            : writable
+              ? "Read only: changing checks needs the operations role."
+              : "This trip is closed: its checks are read only."}
         </p>
       )}
       {check.code === "custom" ? (

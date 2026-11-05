@@ -13,12 +13,13 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ACCESS_COOKIE } from "@/lib/session";
-import { CIS_STAFF_URL } from "@/lib/config";
+import { B2C_INTAKE_OPEN, CIS_STAFF_URL } from "@/lib/config";
 import { fetchStaffMe } from "@/lib/api/server";
 import { SessionNotice } from "./SessionNotice";
 // Server component: the shell modules directly, not the "@/ui" barrel (which re-exports client and server modules).
 import { AdminShell } from "@/ui/local/AdminShell";
 import { StaffProvider } from "@/ui/local/StaffContext";
+import { withoutB2cWrites } from "@/ui/booking/b2cFrozen";
 
 export const dynamic = "force-dynamic";
 
@@ -71,8 +72,11 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     );
   }
 
+  // AA-1037 (root ADR 0019 d8): while the B2C part is closed no page offers a write on customers, customer invoices or
+  // payments (the API answers 410 b2b_only); the pages read these permissions with useCan.
+  const staff = { ...me.staff, permissions: withoutB2cWrites(me.staff.permissions, B2C_INTAKE_OPEN) };
   return (
-    <StaffProvider staff={me.staff}>
+    <StaffProvider staff={staff}>
       <AdminShell>{children}</AdminShell>
     </StaffProvider>
   );

@@ -14,6 +14,8 @@
 // approval" is refused for a version with no items (the API answers 422 version_empty too).
 // AA-1013: items made from a CIS tour carry what CIS says today (`cis`); when a day title moved on, a notice names the
 // tour and, on an editable draft, "Refresh from CIS" copies today's titles into the draft (Save keeps them).
+// AA-1037: on a b2c case while the B2C part is closed, the case layout (../../layout.tsx) takes version.write out, so
+// the builder is read-only and says why.
 
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -38,6 +40,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { CHANNELS, proposalsApi } from "@/lib/api/proposals";
 import type { TripCaseDetail, VersionWithItems } from "@/lib/api/types";
 import {
@@ -79,6 +82,7 @@ import {
   useStaff,
   useToast,
 } from "@/ui";
+import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { CostLinesEditor, FxNotice, PriceSettings, QuoteResult, useQuotePreview, type PriceSettingsValue } from "@/ui/booking/PricePanel";
 import { dayDate, useVersion } from "@/app/(staff)/_parts/useVersion";
@@ -394,7 +398,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
         )}
 
         {(locked || closed || !canWrite) && (
-          <div role="status" className="flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
+          <div role="status" data-testid="builder-read-only" className="flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved
               ? "Approved: this version is locked."
@@ -402,7 +406,9 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                 ? "Sent to the customer: this version is locked. Create a new version from the case to change anything."
                 : closed
                   ? `The case is ${c.status}: its proposals cannot change.`
-                  : "Read-only: your role can view proposals but not edit them."}
+                  : isFrozenCase(c.channel, B2C_INTAKE_OPEN)
+                    ? B2C_READ_ONLY_NOTE
+                    : "Read-only: your role can view proposals but not edit them."}
           </div>
         )}
 

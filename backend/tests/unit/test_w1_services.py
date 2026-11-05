@@ -673,6 +673,7 @@ async def test_list_versions_filters_and_shape() -> None:
         "trip_case_id": CASE_ID,
         "trip_case_code": "TC-1",
         "trip_case_status": "building",
+        "trip_case_channel": "b2c",
         "start_date": None,
         "customer_id": CUSTOMER_ID,
         "customer_name": "Ann",
@@ -693,6 +694,7 @@ async def test_list_versions_filters_and_shape() -> None:
     item = out["items"][0]
     assert item["customer"] == {"id": CUSTOMER_ID, "name": "Ann"} and item["updated_by"] == {"id": "u-1", "name": "S"}
     assert item["trip_title"] is None and item["leg_titles"] == []
+    assert item["trip_case_channel"] == "b2c" and "tc.channel AS trip_case_channel" in conn.calls[-1][0]
     unassigned = ScriptedConn()
     await versions.list_versions(unassigned, assignee="none")
     assert "IS NULL" in unassigned.calls[0][0]

@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Briefcase, CalendarDays, FileText, Pencil, User, UserPlus, Users as UsersIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { agencyBillingApi, saveBlob } from "@/lib/api/agencyBilling";
 import type { ActivityItem, TripCaseDetail } from "@/lib/api/types";
 import { CATALOG_STATE_META, catalogReasonLabel, isFlaggedState } from "@/lib/tourState";
@@ -40,6 +41,7 @@ import {
   useCan,
   useUrlFilters,
 } from "@/ui";
+import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { caseCountries, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFacts";
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
@@ -65,11 +67,6 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
   const { code } = use(params);
   const ref = decodeURIComponent(code);
   const q = useQuery({ queryKey: ["trip-case", ref], queryFn: () => api.tripCases.get(ref) });
-  const { get, set } = useUrlFilters();
-  const tab = TABS.find((t) => t.key === get("tab"))?.key ?? "overview";
-  const canWrite = useCan("trip_case.write");
-  const canAssign = useCan("trip_case.assign");
-  const [panel, setPanel] = useState<"assign" | "edit" | null>(null);
 
   if (q.isLoading) return <WorkspaceSkeleton />;
   if (q.isError || !q.data) {
@@ -92,7 +89,18 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
       </PageFrame>
     );
   }
-  const c = q.data;
+  // AA-1037 (root ADR 0019 d8): a b2c case is read-only while the B2C part is closed: every tab reads its write
+  // permissions from the case layout's StaffProvider (./layout.tsx, casePermissions; the API answers 410 b2b_only).
+  return <Workspace c={q.data} />;
+}
+
+function Workspace({ c }: { c: TripCaseDetail }) {
+  const { get, set } = useUrlFilters();
+  const tab = TABS.find((t) => t.key === get("tab"))?.key ?? "overview";
+  const canWrite = useCan("trip_case.write");
+  const canAssign = useCan("trip_case.assign");
+  const [panel, setPanel] = useState<"assign" | "edit" | null>(null);
+  const frozen = isFrozenCase(c.channel, B2C_INTAKE_OPEN);
   const cancelNote = c.status === "cancelled" ? [...c.status_history].reverse().find((h) => h.to_status === "cancelled")?.note : null;
 
   return (
@@ -113,6 +121,13 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                   <MoneyBadge money={c.money} />
                   {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>TripPlanner</Pill>}
                   {c.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
+                  {frozen && (
+                    <span title={B2C_READ_ONLY_NOTE} data-testid="case-read-only">
+                      <Pill tone="neutral" dot={false}>
+                        Read-only
+                      </Pill>
+                    </span>
+                  )}
                 </div>
                 {/* Figma TRIP CASES DETAILS / Assigned Trips-1 meta: customer · agent · date range (N days) · pax. */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted" data-testid="case-meta">

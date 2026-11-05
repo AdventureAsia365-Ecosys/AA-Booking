@@ -8,10 +8,11 @@
 //   - footer = staff card (initials, name, Booking role) with a sign-out button, then Settings + collapse;
 //   - AA-996: the `[` key does nothing in the compact density window (the sidebar is the forced icon rail there);
 //   - S264: each group folds (kit core NavGroup + useNavGroups, scope "booking"): folded unless the user opened it, the
-//     group of the current page open on arrival; the icon rail (collapsed, or the compact window) shows every item.
+//     group of the current page open on arrival; the icon rail (collapsed, or the compact window) shows every item;
+//   - AA-1037: an entry may open one tab of a page (`tab` / `notTabs` in nav.tsx), so the active state reads `?tab=`.
 
 import { useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronsLeft, ChevronsRight, LogOut } from "lucide-react";
 import { K, alpha, sans, serif } from "../core/tokens";
 import { LOGO_SRC } from "../core/brand";
@@ -27,6 +28,8 @@ import { COMPACT_QUERY } from "../booking/DataTable";
 export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () => void; drawerOpen?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
+  // AA-1037: two entries open one page (Agency billing: Partners = its Agencies tab, Settlement = the rest).
+  const tab = useSearchParams().get("tab");
   const staff = useStaff();
   const { name, initials, roleLabel } = staffDisplay(staff);
   const [collapsed, setCollapsed] = useSidebarCollapsed();
@@ -34,7 +37,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
   // The icon rail: collapsed, or the compact density window (forced rail, app/globals.css); never the phone drawer.
   const compact = useMediaQuery(COMPACT_QUERY);
   const rail = (collapsed || compact) && !drawerOpen;
-  const activeGroup = groups.find((g) => g.items.some((n) => navActive(n, pathname)));
+  const activeGroup = groups.find((g) => g.items.some((n) => navActive(n, pathname, tab)));
   const navGroups = useNavGroups("booking", activeGroup ? navGroupId(activeGroup.label) : null, pathname);
 
   // `[` toggles collapse, ignored while typing. AA-996: also ignored in the compact density window (768-1199 px), where
@@ -148,11 +151,11 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
               open={navGroups.isOpen(id)}
               onToggle={() => navGroups.toggle(id)}
               rail={rail}
-              active={group.items.some((n) => navActive(n, pathname))}
+              active={group.items.some((n) => navActive(n, pathname, tab))}
               itemsStyle={{ gap: 2 }}
             >
               {group.items.map((n) => (
-                <NavItem key={n.href} entry={n} active={navActive(n, pathname)} onClick={() => go(n.href)} />
+                <NavItem key={n.href} entry={n} active={navActive(n, pathname, tab)} onClick={() => go(n.href)} />
               ))}
             </NavGroup>
           );

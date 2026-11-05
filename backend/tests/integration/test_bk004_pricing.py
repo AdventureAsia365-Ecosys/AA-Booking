@@ -256,7 +256,10 @@ async def test_quote_preview_end_to_end(admin: asyncpg.Connection, migrated_book
         " VALUES ('EUR', 0.92, 0.02, DATE '2026-10-01', 'test'), ('VND', 25400, 0, DATE '2026-10-01', 'test')"
     )
     await admin.execute(APPROVE_ALL_FX)
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
+    )
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     # Real staff auth (AA-681): a CIS-signed JWT for the active contracting row the fixture made, and one for
@@ -353,7 +356,10 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
     )
     await admin.execute(APPROVE_ALL_FX)
     await admin.execute("UPDATE booking.staff_users SET role = 'sales' WHERE cis_user_id = $1", STAFF_ID)
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
+    )
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     sales = {"Authorization": f"Bearer {cis.token(sub=STAFF_ID, cis_role='reviewer')}"}

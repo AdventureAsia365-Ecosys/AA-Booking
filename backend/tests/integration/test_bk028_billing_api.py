@@ -83,7 +83,10 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 @pytest_asyncio.fixture
 async def client(admin: asyncpg.Connection, migrated_booking_dsn: str) -> AsyncIterator[Client]:
-    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
+    settings = Settings(
+        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
+    )
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier(), ops_store=FakeOpsStore())
     try:
@@ -467,7 +470,7 @@ async def test_overdue_reminder_once_per_key(client: Client, admin: asyncpg.Conn
         ),
         201,
     )
-    first = await lifecycle.run_reminders(pool)
+    first = await lifecycle.run_reminders(pool, b2c_open=True)
     assert first["payments_overdue"] >= 1 and first["payments_due_soon"] >= 1
     rows = await admin.fetch(
         "SELECT recipient_type, type, recipient_ref, data ->> 'reminder_key' AS k FROM booking.notifications"
@@ -481,7 +484,7 @@ async def test_overdue_reminder_once_per_key(client: Client, admin: asyncpg.Conn
         ("payment.due_soon", "staff"),
     ]
     assert rows[1]["recipient_ref"] == SALES and rows[1]["k"].endswith(":d1")
-    second = await lifecycle.run_reminders(pool)
+    second = await lifecycle.run_reminders(pool, b2c_open=True)
     after = await admin.fetchval(
         "SELECT count(*) FROM booking.notifications WHERE entity_id = $1::uuid"
         " AND type IN ('invoice.overdue', 'payment.due_soon')",
@@ -499,5 +502,5 @@ async def test_overdue_reminder_once_per_key(client: Client, admin: asyncpg.Conn
     finally:
         await admin.execute("ALTER TABLE booking.payment_schedule ENABLE TRIGGER USER")
         await admin.execute("RESET ROLE")
-    third = await lifecycle.run_reminders(pool)
+    third = await lifecycle.run_reminders(pool, b2c_open=True)
     assert third["payments_notified"] == 1 and third["customer_rows"] == 1

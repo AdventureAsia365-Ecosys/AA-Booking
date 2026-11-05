@@ -12,6 +12,8 @@
 // 390 px (it scrolled sideways by 257 px). Download PDF is W2.
 // AA-835: an item that books a hotel room or a service shows the description and highlights CIS published for it
 // (the API sends them only while published; draft / stale content never reaches a proposal).
+// AA-1037: on a b2c case while the B2C part is closed, the case layout (../../../layout.tsx) takes version.write out,
+// so Send is not offered.
 
 import { use, useState } from "react";
 import Link from "next/link";

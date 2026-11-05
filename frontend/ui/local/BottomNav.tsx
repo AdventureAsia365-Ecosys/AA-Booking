@@ -3,9 +3,12 @@
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/BottomNav.tsx (CIS commit 039bb250): fixed phone
 // nav (< 768 px, ui/local/shell.css). Booking items (UI spec §2.1): Dashboard, Cases, Customers, Notifications,
 // More (opens the drawer with the full nav). Items the role cannot open are left out.
+// AA-1037 (root ADR 0019 d8): with the B2C part closed (NEXT_PUBLIC_B2C_INTAKE unset, the default) the third item is
+// the B2B desk instead of Customers (frozen B2C records, still under More).
 
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Briefcase, LayoutGrid, Menu, Users } from "lucide-react";
+import { Bell, Briefcase, Handshake, LayoutGrid, Menu, Users } from "lucide-react";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { K } from "../core/tokens";
 import { navActive } from "./nav";
 import { useStaff } from "./StaffContext";
@@ -14,9 +17,11 @@ import { canSeePage } from "@/lib/rbac";
 const ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
   { href: "/cases", label: "Cases", icon: Briefcase },
-  { href: "/customers", label: "Customers", icon: Users },
+  B2C_INTAKE_OPEN
+    ? { href: "/customers", label: "Customers", icon: Users }
+    : { href: "/b2b-desk", label: "B2B desk", icon: Handshake },
   { href: "/notifications", label: "Alerts", icon: Bell },
-] as const;
+];
 
 export function BottomNav({ onOpenMore }: { onOpenMore: () => void }) {
   const router = useRouter();

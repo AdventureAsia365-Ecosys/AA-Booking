@@ -25,6 +25,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import b2c
 from app.auth.staff import Staff, get_pool, require
 from app.ops import files as ops_files
 from app.ops import supplier_bookings as service
@@ -109,15 +110,17 @@ async def case_bookings(ref: CaseRef, staff: CanRead, pool: Pool) -> dict[str, A
         return await service.list_for_case(conn, staff, ref)
 
 
-@router.post("/trip-cases/{ref}/supplier-bookings/generate")
-async def generate(ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/trip-cases/{ref}/supplier-bookings/generate", responses=b2c.GONE_RESPONSE)
+async def generate(ref: CaseRef, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, ref)  # AA-1037: a b2c case is read-only
         return await service.generate(conn, staff, ref)
 
 
-@router.post("/trip-cases/{ref}/supplier-bookings", status_code=201)
-async def create(body: NewBooking, ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/trip-cases/{ref}/supplier-bookings", status_code=201, responses=b2c.GONE_RESPONSE)
+async def create(body: NewBooking, ref: CaseRef, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(request, conn, ref)  # AA-1037: a b2c case is read-only
         return await service.create(conn, staff, ref, _ids(body.model_dump()))
 
 
@@ -152,21 +155,28 @@ async def get_booking(booking_id: BookingId, staff: CanRead, pool: Pool) -> dict
         return await service.get_booking(conn, staff, str(booking_id))
 
 
-@router.patch("/supplier-bookings/{booking_id}")
-async def patch_booking(body: BookingFacts, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.patch("/supplier-bookings/{booking_id}", responses=b2c.GONE_RESPONSE)
+async def patch_booking(
+    body: BookingFacts, booking_id: BookingId, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(request, conn, str(booking_id))  # AA-1037
         return await service.update(conn, staff, str(booking_id), _ids(body.model_dump(exclude_unset=True)))
 
 
-@router.post("/supplier-bookings/{booking_id}/request")
-async def request_booking(booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/supplier-bookings/{booking_id}/request", responses=b2c.GONE_RESPONSE)
+async def request_booking(booking_id: BookingId, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(request, conn, str(booking_id))  # AA-1037
         return await service.request(conn, staff, str(booking_id))
 
 
-@router.post("/supplier-bookings/{booking_id}/confirm")
-async def confirm_booking(body: ConfirmIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/supplier-bookings/{booking_id}/confirm", responses=b2c.GONE_RESPONSE)
+async def confirm_booking(
+    body: ConfirmIn, booking_id: BookingId, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(request, conn, str(booking_id))  # AA-1037
         return await service.confirm(
             conn,
             staff,
@@ -176,30 +186,41 @@ async def confirm_booking(body: ConfirmIn, booking_id: BookingId, staff: CanWrit
         )
 
 
-@router.post("/supplier-bookings/{booking_id}/decline")
-async def decline_booking(body: DeclineIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/supplier-bookings/{booking_id}/decline", responses=b2c.GONE_RESPONSE)
+async def decline_booking(
+    body: DeclineIn, booking_id: BookingId, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(request, conn, str(booking_id))  # AA-1037
         return await service.decline(conn, staff, str(booking_id), decline_code=body.decline_code)
 
 
-@router.post("/supplier-bookings/{booking_id}/cancel")
-async def cancel_booking(body: ReasonIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/supplier-bookings/{booking_id}/cancel", responses=b2c.GONE_RESPONSE)
+async def cancel_booking(
+    body: ReasonIn, booking_id: BookingId, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(request, conn, str(booking_id))  # AA-1037
         return await service.cancel(conn, staff, str(booking_id), reason=body.reason)
 
 
-@router.post("/supplier-bookings/{booking_id}/rerequest")
-async def rerequest_booking(body: ReasonIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/supplier-bookings/{booking_id}/rerequest", responses=b2c.GONE_RESPONSE)
+async def rerequest_booking(
+    body: ReasonIn, booking_id: BookingId, staff: CanWrite, pool: Pool, request: Request
+) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(request, conn, str(booking_id))  # AA-1037
         return await service.rerequest(conn, staff, str(booking_id), reason=body.reason)
 
 
 # ── Operations documents ─────────────────────────────────────────────────────
 
 
-@router.post("/ops-files", status_code=201)
-async def upload_file(body: NewFile, staff: CanWrite, pool: Pool, store: Store) -> dict[str, Any]:
+@router.post("/ops-files", status_code=201, responses=b2c.GONE_RESPONSE)
+async def upload_file(body: NewFile, staff: CanWrite, pool: Pool, store: Store, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        # AA-1037: payment evidence (B2C money) and the files of a b2c case's supplier bookings are frozen.
+        await b2c.refuse_b2c_file_upload(request, conn, body.entity_type, str(body.entity_id))
         return await ops_files.upload(
             conn,
             store,
@@ -219,7 +240,8 @@ async def download_file(file_id: FileId, staff: CanRead, pool: Pool, store: Stor
         return await ops_files.download(conn, store, staff, str(file_id))
 
 
-@router.post("/ops-files/{file_id}/remove")
-async def remove_file(body: ReasonIn, file_id: FileId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+@router.post("/ops-files/{file_id}/remove", responses=b2c.GONE_RESPONSE)
+async def remove_file(body: ReasonIn, file_id: FileId, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_file_remove(request, conn, str(file_id))  # AA-1037: B2C files are frozen
         return await ops_files.remove(conn, staff, str(file_id), body.reason)

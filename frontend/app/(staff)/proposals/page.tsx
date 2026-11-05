@@ -9,6 +9,8 @@
 // code + customer) and Trip (first leg, dates + length) are the flexible columns, one truncated line per row with the
 // full text in the tooltip; the fixed columns keep their natural width. Version and Dates are no longer columns of
 // their own: they sit in those two cells.
+// AA-1037 (root ADR 0019 d8): while the B2C part is closed a row on a b2c case (trip_case_channel) offers no write
+// (New version, Send, Delete draft: the API answers 410 b2b_only) and the case picker does not offer b2c cases.
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { CopyPlus, Eye, Pencil, Plus, Search, Send, Trash2 } from "lucide-react";
 import { api } from "@/lib/api/client";
+import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { proposalsApi } from "@/lib/api/proposals";
 import type { VersionListItem } from "@/lib/api/types";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
@@ -43,6 +46,7 @@ import {
   useToast,
   useUrlFilters,
 } from "@/ui";
+import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { SendProposalModal } from "./_parts/SendProposalModal";
 
 const CLOSED = ["completed", "cancelled"];
@@ -225,6 +229,7 @@ function RowActions({
   const closed = CLOSED.includes(row.trip_case_status);
   const draft = row.badge === "draft";
   const label = `${row.trip_case_code} V${row.version_number}`;
+  const writable = canWrite && !isFrozenCase(row.trip_case_channel, B2C_INTAKE_OPEN);
   // Stop the row click so an action never also opens the builder.
   return (
     <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
@@ -234,7 +239,7 @@ function RowActions({
       <IconButton title="Preview" label={`Preview ${label}`} onClick={() => onOpen(`${builderHref(row)}/preview`)}>
         <Eye size={14} />
       </IconButton>
-      {canWrite && (
+      {writable && (
         <>
           <IconButton
             title="New version (copies the latest)"
@@ -344,10 +349,12 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
         <ul className="flex max-h-[360px] flex-col divide-y divide-line2 overflow-y-auto rounded-md border border-line">
           {cases.data!.items.map((c) => {
             const closed = CLOSED.includes(c.status);
+            const frozen = isFrozenCase(c.channel, B2C_INTAKE_OPEN);
             return (
               <li key={c.id}>
                 <ListButton
-                  disabled={closed || pending !== null}
+                  disabled={closed || frozen || pending !== null}
+                  title={frozen ? B2C_READ_ONLY_NOTE : undefined}
                   onClick={() => choose(c.code)}
                   className="justify-between"
                   style={{ gap: 12, padding: "10px 12px", borderRadius: 0 }}
@@ -361,6 +368,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {pending === c.code && <Spinner />}
+                    {frozen && <span className="text-xs text-muted">Read-only</span>}
                     <TripCaseStatusBadge status={c.status} />
                   </span>
                 </ListButton>

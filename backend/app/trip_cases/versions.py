@@ -957,7 +957,10 @@ async def list_versions(
     limit: int = 25,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """Cross-case proposal list (``/proposals``). ``assignee`` = the case's open sales owner (id or ``none``)."""
+    """Cross-case proposal list (``/proposals``). ``assignee`` = the case's open sales owner (id or ``none``).
+
+    Each row carries its case's ``trip_case_channel`` (``b2c`` | ``b2b``): the staff admin offers no version write on
+    a b2c row while the B2C part is closed (AA-1037; the version's own ``channel`` is its pricing channel)."""
     from app.trip_cases.service import _day_start  # private helper shared with the case list
 
     where = ["v.deleted_at IS NULL", "tc.deleted_at IS NULL"]
@@ -999,7 +1002,8 @@ async def list_versions(
     rows = await conn.fetch(
         f"""
         SELECT {sql.VERSION_COLUMNS}, tc.id::text AS trip_case_id, tc.code AS trip_case_code,
-               tc.status AS trip_case_status, tc.start_date, c.id::text AS customer_id, c.name AS customer_name,
+               tc.status AS trip_case_status, tc.channel AS trip_case_channel, tc.start_date,
+               c.id::text AS customer_id, c.name AS customer_name,
                us.name AS updated_by_name, {sales} AS sales_id, {sql.LEGS_JSON},
                tc.inquiry_snapshot::text AS inquiry_snapshot
         {base} LEFT JOIN booking.staff_users us ON us.cis_user_id = v.updated_by

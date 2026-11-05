@@ -4,7 +4,10 @@
 //   - 1440: on /cases the Sales group (current page) is open and the others are folded; unfolding Supply is kept after a
 //     reload; folding Sales hides its items until the next page load, which opens it again;
 //   - 960 (compact window, forced icon rail): no group header, every item of every group is shown;
-//   - 390: the phone drawer shows the group headers and folds like the desktop sidebar.
+//   - 390: the phone drawer shows the group headers and folds like the desktop sidebar;
+//   - AA-1037 (root ADR 0019 d8): B2B leads (Partners, Settlement, B2B desk right after Overview) and, with the B2C part
+//     closed (NEXT_PUBLIC_B2C_INTAKE unset, the default), Customers and Payments & Invoices sit in "B2C records
+//     (read-only)" near the end.
 // Screenshots (light and dark, 1440 expanded and folded, 390 drawer) land in $LAYOUT_SHOTS_DIR/sidebar-groups-*.png.
 
 import path from "node:path";
@@ -59,7 +62,7 @@ for (const scheme of ["light", "dark"] as const) {
       await openCases(page);
       await expect(items(page, "sales")).toBeVisible();
       await expect(page.getByRole("button", { name: "Trip Cases" })).toBeVisible();
-      for (const id of ["supply", "operations", "catalog-from-cis", "admin"]) {
+      for (const id of ["b2b", "supply", "operations", "catalog-from-cis", "b2c-records-read-only", "admin"]) {
         await expect(toggle(page, id)).toHaveAttribute("aria-expanded", "false");
         await expect(items(page, id)).toBeHidden();
       }
@@ -81,6 +84,30 @@ for (const scheme of ["light", "dark"] as const) {
     });
   });
 }
+
+test.describe("B2B first (1440)", () => {
+  test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+
+  test("B2B follows Overview and the B2C records are a read-only group", async ({ page, baseURL }) => {
+    const errors = await prepare(page, baseURL!);
+    await openCases(page);
+    const ids = await page
+      .getByTestId("admin-sidebar")
+      .locator("[data-nav-group]")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-nav-group")));
+    expect(ids.slice(0, 3)).toEqual(["overview", "b2b", "sales"]);
+    expect(ids.slice(-2)).toEqual(["b2c-records-read-only", "admin"]);
+    await toggle(page, "b2b").click();
+    for (const name of ["Partners", "Settlement", "B2B desk"]) {
+      await expect(items(page, "b2b").getByRole("button", { name, exact: true })).toBeVisible();
+    }
+    await expect(items(page, "sales").getByRole("button", { name: "Customers" })).toHaveCount(0);
+    await toggle(page, "b2c-records-read-only").click();
+    await expect(items(page, "b2c-records-read-only").getByRole("button", { name: "Customers" })).toBeVisible();
+    await expect(items(page, "b2c-records-read-only").getByRole("button", { name: "Payments & Invoices" })).toBeVisible();
+    expect(errors, "no console error").toEqual([]);
+  });
+});
 
 test.describe("sidebar groups in the compact window (960)", () => {
   test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
