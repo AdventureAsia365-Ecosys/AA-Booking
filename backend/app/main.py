@@ -63,6 +63,7 @@ from app.outbox import OutboxSequencer
 from app.retention import jobs as retention_jobs
 from app.routers import (
     agency_billing,
+    agency_pricing,
     b2b,
     b2b_desk,
     b2b_partners,
@@ -218,6 +219,7 @@ def create_app(
     app.include_router(notifications.router)
     app.include_router(reference.router)
     app.include_router(pricing.router)
+    app.include_router(agency_pricing.router)  # AA-1030: agency price tiers and rate cards (bk-043)
     app.include_router(suppliers.router)
     app.include_router(catalog.router)
     app.include_router(supply.router)

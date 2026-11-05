@@ -33,7 +33,7 @@ function errorText(err: unknown): string | null {
   return err instanceof Error ? err.message : "Could not save.";
 }
 
-function PercentInput({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) {
+export function PercentInput({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) {
   return (
     <span className="relative block">
       <Input
