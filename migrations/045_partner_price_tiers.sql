@@ -17,7 +17,10 @@
 --   3. booking.partner_rate_cards: an optional contract rate card of one partner: a discount on the agency price for
 --      the whole catalogue (trip_plan_id NULL) or one trip plan, valid_from .. valid_to (NULL = open-ended), with the
 --      contract reference. Append-only and maker-checker like the tier discounts. A card in force beats the tier; a
---      plan card beats a catalogue card.
+--      plan card beats a catalogue card. A card with discount_pct NULL is an END card: from its valid_from it ends the
+--      contract rate of its scope (back to the catalogue card, then the tier), so an open-ended card can be ended
+--      (contract over, card approved by mistake) through the same maker-checker. On one day an end card beats a
+--      discount card of the same scope.
 --   4. booking.partner_price_approvals: the second-person approvals of 2. and 3. (one row per approved row), with a
 --      trigger refusing an approval by the row's creator. A table of its own, not more entity types on
 --      booking.policy_approvals: bk-007 / bk-021 re-add that table's entity CHECK when they are replayed, which would
@@ -118,7 +121,7 @@ CREATE TABLE IF NOT EXISTS booking.partner_rate_cards (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     partner_id    UUID NOT NULL REFERENCES booking.b2b_partners (id),
     trip_plan_id  UUID REFERENCES booking.trip_plans (id),
-    discount_pct  NUMERIC(5, 4) NOT NULL,
+    discount_pct  NUMERIC(5, 4),
     valid_from    DATE NOT NULL,
     valid_to      DATE,
     contract_ref  TEXT,
@@ -126,20 +129,21 @@ CREATE TABLE IF NOT EXISTS booking.partner_rate_cards (
     created_by    TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT partner_rate_cards_pct_chk CHECK (discount_pct >= 0 AND discount_pct < 0.5),
+    CONSTRAINT partner_rate_cards_pct_chk CHECK (discount_pct IS NULL OR (discount_pct >= 0 AND discount_pct < 0.5)),
     CONSTRAINT partner_rate_cards_validity_chk CHECK (valid_to IS NULL OR valid_to >= valid_from),
     CONSTRAINT partner_rate_cards_ref_chk CHECK (
         contract_ref IS NULL OR length(btrim(contract_ref)) BETWEEN 1 AND 120),
     CONSTRAINT partner_rate_cards_note_chk CHECK (note IS NULL OR length(note) <= 500)
 );
+-- One discount card and one end card per partner, scope and day (an end card can end a card on its first day).
 CREATE UNIQUE INDEX IF NOT EXISTS partner_rate_cards_scope_day_uq
     ON booking.partner_rate_cards (partner_id, coalesce(trip_plan_id, '00000000-0000-0000-0000-000000000000'::uuid),
-                                   valid_from);
+                                   valid_from, (discount_pct IS NULL));
 CREATE INDEX IF NOT EXISTS partner_rate_cards_partner_idx ON booking.partner_rate_cards (partner_id, valid_from DESC);
 COMMENT ON TABLE booking.partner_rate_cards IS
-    'bk-045 (AA-1030): contract rate card of one B2B partner, a discount on the agency (b2b) price for the whole catalogue (trip_plan_id NULL) or one trip plan, valid_from .. valid_to. Overrides the tier while in force (a plan card beats a catalogue card). Append-only; in force once approved (partner_price_approvals).';
+    'bk-045 (AA-1030): contract rate card of one B2B partner, a discount on the agency (b2b) price for the whole catalogue (trip_plan_id NULL) or one trip plan, valid_from .. valid_to. Overrides the tier while in force (a plan card beats a catalogue card). discount_pct NULL = an end card: ends the contract rate of its scope from valid_from (back to the catalogue card, then the tier). Append-only; in force once approved (partner_price_approvals).';
 COMMENT ON COLUMN booking.partner_rate_cards.discount_pct IS
-    'conf:commercial; bk-045: fraction taken off the b2b price (0.0450 = 4.5 %); below 0.5.';
+    'conf:commercial; bk-045: fraction taken off the b2b price (0.0450 = 4.5 %); below 0.5. NULL = an end card (no contract rate for this scope from valid_from).';
 COMMENT ON COLUMN booking.partner_rate_cards.valid_to IS 'bk-045: last day of the card; NULL = open-ended.';
 COMMENT ON COLUMN booking.partner_rate_cards.contract_ref IS 'conf:commercial; bk-045: the partner contract reference (no personal data).';
 COMMENT ON COLUMN booking.partner_rate_cards.note IS 'conf:commercial; bk-045: staff note.';

@@ -185,3 +185,19 @@ async def test_maker_checker_and_checks(app_conn: asyncpg.Connection) -> None:
             uuid.uuid4(),
             CHECKER,
         )
+
+
+async def test_end_card_shares_the_day_of_a_discount_card(app_conn: asyncpg.Connection) -> None:
+    """A card with discount_pct NULL ends the contract rate of its scope; it may start on a discount card's first day
+    (to undo a card approved by mistake), but there is one end card per scope and day."""
+    partner = await _partner(app_conn)
+    insert = (
+        "INSERT INTO booking.partner_rate_cards (partner_id, discount_pct, valid_from, created_by)"
+        " VALUES ($1::uuid, $2::numeric, DATE '2027-03-01', $3) RETURNING id::text"
+    )
+    assert await app_conn.fetchval(insert, partner, Decimal("0.04"), MAKER)
+    assert await app_conn.fetchval(insert, partner, None, MAKER)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await app_conn.fetchval(insert, partner, None, MAKER)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await app_conn.fetchval(insert, partner, Decimal("0.05"), MAKER)
