@@ -83,6 +83,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   items save by staff), a sent or approved version keeps what the customer saw. Also
   feature-detected: until CIS 278 is applied (or when the read fails with any database error, such as a column type
   CIS changed) `content` is null and the staff UI hides the panel; a CIS migration never fails a Booking request.
+  **Agency billing read** (AA-1037, CIS 377, contract tenant.entitlements.v1 1.3): `catalog.v_tenant_billing_v1` (one row
+  per tenant and subscription: plan price, unit, seats, status, and the bill-to fields CIS holds), read by
+  `bk_saas_invoice_draft` and by an invoice issue (bill-to snapshot); feature-detected (`app/agency_billing/cis.py`).
   `catalog.v_tour_place_name` (CIS 298, AA-996: list destinations; the names and positions of `v_tour_place` without
   its per-place card / destination / segment lookups) is read too; the list never reads `v_tour_place`.
   **Parse-backed views** (`v_tour_day`, `v_tour_place`, `v_tour_place_name`; their day text parses every live
@@ -116,6 +119,10 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   cheapest suggested retail price per person for 2 travellers among the b2b rows still valid; no net, agency price or
   margin), SELECT to role `tripplanner` (+ USAGE on schema `booking`) for the TripPlanner tour page, and to `cis_app`
   (bk-040) for the agency Content studio Marketplace (CIS `GET /v1/tours/pool` attaches it to each pool row).
+  **Agency billing status** (AA-1037, bk-042, root ADR 0019 d9): `booking.v_tenant_billing_status` (per agency: status
+  ok | warn | past_due from the oldest overdue issued invoice against its warn / suspend days, oldest overdue days,
+  overdue invoices and amount per currency, paid-through day of the software fee, the warn / suspend days), SELECT to
+  `cis_app`: the CIS hourly `tenant_billing_tick` moves the account (CIS stays the only writer of account state).
   No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
   `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
@@ -186,6 +193,13 @@ backend/
                            track.py (case auto-advance over the supply and money tracks);
                            S4 (bk-030): supplier_bills.py (enter / edit / approve / cancel bills, payouts and their
                            void, billable bookings, KPIs, case cost vs billed)
+  app/agency_billing/      AA-1037 R4 (bk-041 / bk-042): config.py (billing entity, tax rules, payment terms), invoices.py
+                           (list, detail, draft lines, issue with the gap-free AAS- / AAT- number + snapshots, void,
+                           e-invoice no), payments.py (record = maker, approve / reject = checker), drafts.py
+                           (bk_saas_invoice_draft, bk_settlement_draft, DraftSchedule), cis.py (catalog.v_tenant_billing_v1)
+  app/routers/agency_billing.py  /booking/agency-invoices*, /booking/agency-payments*, /booking/agency-billing/status|runs,
+                           /booking/billing-entities*, /booking/tax-rules*, /booking/billing-terms* (agency_billing.read /
+                           .write, agency_payment.approve, billing_config.write = admin, finance)
   app/routers/billing.py   /booking/invoices (GET, GET/PATCH/DELETE /{number}, …/send|cancel|amend|remind|payments),
                            /booking/trip-cases/{ref}/billing (GET), /booking/trip-cases/{ref}/invoices (POST),
                            /booking/payments (GET, GET/PATCH /{ref}, …/verify|void), /booking/billing/summary —
@@ -477,6 +491,9 @@ send, OTP) is not built: those still write rows only.
   Supplier bills (AA-682 S4, bk-030): `bill.read` = admin, sales, contracting; `bill.write` / `bill.approve` = admin,
   contracting (never approving a bill they entered or whose amounts / lines they last changed, `facts_edited_by`: 403
   `maker_checker`); `payout.write` = admin (never on a bill they entered or last changed). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
+  Agency billing (AA-1037, bk-041 / bk-042): `agency_billing.read` / `agency_billing.write` / `agency_payment.approve` /
+  `billing_config.write` = admin, finance; approving or rejecting a payment is never its recorder's (403 `maker_checker`,
+  CHECK in the database). None of them is in the preview cap.
   Catalog geo state (AA-996, bk-029): the Booking status, reason, area and notes of a CIS country or place
   `catalog.admin` = admin only (UI spec §3 "A edit status"); reading Countries / Destinations is `catalog.read`.
   Notifications,
@@ -933,6 +950,8 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_price_recompute` | AA-1029 R4 (root ADR 0005 d3, ADR 0019 b15): queued by a maintenance hook whenever the watermark of its inputs moves (approvals, contract / rate / plan edits, component count, the UTC day; key = its hash). For every plan with a component or a computed row, one transaction each: the cost sheet (see "Tour price chain"), hand rows kept, the set stored only when it changed (audit `trip_plan.prices_recomputed`, dated history `cost_sheet`). A plan that fails is counted and the run raises at the end (retried; the others are stored). Payload `{plan_id?}`. Not deploy-gate exempt (seconds to a minute). |
 | `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). AA-969 (root ADR 0019 d16): the clearing never touches a case of the pilot tenant (`party_tenant_id`). |
 | `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). S3 (bk-028): `payment.due_soon` (a schedule row of a sent invoice due within `payment_due_soon_days`) and `invoice.overdue` (past due, at the steps of `payment_overdue_reminder_days` [1, 7], the highest step reached), each one staff row (the case's sales owner, else the shared queue) + one customer My Trips row (no e-mail); read in the ops time zone. S4 (bk-030): `supplier_bill.due` (a received or approved bill due within `supplier_bill_due_soon_days`, then once more when overdue; shared staff queue). Never writes money. Not deploy-gate exempt. |
+| `bk_saas_invoice_draft` | AA-1037 R4 (root ADR 0019 d9): the software-fee drafts of a month (payload `period` YYYY-MM, optional `tenant_id`): every live subscription (active, past_due) of `catalog.v_tenant_billing_v1` (CIS 377; `skipped` without it) gives `subscription` / `extra_seats` lines on the agency's draft (one live invoice per agency, kind, period start and currency); a plan without a price gives a zero line (`price_missing`); a re-run replaces the job lines of a draft and leaves an issued invoice alone. Queued daily by `DraftSchedule` for the current month (key per month) and by staff (`POST /booking/agency-billing/runs`). One transaction per agency; a failing agency is counted and the run raises at the end. Not deploy-gate exempt (seconds). |
+| `bk_settlement_draft` | AA-1037 R4: the tour settlement drafts of a month (default: the closed month): per confirmed B2B hold, `deposit` (deposit % of the B2B total) or `full` (booked inside the balance window), then `balance` once the balance date (departure - `balance_days_before_departure`) is before the period end, or one `cancellation_fee` line (the fee less what was billed; a credit when negative) for a cancelled booking; terms from `billing_terms` (agency override, else default); one live line per (hold, role), so nothing is billed twice and an unbilled earlier event lands on the next run. Queued daily by `DraftSchedule` for the previous month and by staff. Not deploy-gate exempt. |
 | `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |
@@ -1486,14 +1505,36 @@ tables with `bk_owner`'s rights, so `cis_app` still reads no price table (guarde
 cross-owner grant, Infra `db/owners.yaml` consumer grant + isolation probe cell): migration-only PR, applied on Dev by
 Infra Migration Apply when the job tables are idle. No Booking code reads it: not in `REQUIRED_SCHEMA_VERSIONS`.
 
+### `bk-041` (AA-1037 R4 agency billing tables — needs `bk-019`, `bk-020`)
+
+The first expand file with new tables (root ADR 0017): `billing_entity`, `tax_rule`, `billing_terms` (default row
+seeded: 30 % deposit, balance 30 days before departure, due 14 / 14 days, warn 1, suspend 30, USD), `invoice_sequence`
+(gap-free AAS- / AAT- numbers per year, taken in the issue transaction), `agency_invoice` (party_tenant_id ->
+`b2b_partners.tenant_id`, kind saas | settlement, draft | issued | paid | void, snapshots, `e_invoice_no`; one live
+invoice per agency, kind, period start and currency), `agency_invoice_line` (composite FK on (invoice, kind): software
+fees and tour money never mix, b17; one live line per (hold, role)), `agency_payment` (maker-checker CHECK, document
+reference NOT NULL). Seed rows go only into tables the file creates; personal / payment columns carry their DM-6.1 tag.
+DM-7.1 rows in the root data standards (S269).
+
+### `bk-042` (AA-1037 R4 agency billing guards + the CIS status view — needs `bk-041`, `bk-017`)
+
+A **contract** file: `REVOKE DELETE` on payments, the number series, tax rules and entities; guard triggers (only a draft
+is deleted or edited; issued facts are frozen; draft -> issued -> paid | void; paid only when approved payments cover the
+total; e-invoice number once; lines change only on a draft; payments: one final decision, never above the total) and
+`agency_payment_settle` (the database marks the invoice paid); `updated_at` triggers; the view
+`booking.v_tenant_billing_status` SELECT to `booking` and `cis_app` (Infra `db/owners.yaml` consumer grant). The code
+raises readiness to bk-042.
+
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679
 follow-up). `v_from_prices` shipped with bk-039 (AA-1029). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
 
 ## Out of scope today
 
-A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice (proforma only, D7),
-agency settlement (B2B cases have no customer invoice, CRM O-10), a customer notifications feed (the customer rows
+A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
+(proforma only, D7; agency invoices carry a tax rule and the manually recorded e-invoice number, AA-1037), the
+e-invoice provider API (later; phase 1 = manual `e_invoice_no`), invoice PDF and e-mail of agency invoices,
+maker-checker on billing settings (audited only; the R4 "editable Settings" slice), a customer notifications feed (the customer rows
 of AA-682 are written but `booking.customer.v1` serves payments only; critic note 11),
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog

@@ -52,6 +52,233 @@
         "title": "AdjustmentIn",
         "type": "object"
       },
+      "AgencyDraftRunIn": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "saas",
+              "settlement"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "AgencyDraftRunIn",
+        "type": "object"
+      },
+      "AgencyInvoiceChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "e_invoice_no": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "E Invoice No"
+          },
+          "staff_note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staff Note"
+          }
+        },
+        "title": "AgencyInvoiceChanges",
+        "type": "object"
+      },
+      "AgencyIssueIn": {
+        "additionalProperties": false,
+        "properties": {
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          }
+        },
+        "title": "AgencyIssueIn",
+        "type": "object"
+      },
+      "AgencyLineIn": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 9999.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "1",
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "description",
+          "unit_price"
+        ],
+        "title": "AgencyLineIn",
+        "type": "object"
+      },
+      "AgencyPaymentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "document_ref": {
+            "description": "the evidence: statement line, slip, file id",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Document Ref",
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "bank_transfer",
+              "cash",
+              "card_offline",
+              "other"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "received_on": {
+            "format": "date",
+            "title": "Received On",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          }
+        },
+        "required": [
+          "amount",
+          "method",
+          "received_on",
+          "document_ref"
+        ],
+        "title": "AgencyPaymentIn",
+        "type": "object"
+      },
+      "AgencyReasonIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AgencyReasonIn",
+        "type": "object"
+      },
       "Amendment": {
         "additionalProperties": false,
         "properties": {
@@ -234,6 +461,268 @@
           }
         },
         "title": "BillChanges",
+        "type": "object"
+      },
+      "BillingEntityChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "country_iso2": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Iso2"
+          },
+          "invoice_inbox": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "pattern": "^[^@\\s]+@[^@\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Inbox"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "legal_entity": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Entity"
+          },
+          "payment_instructions": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Instructions"
+          },
+          "registered_office": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Office"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          }
+        },
+        "title": "BillingEntityChanges",
+        "type": "object"
+      },
+      "BillingEntityIn": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[A-Z][A-Z0-9_-]{1,31}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "country_iso2": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Iso2"
+          },
+          "invoice_inbox": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "pattern": "^[^@\\s]+@[^@\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Inbox"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "legal_entity": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Legal Entity",
+            "type": "string"
+          },
+          "payment_instructions": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Instructions"
+          },
+          "registered_office": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Office"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          }
+        },
+        "required": [
+          "code",
+          "legal_entity"
+        ],
+        "title": "BillingEntityIn",
+        "type": "object"
+      },
+      "BillingTermsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "balance_days_before_departure": {
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Balance Days Before Departure",
+            "type": "integer"
+          },
+          "deposit_pct": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,1}|(?=[\\d.]{1,6}0*$)\\d{0,1}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Deposit Pct"
+          },
+          "saas_currency": {
+            "default": "USD",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Saas Currency",
+            "type": "string"
+          },
+          "saas_due_days": {
+            "maximum": 120.0,
+            "minimum": 0.0,
+            "title": "Saas Due Days",
+            "type": "integer"
+          },
+          "settlement_due_days": {
+            "maximum": 120.0,
+            "minimum": 0.0,
+            "title": "Settlement Due Days",
+            "type": "integer"
+          },
+          "suspend_after_days": {
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Suspend After Days",
+            "type": "integer"
+          },
+          "warn_after_days": {
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Warn After Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deposit_pct",
+          "balance_days_before_departure",
+          "saas_due_days",
+          "settlement_due_days",
+          "warn_after_days",
+          "suspend_after_days"
+        ],
+        "title": "BillingTermsIn",
         "type": "object"
       },
       "Booking": {
@@ -6795,6 +7284,213 @@
         "title": "SupplierFields",
         "type": "object"
       },
+      "TaxRuleChanges": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "footer_wording": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Footer Wording"
+          },
+          "invoice_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "saas",
+                  "settlement"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Kind"
+          },
+          "line_wording": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Wording"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,2}|(?=[\\d.]{1,7}0*$)\\d{0,2}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "recipient_country": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Country"
+          }
+        },
+        "title": "TaxRuleChanges",
+        "type": "object"
+      },
+      "TaxRuleIn": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[A-Z][A-Z0-9_-]{1,31}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "effective_from": {
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "footer_wording": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Footer Wording"
+          },
+          "invoice_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "saas",
+                  "settlement"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Kind"
+          },
+          "line_wording": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Line Wording",
+            "type": "string"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,2}|(?=[\\d.]{1,7}0*$)\\d{0,2}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Rate"
+          },
+          "recipient_country": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Country"
+          }
+        },
+        "required": [
+          "code",
+          "rate",
+          "line_wording",
+          "effective_from"
+        ],
+        "title": "TaxRuleIn",
+        "type": "object"
+      },
       "TierCreate": {
         "additionalProperties": false,
         "properties": {
@@ -7289,6 +7985,990 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/booking/agency-billing/runs": {
+      "get": {
+        "operationId": "agency_draft_runs_booking_agency_billing_runs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Agency Draft Runs Booking Agency Billing Runs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Agency Draft Runs",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "post": {
+        "operationId": "run_agency_drafts_booking_agency_billing_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyDraftRunIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Agency Drafts Booking Agency Billing Runs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Agency Drafts",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-billing/status": {
+      "get": {
+        "operationId": "agency_billing_status_booking_agency_billing_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Agency Billing Status Booking Agency Billing Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Agency Billing Status",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices": {
+      "get": {
+        "operationId": "list_agency_invoices_booking_agency_invoices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "saas",
+                    "settlement"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "issued",
+                    "paid",
+                    "void",
+                    "overdue",
+                    "waiting",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "description": "number, agency or e-invoice number",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "number, agency or e-invoice number",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Agency Invoices Booking Agency Invoices Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Agency Invoices",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/summary": {
+      "get": {
+        "operationId": "agency_invoice_summary_booking_agency_invoices_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Agency Invoice Summary Booking Agency Invoices Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Agency Invoice Summary",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/{ref}": {
+      "delete": {
+        "operationId": "delete_agency_invoice_booking_agency_invoices__ref__delete",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Agency Invoice",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "get": {
+        "operationId": "get_agency_invoice_booking_agency_invoices__ref__get",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Agency Invoice Booking Agency Invoices  Ref  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agency Invoice",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_agency_invoice_booking_agency_invoices__ref__patch",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyInvoiceChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Agency Invoice Booking Agency Invoices  Ref  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Agency Invoice",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/{ref}/issue": {
+      "post": {
+        "operationId": "issue_agency_invoice_booking_agency_invoices__ref__issue_post",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgencyIssueIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Issue Agency Invoice Booking Agency Invoices  Ref  Issue Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issue Agency Invoice",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/{ref}/lines": {
+      "post": {
+        "operationId": "add_agency_invoice_line_booking_agency_invoices__ref__lines_post",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyLineIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Agency Invoice Line Booking Agency Invoices  Ref  Lines Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Agency Invoice Line",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/{ref}/lines/{line_no}": {
+      "delete": {
+        "operationId": "remove_agency_invoice_line_booking_agency_invoices__ref__lines__line_no__delete",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_no",
+            "required": true,
+            "schema": {
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Line No",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove Agency Invoice Line Booking Agency Invoices  Ref  Lines  Line No  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Agency Invoice Line",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/{ref}/payments": {
+      "post": {
+        "operationId": "record_agency_payment_booking_agency_invoices__ref__payments_post",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "8-200 characters, one per request",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "8-200 characters, one per request",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyPaymentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Agency Payment Booking Agency Invoices  Ref  Payments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Agency Payment",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-invoices/{ref}/void": {
+      "post": {
+        "operationId": "void_agency_invoice_booking_agency_invoices__ref__void_post",
+        "parameters": [
+          {
+            "description": "Invoice UUID or number (AAS-2026-000001)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Invoice UUID or number (AAS-2026-000001)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Void Agency Invoice Booking Agency Invoices  Ref  Void Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Void Agency Invoice",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-payments": {
+      "get": {
+        "operationId": "list_agency_payments_booking_agency_payments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "recorded",
+                    "approved",
+                    "rejected",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "invoice",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Invoice"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Agency Payments Booking Agency Payments Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Agency Payments",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-payments/{payment_id}/approve": {
+      "post": {
+        "operationId": "approve_agency_payment_booking_agency_payments__payment_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Agency Payment Booking Agency Payments  Payment Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Agency Payment",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/agency-payments/{payment_id}/reject": {
+      "post": {
+        "operationId": "reject_agency_payment_booking_agency_payments__payment_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "payment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Payment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgencyReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Agency Payment Booking Agency Payments  Payment Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Agency Payment",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
     "/booking/audit-logs": {
       "get": {
         "operationId": "list_audit_logs_booking_audit_logs_get",
@@ -9050,6 +10730,315 @@
         "summary": "Create Quote",
         "tags": [
           "b2b"
+        ]
+      }
+    },
+    "/booking/billing-entities": {
+      "get": {
+        "operationId": "list_billing_entities_booking_billing_entities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Billing Entities Booking Billing Entities Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Billing Entities",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "post": {
+        "operationId": "create_billing_entity_booking_billing_entities_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingEntityIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Billing Entity Booking Billing Entities Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Billing Entity",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/billing-entities/{entity_id}": {
+      "patch": {
+        "operationId": "update_billing_entity_booking_billing_entities__entity_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingEntityChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Billing Entity Booking Billing Entities  Entity Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Billing Entity",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/billing-terms": {
+      "get": {
+        "operationId": "list_billing_terms_booking_billing_terms_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Billing Terms Booking Billing Terms Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Billing Terms",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/billing-terms/agencies/{tenant_id}": {
+      "delete": {
+        "operationId": "delete_agency_terms_booking_billing_terms_agencies__tenant_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Agency Terms",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "put": {
+        "operationId": "put_agency_terms_booking_billing_terms_agencies__tenant_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingTermsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Agency Terms Booking Billing Terms Agencies  Tenant Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Agency Terms",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/billing-terms/default": {
+      "put": {
+        "operationId": "put_default_terms_booking_billing_terms_default_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingTermsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Default Terms Booking Billing Terms Default Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Default Terms",
+        "tags": [
+          "agency-billing"
         ]
       }
     },
@@ -18271,6 +20260,140 @@
         "summary": "Rate In Force",
         "tags": [
           "supply"
+        ]
+      }
+    },
+    "/booking/tax-rules": {
+      "get": {
+        "operationId": "list_tax_rules_booking_tax_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Tax Rules Booking Tax Rules Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tax Rules",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "post": {
+        "operationId": "create_tax_rule_booking_tax_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaxRuleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Tax Rule Booking Tax Rules Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Tax Rule",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/tax-rules/{rule_id}": {
+      "patch": {
+        "operationId": "update_tax_rule_booking_tax_rules__rule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaxRuleChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Tax Rule Booking Tax Rules  Rule Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Tax Rule",
+        "tags": [
+          "agency-billing"
         ]
       }
     },

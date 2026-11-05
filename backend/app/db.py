@@ -56,6 +56,9 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-037",  # AA-1028 R1 slice 2: b2b_partners.projected_at (bk_tenant_pull, staff partner reads; MIG-4)
     "bk-038",  # AA-1035 R2: staff_users_role_chk allows finance (a booking-finance sign-in writes it; MIG-4)
     "bk-039",  # AA-1029 R4: price chain columns, trip_plan_price_history, v_from_prices (read by every price query)
+    # bk-040 (AA-1029 cis_app grant) changes no shape read here.
+    "bk-041",  # AA-1037 R4: agency billing tables (expand)
+    "bk-042",  # AA-1037 R4: agency billing guards + v_tenant_billing_status (contract; MIG-4)
     "bk-043",  # AA-1030 R4: partner tiers, tier discounts, rate cards (read by every B2B quote); MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)

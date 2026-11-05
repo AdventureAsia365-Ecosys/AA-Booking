@@ -29,7 +29,8 @@ Reads keep the admin permissions. The match is on the access token's ``email`` c
 trigger sets to the normalised address; lower-casing here can only cap more sessions, never fewer.
 
 **Finance (AA-1035 R2, root ADR 0019 d3 / d9).** ``finance`` issues invoices and records payments (``billing.read``,
-``billing.write``). It comes ONLY from the WORKFORCE group ``booking-finance`` (granted on the CIS Staff page through
+``billing.write``) and runs agency billing (``agency_billing.*``, ``agency_payment.approve``, ``billing_config.write``,
+AA-1037). It comes ONLY from the WORKFORCE group ``booking-finance`` (granted on the CIS Staff page through
 ``shared.staff_app_grant`` role ``finance``); the CIS -> Booking bridge never yields it (:data:`ROLE_FROM_CIS` has no
 finance entry and CIS mints no bridge token for its new roles).
 
@@ -136,6 +137,14 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "bill.write": frozenset({"admin", "contracting"}),
     "bill.approve": frozenset({"admin", "contracting"}),
     "payout.write": frozenset({"admin"}),
+    # Agency billing (bk-041 / bk-042, AA-1037 R4, root ADR 0019 d3 / d9): every invoice from AA to an agency (software
+    # fee + tour settlement). Finance runs it: drafts, issues, records payments; a second finance user (or an admin)
+    # approves or rejects a payment, never its recorder (maker-checker, 403 maker_checker + a CHECK). The billing
+    # entity, tax rules and payment terms are data rows finance edits (b16 / b17). Not in preview sessions.
+    "agency_billing.read": frozenset({"admin", "finance"}),
+    "agency_billing.write": frozenset({"admin", "finance"}),
+    "agency_payment.approve": frozenset({"admin", "finance"}),
+    "billing_config.write": frozenset({"admin", "finance"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin

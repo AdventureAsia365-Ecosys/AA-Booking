@@ -80,6 +80,8 @@ export const EXCLUDED: Record<string, string> = {
   "/cases/[code]/proposals/[n]": "a proposal version: no layout-mock fixture for the version endpoints yet",
   "/cases/[code]/proposals/[n]/preview": "the customer preview of a proposal version: no layout-mock fixture for it yet",
   "/catalog/trip-plans/[sourceId]/commercial": "the commercial editor of a trip plan (writes): no layout-mock fixture for it yet",
+  "/agency-billing": "agency invoices (AA-1037): no layout-mock fixture for agency billing yet (follow-up: add one)",
+  "/agency-billing/invoices/[ref]": "an agency invoice (AA-1037): no layout-mock fixture for agency billing yet",
   "/pricing/calculator": "the quote calculator posts every change to the API (writes), which the layout mock does not answer",
   "/suppliers/new": "a write form (new supplier): the layout-mock API answers reads only",
   "/suppliers/[id]/edit": "a write form (supplier edit): the layout-mock API answers reads only",

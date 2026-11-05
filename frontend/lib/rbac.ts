@@ -73,6 +73,10 @@ export const PAGE_RULES: readonly PageRule[] = [
   // AA-1035: finance works the invoices and payments (API billing.read / billing.write; verifying stays admin).
   { pattern: "/billing", roles: [A, S, C, F] },
   { pattern: "/billing/*", roles: [A, S, F] },
+  // AA-1037 R4 (root ADR 0019 d9): agency billing, every invoice from AA to an agency (software fee + tour
+  // settlement), payments with maker-checker and the billing settings (API agency_billing.*, billing_config.write).
+  { pattern: "/agency-billing", roles: [A, F] },
+  { pattern: "/agency-billing/*", roles: [A, F] },
   // Trip checks (AA-682 S2): every operational role (API ops.read / ops.write).
   { pattern: "/trip-checks", roles: [A, S, C] },
   // B2B desk (AA-975): on-request lines and departure incidents; every operational role (API b2b_desk.*).
