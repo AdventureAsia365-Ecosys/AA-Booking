@@ -239,7 +239,8 @@ export interface Summary {
 }
 
 export const agencyBillingApi = {
-  invoices: (q: { kind?: string; status?: string; q?: string; limit?: number; offset?: number }) =>
+  // `tenant_id`: one agency's invoices (the CIS Tenant 360 deep link `?tenant=`, ui/booking/agencyFilter.ts).
+  invoices: (q: { kind?: string; status?: string; tenant_id?: string; q?: string; limit?: number; offset?: number }) =>
     bkGet<Page<AgencyInvoice>>("agency-invoices", q),
   summary: () => bkGet<Summary>("agency-invoices/summary"),
   invoice: (ref: string) => bkGet<AgencyInvoiceDetail>(`agency-invoices/${enc(ref)}`),
