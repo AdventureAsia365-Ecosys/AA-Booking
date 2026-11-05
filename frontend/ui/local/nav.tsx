@@ -18,6 +18,7 @@ import {
   CreditCard,
   Globe,
   Handshake,
+  Landmark,
   LayoutGrid,
   Map as MapIcon,
   MapPin,
@@ -71,6 +72,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/billing", label: "Payments & Invoices", icon: <CreditCard size={ICON} />, wave: 3, shipped: true },
       { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: true },
       { href: "/b2b-desk", label: "B2B desk", icon: <Handshake size={ICON} />, wave: 3, shipped: true },
+      // AA-1037 R4: every invoice from AA to an agency (software fee + tour settlement).
+      { href: "/agency-billing", label: "Agency billing", icon: <Landmark size={ICON} />, wave: 3, shipped: true },
     ],
   },
   {
