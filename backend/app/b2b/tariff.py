@@ -28,6 +28,9 @@
 - **Rows that cannot be quoted** (a plan without bookable components, a component without a rate in force, a cost
   currency without an approved FX rate) are left out of the agency's tariff; the staff read lists them with the
   reason (``unpriced``).
+- **The asked currency must price today** (S270): a quote currency without an approved FX rate in force is refused
+  as ``invalid`` (422, :func:`check_currency`, listing the currencies that do price), before any row is read; only
+  the tariff does this, ``POST /quotes`` keeps its 503 ``unavailable``.
 - **Never** a net cost, a supplier rate or a margin (the agency's own discount and the public RRP only).
 
 Read by staff (``GET /booking/pricing/partner-tariffs/{partner_id}``, ``pricing.read``, ``app.routers.
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -61,7 +65,9 @@ from app.b2b.components import (
 from app.b2b.errors import B2BError
 from app.catalog import cost_sheet, liveness
 from app.catalog.destinations import CATALOG_ERRORS
-from app.pricing import engine
+from app.pricing import engine, repository
+
+log = logging.getLogger(__name__)
 
 SOURCE_SYSTEM = "cis"
 CHANNEL = engine.Channel.B2B.value
@@ -165,6 +171,29 @@ async def rate_cuts(conn: asyncpg.Connection, plan_ids: Sequence[str]) -> dict[s
     return {plan: cost_sheet.rate_cuts(ps, spans) for plan, ps in parts.items()}
 
 
+async def check_currency(conn: asyncpg.Connection, currency: str, on: date) -> None:
+    """Refuse a tariff currency AA does not price in on ``on`` as ``invalid`` (422, the caller's choice): not a quote
+    currency, or a quote currency without an approved FX rate in force (S270, AA-1029 / AA-1030 follow-up: an agency
+    asking AUD before AUD has a rate is told to pick another currency, not that AA is down). The message lists the
+    currencies that do price today (USD always). Only the tariff does this: ``POST /quotes`` and
+    :func:`app.b2b.quotes.price_basis` still answer ``unavailable`` (503) for a quote currency without a rate, and a
+    supplier cost currency without a rate stays AA's data problem (the tariff leaves those rows unpriced, a quote
+    answers 503). A DB error while reading the rates is ``unavailable`` too."""
+    if currency not in quotes.QUOTE_CURRENCIES:
+        allowed = ", ".join(sorted(quotes.QUOTE_CURRENCIES))
+        raise B2BError("invalid", f"{currency} is not a quote currency (one of {allowed})")
+    if currency == engine.BASE_CURRENCY:
+        return
+    try:
+        rates = await repository.fx_rates_in_force(conn, quotes.QUOTE_CURRENCIES, on)
+    except Exception as exc:  # noqa: BLE001 — a DB error or an invalid stored row both mean "cannot price now"
+        log.warning("b2b_tariff_fx_unavailable error=%s", type(exc).__name__)
+        raise B2BError("unavailable", "pricing data is not available") from None
+    if currency not in rates:
+        priced = ", ".join([engine.BASE_CURRENCY, *sorted(rates)])
+        raise B2BError("invalid", f"no approved FX rate for {currency} today; AA prices this tariff in {priced}")
+
+
 def per_person(price: Decimal, party: int, currency: str) -> Decimal:
     """The line price shared over the party, rounded up like a quote line (cent, VND 1,000)."""
     return quotes.round_line(price / party, currency)
@@ -223,11 +252,10 @@ async def build(
     source_id: str | None = None,
     limit: int = MAX_ROWS,
 ) -> dict[str, Any]:
-    """The tariff of one partner in one quote currency on ``on``. Raises B2BError (``invalid`` currency,
-    ``unavailable`` without a b2b rule, an FX rate for ``currency`` or a readable catalog)."""
-    if currency not in quotes.QUOTE_CURRENCIES:
-        allowed = ", ".join(sorted(quotes.QUOTE_CURRENCIES))
-        raise B2BError("invalid", f"{currency} is not a quote currency (one of {allowed})")
+    """The tariff of one partner in one quote currency on ``on``. Raises B2BError: ``invalid`` when ``currency`` is
+    not a quote currency or has no approved FX rate in force on ``on`` (:func:`check_currency`, the caller's choice);
+    ``unavailable`` without a b2b rule, without readable pricing data or without a readable catalog (AA's side)."""
+    await check_currency(conn, currency, on)
     try:
         rows = await conn.fetch(ROWS_SQL, on, source_id, limit + 1)
         served = await liveness.states(conn, [r["source_id"] for r in rows], strict=True)

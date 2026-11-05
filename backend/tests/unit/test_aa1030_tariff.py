@@ -58,14 +58,27 @@ class Conn:
     """The matrix rows, and (optional) plan components and rate spans for the cuts at rate changes."""
 
     def __init__(
-        self, rows: list[dict[str, Any]], parts: list[dict[str, Any]] | None = None, spans: list[dict[str, Any]] = ()
+        self,
+        rows: list[dict[str, Any]],
+        parts: list[dict[str, Any]] | None = None,
+        spans: list[dict[str, Any]] = (),
+        fx: dict[str, D] | None = None,
     ) -> None:
         self.rows = rows
         self.parts = parts or []
         self.spans = list(spans)
+        self.fx = fx or {}  # approved FX rates in force: {currency: rate per USD}
         self.asked: list[tuple[Any, ...]] = []
+        self.fx_asked: list[tuple[Any, ...]] = []
 
     async def fetch(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+        if sql == repository.FX_SQL:
+            self.fx_asked.append(args)
+            return [
+                {"currency": cur, "rate_per_usd": rate, "buffer_pct": D("0"), "as_of": ON, "source": "invented"}
+                for cur, rate in self.fx.items()
+                if cur in args[0]
+            ]
         if sql == PLAN_COMPONENTS_SQL:
             return [p for p in self.parts if p["trip_plan_id"] in args[0]]
         if sql == cost_sheet.SPANS_SQL:
@@ -192,6 +205,60 @@ async def test_a_currency_that_is_not_a_quote_currency_is_refused(wired: dict[st
     with pytest.raises(B2BError) as err:
         await tariff.build(Conn([]), partner_id="p", currency="XYZ", on=ON)
     assert err.value.error == "invalid"
+
+
+@pytest.mark.asyncio
+async def test_a_quote_currency_without_an_approved_fx_rate_today_is_the_callers_choice(wired: dict[str, Any]) -> None:
+    """S270 (AA-1029 / AA-1030 follow-up): AUD with no rate in force is 422 ``invalid`` before any row is read (never
+    503 ``unavailable``, which the CRM shows as "AA cannot be reached"); the message lists what does price today."""
+    conn = Conn([_row(PLAN_A, "tour-a", 2, 2)], fx={"EUR": D("0.92"), "VND": D("25000")})
+    with pytest.raises(B2BError) as err:
+        await tariff.build(conn, partner_id="p", currency="AUD", on=ON)
+    assert err.value.error == "invalid" and err.value.status_code == 422
+    assert err.value.message == "no approved FX rate for AUD today; AA prices this tariff in USD, EUR, VND"
+    assert conn.asked == [] and wired["calls"] == 0 and "basis_kw" not in wired
+    assert conn.fx_asked == [(sorted(quotes.QUOTE_CURRENCIES - {"USD"}), ON)]  # one read for every quote currency
+
+
+@pytest.mark.asyncio
+async def test_a_quote_currency_with_a_rate_and_usd_are_priced(wired: dict[str, Any]) -> None:
+    eur = Conn([_row(PLAN_A, "tour-a", 2, 2)], fx={"EUR": D("0.92")})
+    out = await tariff.build(eur, partner_id="p", currency="EUR", on=ON)
+    assert out["currency"] == "EUR" and [i["pax_min"] for i in out["items"]] == [2]
+    usd = Conn([_row(PLAN_A, "tour-a", 2, 2)])
+    assert (await tariff.build(usd, partner_id="p", currency="USD", on=ON))["items"]
+    assert usd.fx_asked == []  # USD is the base currency: nothing to check
+
+
+@pytest.mark.asyncio
+async def test_unreadable_fx_rates_are_aas_side(wired: dict[str, Any]) -> None:
+    class Broken(Conn):
+        async def fetch(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+            if sql == repository.FX_SQL:
+                raise ConnectionError("db down")
+            return await super().fetch(sql, *args)
+
+    with pytest.raises(B2BError) as err:
+        await tariff.build(Broken([]), partner_id="p", currency="EUR", on=ON)
+    assert (err.value.error, err.value.status_code) == ("unavailable", 503)
+
+
+@pytest.mark.asyncio
+async def test_quotes_still_answer_unavailable_for_a_currency_without_a_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the tariff turns the asked currency's missing rate into 422: ``price_basis`` (``POST /quotes``) is
+    unchanged."""
+
+    async def rule_in_force(conn: Any, channel: Any, on: date) -> repository.DatedRule:
+        return RULE
+
+    async def fx_rates_in_force(conn: Any, currencies: Any, on: date) -> dict[str, repository.DatedFxRate]:
+        return {}
+
+    monkeypatch.setattr(repository, "rule_in_force", rule_in_force)
+    monkeypatch.setattr(repository, "fx_rates_in_force", fx_rates_in_force)
+    with pytest.raises(B2BError) as err:
+        await quotes.price_basis(None, partner_id="p", currency="AUD", cost_currencies=set(), on=ON, require_all=False)
+    assert (err.value.error, err.value.status_code) == ("unavailable", 503)
 
 
 def test_chunks_stay_within_the_quote_lookup_budget() -> None:

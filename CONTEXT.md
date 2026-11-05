@@ -793,7 +793,11 @@ the partner's `quotes.PriceBasis` (b2b rule, FX, agency terms in force today). S
 answers for that party and day; `price_per_person` = it / party, rounded up like a line. Not the matrix `amount`
 (rounded to 5 USD, peak uplift; quotes never read it); the row's public RRP is shown as it is. Rows a quote cannot
 price (no components, no rate in force, no FX rate for a cost currency) are left out of the agency's tariff and listed
-with the reason for staff. Staff `GET /booking/pricing/partner-tariffs/{partner_id}` (`pricing.read`; JSON with
+with the reason for staff. The asked currency must price today (S270): a quote currency without an approved FX rate in
+force is refused before any row is read as **422 `invalid`** (`tariff.check_currency`, the message lists the
+currencies that do price, USD always), the caller's choice and not an outage; `POST /quotes` keeps its 503
+`unavailable` for the same gap, and a supplier cost currency without a rate stays AA's data problem (rows unpriced in
+the tariff, 503 on a quote). Staff `GET /booking/pricing/partner-tariffs/{partner_id}` (`pricing.read`; JSON with
 `partner`, `unpriced`, each row's `rate_card_id`; `?format=csv`) and the agency `GET /booking/b2b/v1/tariff`; both CSVs
 are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pricing → Agency tiers → Agencies →
 "View tariff" (`/pricing/agency-tiers/tariff?partner=<id>`: currency, Download CSV, Print; the print stylesheet in
