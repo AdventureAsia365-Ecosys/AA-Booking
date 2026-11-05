@@ -46,7 +46,7 @@ from typing import Any
 import asyncpg
 import boto3
 
-from app import audit
+from app import audit, pilot
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
@@ -61,6 +61,7 @@ from app.retention.policy import (
     SPECS,
     Spec,
     archive_bucket,
+    without_pilots,
 )
 
 log = logging.getLogger(__name__)
@@ -342,6 +343,9 @@ async def _run_locked(
     except OverrideRefused as exc:
         raise PermanentError(str(exc)) from None
     refs = await runner.fk_refs(conn, spec.table) if spec.action == "delete" else []
+    # AA-969 (root ADR 0019 d16): a table with tenant data leaves the pilot tenant's rows out of every part.
+    pilots = await pilot.pilot_tenants(conn) if spec.pilot_where else []
+    spec = without_pilots(spec, pilots)
     cuts, policy_cuts, parts = {}, {}, []
     for part in spec.parts:
         policy_cuts[part.name] = await runner.cutoff(conn, part.window_days)
@@ -366,6 +370,8 @@ async def _run_locked(
         "archived_total": 0,
         "parts": [p.as_dict() for p in parts],
     }
+    if pilots:
+        result["pilot_tenants_skipped"] = len(pilots)
     if forced is not None:
         result["override"] = {
             "older_than": forced.date().isoformat(),
