@@ -13773,6 +13773,127 @@
         ]
       }
     },
+    "/booking/catalog/price-readiness": {
+      "get": {
+        "description": "AA-1029: which trip plans price and why the others do not (see ``app/catalog/price_readiness.py``). The\nsummary counts every plan; ``items`` are the plans that match the filters.",
+        "operationId": "price_readiness_report_booking_catalog_price_readiness_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "priced",
+                    "hand_priced",
+                    "missing_rates",
+                    "missing_fx",
+                    "no_rule",
+                    "no_components",
+                    "inactive_component"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "country name as the catalog gives it",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "country name as the catalog gives it",
+              "title": "Country"
+            }
+          },
+          {
+            "description": "part of the title or the tour key",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "part of the title or the tour key",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Price Readiness Report Booking Catalog Price Readiness Get"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Price Readiness Report",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
     "/booking/catalog/trip-plans": {
       "get": {
         "operationId": "list_trip_plans_booking_catalog_trip_plans_get",
