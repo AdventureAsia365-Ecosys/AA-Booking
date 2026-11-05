@@ -146,6 +146,8 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
       });
       page.on("response", (r) => {
         const url = r.url();
+        // A redirect is not a failure ("/" sends a visitor on); the page it lands on is checked by its own answer.
+        if (r.status() >= 300 && r.status() < 400) return;
         if (!url.startsWith(origin) || allowed(ALLOW.requests, url)) return;
         if (url.includes("/api/booking/") && r.status() === 501 && !HOST) return; // counted as unmocked
         const expected = url === docUrl ? (p.status ?? 200) : null;
@@ -169,7 +171,7 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
 
       const result = {
         page: p.slug, path: p.path, auth: p.auth, viewport, theme, selftest: p.selftest ?? null,
-        status: res?.status() ?? null, appliedTheme, hasFrame, overflow, consoleErrors, failedRequests: failed, unmocked,
+        status: res?.status() ?? null, appliedTheme, hasFrame, frameExpected: p.frame !== false, overflow, consoleErrors, failedRequests: failed, unmocked,
       };
       fs.mkdirSync(REPORT_DIR, { recursive: true });
       fs.writeFileSync(path.join(REPORT_DIR, `${name}.json`), JSON.stringify(result, null, 1));
