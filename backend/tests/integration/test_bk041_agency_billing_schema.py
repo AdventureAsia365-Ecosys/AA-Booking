@@ -191,6 +191,38 @@ async def test_issued_invoice_keeps_its_facts_and_lines(conn: asyncpg.Connection
     await conn.execute("UPDATE booking.agency_invoice SET staff_note = 'called the agency' WHERE id = $1", inv)
 
 
+async def test_a_line_never_moves_off_its_invoice(conn: asyncpg.Connection) -> None:
+    tid = await _partner(conn)
+    entity = await _entity(conn)
+    issued = await _draft(conn, tid)
+    await _issue(conn, issued, entity, due=TODAY + timedelta(days=14), number="AAS-2026-000002")
+    draft = await _draft(conn, tid, period=date(2026, 12, 1))
+    # an issued invoice's line is not re-pointed at a draft of the same kind (the guard used to read NEW only)
+    with pytest.raises(asyncpg.RestrictViolationError):
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE booking.agency_invoice_line SET invoice_id = $1, line_no = 2 WHERE invoice_id = $2",
+                draft,
+                issued,
+            )
+    # a draft's line keeps its key too: not moved onto the issued invoice, not renumbered
+    with pytest.raises(asyncpg.RestrictViolationError):
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE booking.agency_invoice_line SET invoice_id = $1, line_no = 2 WHERE invoice_id = $2",
+                issued,
+                draft,
+            )
+    with pytest.raises(asyncpg.RestrictViolationError):
+        async with conn.transaction():
+            await conn.execute("UPDATE booking.agency_invoice_line SET line_no = 5 WHERE invoice_id = $1", draft)
+    # the draft's other columns stay editable
+    await conn.execute(
+        "UPDATE booking.agency_invoice_line SET description = 'Plan, edited' WHERE invoice_id = $1", draft
+    )
+    assert await conn.fetchval("SELECT count(*) FROM booking.agency_invoice_line WHERE invoice_id = $1", issued) == 1
+
+
 async def test_draft_is_deleted_with_its_lines(conn: asyncpg.Connection) -> None:
     tid = await _partner(conn)
     inv = await _draft(conn, tid)
