@@ -1,4 +1,4 @@
-"""AA-1030 (bk-045) on a real PostgreSQL: registration and re-run no-op, the seeded tiers and their approved discounts
+"""AA-1030 (bk-043) on a real PostgreSQL: registration and re-run no-op, the seeded tiers and their approved discounts
 (root ADR 0019 b15 starting values 0 / 3 / 6 %), the grants (append-only rate tables, a tier's code never renamed),
 the maker-checker trigger of ``booking.partner_price_approvals`` and the new CHECKs / FKs.
 """
@@ -16,7 +16,7 @@ import pytest_asyncio
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "045_partner_price_tiers.sql"
+MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "043_partner_price_tiers.sql"
 TENANT = "aa103045-0000-4000-8000-000000000001"
 MAKER = "aa1030-maker"
 CHECKER = "aa1030-checker"
@@ -62,7 +62,7 @@ async def app_conn(admin: asyncpg.Connection, migrated_booking_dsn: str) -> Asyn
 async def _partner(conn: asyncpg.Connection) -> str:
     return await conn.fetchval(
         "INSERT INTO booking.b2b_partners (tenant_id, agency_name, status, billing_currency, m2m_client_id)"
-        " VALUES ($1::uuid, 'Invented Lantern Travel', 'active', 'USD', 'clientbk045') RETURNING id::text",
+        " VALUES ($1::uuid, 'Invented Lantern Travel', 'active', 'USD', 'clientbk043') RETURNING id::text",
         TENANT,
     )
 
@@ -73,7 +73,7 @@ async def test_registered_rerunnable_and_owned(admin: asyncpg.Connection) -> Non
         await admin.execute(MIGRATION.read_text(encoding="utf-8"))  # a second run is a no-op
     finally:
         await admin.execute("RESET ROLE")
-    assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-045'") == 1
+    assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-043'") == 1
     for rel in (
         "booking.partner_tiers",
         "booking.partner_tier_discounts",
@@ -103,9 +103,9 @@ async def test_seeded_tiers_are_approved(admin: asyncpg.Connection) -> None:
         " JOIN booking.partner_price_approvals a ON a.partner_tier_discount_id = d.id ORDER BY t.sort_order"
     )
     assert [(r["code"], r["discount_pct"], r["approved_by"]) for r in rows] == [
-        ("standard", Decimal("0.0000"), "seed:bk-045"),
-        ("silver", Decimal("0.0300"), "seed:bk-045"),
-        ("gold", Decimal("0.0600"), "seed:bk-045"),
+        ("standard", Decimal("0.0000"), "seed:bk-043"),
+        ("silver", Decimal("0.0300"), "seed:bk-043"),
+        ("gold", Decimal("0.0600"), "seed:bk-043"),
     ]
 
 
