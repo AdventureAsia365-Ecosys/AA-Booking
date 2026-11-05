@@ -15,6 +15,9 @@ of bk-038). Not in preview sessions; the E2E session stays read-only (global rul
 - ``POST /agency-billing/runs`` (queue a draft job) · ``GET /agency-billing/runs``
 - ``GET|POST /billing-entities``, ``PATCH /billing-entities/{id}`` · ``GET|POST /tax-rules``, ``PATCH /tax-rules/{id}``
 - ``GET /billing-terms`` · ``PUT /billing-terms/default`` · ``PUT|DELETE /billing-terms/agencies/{tenant_id}``
+- AA-1037 extras: ``GET /agency-billing/export.csv`` (``what`` invoices|payments, ``from``, ``to``; G5) ·
+  ``GET /partner-terms-clauses`` · ``PUT /partner-terms-clauses/{code}`` (``billing_config.write``) ·
+  ``POST /partner-terms-clauses/{code}/approve`` (``terms_clause.approve``, never the last editor; G6)
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agency_billing import config, drafts, invoices, payments
+from app.agency_billing import clauses, config, drafts, export, invoices, payments
 from app.auth.staff import Staff, get_pool, require
 
 router = APIRouter(prefix="/booking", tags=["agency-billing"])
@@ -38,6 +41,8 @@ CanRead = Annotated[Staff, Depends(require("agency_billing.read"))]
 CanWrite = Annotated[Staff, Depends(require("agency_billing.write"))]
 CanApprove = Annotated[Staff, Depends(require("agency_payment.approve"))]
 CanConfigure = Annotated[Staff, Depends(require("billing_config.write"))]
+CanApproveClause = Annotated[Staff, Depends(require("terms_clause.approve"))]
+ClauseCode = Annotated[str, Path(pattern=r"^[a-z][a-z0-9_]{1,39}$")]
 Ref = Annotated[str, Path(min_length=1, max_length=64, description="Invoice UUID or number (AAS-2026-000001)")]
 IdempotencyKey = Annotated[
     str | None, Header(alias="Idempotency-Key", max_length=200, description="8-200 characters, one per request")
@@ -160,6 +165,21 @@ class BillingTermsIn(BaseModel):
     warn_after_days: int = Field(ge=0, le=365)
     suspend_after_days: int = Field(ge=1, le=365)
     saas_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+
+
+class TermsClauseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=4000)
+    free_cancel_days: int | None = Field(default=None, ge=0, le=60)
+    position: int | None = Field(default=None, ge=1, le=999)
+
+
+class TermsClauseApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1, description="the version the approver read")
 
 
 # ── Invoices ─────────────────────────────────────────────────────────────────
@@ -378,3 +398,50 @@ async def delete_agency_terms(tenant_id: UUID, staff: CanConfigure, pool: Pool) 
     async with pool.acquire() as conn:
         await config.delete_terms_override(conn, str(tenant_id), staff.cis_user_id)
     return Response(status_code=204)
+
+
+# ── AA-1037 extras: accountant export (G5) and partner terms clauses (G6) ─────
+
+
+@router.get(
+    "/agency-billing/export.csv",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {"schema": {"type": "string"}}}}},
+)
+async def export_agency_billing(
+    staff: CanRead,
+    pool: Pool,
+    what: Annotated[Literal["invoices", "payments"], Query()],
+    start: Annotated[date, Query(alias="from")],
+    end: Annotated[date, Query(alias="to")],
+) -> Response:
+    async with pool.acquire() as conn:
+        text, _ = await export.export(conn, what, start, end, staff.cis_user_id)
+    return Response(
+        content=text.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{export.file_name(what, start, end)}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/partner-terms-clauses")
+async def list_terms_clauses(_: CanRead, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return {"items": await clauses.list_clauses(conn)}
+
+
+@router.put("/partner-terms-clauses/{code}")
+async def put_terms_clause(code: ClauseCode, body: TermsClauseIn, staff: CanConfigure, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await clauses.put_clause(conn, code, body.model_dump(), staff.cis_user_id)
+
+
+@router.post("/partner-terms-clauses/{code}/approve")
+async def approve_terms_clause(
+    code: ClauseCode, body: TermsClauseApproveIn, staff: CanApproveClause, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await clauses.approve_clause(conn, code, body.version, staff.cis_user_id)

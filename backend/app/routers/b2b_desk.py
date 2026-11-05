@@ -9,12 +9,14 @@ outcome as events on ``GET /booking/b2b/v1/events``.
 - ``GET /departures?from&to``: departures with seats, the agencies on them and the open incident.
 - ``GET /departures/{id}/incidents``, ``POST /departures/{id}/incidents`` (``incident_code``) = "Flag incident on
   departure"; ``POST /incidents/{id}/clear``.
+- ``GET /bookings/{ref}/confirmation`` (AA-1037 G2; ``ref`` = the trip case id or code): the booking confirmation of
+  a confirmed B2B booking as the printable HTML file the agency gets (``format=json`` for the JSON body).
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
 import asyncpg
@@ -22,7 +24,8 @@ from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.auth.staff import Staff, get_pool, require
-from app.b2b import desk
+from app.b2b import confirmation, desk
+from app.errors import NotFound
 
 router = APIRouter(prefix="/booking/b2b-desk", tags=["b2b"])
 
@@ -105,3 +108,22 @@ async def flag_incident(
 async def clear_incident(incident_id: Annotated[uuid.UUID, Path()], staff: CanWrite, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await desk.clear_incident(conn, staff, str(incident_id))
+
+
+@router.get(
+    "/bookings/{ref}/confirmation",
+    responses={200: {"content": {"text/html": {"schema": {"type": "string"}}}}},
+)
+async def get_booking_confirmation(
+    ref: Annotated[str, Path(min_length=1, max_length=64, description="trip case id or code")],
+    _: CanRead,
+    pool: Pool,
+    format: Literal["json", "html"] = "html",
+) -> Any:
+    async with pool.acquire() as conn:
+        doc = await confirmation.load(conn, ref, partner_id=None, now=datetime.now(UTC))
+    if doc is None:
+        raise NotFound("booking_not_found", "no confirmed B2B booking with this id or code")
+    if format == "html":
+        return confirmation.html_response(doc)
+    return {**confirmation.public(doc), "agency_name": doc["_agency_name"]}

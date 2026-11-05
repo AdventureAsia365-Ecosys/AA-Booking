@@ -4,7 +4,7 @@
 // Read agency_billing.read, write agency_billing.write, approve / reject a payment agency_payment.approve (never the
 // person who recorded it), configuration billing_config.write: admin and finance.
 
-import { bkGet, bkSend } from "./client";
+import { BFF_BASE, ApiError, bkGet, bkSend } from "./client";
 import type { IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
@@ -98,9 +98,71 @@ export interface AgencyPayment {
   reject_reason: string | null;
 }
 
+/** AA-1037 extras G4: an overdue reminder step handled for an invoice (bk-044). */
+export interface InvoiceReminder {
+  step_days: number;
+  step_kind: "reminder" | "credit_stop";
+  days_overdue: number;
+  outcome: "sent" | "skipped";
+  skip_reason: string | null;
+  sent_to: string | null;
+  redirected: boolean;
+  created_at: IsoDateTime;
+}
+
 export interface AgencyInvoiceDetail extends AgencyInvoice {
   lines: AgencyInvoiceLine[];
   payments: AgencyPayment[];
+  reminders?: InvoiceReminder[];
+}
+
+/** AA-1037 extras G6: a clause of AA's terms to agencies (bk-044); agencies see approved clauses only. */
+export interface TermsClause {
+  id: string;
+  code: string;
+  position: number;
+  title: string;
+  body: string;
+  free_cancel_days: number | null;
+  status: "draft" | "approved";
+  version: number;
+  updated_at: IsoDateTime;
+  updated_by: string;
+  approved_by: string | null;
+  approved_at: IsoDateTime | null;
+}
+
+export type ExportWhat = "invoices" | "payments";
+
+/** A staff download (CSV, HTML) as a Blob; the API's error code on failure (fetch through the BFF, like bkGet). */
+async function download(path: string, query: Record<string, string>): Promise<Blob> {
+  const qs = new URLSearchParams(query).toString();
+  const res = await fetch(`${BFF_BASE}/${path}${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+  if (!res.ok) {
+    let code = "";
+    let message = "The file could not be downloaded.";
+    try {
+      const body = (await res.json()) as { detail?: unknown; message?: string };
+      if (typeof body.detail === "string") code = body.detail;
+      if (typeof body.message === "string") message = body.message;
+    } catch {
+      // not JSON: keep the generic message
+    }
+    throw new ApiError(message, res.status, code);
+  }
+  return res.blob();
+}
+
+/** Save a Blob under a file name (browser only). */
+export function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 export interface Page<T> {
@@ -218,6 +280,15 @@ export const agencyBillingApi = {
   putAgencyTerms: (tenantId: string, body: BillingTerms) =>
     bkSend<BillingTerms>(`billing-terms/agencies/${enc(tenantId)}`, { method: "PUT", body }),
   deleteAgencyTerms: (tenantId: string) => bkSend<void>(`billing-terms/agencies/${enc(tenantId)}`, { method: "DELETE" }),
+  // AA-1037 extras: the accountant export (G5) and the partner terms clauses (G6).
+  exportCsv: (what: ExportWhat, from: string, to: string) => download("agency-billing/export.csv", { what, from, to }),
+  clauses: () => bkGet<{ items: TermsClause[] }>("partner-terms-clauses"),
+  putClause: (code: string, body: { title: string; body: string; free_cancel_days: number | null }) =>
+    bkSend<TermsClause>(`partner-terms-clauses/${enc(code)}`, { method: "PUT", body }),
+  approveClause: (code: string, version: number) =>
+    bkSend<TermsClause>(`partner-terms-clauses/${enc(code)}/approve`, { body: { version } }),
+  // AA-1037 extras G2: the booking confirmation of a B2B booking (the HTML file the agency gets).
+  confirmation: (caseRef: string) => download(`b2b-desk/bookings/${enc(caseRef)}/confirmation`, {}),
 };
 
 /** "2026-11-01" -> "November 2026" (the invoice period is a calendar month). */

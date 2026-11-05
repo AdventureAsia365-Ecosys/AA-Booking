@@ -147,7 +147,17 @@ def test_quote_prices_lines_and_stores_append_only() -> None:
     resp = _client(conn, m2m).post("/booking/b2b/v1/quotes", json=_quote_body(), headers=_headers(m2m.token()))
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert set(body) == {"quote_id", "currency", "fx", "valid_until", "price_hash", "lines", "total_b2b_price"}
+    assert set(body) == {
+        "quote_id",
+        "currency",
+        "fx",
+        "valid_until",
+        "price_hash",
+        "lines",
+        "total_b2b_price",
+        "cancellation_policy",  # 1.3 (AA-1037 G1); null here: no approved policy scripted
+    }
+    assert body["cancellation_policy"] is None
     # 2 nights x 1,000,000 VND / 25,000 = 80 USD net; / (1 - 0.15 - 0.03) = 97.5609… → ceil 97.57.
     # 10 USD x 2 pax = 20 net → 24.3902… → 24.40. Total = exact sum.
     assert [line["b2b_price"] for line in body["lines"]] == [
@@ -467,6 +477,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/holds/{hold_id}/extend",
         "/booking/b2b/v1/bookings/{booking_id}/cancel",
         "/booking/b2b/v1/events",
+        "/booking/b2b/v1/bookings/{booking_id}/confirmation",  # 1.3 (AA-1037 G2)
+        "/booking/b2b/v1/terms",  # 1.3 (AA-1037 G6)
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -486,6 +498,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "Booking",
         "CancellationResult",
         "EventPage",
+        "BookingConfirmation",
+        "PartnerTerms",
     }
     keys: set[str] = set()
     pending, seen = list(refs), set()

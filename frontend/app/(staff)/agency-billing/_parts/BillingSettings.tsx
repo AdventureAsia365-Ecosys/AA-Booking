@@ -4,6 +4,8 @@
 // the tax rules (rate + wording per kind and recipient country, with an effective window) and the payment terms (the
 // default set and per-agency overrides: deposit %, balance days before departure, due days, warn / suspend days).
 // Every change is audited in Booking. billing_config.write = admin, finance.
+// AA-1037 extras G6: the terms clauses agencies see (e.g. price errors), as data: finance edits a clause (a draft
+// again), the business owner (terms_clause.approve = admin) approves it; agencies only see approved clauses.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,10 +16,12 @@ import {
   type BillingEntity,
   type BillingTerms,
   type TaxRule,
+  type TermsClause,
 } from "@/lib/api/agencyBilling";
 import {
   Button,
   Checkbox,
+  ConfirmDialog,
   DataTable,
   DateText,
   Field,
@@ -28,6 +32,7 @@ import {
   Select,
   Textarea,
   useCan,
+  useStaff,
   useToast,
 } from "@/ui";
 import { errorText } from "./shared";
@@ -38,6 +43,7 @@ export function BillingSettings() {
       <EntitiesSection />
       <TaxRulesSection />
       <TermsSection />
+      <TermsClausesSection />
     </div>
   );
 }
@@ -379,6 +385,156 @@ function TermsSection() {
           </ul>
         </div>
       )}
+    </Section>
+  );
+}
+
+// ── Terms clauses (AA-1037 extras G6) ────────────────────────────────────────
+
+type ClauseForm = { code: string; title: string; body: string; free_cancel_days: string; isNew: boolean };
+
+function TermsClausesSection() {
+  const canEdit = useCan("billing_config.write");
+  const canApprove = useCan("terms_clause.approve");
+  const me = useStaff();
+  const toast = useToast();
+  const invalidate = useInvalidate();
+  const list = useQuery({ queryKey: ["agency-billing", "clauses"], queryFn: agencyBillingApi.clauses });
+  const [form, setForm] = useState<ClauseForm | null>(null);
+  const [approving, setApproving] = useState<TermsClause | null>(null);
+  const save = useMutation({
+    mutationFn: (f: ClauseForm) =>
+      agencyBillingApi.putClause(f.code.trim(), {
+        title: f.title.trim(),
+        body: f.body.trim(),
+        free_cancel_days: f.free_cancel_days.trim() === "" ? null : Number(f.free_cancel_days),
+      }),
+    onSuccess: () => {
+      toast.success("Clause saved as a draft; it reaches agencies once approved");
+      setForm(null);
+      invalidate();
+    },
+  });
+  const approve = useMutation({
+    mutationFn: (c: TermsClause) => agencyBillingApi.approveClause(c.code, c.version),
+    onSuccess: () => {
+      toast.success("Clause approved; agencies now see it");
+      setApproving(null);
+      invalidate();
+    },
+    onError: (e) => {
+      toast.error(errorText(e));
+      setApproving(null);
+    },
+  });
+  const columns: ColumnDef<TermsClause, unknown>[] = [
+    {
+      id: "title",
+      header: "Clause",
+      cell: ({ row }) => (
+        <div className="flex max-w-[640px] flex-col gap-1">
+          <span className="font-semibold">{row.original.title}</span>
+          <span className="whitespace-pre-line text-[13px] text-body">{row.original.body}</span>
+        </div>
+      ),
+    },
+    {
+      id: "window",
+      header: "Free-cancel window",
+      cell: ({ row }) => (row.original.free_cancel_days == null ? "—" : `${row.original.free_cancel_days} days`),
+    },
+    {
+      id: "status",
+      header: "Status",
+      cell: ({ row }) =>
+        row.original.status === "approved" ? (
+          <Pill tone="success">{`Approved v${row.original.version}`}</Pill>
+        ) : (
+          <Pill tone="warning">{`Draft v${row.original.version}, not shown to agencies`}</Pill>
+        ),
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <span className="flex flex-wrap gap-2">
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                setForm({
+                  code: row.original.code,
+                  title: row.original.title,
+                  body: row.original.body,
+                  free_cancel_days: row.original.free_cancel_days == null ? "" : String(row.original.free_cancel_days),
+                  isNew: false,
+                })
+              }
+            >
+              Edit
+            </Button>
+          )}
+          {canApprove && row.original.status === "draft" && row.original.updated_by !== me.cis_user_id && (
+            <Button size="sm" variant="primary" onClick={() => setApproving(row.original)}>Approve</Button>
+          )}
+        </span>
+      ),
+    },
+  ];
+  const f = form;
+  return (
+    <Section
+      title="Terms clauses"
+      description="Clauses of AA's terms that agencies read with their payment terms (for example how AA corrects a clearly wrong price). A clause is a draft until the business owner approves it; any edit makes it a draft again."
+      actions={canEdit ? <Button onClick={() => setForm({ code: "", title: "", body: "", free_cancel_days: "", isNew: true })}>Add clause</Button> : undefined}
+    >
+      <DataTable<TermsClause>
+        searchable={false}
+        tableId="terms-clauses"
+        data={list.data?.items ?? []}
+        columns={columns}
+        getRowId={(r) => r.id}
+        loading={list.isLoading}
+        error={list.isError ? errorText(list.error) : null}
+        emptyTitle="No terms clause"
+        emptyDescription="Add a clause; agencies see it once it is approved."
+        tableMinWidth={900}
+      />
+      <FormDrawer
+        open={f !== null}
+        onClose={() => setForm(null)}
+        title={f?.isNew ? "Add terms clause" : "Edit terms clause"}
+        onSubmit={() => f && save.mutate(f)}
+        busy={save.isPending}
+        error={save.isError ? errorText(save.error) : null}
+      >
+        {f && (
+          <div className="flex flex-col gap-3">
+            <Field label="Code" required hint="Lower-case letters, digits or _ (for example price_error)">
+              <Input value={f.code} disabled={!f.isNew} onChange={(e) => setForm({ ...f, code: e.target.value.toLowerCase() })} />
+            </Field>
+            <Field label="Title" required>
+              <Input value={f.title} maxLength={120} onChange={(e) => setForm({ ...f, title: e.target.value })} />
+            </Field>
+            <Field label="Wording" required hint="Saved as a draft; the business owner approves the wording before agencies see it">
+              <Textarea value={f.body} rows={8} maxLength={4000} onChange={(e) => setForm({ ...f, body: e.target.value })} />
+            </Field>
+            <Field label="Free-cancel window (days)" hint="Days the agency may cancel free of charge after AA's notice; empty when the clause has none">
+              <Input type="number" min={0} max={60} value={f.free_cancel_days} onChange={(e) => setForm({ ...f, free_cancel_days: e.target.value })} />
+            </Field>
+          </div>
+        )}
+      </FormDrawer>
+      <ConfirmDialog
+        open={approving !== null}
+        onClose={() => setApproving(null)}
+        onConfirm={() => approving && approve.mutate(approving)}
+        title={`Approve "${approving?.title ?? ""}"?`}
+        message="Agencies see this wording in their terms from now on. A later edit makes it a draft again."
+        confirmLabel="Approve"
+        busy={approve.isPending}
+      />
     </Section>
   );
 }

@@ -11,8 +11,9 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Briefcase, CalendarDays, Pencil, User, UserPlus, Users as UsersIcon } from "lucide-react";
+import { ArrowLeft, Briefcase, CalendarDays, FileText, Pencil, User, UserPlus, Users as UsersIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
+import { agencyBillingApi, saveBlob } from "@/lib/api/agencyBilling";
 import type { ActivityItem, TripCaseDetail } from "@/lib/api/types";
 import { CATALOG_STATE_META, catalogReasonLabel, isFlaggedState } from "@/lib/tourState";
 import {
@@ -146,6 +147,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
                   <Pencil size={14} /> Edit details
                 </Button>
               )}
+              {c.channel === "b2b" && <ConfirmationButton code={c.code} />}
               {c.channel !== "b2b" && <StatusActions c={c} />}
             </div>
           </div>
@@ -565,5 +567,32 @@ function Activity({ code }: { code: string }) {
         </LinkButton>
       )}
     </Section>
+  );
+}
+
+// AA-1037 extras G2: the booking confirmation the agency gets (HTML file, prints to PDF; no traveller names, no prices).
+function ConfirmationButton({ code }: { code: string }) {
+  const canRead = useCan("b2b_desk.read");
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!canRead) return null;
+  async function download() {
+    setBusy(true);
+    setFailed(null);
+    try {
+      saveBlob(await agencyBillingApi.confirmation(code), `booking-confirmation-${code}.html`);
+    } catch (e) {
+      setFailed(e instanceof ApiError && e.status === 404 ? "No confirmed agency booking yet" : "The confirmation could not be downloaded");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Button variant="ghost" disabled={busy} onClick={download}>
+        <FileText size={14} /> {busy ? "Preparing…" : "Confirmation"}
+      </Button>
+      {failed && <span className="text-[12px] text-danger">{failed}</span>}
+    </span>
   );
 }

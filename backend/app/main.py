@@ -38,6 +38,7 @@ from fastapi.exceptions import RequestValidationError
 
 from app import b2c
 from app.agency_billing import drafts as agency_drafts
+from app.agency_billing import reminders as agency_reminders
 from app.auth import customer as customer_auth
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
@@ -137,6 +138,8 @@ def create_app(
                 **cost_sheet.HANDLERS,
                 # AA-1037 R4: the agency invoice drafts (software fee from the CIS subscription, tour settlement).
                 **agency_drafts.HANDLERS,
+                # AA-1037 G4: overdue agency invoice reminders (once per invoice per step, bk-044).
+                agency_reminders.KIND: agency_reminders.build_handler(settings),
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }
@@ -153,6 +156,8 @@ def create_app(
                     cost_sheet.RecomputeSchedule(),
                     # AA-1037 R4: daily, the SaaS draft of this month and the settlement draft of the closed month.
                     agency_drafts.DraftSchedule(),
+                    # AA-1037 G4: daily, the overdue agency invoice reminders.
+                    agency_reminders.ReminderSchedule(),
                     # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
                     ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.

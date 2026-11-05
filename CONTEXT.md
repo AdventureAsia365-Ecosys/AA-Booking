@@ -177,7 +177,7 @@ backend/
                            in force, staff admin; cancel / dry run → b2b_cancellations)
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
                            /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
-                           /bookings/{id}/cancel (AA-974)
+                           /bookings/{id}/cancel (AA-974); /bookings/{id}/confirmation, /terms (AA-1037, minor 1.3)
   app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/ops/                 AA-682 operations after the sale (bk-026): supplier_bookings.py (generate / add / edit /
@@ -194,10 +194,13 @@ backend/
   app/agency_billing/      AA-1037 R4 (bk-041 / bk-042): config.py (billing entity, tax rules, payment terms), invoices.py
                            (list, detail, draft lines, issue with the gap-free AAS- / AAT- number + snapshots, void,
                            e-invoice no), payments.py (record = maker, approve / reject = checker), drafts.py
-                           (bk_saas_invoice_draft, bk_settlement_draft, DraftSchedule), cis.py (catalog.v_tenant_billing_v1)
+                           (bk_saas_invoice_draft, bk_settlement_draft, DraftSchedule), cis.py (catalog.v_tenant_billing_v1);
+                           AA-1037 extras (bk-044): reminders.py (bk_agency_invoice_reminders + ReminderSchedule, G4),
+                           export.py (accountant CSV, G5), clauses.py (partner terms clauses, G6)
   app/routers/agency_billing.py  /booking/agency-invoices*, /booking/agency-payments*, /booking/agency-billing/status|runs,
                            /booking/billing-entities*, /booking/tax-rules*, /booking/billing-terms* (agency_billing.read /
-                           .write, agency_payment.approve, billing_config.write = admin, finance)
+                           .write, agency_payment.approve, billing_config.write = admin, finance);
+                           /booking/agency-billing/export.csv, /booking/partner-terms-clauses* (terms_clause.approve = admin)
   app/routers/billing.py   /booking/invoices (GET, GET/PATCH/DELETE /{number}, …/send|cancel|amend|remind|payments),
                            /booking/trip-cases/{ref}/billing (GET), /booking/trip-cases/{ref}/invoices (POST),
                            /booking/payments (GET, GET/PATCH /{ref}, …/verify|void), /booking/billing/summary —
@@ -274,6 +277,8 @@ backend/
   app/catalog/lifecycle.py AA-986 L5: bk_tour_lifecycle_pull (outbox → inbox → staff notifications) + PullSchedule
   app/b2b/tenant_pull.py   AA-1028: bk_tenant_pull (catalog.v_tenant_account_v1 → booking.b2b_partners) + TenantPullSchedule
   app/b2b/served.py        AA-986 L5: 409 tour_not_served for a tp: line of a tour that is not served
+  app/b2b/confirmation.py  AA-1037 G2: the booking confirmation (JSON / printable HTML; no traveller names, no prices)
+  app/b2b/terms.py         AA-1037 G6: GET /booking/b2b/v1/terms (payment terms, credit status, policy, approved clauses)
   app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules,
                            /booking/pricing/fx-rates and /booking/pricing/cancellation-policies (AA-974), POST
                            …/{id}/approve (reads pricing.read, writes pricing.write)
@@ -420,7 +425,12 @@ Booking sends transactional e-mail through **Amazon SES** on acc2 (identity `lum
 message: the staff **"new inquiry"** e-mail. Booking sends it, not TripPlanner (S238 decision, ADR 0004 boundary:
 TripPlanner is the front door, Booking owns customers, trip cases and notifications); TripPlanner's `notify.py` only
 logs. Sending happens in a `booking.job` (`bk_notify_email`), never in a request path or inside the intake
-transaction. Templates are in code (`app/notifications/staff_email.py`). Bounce/complaint suppression in Booking
+transaction. Templates are in code (`app/notifications/staff_email.py`). **Agency invoice reminders** (AA-1037 G4,
+`bk_agency_invoice_reminders`, daily, `app/agency_billing/reminders.py`): an overdue issued agency invoice gets one
+e-mail per step it reaches (setting `agency_reminder_steps_days`, default 1 / 7 / 14 days overdue, plus the credit-stop
+step at the agency's `suspend_after_days`; only the highest step reached), to the bill-to billing e-mail of the
+invoice, recorded once per (invoice, step) in `booking.agency_invoice_reminder` (bk-044). Outside `prod` every
+reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). Bounce/complaint suppression in Booking
 tables is not built yet (the SES configuration set's account suppression list applies). Customer e-mail (proposal
 send, OTP) is not built: those still write rows only.
 
@@ -486,7 +496,8 @@ send, OTP) is not built: those still write rows only.
   `maker_checker`); `payout.write` = admin (never on a bill they entered or last changed). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
   Agency billing (AA-1037, bk-041 / bk-042): `agency_billing.read` / `agency_billing.write` / `agency_payment.approve` /
   `billing_config.write` = admin, finance; approving or rejecting a payment is never its recorder's (403 `maker_checker`,
-  CHECK in the database). None of them is in the preview cap.
+  CHECK in the database). None of them is in the preview cap. `terms_clause.approve` = admin (AA-1037 G6, bk-044): a
+  partner terms clause reaches agencies once approved, never by its last editor (403 `maker_checker`, CHECK).
   Catalog geo state (AA-996, bk-029): the Booking status, reason, area and notes of a CIS country or place
   `catalog.admin` = admin only (UI spec §3 "A edit status"); reading Countries / Destinations is `catalog.read`.
   Notifications,
@@ -631,6 +642,25 @@ send, OTP) is not built: those still write rows only.
   AA-682 (design D13, one action both ways): a line that a live supplier booking covers is answered by that booking
   (its confirm accepts the line, its decline declines it, through `desk.answer_line` in the same transaction); the desk
   answers such a line 409 `answer_from_suppliers_tab` and lists the booking code (`supplier_booking`).
+- **Contract minor 1.3 (AA-1037 R4 extras, additive; root research note 2026-11-05 Asian Trails benchmark G1 / G2 / G4 /
+  G6)**:
+  - **G1 policy on answers**: every `Quote` and `Hold` answer carries `cancellation_policy` `{policy_id, basis, tiers}`:
+    `in_force_today` = the policy a confirm today would lock (the plan of the first `tp:` line, else the B2B default),
+    `locked` = the policy locked on a confirmed hold. Not part of the price hash; null without an approved policy.
+  - **G2 booking confirmation**: `GET /bookings/{booking_id}/confirmation` (scope `read`, the agency's own bookings;
+    `format=json` | `html`) and staff `GET /booking/b2b-desk/bookings/{ref}/confirmation` (`b2b_desk.read`, case id or
+    code, HTML by default): reference, agency proposal ref / version, status (`confirmed` | `cancelled`), dates, the
+    most travellers of a line by age band, each line (title, kind, date, nights, pax, rooms, status, supplier
+    confirmation refs of the confirmed supplier bookings covering it) and the locked policy. No traveller names, no
+    prices. HTML = one self-contained file (inline CSS, no script, every value escaped, CSP `default-src 'none'`),
+    downloaded as an attachment; Booking has no PDF renderer, so the page prints to PDF from the browser. Staff:
+    "Confirmation" on a B2B trip case.
+  - **G4 credit stop**: `POST /holds` is 409 `credit_hold_overdue` while the agency's `booking.v_tenant_billing_status`
+    is `past_due` (oldest overdue agency invoice past `suspend_after_days`); replays, confirms, extends and cancels of
+    existing holds still work; the stop lifts once the overdue invoices are paid (payment approved).
+  - **G6 terms**: `GET /terms` (scope `read`): the agency's payment terms (deposit %, balance days, settlement due
+    days), credit status (`holds_paused`), the default cancellation policy in force and the **approved** partner terms
+    clauses (bk-044 `partner_terms_clause`, e.g. `price_error` with its free-cancel window). Drafts never reach it.
 
 ## Tour price chain (AA-1029; root ADR 0005 d3 / d6 / d7, ADR 0019 b15)
 
@@ -925,6 +955,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). AA-969 (root ADR 0019 d16): the clearing never touches a case of the pilot tenant (`party_tenant_id`). |
 | `bk_ops_reminders` | AA-682 S2: same daily hook and key pattern. Notifications only, each once (`reminder_key`, `ON CONFLICT DO NOTHING`): `supplier_booking.waiting` (requested more than `supplier_answer_days` ago; to the requester, else the shared queue; again after a re-request) and `trip_check.due` (open check due within `trip_check_reminder_days` or overdue; to the assignee, else the shared queue; again when the due date changes). S3 (bk-028): `payment.due_soon` (a schedule row of a sent invoice due within `payment_due_soon_days`) and `invoice.overdue` (past due, at the steps of `payment_overdue_reminder_days` [1, 7], the highest step reached), each one staff row (the case's sales owner, else the shared queue) + one customer My Trips row (no e-mail); read in the ops time zone. S4 (bk-030): `supplier_bill.due` (a received or approved bill due within `supplier_bill_due_soon_days`, then once more when overdue; shared staff queue). Never writes money. Not deploy-gate exempt. |
 | `bk_saas_invoice_draft` | AA-1037 R4 (root ADR 0019 d9): the software-fee drafts of a month (payload `period` YYYY-MM, optional `tenant_id`): every live subscription (active, past_due) of `catalog.v_tenant_billing_v1` (CIS 377; `skipped` without it) gives `subscription` / `extra_seats` lines on the agency's draft (one live invoice per agency, kind, period start and currency); a plan without a price gives a zero line (`price_missing`); a re-run replaces the job lines of a draft and leaves an issued invoice alone. Queued daily by `DraftSchedule` for the current month (key per month) and by staff (`POST /booking/agency-billing/runs`). One transaction per agency; a failing agency is counted and the run raises at the end. Not deploy-gate exempt (seconds). |
+| `bk_agency_invoice_reminders` | AA-1037 extras G4: once a day (`ReminderSchedule`, key per day; payload `day`), the overdue issued agency invoices with a balance (at most 500): per invoice the highest step reached (`agency_reminder_steps_days` + the credit stop at `suspend_after_days`) not yet in `booking.agency_invoice_reminder` is e-mailed (outside prod to the staff inbox) and recorded, or recorded `skipped` without a billing e-mail. No `SES_FROM_ADDRESS` (or no staff inbox outside prod): `skipped`, nothing written. A failed send is counted, the others are kept and the run raises (retried); a sending pause fails it. Not deploy-gate exempt (seconds). |
 | `bk_settlement_draft` | AA-1037 R4: the tour settlement drafts of a month (default: the closed month): per confirmed B2B hold, `deposit` (deposit % of the B2B total) or `full` (booked inside the balance window), then `balance` once the balance date (departure - `balance_days_before_departure`) is before the period end, or one `cancellation_fee` line (the fee less what was billed; a credit when negative) for a cancelled booking; terms from `billing_terms` (agency override, else default); one live line per (hold, role), so nothing is billed twice and an unbilled earlier event lands on the next run. Queued daily by `DraftSchedule` for the previous month and by staff. Not deploy-gate exempt. |
 | `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
@@ -1487,6 +1518,15 @@ total; e-invoice number once; lines change only on a draft; payments: one final 
 `booking.v_tenant_billing_status` SELECT to `booking` and `cis_app` (Infra `db/owners.yaml` consumer grant). The code
 raises readiness to bk-042.
 
+### `bk-044` (AA-1037 R4 extras G4 / G6 — needs `bk-041`)
+
+An **expand** file: `booking.agency_invoice_reminder` (one row per overdue agency invoice and reminder step, PK
+`(invoice_id, step_days)`; `sent` with the address (`pii:contact`) and the SES message id, or `skipped`
+`no_billing_email`) and `booking.partner_terms_clause` (clauses of AA's terms to agencies as data: code, heading (the title), body,
+`free_cancel_days`, `draft` | `approved`, version; approved by a person who is not its last editor, CHECK), one seed row:
+`price_error`, DRAFT wording for the business owner to approve. SELECT / INSERT (and UPDATE on clauses) to `booking`.
+The code raises readiness to bk-044.
+
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679
 follow-up). `v_from_prices` shipped with bk-039 (AA-1029). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
@@ -1495,7 +1535,8 @@ follow-up). `v_from_prices` shipped with bk-039 (AA-1029). Operations S5 (My Pay
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
 (proforma only, D7; agency invoices carry a tax rule and the manually recorded e-invoice number, AA-1037), the
-e-invoice provider API (later; phase 1 = manual `e_invoice_no`), invoice PDF and e-mail of agency invoices,
+e-invoice provider API (later; phase 1 = manual `e_invoice_no`), invoice PDF and e-mail of agency invoices (only the
+overdue reminders are e-mailed, AA-1037 G4; documents are printable HTML, no PDF renderer),
 maker-checker on billing settings (audited only; the R4 "editable Settings" slice), a customer notifications feed (the customer rows
 of AA-682 are written but `booking.customer.v1` serves payments only; critic note 11),
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the

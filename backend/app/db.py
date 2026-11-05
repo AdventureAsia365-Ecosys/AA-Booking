@@ -59,6 +59,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     # bk-040 (AA-1029 cis_app grant) changes no shape read here.
     "bk-041",  # AA-1037 R4: agency billing tables (expand)
     "bk-042",  # AA-1037 R4: agency billing guards + v_tenant_billing_status (contract; MIG-4)
+    "bk-044",  # AA-1037 R4 extras: agency invoice reminder log + partner terms clauses (expand)
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
