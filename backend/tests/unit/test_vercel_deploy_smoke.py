@@ -178,7 +178,7 @@ def test_playwright_has_the_smoke_public_project_without_a_local_server() -> Non
     project = cfg[cfg.index('name: "smoke-public"') :]
     assert r"testMatch: /smoke-public\/.*\.spec\.ts$/" in project
     assert "baseURL: SMOKE_BASE_URL" in project
-    assert "webServer: SMOKE_BASE_URL ? undefined : [" in cfg, "a deployed URL needs no local next start"
+    assert "webServer: SMOKE_BASE_URL || VISUAL_BASE_URL ? undefined : [" in cfg, "a deployed URL (smoke or visual) needs no local next start"
     scripts = json.loads((FRONTEND / "package.json").read_text())["scripts"]
     assert "--project=smoke-public" in scripts["test:smoke-public"]
     assert f"https://{PRODUCTION_HOST}" in scripts["test:smoke-public"]
