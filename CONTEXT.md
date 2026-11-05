@@ -123,6 +123,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   ok | warn | past_due from the oldest overdue issued invoice against its warn / suspend days, oldest overdue days,
   overdue invoices and amount per currency, paid-through day of the software fee, the warn / suspend days), SELECT to
   `cis_app`: the CIS hourly `tenant_billing_tick` moves the account (CIS stays the only writer of account state).
+  CIS Tenant 360 links to the staff page `/agency-billing?tab=invoices&tenant=<CIS tenant uuid>`: the Invoices tab sends
+  `tenant_id` to `GET /booking/agency-invoices` and shows a removable chip with the agency's name; a value that is not
+  a UUID is ignored (the unfiltered list).
   No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
   `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B

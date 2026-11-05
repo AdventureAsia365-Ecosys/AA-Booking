@@ -72,7 +72,8 @@ export function AgencyBillingView() {
       title="Agency billing"
       description="Every invoice from AA to an agency: the software fee and the tour settlement. Drafts come from the monthly jobs; finance issues them, records payments and a second person approves each payment."
     >
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* One column on a phone, like the billing KPIs: a money value at the tile size is wider than half of 390 px. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="Drafts to issue" value={summary.data ? String(summary.data.by_currency.reduce((n, r) => n + r.drafts, 0)) : loading} />
         <KpiTile label="Open (USD)" value={usd ? <Money amount={usd.open} currency="USD" /> : loading} />
         <KpiTile label="Overdue (USD)" value={usd ? <Money amount={usd.overdue} currency="USD" /> : loading} valueTone={usd && Number(usd.overdue) > 0 ? "danger" : undefined} />
