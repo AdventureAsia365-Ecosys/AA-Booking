@@ -331,6 +331,8 @@ export interface VersionListItem extends Omit<Version, "updated_by"> {
   trip_case_id: string;
   trip_case_code: string;
   trip_case_status: TripCaseStatus;
+  /** AA-1037: the case's channel (the version's own `channel` is its pricing channel). */
+  trip_case_channel: TripCaseChannel;
   start_date: IsoDate | null;
   end_date: IsoDate | null;
   sales_id: string | null;

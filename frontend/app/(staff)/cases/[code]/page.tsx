@@ -38,12 +38,10 @@ import {
   TripCaseStatusBadge,
   Money,
   formatDay,
-  StaffProvider,
   useCan,
-  useStaff,
   useUrlFilters,
 } from "@/ui";
-import { B2C_READ_ONLY_NOTE, casePermissions, isFrozenCase } from "@/ui/booking/b2cFrozen";
+import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { caseCountries, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFacts";
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
@@ -69,7 +67,6 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
   const { code } = use(params);
   const ref = decodeURIComponent(code);
   const q = useQuery({ queryKey: ["trip-case", ref], queryFn: () => api.tripCases.get(ref) });
-  const staff = useStaff();
 
   if (q.isLoading) return <WorkspaceSkeleton />;
   if (q.isError || !q.data) {
@@ -92,14 +89,9 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
       </PageFrame>
     );
   }
-  const c = q.data;
-  // AA-1037 (root ADR 0019 d8): a b2c case is read-only while the B2C part is closed: every tab below reads its write
-  // permissions from this provider (the API answers 410 b2b_only to the same writes).
-  return (
-    <StaffProvider staff={{ ...staff, permissions: casePermissions(staff.permissions, c.channel, B2C_INTAKE_OPEN) }}>
-      <Workspace c={c} />
-    </StaffProvider>
-  );
+  // AA-1037 (root ADR 0019 d8): a b2c case is read-only while the B2C part is closed: every tab reads its write
+  // permissions from the case layout's StaffProvider (./layout.tsx, casePermissions; the API answers 410 b2b_only).
+  return <Workspace c={q.data} />;
 }
 
 function Workspace({ c }: { c: TripCaseDetail }) {

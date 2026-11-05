@@ -259,6 +259,7 @@ function versionListItem(i: number): VersionListItem {
     trip_case_id: uuid("c", i),
     trip_case_code: `TC-${pad(i + 1)}`,
     trip_case_status: OPEN_STATUSES[i % OPEN_STATUSES.length],
+    trip_case_channel: i % 7 === 3 ? "b2b" : "b2c",
     start_date: "2027-01-14",
     end_date: "2027-02-02",
     sales_id: "u-001",

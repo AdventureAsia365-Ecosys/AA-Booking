@@ -2,10 +2,11 @@
 // (NEXT_PUBLIC_B2C_INTAKE unset) the staff admin offers no B2C write, and the nav leads with the B2B pages.
 //   1. b2cFrozen.ts: the permissions taken out everywhere and inside a b2c case; the billing read mask;
 //   2. navMatch.ts: Partners (Agency billing > Agencies) and Settlement (the rest of Agency billing) on one page;
-//   3. source guards: the layout, the case page and the billing client use them; the nav order; the phone bottom nav.
+//   3. source guards: the staff layout, the case layout and the billing client use them; every other page that offers a
+//      case, version or operations write gates it per case; the nav order; the phone bottom nav.
 // Run: npm run test:unit (node --test ui/booking/*.test.mjs).
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -77,16 +78,55 @@ test("Partners is the Agencies tab of Agency billing, Settlement the rest of it"
   assert.equal(match.navActive({ href: "/cases" }, "/cases/TC-000001"), true);
 });
 
-test("the layout, the case page and the billing client apply the freeze", () => {
+test("the layout, the case layout and the billing client apply the freeze", () => {
   assert.match(read("app/(staff)/layout.tsx"), /withoutB2cWrites\(me\.staff\.permissions, B2C_INTAKE_OPEN\)/);
+  // Every route under /cases/{code} (workspace, proposal builder, preview) sits inside this provider.
   assert.match(
-    read("app/(staff)/cases/[code]/page.tsx"),
-    /<StaffProvider staff=\{\{ \.\.\.staff, permissions: casePermissions\(staff\.permissions, c\.channel, B2C_INTAKE_OPEN\) \}\}>/,
+    read("app/(staff)/cases/[code]/layout.tsx"),
+    /<StaffProvider staff=\{\{ \.\.\.staff, permissions: casePermissions\(staff\.permissions, q\.data\?\.channel, B2C_INTAKE_OPEN\) \}\}>/,
   );
+  // No page below it hands out its own staff profile again (that would drop the case mask).
+  for (const file of filesUnder("app/(staff)/cases/[code]")) {
+    if (file.endsWith("/layout.tsx")) continue;
+    assert.doesNotMatch(read(file), /<StaffProvider\b/, file);
+  }
   const billing = read("lib/api/billing.ts");
   for (const call of ["invoices", "invoice", "forCase", "payments", "payment"]) {
     assert.match(billing, new RegExp(`\\b${call}: \\([^)]*\\)[^=]*=> b2cRead\\(bkGet<`), call);
   }
+});
+
+// Each page outside /cases/{code} that reads a case, version or operations write permission gates it itself: per case
+// (isFrozenCase on the row's or check's channel) or for the whole page (B2C_INTAKE_OPEN: it only creates b2c cases).
+// A new entry point fails here until it is gated and listed.
+const CASE_WRITES = /useCan\("(trip_case\.write|trip_case\.assign|version\.write|ops\.write)"\)/;
+const GATED_ELSEWHERE = {
+  "app/(staff)/proposals/page.tsx": /isFrozenCase\(row\.trip_case_channel, B2C_INTAKE_OPEN\)[\s\S]*isFrozenCase\(c\.channel, B2C_INTAKE_OPEN\)/,
+  "app/(staff)/trip-checks/_parts/CheckDrawer.tsx": /useCan\("ops\.write"\) && writable && !frozen/,
+  "app/(staff)/cases/page.tsx": /B2C_INTAKE_OPEN && canWrite/,
+  "app/(staff)/cases/new/page.tsx": /if \(!B2C_INTAKE_OPEN\)/,
+  "app/(staff)/customers/page.tsx": /B2C_INTAKE_OPEN && canCreateCase/,
+  "app/(staff)/customers/[id]/page.tsx": /B2C_INTAKE_OPEN && canCreateCase/,
+  "app/(staff)/catalog/trip-plans/_parts/TripPlanDetailView.tsx": /UseForTripCaseModal/,
+};
+
+function filesUnder(rel) {
+  return readdirSync(ROOT + rel, { recursive: true })
+    .map((f) => `${rel}/${String(f).replaceAll("\\", "/")}`)
+    .filter((f) => /\.tsx?$/.test(f));
+}
+
+test("every case, version or operations write outside a case page is gated per case or for the whole page", () => {
+  assert.match(read("lib/api/types.ts"), /trip_case_channel: TripCaseChannel;/);
+  assert.match(read("app/(staff)/catalog/trip-plans/_parts/UseForTripCaseModal.tsx"), /B2C_INTAKE_OPEN \? "new_case" : "existing_case"/);
+  const found = [];
+  for (const file of [...filesUnder("app"), ...filesUnder("ui")]) {
+    if (file.startsWith("app/(staff)/cases/[code]/") || !CASE_WRITES.test(read(file))) continue;
+    found.push(file);
+    assert.ok(file in GATED_ELSEWHERE, `${file} offers a case write: gate it with isFrozenCase / B2C_INTAKE_OPEN and list it`);
+    assert.match(read(file), GATED_ELSEWHERE[file], file);
+  }
+  assert.deepEqual(found.sort(), Object.keys(GATED_ELSEWHERE).sort());
 });
 
 test("the nav leads with B2B and moves the B2C records to a read-only group while closed", () => {

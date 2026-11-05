@@ -476,8 +476,11 @@ the B2C part of Booking is **read-only** while `B2C_INTAKE_ENABLED` is off (the 
   B2C drop (DRY RUN lane), once the b2c rows are handled.
 - **Staff admin**: the same switch at build time (`NEXT_PUBLIC_B2C_INTAKE`, `frontend/ui/booking/b2cFrozen.ts`) takes
   the B2C-only write permissions out of the staff profile (`billing.write`, `payment.verify`, `customer.write`,
-  `customer.admin`) and, inside a b2c case, the case, version and operations writes too; a b2c case shows a
-  "Read-only" pill. The nav leads with B2B (Partners = Agency billing > Agencies, Settlement = Agency billing, B2B
+  `customer.admin`) and, inside a b2c case (`app/(staff)/cases/[code]/layout.tsx`: the workspace, the proposal
+  builder and its preview), the case, version and operations writes too; a b2c case shows a "Read-only" pill. The
+  pages outside a case gate per row: `/proposals` reads `trip_case_channel` (`GET /booking/versions`) and the check
+  drawer of `/trip-checks` the check's case channel; `ui/booking/b2cFrozen.test.mjs` fails on any other page that
+  reads a case, version or operations write permission until it is gated and listed. The nav leads with B2B (Partners = Agency billing > Agencies, Settlement = Agency billing, B2B
   desk) and moves Customers and Payments & Invoices to the "B2C records (read-only)" group; the phone bottom nav
   shows the B2B desk instead of Customers.
 
