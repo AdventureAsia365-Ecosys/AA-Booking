@@ -38,6 +38,7 @@ name: Vercel Deploy
 # screenshot is uploaded as an artifact. Job `result` is the run's verdict: on a production run it is red unless
 # deploy AND smoke succeeded (a skipped smoke is red too); previews, alias-only and no-op label runs are not gated
 # by it (the deploy job's own status stands, as before).
+# AA-1008 — after the production smoke, job `visual-production` runs visual.yml (public pages, report-only).
 
 on:
   pull_request:
@@ -365,6 +366,22 @@ jobs:
           path: frontend/e2e/smoke-public/results/
           if-no-files-found: warn
           retention-days: 14
+
+  # AA-1008 (root ADR 0016 decision 9) — after the production deploy and its smoke: the visual run (visual.yml job
+  # `deployed`) of the public pages on the production host, 1440 / 390, light / dark. Report-only: the `result`
+  # verdict below does not wait on it. Permissions cover every nested job of visual.yml (GitHub checks them at
+  # startup, S247).
+  visual-production:
+    name: Visual (production, public pages)
+    needs: [deploy, smoke]
+    if: always() && needs.deploy.outputs.target == 'production' && needs.deploy.outputs.url != '' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/visual.yml
+    with:
+      base_url: https://booking.lumiguides.it.com
+      sha: ${{ needs.deploy.outputs.sha }}
 
   # AA-993 V5 — the run's verdict. GitHub shows a skipped job grey, so without this a failed deploy (smoke then
   # skips) or a skipped smoke could pass for green. Production run (push to main, or a dispatch with

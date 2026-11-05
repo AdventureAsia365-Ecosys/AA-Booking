@@ -85,7 +85,7 @@ export function NotificationPopover() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-[420px] max-w-[calc(100vw-24px)] overflow-hidden rounded-lg border border-line bg-card shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+        <div className="absolute right-0 top-full z-50 mt-2 w-[420px] max-w-[calc(100vw-24px)] overflow-hidden rounded-lg border border-line bg-card shadow-kit-lg">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <span className="text-[13px] font-semibold text-ink">Notifications</span>
             {unread > 0 && (
