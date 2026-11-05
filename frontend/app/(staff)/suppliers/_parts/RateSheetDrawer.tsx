@@ -4,15 +4,18 @@
 // pick it: "Check" validates it with nothing written (dry run) and lists the rates or every problem by sheet, row and
 // column; "Import as draft" creates one DRAFT contract with its rates. A second person publishes the draft from the
 // Contracts table (maker-checker), and the prices of the trip plans that use these items follow by themselves.
+// AA-1029: the Check result also lists the trip plans that use the sheet's items, whether each would have a rate for
+// every component once the draft is published, and how many would move to priced (Pricing → Price readiness).
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, FileSpreadsheet } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
-import { suppliersApi, type RateSheetProblem, type RateSheetResult } from "@/lib/api/suppliers";
-import { Button, FormDrawer, LinkButton, useToast } from "@/ui";
+import { suppliersApi, type RateSheetImpact, type RateSheetProblem, type RateSheetResult } from "@/lib/api/suppliers";
+import { Button, FormDrawer, LinkButton, PriceReadinessBadge, useToast } from "@/ui";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_IMPACT_LISTED = 12;
 
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -27,6 +30,46 @@ function problemsOf(err: unknown): RateSheetProblem[] {
   if (!(err instanceof ApiError)) return [];
   const list = err.body.errors;
   return Array.isArray(list) ? (list as RateSheetProblem[]) : [];
+}
+
+/** The trip plans the sheet would price once the draft is published (read only; nothing is written by a check). */
+function Impact({ impact }: { impact: RateSheetImpact }) {
+  if (!impact.plans_total) {
+    return <p className="text-xs text-muted">No trip plan uses these hotels or services yet.</p>;
+  }
+  const moving = impact.would_move_to_priced;
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-line p-3 text-xs text-body" data-testid="rate-sheet-impact">
+      <p className="font-medium text-ink">
+        {impact.plans_total} trip plan{impact.plans_total > 1 ? "s use" : " uses"} these items. Once this draft is published,{" "}
+        {moving ? `${moving} would price from rates.` : "none would move to priced."}
+      </p>
+      <ul className="flex flex-col gap-1.5">
+        {impact.plans.slice(0, MAX_IMPACT_LISTED).map((p) => (
+          <li key={p.tour_key} className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="min-w-0 break-words font-medium text-ink">{p.title ?? p.tour_key}</span>
+              <PriceReadinessBadge status={p.status} />
+              <span aria-hidden="true" className="text-muted">
+                →
+              </span>
+              <span className="sr-only">after publishing:</span>
+              <PriceReadinessBadge status={p.status_after} />
+            </span>
+            <span className="text-muted">
+              {p.components_from_sheet} of {p.components} components from this sheet
+              {p.all_rated_after
+                ? "; every component has a rate"
+                : `; still without a rate: ${p.components_without_rate_after.map((c) => (c.room_type ? `${c.code} ${c.room_type}` : c.code)).join(", ")}`}
+              {p.missing_fx_after.length ? `; no exchange rate for ${p.missing_fx_after.join(", ")}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {impact.plans.length > MAX_IMPACT_LISTED && <p className="text-muted">… and {impact.plans.length - MAX_IMPACT_LISTED} more</p>}
+      {impact.truncated && <p className="text-muted">Only the first {impact.plans.length} plans were checked.</p>}
+    </div>
+  );
 }
 
 export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string; onClose: () => void }) {
@@ -136,6 +179,7 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
           {preview.ignored_sheets.length > 0 && <p className="text-muted">Not read: {preview.ignored_sheets.join(", ")}</p>}
         </div>
       )}
+      {preview?.impact && <Impact impact={preview.impact} />}
     </FormDrawer>
   );
 }

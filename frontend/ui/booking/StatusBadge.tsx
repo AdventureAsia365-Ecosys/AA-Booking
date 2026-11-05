@@ -8,6 +8,7 @@ import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBooki
 import type { TripCheckStatus } from "@/lib/api/tripChecks";
 import type { InvoiceStatus, PaymentState, ScheduleState } from "@/lib/api/billing";
 import type { PayoutState, SupplierBillStatus } from "@/lib/api/supplierBills";
+import type { ReadinessStatus } from "@/lib/api/priceReadiness";
 import { formatMoney } from "../core/format";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
@@ -211,6 +212,22 @@ export function Pill({
       {children}
     </span>
   );
+}
+
+/** AA-1029: price readiness of a trip plan (Pricing → Price readiness, the rate-sheet impact). */
+export const PRICE_READINESS_META: Record<ReadinessStatus, { label: string; tone: BookingTone }> = {
+  priced: { label: "Priced", tone: "success" },
+  hand_priced: { label: "Priced by hand", tone: "info" },
+  missing_rates: { label: "Missing rates", tone: "warning" },
+  missing_fx: { label: "Missing FX rate", tone: "warning" },
+  no_rule: { label: "No pricing rule", tone: "danger" },
+  no_components: { label: "No components", tone: "neutral" },
+  inactive_component: { label: "Inactive component", tone: "danger" },
+};
+
+export function PriceReadinessBadge({ status }: { status: ReadinessStatus | string }) {
+  const meta = PRICE_READINESS_META[status as ReadinessStatus] ?? { label: status, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
 }
 
 export function TripCaseStatusBadge({ status }: { status: TripCaseStatus | string }) {

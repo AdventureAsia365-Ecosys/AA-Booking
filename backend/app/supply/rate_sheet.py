@@ -17,9 +17,12 @@ Template (:func:`template`; ``GET /booking/rate-sheets/template``):
 Items are matched to the supplier's **existing** hotels (by code, ``HTL-000123``, then the room type name, case and
 spaces ignored) and services (by code, ``SVC-000123``): supply facts are entered and checked in the admin (ADR 0004a),
 a rate sheet only prices them. Every problem is reported per sheet, row and column (``errors``) and **nothing is
-written** while one is left; ``dry_run`` validates and previews without writing. Bounded: at most :data:`MAX_BYTES`
-and :data:`MAX_ROWS` rows. The workbook is read with openpyxl in read-only, values-only mode (no formulas are run, no
-macros: an ``.xlsm`` is refused by its content type and openpyxl never executes VBA).
+written** while one is left; ``dry_run`` validates and previews without writing, and adds the sheet's ``impact``
+(``app.catalog.price_readiness.impact``: the trip plans whose components use the sheet's items, whether each would
+have a rate for every component once the draft is published, and how many would move to priced; a read only).
+Bounded: at most :data:`MAX_BYTES` and :data:`MAX_ROWS` rows. The workbook is read with openpyxl in read-only,
+values-only mode (no formulas are run, no macros: an ``.xlsm`` is refused by its content type and openpyxl never
+executes VBA).
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import asyncpg
 from openpyxl import Workbook, load_workbook
 
 from app.auth.staff import Staff
+from app.catalog import cost_sheet, price_readiness
 from app.errors import Invalid
 from app.suppliers import service as suppliers
 from app.supply import rates
@@ -423,6 +427,7 @@ async def import_sheet(
         "ignored_sheets": sheet.ignored_sheets,
     }
     if dry_run:
+        out["impact"] = await price_readiness.impact(conn, sheet.contract, matched, on=cost_sheet.today())
         return out
     contract = await suppliers.create_contract(
         conn, staff, supplier["id"], {k: v for k, v in sheet.contract.items() if v is not None}

@@ -52,6 +52,7 @@ import type {
 } from "../../lib/api/supply";
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
+import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
@@ -820,6 +821,75 @@ const TARIFF: PartnerTariff = {
     },
   ],
   truncated: false,
+};
+// ── Price readiness (AA-1029) ───────────────────────────────────────────────
+// Every status, long titles, a plan out of the catalog, a missing FX and a long list of components without a rate.
+const READINESS_CYCLE: ReadinessStatus[] = [
+  "no_components",
+  "missing_rates",
+  "priced",
+  "no_components",
+  "hand_priced",
+  "missing_fx",
+  "no_components",
+  "inactive_component",
+];
+function readinessItem(i: number): ReadinessItem {
+  const status = READINESS_CYCLE[i % READINESS_CYCLE.length];
+  const priced = status === "priced" || status === "hand_priced";
+  const unrated =
+    status === "missing_rates"
+      ? range(5).map((c) => ({
+          day_no: c + 1,
+          kind: c % 2 ? ("service" as const) : ("hotel" as const),
+          code: c % 2 ? `SVC-00${4200 + c}` : `HTL-00${3100 + c}`,
+          room_type: c % 2 ? null : "Superior Garden View Twin with Balcony",
+          supplier_code: `SUP-00${1100 + c}`,
+        }))
+      : [];
+  return {
+    tour_key: `aa000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    title: i === 9 ? null : `Invented Highlands and Hidden Lagoons Discovery Journey ${i + 1}`,
+    country: ["Invented Land", "Lake Country of the North", "Coastland"][i % 3],
+    duration_days: 3 + (i % 12),
+    in_catalog: i !== 9,
+    sellable: i % 4 === 0,
+    status,
+    reason: priced ? (status === "hand_priced" ? "no_components" : null) : status,
+    components: status === "no_components" ? 0 : 6 + (i % 5),
+    components_without_rate: unrated,
+    missing_fx: status === "missing_fx" ? ["VND", "THB"] : [],
+    computed_rows: status === "priced" ? 12 : 0,
+    hand_rows: status === "hand_priced" ? 2 : 0,
+    hand_rows_expired: i % 7 === 0 ? 1 : 0,
+    from_price: priced ? { amount: `${1235 + i * 10}.00`, currency: "USD", season: "Green season (shoulder months)" } : null,
+    pending_recompute: false,
+    note: null,
+  };
+}
+const READINESS_ITEMS = range(ROWS).map(readinessItem);
+const READINESS: PriceReadiness = {
+  today: "2026-10-23",
+  horizon_to: "2027-10-23",
+  rules: ["b2b", "fixed_departure"],
+  fx_currencies: ["EUR", "THB"],
+  summary: {
+    total: 892,
+    by_status: { priced: 41, hand_priced: 12, missing_rates: 96, missing_fx: 8, no_rule: 0, no_components: 731, inactive_component: 4 },
+    by_country: ["Invented Land", "Lake Country of the North", "Coastland"].map((country, i) => ({
+      country,
+      total: 300 - i * 4,
+      priced: 14,
+      hand_priced: 4,
+      missing_rates: 32,
+      missing_fx: 3,
+      no_rule: 0,
+      no_components: 245 - i * 4,
+      inactive_component: 2,
+    })),
+  },
+  items: READINESS_ITEMS,
+  degraded: [],
 };
 const RATE_CARDS: Listed<RateCardRow> = {
   today: "2026-10-23",
@@ -1641,6 +1711,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "pricing/partner-terms") return ok({ today: "2026-10-23", items: range(ROWS).map(partnerTerms) });
   if (p === "pricing/partner-rate-cards") return ok(RATE_CARDS);
   if (p.startsWith("pricing/partner-tariffs/")) return ok(TARIFF);
+  if (p === "catalog/price-readiness") return ok(READINESS);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {

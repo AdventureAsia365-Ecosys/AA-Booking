@@ -15,6 +15,7 @@
 //   GET   /booking/catalog/destinations?q=&country=&limit=                        CIS places   (any staff)
 
 import { BFF_BASE, bkGet, bkSend } from "./client";
+import type { ReadinessStatus, UnratedComponent } from "./priceReadiness";
 import type { IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
@@ -183,6 +184,30 @@ export interface RateSheetPreviewRow {
   notes: string | null;
 }
 
+/** AA-1029: the trip plans a rate sheet's items price (dry run only; read, nothing written). */
+export interface RateSheetImpactPlan {
+  tour_key: string;
+  title: string | null;
+  country: string | null;
+  components: number;
+  components_from_sheet: number;
+  status: ReadinessStatus;
+  /** Every component would have a rate once this draft is published. */
+  all_rated_after: boolean;
+  status_after: ReadinessStatus;
+  moves_to_priced: boolean;
+  components_without_rate_after: UnratedComponent[];
+  missing_fx_after: string[];
+}
+
+export interface RateSheetImpact {
+  plans: RateSheetImpactPlan[];
+  plans_total: number;
+  would_move_to_priced: number;
+  truncated: boolean;
+  horizon_to: IsoDate;
+}
+
 export interface RateSheetResult {
   dry_run: boolean;
   supplier: { id: string; code: string };
@@ -190,6 +215,7 @@ export interface RateSheetResult {
   rates: RateSheetPreviewRow[];
   ignored_sheets: string[];
   imported?: number;
+  impact?: RateSheetImpact;
 }
 
 /** The empty AA rate-sheet workbook, as a Blob to save. */

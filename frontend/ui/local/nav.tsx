@@ -18,6 +18,7 @@ import {
   CalendarDays,
   ClipboardList,
   CreditCard,
+  Gauge,
   Globe,
   Handshake,
   Landmark,
@@ -120,6 +121,8 @@ export function navGroups(b2cOpen: boolean): NavGroup[] {
         { href: "/services", label: "Services", icon: <Activity size={ICON} />, wave: 2, shipped: true },
         { href: "/pricing/rules", label: "Pricing rules & FX", icon: <Percent size={ICON} />, wave: 2, shipped: true },
         { href: "/pricing/agency-tiers", label: "Agency tiers", icon: <Award size={ICON} />, wave: 2, shipped: true },
+        // AA-1029: which trip plans price and why the others do not.
+        { href: "/pricing/readiness", label: "Price readiness", icon: <Gauge size={ICON} />, wave: 2, shipped: true },
       ],
     },
     {
