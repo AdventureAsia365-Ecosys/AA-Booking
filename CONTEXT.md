@@ -535,7 +535,7 @@ send, OTP) is not built: those still write rows only.
   `null` without either or a rate). **AA-973**: `GET /departures`, `POST /holds`,
   `GET` / `DELETE /holds/{id}`, `POST /holds/{id}/confirm` (below). **AA-974**: VND quotes, `POST /holds/{id}/extend`,
   the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below). **AA-975**:
-  `GET /events` (below). **AA-1030 G3 (contract 1.3)**: `GET /tariff` (scope `read`; `?currency=`, `?source_id=`,
+  `GET /events` (below). **AA-1030 G3 (contract 1.4)**: `GET /tariff` (scope `read`; `?currency=`, `?source_id=`,
   `?format=csv`): the calling agency's own tariff (see "Agency price tiers").
 - **Departures and seats (AA-973)**: a departure is a start date of a trip plan with a seat `capacity`, a status
   (`scheduled` ↔ `guaranteed`, `cancelled` final) and `auto_confirm`; staff keep them under

@@ -31,7 +31,7 @@
 - **Never** a net cost, a supplier rate or a margin (the agency's own discount and the public RRP only).
 
 Read by staff (``GET /booking/pricing/partner-tariffs/{partner_id}``, ``pricing.read``, ``app.routers.
-agency_pricing``) and by the agency (``GET /booking/b2b/v1/tariff``, contract ``booking.b2b.v1`` 1.3, scope ``read``),
+agency_pricing``) and by the agency (``GET /booking/b2b/v1/tariff``, contract ``booking.b2b.v1`` 1.4, scope ``read``),
 as JSON or CSV (:func:`to_csv`, the same columns for both, so staff can send the agency the file it would download).
 """
 

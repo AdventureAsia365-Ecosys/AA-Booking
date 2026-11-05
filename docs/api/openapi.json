@@ -7286,7 +7286,7 @@
       },
       "Tariff": {
         "additionalProperties": false,
-        "description": "1.3 (AA-1030 G3). The calling agency's own tariff: its price per tour, season and pax band.",
+        "description": "1.4 (AA-1030 G3). The calling agency's own tariff: its price per tour, season and pax band.",
         "properties": {
           "basis": {
             "const": "per_person_band_min_twin_share",
@@ -7337,7 +7337,7 @@
       },
       "TariffItem": {
         "additionalProperties": false,
-        "description": "1.3 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every\ndeparture from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's\n``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``).",
+        "description": "1.4 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every\ndeparture from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's\n``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``).",
         "properties": {
           "agency_discount_pct": {
             "pattern": "^\\d+(\\.\\d{1,4})?$",
@@ -10913,7 +10913,7 @@
     },
     "/booking/b2b/v1/tariff": {
       "get": {
-        "description": "1.3 (AA-1030 G3): the agency's own price per tour, season and pax band (``app.b2b.tariff``); ``format=csv``\nanswers the same rows as a CSV file.",
+        "description": "1.4 (AA-1030 G3): the agency's own price per tour, season and pax band (``app.b2b.tariff``); ``format=csv``\nanswers the same rows as a CSV file.",
         "operationId": "get_tariff_booking_b2b_v1_tariff_get",
         "parameters": [
           {

@@ -9,7 +9,7 @@ AA-972 serves ``GET /products``, ``POST /quotes``, ``GET /fx-rates`` and ``GET /
 (``app.b2b.departures``, ``app.b2b.holds``); AA-974 the commercial rules: VND quotes, ``POST /holds/{hold_id}/extend``
 (once), the 429 re-hold limit on ``POST /holds`` and ``POST /bookings/{booking_id}/cancel`` (+ ``?dry_run=true``,
 ``app.b2b.cancellation``); AA-975 the event feed ``GET /events`` (``app.b2b.events``, outbox bk-022); AA-1030 G3
-(contract 1.3) the agency's own tariff ``GET /tariff`` (JSON or ``?format=csv``, ``app.b2b.tariff``).
+(contract 1.4) the agency's own tariff ``GET /tariff`` (JSON or ``?format=csv``, ``app.b2b.tariff``).
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -283,7 +283,7 @@ class PriceParity(Strict):
 
 
 class TariffItem(Strict):
-    """1.3 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every
+    """1.4 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every
     departure from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's
     ``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``)."""
 
@@ -305,7 +305,7 @@ class TariffItem(Strict):
 
 
 class Tariff(Strict):
-    """1.3 (AA-1030 G3). The calling agency's own tariff: its price per tour, season and pax band."""
+    """1.4 (AA-1030 G3). The calling agency's own tariff: its price per tour, season and pax band."""
 
     currency: Currency
     priced_on: date
@@ -384,7 +384,7 @@ async def get_tariff(
     source_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
     format: Annotated[Literal["json", "csv"], Query()] = "json",  # noqa: A002 — the query parameter's name
 ) -> Any:
-    """1.3 (AA-1030 G3): the agency's own price per tour, season and pax band (``app.b2b.tariff``); ``format=csv``
+    """1.4 (AA-1030 G3): the agency's own price per tour, season and pax band (``app.b2b.tariff``); ``format=csv``
     answers the same rows as a CSV file."""
     on = datetime.now(UTC).date()
     async with ctx.pool.acquire() as conn:
