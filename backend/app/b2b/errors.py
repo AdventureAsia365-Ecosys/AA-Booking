@@ -22,6 +22,7 @@ STATUS: dict[str, int] = {
     "forbidden": 403,
     "unknown_partner": 403,
     "not_found": 404,
+    "invoice_not_found": 404,  # AA-1037 (1.5): a draft, another agency's invoice or not an invoice number
     "price_changed": 409,
     "extend_limit": 409,
     "credit_hold_overdue": 409,  # AA-1037 G4: the agency's AA invoices are overdue past its credit terms

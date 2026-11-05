@@ -94,6 +94,164 @@
         "title": "AgencyDraftRunIn",
         "type": "object"
       },
+      "AgencyInvoice": {
+        "additionalProperties": false,
+        "description": "1.5 (AA-1037). The invoice with its lines, the approved payments and the issuer (how to pay).",
+        "properties": {
+          "balance": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Balance",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date",
+            "title": "Due Date",
+            "type": "string"
+          },
+          "e_invoice_no": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "E Invoice No"
+          },
+          "footer_wording": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Footer Wording"
+          },
+          "invoice_kind": {
+            "enum": [
+              "saas",
+              "settlement"
+            ],
+            "title": "Invoice Kind",
+            "type": "string"
+          },
+          "issued_on": {
+            "format": "date",
+            "title": "Issued On",
+            "type": "string"
+          },
+          "issuer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvoiceIssuer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/AgencyInvoiceLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "number": {
+            "pattern": "^AA[ST]-\\d{4}-\\d{6}$",
+            "title": "Number",
+            "type": "string"
+          },
+          "overdue_days": {
+            "minimum": 0.0,
+            "title": "Overdue Days",
+            "type": "integer"
+          },
+          "paid": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Paid",
+            "type": "string"
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/AgencyInvoicePayment"
+            },
+            "title": "Payments",
+            "type": "array"
+          },
+          "period_end": {
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "issued",
+              "paid",
+              "void"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "subtotal": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "tax_amount": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Tax Amount",
+            "type": "string"
+          },
+          "tax_rate": {
+            "pattern": "^\\d+\\.\\d{4}$",
+            "title": "Tax Rate",
+            "type": "string"
+          },
+          "total": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "invoice_kind",
+          "status",
+          "period_start",
+          "period_end",
+          "currency",
+          "subtotal",
+          "tax_amount",
+          "total",
+          "paid",
+          "balance",
+          "issued_on",
+          "due_date",
+          "overdue_days",
+          "tax_rate",
+          "issuer",
+          "lines",
+          "payments"
+        ],
+        "title": "AgencyInvoice",
+        "type": "object"
+      },
       "AgencyInvoiceChanges": {
         "additionalProperties": false,
         "properties": {
@@ -124,6 +282,263 @@
           }
         },
         "title": "AgencyInvoiceChanges",
+        "type": "object"
+      },
+      "AgencyInvoiceLine": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "booking_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Id"
+          },
+          "description": {
+            "maxLength": 300,
+            "title": "Description",
+            "type": "string"
+          },
+          "hold_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hold Id"
+          },
+          "line_no": {
+            "minimum": 1.0,
+            "title": "Line No",
+            "type": "integer"
+          },
+          "line_role": {
+            "enum": [
+              "subscription",
+              "extra_seats",
+              "deposit",
+              "balance",
+              "full",
+              "cancellation_fee",
+              "adjustment"
+            ],
+            "title": "Line Role",
+            "type": "string"
+          },
+          "quantity": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit_price": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Unit Price",
+            "type": "string"
+          },
+          "voided": {
+            "title": "Voided",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "line_no",
+          "line_role",
+          "description",
+          "quantity",
+          "unit_price",
+          "amount",
+          "voided"
+        ],
+        "title": "AgencyInvoiceLine",
+        "type": "object"
+      },
+      "AgencyInvoicePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgencyInvoiceSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "AgencyInvoicePage",
+        "type": "object"
+      },
+      "AgencyInvoicePayment": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "received_on": {
+            "format": "date",
+            "title": "Received On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "received_on",
+          "amount",
+          "currency"
+        ],
+        "title": "AgencyInvoicePayment",
+        "type": "object"
+      },
+      "AgencyInvoiceSummary": {
+        "additionalProperties": false,
+        "description": "1.5 (AA-1037). One AA invoice of the calling agency (issued, paid or void; a draft is never shown). Amounts in\nthe invoice currency; ``period_end`` is the last day the invoice covers.",
+        "properties": {
+          "balance": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Balance",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "due_date": {
+            "format": "date",
+            "title": "Due Date",
+            "type": "string"
+          },
+          "e_invoice_no": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "E Invoice No"
+          },
+          "invoice_kind": {
+            "enum": [
+              "saas",
+              "settlement"
+            ],
+            "title": "Invoice Kind",
+            "type": "string"
+          },
+          "issued_on": {
+            "format": "date",
+            "title": "Issued On",
+            "type": "string"
+          },
+          "number": {
+            "pattern": "^AA[ST]-\\d{4}-\\d{6}$",
+            "title": "Number",
+            "type": "string"
+          },
+          "overdue_days": {
+            "minimum": 0.0,
+            "title": "Overdue Days",
+            "type": "integer"
+          },
+          "paid": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Paid",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "issued",
+              "paid",
+              "void"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "subtotal": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "tax_amount": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Tax Amount",
+            "type": "string"
+          },
+          "total": {
+            "pattern": "^-?\\d+\\.\\d{2}$",
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "invoice_kind",
+          "status",
+          "period_start",
+          "period_end",
+          "currency",
+          "subtotal",
+          "tax_amount",
+          "total",
+          "paid",
+          "balance",
+          "issued_on",
+          "due_date",
+          "overdue_days"
+        ],
+        "title": "AgencyInvoiceSummary",
         "type": "object"
       },
       "AgencyIssueIn": {
@@ -658,6 +1073,85 @@
           "legal_entity"
         ],
         "title": "BillingEntityIn",
+        "type": "object"
+      },
+      "BillingStatus": {
+        "additionalProperties": false,
+        "description": "1.5 (AA-1037). The agency's credit status (as ``PartnerTerms.credit``) and the last day its software fee is\npaid for.",
+        "properties": {
+          "holds_paused": {
+            "title": "Holds Paused",
+            "type": "boolean"
+          },
+          "oldest_overdue_days": {
+            "minimum": 0.0,
+            "title": "Oldest Overdue Days",
+            "type": "integer"
+          },
+          "overdue_amount": {
+            "items": {
+              "$ref": "#/components/schemas/Money"
+            },
+            "title": "Overdue Amount",
+            "type": "array"
+          },
+          "overdue_invoices": {
+            "minimum": 0.0,
+            "title": "Overdue Invoices",
+            "type": "integer"
+          },
+          "paid_through": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Through"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "warn",
+              "past_due"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suspend_after_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suspend After Days"
+          },
+          "warn_after_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn After Days"
+          }
+        },
+        "required": [
+          "status",
+          "holds_paused",
+          "overdue_invoices",
+          "oldest_overdue_days",
+          "overdue_amount"
+        ],
+        "title": "BillingStatus",
         "type": "object"
       },
       "BillingTermsIn": {
@@ -3576,6 +4070,110 @@
           }
         },
         "title": "InvoiceChanges",
+        "type": "object"
+      },
+      "InvoiceIssuer": {
+        "additionalProperties": false,
+        "description": "The AA entity that issued the invoice, as snapshotted at issue, with how to pay it.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "country_iso2": {
+            "anyOf": [
+              {
+                "maxLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Iso2"
+          },
+          "invoice_inbox": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Inbox"
+          },
+          "legal_entity": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Entity"
+          },
+          "payment_instructions": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Instructions"
+          },
+          "registered_office": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registered Office"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          },
+          "tax_line": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Line"
+          }
+        },
+        "title": "InvoiceIssuer",
         "type": "object"
       },
       "ItemIn": {
@@ -10687,6 +11285,63 @@
         ]
       }
     },
+    "/booking/b2b/v1/billing-status": {
+      "get": {
+        "description": "1.5 (AA-1037): the agency's billing status (``booking.v_tenant_billing_status``).",
+        "operationId": "get_billing_status_booking_b2b_v1_billing_status_get",
+        "parameters": [
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "Get Billing Status",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
     "/booking/b2b/v1/bookings/{booking_id}/cancel": {
       "post": {
         "operationId": "cancel_booking_booking_b2b_v1_bookings__booking_id__cancel_post",
@@ -11506,6 +12161,195 @@
           }
         ],
         "summary": "Extend Hold",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/invoices": {
+      "get": {
+        "description": "1.5 (AA-1037): the calling agency's own AA invoices, newest first (``app.b2b.invoices``).",
+        "operationId": "list_agency_invoices_booking_b2b_v1_invoices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "saas",
+                    "settlement"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "issued",
+                    "paid",
+                    "void"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgencyInvoicePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "List Agency Invoices",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/invoices/{number}": {
+      "get": {
+        "operationId": "get_agency_invoice_booking_b2b_v1_invoices__number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Number",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgencyInvoice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "Get Agency Invoice",
         "tags": [
           "b2b"
         ]
