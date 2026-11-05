@@ -251,6 +251,8 @@ backend/
                            GET|POST …/{source_id}/departures, PATCH /booking/catalog/departures/{id} (AA-973);
                            GET /booking/catalog/geo/destinations[/{id}], GET /booking/catalog/geo/countries[/{iso}]
                            (catalog.read), PATCH of both (catalog.admin) (AA-996, bk-029)
+                           GET /booking/catalog/price-readiness?status=&country=&q=&format=json|csv (pricing.read,
+                           AA-1029)
   app/catalog/geo.py       AA-996: Catalog → Countries / Destinations: CIS places (v_destination, v_destination_photo
                            when served) and countries from CIS ISO codes (catalog.v_country; places by
                            v_destination.country_iso2, tours by v_tour.country = v_country.name), joined to the Booking
@@ -277,7 +279,12 @@ backend/
   app/catalog/cost_sheet.py  AA-1029: bk_price_recompute (components x rates in force -> computed matrix rows per
                            window x pax band, priced by the rules in force, hand rows kept) + RecomputeSchedule
   app/catalog/price_history.py  AA-1029 (bk-039): dated price history (close open rows, insert the new set; as_of)
+  app/catalog/price_readiness.py  AA-1029: catalog-wide price readiness (one status per plan: priced, hand_priced, or the
+                           cost sheet's reason: missing_rates / missing_fx / no_rule / no_components /
+                           inactive_component; components without a published rate in the next 365 days by code, never
+                           a net; summary per status and country; staff CSV) + the rate-sheet dry-run impact
   app/supply/rate_sheet.py AA-1029: supplier rate-sheet Excel import (openpyxl, read-only) into a draft contract
+                           (the dry run adds `impact`: the plans that use the sheet's items, priced once it is published)
   app/catalog/liveness.py  AA-986 L5: served state of a catalog key (served | retired | paused | not_in_catalog) from
                            v_tour + v_tour_retired, feature detection of the CIS 274 views, strict / soft reads
   app/catalog/lifecycle.py AA-986 L5: bk_tour_lifecycle_pull (outbox → inbox → staff notifications) + PullSchedule
@@ -762,6 +769,22 @@ Loading supplier rates makes prices flow with no hand step after the plan's comp
 Staff: the commercial drawer shows the from price, the reference (Mark reviewed) and "Recompute from rates"
 (`POST …/prices/recompute`); cost sheet rows carry a badge; the b2b rule takes the RRP markup; suppliers have
 "Import rate sheet".
+
+**Price readiness** (`app/catalog/price_readiness.py`, `GET /booking/catalog/price-readiness`, `pricing.read`; staff
+page Pricing → Price readiness, `/pricing/readiness`): one status per trip plan so staff see which tours price and what
+the others still need. `priced` = computed rows still valid; else `hand_priced` = hand or overridden rows still valid
+(an expired hand row counts for nothing); else the cost sheet's own reason in its order (`cost_sheet.blocking_reason`:
+`no_components`, `inactive_component`, `no_rule`), then its `no_rates` split into `missing_rates` (a component without
+a published rate on any day from today to +365, listed by HTL- / SVC- code, room type and supplier code) and
+`missing_fx` (every rate of a component in a currency without an approved FX rate today). A plan with no reason and no
+computed row yet is decided by `cost_sheet.compute` itself (no write, at most 50 a read): rows = `priced` +
+`pending_recompute`, none = `missing_rates` with a note. One plan query (counts and `v_from_prices` joined; the CIS
+catalog join fails soft), then components and rate spans (`cost_sheet.SPANS_SQL`) in batches: no N+1. The summary
+counts every plan per status and per country; filters `status`, `country`, `q`; `?format=csv` is the staff file
+(`price_readiness.CSV_COLUMNS`, formula-safe, never a net or margin; the from price is the public RRP). The rate-sheet
+dry run (`?dry_run=true`) adds `impact`: the plans whose components use the sheet's room types or services, for each
+whether every component would have a rate once the draft is published, its status after, and `would_move_to_priced`
+(the import drawer lists them under the Check result). Read only; the publish path is unchanged.
 
 ## Agency price tiers (AA-1030, bk-043; root ADR 0019 b15)
 
