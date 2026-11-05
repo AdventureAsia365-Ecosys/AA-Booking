@@ -20,7 +20,8 @@
 --      issued -> void (no approved payment); e_invoice_no is set once on an issued or paid invoice; staff_note stays
 --      editable; updated_at follows.
 --   3. booking.agency_invoice_line_guard (BEFORE INSERT OR UPDATE OR DELETE): lines change only while their invoice
---      is a draft; the one later change is voided = true when the invoice is void.
+--      is a draft; the one later change is voided = true when the invoice is void. A line never moves: its key
+--      (invoice_id, invoice_kind, line_no) is fixed on UPDATE, so no line leaves an issued, paid or void invoice.
 --   4. booking.agency_payment_guard (BEFORE INSERT OR UPDATE): a payment is recorded against an issued invoice, in
 --      its currency, starting 'recorded'; afterwards only the decision (approve / reject, once) is written; an
 --      approval never takes the approved total above the invoice total. AFTER: booking.agency_payment_settle marks
@@ -144,6 +145,12 @@ AS $$
 DECLARE
     v_status text;
 BEGIN
+    -- A line never moves to another invoice or position: the guard below reads one invoice's status only.
+    IF TG_OP = 'UPDATE' AND (NEW.invoice_id, NEW.invoice_kind, NEW.line_no)
+                            IS DISTINCT FROM (OLD.invoice_id, OLD.invoice_kind, OLD.line_no) THEN
+        RAISE EXCEPTION 'agency_invoice_line: the key of a line (invoice, kind, line number) does not change'
+            USING ERRCODE = 'restrict_violation';
+    END IF;
     SELECT status INTO v_status FROM booking.agency_invoice
      WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD.invoice_id ELSE NEW.invoice_id END;
     IF v_status IS NULL THEN
@@ -162,7 +169,8 @@ BEGIN
 END
 $$;
 COMMENT ON FUNCTION booking.agency_invoice_line_guard() IS
-    'AA-1037 (bk-042): lines change only while their invoice is a draft; voided = true once the invoice is void.';
+    'AA-1037 (bk-042): lines change only while their invoice is a draft; voided = true once the invoice is void; '
+    'a line''s key (invoice_id, invoice_kind, line_no) never changes.';
 
 DROP TRIGGER IF EXISTS agency_invoice_line_guard ON booking.agency_invoice_line;
 CREATE TRIGGER agency_invoice_line_guard
