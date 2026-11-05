@@ -180,6 +180,7 @@ backend/
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
                            /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
                            /bookings/{id}/cancel (AA-974); /bookings/{id}/confirmation, /terms (AA-1037, minor 1.3)
+                           /tariff (AA-1030, 1.4); /invoices, /invoices/{number}, /billing-status (AA-1037, 1.5)
   app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/ops/                 AA-682 operations after the sale (bk-026): supplier_bookings.py (generate / add / edit /
@@ -281,6 +282,7 @@ backend/
   app/b2b/served.py        AA-986 L5: 409 tour_not_served for a tp: line of a tour that is not served
   app/b2b/confirmation.py  AA-1037 G2: the booking confirmation (JSON / printable HTML; no traveller names, no prices)
   app/b2b/terms.py         AA-1037 G6: GET /booking/b2b/v1/terms (payment terms, credit status, policy, approved clauses)
+  app/b2b/invoices.py      AA-1037 (1.5): the agency's own AA invoices + billing status (partner-scoped, field allow-list)
   app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules,
                            /booking/pricing/fx-rates and /booking/pricing/cancellation-policies (AA-974), POST
                            …/{id}/approve (reads pricing.read, writes pricing.write)
@@ -593,6 +595,18 @@ the B2C part of Booking is **read-only** while `B2C_INTAKE_ENABLED` is off (the 
   the re-hold limit on `POST /holds`, `POST /bookings/{id}/cancel` (+ `?dry_run=true`) (below). **AA-975**:
   `GET /events` (below). **AA-1030 G3 (contract 1.4)**: `GET /tariff` (scope `read`; `?currency=`, `?source_id=`,
   `?format=csv`): the calling agency's own tariff (see "Agency price tiers").
+- **Agency invoices (AA-1037, contract 1.5; root ADR 0019 d17, the data of the CRM "Bookings with AA" page)**
+  (`app.b2b.invoices` over `app.agency_billing.invoices`, scope `read`): `GET /invoices` (`?kind=saas|settlement`,
+  `?status=issued|paid|void`, `?limit` 1-100, `?offset`; newest first, no lines), `GET /invoices/{number}` (lines with
+  `hold_id` / `booking_id`, the approved payments as date + amount, the issuer snapshot with the payment instructions)
+  and `GET /billing-status` (the caller's `v_tenant_billing_status` row as `/terms` `credit` + `paid_through`). Every
+  read is filtered in SQL by the `tenant_id` of the partner `app.b2b.access` resolved (never by a caller field); a
+  draft is never listed or answered; a draft, another agency's number or anything that is not an `AAS-` / `AAT-` number
+  is the same 404 `invoice_not_found`. Field allow-list: the functions copy contract fields key by key and the response
+  models forbid extras, so the staff note, the void reason, every `*_by`, the payment bank `reference` / `document_ref`
+  / note, the amount waiting for approval and the `bill_to` snapshot (the agency's billing contact, personal data the
+  contract never carries) stay in Booking. `period_end` is the last day covered (the stored one is exclusive). Answers
+  are `Cache-Control: no-store`. Consumer: the AA-Partner CRM page (not built in this repo).
 - **Departures and seats (AA-973)**: a departure is a start date of a trip plan with a seat `capacity`, a status
   (`scheduled` ↔ `guaranteed`, `cancelled` final) and `auto_confirm`; staff keep them under
   `/booking/catalog/trip-plans/{source_id}/departures` (capacity never below held + sold, audited, edits touch the

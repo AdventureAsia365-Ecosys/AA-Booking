@@ -14,7 +14,9 @@ Numbers: ``AAS-<year>-<6 digits>`` (software fee) and ``AAT-<year>-<6 digits>`` 
 from __future__ import annotations
 
 import json
+import re
 import uuid
+from collections.abc import Sequence
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -30,6 +32,9 @@ SERIES = {"saas": "AAS", "settlement": "AAT"}
 KIND_LABEL = {"saas": "Software fee", "settlement": "Tour settlement"}
 MAX_LINES = 500
 CENT = Decimal("0.01")
+# AA-1037 (booking.b2b.v1 1.5): what an agency may see of its own invoices. A draft holds no number and is never shown.
+AGENCY_STATUSES = ("issued", "paid", "void")
+NUMBER_RE = re.compile(r"^AA[ST]-[0-9]{4}-[0-9]{6}$")
 
 INVOICE_COLUMNS = """
     i.id::text AS id, i.number, i.party_tenant_id, i.invoice_kind, i.status, i.period_start, i.period_end, i.currency,
@@ -54,7 +59,8 @@ INVOICE_FROM = """
 """
 LINE_SQL = """
 SELECT l.line_no, l.line_role, l.product, l.plan_key, l.source_hold_id::text AS source_hold_id, l.description,
-       l.quantity, l.unit_price, l.amount, l.voided, l.created_by, l.created_at, tc.code AS trip_case_code
+       l.quantity, l.unit_price, l.amount, l.voided, l.created_by, l.created_at, tc.code AS trip_case_code,
+       h.trip_case_id::text AS booking_id
   FROM booking.agency_invoice_line l
   LEFT JOIN booking.b2b_holds h ON h.id = l.source_hold_id
   LEFT JOIN booking.trip_cases tc ON tc.id = h.trip_case_id
@@ -63,6 +69,12 @@ SELECT l.line_no, l.line_role, l.product, l.plan_key, l.source_hold_id::text AS 
 PAYMENT_COLUMNS = """
     id::text AS id, invoice_id::text AS invoice_id, amount, currency, method, received_on, reference, document_ref,
     note, status, recorded_by, recorded_at, approved_by, approved_at, rejected_by, rejected_at, reject_reason
+"""
+# AA-1037 (booking.b2b.v1 1.5): the agency sees approved payments only, and only when and how much (never the bank
+# reference, the document, the note or who recorded / approved it).
+AGENCY_PAYMENT_SQL = """
+SELECT received_on, amount, currency FROM booking.agency_payment
+ WHERE invoice_id = $1::uuid AND status = 'approved' ORDER BY received_on, approved_at, id
 """
 
 
@@ -92,7 +104,10 @@ async def list_invoices(
     q: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    statuses: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    """A page of invoices, newest first. ``statuses`` limits the page to those statuses whatever ``status`` asks
+    (the agency read passes :data:`AGENCY_STATUSES`, so a draft is never listed to an agency)."""
     where, args = ["true"], []
 
     def arg(v: Any) -> str:
@@ -107,6 +122,8 @@ async def list_invoices(
         where.append("coalesce(m.waiting, 0) > 0")
     elif status and status != "all":
         where.append(f"i.status = {arg(status)}")
+    if statuses is not None:
+        where.append(f"i.status = ANY({arg(list(statuses))}::text[])")
     if tenant_id:
         where.append(f"i.party_tenant_id = {arg(tenant_id)}::uuid")
     if q:
@@ -151,6 +168,27 @@ async def get(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     ]
     # AA-1037 G4: the overdue reminder steps already handled (bk-044).
     return {**inv, "lines": lines, "payments": payments, "reminders": await reminders.for_invoice(conn, inv["id"])}
+
+
+async def get_for_agency(conn: asyncpg.Connection, number: str, *, tenant_id: str) -> dict[str, Any] | None:
+    """One invoice of the calling agency by its number (booking.b2b.v1 1.5): ``None`` unless the number is well formed,
+    belongs to ``tenant_id`` and the invoice is issued, paid or void. Lines as :func:`get`; payments approved only
+    (:data:`AGENCY_PAYMENT_SQL`). The caller shapes the answer through its own field allow-list."""
+    if not isinstance(number, str) or not NUMBER_RE.fullmatch(number):
+        return None
+    row = await conn.fetchrow(
+        f"SELECT {INVOICE_COLUMNS} {INVOICE_FROM}"  # noqa: S608
+        " WHERE i.number = $1 AND i.party_tenant_id = $2::uuid AND i.status = ANY($3::text[])",
+        number,
+        tenant_id,
+        list(AGENCY_STATUSES),
+    )
+    if row is None:
+        return None
+    inv = _out(row)
+    lines = [dict(r) for r in await conn.fetch(LINE_SQL, inv["id"])]
+    payments = [dict(r) for r in await conn.fetch(AGENCY_PAYMENT_SQL, inv["id"])]
+    return {**inv, "lines": lines, "payments": payments}
 
 
 async def recompute(conn: asyncpg.Connection, invoice_id: str) -> None:

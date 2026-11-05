@@ -14,6 +14,9 @@ extras (contract minor 1.3): the cancellation policy on every quote and hold ans
 ``credit_hold_overdue`` on ``POST /holds`` while the agency's AA invoices are overdue past its terms (G4) and the
 agency's terms ``GET /terms`` (payment terms, credit status, default cancellation policy, approved clauses; G6).
 AA-1030 G3 (contract 1.4): the agency's own tariff ``GET /tariff`` (JSON or ``?format=csv``, ``app.b2b.tariff``).
+AA-1037 (contract 1.5, root ADR 0019 d17): the agency's own AA invoices ``GET /invoices``, ``GET /invoices/{number}``
+and its billing status ``GET /billing-status`` (``app.b2b.invoices``: scoped by the caller's partner, drafts never
+shown, a field allow-list without staff notes, reasons, staff names, bank references or the bill-to snapshot).
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -30,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.m2m import SCOPE_BOOK, SCOPE_HOLD, SCOPE_QUOTE, SCOPE_READ
 from app.b2b import cancellation, confirmation, departures, events, holds, quotes, reads, tariff, terms
+from app.b2b import invoices as agency_invoices
 from app.b2b.access import B2BContext, require_scope
 from app.b2b.components import LineAsk, RoomAsk
 from app.b2b.errors import PREFIX, B2BError
@@ -421,6 +425,88 @@ class Tariff(Strict):
     truncated: bool
 
 
+Amount = Annotated[str, Field(pattern=r"^-?\d+\.\d{2}$")]
+InvoiceKind = Literal["saas", "settlement"]
+InvoiceStatus = Literal["issued", "paid", "void"]
+InvoiceNumber = Annotated[str, Field(pattern=r"^AA[ST]-\d{4}-\d{6}$")]
+
+
+class AgencyInvoiceSummary(Strict):
+    """1.5 (AA-1037). One AA invoice of the calling agency (issued, paid or void; a draft is never shown). Amounts in
+    the invoice currency; ``period_end`` is the last day the invoice covers."""
+
+    number: InvoiceNumber
+    invoice_kind: InvoiceKind
+    status: InvoiceStatus
+    period_start: date
+    period_end: date
+    currency: Currency
+    subtotal: Amount
+    tax_amount: Amount
+    total: Amount
+    paid: Amount
+    balance: Amount
+    issued_on: date
+    due_date: date
+    overdue_days: int = Field(ge=0)
+    e_invoice_no: str | None = Field(default=None, max_length=64)
+
+
+class AgencyInvoicePage(Strict):
+    items: list[AgencyInvoiceSummary]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1)
+    offset: int = Field(ge=0)
+
+
+class InvoiceIssuer(Strict):
+    """The AA entity that issued the invoice, as snapshotted at issue, with how to pay it."""
+
+    code: str | None = Field(default=None, max_length=32)
+    legal_entity: str | None = Field(default=None, max_length=300)
+    tax_code: str | None = Field(default=None, max_length=64)
+    registered_office: str | None = Field(default=None, max_length=1000)
+    country_iso2: str | None = Field(default=None, max_length=2)
+    invoice_inbox: str | None = Field(default=None, max_length=254)
+    payment_instructions: str | None = Field(default=None, max_length=2000)
+    tax_line: str | None = Field(default=None, max_length=120)
+
+
+class AgencyInvoiceLine(Strict):
+    line_no: int = Field(ge=1)
+    line_role: Literal["subscription", "extra_seats", "deposit", "balance", "full", "cancellation_fee", "adjustment"]
+    description: str = Field(max_length=300)
+    quantity: Amount
+    unit_price: Amount
+    amount: Amount
+    hold_id: str | None = Field(default=None, max_length=64)
+    booking_id: str | None = Field(default=None, max_length=64)
+    voided: bool
+
+
+class AgencyInvoicePayment(Strict):
+    received_on: date
+    amount: Amount
+    currency: Currency
+
+
+class AgencyInvoice(AgencyInvoiceSummary):
+    """1.5 (AA-1037). The invoice with its lines, the approved payments and the issuer (how to pay)."""
+
+    tax_rate: str = Field(pattern=r"^\d+\.\d{4}$")
+    footer_wording: str | None = Field(default=None, max_length=1000)
+    issuer: InvoiceIssuer | None
+    lines: list[AgencyInvoiceLine]
+    payments: list[AgencyInvoicePayment]
+
+
+class BillingStatus(CreditStatus):
+    """1.5 (AA-1037). The agency's credit status (as ``PartnerTerms.credit``) and the last day its software fee is
+    paid for."""
+
+    paid_through: date | None = None
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 
@@ -615,3 +701,43 @@ async def get_booking_confirmation(
 async def get_partner_terms(ctx: CanRead) -> dict:
     async with ctx.pool.acquire() as conn:
         return await terms.partner_terms(conn, tenant_id=str(ctx.partner["tenant_id"]), today=datetime.now(UTC).date())
+
+
+NO_STORE = {"Cache-Control": "no-store"}
+
+
+@router.get("/invoices", response_model=AgencyInvoicePage)
+async def list_agency_invoices(
+    ctx: CanRead,
+    response: Response,
+    kind: InvoiceKind | None = None,
+    status: InvoiceStatus | None = None,
+    limit: Annotated[int, Query(ge=1, le=agency_invoices.MAX_LIMIT)] = agency_invoices.DEFAULT_LIMIT,
+    offset: Annotated[int, Query(ge=0, le=agency_invoices.MAX_OFFSET)] = 0,
+) -> dict:
+    """1.5 (AA-1037): the calling agency's own AA invoices, newest first (``app.b2b.invoices``)."""
+    response.headers.update(NO_STORE)
+    async with ctx.pool.acquire() as conn:
+        return await agency_invoices.list_for_agency(
+            conn, tenant_id=str(ctx.partner["tenant_id"]), kind=kind, status=status, limit=limit, offset=offset
+        )
+
+
+@router.get("/invoices/{number}", response_model=AgencyInvoice)
+async def get_agency_invoice(
+    # No pattern here: anything that is not one of the agency's invoice numbers is the same 404 invoice_not_found.
+    number: Annotated[str, Path(min_length=1, max_length=64)],
+    ctx: CanRead,
+    response: Response,
+) -> dict:
+    response.headers.update(NO_STORE)
+    async with ctx.pool.acquire() as conn:
+        return await agency_invoices.get_for_agency(conn, number, tenant_id=str(ctx.partner["tenant_id"]))
+
+
+@router.get("/billing-status", response_model=BillingStatus)
+async def get_billing_status(ctx: CanRead, response: Response) -> dict:
+    """1.5 (AA-1037): the agency's billing status (``booking.v_tenant_billing_status``)."""
+    response.headers.update(NO_STORE)
+    async with ctx.pool.acquire() as conn:
+        return await agency_invoices.billing_status(conn, tenant_id=str(ctx.partner["tenant_id"]))
