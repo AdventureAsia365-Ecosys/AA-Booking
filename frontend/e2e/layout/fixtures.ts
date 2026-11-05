@@ -51,6 +51,7 @@ import type {
   SupplyMedia,
 } from "../../lib/api/supply";
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
+import type { Listed, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
@@ -688,6 +689,100 @@ const RULES: PolicyList<PricingRuleRow> = {
   })),
 };
 
+// ── Agency tiers (AA-1030) ───────────────────────────────────────────────────
+const TIER_LABEL: Record<string, string> = { standard: "Standard", silver: "Silver", gold: "Gold" };
+const AGENCY_TIERS: TierList = {
+  today: "2026-10-23",
+  b2b_rule: { target_margin: "0.1500", floor_margin: "0.1000", card_fee_pct: "0.0300", valid_from: "2026-10-14", rrp_markup_pct: "0.2500" },
+  items: (
+    [
+      ["standard", "0.0000", "0.1500", false, 14, 0],
+      ["silver", "0.0300", "0.1246", false, 6, 1],
+      ["gold", "0.0600", "0.0977", true, 3, 0],
+    ] as const
+  ).map(([code, discount, margin, below, partners, pending], i) => ({
+    code,
+    label: TIER_LABEL[code],
+    sort_order: (i + 1) * 10,
+    partners,
+    discount_in_force: discount,
+    pending,
+    margin_after_discount: margin,
+    below_floor: below,
+  })),
+};
+const TIER_DISCOUNTS: Listed<TierDiscountRow> = {
+  today: "2026-10-23",
+  items: (
+    [
+      ["pending", "silver", "0.0400"],
+      ["in_force", "gold", "0.0600"],
+      ["in_force", "silver", "0.0300"],
+      ["in_force", "standard", "0.0000"],
+    ] as const
+  ).map(([status, tier, discount], i) => ({
+    id: `td-${i}`,
+    status,
+    created_by: person("u-002", 1),
+    created_at: NOW,
+    approved_by: status === "pending" ? null : person("u-003", 2),
+    approved_at: status === "pending" ? null : NOW,
+    can_approve: status === "pending",
+    tier_code: tier,
+    tier_label: TIER_LABEL[tier],
+    discount_pct: discount,
+    valid_from: "2026-10-01",
+    note: "Starting value from the business decision page, to review after the first three agency contracts",
+  })),
+};
+const AGENCY_NAMES = ["Lotus Lantern Travel", "Heron Coast Journeys", "Blue Bamboo Holidays", "Northern Pass Tours"];
+function partnerTerms(i: number): PartnerTerms {
+  const tier = (["standard", "silver", "gold"] as const)[i % 3];
+  const discount = AGENCY_TIERS.items[i % 3].discount_in_force;
+  const card = i === 2 ? "0.0450" : null;
+  return {
+    id: `pt-${i}`,
+    agency_name: `${AGENCY_NAMES[i % AGENCY_NAMES.length]} ${i + 1}`,
+    status: i === 5 ? "suspended" : "active",
+    billing_currency: "USD",
+    projected: true,
+    tier_code: tier,
+    tier_label: TIER_LABEL[tier],
+    tier_discount: discount,
+    card_discount: card,
+    plan_cards: i === 2 ? 2 : 0,
+    effective_discount: card ?? discount,
+  };
+}
+const RATE_CARDS: Listed<RateCardRow> = {
+  today: "2026-10-23",
+  items: (
+    [
+      ["pending", null, "0.0500"],
+      ["in_force", "e1000000-0000-4000-8000-000000000101", "0.0800"],
+      ["in_force", null, "0.0450"],
+      ["expired", null, "0.0400"],
+    ] as const
+  ).map(([status, source, discount], i) => ({
+    id: `rc-${i}`,
+    status,
+    created_by: person("u-002", 1),
+    created_at: NOW,
+    approved_by: status === "pending" ? null : person("u-003", 2),
+    approved_at: status === "pending" ? null : NOW,
+    can_approve: status === "pending",
+    partner_id: "pt-2",
+    agency_name: "Blue Bamboo Holidays 3",
+    trip_plan_id: source ? "tp-1" : null,
+    source_id: source,
+    discount_pct: discount,
+    valid_from: "2026-10-01",
+    valid_to: status === "expired" ? "2026-09-30" : "2027-09-30",
+    contract_ref: "Invented contract BB-2026-07",
+    note: null,
+  })),
+};
+
 // ── Catalog trip plans ───────────────────────────────────────────────────────
 function tripPlan(i: number): TripPlanListItem {
   return {
@@ -1206,6 +1301,10 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "pricing/rules") return ok(RULES);
   if (p === "pricing/fx-rates") return ok(FX);
+  if (p === "pricing/partner-tiers") return ok(AGENCY_TIERS);
+  if (p === "pricing/partner-tier-discounts") return ok(TIER_DISCOUNTS);
+  if (p === "pricing/partner-terms") return ok({ today: "2026-10-23", items: range(ROWS).map(partnerTerms) });
+  if (p === "pricing/partner-rate-cards") return ok(RATE_CARDS);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {
