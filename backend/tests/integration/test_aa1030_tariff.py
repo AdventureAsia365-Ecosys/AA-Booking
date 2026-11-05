@@ -250,3 +250,79 @@ async def test_a_hand_row_over_a_rate_change_is_cut_there(
         ("2027-01-01", "2027-05-31", winter["price"]["amount"]),
         ("2027-06-01", "2027-12-31", summer_item["price"]["amount"]),
     ]
+
+
+async def test_a_tariff_currency_without_an_approved_fx_rate_is_the_callers_choice(
+    client: tuple[httpx.AsyncClient, LocalCis, LocalM2M],  # noqa: F811
+    admin: asyncpg.Connection,  # noqa: F811
+    supply: dict[str, str],  # noqa: F811
+    tiers_clean: None,  # noqa: F811
+    matrix_clean: None,
+) -> None:
+    """S270 (AA-1029 / AA-1030 follow-up): an agency asking AUD with no approved AUD rate gets 422 ``invalid`` (pick
+    another currency), never 503 ``unavailable``; EUR with an approved rate prices; POST /quotes keeps its 503 for
+    both a quote currency and a supplier cost currency without a rate, and the tariff leaves a cost gap's rows
+    unpriced (AA's data problem), never 422."""
+    c, cis, m2m = client
+    boss, sales, maker = _staff(cis, ADMIN), _staff(cis, SALES), _staff(cis, MAKER)
+    body = {"tenant_id": TENANT_STANDARD, "agency_name": "Invented Kestrel Tours", "m2m_client_id": CRM_CLIENT}
+    partner = (await _ok(await c.post("/b2b-partners", json=body, headers=boss), 201))["id"]
+    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
+    items = {
+        "items": [{"day_no": 1, "hotel_room_type_id": supply["room"]}, {"day_no": 1, "service_id": supply["service"]}]
+    }
+    plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
+        "trip_plan_id"
+    ]
+    await _ok(await c.post(f"/catalog/trip-plans/{SOURCE_ID}/prices/recompute", headers=maker))
+    eur = await _insert(
+        admin, "fx_rates", currency="EUR", rate_per_usd=D("0.92"), buffer_pct=0, as_of=date(2026, 1, 1),
+        source="synthetic", created_by=MAKER,
+    )  # fmt: skip
+    await admin.execute(
+        "INSERT INTO booking.policy_approvals (entity_type, fx_rate_id, approved_by) VALUES ('fx_rate', $1::uuid, $2)",
+        eur,
+        CHECKER,
+    )
+    agency = _m2m(m2m, TENANT_STANDARD)
+    staff_url = f"/pricing/partner-tariffs/{partner}"
+
+    # AUD: a quote currency with no approved rate. Agency read and CSV: 422 invalid; the staff read: 422 too.
+    for params in ({"currency": "AUD"}, {"currency": "AUD", "format": "csv"}):
+        res = await c.get("/b2b/v1/tariff", params=params, headers=agency)
+        assert res.status_code == 422, res.text
+        assert res.json() == {
+            "error": "invalid",
+            "message": "no approved FX rate for AUD today; AA prices this tariff in USD, EUR, VND",
+        }
+    staff = await c.get(staff_url, params={"currency": "AUD"}, headers=sales)
+    assert staff.status_code == 422 and staff.json()["detail"] == "invalid_currency"
+
+    # EUR: an approved rate in force, so the tariff prices in EUR and equals a EUR quote.
+    tariff = await _ok(await c.get("/b2b/v1/tariff", params={"currency": "EUR"}, headers=agency))
+    assert tariff["currency"] == "EUR" and tariff["fx"]["quote_currency"] == "EUR" and tariff["items"]
+    item = tariff["items"][1]
+    quote = await _quote_row(c, m2m, TENANT_STANDARD, plan_id, item, "EUR")
+    assert quote["lines"][0]["b2b_price"] == item["price"]
+
+    # POST /quotes is unchanged: AUD without a rate is still 503 unavailable.
+    line = {
+        "line_ref": "plan",
+        "component_id": f"tp:{plan_id}",
+        "service_date": item["priced_for_date"],
+        "pax": {"adult": item["priced_for_pax"]},
+    }
+    request = {"proposal_ref": "TAR-AUD", "proposal_version": 1, "currency": "AUD", "lines": [line]}
+    res = await c.post("/b2b/v1/quotes", json=request, headers=agency)
+    assert res.status_code == 503 and res.json()["error"] == "unavailable"
+
+    # A supplier cost currency (VND) without a rate: AA's data problem. The USD tariff still answers 200 with the
+    # rows left out (staff see why); a quote needing VND answers 503 unavailable; nothing becomes 422.
+    await admin.execute("DELETE FROM booking.fx_rates WHERE currency = 'VND'")
+    gap = await _ok(await c.get(staff_url, headers=sales))
+    assert gap["items"] == [] and gap["unpriced"] and all("VND" in u["reason"] for u in gap["unpriced"])
+    assert (await _ok(await c.get("/b2b/v1/tariff", headers=agency)))["items"] == []
+    request = {"proposal_ref": "TAR-VND", "proposal_version": 1, "currency": "USD", "lines": [line]}
+    res = await c.post("/b2b/v1/quotes", json=request, headers=agency)
+    assert res.status_code == 503 and res.json()["error"] == "unavailable"
