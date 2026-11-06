@@ -7,7 +7,10 @@
 -- Merged as a migration-only PR (MIG-4, lesson 164) only after, in this order:
 --   1. the readers outside Booking are gone: TripPlanner My Payments, the CIS data coverage row bk.customers, the CIS
 --      KPI rows on these tables, the CIS erasure checklist line, the AA-CIS-Infra isolation probe cells on
---      booking.customers and booking.v_ops_inquiry_inbox, the root contract booking.customer.v1 (all AA-1046 S271);
+--      booking.customers and booking.v_ops_inquiry_inbox and its owner-only exemption for booking.retired_b2c_record
+--      (else runtime_grants.booking goes red on this apply), the Infra DM-6.5 consent script, the root contract
+--      booking.customer.v1, the root DSAR runbook, consent query page and UAT scenarios BK-08 / BK-10 (all AA-1046
+--      S271);
 --   2. the Booking build that no longer reads or writes them is deployed (AA-1046 S271 code PR: the B2C routers and
 --      services, app/inquiry/intake.py and its bk_inquiry_pull job, the staff admin pages; no trip_cases.customer_id);
 --   3. a fresh DRY RUN (root docs/audits/2026-11-05-S270-aa1037-b2c-drop-dryrun/scripts/aa1037_b2c_dry_run.py) at
