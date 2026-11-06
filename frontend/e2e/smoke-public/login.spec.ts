@@ -7,7 +7,7 @@
 // What it checks on GET /login:
 //   - HTTP 200 on the same origin and path (a Vercel Authentication wall or a redirect elsewhere fails);
 //   - the sign-in card renders, with "Sign in with company email" (the production build has the booking-staff
-//     client secret; without it the button disappears and staff would only see the legacy form);
+//     client secret; without it the button disappears and staff have no way in since the legacy form is gone);
 //   - no console error, no uncaught page error, no failed or >= 400 same-origin request while the page loads;
 //   - the response carries every header next.config.ts sets, with the same value, and at least the six AA-879
 //     security headers (CSP frame-ancestors, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy);

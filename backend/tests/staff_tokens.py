@@ -138,8 +138,11 @@ class LocalCis:
         )
 
     def verifier(self) -> MultiIssuerVerifier:
-        """The Booking staff verifier (production issuer profiles) over the two local issuers."""
-        return identity_config.build_staff_verifier(self.settings(), self.fetch)
+        """The Booking staff verifier over the two local issuers. AA-911: production accepts WORKFORCE only (the bridge
+        is off, ``identity_config.BRIDGE_ENABLED``); the endpoint tests still sign in with bridge-shaped tokens until
+        they move to WORKFORCE tokens, so this TEST verifier adds the bridge issuer explicitly.
+        tests/unit/test_aa911_bridge_off.py checks that the production verifier refuses a bridge token."""
+        return identity_config.build_staff_verifier(self.settings(), self.fetch, include_bridge=True)
 
 
 # ── Cognito M2M pool stand-in (AA-972, app.auth.m2m) ─────────────────────────

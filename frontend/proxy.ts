@@ -5,13 +5,8 @@
 // - token fresh → through; under 2 minutes left or expired → /api/auth/refresh?next=<path> (the refresh cookie is
 //   scoped to /api, so the refresh happens there; this file never sees it). The bk_access cookie lives as long as
 //   the 12 h session, so an expired token still tells this proxy which path to take.
-// Legacy CIS password session (bk_cis_session, until AA-680 PR-4):
-// - The Booking token is re-minted when missing or under 2 minutes from expiry; the fresh cookie is set
-//   on the response AND forwarded on the request, so the server render in this same request uses it.
-// Neither → /login?next=<path>.
-// - CIS refuses the mint (session expired, user deactivated in CIS) → both cookies cleared → /login.
-// - CIS unreachable → the request goes on with the old token; the (staff) layout shows the outage
-//   instead of logging the user out because of a network blip.
+// No company e-mail session → /login?next=<path>. AA-911 (S271): the legacy CIS password session (bk_cis_session)
+// is retired with the CIS -> Booking bridge; a browser still holding that cookie is sent to /login with it cleared.
 // /api/* is not matched: the BFF route handlers answer 401 JSON themselves (lib/session.ts).
 // Role checks per page happen in the shell (lib/rbac.ts); the Booking API enforces its own matrix.
 
@@ -22,9 +17,7 @@ import {
   CIS_SESSION_COOKIE,
   REFRESH_PATH,
   clearSessionCookies,
-  cookieOptions,
   isCognitoAccess,
-  mintBookingToken,
   needsRefresh,
 } from "./lib/session";
 
@@ -46,30 +39,19 @@ function toRefresh(request: NextRequest) {
   return NextResponse.redirect(url);
 }
 
-export async function proxy(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
     return NextResponse.next();
   }
 
   const access = request.cookies.get(ACCESS_COOKIE)?.value;
-  const cisSession = request.cookies.get(CIS_SESSION_COOKIE)?.value;
-  if (isCognitoAccess(access) && !cisSession) {
+  const legacy = request.cookies.get(CIS_SESSION_COOKIE)?.value;
+  if (isCognitoAccess(access) && !legacy) {
     return needsRefresh(access) ? toRefresh(request) : NextResponse.next();
   }
-  if (!cisSession) return toLogin(request, false);
-
-  if (!needsRefresh(access)) return NextResponse.next();
-
-  const minted = await mintBookingToken(cisSession);
-  if (!minted.ok) {
-    if (minted.reason === "unauthorized") return toLogin(request, true, "expired");
-    return NextResponse.next();
-  }
-  request.cookies.set(ACCESS_COOKIE, minted.token);
-  const res = NextResponse.next({ request: { headers: request.headers } });
-  res.cookies.set(ACCESS_COOKIE, minted.token, cookieOptions(minted.expiresIn));
-  return res;
+  // A retired bridge session (or a bridge token left in bk_access) ends here: clear it, sign in again.
+  return legacy || access ? toLogin(request, true, "expired") : toLogin(request, false);
 }
 
 export const config = {

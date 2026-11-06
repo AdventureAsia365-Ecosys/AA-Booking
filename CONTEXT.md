@@ -99,8 +99,8 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   `null` (`degraded`). Later: CIS golden records.
 - **Trusts** the Cognito WORKFORCE staff pool (root ADR 0006 / 0006a, AA-680 Phase 2): Booking verifies WORKFORCE
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
-  (granted in CIS → Platform → Staff). During the transition it still accepts the CIS bridge token (ADR 0004 O1: CIS
-  issues an RS256 JWT with `aud=booking`, verified against the CIS JWKS). Booking keeps only a thin staff profile
+  (granted in CIS → Platform → Staff). The CIS bridge token (ADR 0004 O1) is no longer accepted: AA-911 (S271) turned
+  the bridge issuer off and CIS no longer mints it. Booking keeps only a thin staff profile
   (`booking.staff_users`) and never reads the CIS staff directory.
 - **Publishes** to CIS (AA-858, contract `ops.overview.v1`, root ADR 0008 §5): two aggregate views in its own schema,
   `booking.v_ops_funnel_daily` (per UTC day, metric, source system) and `booking.v_ops_case_status` (cases per current
@@ -483,8 +483,10 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   - **WORKFORCE** (issuer `DEV_WORKFORCE_ISSUER` in `backend/app/auth/identity_config.py` on Dev) x clients
     **booking-staff** and **breakglass**: access tokens only (`token_use = access`), the client in `client_id` (no
     `aud` check), roles from `cognito:groups`. `cis-admin` is not accepted (no CIS screen calls Booking yet).
-  - **BRIDGE** (transition only, ADR 0006a A6): `iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, `sub` = CIS
-    `admin_users.id`, the role in `cis_role` (`admin|reviewer|content`). Removed by AA-680 PR-4 (`BRIDGE_ENABLED`).
+  - **BRIDGE** (retired, AA-911 S271): `BRIDGE_ENABLED = False`, production accepts WORKFORCE only and a bridge
+    token is 401. The bridge profile (`iss` = `STAFF_JWT_ISSUER`, `aud` = `booking`, role in `cis_role`) and its
+    provisioning code stay only for the test issuer of `tests/staff_tokens.py` (`include_bridge=True`) until the
+    endpoint tests move to WORKFORCE tokens; then they are deleted.
 - **WORKFORCE identity (bk-016).** The Booking role is the first `booking-*` group in the order `booking-admin` →
   `admin`, `booking-sales` → `sales`, `booking-contracting` → `contracting`, `booking-content_creator` →
   `content_creator`, `booking-finance` → `finance` (AA-1035 R2, root ADR 0019 d3 / d9; bk-038 lets the row hold it),
@@ -1661,10 +1663,9 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   non-GET/HEAD/OPTIONS is 403 `preview_read_only` before any DB access; permissions limited to `PREVIEW_PERMISSIONS`;
   `/booking/staff/me` says `preview_viewer: true`). Runbook: root
   `docs/ops/runbooks/preview-staff-sign-in.md`.
-- **Legacy CIS password bridge (until AA-680 PR-4)**: `POST /api/auth/login` (CIS `/auth/admin-login` →
-  `/auth/booking-token`) → `bk_cis_session` + `bk_access`; `proxy.ts` and the BFF re-mint the 15-minute Booking token
-  from the CIS session. On hosts with company sign-in the form sits collapsed under the company button (E2E account).
-  One session kind at a time: each sign-in clears the other kind's cookies.
+- **Legacy CIS password bridge: retired (AA-911, S271).** `POST /api/auth/login` and the password form are gone;
+  `proxy.ts` sends a browser that still holds `bk_cis_session` (or a non-Cognito `bk_access`) to `/login` with the
+  cookies cleared, and the BFF answers 401 without a company e-mail session.
 - `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the access token as Bearer. Tokens live only in
   httpOnly cookies. Booking roles of company sign-in profiles are read-only on `/staff` (set in CIS → Platform →
   Staff, API 409 `managed_in_directory`); Activate / Deactivate stays.

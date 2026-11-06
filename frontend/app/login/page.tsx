@@ -6,16 +6,14 @@
 //
 // AA-680 (root ADR 0006 / 0006a): the primary way in is "Sign in with company email" — the Cognito WORKFORCE
 // managed login (booking-staff client, staff-auth.lumiguides.it.com, an e-mail code). It is offered only on the
-// registered hosts with the client secret set (lib/cognito.ts). The legacy CIS username + password form (the bridge,
-// until AA-680 PR-4) stays: collapsed under the company button where that button exists, and as the only form on
-// hosts without company sign-in (per-deployment Vercel preview URLs). Booking roles are managed in CIS → Platform →
-// Staff. AA-911: the fixed Preview host booking-preview.lumiguides.it.com never shows the legacy form.
+// registered hosts with the client secret set (lib/cognito.ts). Booking roles are managed in CIS → Platform → Staff.
+// AA-911 (S271): the legacy CIS username + password form (the CIS -> Booking bridge) is retired; a host without
+// company sign-in shows why instead.
 
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { LoginForm } from "./LoginForm";
 import { CIS_STAFF_URL } from "@/lib/config";
-import { cognitoSignInAvailable, isPreviewSignInHost, workforceSignInHost } from "@/lib/cognito";
+import { cognitoSignInAvailable, workforceSignInHost } from "@/lib/cognito";
 import { safeNext } from "@/lib/safeNext";
 import { StandaloneFrame } from "@/ui/local/StandaloneFrame";
 
@@ -35,7 +33,7 @@ const REASONS: Record<string, { tone: "info" | "error"; text: string }> = {
   unavailable: { tone: "error", text: "The company sign-in service is not answering. Try again in a moment." },
   cognito_unavailable: {
     tone: "error",
-    text: "Company e-mail sign-in is not available on this address. Use the CIS password form below.",
+    text: "Company e-mail sign-in is not available on this address.",
   },
 };
 
@@ -49,8 +47,6 @@ export default async function LoginPage({
   const next = safeNext(sp.next);
   const host = (await headers()).get("host");
   const company = cognitoSignInAvailable(host);
-  // AA-911: no legacy password form on the fixed Preview host (a stable URL that may be public).
-  const legacyForm = !isPreviewSignInHost(host);
   const signInHref = `/api/auth/signin/cognito${next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`;
   return (
     <StandaloneFrame theme="light" className="bk-login-bg relative overflow-hidden px-4 py-10">
@@ -64,9 +60,7 @@ export default async function LoginPage({
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-deep">Booking · staff</p>
           <h1 className="mt-1 font-display text-[26px] font-semibold leading-tight text-ink">Sign in to Booking</h1>
           <p className="mt-1.5 text-[13px] text-muted">
-            {company
-              ? "Use your company e-mail. Trip cases, proposals and customers in one place."
-              : "Use your CIS staff account. Trip cases, proposals and customers in one place."}
+            Use your company e-mail. Trip cases, proposals and customers in one place.
           </p>
           {reason && (
             <p
@@ -91,21 +85,10 @@ export default async function LoginPage({
               <p className="mt-2 text-center text-xs text-muted">
                 Opens {workforceSignInHost()} and sends a one-time code to your @adventure.asia inbox.
               </p>
-              {legacyForm && (
-                <details className="mt-6 border-t border-line pt-4">
-                  <summary className="cursor-pointer text-[13px] font-medium text-muted hover:text-ink">
-                    Use a CIS username and password instead (legacy)
-                  </summary>
-                  <LoginForm next={next} />
-                </details>
-              )}
             </>
-          ) : legacyForm ? (
-            <LoginForm next={next} />
           ) : (
             <p role="alert" className="mt-6 rounded-md border border-danger-border bg-danger-soft px-3 py-2 text-[13px] text-danger">
-              Company e-mail sign-in is not set up on this preview build. Point this address at a preview built after
-              the sign-in settings were added (root runbook preview-staff-sign-in).
+              Company e-mail sign-in is not set up on this address. Open Booking on its staff address to sign in.
             </p>
           )}
         </div>
