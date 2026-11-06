@@ -33,7 +33,7 @@ METRICS = {
     "rates_current",
     "media_active",
     "media_active_with_rights",
-    "customers",
+    # "customers" left the view with the B2C retirement (bk-045 rewrites it without the metric, AA-1046).
     "b2b_partners_active",
     "b2b_holds_active",
 }
@@ -135,7 +135,7 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         await admin.execute("SET LOCAL ROLE cis_app")
         await admin.fetch(f"SELECT * FROM {TOTALS}")
         await admin.fetch(f"SELECT * FROM {KEYS} LIMIT 1")
-        for table in ("booking.trip_plans", "booking.suppliers", "booking.customers", "booking.b2b_holds"):
+        for table in ("booking.trip_plans", "booking.suppliers", "booking.trip_cases", "booking.b2b_holds"):
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 async with admin.transaction():
                     await admin.fetch(f"SELECT 1 FROM {table} LIMIT 1")
@@ -164,6 +164,8 @@ async def test_guard_refuses_a_runner_other_than_bk_owner(admin: asyncpg.Connect
 
 
 async def test_reapply_as_bk_owner_is_a_noop(admin: asyncpg.Connection) -> None:
+    if await admin.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = 'bk-045'"):
+        pytest.skip("bk-025 counts booking.customers, which bk-045 dropped (AA-1046): superseded, never re-run")
     first = await admin.fetchval("SELECT applied_at FROM shared.schema_versions WHERE version = 'bk-025'")
     await admin.execute("SET ROLE bk_owner")
     try:

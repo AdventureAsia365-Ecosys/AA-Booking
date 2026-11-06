@@ -29,7 +29,7 @@ import {
   useCan,
   useUrlFilters,
 } from "@/ui";
-import { checkProgress, tabCountsShown } from "@/ui/booking/caseFacts";
+import { casePartyLabel, checkProgress, tabCountsShown } from "@/ui/booking/caseFacts";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { CheckDrawer, checkTitle, isOverdue } from "./_parts/CheckDrawer";
 
@@ -116,16 +116,14 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
   },
   {
     id: "customer",
-    header: "Customer",
-    accessorFn: (r) => (r.trip_case.channel === "b2b" ? "B2B agency" : (r.trip_case.customer_name ?? "")),
+    header: "For",
+    accessorFn: (r) => casePartyLabel(r.trip_case),
     enableSorting: false,
     cell: ({ row }) => {
       const t = row.original.trip_case;
       if (t.channel === "b2b") return <Pill tone="accent" dot={false}>B2B agency</Pill>;
       return (
-        <span className="block max-w-[180px] truncate text-[13px] text-body md:max-w-[110px]" title={t.customer_name ?? undefined}>
-          {t.customer_name ?? "—"}
-        </span>
+        <span className="block max-w-[180px] truncate text-[13px] text-body md:max-w-[110px]">{casePartyLabel(t)}</span>
       );
     },
   },

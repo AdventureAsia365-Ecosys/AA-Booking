@@ -9,6 +9,7 @@ version priced by the AA-810 engine.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import date
 from decimal import Decimal as D
 from typing import Any
 
@@ -20,11 +21,12 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
+from tests.integration import ops
 from tests.integration.conftest import MIGRATIONS
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 MAKER, CHECKER, SALES = "it-823-api-maker", "it-823-api-checker", "it-823-api-sales"
 HANOI = "d0000000-0000-4000-8000-000000000001"
@@ -41,7 +43,8 @@ async def _clean(conn: asyncpg.Connection) -> None:
         " (SELECT id FROM booking.trip_cases WHERE notes = 'it-823')"
     )
     await conn.execute("DELETE FROM booking.trip_cases WHERE notes = 'it-823'")
-    await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-823-%'")
+    if await conn.fetchval("SELECT to_regclass('booking.customers')") is not None:  # before bk-045 (AA-1046)
+        await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-682-it-823-%'")
     await conn.execute("DELETE FROM booking.supplier_contracts")
     await conn.execute("DELETE FROM booking.suppliers")
     await conn.execute("DELETE FROM booking.fx_rates")
@@ -73,9 +76,7 @@ async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
 ) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     try:
@@ -333,13 +334,8 @@ async def test_rates_default_the_item_net_and_price_the_version(
     deleted = next(a for a in hotel_page["recent_activity"] if a["action"] == "supplier_rate.deleted")
     assert deleted["entity_label"].endswith("Emerald · Family Suite") and deleted["summary"] == "Removed rate 7.00 VND"
 
-    customer_id = await admin.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ('it-823-api@example.test') RETURNING id"
-    )
-    case = await admin.fetchrow(
-        "INSERT INTO booking.trip_cases (customer_id, start_date, pax, notes) VALUES ($1, '2027-03-10', 2, 'it-823')"
-        " RETURNING id, code",
-        customer_id,
+    case = await ops.insert_b2c_case(
+        admin, tag="it-823-api", status="new_inquiry", start=date(2027, 3, 10), end=None, notes="it-823"
     )
     await admin.execute(
         "INSERT INTO booking.trip_case_versions (trip_case_id, version_number) VALUES ($1, 1)", case["id"]

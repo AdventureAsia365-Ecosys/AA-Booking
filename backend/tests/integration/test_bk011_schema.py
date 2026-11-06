@@ -1,7 +1,7 @@
 """bk-011 (AA-830) on a real PostgreSQL: the catalog tour key columns of booking.trip_case_legs.
 
-Schema-level only (no new API code): it ships with the migration-only PR so the DB rules are proven before apply. The
-legs are opened by the existing bk-002 intake (which leaves the new columns null).
+Schema-level only (no new API code). The legs belong to a kept b2c case written the way the retired bk-002 intake
+stored them (the new columns null; AA-1046).
 """
 
 from __future__ import annotations
@@ -13,16 +13,15 @@ import pytest
 import pytest_asyncio
 
 from tests import inquiry_samples as samples
-from tests.integration.test_bk002_intake import INTAKE_TABLES, drain, publish
+from tests.integration.handoff import LEG_TABLES, case_with_legs
 
-# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
-    await conn.execute(f"TRUNCATE {INTAKE_TABLES} CASCADE")
+    await conn.execute(f"TRUNCATE {LEG_TABLES} CASCADE")
     await conn.execute("TRUNCATE tripplanner.outbox RESTART IDENTITY")
     await conn.execute("TRUNCATE catalog.v_tour, catalog.stub_parsed_day, catalog.v_tour_photo")
     try:
@@ -60,8 +59,7 @@ async def test_bk011_is_registered_and_the_columns_are_nullable(admin: asyncpg.C
 async def test_key_check_refuses_half_or_foreign_keys(
     admin: asyncpg.Connection, pool: asyncpg.Pool, system: str | None, source_id: str | None
 ) -> None:
-    await publish(admin, samples.v1_1())
-    await drain(pool)
+    await case_with_legs(admin, samples.v1_1())
     leg_id = await admin.fetchval("SELECT id::text FROM booking.trip_case_legs LIMIT 1")
     async with pool.acquire() as conn:
         with pytest.raises(asyncpg.CheckViolationError):
@@ -74,8 +72,7 @@ async def test_key_check_refuses_half_or_foreign_keys(
 
 
 async def test_a_full_key_is_accepted_and_indexed(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
-    await publish(admin, samples.v1_1())
-    await drain(pool)
+    await case_with_legs(admin, samples.v1_1())
     async with pool.acquire() as conn:
         status = await conn.execute(
             "UPDATE booking.trip_case_legs SET source_system = 'cis', source_id = 'src-1' WHERE position = 1"

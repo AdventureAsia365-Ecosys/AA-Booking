@@ -1,5 +1,5 @@
 """Operations documents (bk-026 ``booking.ops_files``; AA-682 design D10): supplier vouchers and confirmations
-(S1), payment evidence (S3, bk-028), supplier bill documents and payout evidence (S4, bk-030).
+(S1), supplier bill documents and payout evidence (S4, bk-030).
 
 - **Private bucket, SSE-S3.** The bytes go to the ops-docs bucket (``OPS_DOCS_BUCKET``, AA-CIS-Infra
   ``booking_ops_docs.tf``: SSE-S3 by default, a put naming another algorithm is denied, and every object verb is
@@ -19,12 +19,10 @@
 - **B2B cases take no document** (design D12, DM-6.8: a voucher or a supplier confirmation names travellers of an agency
   trip, which never enter ``booking.*``): 422 ``document_not_allowed_b2b``; bk-026 refuses it too.
 
-- **Payment evidence** (bk-028, critic note 6): record the payment first, then upload with the payment as entity; the
-  upload makes the file the payment's ``evidence_file_id`` in the same transaction (the evidence a verifier needs).
-  Only while the payment is not verified or voided; the evidence of a verified payment is never removed (409
-  ``evidence_locked``, refused by bk-028 too). Removing the current evidence of a recorded payment detaches it first
-  (``evidence_file_id`` NULL, so the payment needs new evidence before it verifies); bk-028 refuses removing a file a
-  non-voided payment still points at, and re-checks at verify that the evidence is an active file.
+- **Customer payment evidence** (bk-028, entity ``payment``) is retired with the customer payments (AA-1046): its
+  rows and S3 objects are kept under the accounting exception (DM-7.1; bk-045 freezes them, the payments are archived
+  in ``booking.retired_b2c_record``), and no route reads, adds or removes one any more (403: no permission covers the
+  entity ``payment``).
 
 - **Supplier bill documents** (bk-030): the supplier's PDF, uploaded with the bill as entity while the bill is
   ``received`` (it is what the approver checks); the newest becomes the bill's ``document_file_id``. Never on a bill
@@ -35,9 +33,8 @@
   cases: it names no traveller); the newest becomes ``evidence_file_id``. The evidence a live payout points at is
   replaced, never removed (409 ``evidence_locked``).
 
-Permissions: a file inherits the permission of its parent (supplier booking: ``ops.read`` / ``ops.write``; payment:
-``billing.read`` / ``billing.write``; supplier bill: ``bill.read`` / ``bill.write``; payout: ``bill.read`` /
-``payout.write``).
+Permissions: a file inherits the permission of its parent (supplier booking: ``ops.read`` / ``ops.write``; supplier
+bill: ``bill.read`` / ``bill.write``; payout: ``bill.read`` / ``payout.write``).
 """
 
 from __future__ import annotations
@@ -69,30 +66,26 @@ PRESIGN_SECONDS = 300
 OBJECT_PREFIX = "ops-docs"
 EXTENSIONS = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 CONTENT_TYPES = tuple(EXTENSIONS)
-KINDS = ("payment_evidence", "supplier_voucher", "supplier_confirmation", "supplier_bill", "payout_evidence")
-# The entity each kind belongs to (bk-026 vouchers / confirmations, bk-028 payment evidence, bk-030 bills / payouts).
+KINDS = ("supplier_voucher", "supplier_confirmation", "supplier_bill", "payout_evidence")
+# The entity each kind belongs to (bk-026 vouchers / confirmations, bk-030 bills / payouts).
 KIND_ENTITY = {
     "supplier_voucher": "supplier_booking",
     "supplier_confirmation": "supplier_booking",
-    "payment_evidence": "payment",
     "supplier_bill": "supplier_bill",
     "payout_evidence": "supplier_payout",
 }
 PERMISSIONS = {
     "supplier_booking": ("ops.read", "ops.write"),
-    "payment": ("billing.read", "billing.write"),
     "supplier_bill": ("bill.read", "bill.write"),
     "supplier_payout": ("bill.read", "payout.write"),
 }
 NOT_FOUND = {
     "supplier_booking": "supplier_booking_not_found",
-    "payment": "payment_not_found",
     "supplier_bill": "supplier_bill_not_found",
     "supplier_payout": "supplier_payout_not_found",
 }
 # The column holding the parent's current file, set by an upload (the newest wins) and cleared before a removal.
 CURRENT_FILE = {
-    "payment": "payments SET evidence_file_id",
     "supplier_bill": "supplier_bills SET document_file_id",
     "supplier_payout": "supplier_payouts SET evidence_file_id",
 }
@@ -247,16 +240,6 @@ SELECT sb.id::text AS id, sb.code, sb.status, sb.trip_case_id::text AS trip_case
        sb.voucher_file_id::text AS voucher_file_id, tc.code AS case_code, tc.channel
 FROM booking.supplier_bookings sb JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
 WHERE sb.id = $1::uuid"""
-PAYMENT_PARENT_SQL = """
-SELECT p.id::text AS id, p.ref AS code,
-       CASE WHEN p.voided_at IS NOT NULL THEN 'voided' WHEN p.verified_at IS NOT NULL THEN 'verified'
-            ELSE 'recorded' END AS status,
-       i.trip_case_id::text AS trip_case_id, p.evidence_file_id::text AS voucher_file_id, tc.code AS case_code,
-       tc.channel, i.id::text AS invoice_id, p.verified_at IS NOT NULL AS verified
-FROM booking.payments p
-JOIN booking.invoices i ON i.id = p.invoice_id
-JOIN booking.trip_cases tc ON tc.id = i.trip_case_id
-WHERE p.id = $1::uuid"""
 # bk-030: a bill's "voucher_file_id" is its document; channel 'b2b' when the bill touches a B2B case (its own case or
 # the case of any line), the DM-6.8 rule of ops_files_guard.
 BILL_PARENT_SQL = """
@@ -331,10 +314,9 @@ def _require(staff: Staff, entity_type: str, *, write: bool) -> None:
 
 
 async def _parent(conn: asyncpg.Connection, entity_type: str, entity_id: str, *, lock: bool) -> Any:
-    """The supplier booking, payment, supplier bill or payout a file belongs to, with its case channel (404 when it
-    does not exist). The ``voucher_file_id`` column is the parent's current file (voucher, payment evidence, bill
-    document, payout evidence). A payment is locked in the money order (case, invoice, payment; critic B4), a payout
-    in the bill order (bill, payout)."""
+    """The supplier booking, supplier bill or payout a file belongs to, with its case channel (404 when it does not
+    exist). The ``voucher_file_id`` column is the parent's current file (voucher, bill document, payout evidence). A
+    payout is locked in the bill order (bill, payout)."""
     if entity_type not in PERMISSIONS:
         raise Invalid("unknown_entity", f"no file belongs to a {entity_type}")
     missing = NOT_FOUND[entity_type]
@@ -343,13 +325,7 @@ async def _parent(conn: asyncpg.Connection, entity_type: str, entity_id: str, *,
         ident = str(uuid.UUID(entity_id))
     except ValueError:
         raise NotFound(missing, f"{label} {entity_id} not found") from None
-    if entity_type == "payment":
-        row = await conn.fetchrow(PAYMENT_PARENT_SQL, ident)
-        if row is not None and lock:
-            await conn.execute("SELECT 1 FROM booking.trip_cases WHERE id = $1::uuid FOR UPDATE", row["trip_case_id"])
-            await conn.execute("SELECT 1 FROM booking.invoices WHERE id = $1::uuid FOR UPDATE", row["invoice_id"])
-            row = await conn.fetchrow(PAYMENT_PARENT_SQL + " FOR UPDATE OF p", ident)
-    elif entity_type == "supplier_bill":
+    if entity_type == "supplier_bill":
         row = await conn.fetchrow(BILL_PARENT_SQL + (" FOR UPDATE OF b" if lock else ""), ident)
     elif entity_type == "supplier_payout":
         row = await conn.fetchrow(PAYOUT_PARENT_SQL, ident)
@@ -398,8 +374,6 @@ async def upload(
             raise Conflict("payout_closed", f"payout {parent['code']} is voided: its evidence is fixed")
     elif parent["status"] in ("declined", "cancelled"):
         raise Conflict("supplier_booking_closed", f"supplier booking {parent['code']} is {parent['status']}")
-    elif parent["status"] in ("verified", "voided"):
-        raise Conflict("payment_closed", f"payment {parent['code']} is {parent['status']}: its evidence is fixed")
     if store is None:
         raise Unavailable("ops_storage_unavailable", "document storage is not configured for this environment")
     name = clean_name(file_name)
@@ -453,7 +427,7 @@ async def upload(
         summary=f"Added a {kind.replace('_', ' ')} ({detected}, {len(data)} bytes)",
     )
     if entity_type in CURRENT_FILE:
-        # The newest file is the parent's current one (critic note 6): payment / payout evidence, bill document; the
+        # The newest file is the parent's current one (critic note 6): payout evidence, bill document; the
         # guards check it is an active file of that parent and kind.
         await conn.execute(
             f"UPDATE booking.{CURRENT_FILE[entity_type]} = $2::uuid, updated_by = $3 WHERE id = $1::uuid",  # noqa: S608
@@ -499,20 +473,16 @@ async def download(conn: asyncpg.Connection, store: OpsStore | None, staff: Staf
 # Parents whose status is final: their current-file pointer is never written again (the DB refuses it), so removing
 # their file leaves the pointer. Every other parent (a supplier booking in any status, cancelled included) detaches.
 FINAL_PARENT: dict[str, tuple[str, ...]] = {
-    "payment": ("voided",),
     "supplier_payout": ("voided",),
     "supplier_bill": ("cancelled",),
 }
 
 
 async def remove(conn: asyncpg.Connection, staff: Staff, file_id: str, reason: str) -> dict[str, Any]:
-    """Remove a file (final; the object stays until retention). A removed voucher or payment evidence leaves its
-    parent first.
+    """Remove a file (final; the object stays until retention). A removed voucher leaves its parent first.
 
-    Lock order: the parent (case, invoice, payment; or the supplier booking), THEN the file, the order of every other
-    money write: a payment verify locks case, invoice, payment and bk-028 takes its evidence file FOR SHARE, so locking
-    the file first here could deadlock with it. The evidence a non-voided payment points at is detached before the
-    file is removed (bk-028 refuses removing attached evidence; review S253)."""
+    Lock order: the parent (the supplier booking, bill or payout), THEN the file, the order of every other money write
+    (review S253)."""
     reason = (reason or "").strip()
     if not reason:
         raise Invalid("reason_required", "say why the file is removed")
@@ -525,8 +495,6 @@ async def remove(conn: asyncpg.Connection, staff: Staff, file_id: str, reason: s
     if row["status"] == "removed":  # removed while this call waited for the parent
         return file_out(row)
     current = parent["voucher_file_id"] == row["id"]
-    if row["entity_type"] == "payment" and current and parent.get("verified"):
-        raise Conflict("evidence_locked", f"this file is the evidence of verified payment {parent['code']}; it stays")
     if row["entity_type"] == "supplier_bill" and current and parent["status"] in ("approved", "paid"):
         raise Conflict("document_locked", f"this file is the document of approved bill {parent['code']}; it stays")
     if row["entity_type"] == "supplier_payout" and current and parent["status"] == "live":

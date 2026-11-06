@@ -53,7 +53,6 @@ export interface TripCheck {
     channel: "b2c" | "b2b";
     start_date: IsoDate | null;
     end_date: IsoDate | null;
-    customer_name: string | null;
     /** AA-996, /trip-checks rows only: the trip's stored checks (progress) and its sales owner. */
     checks?: { total: number; done: number; not_applicable: number };
     sales_name?: string | null;

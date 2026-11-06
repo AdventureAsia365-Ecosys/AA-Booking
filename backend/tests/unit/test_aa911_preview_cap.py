@@ -111,11 +111,11 @@ def test_same_user_on_the_production_client_keeps_the_full_role() -> None:
         ("PUT", "/booking/staff/me/preferences", {"notify": {}}),
         ("PATCH", f"/booking/staff/{COG_KEY}", {"active": False}),
         ("POST", "/booking/trip-cases", {"title": "x"}),
-        ("POST", "/booking/customers", {"name": "x"}),
+        ("POST", "/booking/trip-cases/TC-000001/status", {"to_status": "cancelled", "reason": "x"}),
         ("POST", "/booking/notifications/read", {"all": True}),
         ("POST", "/booking/pricing/rules", {}),
         ("POST", "/booking/retention/runs", {}),
-        ("DELETE", "/booking/customers/c-1", None),
+        ("DELETE", "/booking/trip-cases/TC-000001/versions/1", None),
         ("DELETE", "/booking/rates/00000000-0000-4000-8000-000000000001", None),
     ],
 )

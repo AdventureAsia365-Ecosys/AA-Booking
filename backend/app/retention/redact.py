@@ -1,7 +1,8 @@
 """AA-825 — what ``bk_retention_inbox_redact`` keeps of an ``inquiry.submitted`` inbox row (DM-6.6). Pure functions.
 
-The payload is **rebuilt from an allowlist**, not scrubbed with a denylist: only keys of the contract (v1 to v1.3,
-``backend/app/contracts/``) that carry no personal data survive, and every other key is dropped. This matters most for
+The payload is **rebuilt from an allowlist**, not scrubbed with a denylist: only keys of the contract (v1 to v1.3, root
+``docs/contracts/inquiry.submitted.*.json``; the intake that parsed them is retired, AA-1046, the kept rows are still
+redacted) that carry no personal data survive, and every other key is dropped. This matters most for
 ``failed`` rows, whose payload by definition did not pass the contract and can hold personal data anywhere (an extra
 key, a ``customer`` that is a string, an unknown contact field of a future version). A denylist would leave that data in
 place while ``redacted_at`` says the row is clean.

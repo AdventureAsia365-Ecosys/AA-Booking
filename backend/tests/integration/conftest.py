@@ -117,6 +117,17 @@ def booking_dsn(admin_dsn: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+# AA-1046: bk-045 (destructive) dropped the B2C objects files bk-001..bk-036 create or alter (customers and their
+# identities, OTPs and sessions, media_files, the customer invoices and payments, v_ops_inquiry_inbox,
+# trip_cases.customer_id). A RE-RUN after the drop (the idempotency checks of this suite) starts at bk-037: DB Migrate
+# never runs a registered file again, and re-running an older one fails on a dropped object or recreates it (S271,
+# each of bk-001, 002, 005, 014, 018, 020, 024, 025, 028, 030, 035, 036 did; the files between them only re-grant what
+# the next of those revokes, so a re-run that skips some of them leaves grants the first pass never left). The first
+# pass always runs every file.
+SUPERSEDED_BY_BK045 = frozenset(range(1, 37))
+BK045 = 45
+
+
 async def apply_migrations(
     conn: asyncpg.Connection, *, first_pass: bool = False, only: Iterable[int] | None = None
 ) -> None:
@@ -127,12 +138,18 @@ async def apply_migrations(
     booking when the file starts, XD8): a mismatch fails here, before the Dev apply. A re-run (the idempotency
     check) uses the same per-file role; DB Migrate itself never re-runs a registered file. After a switched file
     the login role may own nothing in schema booking (the runner's ownership post-check). ``only`` limits the run to
-    those bk- numbers, in file order (e.g. ``range(1, 18)`` = the state before bk-018).
+    those bk- numbers, in file order (e.g. ``range(1, 18)`` = the state before bk-018). A re-run once bk-045 is
+    registered skips :data:`SUPERSEDED_BY_BK045`.
     """
     login = await conn.fetchval("SELECT session_user")
     wanted = None if only is None else set(only)
+    dropped = not first_pass and bool(
+        await conn.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = $1", f"bk-{BK045:03d}")
+    )
     for path in MIGRATIONS:
         if wanted is not None and int(path.name[:3]) not in wanted:
+            continue
+        if dropped and int(path.name[:3]) in SUPERSEDED_BY_BK045:
             continue
         role = migration_role(int(path.name[:3]))
         if first_pass:
@@ -180,16 +197,17 @@ def migrated_booking_dsn(migrated_admin_dsn: str) -> str:
 
 
 # ── AA-1034 R0: the frozen B2C tables (bk-036 REVOKEs INSERT on them from role booking) ──────────────────────────
-# The B2C code (TripPlanner intake, staff leads, traveller sign-in) stays in the repo until the tables are dropped, so
-# its tests keep running: a module that exercises it marks itself with `b2c_insert_regranted`, which gives role
-# booking INSERT back for the test and takes it away again afterwards (the bk-036 state). tests/integration/
-# test_bk036_schema.py tests the revoke itself.
+# The B2C code is retired (AA-1046); the schema tests of the old B2C migrations that insert a traveller row as role
+# booking mark themselves with `b2c_insert_regranted`, which gives role booking INSERT back for the test and takes it
+# away again afterwards (the bk-036 state). tests/integration/test_bk036_schema.py tests the revoke itself.
 B2C_TABLES = ("customers", "customer_identities", "customer_otps", "customer_sessions")
 
 
 async def _set_b2c_insert(admin_dsn: str, grant: bool) -> None:
     conn = await asyncpg.connect(admin_dsn)
     try:
+        if await conn.fetchval("SELECT to_regclass('booking.customers')") is None:
+            return  # AA-1046: bk-045 dropped them (only a module that rebuilt the schema before it still has them)
         async with as_booking_owner(conn):
             verb = "GRANT INSERT ON {} TO booking" if grant else "REVOKE INSERT ON {} FROM booking"
             await conn.execute(verb.format(", ".join(f"booking.{t}" for t in B2C_TABLES)))
@@ -210,6 +228,29 @@ def b2c_insert_regranted(migrated_admin_dsn: str) -> Iterator[None]:
         yield
     finally:
         _run_set_b2c_insert(migrated_admin_dsn, False)
+
+
+# ── AA-1046: the b2c write guard, off for the tests of the services behind it ─────────────────────────────────────────
+# A staff write on a b2c trip case (kept history) answers 410 (app.b2c; tests/unit/test_aa1046_b2c_retired.py).
+# The API tests of the operations services (supplier bookings, vouchers, checks, bills) still drive them over HTTP on
+# the sold b2c case of tests/integration/ops.py: a module that does so uses `b2c_guard_off`.
+
+
+@pytest.fixture
+def b2c_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import b2c
+
+    async def passes(*_: object) -> None:
+        return None
+
+    for name in (
+        "refuse_b2c_case_write",
+        "refuse_b2c_supplier_booking_write",
+        "refuse_b2c_check_write",
+        "refuse_b2c_file_upload",
+        "refuse_b2c_file_remove",
+    ):
+        monkeypatch.setattr(b2c, name, passes)
 
 
 # ── AA-996 perf guard: every catalog read of every route a test exercises ─────

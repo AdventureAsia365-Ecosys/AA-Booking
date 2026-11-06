@@ -3,8 +3,7 @@
 - ``PATCH /booking/staff/{id}`` takes a ``reason`` (required to deactivate, else optional); it lands in the audit row
   (``after.reason`` + a summary that starts with "Deactivated." / "Activated."), never on the profile.
 - ``GET /booking/audit-logs`` takes ``q`` (summary, action, record label or actor name; ILIKE, ``%`` / ``_`` literal).
-- A payment carries its ``customer`` (id, code, name); the payment detail adds the trip case facts and, with
-  ``customer.read``, the customer's e-mail and phone (Figma PAYMENT DETAILS cards).
+- (The payment customer and trip context of the billing detail went with the customer payments, AA-1046.)
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from app.auth import admin
 from app.auth.staff import Staff, current_staff, get_pool
 from app.errors import Invalid
 from app.main import create_app
-from app.ops import payments as pay
 from app.settings import Settings
 from tests.unit.fakes import ScriptedConn
 
@@ -152,102 +150,3 @@ def test_audit_route_passes_q() -> None:
     assert conn.calls[0][1][0] == "%deactivat%"
     assert client(ADMIN, ScriptedConn()).get("/booking/audit-logs", params={"q": "x" * 201}).status_code == 422
     assert client(SALES, ScriptedConn()).get("/booking/audit-logs", params={"q": "x"}).status_code == 403
-
-
-# ── Payment customer and trip context ────────────────────────────────────────
-
-
-def payment_row(**over: Any) -> dict[str, Any]:
-    row = {
-        "id": "p0000000-0000-4000-8000-000000000001",
-        "ref": "PMT-000001",
-        "state": "verified",
-        "method": "bank_transfer",
-        "evidence_file_id": "f",
-        "recorded_by": "u-1",
-        "recorded_by_name": "Sales One",
-        "verified_by": "a-1",
-        "verified_by_name": "Admin",
-        "voided_by": None,
-        "voided_by_name": None,
-        "invoice_id": "i0000000-0000-4000-8000-000000000001",
-        "invoice_number": "INV-000001",
-        "invoice_status": "paid",
-        "trip_case_id": CASE_ID,
-        "trip_case_code": "TC-000001",
-        "customer_id": CUSTOMER_ID,
-        "customer_code": "CUS-000001",
-        "customer_name": "Ann Traveller",
-    }
-    row.update(over)
-    return row
-
-
-def test_payment_out_carries_the_customer() -> None:
-    out = pay.payment_out(payment_row(), SALES)
-    assert out["customer"] == {"id": CUSTOMER_ID, "code": "CUS-000001", "name": "Ann Traveller"}
-    # A B2B trip has no customer; a row read without the new columns stays valid.
-    assert (
-        pay.payment_out(payment_row(customer_id=None, customer_code=None, customer_name=None), SALES)["customer"]
-        is None
-    )
-    old = payment_row()
-    for k in ("customer_id", "customer_code", "customer_name"):
-        old.pop(k)
-    assert pay.payment_out(old, SALES)["customer"] is None
-
-
-def detail_conn() -> ScriptedConn:
-    return ScriptedConn(
-        [
-            ("FROM booking.payments p", payment_row()),
-            ("FROM booking.ops_files f", []),
-            ("b.balance::text AS balance FROM booking.invoices i", {"currency": "USD", "balance": "0.00"}),
-            (
-                "FROM booking.trip_cases WHERE id",
-                {
-                    "status": "paid",
-                    "trip_style": "Cultural",
-                    "start_date": date(2027, 11, 12),
-                    "end_date": date(2027, 11, 26),
-                    "pax": 2,
-                    "channel": "b2c",
-                },
-            ),
-            ("SELECT email, phone FROM booking.customers", {"email": "ann@example.test", "phone": "+10000000000"}),
-        ]
-    )
-
-
-@pytest.mark.asyncio
-async def test_payment_detail_adds_trip_and_contact() -> None:
-    out = await pay.get_payment(detail_conn(), SALES, "PMT-000001")
-    assert out["trip_case"]["code"] == "TC-000001" and out["trip_case"]["trip_style"] == "Cultural"
-    assert out["trip_case"]["end_date"] == date(2027, 11, 26) and out["trip_case"]["pax"] == 2
-    assert out["customer"]["email"] == "ann@example.test" and out["customer"]["phone"] == "+10000000000"
-
-
-@pytest.mark.asyncio
-async def test_payment_detail_contact_needs_customer_read() -> None:
-    conn = detail_conn()
-    # A billing reader without customer.read (preview cap has neither; a role matrix change could split them).
-    reader = Staff("u-5", None, "Reader", "sales", True, "reviewer")
-    reader_no_customer = _without(reader, "customer.read")
-    out = await pay.get_payment(conn, reader_no_customer, "PMT-000001")
-    assert out["customer"] == {"id": CUSTOMER_ID, "code": "CUS-000001", "name": "Ann Traveller"}
-    assert conn.sql("SELECT email, phone FROM booking.customers") == []
-
-
-def _without(staff: Staff, permission: str) -> Staff:
-    class Limited(Staff):
-        def can(self, p: str) -> bool:  # noqa: D102
-            return p != permission and super().can(p)
-
-    return Limited(**{f: getattr(staff, f) for f in staff.__dataclass_fields__})
-
-
-@pytest.mark.asyncio
-async def test_payment_detail_without_a_customer() -> None:
-    conn = detail_conn().on("FROM booking.payments p", payment_row(customer_id=None))
-    out = await pay.get_payment(conn, SALES, "PMT-000001")
-    assert out["customer"] is None and out["trip_case"]["status"] == "paid"

@@ -1,4 +1,4 @@
-"""Trip case reads and staff writes: list, summary, detail, activity, create, edit, status, assignment.
+"""Trip case reads and staff writes: list, summary, detail, activity, edit, status, assignment.
 
 Plain SQL on asyncpg. Every write runs in the caller's transaction, locks the trip case row first
 (``FOR UPDATE``) and writes one ``booking.audit_logs`` row. Status rules live in the database
@@ -22,7 +22,7 @@ from app.catalog import liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound
 from app.notifications import service as notifications
-from app.ops import invoices, supplier_bookings
+from app.ops import supplier_bookings
 from app.trip_cases import sql
 
 log = logging.getLogger(__name__)
@@ -60,13 +60,9 @@ SORTS = {"created_at": "tc.created_at", "updated_at": "tc.updated_at", "start_da
 MAX_COUNTRIES = 20
 
 CASE_COLUMNS = """
-    tc.id::text AS id, tc.code, tc.status, tc.customer_id::text AS customer_id, tc.trip_style,
+    tc.id::text AS id, tc.code, tc.status, tc.trip_style,
     tc.start_date, tc.end_date, tc.pax, tc.pax_adults, tc.pax_children, tc.currency, tc.notes, tc.source_system,
     tc.source_id, tc.channel, tc.party_tenant_id::text AS party_tenant_id, tc.created_at, tc.updated_at
-"""
-CUSTOMER_COLUMNS = """
-    c.code AS customer_code, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
-    c.verified AS customer_verified, c.needs_merge_review AS customer_needs_merge_review
 """
 OPEN_ASSIGNEES = """
     (SELECT coalesce(json_agg(json_build_object(
@@ -143,7 +139,6 @@ async def list_cases(
     assignee: str | None = None,
     q: str | None = None,
     source: str | None = None,
-    customer_id: str | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
     sort: str | None = None,
@@ -152,7 +147,8 @@ async def list_cases(
 ) -> dict[str, Any]:
     """``assignee``: a CIS user id (open assignment in any role), or ``none`` for unassigned cases.
 
-    ``q`` matches the case code, the customer code, name or e-mail. ``created_to`` is inclusive."""
+    ``q`` matches the case code. ``created_to`` is inclusive. Every channel is listed: the ``b2c`` cases are the kept
+    history of the retired B2C half (read-only, AA-1046), told apart by ``channel``."""
     where = ["tc.deleted_at IS NULL"]
     args: list[Any] = []
 
@@ -177,24 +173,22 @@ async def list_cases(
             assignee,
         )
     if q and q.strip():
-        add("(tc.code ILIKE {p} OR c.code ILIKE {p} OR c.name ILIKE {p} OR c.email ILIKE {p})", paging.contains(q))
+        add("tc.code ILIKE {p}", paging.contains(q))
     if source:
         if source not in SOURCES:
             raise Invalid("unknown_source", f"source must be one of {', '.join(SOURCES)}")
         add("tc.source_system = {p}", source)
-    if customer_id:
-        add("tc.customer_id = {p}::uuid", customer_id)
     if created_from:
         add("tc.created_at >= {p}", _day_start(created_from))
     if created_to:
         add("tc.created_at < {p}", _day_start(created_to + timedelta(days=1)))
     order = _sort_clause(sort)
     clause = " AND ".join(where)
-    base = "FROM booking.trip_cases tc LEFT JOIN booking.customers c ON c.id = tc.customer_id"  # b2b: no customer
+    base = "FROM booking.trip_cases tc"
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(
         f"""
-        SELECT {CASE_COLUMNS}, {CUSTOMER_COLUMNS}, {OPEN_ASSIGNEES}, {sql.LEGS_JSON}, {sql.COUNTRIES_ARRAY},
+        SELECT {CASE_COLUMNS}, {OPEN_ASSIGNEES}, {sql.LEGS_JSON}, {sql.COUNTRIES_ARRAY},
                tc.inquiry_snapshot::text AS inquiry_snapshot,
                (SELECT max(v.version_number) FROM booking.trip_case_versions v
                 WHERE v.trip_case_id = tc.id AND v.deleted_at IS NULL) AS latest_version
@@ -271,9 +265,9 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     where, arg = _case_filter(ref)
     row = await conn.fetchrow(
         f"""
-        SELECT {CASE_COLUMNS}, {CUSTOMER_COLUMNS}, {OPEN_ASSIGNEES}, {sql.COUNTRIES_ARRAY},
+        SELECT {CASE_COLUMNS}, {OPEN_ASSIGNEES}, {sql.COUNTRIES_ARRAY},
                tc.inquiry_snapshot::text AS inquiry_snapshot, tc.inbox_event_id::text AS inbox_event_id
-        FROM booking.trip_cases tc LEFT JOIN booking.customers c ON c.id = tc.customer_id
+        FROM booking.trip_cases tc
         WHERE {where} AND tc.deleted_at IS NULL
         """,  # noqa: S608 — fixed fragments
         arg,
@@ -319,8 +313,6 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     case["allowed_transitions"] = await allowed_transitions(conn, case["status"])
     # AA-682 S1: the supply track ("Confirmed & Booked" badge = state booked), computed by v_trip_case_supply_state.
     case["supply"] = await supplier_bookings.supply_state(conn, case_id)
-    # AA-682 S3: the money badge (live invoice, state, balance); the router hides it without billing.read.
-    case["money"] = await invoices.money_badge(conn, case_id)
     return case
 
 
@@ -651,19 +643,11 @@ async def change_status(
                 f"cancel the case's {live} live supplier booking(s) before reopening it",
                 allowed_transitions=allowed,
             )
-        blocking = await invoices.blocks_reopen(conn, row["id"])
-        if blocking:
-            raise Conflict(
-                "live_invoice",
-                f"{blocking} is still open: refund and cancel the invoice (and settle its payments) before reopening",
-                allowed_transitions=allowed,
-            )
     await set_status(conn, staff, row, to_status, reason)
     if to_status == "cancelled":
         await supplier_bookings.on_case_cancelled(
             conn, case_id=row["id"], case_code=row["code"], cause=f"staff cancel: {reason}"
         )
-        await invoices.on_case_cancelled(conn, case_id=row["id"], case_code=row["code"])
     await audit.record(
         conn,
         actor_type="staff",
@@ -745,84 +729,6 @@ async def assign(
         summary=f"{role}: {previous or '-'} -> {cis_user_id or '-'}",
     )
     return {"id": case["id"], "code": case["code"], "role": role, "staff_user_id": cis_user_id, "changed": True}
-
-
-async def create_case(
-    conn: asyncpg.Connection, staff: Staff, data: dict[str, Any], *, source: tuple[str, str | None] = ("manual", None)
-) -> dict[str, Any]:
-    """A staff-created case for an existing customer or a new manual lead. ``source`` is ``('manual', None)``, or
-    ``('cis', <catalog source_id>)`` for a case started from a sellable trip plan (AA-679, ``app.catalog``).
-
-    ``data``: ``customer_id`` xor ``new_customer`` ({name, email?, phone?, address?, contact_consent}),
-    ``start_date``, ``pax`` / ``pax_adults`` / ``pax_children``, ``currency`` (default USD), ``trip_style``,
-    ``notes``, ``countries`` (ISO-2), ``assignee`` (sales; default the caller when they are sales),
-    ``initial_status`` (``new_inquiry`` default, or ``discovery`` for a lead already in conversation)."""
-    from app.customers import service as customers  # local: customers imports this module for archive
-
-    initial = data.get("initial_status") or "new_inquiry"
-    if initial not in INITIAL_STATUSES:
-        raise Invalid("invalid_initial_status", f"initial_status must be one of {', '.join(INITIAL_STATUSES)}")
-    if bool(data.get("customer_id")) == bool(data.get("new_customer")):
-        raise Invalid("customer_required", "send exactly one of customer_id or new_customer")
-    if data.get("customer_id"):
-        customer = await customers.resolve_customer(conn, data["customer_id"], lock=True)
-        if customer["is_blocked"]:
-            raise Conflict("customer_blocked", "the customer is blocked")
-        customer_id = customer["id"]
-    else:
-        customer_id = (await customers.create_lead(conn, staff, data["new_customer"]))["id"]
-    pax_fields = _pax_consistent(
-        {k: data[k] for k in ("pax", "pax_adults", "pax_children") if data.get(k) is not None}, {}
-    )
-    await conn.execute("SELECT set_config('booking.actor', $1, true)", staff.cis_user_id)
-    try:
-        case = await conn.fetchrow(
-            """
-            INSERT INTO booking.trip_cases
-                (customer_id, status, source_system, source_id, start_date, pax, pax_adults, pax_children, currency,
-                 trip_style, notes, created_by)
-            VALUES ($1::uuid, $2, $11, $12, $3, $4, $5, $6, $7, $8, $9, $10::uuid)
-            RETURNING id::text AS id, code, status
-            """,
-            customer_id,
-            initial,
-            data.get("start_date"),
-            pax_fields.get("pax"),
-            pax_fields.get("pax_adults"),
-            pax_fields.get("pax_children"),
-            data.get("currency") or "USD",
-            data.get("trip_style"),
-            data.get("notes"),
-            audit.as_uuid(staff.cis_user_id),
-            source[0],
-            source[1],
-        )
-    except asyncpg.CheckViolationError as exc:
-        raise Invalid("invalid_value", exc.constraint_name or "check violation") from exc
-    if data.get("countries"):
-        await _set_countries(conn, case["id"], data["countries"])
-    await audit.record(
-        conn,
-        actor_type="staff",
-        actor_ref=staff.cis_user_id,
-        action="trip_case.created",
-        entity_type="trip_case",
-        entity_id=case["id"],
-        after={
-            "customer_id": customer_id,
-            "status": case["status"],
-            "source_system": source[0],
-            **({"source_id": source[1]} if source[1] else {}),
-            **{k: data.get(k) for k in ("start_date", "currency", "trip_style", "countries")},
-            **pax_fields,
-        },
-        entity_label=case["code"],
-        summary=f"Created {case['code']} ({case['status']})",
-    )
-    assignee = data.get("assignee") or (staff.cis_user_id if staff.role == "sales" else None)
-    if assignee:
-        await assign(conn, staff, case["id"], assignee, "sales")
-    return await get_case(conn, case["id"])
 
 
 def is_terminal(status: str) -> bool:

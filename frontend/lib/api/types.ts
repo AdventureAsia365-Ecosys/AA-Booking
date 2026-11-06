@@ -57,7 +57,8 @@ export interface StaffAssignmentRow {
   code: string;
   status: TripCaseStatus;
   start_date: IsoDate | null;
-  customer_name: string | null;
+  /** AA-1046: replaces the customer name (the B2C customer table is retired). */
+  channel: TripCaseChannel;
 }
 
 export interface StaffDetail extends StaffProfile {
@@ -113,8 +114,7 @@ export interface TripCaseListItem extends TripShape {
   id: string;
   code: string;
   status: TripCaseStatus;
-  /** null only on a B2B case (channel "b2b", bk-020). */
-  customer_id: string | null;
+  /** AA-1046: no customer link any more (the B2C half is retired; a b2c case is read-only history). */
   channel: TripCaseChannel;
   /** The agency (AA-Partner tenant id) of a B2B case; null on B2C. */
   party_tenant_id: string | null;
@@ -130,12 +130,6 @@ export interface TripCaseListItem extends TripShape {
   source_id: string | null;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
-  customer_code: string | null;
-  customer_name: string | null;
-  customer_email: string | null;
-  customer_phone: string | null;
-  customer_verified: boolean;
-  customer_needs_merge_review: boolean;
   assignees: CaseAssignee[];
   countries: string[];
   latest_version: number | null;
@@ -235,17 +229,6 @@ export interface TripCaseDetail extends Omit<TripCaseListItem, "latest_version">
   allowed_transitions: TripCaseStatus[];
   /** AA-682 S1 (bk-026): the supply track; state `booked` = the "Confirmed & Booked" badge. */
   supply?: import("./supplierBookings").SupplyState;
-  /** AA-682 S3: the live invoice (null without one, or without billing.read). */
-  money?: {
-    invoice_number: string;
-    status: string;
-    currency: string;
-    total_amount: DecimalString;
-    net_paid: DecimalString;
-    balance: DecimalString | null;
-    overdue_amount: DecimalString;
-    unverified_count: number;
-  } | null;
   /** AA-986 L5: tours this case uses that AA no longer serves (kept; staff decide what to do). */
   tour_alerts?: TourAlert[];
   /** AA-996: ISO-2 countries the legs go through (CIS tour countries, then the inquiry's route-day places); shown
@@ -336,7 +319,6 @@ export interface VersionListItem extends Omit<Version, "updated_by"> {
   start_date: IsoDate | null;
   end_date: IsoDate | null;
   sales_id: string | null;
-  customer: { id: string; name: string | null };
   /** In this list `updated_by` is an object (versions.list_versions), not the bare CIS user id. */
   updated_by: { id: string | null; name: string | null };
   leg_titles: string[];

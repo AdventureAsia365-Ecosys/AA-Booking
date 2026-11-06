@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.auth import ci
 from app.auth.ci import DEPLOY_GATE_AUDIENCE, GITHUB_JWKS_URL, GITHUB_OIDC_ISSUER, GithubDeployVerifier
 from app.auth.tokens import AuthUnavailable, InvalidToken, JwksCache
+from app.b2c import RETIRED_KINDS
 from app.db import Database
 from app.jobs import queue
 from app.jobs.kinds import (
@@ -238,7 +239,8 @@ async def test_active_count_empty_queue() -> None:
 
 def test_exempt_kinds_are_real_kinds() -> None:
     assert DEPLOY_GATE_EXEMPT == frozenset({"bk_inquiry_pull", "bk_noop_sleep"})
-    assert DEPLOY_GATE_EXEMPT <= EXPECTED_SECONDS.keys()
+    # AA-1046: bk_inquiry_pull is a retired kind (no handler, so no expected run time); it stays exempt.
+    assert DEPLOY_GATE_EXEMPT - RETIRED_KINDS <= EXPECTED_SECONDS.keys()
 
 
 def test_deploy_blocking_kinds_are_the_unreleased_retention_kinds() -> None:

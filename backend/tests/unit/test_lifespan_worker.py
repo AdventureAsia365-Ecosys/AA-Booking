@@ -74,9 +74,6 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
     (worker,) = FakeWorker.instances
     assert worker.started and worker.stopped
     assert set(worker.handlers) == {
-        "bk_inquiry_pull",
-        "bk_inquiry_process",
-        "bk_notify_email",
         "bk_retention_job",
         "bk_retention_inbox_redact",
         "bk_b2b_hold_expire",
@@ -90,7 +87,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "bk_settlement_draft",  # AA-1037 R4: the agency tour settlement drafts
         "bk_agency_invoice_reminders",  # AA-1037 G4: overdue agency invoice reminders
     }
-    assert [r.kind for r in worker.recurring] == ["bk_inquiry_pull"]
+    assert list(worker.recurring) == []  # AA-1046: the recurring inquiry pull is retired
     # AA-825 daily retention runs; AA-973 B2B hold expiry when a hold is due; AA-986 L5 the CIS lifecycle outbox pull
     # when the outbox has a new row; AA-682 S2 the daily case lifecycle + operations reminders; AA-975 the stamping of
     # the Booking outbox feed order.
@@ -108,8 +105,8 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
     ]
     # AA-751: retention runs keep no progress checkpoint, so a shutdown fails them instead of releasing them.
     assert worker.no_release == {"bk_retention_job", "bk_retention_inbox_redact"}
-    # AA-1034 R0: B2C_INTAKE_ENABLED is off by default, so the worker switches the TripPlanner intake off.
-    assert worker.disabled_kinds == {"bk_inquiry_pull", "bk_inquiry_process"}
+    # AA-1046: the retired B2C kinds are switched off for good (a leftover queued row is cancelled).
+    assert worker.disabled_kinds == {"bk_inquiry_pull", "bk_inquiry_process", "bk_notify_email"}
     # AA-751: the backlog metrics sampler runs for the app lifetime too and is cancelled on shutdown.
     (sampler,) = FakeSampler.instances
     assert sampler.started and sampler.cancelled
@@ -135,12 +132,3 @@ def test_worker_not_started(kw: dict) -> None:
         client.get("/booking/health")
     assert FakeWorker.instances == []
     assert FakeSampler.instances == []
-
-
-@pytest.mark.parametrize(("enabled", "disabled"), [(False, {"bk_inquiry_pull", "bk_inquiry_process"}), (True, set())])
-def test_b2c_intake_flag_switches_the_intake_kinds(enabled: bool, disabled: set[str]) -> None:
-    """AA-1034 R0 (root ADR 0019 d8): the worker gets the intake kinds as switched off unless the flag is on."""
-    with TestClient(_app(worker_enabled=True, b2c_intake_enabled=enabled)):
-        pass
-    (worker,) = FakeWorker.instances
-    assert set(worker.disabled_kinds) == disabled

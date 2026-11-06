@@ -8,6 +8,7 @@ reminder dedupe index and the DM-6.1 tags in the same file. The HTTP flows and t
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
@@ -298,7 +299,7 @@ async def test_board_view(app_conn: asyncpg.Connection) -> None:
     a, b = rows[sold["id"]], rows[b2b["id"]]
     assert (a["checks_total"], a["checks_open"], a["checks_overdue"]) == (3, 3, 1)
     assert a["supply_state"] == "confirming" and a["suppliers_confirmed"] is False
-    assert a["payment_verified"] is False  # bk-028: B2C reads its invoice (none paid); B2B stays NULL
+    assert a["payment_verified"] is None  # bk-045 (AA-1046): no customer invoice any more, NULL on every case
     assert a["next_due_date"] == await app_conn.fetchval("SELECT current_date - 1")
     assert (b["checks_open"], b["checks_not_applicable"]) == (2, 1)
     assert b["supply_state"] == "none" and b["suppliers_confirmed"] is True
@@ -319,11 +320,9 @@ async def test_reminder_dedupe_index(app_conn: asyncpg.Connection) -> None:
     await app_conn.execute(sql, "staff", None, case["id"], data)
     with pytest.raises(asyncpg.UniqueViolationError, match="notifications_reminder_uq"):
         await app_conn.execute(sql, "staff", None, case["id"], data)
-    # The customer row of the same reminder does not collide with the staff row (critic B7).
-    customer = await app_conn.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ('it-682-remind@example.test') RETURNING id::text"
-    )
-    await app_conn.execute(sql, "customer", customer, case["id"], data)
+    # The customer row of the same reminder does not collide with the staff row (critic B7). Customer rows are history
+    # since bk-045 (AA-1046: no customer table, no FK); the index still keeps the two apart.
+    await app_conn.execute(sql, "customer", str(uuid.uuid4()), case["id"], data)
     # Rows without a reminder key never collide.
     for _ in range(2):
         await app_conn.execute(sql, "staff", None, case["id"], "{}")

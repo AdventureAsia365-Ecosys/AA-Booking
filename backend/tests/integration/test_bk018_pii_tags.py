@@ -18,7 +18,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
-from tests.integration.conftest import apply_migrations, as_booking_owner
+from tests.integration.conftest import MIGRATIONS, apply_migrations, as_booking_owner
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -100,6 +100,9 @@ EXPECTED: dict[str, tuple[str, tuple[str, ...]]] = {
     "version_item_costs.net_amount": ("conf:commercial", ()),
     "version_item_costs.supplier_note": ("conf:commercial", ()),
 }
+
+# AA-1046: bk-045 dropped these bk-018-tagged relations with the B2C half; their EXPECTED rows are history.
+DROPPED_BY_BK045 = frozenset({"customers", "media_files", "v_customer_summary", "customer_otps", "customer_sessions"})
 
 # Tagged before bk-018 (bk-008, bk-009, bk-010, bk-012); bk-018 must not touch them.
 EXISTING: dict[str, str] = {
@@ -196,9 +199,26 @@ def parse(comment: str | None) -> tuple[str | None, list[str]]:
     return tag, also
 
 
+BK018_COMMENT_RE = re.compile(r"^COMMENT ON COLUMN booking\.(\w+)\.(\w+) IS\s+((?:'(?:[^']|'')*'\s*)+);", re.M)
+
+
+async def _bk018_comments_again(conn: asyncpg.Connection) -> None:
+    """AA-1046: other modules re-run single old files (bk-004 for its pricing rules, …), which rewrites a column
+    comment bk-018 tagged. Before bk-045 a later full re-run ran bk-018 again; after it bk-001..bk-036 are never re-run
+    (conftest SUPERSEDED_BY_BK045), so this module puts bk-018's comments back itself, on the relations that still
+    exist, before it reads them."""
+    text = next(p for p in MIGRATIONS if p.name.startswith("018_")).read_text(encoding="utf-8")
+    async with as_booking_owner(conn):
+        for table, column, literal in BK018_COMMENT_RE.findall(text):
+            if await conn.fetchval("SELECT to_regclass($1)", f"booking.{table}") is not None:
+                await conn.execute(f"COMMENT ON COLUMN booking.{table}.{column} IS {literal}")
+
+
 @pytest_asyncio.fixture
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
+    if await conn.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = 'bk-045'"):
+        await _bk018_comments_again(conn)
     try:
         yield conn
     finally:
@@ -210,6 +230,8 @@ async def _comments(conn: asyncpg.Connection) -> dict[str, str | None]:
 
 
 async def test_bk018_only_prefixes_tags_and_keeps_old_text(admin: asyncpg.Connection) -> None:
+    if await admin.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = 'bk-045'"):
+        pytest.skip("bk-001..bk-018 name objects bk-045 dropped (AA-1046): they are never re-run after it")
     try:
         async with as_booking_owner(admin):
             await admin.execute(CLEAR_SQL)
@@ -235,6 +257,9 @@ async def test_bk018_only_prefixes_tags_and_keeps_old_text(admin: asyncpg.Connec
 async def test_expected_and_existing_tags(admin: asyncpg.Connection) -> None:
     comments = await _comments(admin)
     for col, (tag, also) in EXPECTED.items():
+        if col.split(".", 1)[0] in DROPPED_BY_BK045:
+            assert col not in comments, f"{col}: bk-045 dropped its relation"
+            continue
         assert parse(comments[col]) == (tag, list(also)), (col, comments[col])
     for col, tag in EXISTING.items():
         assert parse(comments[col])[0] == tag, (col, comments[col])

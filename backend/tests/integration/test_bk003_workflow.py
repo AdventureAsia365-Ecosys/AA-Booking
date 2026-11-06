@@ -24,15 +24,17 @@ from app.main import create_app
 from app.settings import Settings
 from app.trip_cases import service, versions
 from app.trip_cases.versions import Item
+from tests.integration import ops
+from tests.integration.conftest import ADMIN_DSN
 from tests.staff_tokens import LocalCis
 
-# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
+# AA-1046: the services run on the sold b2c case of tests.integration.ops (conftest `b2c_guard_off`).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 TABLES = (
     "booking.trip_case_version_itinerary, booking.trip_case_versions, booking.staff_assignments, "
     "booking.trip_case_status_history, booking.trip_case_legs, booking.notifications, booking.trip_cases, "
-    "booking.staff_users, booking.audit_logs, booking.customers"
+    "booking.staff_users, booking.audit_logs"
 )
 
 
@@ -61,15 +63,16 @@ async def provisioned(pool: asyncpg.Pool, sub: str, cis_role: str, role: str) ->
 
 
 async def new_case(pool: asyncpg.Pool, legs: list[tuple[int, str, int, int]] = ()) -> dict[str, Any]:
+    """A kept b2c case from a TripPlanner hand-off (AA-1046: written in SQL as the owner, the intake is retired)."""
     snapshot = {"days": [{"day": 1, "source_tour_id": "tour-b", "name": "Sapa trek"}], "custom_days": []}
-    async with pool.acquire() as conn, conn.transaction():
-        customer = await conn.fetchval(
-            "INSERT INTO booking.customers (name, email) VALUES ('Lead', $1) RETURNING id", f"{uuid.uuid4().hex}@x.test"
+    conn = await asyncpg.connect(ADMIN_DSN)
+    try:
+        case = await ops.insert_b2c_case(
+            conn, tag=uuid.uuid4().hex[:8], status="new_inquiry", start=None, end=None, source_system="tripplanner"
         )
-        case = await conn.fetchrow(
-            "INSERT INTO booking.trip_cases (customer_id, source_system, inquiry_snapshot, currency)"
-            " VALUES ($1, 'tripplanner', $2::jsonb, 'USD') RETURNING id::text AS id, code",
-            customer,
+        await conn.execute(
+            "UPDATE booking.trip_cases SET inquiry_snapshot = $2::jsonb, pax = NULL, notes = NULL WHERE id = $1::uuid",
+            case["id"],
             json.dumps(snapshot),
         )
         await conn.executemany(
@@ -77,7 +80,9 @@ async def new_case(pool: asyncpg.Pool, legs: list[tuple[int, str, int, int]] = (
             " VALUES ($1::uuid, $2, $3, $4, $5)",
             [(case["id"], *leg) for leg in legs],
         )
-    return dict(case)
+    finally:
+        await conn.close()
+    return case
 
 
 async def test_provisioning_admin_active_others_inactive(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
@@ -280,9 +285,7 @@ async def test_staff_uuid_ids_fill_audit_actor_id(pool: asyncpg.Pool, admin: asy
 async def test_http_flow_with_a_cis_token(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
     """JWT (local RSA key) → provisioning → trip case endpoints, through the real app and pool."""
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     boss = {"Authorization": f"Bearer {cis.token(sub='boss', cis_role='admin')}"}

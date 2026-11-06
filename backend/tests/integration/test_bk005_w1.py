@@ -1,8 +1,9 @@
 """bk-005 + the Wave 1 staff endpoints on a real PostgreSQL, as role ``booking``.
 
-Covers D2 (item ids survive a save, so rows referencing them survive too), D3 (send -> approve ->
-confirmed, reopen), D4 (staff directory), the sent lock, case create, customers, notifications, settings,
-the cross-case version list, activity and audit reads, and the bk-005 privileges.
+Covers D2 (item ids survive a save, so rows referencing them survive too), D3 (sent -> approve -> confirmed,
+reopen), D4 (staff directory), the sent lock, notifications, settings, the cross-case version list, activity and audit
+reads, and the bk-005 privileges. AA-1046: the B2C half is retired (no Send, no customers, no staff-made case); the
+cases here are kept b2c cases written in SQL (``tests.integration.ops``) and a B2B case for the HTTP routes.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -21,7 +22,6 @@ import pytest_asyncio
 from app import audit
 from app.auth import admin as staff_admin
 from app.auth.staff import BridgeClaims, Staff, provision
-from app.customers import service as customers
 from app.db import Database
 from app.errors import Conflict, Forbidden, Invalid
 from app.main import create_app
@@ -29,16 +29,15 @@ from app.notifications import service as notifications
 from app.settings import Settings
 from app.trip_cases import service, versions
 from app.trip_cases.versions import Item
+from tests.integration import ops
 from tests.staff_tokens import LocalCis
 
-# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 TABLES = (
     "booking.notification_reads, booking.trip_case_countries, booking.trip_case_version_itinerary, "
     "booking.trip_case_versions, booking.staff_assignments, booking.trip_case_status_history, "
-    "booking.trip_case_legs, booking.notifications, booking.trip_cases, booking.staff_users, booking.audit_logs, "
-    "booking.customers"
+    "booking.trip_case_legs, booking.notifications, booking.trip_cases, booking.staff_users, booking.audit_logs"
 )
 
 
@@ -69,26 +68,40 @@ async def staff(pool: asyncpg.Pool, admin: asyncpg.Connection, sub: str, role: s
     return Staff(sub, f"{sub}@example.test", sub.title(), role, True, cis_role)
 
 
-async def inquiry_case(pool: asyncpg.Pool, legs: list[tuple[int, str, int, int]] = ()) -> dict[str, Any]:
+async def inquiry_case(admin: asyncpg.Connection, legs: list[tuple[int, str, int, int]] = ()) -> dict[str, Any]:
+    """A kept b2c case from a TripPlanner hand-off (AA-1046: written in SQL, the intake is retired), with its legs."""
     snapshot = {"days": [{"day": 1, "source_tour_id": "tour-b", "name": "Sapa trek"}], "custom_days": []}
-    async with pool.acquire() as conn, conn.transaction():
-        customer = await conn.fetchval(
-            "INSERT INTO booking.customers (name, email, source) VALUES ('Ann Lead', $1, 'tripplanner_lead')"
-            " RETURNING id::text",
-            f"{uuid.uuid4().hex}@x.test",
-        )
-        case = await conn.fetchrow(
-            "INSERT INTO booking.trip_cases (customer_id, source_system, inquiry_snapshot, currency)"
-            " VALUES ($1::uuid, 'tripplanner', $2::jsonb, 'USD') RETURNING id::text AS id, code",
-            customer,
-            json.dumps(snapshot),
-        )
-        await conn.executemany(
-            "INSERT INTO booking.trip_case_legs (trip_case_id, position, source_tour_id, day_from, day_to)"
-            " VALUES ($1::uuid, $2, $3, $4, $5)",
-            [(case["id"], *leg) for leg in legs],
-        )
-    return {**dict(case), "customer_id": customer}
+    case = await ops.insert_b2c_case(
+        admin, tag=uuid.uuid4().hex[:8], status="new_inquiry", start=None, end=None, source_system="tripplanner"
+    )
+    await admin.execute(
+        "UPDATE booking.trip_cases SET inquiry_snapshot = $2::jsonb, pax = NULL WHERE id = $1::uuid",
+        case["id"],
+        json.dumps(snapshot),
+    )
+    await admin.executemany(
+        "INSERT INTO booking.trip_case_legs (trip_case_id, position, source_tour_id, day_from, day_to)"
+        " VALUES ($1::uuid, $2, $3, $4, $5)",
+        [(case["id"], *leg) for leg in legs],
+    )
+    return case
+
+
+async def sent_out_of_band(pool: asyncpg.Pool, admin: asyncpg.Connection, actor: Staff, case: dict, n: int) -> None:
+    """Version ``n`` sent to the traveller the way the retired Send did it (AA-1046: there is no Send route any more;
+    the sent versions of the kept b2c cases still lock and still approve)."""
+    status = await admin.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", case["id"])
+    chain = ["discovery", "building", "proposal_sent"]
+    if status in chain:
+        chain = chain[chain.index(status) + 1 :]
+    await move(pool, actor, case["code"], *chain)
+    await admin.execute(
+        "UPDATE booking.trip_case_versions SET is_sent_to_customer = true, sent_at = now(), sent_by = $3,"
+        " valid_until = current_date + 14 WHERE trip_case_id = $1::uuid AND version_number = $2",
+        case["id"],
+        n,
+        actor.cis_user_id,
+    )
 
 
 async def move(pool: asyncpg.Pool, actor: Staff, ref: str, *steps: str) -> None:
@@ -110,7 +123,7 @@ async def priced_v1(pool: asyncpg.Pool, admin: asyncpg.Connection, actor: Staff,
 
 async def test_d2_put_items_keeps_ids_and_referencing_rows(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool, [(1, "tour-a", 1, 3), (2, "tour-b", 4, 5)])
+    case = await inquiry_case(admin, [(1, "tour-a", 1, 3), (2, "tour-b", 4, 5)])
     async with pool.acquire() as conn, conn.transaction():
         v1 = await versions.create_version(conn, boss, case["code"], None)
     first, second = v1["items"]
@@ -165,10 +178,10 @@ async def test_d2_put_items_keeps_ids_and_referencing_rows(pool: asyncpg.Pool, a
 # ── D3: send, approve, reopen; sent lock ─────────────────────────────────────
 
 
-async def test_d3_send_approve_confirms_and_locks(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
+async def test_d3_approve_confirms_and_locks(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
     sales = await staff(pool, admin, "sam", "sales")
-    case = await inquiry_case(pool, [(1, "tour-a", 1, 3)])
+    case = await inquiry_case(admin, [(1, "tour-a", 1, 3)])
     async with pool.acquire() as conn, conn.transaction():
         await service.assign(conn, boss, case["code"], "sam", "sales")
     await move(pool, boss, case["code"], "discovery")
@@ -177,39 +190,7 @@ async def test_d3_send_approve_confirms_and_locks(pool: asyncpg.Pool, admin: asy
         with pytest.raises(Conflict) as approve_early:
             await versions.approve_version(conn, sales, case["code"], 1, None)
         assert approve_early.value.code == "version_not_sent"
-    today = date.today()
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Invalid):
-            await versions.send_version(
-                conn, sales, case["code"], 1, to=None, subject="s", message="m", valid_until=today + timedelta(days=3)
-            )
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Invalid) as mismatch:
-            await versions.send_version(
-                conn, sales, case["code"], 1, to="someone@else.test", subject="s", message="m", valid_until=None
-            )
-    assert mismatch.value.code == "recipient_mismatch"
-    async with pool.acquire() as conn, conn.transaction():
-        sent = await versions.send_version(
-            conn, sales, case["code"], 1, to=None, subject="Your trip", message="Dear Ann", valid_until=None
-        )
-    assert sent["badge"] == "sent" and sent["valid_until"] == today + timedelta(days=14)
-    assert sent["trip_case"]["status"] == "proposal_sent" and sent["email_sent"] is False
-    history = await admin.fetch(
-        "SELECT from_status, to_status, changed_by, note FROM booking.trip_case_status_history"
-        " WHERE trip_case_id = $1::uuid ORDER BY changed_at, seq",
-        case["id"],
-    )
-    assert [(h["from_status"], h["to_status"]) for h in history][-2:] == [
-        ("discovery", "building"),
-        ("building", "proposal_sent"),
-    ]
-    assert history[-1]["changed_by"] == "sam" and history[-1]["note"] == "V1 sent"
-    note = await admin.fetchrow(
-        "SELECT recipient_type, recipient_id::text AS rid, type, title, data FROM booking.notifications"
-        " WHERE type = 'proposal.sent'"
-    )
-    assert (note["recipient_type"], note["rid"], note["title"]) == ("customer", case["customer_id"], "Your trip")
+    await sent_out_of_band(pool, admin, sales, case, 1)
     # Sent = locked in the database: no item writes, no commercial field changes.
     async with pool.acquire() as conn:
         with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
@@ -234,14 +215,14 @@ async def test_d3_send_approve_confirms_and_locks(pool: asyncpg.Pool, admin: asy
     assert detail["status"] == "confirmed" and detail["status_history"][-1]["note"].startswith("V1 approved")
     assert {n["type"] for n in feed["items"]} >= {"trip_case.assigned", "trip_case.status_changed", "proposal.approved"}
     actions = [r["action"] for r in await admin.fetch("SELECT action FROM booking.audit_logs ORDER BY created_at")]
-    assert "trip_case_version.sent" in actions and "trip_case_version.approved" in actions
+    assert "trip_case_version.approved" in actions
 
 
 async def test_approve_refuses_a_sent_version_without_items(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     """AA-996 (Figma audit item 12): Dev had an approved V1 with no items and a 2,400 USD total, made out of band. A
     version that is sent but empty is refused (422 version_empty) and the case stays at proposal_sent."""
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool)  # no legs: V1 starts with no items
+    case = await inquiry_case(admin)  # no legs: V1 starts with no items
     v1 = await priced_v1(pool, admin, boss, case)
     await move(pool, boss, case["code"], "discovery", "building", "proposal_sent")
     # The way a seed script reaches "sent" without Send (Send itself refuses an empty version).
@@ -270,7 +251,7 @@ async def test_case_detail_derives_countries_from_the_legs(pool: asyncpg.Pool, a
         " VALUES ('aa996-laos', 'Pak Ou Caves', 'Laos', 2, now())"
     )
     try:
-        case = await inquiry_case(pool, [(1, "tour-b", 1, 2)])
+        case = await inquiry_case(admin, [(1, "tour-b", 1, 2)])
         await admin.execute(
             "UPDATE booking.trip_case_legs SET source_system = 'cis', source_id = 'aa996-laos'"
             " WHERE trip_case_id = $1::uuid",
@@ -290,16 +271,15 @@ async def test_case_detail_derives_countries_from_the_legs(pool: asyncpg.Pool, a
 
 async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool, [(1, "tour-a", 1, 2)])
+    case = await inquiry_case(admin, [(1, "tour-a", 1, 2)])
     await move(pool, boss, case["code"], "discovery", "building")
     await priced_v1(pool, admin, boss, case)
+    await sent_out_of_band(pool, admin, boss, case, 1)
     async with pool.acquire() as conn, conn.transaction():
-        await versions.send_version(conn, boss, case["code"], 1, to=None, subject="s", message="m", valid_until=None)
         v2 = await versions.create_version(conn, boss, case["code"], "second try")
     # V2 starts unpriced (review finding 2); price it out of band like V1.
     await admin.execute("UPDATE booking.trip_case_versions SET total_price = 2100 WHERE id = $1::uuid", v2["id"])
-    async with pool.acquire() as conn, conn.transaction():
-        await versions.send_version(conn, boss, case["code"], 2, to=None, subject="s2", message="m2", valid_until=None)
+    await sent_out_of_band(pool, admin, boss, case, 2)
     async with pool.acquire() as conn, conn.transaction():
         listed = await versions.list_versions(conn, q=case["code"])
         with pytest.raises(Conflict) as superseded:
@@ -307,20 +287,6 @@ async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, 
     assert {v["version_number"]: v["badge"] for v in listed["items"]} == {1: "superseded", 2: "sent"}
     assert {v["trip_case_channel"] for v in listed["items"]} == {"b2c"}  # AA-1037: an inquiry case is a b2c case
     assert superseded.value.code == "version_superseded"
-    # AA-910: the derived "superseded" badge leaves a trail (real VERSION_BADGE SQL, not a scripted answer).
-    trail = await admin.fetch(
-        "SELECT entity_id::text AS entity_id, entity_label, before, after, summary FROM booking.audit_logs"
-        " WHERE action = 'trip_case_version.superseded'"
-    )
-    v1_id = await admin.fetchval(
-        "SELECT id::text FROM booking.trip_case_versions WHERE trip_case_id = $1::uuid AND version_number = 1",
-        case["id"],
-    )
-    assert [(r["entity_id"], r["entity_label"], r["summary"]) for r in trail] == [
-        (v1_id, f"{case['code']} V1", "V1 superseded: V2 was sent")
-    ]
-    assert json.loads(trail[0]["before"]) == {"badge": "sent"}
-    assert json.loads(trail[0]["after"]) == {"badge": "superseded", "superseded_by": 2, "by": "sent"}
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(Conflict) as bare:  # confirmed is reached by approving a version only
             await service.change_status(conn, boss, case["code"], "confirmed", None)
@@ -339,19 +305,13 @@ async def test_d3_resend_supersedes_and_reopen_needs_reason(pool: asyncpg.Pool, 
 async def test_new_version_and_item_changes_clear_the_price(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     """Review finding 2: a price belongs to one item list; V2+ and a changed list must be priced again."""
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool, [(1, "tour-a", 1, 2), (2, "tour-b", 3, 4)])
+    case = await inquiry_case(admin, [(1, "tour-a", 1, 2), (2, "tour-b", 3, 4)])
     await move(pool, boss, case["code"], "discovery", "building")
     v1 = await priced_v1(pool, admin, boss, case)
     await admin.execute("UPDATE booking.trip_case_versions SET channel = 'b2b' WHERE id = $1::uuid", v1["id"])
     async with pool.acquire() as conn, conn.transaction():
         v2 = await versions.create_version(conn, boss, case["code"], None)
     assert v2["total_price"] is None and v2["currency"] == "USD" and v2["channel"] == "b2b"
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Invalid) as unpriced:
-            await versions.send_version(
-                conn, boss, case["code"], 2, to=None, subject="s", message="m", valid_until=None
-            )
-    assert unpriced.value.code == "price_missing"
     await admin.execute("UPDATE booking.trip_case_versions SET total_price = 2500 WHERE id = $1::uuid", v2["id"])
     same = [
         Item(i["title"], i["day_from"], i["day_to"], i["source_tour_id"], i["notes"], id=i["id"]) for i in v2["items"]
@@ -362,12 +322,6 @@ async def test_new_version_and_item_changes_clear_the_price(pool: asyncpg.Pool, 
     async with pool.acquire() as conn, conn.transaction():
         cleared = await versions.replace_items(conn, boss, case["code"], 2, same[:1])
     assert cleared["total_price"] is None
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Invalid) as stale:
-            await versions.send_version(
-                conn, boss, case["code"], 2, to=None, subject="s", message="m", valid_until=None
-            )
-    assert stale.value.code == "price_missing"
     summary = await admin.fetchval(
         "SELECT summary FROM booking.audit_logs WHERE action = 'trip_case_version.items_replaced'"
         " ORDER BY created_at DESC LIMIT 1"
@@ -380,11 +334,10 @@ async def test_sent_version_cannot_be_hard_deleted_and_confirmed_can_cancel(
 ) -> None:
     """Review findings 6 and 13."""
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool, [(1, "tour-a", 1, 2)])
+    case = await inquiry_case(admin, [(1, "tour-a", 1, 2)])
     await move(pool, boss, case["code"], "discovery", "building")
     v1 = await priced_v1(pool, admin, boss, case)
-    async with pool.acquire() as conn, conn.transaction():
-        await versions.send_version(conn, boss, case["code"], 1, to=None, subject="s", message="m", valid_until=None)
+    await sent_out_of_band(pool, admin, boss, case, 1)
     async with pool.acquire() as conn:
         with pytest.raises(asyncpg.InsufficientPrivilegeError):  # role booking only soft-deletes versions
             await conn.execute("DELETE FROM booking.trip_case_versions WHERE id = $1::uuid", v1["id"])
@@ -406,7 +359,7 @@ async def test_sent_version_cannot_be_hard_deleted_and_confirmed_can_cancel(
 
 async def test_version_patch_delete_and_number_not_reused(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool)
+    case = await inquiry_case(admin)
     async with pool.acquire() as conn, conn.transaction():
         await versions.create_version(conn, boss, case["code"], None)
         v2 = await versions.create_version(conn, boss, case["code"], None)
@@ -424,65 +377,9 @@ async def test_version_patch_delete_and_number_not_reused(pool: asyncpg.Pool, ad
 # ── Cases: create, list, summary, activity ───────────────────────────────────
 
 
-async def test_create_case_with_new_lead_and_list_filters(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
-    sam = await staff(pool, admin, "sam", "sales")
-    existing = await inquiry_case(pool, [(1, "tour-b", 1, 2)])
-    existing_email = await admin.fetchval(
-        "SELECT email FROM booking.customers WHERE id = $1::uuid", existing["customer_id"]
-    )
-    async with pool.acquire() as conn, conn.transaction():
-        created = await service.create_case(
-            conn,
-            sam,
-            {
-                "new_customer": {"name": "Bob Phone", "email": existing_email.upper(), "contact_consent": True},
-                "pax_adults": 2,
-                "pax_children": 1,
-                "countries": ["vn", "KH"],
-                "trip_style": "family",
-                "initial_status": "discovery",
-            },
-        )
-    assert created["source_system"] == "manual" and created["status"] == "discovery"
-    assert (created["pax"], created["pax_adults"], created["pax_children"]) == (3, 2, 1)
-    assert created["countries"] == ["VN", "KH"] and created["currency"] == "USD"
-    assert [a["cis_user_id"] for a in created["assignees"]] == ["sam"]  # sales creator assigned by default
-    lead = await admin.fetchrow(
-        "SELECT code, verified, source, needs_merge_review, merge_candidate_id::text AS cand, contact_consent_at"
-        " FROM booking.customers WHERE id = $1::uuid",
-        created["customer_id"],
-    )
-    assert lead["code"].startswith("CUS-") and lead["verified"] is False and lead["source"] == "manual"
-    assert lead["needs_merge_review"] and lead["cand"] == existing["customer_id"] and lead["contact_consent_at"]
-    with pytest.raises(Invalid):  # raised through the transaction: everything rolls back
-        async with pool.acquire() as conn, conn.transaction():
-            await service.create_case(
-                conn, sam, {"new_customer": {"name": "x", "email": "y@z.test"}, "countries": ["ZZ"]}
-            )
-    with pytest.raises(Invalid):
-        async with pool.acquire() as conn, conn.transaction():
-            await service.update_case(conn, sam, created["code"], {"pax": 9})  # split says 3
-    async with pool.acquire() as conn, conn.transaction():
-        upd = await service.update_case(conn, sam, created["code"], {"pax_children": 0, "countries": ["TH"]})
-    assert upd["changed"] == ["countries", "pax", "pax_children"] and upd["pax"] == 2 and upd["countries"] == ["TH"]
-    async with pool.acquire() as conn:
-        by_q = await service.list_cases(conn, q="bob phone")
-        by_source = await service.list_cases(conn, source="tripplanner")
-        by_customer_code = await service.list_cases(conn, q=lead["code"].lower())
-        sorted_up = await service.list_cases(conn, sort="-updated_at", statuses=["discovery", "new_inquiry"])
-        summary = await service.summary(conn, sam)
-    assert [c["code"] for c in by_q["items"]] == [created["code"]]
-    assert by_source["total"] == 1 and by_source["items"][0]["trip_title"] == "Sapa trek"
-    assert by_source["items"][0]["leg_titles"] == ["Sapa trek"] and by_source["items"][0]["duration_days"] == 2
-    assert by_customer_code["total"] == 1
-    assert sorted_up["items"][0]["code"] == created["code"]
-    assert summary["open"] == 2 and summary["new_inquiry"] == 1 and summary["mine"] == 1
-    assert summary["by_status"]["discovery"] == 1 and summary["mom_delta"]["created_this_month"] == 2
-
-
 async def test_activity_merges_history_and_audit(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool)
+    case = await inquiry_case(admin)
     await move(pool, boss, case["code"], "discovery")
     async with pool.acquire() as conn, conn.transaction():
         await service.update_case(conn, boss, case["code"], {"notes": "VIP"})
@@ -499,59 +396,6 @@ async def test_activity_merges_history_and_audit(pool: asyncpg.Pool, admin: asyn
 
 
 # ── Customers ────────────────────────────────────────────────────────────────
-
-
-async def test_customers_status_detail_edit_archive(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
-    boss = await staff(pool, admin, "boss")
-    sam = await staff(pool, admin, "sam", "sales")
-    inquiry = await inquiry_case(pool, [(1, "tour-b", 1, 2)])
-    active = await inquiry_case(pool)
-    await move(pool, boss, active["code"], "discovery")
-    async with pool.acquire() as conn, conn.transaction():
-        lead = await customers.create_lead(
-            conn, sam, {"name": " Cara ", "phone": "+84 90 000", "contact_consent": False}
-        )
-    async with pool.acquire() as conn:
-        everyone = await customers.list_customers(conn)
-        leads = await customers.list_customers(conn, status="lead")
-        actives = await customers.list_customers(conn, status="active")
-        by_q = await customers.list_customers(conn, q="cara", source="manual")
-        detail = await customers.get_customer(conn, inquiry["customer_id"])
-        by_code = await customers.get_customer(conn, lead["code"].lower())
-    assert everyone["total"] == 3
-    assert {c["id"] for c in leads["items"]} == {inquiry["customer_id"], lead["id"]}
-    assert [c["id"] for c in actives["items"]] == [active["customer_id"]] and actives["items"][0]["case_count"] == 1
-    assert [c["name"] for c in by_q["items"]] == ["Cara"]
-    assert detail["status"] == "lead" and [c["code"] for c in detail["cases"]] == [inquiry["code"]]
-    assert detail["inquiries"][0]["trip_title"] == "Sapa trek"
-    assert by_code["id"] == lead["id"]
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Forbidden):
-            await customers.update_customer(conn, sam, lead["id"], {"is_blocked": True})
-        edited = await customers.update_customer(conn, sam, lead["id"], {"email": "Cara@X.test", "address": "Hanoi"})
-        blocked = await customers.update_customer(conn, boss, lead["id"], {"is_blocked": True})
-    assert edited["changed"] == ["address", "email"] and edited["email"] == "cara@x.test"
-    assert blocked["is_blocked"] is True
-    await admin.execute("UPDATE booking.customers SET verified = true WHERE id = $1::uuid", lead["id"])
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Conflict) as locked:
-            await customers.update_customer(conn, sam, lead["id"], {"email": "new@x.test"})
-    assert locked.value.code == "email_locked"
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Conflict) as has_cases:
-            await customers.archive_customer(conn, boss, active["customer_id"])
-        assert has_cases.value.extra["trip_cases"] == [active["code"]]
-    async with pool.acquire() as conn, conn.transaction():
-        await customers.archive_customer(conn, boss, inquiry["customer_id"])
-    status = await admin.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", inquiry["id"])
-    assert status == "cancelled"
-    async with pool.acquire() as conn:
-        after = await customers.list_customers(conn)
-        blocked_list = await customers.list_customers(conn, status="blocked")
-    assert after["total"] == 2 and [c["id"] for c in blocked_list["items"]] == [lead["id"]]
-    async with pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Conflict):
-            await service.create_case(conn, sam, {"customer_id": lead["id"]})  # blocked
 
 
 # ── Notifications, staff, settings, audit ────────────────────────────────────
@@ -598,7 +442,7 @@ async def test_staff_directory_detail_preferences(pool: asyncpg.Pool, admin: asy
     sam = await staff(pool, admin, "sam", "sales")
     await staff(pool, admin, "cathy", "contracting")
     await admin.execute("UPDATE booking.staff_users SET active = false WHERE cis_user_id = 'cathy'")
-    case = await inquiry_case(pool)
+    case = await inquiry_case(admin)
     async with pool.acquire() as conn, conn.transaction():
         await service.assign(conn, boss, case["code"], "sam", "sales")
         everyone = await staff_admin.directory(conn)
@@ -624,7 +468,7 @@ async def test_staff_directory_detail_preferences(pool: asyncpg.Pool, admin: asy
 
 async def test_audit_log_read_pages_and_filters(pool: asyncpg.Pool, admin: asyncpg.Connection) -> None:
     boss = await staff(pool, admin, "boss")
-    case = await inquiry_case(pool)
+    case = await inquiry_case(admin)
     async with pool.acquire() as conn, conn.transaction():
         for i in range(3):
             await service.update_case(conn, boss, case["code"], {"notes": f"n{i}"})
@@ -645,7 +489,6 @@ async def test_bk005_privileges_and_settings(pool: asyncpg.Pool) -> None:
         for sql in (
             "UPDATE booking.settings SET value = '1'::jsonb",
             "INSERT INTO booking.countries VALUES ('XX', 'Nowhere', true)",
-            "DELETE FROM booking.v_customer_summary",
             "UPDATE booking.notification_reads SET read_at = now()",
         ):
             # The view is not auto-updatable either; either error means role booking cannot write it.
@@ -662,10 +505,17 @@ async def test_bk005_privileges_and_settings(pool: asyncpg.Pool) -> None:
 
 
 async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncpg.Connection) -> None:
-    # AA-1034 R0: the frozen B2C routes (new leads) stay tested with the intake on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", b2c_intake_enabled=True
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test")
+    # AA-1046: a staff-made case is retired (410); the version routes are exercised on a B2B case (and refused on a
+    # kept b2c case).
+    b2b = await ops.b2b_case(admin, tag="w1-http")
+    # The audit row the B2B confirm writes for its new case (app.b2b.holds), for the audit-log reads below.
+    await admin.execute(
+        "INSERT INTO booking.audit_logs (actor_type, actor_ref, action, entity_type, entity_id, summary)"
+        " VALUES ('system', 'b2b:confirm', 'trip_case.created', 'trip_case', $1::uuid, 'Created by the B2B confirm')",
+        b2b["id"],
     )
+    b2c = await inquiry_case(admin)
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     boss = {"Authorization": f"Bearer {cis.token(sub='boss', cis_role='admin')}"}
@@ -675,21 +525,13 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
             assert (await client.get("/booking/staff/me", headers=boss)).status_code == 200
             await client.get("/booking/staff/me", headers=cathy)  # provisioned inactive
             await client.patch("/booking/staff/cathy", json={"active": True, "role": "contracting"}, headers=boss)
-            created = await client.post(
-                "/booking/trip-cases",
-                json={"new_customer": {"name": "Dee", "email": "dee@x.test", "contact_consent": True}, "pax": 2},
-                headers=boss,
-            )
-            code = created.json()["code"]
-            denied = await client.post(
-                "/booking/trip-cases", json={"new_customer": {"name": "E", "phone": "+1 555"}}, headers=cathy
-            )
-            bad_body = await client.post("/booking/trip-cases", json={"pax": 2}, headers=boss)
+            created = await client.post("/booking/trip-cases", json={"pax": 2}, headers=boss)
+            code = b2b["code"]
+            denied = await client.post("/booking/trip-cases", json={}, headers=cathy)
+            b2c_version = await client.post(f"/booking/trip-cases/{b2c['code']}/versions", headers=boss)
             summary = await client.get("/booking/trip-cases/summary", headers=cathy)
             directory = await client.get("/booking/staff/directory", headers=cathy)
-            customers_list = await client.get("/booking/customers?status=lead", headers=cathy)
-            customer = await client.get(f"/booking/customers/{created.json()['customer_id']}", headers=cathy)
-            archive_denied = await client.delete(f"/booking/customers/{created.json()['customer_id']}", headers=cathy)
+            customers_gone = await client.get("/booking/customers?status=lead", headers=cathy)
             version = await client.post(f"/booking/trip-cases/{code}/versions", headers=boss)
             put = await client.put(
                 f"/booking/trip-cases/{code}/versions/1/items",
@@ -704,7 +546,7 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
             )
             version_get = await client.get(f"/booking/trip-cases/{code}/versions/1", headers=cathy)
             patch = await client.patch(f"/booking/trip-cases/{code}/versions/1", json={"title": "A"}, headers=boss)
-            send_no_price = await client.post(
+            send_gone = await client.post(
                 f"/booking/trip-cases/{code}/versions/1/send", json={"subject": "s", "message": "m"}, headers=boss
             )
             proposals = await client.get("/booking/versions?badge=draft", headers=cathy)
@@ -729,16 +571,15 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
             gone = await client.get(f"/booking/trip-cases/{code}/versions/1", headers=boss)
     finally:
         await db.close()
-    assert created.status_code == 201 and code.startswith("TC-")
-    assert denied.status_code == 403 and bad_body.status_code == 422
-    assert summary.status_code == 200 and summary.json()["new_inquiry"] == 1
+    assert created.status_code == 410 and created.json()["detail"] == "b2b_only"
+    assert denied.status_code == 403 and b2c_version.status_code == 410
+    assert summary.status_code == 200 and summary.json()["new_inquiry"] == 1  # the kept b2c case
     assert directory.status_code == 200 and {s["cis_user_id"] for s in directory.json()["items"]} == {"boss", "cathy"}
-    assert customers_list.json()["total"] == 1 and customer.json()["code"].startswith("CUS-")
-    assert archive_denied.status_code == 403
+    assert customers_gone.status_code == 404
     assert version.status_code == 201 and put.status_code == 200
     assert put_again.json()["items"][0]["id"] == item_id
     assert version_get.json()["item_count"] == 1 and patch.json()["title"] == "A"
-    assert send_no_price.status_code == 409  # case is new_inquiry: convert it first
+    assert send_gone.status_code in (404, 405)  # AA-1046: no Send to a traveller customer
     assert proposals.json()["total"] == 1 and proposals.json()["items"][0]["title"] == "A"
     assert activity.status_code == 200 and activity.json()["items"]
     assert notes.status_code == 200 and read.status_code == 200 and read_bad.status_code == 422

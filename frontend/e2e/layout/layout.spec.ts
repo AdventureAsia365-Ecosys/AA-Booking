@@ -12,7 +12,7 @@
 //                (`bk-dt-sticky-end`, position: sticky) and in view.
 //   390 x 844  — phones (cards instead of tables): no horizontal page scroll, console clean.
 //   960 / 1100 — AA-996 compact density (768-1199 px: a laptop at 125-150 % browser zoom; ui/booking/DataTable.tsx and
-//                app/globals.css): the widest lists (cases, billing invoices / payments, suppliers, trip plans,
+//                app/globals.css): the widest lists (cases, supplier bills, suppliers, trip plans,
 //                destinations) fit their frame with no clipped column, in light and dark at 960; the sidebar is the
 //                68 px rail; the folded FX / audit columns open in the row's details drawer. Every page at 960: the page
 //                never scrolls sideways. At 1280 the sidebar is still the stored (expanded) width: nothing changed there.
@@ -55,8 +55,6 @@ const PAGES: PageCase[] = [
   { name: "cases", path: "/cases" },
   { name: "case-proposals", path: "/cases/TC-000001?tab=proposals" },
   { name: "proposals", path: "/proposals" },
-  { name: "customers", path: "/customers" },
-  { name: "customer-cases", path: "/customers/CUS-000001?tab=cases" },
   { name: "trip-plans", path: "/catalog/trip-plans" },
   { name: "trip-plans-orphaned", path: "/catalog/trip-plans?show=orphaned" },
   { name: "destinations", path: "/catalog/destinations" },
@@ -66,11 +64,9 @@ const PAGES: PageCase[] = [
   // AA-996 slice 3: cover hero + "Photos · From CIS" gallery (24 tiles) on the country overview.
   { name: "country-overview", path: "/catalog/countries/LA", ready: '[data-testid="country-photos"]', noTable: true },
   { name: "settings-security", path: "/settings?tab=security", ready: "text=Company e-mail, one-time code", noTable: true },
-  // AA-996 slice 5: invoice detail (dates card, totals footer, light tables), payment detail (Related trip + Customer
-  // cards) and the notifications feed (per-type icons, labels, "Open invoice"). No kit DataTable on these pages.
-  { name: "invoice-detail", path: "/billing/invoices/INV-000004", ready: '[data-testid="invoice-totals"]', noTable: true },
-  { name: "payment-detail", path: "/billing/payments/PMT-000007", ready: '[data-testid="payment-customer"]', noTable: true },
-  { name: "notifications", path: "/notifications", ready: "text=Open invoice", noTable: true },
+  // AA-996 slice 5: the notifications feed (per-type icons, labels, "Open …" actions). No kit DataTable there. AA-1046:
+  // the invoice and payment detail pages are retired with the B2C half of Booking.
+  { name: "notifications", path: "/notifications", ready: "text=Open case", noTable: true },
   { name: "suppliers", path: "/suppliers" },
   { name: "supplier-contracts", path: "/suppliers/SUP-000001?tab=contracts" },
   { name: "supplier-rates", path: "/suppliers/SUP-000001?tab=rates" },
@@ -87,8 +83,6 @@ const PAGES: PageCase[] = [
   { name: "agency-tiers-cards", path: "/pricing/agency-tiers?tab=cards" },
   { name: "agency-tariff", path: "/pricing/agency-tiers/tariff?partner=pt-1" },
   { name: "price-readiness", path: "/pricing/readiness" },
-  { name: "billing-invoices", path: "/billing" },
-  { name: "billing-payments", path: "/billing?tab=payments" },
   { name: "trip-checks", path: "/trip-checks" },
   { name: "b2b-desk-on-request", path: "/b2b-desk" },
   { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },
@@ -449,8 +443,6 @@ test.describe("1280 x 800 squeeze, light", () => {
 // dark and at 1100 in light; the sidebar is the 68 px rail.
 const COMPACT_PAGES: PageCase[] = [
   { name: "cases", path: "/cases" },
-  { name: "billing-invoices", path: "/billing" },
-  { name: "billing-payments", path: "/billing?tab=payments" },
   { name: "suppliers", path: "/suppliers" },
   { name: "trip-plans", path: "/catalog/trip-plans" },
   { name: "destinations", path: "/catalog/destinations" },
@@ -487,29 +479,6 @@ for (const { width, scheme } of COMPACT_PASSES) {
   });
 }
 
-test.describe("compact 960: the folded columns open in the row's details drawer", () => {
-  test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
-  // AA-996 audit slice 1: the amount paid is a line under the total (column "Total / paid"), so it folds with it.
-  test("billing invoices: Issued and Total / paid are in the details drawer", async ({ page, baseURL }) => {
-    const c = await prepare(page, baseURL!);
-    await open(page, { name: "billing-invoices", path: "/billing" }, c);
-    const heads = await page.locator("main table thead th").allInnerTexts();
-    for (const folded of ["ISSUED", "TOTAL / PAID"]) expect(heads.map((h) => h.trim().toUpperCase()), `${folded} left the table`).not.toContain(folded);
-    await page.locator('[data-testid="bk-dt-details"]').first().click();
-    const drawer = page.locator('[data-testid="bk-dt-details-drawer"]');
-    await expect(drawer).toBeVisible();
-    await expect(drawer).toContainText("INV-000001");
-    for (const label of ["Issued", "Total / paid"]) await expect(drawer.locator("dt", { hasText: new RegExp(`^${label}$`, "i") })).toHaveCount(1);
-    await expect(drawer, "the amount paid shows under the total").toContainText("paid");
-    await page.waitForTimeout(300); // the kit drawer slides in (0.18 s): shoot it settled
-    await page.screenshot({ path: path.join(OUT, "billing-invoices-details-960-light.png") });
-    // Opening the details does not follow the row link (the button stops the row click).
-    expect(new URL(page.url()).pathname).toBe("/billing");
-    expect(c.unmocked, "every Booking API call has a fixture").toEqual([]);
-    expect(c.consoleErrors, "console is clean").toEqual([]);
-  });
-});
-
 // AA-996 review fixes: the CSV does not depend on the density, the details drawer does not outlive the compact window,
 // and the `[` key does not flip the hidden sidebar preference there.
 async function csvText(page: Page): Promise<string> {
@@ -545,7 +514,7 @@ test.describe("compact 960: the details drawer and the sidebar key", () => {
   test.use({ viewport: { width: 960, height: 900 }, colorScheme: "light" });
   test("the drawer closes when the window leaves the compact range and does not come back", async ({ page, baseURL }) => {
     const c = await prepare(page, baseURL!);
-    await open(page, { name: "billing-invoices", path: "/billing" }, c);
+    await open(page, { name: "cases", path: "/cases" }, c);
     await page.locator('[data-testid="bk-dt-details"]').first().click();
     const drawer = page.locator('[data-testid="bk-dt-details-drawer"]');
     await expect(drawer).toBeVisible();
@@ -575,11 +544,9 @@ test.describe("compact 960: the details drawer and the sidebar key", () => {
 //   - Filters and the table tools (Columns, CSV) share ONE row at 1440 px, and every filter bar has "Reset filters".
 //   - Export CSV on every list (the Countries grid has it in the filter bar's tools slot).
 //   - Dates: no browser date input shows its locale text; the en-GB DateField reads day-first input.
-//   - Billing invoices: codes and dates never wrap mid-value.
 type ListCase = { name: string; path: string; filters: boolean };
 const LIST_PAGES: ListCase[] = [
   { name: "cases", path: "/cases", filters: true },
-  { name: "customers", path: "/customers", filters: true },
   { name: "proposals", path: "/proposals", filters: true },
   { name: "case-proposals", path: "/cases/TC-000001?tab=proposals", filters: false },
   { name: "trip-plans", path: "/catalog/trip-plans", filters: true },
@@ -587,9 +554,7 @@ const LIST_PAGES: ListCase[] = [
   { name: "suppliers", path: "/suppliers", filters: true },
   { name: "hotels", path: "/hotels?view=table", filters: true },
   { name: "services", path: "/services", filters: true },
-  { name: "billing-invoices", path: "/billing", filters: true },
-  { name: "billing-payments", path: "/billing?tab=payments", filters: true },
-  { name: "billing-supplier-bills", path: "/billing?tab=supplier-bills", filters: true },
+  { name: "billing-supplier-bills", path: "/billing", filters: true },
   { name: "trip-checks", path: "/trip-checks", filters: true },
   { name: "staff", path: "/staff", filters: true },
 ];
@@ -673,30 +638,6 @@ test.describe("AA-996 audit slice 1: filters and tools on one row at 1440, CSV o
     const text = fs.readFileSync((await download.path())!, "utf8").replace(/^﻿/, "");
     expect(text.split("\n")[0]).toBe("Country,ISO code,Status,Area,Places (CIS),Tours (CIS),Photos (CIS),Active suppliers,In Booking");
     expect(text.split("\n").length, "one line per country card").toBeGreaterThan(1);
-    expect(c.consoleErrors, "console is clean").toEqual([]);
-  });
-
-  test("billing invoices: codes and dates never wrap mid-value", async ({ page, baseURL }) => {
-    const c = await prepare(page, baseURL!);
-    await open(page, { name: "billing-invoices", path: "/billing" }, c);
-    const wrapped = await page.evaluate(() => {
-      const table = document.querySelector("main table");
-      if (!table) return ["no table"];
-      const heads = Array.from(table.querySelectorAll("thead th")).map((th) => (th.textContent ?? "").trim().toUpperCase());
-      const bad: string[] = [];
-      for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
-        Array.from(tr.children).forEach((td, i) => {
-          if (!["INVOICE", "TRIP CASE / CUSTOMER", "ISSUED", "NEXT DUE", "TOTAL / PAID", "LEFT TO PAY"].includes(heads[i])) return;
-          // Each code / date element is one line box: its height is one line of text.
-          for (const el of Array.from(td.querySelectorAll("a, time, .bk-tabular, td > span > span:first-child"))) {
-            const r = (el as HTMLElement).getClientRects();
-            if (r.length > 1) bad.push(`${heads[i]}: ${(el.textContent ?? "").trim()}`);
-          }
-        });
-      }
-      return bad;
-    });
-    expect(wrapped, "invoice number, trip case, dates and amounts are one line each").toEqual([]);
     expect(c.consoleErrors, "console is clean").toEqual([]);
   });
 

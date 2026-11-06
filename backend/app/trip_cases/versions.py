@@ -10,12 +10,12 @@
 - **Items keep their ids** (D2): a PUT updates the items it names by ``id``, inserts the ones without an
   id and deletes only the ones left out, so rows that reference an item (bk-004 ``version_item_costs``,
   ``ON DELETE CASCADE``) survive a save.
-- **Send** marks the version sent (validity date, sender), moves the case to ``proposal_sent`` and writes a
-  customer notification row. No e-mail is sent. From then on the database locks the version's commercial
-  fields and its items (bk-005 trigger); staff make a new version instead.
-- **Approve** records the customer's approval of a sent version (staff action until the customer app,
-  O8): the version is approved (bk-003 lock) and the case moves ``proposal_sent -> confirmed`` (D3). A version with
-  no items is refused (422 ``version_empty``, AA-996): Send refuses one too, so only an out-of-band row can be both.
+- **Send** (the version to a traveller customer) is gone with the B2C half (AA-1046): a B2B case's proposals belong
+  to booking.b2b.v1 and a b2c case is read-only history. A version sent before keeps its lock (bk-005 trigger).
+- **Approve** records the customer's approval of a sent version: the version is approved (bk-003 lock) and the case
+  moves ``proposal_sent -> confirmed`` (D3). A version with no items is refused (422 ``version_empty``, AA-996). B2B
+  cases answer 409 (``ensure_staff_managed``) and b2c cases 410, so today no case reaches it; kept for the staff
+  sales flow of a later channel.
 - **Delete** soft-deletes an unsent, unapproved draft.
 - **Net costs** (bk-004 ``version_item_costs``, AA-810): each item carries its supplier net cost lines. ``GET
   …/items`` returns them per item; ``PUT …/items`` replaces an item's lines when the item has ``costs`` (omit it
@@ -62,11 +62,6 @@ MAX_ITEMS = 200
 # A PUT parks kept items at position + this offset before renumbering, so the bk-003 unique
 # (version, position) constraint never collides mid-save. MAX_ITEMS + offset stays under SMALLINT.
 POSITION_PARK = 1000
-VALIDITY_MIN_DAYS = 7
-VALIDITY_MAX_DAYS = 30
-DEFAULT_VALIDITY_DAYS = 14
-# Statuses from which "send" may walk the pre-sale chain to proposal_sent (each hop is an allowed edge).
-SEND_CHAIN = ("discovery", "building", "proposal_sent")
 VERSION_SORTS = {"updated_at": "v.updated_at", "created_at": "v.created_at", "version_number": "v.version_number"}
 
 ITEM_COLUMNS = "position, title, day_from, day_to, source_tour_id, notes, hotel_room_type_id, service_id"
@@ -771,119 +766,6 @@ async def price_version(
     return {"quote": pricing.body(priced), "version": out}
 
 
-async def _validity_days(conn: asyncpg.Connection) -> int:
-    raw = await conn.fetchval("SELECT value::text FROM booking.settings WHERE key = 'quote_validity_days'")
-    try:
-        days = int(json.loads(raw)) if raw else DEFAULT_VALIDITY_DAYS
-    except (TypeError, ValueError):
-        days = DEFAULT_VALIDITY_DAYS
-    return min(max(days, VALIDITY_MIN_DAYS), VALIDITY_MAX_DAYS)
-
-
-async def send_version(
-    conn: asyncpg.Connection,
-    staff: Staff,
-    ref: str,
-    number: int,
-    *,
-    to: str | None,
-    subject: str,
-    message: str,
-    valid_until: date | None,
-    today: date | None = None,
-) -> dict[str, Any]:
-    case = await resolve_case(conn, ref, lock=True)
-    ensure_staff_managed(case)
-    if case["status"] not in SEND_CHAIN:
-        raise Conflict(
-            "case_not_sendable",
-            f"a proposal can be sent from {', '.join(SEND_CHAIN)}; the case is {case['status']}",
-        )
-    version = dict(await _version(conn, case["id"], number, lock=True))
-    _editable(version)
-    item_count = await conn.fetchval(
-        "SELECT count(*) FROM booking.trip_case_version_itinerary WHERE trip_case_version_id = $1::uuid",
-        version["id"],
-    )
-    if not item_count:
-        raise Invalid("version_empty", "add at least one item before sending")
-    if version["total_price"] is None or version["currency"] is None:
-        raise Invalid("price_missing", "price the version (total and currency) before sending")
-    customer = await conn.fetchrow(
-        "SELECT id::text AS id, code, name, email FROM booking.customers WHERE id = $1::uuid", case["customer_id"]
-    )
-    if to is not None and (customer["email"] or "").lower() != to.strip().lower():
-        raise Invalid("recipient_mismatch", "a proposal is sent to the customer's own e-mail only (Q14)")
-    today = today or date.today()
-    valid_until = valid_until or today + timedelta(days=await _validity_days(conn))
-    if not today + timedelta(days=VALIDITY_MIN_DAYS) <= valid_until <= today + timedelta(days=VALIDITY_MAX_DAYS):
-        raise Invalid(
-            "invalid_valid_until",
-            f"valid_until must be {VALIDITY_MIN_DAYS} to {VALIDITY_MAX_DAYS} days from today",
-        )
-    badges = await _version_badges(conn, case["id"])
-    await conn.execute(
-        "UPDATE booking.trip_case_versions SET is_sent_to_customer = true, sent_at = now(), sent_by = $2,"
-        " valid_until = $3, updated_by = $2 WHERE id = $1::uuid",
-        version["id"],
-        staff.cis_user_id,
-        valid_until,
-    )
-    from_status = case["status"]
-    hops = list(SEND_CHAIN[SEND_CHAIN.index(from_status) + 1 :])
-    current = dict(case)
-    for hop in hops:
-        await set_status(conn, staff, current, hop, f"V{number} sent")
-        current["status"] = hop
-    label = _label(case, number)
-    notification_id = await notifications.notify_customer(
-        conn,
-        customer_id=customer["id"],
-        type="proposal.sent",
-        title=subject,
-        message=message,
-        entity_type="trip_case_version",
-        entity_id=version["id"],
-        data={
-            "trip_case_code": case["code"],
-            "version_number": number,
-            "to": customer["email"],
-            "valid_until": valid_until,
-            "total_price": version["total_price"],
-            "currency": version["currency"],
-            "email_sent": False,
-        },
-    )
-    await audit.record(
-        conn,
-        actor_type="staff",
-        actor_ref=staff.cis_user_id,
-        action="trip_case_version.sent",
-        entity_type="trip_case_version",
-        entity_id=version["id"],
-        before={"is_sent_to_customer": False, "case_status": from_status},
-        after={
-            "is_sent_to_customer": True,
-            "valid_until": valid_until,
-            "case_status": "proposal_sent",
-            "to": customer["email"],
-            "subject": subject,
-            "message": message,
-            "notification_id": notification_id,
-            "total_price": version["total_price"],
-            "currency": version["currency"],
-        },
-        entity_label=label,
-        summary=f"Marked V{number} as sent (valid until {valid_until.isoformat()}); no e-mail sent",
-    )
-    await _audit_superseded(conn, staff, case, badges, number, "sent")
-    out = sql.version_dict(await _version(conn, case["id"], number))
-    out["trip_case"] = {"id": case["id"], "code": case["code"], "status": "proposal_sent"}
-    out["notification_id"] = notification_id
-    out["email_sent"] = False
-    return out
-
-
 async def approve_version(
     conn: asyncpg.Connection, staff: Staff, ref: str, number: int, note: str | None
 ) -> dict[str, Any]:
@@ -960,7 +842,8 @@ async def list_versions(
     """Cross-case proposal list (``/proposals``). ``assignee`` = the case's open sales owner (id or ``none``).
 
     Each row carries its case's ``trip_case_channel`` (``b2c`` | ``b2b``): the staff admin offers no version write on
-    a b2c row while the B2C part is closed (AA-1037; the version's own ``channel`` is its pricing channel)."""
+    a b2c row: b2c cases are the read-only history of the retired B2C half (AA-1046; the version's own ``channel`` is
+    its pricing channel)."""
     from app.trip_cases.service import _day_start  # private helper shared with the case list
 
     where = ["v.deleted_at IS NULL", "tc.deleted_at IS NULL"]
@@ -975,7 +858,7 @@ async def list_versions(
             raise Invalid("unknown_badge", f"badge must be one of {', '.join(sql.VERSION_BADGES)}")
         add(f"({sql.VERSION_BADGE}) = {{p}}", badge)
     if q and q.strip():
-        add("(tc.code ILIKE {p} OR c.name ILIKE {p} OR c.email ILIKE {p} OR v.title ILIKE {p})", paging.contains(q))
+        add("(tc.code ILIKE {p} OR v.title ILIKE {p})", paging.contains(q))
     sales = (
         "(SELECT a.staff_user_id FROM booking.staff_assignments a"
         " WHERE a.trip_case_id = tc.id AND a.role = 'sales' AND a.unassigned_at IS NULL)"
@@ -994,16 +877,12 @@ async def list_versions(
         raise Invalid("unknown_sort", f"sort must be one of {', '.join(VERSION_SORTS)} (prefix - for descending)")
     order = f"{column} {'DESC' if raw.startswith('-') else 'ASC'}, v.id"
     clause = " AND ".join(where)
-    base = (
-        "FROM booking.trip_case_versions v JOIN booking.trip_cases tc ON tc.id = v.trip_case_id"
-        " LEFT JOIN booking.customers c ON c.id = tc.customer_id"  # b2b cases have no customer (bk-020)
-    )
+    base = "FROM booking.trip_case_versions v JOIN booking.trip_cases tc ON tc.id = v.trip_case_id"
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(
         f"""
         SELECT {sql.VERSION_COLUMNS}, tc.id::text AS trip_case_id, tc.code AS trip_case_code,
                tc.status AS trip_case_status, tc.channel AS trip_case_channel, tc.start_date,
-               c.id::text AS customer_id, c.name AS customer_name,
                us.name AS updated_by_name, {sales} AS sales_id, {sql.LEGS_JSON},
                tc.inquiry_snapshot::text AS inquiry_snapshot
         {base} LEFT JOIN booking.staff_users us ON us.cis_user_id = v.updated_by
@@ -1021,7 +900,6 @@ async def list_versions(
         shape = sql.trip_shape(
             sql.loads(out.pop("inquiry_snapshot")), sql.loads(out.pop("legs"), []), row["start_date"]
         )
-        out["customer"] = {"id": out.pop("customer_id"), "name": out.pop("customer_name")}
         out["updated_by"] = {"id": row["updated_by"], "name": out.pop("updated_by_name")}
         out.update(
             leg_titles=shape["leg_titles"],

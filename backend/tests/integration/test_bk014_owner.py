@@ -26,6 +26,18 @@ BK014_OBJECTS: dict[str, list[str]] = {
     for kind in ("TABLE", "VIEW", "SEQUENCE", "FUNCTION")
 }
 
+# AA-1046: what bk-045 (destructive) dropped of bk-014's list. They are gone, so the ownership check skips them.
+DROPPED_BY_BK045 = frozenset(
+    {
+        "booking.customers",
+        "booking.customer_otps",
+        "booking.customer_sessions",
+        "booking.media_files",
+        "booking.v_customer_summary",
+        "booking.customer_code_seq",
+    }
+)
+
 LISTED_OWNER_SQL = {
     "TABLE": "SELECT relowner::regrole::text FROM pg_class WHERE oid = $1::regclass AND relkind = 'r'",
     "VIEW": "SELECT relowner::regrole::text FROM pg_class WHERE oid = $1::regclass AND relkind = 'v'",
@@ -64,6 +76,8 @@ async def test_bk014_lists_the_objects_its_header_names() -> None:
     ids=lambda v: v,
 )
 async def test_every_object_bk014_lists_is_owned_by_bk_owner(migrated_admin_dsn: str, kind: str, name: str) -> None:
+    if name in DROPPED_BY_BK045:
+        pytest.skip(f"{name} was dropped by bk-045 (AA-1046)")
     conn = await _admin(migrated_admin_dsn)
     try:
         assert await conn.fetchval(LISTED_OWNER_SQL[kind], name) == OWNER_ROLE
@@ -110,9 +124,9 @@ async def test_default_privileges_are_bk001_rows_for_bk_owner(migrated_admin_dsn
 @pytest.mark.parametrize(
     ("obj", "privilege", "expected"),
     [
-        ("booking.customers", "SELECT", True),
-        ("booking.customers", "DELETE", True),
-        ("booking.customers", "TRUNCATE", False),
+        ("booking.trip_cases", "SELECT", True),
+        ("booking.trip_cases", "DELETE", True),
+        ("booking.trip_cases", "TRUNCATE", False),
         ("booking.audit_logs", "INSERT", True),
         ("booking.audit_logs", "UPDATE", False),  # append-only (bk-001)
         ("booking.pricing_rules", "UPDATE", False),  # append-only (bk-004)
@@ -128,7 +142,7 @@ async def test_role_booking_keeps_its_privileges(
     conn = await _admin(migrated_admin_dsn)
     try:
         assert await conn.fetchval("SELECT has_table_privilege('booking', $1, $2)", obj, privilege) is expected
-        assert await conn.fetchval("SELECT has_sequence_privilege('booking', 'booking.customer_code_seq', 'USAGE')")
+        assert await conn.fetchval("SELECT has_sequence_privilege('booking', 'booking.trip_case_code_seq', 'USAGE')")
         assert await conn.fetchval("SELECT has_function_privilege('booking', 'booking.set_updated_at()', 'EXECUTE')")
         assert await conn.fetchval("SELECT has_schema_privilege('booking', 'booking', 'CREATE')") is False
     finally:
@@ -178,6 +192,9 @@ async def test_master_created_objects_are_no_longer_covered(migrated_admin_dsn: 
 async def test_guard_refuses_an_object_the_list_misses(migrated_admin_dsn: str) -> None:
     """A booking.* object that appeared after the list was written makes bk-014 raise (regenerate the list)."""
     admin = await _admin(migrated_admin_dsn)
+    if await admin.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = 'bk-045'"):
+        await admin.close()
+        pytest.skip("bk-014 names objects bk-045 dropped (AA-1046): it cannot run again; the guard was proven before")
     try:
         await admin.execute("CREATE TABLE booking.zz_unlisted (id int)")  # owned by the master, not in bk-014
         with pytest.raises(asyncpg.RaiseError, match="not owned by bk_owner.*zz_unlisted"):

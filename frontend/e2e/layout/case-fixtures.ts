@@ -62,7 +62,6 @@ function caseDetail(code: string, status: TripCaseStatus): TripCaseDetail {
     id: `cccc0000-0000-4000-8000-${code.slice(3)}`,
     code,
     status,
-    customer_id: "dddd0000-0000-4000-8000-000000000101",
     channel: "b2c",
     party_tenant_id: null,
     trip_style: inquiry ? null : "Slow travel, boutique stays",
@@ -77,12 +76,6 @@ function caseDetail(code: string, status: TripCaseStatus): TripCaseDetail {
     source_id: `trip-${code}`,
     created_at: EARLIER,
     updated_at: NOW,
-    customer_code: "CUS-000101",
-    customer_name: "Alexandra Catherine Montgomery-Whitfield",
-    customer_email: "alexandra.montgomery.whitfield@very-long-customer-domain.example.test",
-    customer_phone: "+44 20 7946 0958",
-    customer_verified: false,
-    customer_needs_merge_review: false,
     assignees: inquiry ? [] : [{ cis_user_id: "u-001", role: "sales", name: "Pham Quoc Bao-Long Sales Lead", assigned_at: EARLIER }],
     countries: [],
     leg_countries: ["LA", "VN"],
@@ -108,7 +101,6 @@ function caseDetail(code: string, status: TripCaseStatus): TripCaseDetail {
     allowed_transitions: inquiry ? ["discovery", "cancelled"] : ["cancelled"],
     tour_alerts: [],
     supply: undefined,
-    money: null,
   };
 }
 
@@ -217,7 +209,6 @@ function tripCheck(i: number): TripCheck {
       channel: trip === 3 ? "b2b" : "b2c",
       start_date: "2026-11-12",
       end_date: "2026-11-26",
-      customer_name: trip === 3 ? null : `Alexandra Catherine Montgomery-Whitfield ${trip}`,
       checks: { total: 3 + (trip % 4), done: trip % 3, not_applicable: trip === 3 ? 1 : 0 },
       sales_name: trip % 2 ? "Pham Quoc Bao-Long Sales Lead" : null,
     },

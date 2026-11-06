@@ -89,7 +89,7 @@ export function auditEntityHref(row: AuditRef): string | null {
     const m = /^(TC-\d+) V(\d+)$/.exec(label);
     if (m) return `/cases/${encodeURIComponent(m[1])}/proposals/${m[2]}`;
   }
-  if (row.entity_type === "customer" && row.entity_id) return `/customers/${encodeURIComponent(row.entity_id)}`;
+  // AA-1046: a customer row (the retired B2C records) has no page to open.
   if (row.entity_type === "staff_user" && row.entity_id) return `/staff/${encodeURIComponent(row.entity_id)}`;
   // The supplier and service pages resolve a record by its UUID as well as its code.
   if (row.entity_type === "supplier" && row.entity_id) return `/suppliers/${encodeURIComponent(row.entity_id)}`;

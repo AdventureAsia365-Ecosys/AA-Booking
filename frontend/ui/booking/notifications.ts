@@ -54,15 +54,8 @@ export function notificationTarget(n: StaffNotification): { href: string; label:
     const ref = caseCode ?? n.entity_id;
     return ref ? { href: `/cases/${encodeURIComponent(ref)}`, label: "Open case" } : null;
   }
-  // AA-996: money rows open the invoice page (by its number), a recorded payment opens the payment to verify.
-  if (n.entity_type === "invoice") {
-    const number = text(n, "invoice_number");
-    return number ? { href: `/billing/invoices/${encodeURIComponent(number)}`, label: "Open invoice" } : null;
-  }
-  if (n.entity_type === "payment") {
-    const ref = text(n, "ref") ?? n.entity_id;
-    return ref ? { href: `/billing/payments/${encodeURIComponent(ref)}`, label: "Open payment" } : null;
-  }
+  // AA-1046: the customer invoice, payment and customer pages are retired with the B2C half of Booking, so their old
+  // feed rows (kept as history) open nothing.
   if (n.entity_type === "supplier_booking") {
     // Here `code` is the booking's own SB- code: the case is `case_code`.
     const ref = text(n, "case_code");
@@ -76,9 +69,6 @@ export function notificationTarget(n: StaffNotification): { href: string; label:
       : key
         ? { href: `/catalog/trip-plans/${encodeURIComponent(key)}`, label: "Open trip plan" }
         : null;
-  }
-  if (n.entity_type === "customer" && n.entity_id) {
-    return { href: `/customers/${encodeURIComponent(n.entity_id)}`, label: "Open customer" };
   }
   if (n.entity_type === "supplier_bill") {
     // The bill drawer opens by URL on the Supplier bills tab of /billing (code BIL-…, or the id).

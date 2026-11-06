@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from typing import Any
 
-import asyncpg
 import pytest
 
 from app import audit, paging, reference
 from app.auth import admin as staff_admin
 from app.auth.staff import Staff
-from app.customers import service as customers
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.trip_cases import service, versions
@@ -35,7 +33,6 @@ def case_row(status: str = "building", **extra: Any) -> dict[str, Any]:
         "id": CASE_ID,
         "code": "TC-000001",
         "status": status,
-        "customer_id": CUSTOMER_ID,
         "currency": "USD",
         "pax": 2,
         "pax_adults": None,
@@ -139,23 +136,13 @@ async def test_reference_reads() -> None:
 # ── notifications ────────────────────────────────────────────────────────────
 
 
-async def test_notify_helpers_write_rows() -> None:
+async def test_notify_staff_writes_a_staff_row() -> None:
     conn = ScriptedConn().on("RETURNING id::text", ROW_ID)
     await notifications.notify_staff(
         conn, type="trip_case.assigned", title="t", message=None, entity_type=None, entity_id=None, recipient_ref="u-1"
     )
     assert conn.sql("VALUES ('staff'")[0][:2] == ("u-1", "trip_case.assigned")
-    nid = await notifications.notify_customer(
-        conn,
-        customer_id=CUSTOMER_ID,
-        type="proposal.sent",
-        title="t",
-        message="m",
-        entity_type="trip_case_version",
-        entity_id=VERSION_ID,
-        data={"valid_until": date(2026, 10, 28)},
-    )
-    assert nid == ROW_ID and json.loads(conn.sql("VALUES ('customer'")[0][-1]) == {"valid_until": "2026-10-28"}
+    assert not hasattr(notifications, "notify_customer")  # AA-1046: no customer feed row is written any more
 
 
 async def test_feed_filters_and_mark_read() -> None:
@@ -255,7 +242,6 @@ async def test_list_cases_w1_filters_and_shape() -> None:
         conn,
         q="ann",
         source="manual",
-        customer_id=CUSTOMER_ID,
         created_from=date(2026, 10, 1),
         created_to=date(2026, 10, 14),
         sort="start_date",
@@ -265,6 +251,8 @@ async def test_list_cases_w1_filters_and_shape() -> None:
     assert item["trip_end_date"] == date(2027, 3, 4) and item["countries"] == ["VN"]
     sql, args = conn.calls[-1]
     assert "ORDER BY tc.start_date ASC NULLS LAST" in sql and args[0] == "%ann%"
+    # AA-1046: no customer join (booking.customers is dropped by bk-045), the search is the case code only
+    assert "booking.customers" not in sql and "customer_id" not in sql and "tc.code ILIKE $1" in sql
     for bad in ({"source": "fax"}, {"sort": "price"}):
         with pytest.raises(Invalid):
             await service.list_cases(ScriptedConn(), **bad)
@@ -414,47 +402,6 @@ def detail_conn(conn: ScriptedConn) -> ScriptedConn:
     )
 
 
-async def test_create_case_existing_customer_and_new_lead() -> None:
-    conn = detail_conn(
-        ScriptedConn()
-        .on("FROM booking.customers WHERE id = $1::uuid", {"id": CUSTOMER_ID, "is_blocked": False})
-        .on("INSERT INTO booking.trip_cases", {"id": CASE_ID, "code": "TC-000001", "status": "new_inquiry"})
-        .on("FROM booking.trip_cases tc", case_row("new_inquiry"))
-        .on("FROM booking.staff_users", {"cis_user_id": "u-1", "active": True})
-    )
-    out = await service.create_case(conn, SALES, {"customer_id": CUSTOMER_ID, "pax_adults": 2, "currency": None})
-    assert out["code"] == "TC-000001"
-    insert = conn.sql("INSERT INTO booking.trip_cases")[0]
-    assert insert[:2] == (CUSTOMER_ID, "new_inquiry") and insert[3:6] == (2, 2, None) and insert[6] == "USD"
-    assert conn.sql("INSERT INTO booking.staff_assignments")[0][1] == "u-1"  # sales creator owns it
-    lead = detail_conn(
-        ScriptedConn()
-        .on("INSERT INTO booking.customers", {"id": CUSTOMER_ID, "code": "CUS-000001"})
-        .on("INSERT INTO booking.trip_cases", {"id": CASE_ID, "code": "TC-000001", "status": "discovery"})
-    )
-    await service.create_case(
-        lead, ADMIN, {"new_customer": {"name": "Bo", "phone": "+1"}, "initial_status": "discovery", "countries": []}
-    )
-    assert lead.sql("INSERT INTO booking.staff_assignments") == []  # admin: no default owner
-
-
-async def test_create_case_errors() -> None:
-    with pytest.raises(Invalid):
-        await service.create_case(ScriptedConn(), SALES, {"customer_id": CUSTOMER_ID, "initial_status": "paid"})
-    with pytest.raises(Invalid):
-        await service.create_case(ScriptedConn(), SALES, {})
-    blocked = ScriptedConn().on("FROM booking.customers WHERE id", {"id": CUSTOMER_ID, "is_blocked": True})
-    with pytest.raises(Conflict):
-        await service.create_case(blocked, SALES, {"customer_id": CUSTOMER_ID})
-    check = (
-        ScriptedConn()
-        .on("FROM booking.customers WHERE id", {"id": CUSTOMER_ID, "is_blocked": False})
-        .on("INSERT INTO booking.trip_cases", asyncpg.CheckViolationError("trip_cases_pax_split_chk"))
-    )
-    with pytest.raises(Invalid):
-        await service.create_case(check, SALES, {"customer_id": CUSTOMER_ID, "pax": 3, "pax_adults": 1})
-
-
 # ── versions ─────────────────────────────────────────────────────────────────
 
 
@@ -500,72 +447,18 @@ def send_conn(status: str = "discovery", **version: Any) -> ScriptedConn:
     )
 
 
-async def test_send_walks_the_chain_and_notifies_the_customer() -> None:
-    today = date(2026, 10, 14)
-    conn = send_conn()
-    out = await versions.send_version(
-        conn, SALES, "TC-1", 1, to="ANN@x.test", subject="Trip", message="Hi", valid_until=None, today=today
+async def test_approve_refuses_b2b_cases() -> None:
+    """AA-973 review: approving would re-confirm a partner booking: 409 before any write."""
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.trip_cases tc", case_row("proposal_sent", channel="b2b"))
+        .on("FROM booking.trip_case_versions v", version_row(is_sent_to_customer=True, badge="sent"))
     )
-    assert out["notification_id"] == ROW_ID and out["email_sent"] is False
-    assert conn.sql("SET is_sent_to_customer = true")[0] == (VERSION_ID, "u-1", today + timedelta(days=10))
-    assert [a[1] for a in conn.sql("UPDATE booking.trip_cases SET status")] == ["building", "proposal_sent"]
-    assert audit_args(conn)[0][3] == "trip_case_version.sent"
-    resend = send_conn("proposal_sent")
-    await versions.send_version(
-        resend, SALES, "TC-1", 1, to=None, subject="s", message="m", valid_until=today + timedelta(days=7), today=today
-    )
-    assert resend.sql("UPDATE booking.trip_cases SET status") == []
-
-
-@pytest.mark.parametrize(
-    ("conn_kwargs", "kwargs", "error", "code"),
-    [
-        ({"status": "new_inquiry"}, {}, Conflict, "case_not_sendable"),
-        ({"total_price": None}, {}, Invalid, "price_missing"),
-        ({}, {"to": "x@y.test"}, Invalid, "recipient_mismatch"),
-        ({}, {"valid_until": date(2026, 10, 15)}, Invalid, "invalid_valid_until"),
-        ({}, {"valid_until": date(2026, 12, 31)}, Invalid, "invalid_valid_until"),
-        ({"is_approved": True}, {}, Conflict, "version_locked"),
-    ],
-)
-async def test_send_errors(conn_kwargs: dict[str, Any], kwargs: dict[str, Any], error: type, code: str) -> None:
-    status = conn_kwargs.pop("status", "building")
-    conn = send_conn(status, **conn_kwargs)
-    args = {"to": None, "subject": "s", "message": "m", "valid_until": None, **kwargs}
-    with pytest.raises(error) as err:
-        await versions.send_version(conn, SALES, "TC-1", 1, today=date(2026, 10, 14), **args)
-    assert err.value.code == code
-
-
-async def test_send_needs_items_and_validity_setting_fallbacks() -> None:
-    empty = send_conn().on("SELECT count(*) FROM booking.trip_case_version_itinerary", 0)
-    with pytest.raises(Invalid) as err:
-        await versions.send_version(empty, SALES, "TC-1", 1, to=None, subject="s", message="m", valid_until=None)
-    assert err.value.code == "version_empty"
-    assert await versions._validity_days(ScriptedConn()) == versions.DEFAULT_VALIDITY_DAYS
-    assert await versions._validity_days(ScriptedConn().on("FROM booking.settings", '"x"')) == 14
-    assert await versions._validity_days(ScriptedConn().on("FROM booking.settings", "90")) == 30
-
-
-async def test_send_and_approve_refuse_b2b_cases() -> None:
-    """AA-973 review: a B2B case has no customer (customer_id NULL); send / approve would read a missing customer or
-    re-confirm a partner booking. Both are 409 before any read of the customer or write."""
-    b2b = {"channel": "b2b", "customer_id": None}
-    for status, call in (
-        ("building", lambda conn: versions.send_version(
-            conn, SALES, "TC-1", 1, to=None, subject="s", message="m", valid_until=None, today=date(2026, 10, 14)
-        )),
-        ("proposal_sent", lambda conn: versions.approve_version(conn, SALES, "TC-1", 1, None)),
-    ):  # fmt: skip
-        conn = (
-            ScriptedConn()
-            .on("FROM booking.trip_cases tc", case_row(status, **b2b))
-            .on("FROM booking.trip_case_versions v", version_row(is_sent_to_customer=True, badge="sent"))
-        )
-        with pytest.raises(Conflict) as err:
-            await call(conn)
-        assert err.value.code == "b2b_case_managed_by_partner_api"
-        assert conn.sql("FROM booking.customers") == [] and conn.sql("UPDATE booking.") == []
+    with pytest.raises(Conflict) as err:
+        await versions.approve_version(conn, SALES, "TC-1", 1, None)
+    assert err.value.code == "b2b_case_managed_by_partner_api"
+    assert conn.sql("UPDATE booking.") == []
+    assert not hasattr(versions, "send_version")  # AA-1046: no send to a traveller customer any more
 
 
 async def test_approve_rules() -> None:
@@ -621,23 +514,6 @@ def badge_rows(*snapshots: dict[int, str]):
     return answer
 
 
-async def test_send_audits_the_versions_it_supersedes() -> None:
-    """AA-910: sending V2 makes the sent V1 superseded (a derived badge, no write to V1): one audit row says so."""
-    conn = send_conn("proposal_sent", version_number=2).on(
-        "FROM booking.trip_case_versions AS v", badge_rows({1: "sent", 2: "draft"}, {1: "superseded", 2: "sent"})
-    )
-    await versions.send_version(
-        conn, SALES, "TC-1", 2, to=None, subject="s", message="m", valid_until=None, today=date(2026, 10, 14)
-    )
-    rows = audit_args(conn)
-    assert [r[3] for r in rows] == ["trip_case_version.sent", "trip_case_version.superseded"]
-    superseded = rows[1]
-    assert superseded[5] == "00000000-0000-4000-8000-000000000001" and superseded[8] == "TC-000001 V1"
-    assert json.loads(superseded[6]) == {"badge": "sent"}
-    assert json.loads(superseded[7]) == {"badge": "superseded", "by": "sent", "superseded_by": 2}
-    assert superseded[9] == "V1 superseded: V2 was sent"
-
-
 async def test_approve_audits_newly_superseded_versions_only() -> None:
     """AA-910: approving V2 supersedes every other live version; V1 (already superseded by the send of V2) gets no
     second row, the unsent draft V3 gets one."""
@@ -657,14 +533,6 @@ async def test_approve_audits_newly_superseded_versions_only() -> None:
     assert json.loads(rows[0][6]) == {"badge": "draft"}
 
 
-async def test_first_send_supersedes_nothing() -> None:
-    conn = send_conn().on("FROM booking.trip_case_versions AS v", badge_rows({1: "draft"}, {1: "sent"}))
-    await versions.send_version(
-        conn, SALES, "TC-1", 1, to=None, subject="s", message="m", valid_until=None, today=date(2026, 10, 14)
-    )
-    assert [r[3] for r in audit_args(conn)] == ["trip_case_version.sent"]
-
-
 async def test_list_versions_filters_and_shape() -> None:
     row = {
         **version_row(),
@@ -675,8 +543,6 @@ async def test_list_versions_filters_and_shape() -> None:
         "trip_case_status": "building",
         "trip_case_channel": "b2c",
         "start_date": None,
-        "customer_id": CUSTOMER_ID,
-        "customer_name": "Ann",
         "sales_id": "u-1",
         "legs": "[]",
         "inquiry_snapshot": None,
@@ -692,7 +558,8 @@ async def test_list_versions_filters_and_shape() -> None:
         sort="version_number",
     )
     item = out["items"][0]
-    assert item["customer"] == {"id": CUSTOMER_ID, "name": "Ann"} and item["updated_by"] == {"id": "u-1", "name": "S"}
+    assert "customer" not in item and item["updated_by"] == {"id": "u-1", "name": "S"}
+    assert "booking.customers" not in conn.calls[-1][0]
     assert item["trip_title"] is None and item["leg_titles"] == []
     assert item["trip_case_channel"] == "b2c" and "tc.channel AS trip_case_channel" in conn.calls[-1][0]
     unassigned = ScriptedConn()
@@ -718,125 +585,3 @@ CUSTOMER = {
     "needs_merge_review": False,
     "source": "manual",
 }
-
-
-async def test_list_customers_filters() -> None:
-    conn = ScriptedConn().on("SELECT count(*)", 1).on("ORDER BY", [{"id": CUSTOMER_ID}])
-    out = await customers.list_customers(
-        conn, q="ann", status="lead", merge_review=True, source="manual", sort="name", limit=5
-    )
-    assert out["total"] == 1
-    sql, args = conn.calls[-1]
-    assert "s.status = $1" in sql and "ORDER BY lower(s.name) ASC" in sql and args[:3] == ("lead", True, "manual")
-    blocked = ScriptedConn()
-    await customers.list_customers(blocked, status="blocked")
-    assert blocked.calls[0][1] == (True,)
-    for bad in ({"status": "vip"}, {"source": "fax"}, {"sort": "age"}):
-        with pytest.raises(Invalid):
-            await customers.list_customers(ScriptedConn(), **bad)
-
-
-async def test_get_customer_detail_assembles_parts() -> None:
-    summary = {**CUSTOMER, "merge_candidate_id": ROW_ID, "status": "lead"}
-    case = {
-        **case_row("new_inquiry"),
-        "source_system": "tripplanner",
-        "created_at": AT,
-        "assignees": "[]",
-        "countries": [],
-        "legs": "[]",
-        "inquiry_snapshot": None,
-    }
-    conn = (
-        ScriptedConn()
-        .on("FROM booking.v_customer_summary s WHERE", summary)
-        .on("deleted_at IS NOT NULL AS archived", {"id": ROW_ID, "code": "CUS-2", "name": "Ann", "verified": True})
-        .on("SELECT count(*)", 1)
-        .on("ORDER BY tc.", [case])
-        .on(
-            "LIMIT 20",
-            [
-                {
-                    "id": ROW_ID,
-                    "at": AT,
-                    "actor_ref": "u-1",
-                    "actor_name": "S",
-                    "action": "customer.created",
-                    "entity_type": "customer",
-                    "entity_label": "CUS-1",
-                    "summary": "x",
-                }
-            ],
-        )
-    )
-    out = await customers.get_customer(conn, "cus-000001")
-    assert out["merge_candidate"]["code"] == "CUS-2" and out["inquiries"][0]["code"] == "TC-000001"
-    assert out["recent_activity"][0]["actor"] == {"id": "u-1", "name": "S"}
-    with pytest.raises(NotFound):
-        await customers.get_customer(ScriptedConn(), CUSTOMER_ID)
-    with pytest.raises(NotFound):
-        await customers.resolve_customer(ScriptedConn(), "CUS-404")
-
-
-async def test_create_lead_rules() -> None:
-    for data, code in (({"name": " ", "email": "a@b.test"}, "name_required"), ({"name": "A"}, "contact_required")):
-        with pytest.raises(Invalid) as err:
-            await customers.create_lead(ScriptedConn(), SALES, data)
-        assert err.value.code == code
-    conn = (
-        ScriptedConn()
-        .on("ORDER BY verified DESC", ROW_ID)
-        .on("INSERT INTO booking.customers", {"id": CUSTOMER_ID, "code": "CUS-000002"})
-    )
-    out = await customers.create_lead(conn, SALES, {"name": "Ann", "email": " ANN@X.test ", "contact_consent": True})
-    assert out == {"id": CUSTOMER_ID, "code": "CUS-000002", "needs_merge_review": True}
-    insert = conn.sql("INSERT INTO booking.customers")[0]
-    assert insert[:2] == ("Ann", "ann@x.test") and insert[4:7] == (True, ROW_ID, True)
-
-
-async def test_update_customer_rules() -> None:
-    def conn_for(**row: Any) -> ScriptedConn:
-        return ScriptedConn().on("FROM booking.customers WHERE", {**CUSTOMER, **row})
-
-    with pytest.raises(Invalid):
-        await customers.update_customer(conn_for(), SALES, CUSTOMER_ID, {"source": "otp"})
-    with pytest.raises(Forbidden):
-        await customers.update_customer(conn_for(), SALES, CUSTOMER_ID, {"is_blocked": True})
-    with pytest.raises(Invalid):
-        await customers.update_customer(conn_for(), SALES, CUSTOMER_ID, {"name": "  "})
-    with pytest.raises(Conflict) as locked:
-        await customers.update_customer(conn_for(verified=True), SALES, CUSTOMER_ID, {"email": "new@x.test"})
-    assert locked.value.code == "email_locked"
-    with pytest.raises(Invalid):
-        await customers.update_customer(conn_for(), SALES, CUSTOMER_ID, {"email": None})
-    assert (await customers.update_customer(conn_for(), SALES, CUSTOMER_ID, {"name": "Ann"}))["changed"] == []
-    taken = conn_for().on("UPDATE booking.customers", asyncpg.UniqueViolationError("dup"))
-    with pytest.raises(Conflict):
-        await customers.update_customer(taken, SALES, CUSTOMER_ID, {"phone": "+84 1"})
-    block = conn_for()
-    out = await customers.update_customer(block, ADMIN, CUSTOMER_ID, {"is_blocked": True})
-    assert out["changed"] == ["is_blocked"] and audit_args(block)[0][3] == "customer.blocked"
-    edit = conn_for()
-    await customers.update_customer(edit, SALES, CUSTOMER_ID, {"address": " Hanoi ", "email": "NEW@x.test"})
-    assert edit.sql("UPDATE booking.customers SET")[0] == (CUSTOMER_ID, "Hanoi", "new@x.test")
-    assert audit_args(edit)[0][3] == "customer.updated"
-
-
-async def test_archive_customer() -> None:
-    cases = [
-        {"id": CASE_ID, "code": "TC-1", "status": "new_inquiry"},
-        {"id": ROW_ID, "code": "TC-2", "status": "cancelled"},
-    ]
-    conn = ScriptedConn().on("FROM booking.customers WHERE", CUSTOMER).on("ORDER BY created_at FOR UPDATE", cases)
-    await customers.archive_customer(conn, ADMIN, CUSTOMER_ID)
-    assert conn.sql("UPDATE booking.trip_cases SET status") == [(CASE_ID, "cancelled")]
-    assert conn.sql("SET deleted_at = now()") == [(CUSTOMER_ID,)]
-    assert json.loads(audit_args(conn)[0][7])["cancelled_cases"] == ["TC-1"]
-    busy = (
-        ScriptedConn()
-        .on("FROM booking.customers WHERE", CUSTOMER)
-        .on("ORDER BY created_at FOR UPDATE", [{"id": CASE_ID, "code": "TC-3", "status": "building"}])
-    )
-    with pytest.raises(Conflict) as err:
-        await customers.archive_customer(busy, ADMIN, CUSTOMER_ID)
-    assert err.value.extra == {"trip_cases": ["TC-3"]}

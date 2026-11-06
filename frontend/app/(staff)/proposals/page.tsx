@@ -2,7 +2,7 @@
 // app/(staff)/proposals/page.tsx — Cross-case proposal versions (W1, UI spec §4.11; Figma ITINERARY BUILDER,
 // -1). GET /booking/versions with server pagination; filters in the URL.
 // Row actions: Open builder, Preview, New version (POST …/versions: copies the case's LATEST version, the
-// only copy the API offers), Send (shared send modal), Delete draft (DELETE …/versions/{n}).
+// only copy the API offers), Delete draft (DELETE …/versions/{n}). Send to the customer is retired (AA-1046).
 // "+ New proposal": a case picker (GET /booking/trip-cases?q=) that opens the case's latest version, or
 // creates V1 when the case has none.
 // Layout (AA-683 S239): the table fits a 1440 px screen without sideways scroll. Proposal (V-number + title, case
@@ -10,13 +10,13 @@
 // full text in the tooltip; the fixed columns keep their natural width. Version and Dates are no longer columns of
 // their own: they sit in those two cells.
 // AA-1037 (root ADR 0019 d8): while the B2C part is closed a row on a b2c case (trip_case_channel) offers no write
-// (New version, Send, Delete draft: the API answers 410 b2b_only) and the case picker does not offer b2c cases.
+// (New version, Delete draft: the API answers 410 b2b_only) and the case picker does not offer b2c cases.
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CopyPlus, Eye, Pencil, Plus, Search, Send, Trash2 } from "lucide-react";
+import { CopyPlus, Eye, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api/client";
 import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { proposalsApi } from "@/lib/api/proposals";
@@ -47,14 +47,13 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
-import { SendProposalModal } from "./_parts/SendProposalModal";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 const CLOSED = ["completed", "cancelled"];
-const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
 const builderHref = (r: { trip_case_code: string; version_number: number }) =>
   `/cases/${encodeURIComponent(r.trip_case_code)}/proposals/${r.version_number}`;
 
-type RowAction = { kind: "copy" | "send" | "delete"; row: VersionListItem } | null;
+type RowAction = { kind: "copy" | "delete"; row: VersionListItem } | null;
 
 export default function ProposalsPage() {
   const router = useRouter();
@@ -207,9 +206,6 @@ export default function ProposalsPage() {
         busy={remove.isPending}
         error={remove.error?.message}
       />
-      {target && (
-        <SendProposalModal open={action?.kind === "send"} onClose={() => setAction(null)} code={target.trip_case_code} n={target.version_number} />
-      )}
       <CasePicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
     </PageFrame>
   );
@@ -224,7 +220,7 @@ function RowActions({
   row: VersionListItem;
   canWrite: boolean;
   onOpen: (href: string) => void;
-  onAction: (kind: "copy" | "send" | "delete") => void;
+  onAction: (kind: "copy" | "delete") => void;
 }) {
   const closed = CLOSED.includes(row.trip_case_status);
   const draft = row.badge === "draft";
@@ -248,14 +244,6 @@ function RowActions({
             onClick={() => onAction("copy")}
           >
             <CopyPlus size={14} />
-          </IconButton>
-          <IconButton
-            title={draft ? "Send to customer" : "Only a draft can be sent"}
-            label={`Send ${label}`}
-            disabled={!draft || !SENDABLE_FROM.includes(row.trip_case_status)}
-            onClick={() => onAction("send")}
-          >
-            <Send size={14} />
           </IconButton>
           <IconButton
             tone="danger"
@@ -360,7 +348,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                   style={{ gap: 12, padding: "10px 12px", borderRadius: 0 }}
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-medium text-ink">{c.customer_name ?? "Unnamed customer"}</span>
+                    <span className="block truncate text-[13px] font-medium text-ink">{casePartyLabel(c)}</span>
                     <span className="text-xs text-muted">
                       <Code>{c.code}</Code>
                       {c.start_date ? ` · ${formatDay(c.start_date)}` : ""}
@@ -408,7 +396,7 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => {
       const title = row.original.title ?? row.original.trip_title ?? "Custom trip";
-      const customer = row.original.customer.name ?? "Unnamed customer";
+      const customer = row.original.trip_case_channel === "b2b" ? "B2B agency" : "Traveller (B2C history)";
       return (
         <FlexCell min={200}>
           <span title={title} className={`${CLAMP} text-[13px] font-medium text-ink`}>

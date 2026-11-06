@@ -1,10 +1,10 @@
 "use client";
 // app/(staff)/cases/[code]/page.tsx — Case workspace (W1, UI spec §4.7; Figma Assigned Trips-1 layout,
 // TRIP CASES DETAILS, USER DETAILS-3/-4/-5/-6/-7). GET /booking/trip-cases/{code} feeds the header band, the
-// 4-phase stepper and the Overview / Proposals / Suppliers (AA-682 S1) / Billing (AA-682 S3) / Checks (AA-682 S2) tabs;
-// the Activity tab reads /activity (status history merged with audit rows). The header shows the supply badge and the
-// money badge (live invoice: to pay / overdue / paid in full; billing.read only). CIS content (tour titles) is
-// read-only, tagged "From CIS".
+// 4-phase stepper and the Overview / Proposals / Suppliers (AA-682 S1) / Checks (AA-682 S2) tabs; the Activity tab
+// reads /activity (status history merged with audit rows). The header shows the supply badge. The Billing tab, the
+// money badge and the customer card of a b2c case (AA-682 S3) are retired with the B2C half of Booking (AA-1046): a b2c
+// case is read-only history with no customer record. CIS content (tour titles) is read-only, tagged "From CIS".
 // Writes (fe-cases lane): status actions (convert / decline / change / cancel / reopen with reason) in
 // StatusActions, Assign (AssignModal), Edit details (EditDetailsDrawer), inline internal notes (NotesCard).
 
@@ -26,7 +26,6 @@ import {
   FromCisTag,
   IconButton,
   LinkButton,
-  MoneyBadge,
   PersonCell,
   Pill,
   Section,
@@ -46,7 +45,6 @@ import { caseCountries, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFac
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
 import { AssignModal } from "./AssignModal";
-import { BillingTab } from "./BillingTab";
 import { ChecksTab } from "./ChecksTab";
 import { EditDetailsDrawer } from "./EditDetailsDrawer";
 import { NotesCard } from "./NotesCard";
@@ -58,7 +56,6 @@ const TABS = [
   { key: "overview", label: "Overview" },
   { key: "proposals", label: "Proposals" },
   { key: "suppliers", label: "Suppliers" },
-  { key: "billing", label: "Billing" },
   { key: "checks", label: "Checks" },
   { key: "activity", label: "Activity" },
 ] as const;
@@ -118,7 +115,6 @@ function Workspace({ c }: { c: TripCaseDetail }) {
                   <h1 className="break-words font-display text-xl font-semibold text-ink sm:text-2xl">{c.trip_title ?? "Custom trip"}</h1>
                   <TripCaseStatusBadge status={c.status} />
                   <SupplyBadge supply={c.supply} />
-                  <MoneyBadge money={c.money} />
                   {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>TripPlanner</Pill>}
                   {c.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
                   {frozen && (
@@ -134,7 +130,7 @@ function Workspace({ c }: { c: TripCaseDetail }) {
                   <Code>{c.code}</Code>
                   <span className="inline-flex min-w-0 items-center gap-1">
                     <User size={14} className="shrink-0" />
-                    <span className="truncate text-body">{c.channel === "b2b" ? "B2B agency" : (c.customer_name ?? "No customer")}</span>
+                    <span className="truncate text-body">{c.channel === "b2b" ? "B2B agency" : "Traveller (B2C history)"}</span>
                   </span>
                   <span className="inline-flex min-w-0 items-center gap-1">
                     <Briefcase size={14} className="shrink-0" />
@@ -199,7 +195,6 @@ function Workspace({ c }: { c: TripCaseDetail }) {
         )}
         {tab === "proposals" && <ProposalsTab c={c} />}
         {tab === "suppliers" && <SuppliersTab c={c} />}
-        {tab === "billing" && <BillingTab c={c} />}
         {tab === "checks" && <ChecksTab c={c} />}
         {tab === "activity" && <Activity code={c.code} />}
       </div>
@@ -370,37 +365,19 @@ function Overview({
           <div className="flex flex-col gap-4">
             <div>
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
-                {c.channel === "b2b" ? "Agency" : "Customer"}
+                {c.channel === "b2b" ? "Agency" : "Traveller"}
               </p>
-              {c.channel === "b2b" || !c.customer_id ? (
+              {c.channel === "b2b" ? (
                 <PersonCell
                   name="B2B agency booking"
-                  sub={c.party_tenant_id ? `Partner tenant ${c.party_tenant_id}` : "No customer on this case"}
+                  sub={c.party_tenant_id ? `Partner tenant ${c.party_tenant_id}` : "No agency on this case"}
                   chips={<Pill tone="accent" dot={false}>B2B</Pill>}
                 />
               ) : (
-                <>
-                  <PersonCell
-                    name={c.customer_name}
-                    sub={[c.customer_email, c.customer_phone].filter(Boolean).join(" · ") || null}
-                    chips={!c.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}
-                  />
-                  <Link
-                    href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`}
-                    className="mt-2 inline-flex h-8 items-center rounded-full border border-accent-border px-3.5 text-[12px] font-semibold uppercase tracking-[0.06em] text-accent-deep hover:bg-accent-tint"
-                  >
-                    View full profile
-                  </Link>
-                  {c.customer_needs_merge_review && (
-                    <p className="mt-2 text-xs text-warning">
-                      This lead may duplicate an existing customer:{" "}
-                      <Link href={`/customers/${encodeURIComponent(c.customer_code ?? c.customer_id)}`} className="font-semibold underline">
-                        review it
-                      </Link>
-                      .
-                    </p>
-                  )}
-                </>
+                <PersonCell
+                  name="Traveller (B2C history)"
+                  sub="Adventure Asia keeps no traveller record since the B2B-only model: this case is read-only history."
+                />
               )}
             </div>
             <div>

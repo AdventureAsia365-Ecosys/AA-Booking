@@ -13,11 +13,6 @@ Names (set by the ECS task definition in AA-CIS-Infra ``accounts/aa365/booking.t
 - ``WORKER_ENABLED``: ``true`` / ``false``. Runs the ``booking.job`` worker loop inside the API
   process (Dev, AA-681 slice 2). Default: on when ``ENVIRONMENT`` is ``dev`` and ``DATABASE_URL``
   is set, off otherwise (tests and local runs start it explicitly).
-- ``B2C_INTAKE_ENABLED``: ``true`` / ``false``, default **off** (root ADR 0019 d8, AA-1034 R0: Adventure Asia sells to
-  partner agencies only). Off: the worker neither schedules nor claims ``bk_inquiry_pull`` / ``bk_inquiry_process``
-  and cancels their queued rows (``app.jobs.worker``), and every staff path that would create a B2C customer
-  (``POST /booking/customers``, a trip case with ``new_customer``) answers 410 ``b2b_only`` (``app.b2c``). A code
-  default, not set on Dev; ``true`` turns the frozen B2C intake back on (bk-036 must then be undone too).
 - ``CIS_JWKS_URL``: JWKS of the CIS staff login (ADR 0004 O1, AA-680). Default: the Dev value
   ``https://api-cis.lumiguides.it.com/auth/.well-known/jwks.json``.
 - ``STAFF_JWT_ISSUER``: expected ``iss`` of staff JWTs. Default: ``https://api-cis.lumiguides.it.com``.
@@ -38,24 +33,15 @@ Cognito M2M (AA-972, root ADR 0006b decision 7; ``app.auth.m2m``): service-to-se
 pool for the B2B API ``/booking/b2b/v1`` (contract booking.b2b.v1). Set by AA-CIS-Infra ``booking.tf`` from the pool
 and the AA-Partner (CRM) app client; both empty (default) = every B2B route answers 503 ``unavailable`` (fail closed).
 
-- ``COGNITO_EXTERNAL_ISSUER``: the EXTERNAL (traveller) pool issuer (AA-908). The inquiry intake accepts a contract v1.4
-  ``customer.identity`` only from this issuer; any other one fails the hand-off. Default
-  :data:`~app.auth.identity_config.DEV_EXTERNAL_ISSUER`. Never set on Dev. It must differ from the WORKFORCE and M2M
-  issuers. Since AA-682 S5 it is also the issuer of the customer routes ``/booking/customer/v1``
-  (``app.auth.customer``).
-- ``COGNITO_TRIPPLANNER_CLIENT_ID`` / ``COGNITO_BOOKING_CUSTOMER_CLIENT_ID``: the two EXTERNAL clients the customer
-  routes accept (AA-682 S5). Defaults :data:`~app.auth.identity_config.DEV_TRIPPLANNER_CLIENT_ID` /
-  :data:`~app.auth.identity_config.DEV_BOOKING_CUSTOMER_CLIENT_ID`; never set on Dev. Letters and digits, and never a
-  staff or M2M client.
-
 - ``COGNITO_M2M_ISSUER``: the M2M pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
 - ``COGNITO_M2M_CRM_CLIENT_ID``: the AA-Partner (CRM) client-credentials app client. Required with the issuer.
 
 Transactional e-mail (AA-811, SES on acc2; Terraform ``accounts/aa365/ses.tf`` grants the task role
 ``ses:SendEmail`` as ``SES_FROM_ADDRESS`` only):
 
-- ``STAFF_NOTIFY_EMAIL``: inbox that receives the "new inquiry" e-mail (``bk_notify_email``). Empty
-  (default) = no e-mail; the job succeeds as ``skipped`` with the reason.
+- ``STAFF_NOTIFY_EMAIL``: the staff inbox that receives the Dev copies of the overdue agency invoice reminders
+  (``app.agency_billing.reminders``; the B2C "new inquiry" e-mail is retired, AA-1046). Empty (default) = no e-mail
+  outside prod; the job records the reminder as skipped with the reason.
 - ``SES_FROM_ADDRESS``: the From address. Empty (default) = no e-mail, same as above.
 - ``SES_CONFIGURATION_SET``: SES configuration set (events + metrics). Empty = omitted (the domain
   identity's default set still applies).
@@ -94,12 +80,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from app.auth.identity_config import (
-    DEV_BOOKING_CUSTOMER_CLIENT_ID,
     DEV_BOOKING_STAFF_CLIENT_ID,
     DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
     DEV_BREAKGLASS_CLIENT_ID,
-    DEV_EXTERNAL_ISSUER,
-    DEV_TRIPPLANNER_CLIENT_ID,
     DEV_WORKFORCE_ISSUER,
 )
 
@@ -136,8 +119,6 @@ class Settings:
     # AA-993 G4 proof: JOB_TEST_KINDS registers the Dev-only test kind bk_noop_sleep (app.jobs.noop_sleep). Like the
     # CIS env of the same name, any value other than 1/true/yes/on means off (never a start-up error).
     job_test_kinds: bool = False
-    # AA-1034 R0 (root ADR 0019 d8): the frozen B2C intake (TripPlanner inquiries, staff-made leads). Off by default.
-    b2c_intake_enabled: bool = False
     cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
     staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
     staff_notify_email: str = ""
@@ -155,9 +136,6 @@ class Settings:
     supply_media_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     ops_docs_bucket: str = ""
     ops_docs_region: str = DEFAULT_SUPPLY_MEDIA_REGION
-    cognito_external_issuer: str = DEV_EXTERNAL_ISSUER
-    cognito_tripplanner_client_id: str = DEV_TRIPPLANNER_CLIENT_ID
-    cognito_booking_customer_client_id: str = DEV_BOOKING_CUSTOMER_CLIENT_ID
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
@@ -233,32 +211,6 @@ class Settings:
             )
         if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.ops_docs_region):
             raise SettingsError(f"OPS_DOCS_REGION must be an AWS region, got {self.ops_docs_region!r}")
-        external = self.cognito_external_issuer
-        if not external.startswith("https://") or external.endswith("/") or len(external) > 300:
-            raise SettingsError(
-                "COGNITO_EXTERNAL_ISSUER must be an https:// URL without a trailing slash, at most 300 characters,"
-                f" got {external!r}"
-            )
-        if external in (self.cognito_workforce_issuer, m2m_issuer):
-            # A staff or service identity must never pass as a signed-in traveller.
-            raise SettingsError(
-                "COGNITO_EXTERNAL_ISSUER must differ from COGNITO_WORKFORCE_ISSUER and COGNITO_M2M_ISSUER"
-            )
-        customer_clients = (
-            ("COGNITO_TRIPPLANNER_CLIENT_ID", self.cognito_tripplanner_client_id),
-            ("COGNITO_BOOKING_CUSTOMER_CLIENT_ID", self.cognito_booking_customer_client_id),
-        )
-        for name, client_id in customer_clients:
-            if not client_id or not client_id.isalnum():
-                raise SettingsError(f"{name} must be a Cognito app client id (letters and digits), got {client_id!r}")
-            if client_id in (
-                self.cognito_booking_staff_client_id,
-                self.cognito_breakglass_client_id,
-                self.cognito_booking_staff_preview_client_id,
-                m2m_client,
-            ):
-                # One client, one route class: a traveller client never doubles as a staff or service client.
-                raise SettingsError(f"{name} must differ from the staff and M2M clients")
         if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
             raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
         if self.sentry_required and not self.sentry_dsn:
@@ -290,7 +242,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             env.get("WORKER_ENABLED"), environment == "dev" and database_url is not None, "WORKER_ENABLED"
         ),
         job_test_kinds=(env.get("JOB_TEST_KINDS") or "").strip().lower() in TRUE_VALUES,
-        b2c_intake_enabled=_flag(env.get("B2C_INTAKE_ENABLED"), False, "B2C_INTAKE_ENABLED"),
         cis_jwks_url=(env.get("CIS_JWKS_URL") or DEFAULT_CIS_JWKS_URL).strip(),
         staff_jwt_issuer=(env.get("STAFF_JWT_ISSUER") or DEFAULT_STAFF_JWT_ISSUER).strip(),
         staff_notify_email=(env.get("STAFF_NOTIFY_EMAIL") or "").strip(),
@@ -311,11 +262,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         supply_media_region=(env.get("SUPPLY_MEDIA_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
         ops_docs_bucket=(env.get("OPS_DOCS_BUCKET") or "").strip(),
         ops_docs_region=(env.get("OPS_DOCS_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
-        cognito_external_issuer=(env.get("COGNITO_EXTERNAL_ISSUER") or "").strip() or DEV_EXTERNAL_ISSUER,
-        cognito_tripplanner_client_id=(env.get("COGNITO_TRIPPLANNER_CLIENT_ID") or "").strip()
-        or DEV_TRIPPLANNER_CLIENT_ID,
-        cognito_booking_customer_client_id=(env.get("COGNITO_BOOKING_CUSTOMER_CLIENT_ID") or "").strip()
-        or DEV_BOOKING_CUSTOMER_CLIENT_ID,
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )

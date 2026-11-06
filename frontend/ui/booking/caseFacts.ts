@@ -138,3 +138,9 @@ export function tabCountsShown(tab: string, due: string): boolean {
   if (!due) return true;
   return due === "overdue" && tab === "overdue";
 }
+
+/** AA-1046: who a case is for, in one line. The B2C half is retired, so a b2c case names no traveller (no customer
+ *  record is kept); a B2B case is an agency booking. */
+export function casePartyLabel(c: { channel: "b2c" | "b2b" | string }): string {
+  return c.channel === "b2b" ? "B2B agency" : "Traveller (B2C history)";
+}

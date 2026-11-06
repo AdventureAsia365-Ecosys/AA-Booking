@@ -13,6 +13,7 @@ import { CURRENCIES, Field, LockedValue, inputCls, paxErrors, textareaCls, toInt
 import { CountryPicker } from "../_parts/CountryPicker";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 interface Form {
   start_date: string;
@@ -84,8 +85,8 @@ function EditBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
       fieldErrors={update.error instanceof ApiError ? update.error.fieldErrors : []}
       width={520}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Customer</p>
-      <LockedValue value={c.customer_name ?? c.customer_email ?? "Customer"} hint="A case keeps its customer. Open a new case for someone else." />
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">For</p>
+      <LockedValue value={casePartyLabel(c)} hint="A case keeps who it is for." />
 
       <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Trip details</p>
       <Field label="Start date" hint="Clear it if the dates are not fixed yet.">

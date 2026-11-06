@@ -1,11 +1,11 @@
 "use client";
 // app/(staff)/cases/[code]/ProposalsTab.tsx
 // AA-683 — the Proposals tab of the case workspace (spec §4.7): the case's versions, read from the case detail.
-// AA-996 (Figma TRIP CASES DETAILS-1, audit item 7): each row has its actions, like the /proposals list: Preview,
-// Send to customer (the shared send modal; an unsent draft while the case is in discovery, building or proposal sent)
-// and Discard draft (DELETE …/versions/{n}: Booking never hard-deletes a sent or approved version, so Figma's Delete
-// is discarding any unsent, unapproved version, the API's rule, which includes an older draft badged "superseded").
-// Send and Discard need version.write; a closed case keeps its versions as they are.
+// AA-996 (Figma TRIP CASES DETAILS-1, audit item 7): each row has its actions, like the /proposals list: Preview and
+// Discard draft (DELETE …/versions/{n}: Booking never hard-deletes a sent or approved version, so Figma's Delete is
+// discarding any unsent, unapproved version, the API's rule, which includes an older draft badged "superseded").
+// Discard needs version.write; a closed case keeps its versions as they are. Send to the customer is retired with the
+// B2C half of Booking (AA-1046): a B2B case's proposals belong to the partner API.
 // A row opens the builder.
 
 import { useState } from "react";
@@ -13,18 +13,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Eye, Send, Trash2 } from "lucide-react";
+import { Eye, Trash2 } from "lucide-react";
 import { proposalsApi } from "@/lib/api/proposals";
 import type { CaseVersion, TripCaseDetail } from "@/lib/api/types";
 import {
   ConfirmDialog, DataTable, DateText, IconButton, Money, Section, VersionBadgePill, csvMoney, useCan, useToast,
 } from "@/ui";
-import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 
 const CLOSED = ["completed", "cancelled"];
-const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
 
-type RowAction = { kind: "send" | "discard"; n: number } | null;
+type RowAction = { kind: "discard"; n: number } | null;
 
 export function ProposalsTab({ c }: { c: TripCaseDetail }) {
   const router = useRouter();
@@ -34,7 +32,6 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
   const [action, setAction] = useState<RowAction>(null);
   const builderHref = (n: number) => `/cases/${encodeURIComponent(c.code)}/proposals/${n}`;
   const closed = CLOSED.includes(c.status);
-  const sendable = SENDABLE_FROM.includes(c.status);
 
   const discard = useMutation({
     mutationFn: (n: number) => proposalsApi.remove(c.code, n),
@@ -79,21 +76,10 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
       enableSorting: false,
       cell: ({ row }) => {
         const v = row.original;
-        const draft = v.badge === "draft";
         // Discard follows the API's own rule (versions._editable): any unsent, unapproved version, including an
         // older draft shown as "superseded" once a later version went out.
         const discardable = !v.is_sent_to_customer && !v.is_approved;
         const label = `${c.code} V${v.version_number}`;
-        const sendWhy = !draft
-          ? "Only a draft can be sent"
-          : !sendable
-            ? `A proposal can be sent while the case is in discovery, building or proposal sent`
-            : v.item_count === 0
-              ? "Add at least one item before sending"
-              : v.total_price == null
-                ? "Apply a price in the builder before sending"
-                : "Send to customer";
-        const canSendRow = draft && sendable && v.item_count > 0 && v.total_price != null;
         // Stop the row click so an action never also opens the builder.
         return (
           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()} data-testid="version-actions">
@@ -102,14 +88,6 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
             </IconButton>
             {canWrite && (
               <>
-                <IconButton
-                  title={sendWhy}
-                  label={`Send ${label} to the customer`}
-                  disabled={!canSendRow}
-                  onClick={() => setAction({ kind: "send", n: v.version_number })}
-                >
-                  <Send size={14} />
-                </IconButton>
                 <IconButton
                   tone="danger"
                   title={!discardable ? "A sent or approved version is kept" : closed ? "The case is closed" : "Discard draft"}
@@ -160,7 +138,6 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         busy={discard.isPending}
         error={discard.error?.message}
       />
-      {action?.kind === "send" && <SendProposalModal open onClose={() => setAction(null)} code={c.code} n={action.n} />}
     </Section>
   );
 }

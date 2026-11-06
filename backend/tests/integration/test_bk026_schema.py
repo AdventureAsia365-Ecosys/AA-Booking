@@ -239,10 +239,11 @@ async def test_post_sale_fact_guard(
     # Back to confirmed only without a live booking.
     with pytest.raises(asyncpg.CheckViolationError, match="no live supplier booking"):
         await _case_status(app_conn, case, "confirmed")
-    # A B2C case reaches pre_departure only with a paid invoice, and a money status only from its invoice (bk-028).
+    # The supply is still confirming, so no pre_departure; no money status at all since bk-045 (AA-1046: the customer
+    # invoice is retired; the transitions table no longer has those edges, the guard refuses one anyway).
     with pytest.raises(asyncpg.CheckViolationError):
         await _case_status(app_conn, case, "pre_departure")
-    with pytest.raises(asyncpg.CheckViolationError, match="must be what its invoice says"):
+    with pytest.raises(asyncpg.CheckViolationError):
         await _case_status(app_conn, case, "invoice_sent")
     # Cancel, then reopen refused while a live booking exists (critic B9).
     await app_conn.execute("SELECT set_config('booking.status_note', 'it', false)")
@@ -258,8 +259,7 @@ async def test_travel_dates_gate_on_trip(admin: asyncpg.Connection, sold: dict[s
     await admin.execute("SET ROLE bk_owner")
     try:
         await admin.execute(
-            "UPDATE booking.trip_cases SET channel = 'b2b', customer_id = NULL, party_tenant_id = gen_random_uuid()"
-            " WHERE id = $1::uuid",
+            "UPDATE booking.trip_cases SET channel = 'b2b', party_tenant_id = gen_random_uuid() WHERE id = $1::uuid",
             sold["id"],
         )
         # The approved items need supply: not booked yet, so no pre_departure.
@@ -360,8 +360,7 @@ async def test_ops_files_rules(app_conn: asyncpg.Connection, admin: asyncpg.Conn
     await admin.execute("SET ROLE bk_owner")
     try:
         await admin.execute(
-            "UPDATE booking.trip_cases SET channel = 'b2b', customer_id = NULL, party_tenant_id = gen_random_uuid()"
-            " WHERE id = $1::uuid",
+            "UPDATE booking.trip_cases SET channel = 'b2b', party_tenant_id = gen_random_uuid() WHERE id = $1::uuid",
             sold["id"],
         )
     finally:

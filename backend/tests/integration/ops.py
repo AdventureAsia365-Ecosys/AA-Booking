@@ -2,11 +2,17 @@
 version of two supply items (a room type and a service of one supplier, with cost rows), helpers for a sent invoice
 (bk-028) and a supplier bill / payout (bk-030), in SQL as the services write them, and the purge of every supplier
 booking / operations file / invoice / payment / supplier bill / payout so the other modules' clean-ups (which delete
-cases, hotels and suppliers) never meet a row that points at them."""
+cases, hotels and suppliers) never meet a row that points at them.
+
+AA-1046: Booking bk-045 drops the customer and customer money tables and lets a b2c case in only as history (created
+before the drop). The b2c case helpers work on both schemas: before bk-045 they add the customer the old
+``trip_cases_channel_chk`` needs, after it they insert no customer; either way the case is created at
+:data:`B2C_CREATED_AT` (kept history). The invoice / payment helpers need the pre-bk-045 schema (the bk-045
+integration test builds its B2C graph on a replay up to bk-044)."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -15,6 +21,15 @@ import asyncpg
 NOTE = "it-682"
 LOCKED = ("booking.version_item_costs", "booking.trip_case_version_itinerary", "booking.trip_case_versions")
 START = date.today() + timedelta(days=40)
+# A b2c case is history since the B2C retirement: bk-045's trip_cases_channel_chk lets one in only when it was created
+# before the drop (the session replay applies bk-045 minutes before a test runs). Relative to today, so a 400-day
+# window (the ops funnel) still sees it.
+B2C_CREATED_AT = datetime.now(UTC) - timedelta(days=60)
+# bk-045's cut-off, the timestamp literal in trip_cases_channel_chk (NULL before bk-045).
+CUTOFF_SQL = (
+    "SELECT substring(pg_get_constraintdef(oid) FROM 'created_at < ''([^'']+)''')::timestamptz"
+    " FROM pg_constraint WHERE conname = 'trip_cases_channel_chk'"
+)
 
 
 async def _as_owner(conn: asyncpg.Connection) -> None:
@@ -55,7 +70,8 @@ async def purge_ops(conn: asyncpg.Connection) -> None:
         await conn.execute(f"DELETE FROM booking.audit_logs WHERE entity_id IN ({cases})")  # noqa: S608
         await conn.execute(f"DELETE FROM booking.notifications WHERE entity_id IN ({cases})")  # noqa: S608
         await conn.execute("DELETE FROM booking.trip_cases WHERE notes LIKE 'it-682%'")
-        await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-682-%'")
+        if await conn.fetchval("SELECT to_regclass('booking.customers')") is not None:  # before bk-045
+            await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-682-%'")
         await conn.execute(
             "DELETE FROM booking.hotel_room_types WHERE hotel_id IN"
             " (SELECT h.id FROM booking.hotels h JOIN booking.suppliers s ON s.id = h.supplier_id"
@@ -150,17 +166,7 @@ async def sold_case(
     """A B2C trip case at ``confirmed`` with an approved V1: item 1 = 2 nights of the room (days 1-3: in day 1, out
     day 3, the B2C pricing rule ``supply_rates.quantity('room_night')`` = day_to - day_from; cost rows in
     ``costs``), item 2 = the service on day 3, item 3 = a free-text item (no supply)."""
-    customer = await conn.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ($1) RETURNING id::text", f"it-682-{tag}@example.test"
-    )
-    case = await conn.fetchrow(
-        "INSERT INTO booking.trip_cases (customer_id, status, start_date, end_date, pax, currency, notes)"
-        " VALUES ($1::uuid, 'confirmed', $2, $3, 2, 'USD', $4) RETURNING id::text AS id, code",
-        customer,
-        START,
-        START + timedelta(days=4),
-        f"{NOTE}-{tag}",
-    )
+    case = await insert_b2c_case(conn, tag=tag, status="confirmed", start=START, end=START + timedelta(days=4))
     version = await conn.fetchval(
         "INSERT INTO booking.trip_case_versions (trip_case_id, version_number, total_price, currency)"
         " VALUES ($1::uuid, 1, 2400, 'USD') RETURNING id::text",
@@ -222,18 +228,43 @@ async def b2b_case(
 async def b2c_case(
     conn: asyncpg.Connection, *, tag: str = "b2c", status: str = "proposal_sent", start: date | None = START
 ) -> dict[str, Any]:
-    """A B2C trip case of a fresh customer inserted at ``status`` (no version)."""
-    customer = await conn.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ($1) RETURNING id::text", f"it-682-{tag}@example.test"
+    """A B2C trip case (kept history) inserted at ``status`` (no version)."""
+    return await insert_b2c_case(
+        conn, tag=tag, status=status, start=start, end=start + timedelta(days=4) if start else None
     )
+
+
+async def latest_b2c_created_at(conn: asyncpg.Connection) -> datetime:
+    """The latest ``created_at`` a b2c case may have: one second before bk-045's cut-off (the time it was applied,
+    written into ``trip_cases_channel_chk``), or now before bk-045."""
+    cutoff = await conn.fetchval(CUTOFF_SQL)
+    return (cutoff - timedelta(seconds=1)) if cutoff else datetime.now(UTC)
+
+
+async def insert_b2c_case(
+    conn: asyncpg.Connection,
+    *,
+    tag: str,
+    status: str,
+    start: date | None,
+    end: date | None,
+    notes: str | None = None,
+    source_system: str = "manual",
+) -> dict[str, Any]:
+    """One b2c trip case created at :data:`B2C_CREATED_AT`, on the schema before or after bk-045 (AA-1046): before it
+    the case needs its customer (``trip_cases_channel_chk``), after it ``trip_cases.customer_id`` is gone."""
+    columns = "status, start_date, end_date, pax, currency, notes, source_system, created_at"
+    args: list[Any] = [status, start, end, notes or f"{NOTE}-{tag}", source_system, B2C_CREATED_AT]
+    values = "$1, $2, $3, 2, 'USD', $4, $5, $6"
+    if await conn.fetchval("SELECT to_regclass('booking.customers')") is not None:  # before bk-045
+        customer = await conn.fetchval(
+            "INSERT INTO booking.customers (email) VALUES ($1) RETURNING id::text", f"it-682-{tag}@example.test"
+        )
+        columns, values = f"customer_id, {columns}", f"$7::uuid, {values}"
+        args.append(customer)
     row = await conn.fetchrow(
-        "INSERT INTO booking.trip_cases (customer_id, status, start_date, end_date, pax, currency, notes)"
-        " VALUES ($1::uuid, $2, $3, $4, 2, 'USD', $5) RETURNING id::text AS id, code",
-        customer,
-        status,
-        start,
-        start + timedelta(days=4) if start else None,
-        f"{NOTE}-{tag}",
+        f"INSERT INTO booking.trip_cases ({columns}) VALUES ({values}) RETURNING id::text AS id, code",  # noqa: S608
+        *args,
     )
     return dict(row)
 

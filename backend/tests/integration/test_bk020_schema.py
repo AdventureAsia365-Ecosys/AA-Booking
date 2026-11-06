@@ -1,6 +1,7 @@
 """AA-973 (bk-020) schema on a real PostgreSQL: registration, re-run no-op, the settings row, grants (nothing deleted
-by the app), owner bk_owner, the B2B trip-case rule (customer_id NULL only for channel b2b, and then the agency is
-set), source_system 'crm', one active hold set per proposal version, and no personal-data-looking column."""
+by the app), owner bk_owner, the B2B trip-case rule (since bk-045, AA-1046: a new case is b2b with its agency set, a
+b2c case is history), source_system 'crm', one active hold set per proposal version, and no personal-data-looking
+column."""
 
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 async def test_registered_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> None:
     assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-020'") == 1
+    if await admin.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = 'bk-045'"):
+        pytest.skip("bk-020 alters trip_cases.customer_id, which bk-045 dropped (AA-1046): superseded, never re-run")
     before = await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint")
     await admin.execute(MIGRATION.read_text(encoding="utf-8"))
     assert await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint") == before
@@ -58,53 +61,43 @@ class _Rollback(Exception):
     """Raised at the end of a test transaction so its rows are rolled back."""
 
 
-async def _customer(conn: asyncpg.Connection) -> str:
-    return await conn.fetchval(
-        "INSERT INTO booking.customers (name, email) VALUES ('Bk020 Schema', $1) RETURNING id::text",
-        f"bk020-{uuid.uuid4().hex[:8]}@example.invalid",
-    )
-
-
 async def test_trip_case_channel_rule(admin: asyncpg.Connection) -> None:
+    """bk-020's rule as bk-045 left it (AA-1046): a new case is a B2B case of an agency; a b2c case is history (created
+    before the B2C retirement), never with an agency."""
     tenant = str(uuid.uuid4())
+    before_drop = "now() - interval '400 days'"
     try:
         async with admin.transaction():
-            customer = await _customer(admin)
-            # b2c (default channel) still needs its customer, and has no agency.
-            b2c = await admin.fetchval(
-                "INSERT INTO booking.trip_cases (customer_id, status, source_system) VALUES ($1::uuid, 'new_inquiry',"
-                " 'manual') RETURNING channel",
-                customer,
-            )
-            assert b2c == "b2c"
             b2b = await admin.fetchval(
-                "INSERT INTO booking.trip_cases"
-                " (customer_id, status, source_system, source_id, channel, party_tenant_id)"
-                " VALUES (NULL, 'confirmed', 'crm', 'prop-1', 'b2b', $1::uuid) RETURNING id::text",
+                "INSERT INTO booking.trip_cases (status, source_system, source_id, channel, party_tenant_id)"
+                " VALUES ('confirmed', 'crm', 'prop-1', 'b2b', $1::uuid) RETURNING id::text",
                 tenant,
             )
             assert b2b
-            bad = (
-                ("NULL", "'b2c'", "NULL"),  # b2c without a customer
-                ("$1::uuid", "'b2b'", "$2::uuid"),  # b2b with a customer
-                ("NULL", "'b2b'", "NULL"),  # b2b without the agency
-                ("$1::uuid", "'b2c'", "$2::uuid"),  # b2c with an agency
+            kept = await admin.fetchval(
+                "INSERT INTO booking.trip_cases (status, source_system, created_at)"
+                f" VALUES ('new_inquiry', 'manual', {before_drop}) RETURNING channel"  # noqa: S608 — test literal
             )
-            for customer_sql, channel_sql, party_sql in bad:
+            assert kept == "b2c"  # the default channel, as history
+            bad = (
+                ("'b2c'", "NULL", "now()"),  # a new b2c case
+                ("'b2b'", "NULL", "now()"),  # b2b without the agency
+                ("'b2c'", "$1::uuid", before_drop),  # b2c with an agency
+            )
+            for channel_sql, party_sql, created_sql in bad:
                 sql = (
-                    "INSERT INTO booking.trip_cases (customer_id, status, source_system, channel, party_tenant_id)"
-                    f" VALUES ({customer_sql}, 'confirmed', 'crm', {channel_sql}, {party_sql})"  # noqa: S608 — test literals
+                    "INSERT INTO booking.trip_cases (status, source_system, channel, party_tenant_id, created_at)"
+                    f" VALUES ('confirmed', 'crm', {channel_sql}, {party_sql}, {created_sql})"  # noqa: S608 — test literals
                 )
-                args = [a for a, used in ((customer, "$1" in sql), (tenant, "$2" in sql)) if used]
                 with pytest.raises(asyncpg.CheckViolationError):
                     async with admin.transaction():
-                        await admin.execute(sql, *args)
+                        await admin.execute(sql, *([tenant] if "$1" in sql else []))
             with pytest.raises(asyncpg.CheckViolationError):
                 async with admin.transaction():
                     await admin.execute(
-                        "INSERT INTO booking.trip_cases (customer_id, status, source_system)"
-                        " VALUES ($1::uuid, 'new_inquiry', 'agency')",
-                        customer,
+                        "INSERT INTO booking.trip_cases (status, source_system, channel, party_tenant_id)"
+                        " VALUES ('new_inquiry', 'agency', 'b2b', $1::uuid)",
+                        tenant,
                     )
             raise _Rollback
     except _Rollback:

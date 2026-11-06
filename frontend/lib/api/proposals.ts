@@ -1,5 +1,6 @@
 // lib/api/proposals.ts
-// AA-683 (builder lane) — typed calls for the proposal builder, preview, send and the pricing calculator.
+// AA-683 (builder lane) — typed calls for the proposal builder, preview and the pricing calculator (Send to the
+// customer is retired with the B2C half of Booking, AA-1046).
 // Kept apart from lib/api/client.ts so the parallel UI lanes do not edit the same file; it reuses that
 // file's BFF helpers (bkGet / bkSend → /api/booking/<path>) and error type.
 //
@@ -10,12 +11,11 @@
 //   DELETE /booking/trip-cases/{ref}/versions/{n}                   soft-delete an unsent draft
 //   PUT    /booking/trip-cases/{ref}/versions/{n}/items             save items (upsert by id, D2) + their costs[]
 //   POST   /booking/trip-cases/{ref}/versions/{n}/price             price the stored costs, save the total
-//   POST   /booking/trip-cases/{ref}/versions/{n}/send              mark sent + lock (no e-mail)
 //   POST   /booking/trip-cases/{ref}/versions/{n}/approve           record the customer's approval
 //   POST   /booking/pricing/quote-preview                           price net costs (writes nothing)
 
 import { bkSend } from "./client";
-import type { DecimalString, IsoDate, TripCaseStatus, Version, VersionItem, VersionWithItems } from "./types";
+import type { DecimalString, IsoDate, Version, VersionItem, VersionWithItems } from "./types";
 
 const enc = encodeURIComponent;
 
@@ -38,20 +38,6 @@ export interface ItemInput {
   costs?: CostInput[];
   hotel_room_type_id?: string | null;
   service_id?: string | null;
-}
-
-export interface SendInput {
-  /** Must equal the customer's e-mail (Q14); omit when the customer has none. */
-  to?: string;
-  subject: string;
-  message: string;
-  valid_until?: IsoDate;
-}
-
-export interface SentVersion extends Version {
-  trip_case: { id: string; code: string; status: TripCaseStatus };
-  notification_id: string | null;
-  email_sent: false;
 }
 
 // ── Pricing (bk-004, AA-810) ─────────────────────────────────────────────────
@@ -132,7 +118,6 @@ export const proposalsApi = {
   saveItems: (ref: string, n: number, items: ItemInput[]) =>
     bkSend<Version & { items: VersionItem[] }>(`${versionPath(ref, n)}/items`, { method: "PUT", body: { items } }),
   price: (ref: string, n: number, body: PriceInput) => bkSend<PricedVersion>(`${versionPath(ref, n)}/price`, { body }),
-  send: (ref: string, n: number, body: SendInput) => bkSend<SentVersion>(`${versionPath(ref, n)}/send`, { body }),
   approve: (ref: string, n: number, note?: string) =>
     bkSend<Version>(`${versionPath(ref, n)}/approve`, { body: note ? { note } : {} }),
   quotePreview: (body: QuotePreviewInput) => bkSend<QuotePreview>("pricing/quote-preview", { body }),
