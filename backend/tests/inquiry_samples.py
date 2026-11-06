@@ -1,5 +1,8 @@
 """inquiry.submitted sample payloads, shaped like TripPlanner backend/assembly/handoff.py builds them.
 
+AA-1046: the Booking intake that parsed them is retired; the kept inbox rows still go through the DM-6.6 redaction
+(``app.retention.redact``), whose tests use these samples.
+
 Contract rule 7: consumer tests parse samples of every accepted version. ``v1_1_as_tripplanner_sends``
 is what TripPlanner emitted before AA-805 (PR #69): the v1.1 shape still labelled ``version: 1``; ``v1_2`` is
 what it emitted from AA-830 on; ``v1_3`` what it emits from AA-986 L6 on; ``v1_4`` what it sends from AA-908 S4 on.
@@ -10,8 +13,6 @@ from __future__ import annotations
 import copy
 import uuid
 from typing import Any
-
-from app.auth.identity_config import DEV_EXTERNAL_ISSUER
 
 
 def _itinerary() -> dict[str, Any]:
@@ -147,7 +148,8 @@ def v1_3(email: str | None = None, *, unavailable: str | None = None) -> dict[st
 
 
 # The Dev EXTERNAL issuer: the one intake accepts by default (intake.DEFAULT_TRAVELLER_ISSUERS).
-ISS = DEV_EXTERNAL_ISSUER
+# An invented EXTERNAL pool issuer (the Booking intake that pinned the real one is retired, AA-1046).
+ISS = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_TestPool1"
 FOREIGN_ISS = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_OtherPool9"
 
 

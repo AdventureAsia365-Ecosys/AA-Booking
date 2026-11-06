@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from app import audit, reference
 from app.auth import admin as staff_admin
 from app.auth.staff import Staff, current_staff, get_pool
-from app.customers import service as customers
 from app.main import create_app
 from app.notifications import service as notifications
 from app.settings import Settings
@@ -38,8 +37,7 @@ class Recorder:
 @pytest.fixture
 def make_client():
     def _make(staff: Staff = SALES) -> TestClient:
-        # AA-1034 R0: the frozen B2C routes stay tested with the intake on (test_aa1034_b2c_off.py covers off).
-        app = create_app(Settings(database_url=None, environment="test", b2c_intake_enabled=True))
+        app = create_app(Settings(database_url=None, environment="test"))
         app.dependency_overrides[current_staff] = lambda: staff
         app.dependency_overrides[get_pool] = lambda: ScriptedConn()
         return TestClient(app)
@@ -56,33 +54,6 @@ def stub(monkeypatch: pytest.MonkeyPatch, module: Any, name: str, result: Any = 
 # ── Trip cases ───────────────────────────────────────────────────────────────
 
 
-def test_create_case_maps_body_and_requires_write(make_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = stub(monkeypatch, service, "create_case", {"code": "TC-000009"})
-    r = make_client().post(
-        "/booking/trip-cases",
-        json={"customer_id": CUSTOMER_ID, "pax_adults": 2, "countries": ["VN"], "initial_status": "discovery"},
-    )
-    assert r.status_code == 201 and r.json()["code"] == "TC-000009"
-    data = rec.calls[0][0][1]
-    assert data["customer_id"] == CUSTOMER_ID and data["currency"] == "USD" and data["countries"] == ["VN"]
-    assert make_client(CONTRACTING).post("/booking/trip-cases", json={"customer_id": CUSTOMER_ID}).status_code == 403
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {},
-        {"customer_id": CUSTOMER_ID, "new_customer": {"name": "x", "email": "x@y.test"}},
-        {"new_customer": {"name": "x"}},
-        {"new_customer": {"name": "x", "email": "not-an-email"}},
-        {"customer_id": CUSTOMER_ID, "initial_status": "paid"},
-        {"customer_id": CUSTOMER_ID, "countries": ["VNM"]},
-    ],
-)
-def test_create_case_validation(make_client, body: dict[str, Any]) -> None:
-    assert make_client().post("/booking/trip-cases", json=body).status_code == 422
-
-
 def test_summary_activity_and_list_params(make_client, monkeypatch: pytest.MonkeyPatch) -> None:
     summary = stub(monkeypatch, service, "summary", {"open": 1})
     activity = stub(monkeypatch, service, "activity", {"items": []})
@@ -92,13 +63,10 @@ def test_summary_activity_and_list_params(make_client, monkeypatch: pytest.Monke
     assert summary.calls[0][0][0] is CONTRACTING
     assert c.get("/booking/trip-cases/TC-000001/activity?limit=5&before=x").status_code == 200
     assert activity.calls[0] == (("TC-000001",), {"before": "x", "limit": 5})
-    r = c.get(
-        f"/booking/trip-cases?q=ann&source=manual&customer_id={CUSTOMER_ID}"
-        "&created_from=2026-10-01&created_to=2026-10-14&sort=-updated_at"
-    )
+    r = c.get("/booking/trip-cases?q=TC-0&source=manual&created_from=2026-10-01&created_to=2026-10-14&sort=-updated_at")
     assert r.status_code == 200
     kwargs = listed.calls[0][1]
-    assert kwargs["q"] == "ann" and kwargs["customer_id"] == CUSTOMER_ID and kwargs["sort"] == "-updated_at"
+    assert kwargs["q"] == "TC-0" and "customer_id" not in kwargs and kwargs["sort"] == "-updated_at"
     assert kwargs["created_from"] == date(2026, 10, 1)
     assert make_client(CONTENT).get("/booking/trip-cases/summary").status_code == 403
 
@@ -116,7 +84,6 @@ def test_version_routes(make_client, monkeypatch: pytest.MonkeyPatch) -> None:
     got = stub(monkeypatch, versions, "get_version", {"version_number": 2})
     patched = stub(monkeypatch, versions, "update_version", {"title": "A"})
     deleted = stub(monkeypatch, versions, "delete_version", None)
-    sent = stub(monkeypatch, versions, "send_version", {"badge": "sent"})
     approved = stub(monkeypatch, versions, "approve_version", {"badge": "approved"})
     c = make_client()
     assert c.get("/booking/trip-cases/TC-1/versions/2").json() == {"version_number": 2}
@@ -125,18 +92,6 @@ def test_version_routes(make_client, monkeypatch: pytest.MonkeyPatch) -> None:
     assert patched.calls[0][0][3] == {"title": "A"}
     assert c.patch("/booking/trip-cases/TC-1/versions/2", json={"badge": "x"}).status_code == 422
     assert c.delete("/booking/trip-cases/TC-1/versions/2").status_code == 204 and deleted.calls
-    r = c.post(
-        "/booking/trip-cases/TC-1/versions/2/send",
-        json={"to": "ann@x.test", "subject": "Your trip", "message": "Hi", "valid_until": "2026-10-28"},
-    )
-    assert r.status_code == 200
-    assert sent.calls[0][1] == {
-        "to": "ann@x.test",
-        "subject": "Your trip",
-        "message": "Hi",
-        "valid_until": date(2026, 10, 28),
-    }
-    assert c.post("/booking/trip-cases/TC-1/versions/2/send", json={"subject": "s"}).status_code == 422
     assert c.post("/booking/trip-cases/TC-1/versions/2/approve", json={"note": "phone"}).status_code == 200
     assert c.post("/booking/trip-cases/TC-1/versions/2/approve").status_code == 200
     assert [call[0][3] for call in approved.calls] == ["phone", None]
@@ -166,31 +121,6 @@ def test_cross_case_versions(make_client, monkeypatch: pytest.MonkeyPatch) -> No
     assert r.status_code == 200
     assert rec.calls[0][1]["assignee"] == "u-1" and rec.calls[0][1]["badge"] == "sent"
     assert make_client(CONTENT).get("/booking/versions").status_code == 403
-
-
-# ── Customers ────────────────────────────────────────────────────────────────
-
-
-def test_customer_routes_and_roles(make_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    listed = stub(monkeypatch, customers, "list_customers", {"items": [], "total": 0})
-    got = stub(monkeypatch, customers, "get_customer", {"id": CUSTOMER_ID})
-    created = stub(monkeypatch, customers, "create_lead", {"id": CUSTOMER_ID})
-    patched = stub(monkeypatch, customers, "update_customer", {"changed": []})
-    archived = stub(monkeypatch, customers, "archive_customer", None)
-    c = make_client(CONTRACTING)
-    assert c.get("/booking/customers?status=lead&merge_review=true&q=ann").status_code == 200
-    assert listed.calls[0][1]["status"] == "lead" and listed.calls[0][1]["merge_review"] is True
-    assert c.get("/booking/customers/CUS-000001").status_code == 200 and got.calls[0][0] == ("CUS-000001",)
-    assert c.post("/booking/customers", json={"name": "Ann", "phone": "+84 1"}).status_code == 403
-    s = make_client(SALES)
-    assert s.post("/booking/customers", json={"name": "Ann", "phone": "+84 1"}).status_code == 201
-    assert created.calls[0][0][1]["phone"] == "+84 1" and got.calls[-1][0] == (CUSTOMER_ID,)
-    assert s.patch("/booking/customers/CUS-1", json={"is_blocked": True}).status_code == 200
-    assert patched.calls[0][0][2] == {"is_blocked": True}
-    assert s.patch("/booking/customers/CUS-1", json={"verified": True}).status_code == 422
-    assert s.delete("/booking/customers/CUS-1").status_code == 403
-    assert make_client(ADMIN).delete("/booking/customers/CUS-1").status_code == 204 and archived.calls
-    assert make_client(CONTENT).get("/booking/customers").status_code == 403
 
 
 # ── Notifications, staff, reference ──────────────────────────────────────────

@@ -194,9 +194,9 @@ async def test_parent_kinds_ids_and_not_found() -> None:
         with pytest.raises(NotFound) as exc:  # bk-030
             await ops_files._parent(conn, entity_type, SB_ID, lock=True)
         assert exc.value.code == code
-    with pytest.raises(NotFound) as exc:  # bk-028: payments take evidence files
+    with pytest.raises(Invalid) as exc:  # AA-1046: customer payment evidence is retired with the payments
         await ops_files._parent(conn, "payment", SB_ID, lock=False)
-    assert exc.value.code == "payment_not_found"
+    assert exc.value.code == "unknown_entity"
     conn = ScriptedConn()
     with pytest.raises(NotFound) as exc:
         await ops_files._parent(conn, "supplier_booking", "SB-000001", lock=False)
@@ -236,7 +236,7 @@ async def test_upload_writes_the_row_and_audit_then_puts_the_object() -> None:
     [
         (SALES, {}, {"kind": "invoice"}, Invalid, "unknown_kind"),
         (SALES, {}, {"kind": "supplier_bill"}, Invalid, "kind_entity_mismatch"),
-        (SALES, {}, {"kind": "payment_evidence"}, Invalid, "kind_entity_mismatch"),
+        (SALES, {}, {"kind": "payment_evidence"}, Invalid, "unknown_kind"),  # AA-1046: retired
         (SALES, {}, {"entity_type": "trip_case"}, Invalid, "kind_entity_mismatch"),
         (CONTENT, {}, {}, Forbidden, "forbidden"),
         (SALES, {}, {"entity_id": "SB-000001"}, NotFound, "supplier_booking_not_found"),
@@ -344,65 +344,16 @@ async def test_remove_another_file_keeps_the_voucher_and_removing_twice_is_a_no_
     assert out["status"] == "removed" and conn.sql(REMOVE) == [] and conn.sql(AUDIT) == []
 
 
-PAY_ID = "00000000-0000-4000-8000-0000000e0001"
-INV_ID = "00000000-0000-4000-8000-0000000d0001"
-PAY_PARENT = "FROM booking.payments p JOIN booking.invoices i"
-DETACH = "UPDATE booking.payments SET evidence_file_id = NULL"
-
-
-def pay_parent(**over: Any) -> dict[str, Any]:
-    return {
-        "id": PAY_ID,
-        "code": "PMT-000001",
-        "status": "recorded",
-        "trip_case_id": CASE_ID,
-        "voucher_file_id": FILE_ID,
-        "case_code": "TC-000001",
-        "channel": "b2c",
-        "invoice_id": INV_ID,
-        "verified": False,
-        **over,
-    }
-
-
-def _first(conn: ScriptedConn, fragment: str) -> int:
-    return next(i for i, (flat, _) in enumerate(conn.calls) if fragment in flat)
-
-
 @pytest.mark.asyncio
-async def test_remove_payment_evidence_locks_the_parent_first_and_detaches_before_removing() -> None:
-    """Review S253: remove locks case, invoice, payment, THEN the file (a verify takes the evidence FOR SHARE after the
-    payment: the other order could deadlock), and detaches the evidence before the removal (bk-028 refuses removing
-    a file a non-voided payment still points at)."""
-    evidence = file_row(kind="payment_evidence", entity_type="payment", entity_id=PAY_ID)
-    conn = ScriptedConn([(GET_FILE, evidence), (PAY_PARENT, pay_parent())])
-    await ops_files.remove(conn, SALES, FILE_ID, "wrong slip")
-    order = [
-        _first(conn, "FROM booking.trip_cases WHERE id = $1::uuid FOR UPDATE"),
-        _first(conn, "FROM booking.invoices WHERE id = $1::uuid FOR UPDATE"),
-        _first(conn, "FOR UPDATE OF p"),
-        _first(conn, "FOR UPDATE OF f"),
-        _first(conn, DETACH),
-        _first(conn, REMOVE),
-    ]
-    assert order == sorted(order)
-    assert conn.sql(DETACH) == [(PAY_ID, "u-1")] and len(conn.sql(REMOVE)) == 1
-
-    # The evidence of a verified payment stays, also once that payment was voided: 409 before any write.
-    for parent in (pay_parent(status="verified", verified=True), pay_parent(status="voided", verified=True)):
-        conn = ScriptedConn([(GET_FILE, evidence), (PAY_PARENT, parent)])
-        with pytest.raises(Conflict) as exc:
-            await ops_files.remove(conn, SALES, FILE_ID, "x")
-        assert exc.value.code == "evidence_locked" and conn.sql(REMOVE) == [] and conn.sql(DETACH) == []
-
-    # A voided, never verified payment is final: the file goes, the payment is not touched.
-    conn = ScriptedConn([(GET_FILE, evidence), (PAY_PARENT, pay_parent(status="voided"))])
-    await ops_files.remove(conn, SALES, FILE_ID, "x")
-    assert len(conn.sql(REMOVE)) == 1 and conn.sql(DETACH) == []
-    # An older evidence file (not the current one) goes without a detach.
-    conn = ScriptedConn([(GET_FILE, evidence), (PAY_PARENT, pay_parent(voucher_file_id="other"))])
-    await ops_files.remove(conn, SALES, FILE_ID, "x")
-    assert len(conn.sql(REMOVE)) == 1 and conn.sql(DETACH) == []
+async def test_retired_payment_evidence_is_neither_read_nor_removed() -> None:
+    """AA-1046: a kept customer payment evidence file (entity ``payment``, accounting exception) has no permission any
+    more: 403 before the parent is read or anything is written."""
+    evidence = file_row(kind="payment_evidence", entity_type="payment", entity_id=SB_ID)
+    conn = ScriptedConn([(GET_FILE, evidence)])
+    with pytest.raises(Forbidden):
+        await ops_files.remove(conn, ADMIN, FILE_ID, "wrong slip")
+    assert conn.sql(REMOVE) == [] and conn.sql("FROM booking.payments") == []
+    assert "payment" not in ops_files.PERMISSIONS and "payment_evidence" not in ops_files.KINDS
 
 
 @pytest.mark.asyncio

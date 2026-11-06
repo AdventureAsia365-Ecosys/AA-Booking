@@ -432,8 +432,9 @@ async def run_lifecycle(
     """One pass over the open sold cases: plan (and, live, apply) the travel moves; count (and, live, clear) the
     emergency contacts past their keep window. ``today`` defaults to the ops date.
 
-    AA-1037 (root ADR 0019 d8): unless ``b2c_open`` (off in the worker since AA-1046), only B2B cases move; a ``b2c`` case is
-    frozen and never a candidate. The DM-7 clearing of trip-check personal data is retention and covers every case."""
+    AA-1037 (root ADR 0019 d8): unless ``b2c_open`` (off in the worker since AA-1046), only B2B cases move; a ``b2c``
+    case is frozen and never a candidate. The DM-7 clearing of trip-check personal data is retention and covers every
+    case."""
     async with pool.acquire() as conn:
         tz = await ops_timezone(conn)
         rules = await policy(conn)

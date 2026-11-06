@@ -1,13 +1,13 @@
-"""AA-1037 (root ADR 0019 d8, AA-1034 R0 follow-up): with B2C_INTAKE_ENABLED off (the default) no B2C write path is
-left.
+"""AA-1046 (root ADR 0019 d8; AA-1034 R0 and AA-1037 before it): the B2C half of Booking is retired.
 
-- Routes that only write B2C records (customer invoices and payments, customer edit / archive, a staff-made case, a
-  new case from a trip plan) answer 410 ``b2b_only`` before the service is called and before any SQL.
-- Routes shared with B2B cases read only the case's ``channel``: a ``b2c`` case answers 410, a ``b2b`` case (or an
-  unknown ref, left to the service's own 404) reaches the service.
-- The billing reads stay, with every write affordance turned off.
-- The switch on (``b2c_intake_enabled=True``) restores every route.
-- The lifecycle and reminder jobs leave B2C rows alone while the switch is off.
+- The B2C-only routes are gone (customers, customer invoices and payments, the billing summary, the customer routes
+  ``/booking/customer/v1``): 404 / 405, nothing reached.
+- A staff-made case (``POST /booking/trip-cases``) or a new case from a trip plan answers 410 ``b2b_only`` before any
+  SQL: such a case was always a B2C case for a traveller customer.
+- Routes shared with B2B cases read only the case's ``channel``: a ``b2c`` case (kept history) answers 410, a ``b2b``
+  case (or an unknown ref, left to the service's own 404) reaches the service. There is no switch any more.
+- The lifecycle and reminder jobs leave b2c cases alone and send no customer payment reminder; the B2C job kinds are
+  retired (no handler, a leftover queued row is cancelled).
 """
 
 from __future__ import annotations
@@ -22,10 +22,9 @@ from fastapi.testclient import TestClient
 from app import b2c
 from app.auth.staff import Staff, current_staff, get_pool
 from app.catalog import trip_plans
-from app.customers import service as customers
 from app.main import create_app
 from app.ops import files as ops_files
-from app.ops import invoices, lifecycle, payments, supplier_bookings, trip_checks
+from app.ops import lifecycle, supplier_bookings, trip_checks
 from app.settings import Settings
 from app.trip_cases import service, versions
 from tests.unit.fakes import ScriptedConn
@@ -35,7 +34,6 @@ BOOKING_ID = "11111111-1111-4111-8111-111111111111"
 CHECK_ID = "22222222-2222-4222-8222-222222222222"
 FILE_ID = "33333333-3333-4333-8333-333333333333"
 PAYMENT_ID = "44444444-4444-4444-8444-444444444444"
-CUSTOMER_ID = "55555555-5555-4555-8555-555555555555"
 PLAN = "66666666-6666-4666-8666-666666666666"
 
 CASE_SQL = "SELECT channel FROM booking.trip_cases"
@@ -43,8 +41,6 @@ BOOKING_SQL = "FROM booking.supplier_bookings sb JOIN booking.trip_cases"
 CHECK_SQL = "FROM booking.trip_case_checks k JOIN booking.trip_cases"
 FILE_SQL = "FROM booking.ops_files f LEFT JOIN booking.trip_cases"
 
-ADJUSTMENT = {"description": "Late check-out", "unit_price": "10", "reason": "asked by the guest"}
-PAYMENT = {"amount": "100", "method": "cash", "received_on": "2026-11-01"}
 FILE = {"file_name": "slip.pdf", "content_type": "application/pdf", "data_base64": "JVBERi0="}
 
 
@@ -60,20 +56,6 @@ class Recorder:
 
 # (module, function, canned result) of every service a guarded route calls.
 SERVICES: list[tuple[Any, str, Any]] = [
-    (invoices, "create", ({"invoice_number": "INV-000001"}, False)),
-    (invoices, "update_draft", {"ok": True}),
-    (invoices, "delete_draft", {"ok": True}),
-    (invoices, "send", {"ok": True}),
-    (invoices, "cancel", {"ok": True}),
-    (invoices, "amend", {"ok": True}),
-    (invoices, "remind", {"ok": True}),
-    (payments, "record", ({"ref": "PMT-000001"}, False)),
-    (payments, "update", {"ok": True}),
-    (payments, "verify", {"ok": True}),
-    (payments, "void", {"ok": True}),
-    (customers, "update_customer", {"changed": []}),
-    (customers, "archive_customer", None),
-    (service, "create_case", {"code": "TC-000009"}),
     (service, "update_case", {"ok": True}),
     (service, "change_status", {"ok": True}),
     (service, "assign", {"ok": True}),
@@ -82,9 +64,8 @@ SERVICES: list[tuple[Any, str, Any]] = [
     (versions, "delete_version", None),
     (versions, "replace_items", {"ok": True}),
     (versions, "price_version", {"ok": True}),
-    (versions, "send_version", {"ok": True}),
     (versions, "approve_version", {"ok": True}),
-    (trip_plans, "use_for_trip_case", {"mode": "new_case"}),
+    (trip_plans, "use_for_trip_case", {"mode": "new_version"}),
     (supplier_bookings, "generate", {"ok": True}),
     (supplier_bookings, "create", {"ok": True}),
     (supplier_bookings, "update", {"ok": True}),
@@ -99,23 +80,33 @@ SERVICES: list[tuple[Any, str, Any]] = [
     (ops_files, "remove", {"ok": True}),
 ]
 
-# Routes that only exist for B2C: refused whatever the record (method, path, body, expected status when open).
-B2C_ONLY = [
-    ("POST", "/booking/trip-cases/TC-000001/invoices", {}, 201),
-    ("PATCH", "/booking/invoices/INV-000001", {"notes": "x"}, 200),
-    ("DELETE", "/booking/invoices/INV-000001", None, 200),
-    ("POST", "/booking/invoices/INV-000001/send", None, 200),
-    ("POST", "/booking/invoices/INV-000001/cancel", {"reason": "duplicate"}, 200),
-    ("POST", "/booking/invoices/INV-000001/amend", {"adjustments": [ADJUSTMENT]}, 200),
-    ("POST", "/booking/invoices/INV-000001/remind", None, 200),
-    ("POST", "/booking/invoices/INV-000001/payments", PAYMENT, 201),
-    ("PATCH", "/booking/payments/PMT-000001", {"note": "x"}, 200),
-    ("POST", "/booking/payments/PMT-000001/verify", None, 200),
-    ("POST", "/booking/payments/PMT-000001/void", {"reason": "typo"}, 200),
-    ("PATCH", "/booking/customers/CUS-000001", {"name": "Redacted"}, 200),
-    ("DELETE", "/booking/customers/CUS-000001", None, 204),
-    ("POST", "/booking/trip-cases", {"customer_id": CUSTOMER_ID}, 201),
-    ("POST", f"/booking/catalog/trip-plans/{PLAN}/trip-cases", {"customer_id": CUSTOMER_ID}, 201),
+# The retired B2C-only routes (method, path, body): gone from the app.
+REMOVED = [
+    ("GET", "/booking/customers", None),
+    ("POST", "/booking/customers", {"name": "Invented Lead", "email": "lead@example.test"}),
+    ("GET", "/booking/customers/CUS-000001", None),
+    ("PATCH", "/booking/customers/CUS-000001", {"name": "Redacted"}),
+    ("DELETE", "/booking/customers/CUS-000001", None),
+    ("GET", "/booking/invoices", None),
+    ("GET", "/booking/invoices/INV-000001", None),
+    ("POST", "/booking/invoices/INV-000001/send", None),
+    ("POST", "/booking/invoices/INV-000001/payments", {"amount": "100"}),
+    ("GET", "/booking/payments", None),
+    ("GET", "/booking/payments/PMT-000001", None),
+    ("POST", "/booking/payments/PMT-000001/verify", None),
+    ("GET", "/booking/billing/summary", None),
+    ("GET", "/booking/trip-cases/TC-000001/billing", None),
+    ("POST", "/booking/trip-cases/TC-000001/invoices", {}),
+    ("POST", "/booking/trip-cases/TC-000001/versions/1/send", {"subject": "Your trip", "message": "Hello"}),
+    ("GET", "/booking/customer/v1/payments", None),
+    ("GET", "/booking/customer/v1/invoices/INV-000001", None),
+]
+
+# Routes that would start a new (B2C) case: refused before any read.
+NEW_CASE = [
+    ("POST", "/booking/trip-cases", {"customer_id": PAYMENT_ID}),
+    ("POST", "/booking/trip-cases", None),
+    ("POST", f"/booking/catalog/trip-plans/{PLAN}/trip-cases", {}),
 ]
 
 # Routes on one trip case: (method, path, body, expected status when allowed).
@@ -128,7 +119,6 @@ CASE_ROUTES = [
     ("DELETE", "/booking/trip-cases/TC-000001/versions/1", None, 204),
     ("PUT", "/booking/trip-cases/TC-000001/versions/1/items", {"items": []}, 200),
     ("POST", "/booking/trip-cases/TC-000001/versions/1/price", {"channel": "b2c_tailor_made"}, 200),
-    ("POST", "/booking/trip-cases/TC-000001/versions/1/send", {"subject": "Your trip", "message": "Hello"}, 200),
     ("POST", "/booking/trip-cases/TC-000001/versions/1/approve", None, 200),
     ("POST", f"/booking/catalog/trip-plans/{PLAN}/trip-cases", {"trip_case": "TC-000001"}, 201),
     ("POST", "/booking/trip-cases/TC-000001/supplier-bookings/generate", None, 200),
@@ -162,8 +152,8 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Recorder]:
     return recs
 
 
-def client(conn: ScriptedConn | None = None, **settings: Any) -> TestClient:
-    app = create_app(Settings(database_url=None, environment="test", **settings))
+def client(conn: ScriptedConn | None = None) -> TestClient:
+    app = create_app(Settings(database_url=None, environment="test"))
     app.dependency_overrides[current_staff] = lambda: ADMIN
     pool = conn or ScriptedConn()
     app.dependency_overrides[get_pool] = lambda: pool
@@ -183,9 +173,17 @@ def assert_gone(r: Any) -> None:
     assert r.json()["detail"] == "b2b_only" and r.json()["message"] == b2c.MESSAGE
 
 
-@pytest.mark.parametrize(("method", "path", "body", "_open"), B2C_ONLY)
-def test_b2c_only_route_answers_410_before_any_read(
-    stubs: dict[str, Recorder], method: str, path: str, body: Any, _open: int
+@pytest.mark.parametrize(("method", "path", "body"), REMOVED)
+def test_retired_b2c_routes_are_gone(stubs: dict[str, Recorder], method: str, path: str, body: Any) -> None:
+    conn = ScriptedConn()
+    r = call(client(conn), method, path, body)
+    assert r.status_code in (404, 405), (method, path, r.status_code)
+    assert called(stubs) == [] and conn.calls == []
+
+
+@pytest.mark.parametrize(("method", "path", "body"), NEW_CASE)
+def test_a_new_staff_made_case_answers_410_before_any_read(
+    stubs: dict[str, Recorder], method: str, path: str, body: Any
 ) -> None:
     conn = ScriptedConn()
     assert_gone(call(client(conn), method, path, body))
@@ -193,13 +191,11 @@ def test_b2c_only_route_answers_410_before_any_read(
     assert conn.calls == []  # refused before any SQL
 
 
-@pytest.mark.parametrize(("method", "path", "body", "status"), B2C_ONLY)
-def test_b2c_only_route_reopens_with_the_switch(
-    stubs: dict[str, Recorder], method: str, path: str, body: Any, status: int
-) -> None:
-    r = call(client(b2c_intake_enabled=True), method, path, body)
-    assert r.status_code == status, r.text
-    assert len(called(stubs)) == 1
+def test_the_retired_customer_routes_are_not_in_the_openapi_document() -> None:
+    paths = create_app(Settings(database_url=None, environment="test")).openapi()["paths"]
+    assert not [p for p in paths if p.startswith(("/booking/customer", "/booking/invoices", "/booking/payments"))]
+    assert "/booking/billing/summary" not in paths
+    assert "/booking/trip-cases/{case_ref}/versions/{version_number}/send" not in paths
 
 
 @pytest.mark.parametrize(("method", "path", "body", "_status"), CASE_ROUTES)
@@ -219,15 +215,6 @@ def test_case_route_keeps_a_b2b_case(
     r = call(client(ScriptedConn().on(CASE_SQL, "b2b")), method, path, body)
     assert r.status_code == status, r.text
     assert len(called(stubs)) == 1
-
-
-@pytest.mark.parametrize(("method", "path", "body", "status"), CASE_ROUTES)
-def test_case_route_with_the_switch_on_reads_no_channel(
-    stubs: dict[str, Recorder], method: str, path: str, body: Any, status: int
-) -> None:
-    conn = ScriptedConn().on(CASE_SQL, "b2c")
-    assert call(client(conn, b2c_intake_enabled=True), method, path, body).status_code == status
-    assert conn.sql(CASE_SQL) == []
 
 
 def test_unknown_case_is_left_to_the_service(stubs: dict[str, Recorder]) -> None:
@@ -274,7 +261,6 @@ def test_payment_evidence_upload_is_refused_without_a_read(stubs: dict[str, Reco
     body = {**FILE, "kind": "payment_evidence", "entity_type": "payment", "entity_id": PAYMENT_ID}
     assert_gone(client(conn).post("/booking/ops-files", json=body))
     assert conn.calls == [] and called(stubs) == []
-    assert client(b2c_intake_enabled=True).post("/booking/ops-files", json=body).status_code == 201
 
 
 def test_supplier_bill_files_stay_open(stubs: dict[str, Recorder]) -> None:
@@ -308,64 +294,23 @@ def test_file_remove_follows_the_file(stubs: dict[str, Recorder], row: Any, refu
     assert conn.sql(FILE_SQL) == [(FILE_ID,)]
 
 
-# ── Billing reads: kept, with no write affordance ────────────────────────────
-
-INVOICE = {
-    "invoice_number": "INV-000001",
-    "actions": {"edit": True, "send": True, "record_payment": True, "cancel": False},
-    "payments": [{"ref": "PMT-000001", "actions": {"verify": True, "void": True}}],
-}
-
-
-def test_frozen_view_turns_every_action_off() -> None:
-    out = b2c.frozen_view({"items": [INVOICE], "total": 1})
-    assert out["items"][0]["actions"] == {"edit": False, "send": False, "record_payment": False, "cancel": False}
-    assert out["items"][0]["payments"][0]["actions"] == {"verify": False, "void": False}
-    assert INVOICE["actions"]["edit"] is True  # the input is not modified
-    case = b2c.frozen_view({"invoice": None, "invoiceable": True, "reason": None, "history": []})
-    assert case["invoiceable"] is False and case["reason"] == "b2b_only"
-    blocked = b2c.frozen_view({"invoiceable": False, "reason": "no_approved_version"})
-    assert blocked == {"invoiceable": False, "reason": "no_approved_version"}
-    assert b2c.frozen_view("text") == "text"
-
-
-@pytest.mark.parametrize(
-    ("path", "module", "name", "result"),
-    [
-        ("/booking/invoices/INV-000001", invoices, "get_invoice", INVOICE),
-        ("/booking/invoices", invoices, "list_invoices", {"items": [INVOICE], "total": 1}),
-        ("/booking/trip-cases/TC-000001/billing", invoices, "for_case", {"invoice": INVOICE, "invoiceable": False}),
-        ("/booking/payments/PMT-000001", payments, "get_payment", {"ref": "PMT-1", "actions": {"verify": True}}),
-        ("/booking/payments", payments, "list_payments", {"items": [{"actions": {"void": True}}], "total": 1}),
-    ],
-)
-def test_billing_reads_stay_and_offer_no_write(
-    monkeypatch: pytest.MonkeyPatch, path: str, module: Any, name: str, result: dict[str, Any]
-) -> None:
-    monkeypatch.setattr(module, name, Recorder(result))
-    frozen = client().get(path)
-    assert frozen.status_code == 200
-    assert "true" not in frozen.text  # no action flag, no invoiceable left on
-    opened = client(b2c_intake_enabled=True).get(path)
-    assert opened.json() == result
-
-
 # ── Jobs ─────────────────────────────────────────────────────────────────────
 
 
-def test_lifecycle_handlers_carry_the_switch() -> None:
-    off = lifecycle.build_handlers(False)
-    on = lifecycle.build_handlers(True)
-    assert set(off) == {lifecycle.KIND, lifecycle.REMINDERS_KIND}
-    assert off[lifecycle.KIND].keywords == {"b2c_open": False}
-    assert on[lifecycle.REMINDERS_KIND].keywords == {"b2c_open": True}
+def test_lifecycle_handlers_run_b2b_only() -> None:
+    handlers = lifecycle.build_handlers()
+    assert handlers == {
+        lifecycle.KIND: lifecycle.handle_lifecycle,
+        lifecycle.REMINDERS_KIND: lifecycle.handle_reminders,
+    }
+
+
+def test_the_b2c_kinds_are_retired() -> None:
+    assert b2c.RETIRED_KINDS == {"bk_inquiry_pull", "bk_inquiry_process", "bk_notify_email"}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("b2c_open", [False, True])
-async def test_lifecycle_candidates_skip_b2c_cases_while_frozen(
-    monkeypatch: pytest.MonkeyPatch, b2c_open: bool
-) -> None:
+async def test_lifecycle_candidates_skip_b2c_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     async def rules(_: Any) -> dict[str, int]:
         return {"pre_departure_days": 7, "emergency_contact_keep_days": 90}
 
@@ -377,78 +322,43 @@ async def test_lifecycle_candidates_skip_b2c_cases_while_frozen(
 
     monkeypatch.setattr(lifecycle, "policy", rules)
     monkeypatch.setattr(lifecycle, "ops_timezone", tz)
+
+    async def today(*_: Any) -> date:
+        return date(2026, 11, 5)
+
     monkeypatch.setattr(lifecycle, "_clear", no_clear)
+    monkeypatch.setattr(lifecycle, "ops_today", today)
     conn = ScriptedConn()
-    out = await lifecycle.run_lifecycle(conn, mode="dry_run", today=date(2026, 11, 5), b2c_open=b2c_open)
-    assert "OR tc.channel = 'b2b'" in lifecycle.CANDIDATES_SQL
+    job = type("J", (), {"payload": {"mode": "dry_run"}})()
+    out = await lifecycle.handle_lifecycle(conn, job)
     (args,) = conn.sql("FROM booking.trip_cases tc WHERE tc.deleted_at IS NULL AND tc.status = ANY")
-    assert args[-1] is b2c_open
-    assert out["b2c"] == ("open" if b2c_open else "frozen")
+    assert args[-1] is False
+    assert out["b2c"] == "frozen"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("b2c_open", [False, True])
-async def test_reminders_leave_b2c_cases_and_customer_invoices_alone(
-    monkeypatch: pytest.MonkeyPatch, b2c_open: bool
-) -> None:
+async def test_reminders_leave_b2c_cases_alone_and_send_no_customer_reminder(monkeypatch: pytest.MonkeyPatch) -> None:
     async def rules(_: Any) -> dict[str, int]:
         return {"supplier_answer_days": 2, "trip_check_reminder_days": 3, "supplier_bill_due_soon_days": 5}
 
     async def tz(_: Any) -> str:
         return "UTC"
 
-    payments_ran: list[bool] = []
-
-    async def payment_reminders(_: Any, __: int) -> dict[str, int]:
-        payments_ran.append(True)
-        return dict(lifecycle.NO_PAYMENT_REMINDERS, payments_notified=1)
-
     monkeypatch.setattr(lifecycle, "policy", rules)
     monkeypatch.setattr(lifecycle, "ops_timezone", tz)
-    monkeypatch.setattr(lifecycle, "_payment_reminders", payment_reminders)
     conn = ScriptedConn()
-    out = await lifecycle.run_reminders(conn, today=date(2026, 11, 5), b2c_open=b2c_open)
+    out = await lifecycle.run_reminders(conn, today=date(2026, 11, 5))
     (waiting,) = conn.sql("FROM booking.supplier_bookings sb")
     (checks,) = conn.sql("FROM booking.trip_case_checks k")
-    assert waiting[-1] is b2c_open and checks[-1] is b2c_open
-    assert payments_ran == ([True] if b2c_open else [])
-    assert out["payments_notified"] == (1 if b2c_open else 0)
-    assert out["b2c"] == ("open" if b2c_open else "frozen")
+    assert waiting[-1] is False and checks[-1] is False
+    assert not [c for c in conn.calls if "invoice" in str(c[0]) or "payment_schedule" in str(c[0])]
+    assert "payments_notified" not in out and "customer_rows" not in out
+    assert out["b2c"] == "frozen"
 
 
-@pytest.mark.asyncio
-async def test_handlers_pass_the_switch_to_the_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[Any] = []
-
-    async def fake_run(_: Any, **kwargs: Any) -> dict[str, Any]:
-        seen.append(kwargs["b2c_open"])
-        return {"moves": {}, "blocked": {}, "refused": 0, "cleared_checks": 0}
-
-    async def fake_reminders(_: Any, **kwargs: Any) -> dict[str, Any]:
-        seen.append(kwargs["b2c_open"])
-        return {
-            "supplier_waiting_notified": 0,
-            "checks_due_notified": 0,
-            "payments_notified": 0,
-            "customer_rows": 0,
-            "bills_notified": 0,
-        }
-
-    monkeypatch.setattr(lifecycle, "run_lifecycle", fake_run)
-    monkeypatch.setattr(lifecycle, "run_reminders", fake_reminders)
-    job = type("J", (), {"payload": {"trigger": "manual"}})()
-    handlers = lifecycle.build_handlers(False)
-    await handlers[lifecycle.KIND](ScriptedConn(), job)
-    await handlers[lifecycle.REMINDERS_KIND](ScriptedConn(), job)
-    assert seen == [False, False]
-
-
-# Routers whose every write touches a B2C record or a trip case (a b2c case among them): each write route must declare
-# the 410, so a new write route there without a guard fails here (the guard itself is tested per route above).
+# Routers whose every write touches a trip case (a b2c case among them): each write route must declare the 410, so a
+# new write route there without a guard fails here (the guard itself is tested per route above).
 GUARDED_PREFIXES = (
-    "/booking/invoices",
-    "/booking/payments",
-    "/booking/customers",
     "/booking/trip-cases",
     "/booking/trip-checks",
     "/booking/supplier-bookings",
@@ -456,7 +366,7 @@ GUARDED_PREFIXES = (
 )
 
 
-def test_every_write_on_b2c_records_and_trip_cases_documents_the_410() -> None:
+def test_every_write_on_trip_cases_documents_the_410() -> None:
     spec = create_app(Settings(database_url=None, environment="test")).openapi()
     writes = [
         (method.upper(), path, op)
@@ -465,6 +375,6 @@ def test_every_write_on_b2c_records_and_trip_cases_documents_the_410() -> None:
         for method, op in ops.items()
         if method in {"post", "patch", "put", "delete"}
     ]
-    assert len(writes) >= len(B2C_ONLY) + len(CASE_ROUTES) - 1
+    assert len(writes) >= len(CASE_ROUTES)
     missing = [(m, p) for m, p, op in writes if "410" not in op.get("responses", {})]
     assert missing == []

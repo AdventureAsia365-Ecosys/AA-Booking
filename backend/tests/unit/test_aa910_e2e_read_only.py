@@ -35,13 +35,13 @@ def test_constant_matches_the_trigger_allow_map_address() -> None:
         ("PUT", "/booking/staff/me/preferences", {"notify": {}}),
         ("PATCH", f"/booking/staff/{COG_KEY}", {"active": False}),
         ("POST", "/booking/trip-cases", {"title": "x"}),
-        ("POST", "/booking/customers", {"name": "x"}),
+        ("POST", "/booking/trip-cases/TC-000001/status", {"to_status": "cancelled", "reason": "x"}),
         ("POST", "/booking/notifications/read", {"all": True}),
         ("POST", "/booking/pricing/rules", {}),
         # AA-996: the builder's live quote is a POST too: the Figma audit's 403 on it was this rule.
         ("POST", "/booking/pricing/quote-preview", {"channel": "b2c_tailor_made", "items": []}),
         ("POST", "/booking/retention/runs", {}),
-        ("DELETE", "/booking/customers/c-1", None),
+        ("DELETE", "/booking/trip-cases/TC-000001/versions/1", None),
         ("DELETE", "/booking/rates/00000000-0000-4000-8000-000000000001", None),
     ],
 )

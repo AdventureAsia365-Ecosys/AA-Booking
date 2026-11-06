@@ -1,57 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AdjustmentIn": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Description",
-            "type": "string"
-          },
-          "quantity": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 9999.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,4}|(?=[\\d.]{1,7}0*$)\\d{0,4}\\.\\d{0,2}0*$)",
-                "type": "string"
-              }
-            ],
-            "default": "1",
-            "title": "Quantity"
-          },
-          "reason": {
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          },
-          "unit_price": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
-                "type": "string"
-              }
-            ],
-            "title": "Unit Price"
-          }
-        },
-        "required": [
-          "description",
-          "unit_price",
-          "reason"
-        ],
-        "title": "AdjustmentIn",
-        "type": "object"
-      },
       "AgencyDraftRunIn": {
         "additionalProperties": false,
         "properties": {
@@ -692,41 +641,6 @@
           "reason"
         ],
         "title": "AgencyReasonIn",
-        "type": "object"
-      },
-      "Amendment": {
-        "additionalProperties": false,
-        "properties": {
-          "adjustments": {
-            "items": {
-              "$ref": "#/components/schemas/AdjustmentIn"
-            },
-            "maxItems": 10,
-            "minItems": 1,
-            "title": "Adjustments",
-            "type": "array"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ScheduleRowIn"
-                },
-                "maxItems": 10,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "the new rows after the covered ones; omit to move the difference",
-            "title": "Schedule"
-          }
-        },
-        "required": [
-          "adjustments"
-        ],
-        "title": "Amendment",
         "type": "object"
       },
       "ApproveBody": {
@@ -1712,147 +1626,6 @@
         "title": "CancellationResult",
         "type": "object"
       },
-      "CaseCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "assignee": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignee"
-          },
-          "countries": {
-            "items": {
-              "pattern": "^[A-Za-z]{2}$",
-              "type": "string"
-            },
-            "maxItems": 20,
-            "title": "Countries",
-            "type": "array"
-          },
-          "currency": {
-            "default": "USD",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency",
-            "type": "string"
-          },
-          "customer_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Customer Id"
-          },
-          "initial_status": {
-            "default": "new_inquiry",
-            "enum": [
-              "new_inquiry",
-              "discovery"
-            ],
-            "title": "Initial Status",
-            "type": "string"
-          },
-          "new_customer": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NewCustomer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "notes": {
-            "anyOf": [
-              {
-                "maxLength": 10000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes"
-          },
-          "pax": {
-            "anyOf": [
-              {
-                "maximum": 999.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pax"
-          },
-          "pax_adults": {
-            "anyOf": [
-              {
-                "maximum": 999.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pax Adults"
-          },
-          "pax_children": {
-            "anyOf": [
-              {
-                "maximum": 998.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pax Children"
-          },
-          "start_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Date"
-          },
-          "trip_style": {
-            "anyOf": [
-              {
-                "maxLength": 60,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trip Style"
-          }
-        },
-        "title": "CaseCreate",
-        "type": "object"
-      },
       "CasePatch": {
         "additionalProperties": false,
         "properties": {
@@ -2687,75 +2460,6 @@
           "overdue_amount"
         ],
         "title": "CreditStatus",
-        "type": "object"
-      },
-      "CustomerPatch": {
-        "additionalProperties": false,
-        "properties": {
-          "address": {
-            "anyOf": [
-              {
-                "maxLength": 500,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Address"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "maxLength": 254,
-                "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "is_blocked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Blocked"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "maxLength": 40,
-                "minLength": 3,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
-          }
-        },
-        "title": "CustomerPatch",
         "type": "object"
       },
       "DeclineIn": {
@@ -3876,202 +3580,6 @@
         "title": "IncidentIn",
         "type": "object"
       },
-      "Invoice": {
-        "additionalProperties": false,
-        "properties": {
-          "balance": {
-            "anyOf": [
-              {
-                "description": "Decimal string, 2 places",
-                "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Total minus paid; negative = overpaid; null when cancelled",
-            "title": "Balance"
-          },
-          "currency": {
-            "description": "ISO 4217",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency",
-            "type": "string"
-          },
-          "document_type": {
-            "const": "proforma",
-            "title": "Document Type",
-            "type": "string"
-          },
-          "invoice_number": {
-            "title": "Invoice Number",
-            "type": "string"
-          },
-          "issued_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issued At"
-          },
-          "next_due_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Due Date"
-          },
-          "overdue_amount": {
-            "description": "Decimal string, 2 places",
-            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-            "title": "Overdue Amount",
-            "type": "string"
-          },
-          "paid_amount": {
-            "description": "Verified receipts minus verified refunds",
-            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-            "title": "Paid Amount",
-            "type": "string"
-          },
-          "payment_instructions": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How to pay; only while money is owed",
-            "title": "Payment Instructions"
-          },
-          "payments": {
-            "description": "Verified payments only",
-            "items": {
-              "$ref": "#/components/schemas/Payment"
-            },
-            "title": "Payments",
-            "type": "array"
-          },
-          "schedule": {
-            "items": {
-              "$ref": "#/components/schemas/ScheduleRow"
-            },
-            "title": "Schedule",
-            "type": "array"
-          },
-          "status": {
-            "enum": [
-              "sent",
-              "partially_paid",
-              "paid",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "total_amount": {
-            "description": "Decimal string, 2 places",
-            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-            "title": "Total Amount",
-            "type": "string"
-          },
-          "trip": {
-            "$ref": "#/components/schemas/TripRef"
-          }
-        },
-        "required": [
-          "invoice_number",
-          "status",
-          "document_type",
-          "currency",
-          "total_amount",
-          "paid_amount",
-          "balance",
-          "next_due_date",
-          "overdue_amount",
-          "issued_at",
-          "trip",
-          "schedule",
-          "payments",
-          "payment_instructions"
-        ],
-        "title": "Invoice",
-        "type": "object"
-      },
-      "InvoiceChanges": {
-        "additionalProperties": false,
-        "properties": {
-          "adjustments": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/AdjustmentIn"
-                },
-                "maxItems": 20,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Adjustments"
-          },
-          "notes": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ScheduleRowIn"
-                },
-                "maxItems": 10,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule"
-          },
-          "terms": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Terms"
-          }
-        },
-        "title": "InvoiceChanges",
-        "type": "object"
-      },
       "InvoiceIssuer": {
         "additionalProperties": false,
         "description": "The AA entity that issued the invoice, as snapshotted at issue, with how to pay it.",
@@ -4820,65 +4328,6 @@
         "title": "NewContract",
         "type": "object"
       },
-      "NewCustomer": {
-        "additionalProperties": false,
-        "properties": {
-          "address": {
-            "anyOf": [
-              {
-                "maxLength": 500,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Address"
-          },
-          "contact_consent": {
-            "default": false,
-            "title": "Contact Consent",
-            "type": "boolean"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "maxLength": 254,
-                "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "maxLength": 40,
-                "minLength": 3,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "NewCustomer",
-        "type": "object"
-      },
       "NewFile": {
         "additionalProperties": false,
         "properties": {
@@ -5128,66 +4577,6 @@
         "title": "NewHotel",
         "type": "object"
       },
-      "NewInvoice": {
-        "additionalProperties": false,
-        "properties": {
-          "adjustments": {
-            "items": {
-              "$ref": "#/components/schemas/AdjustmentIn"
-            },
-            "maxItems": 20,
-            "title": "Adjustments",
-            "type": "array"
-          },
-          "notes": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ScheduleRowIn"
-                },
-                "maxItems": 10,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule"
-          },
-          "send_now": {
-            "default": false,
-            "title": "Send Now",
-            "type": "boolean"
-          },
-          "terms": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Terms"
-          }
-        },
-        "title": "NewInvoice",
-        "type": "object"
-      },
       "NewMedia": {
         "additionalProperties": false,
         "description": "A supplier photo, as base64 JSON (API Gateway passes no binary body; see ``app.supply.media``).",
@@ -5232,114 +4621,6 @@
           "data_base64"
         ],
         "title": "NewMedia",
-        "type": "object"
-      },
-      "NewPayment": {
-        "additionalProperties": false,
-        "properties": {
-          "allow_duplicate_reference": {
-            "default": false,
-            "title": "Allow Duplicate Reference",
-            "type": "boolean"
-          },
-          "amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
-                "type": "string"
-              }
-            ],
-            "title": "Amount"
-          },
-          "kind": {
-            "default": "receipt",
-            "enum": [
-              "receipt",
-              "refund"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "method": {
-            "enum": [
-              "bank_transfer",
-              "card_offline",
-              "cash",
-              "other"
-            ],
-            "title": "Method",
-            "type": "string"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "received_amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "what arrived, when another currency",
-            "title": "Received Amount"
-          },
-          "received_currency": {
-            "anyOf": [
-              {
-                "pattern": "^[A-Z]{3}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Received Currency"
-          },
-          "received_on": {
-            "format": "date",
-            "title": "Received On",
-            "type": "string"
-          },
-          "reference": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "bank or receipt reference, never a card",
-            "title": "Reference"
-          }
-        },
-        "required": [
-          "amount",
-          "method",
-          "received_on"
-        ],
-        "title": "NewPayment",
         "type": "object"
       },
       "NewPayout": {
@@ -6141,92 +5422,6 @@
         "title": "Pax",
         "type": "object"
       },
-      "Payment": {
-        "additionalProperties": false,
-        "properties": {
-          "amount": {
-            "description": "Decimal string, 2 places",
-            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-            "title": "Amount",
-            "type": "string"
-          },
-          "currency": {
-            "description": "ISO 4217",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "receipt",
-              "refund"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "method": {
-            "enum": [
-              "bank_transfer",
-              "card_offline",
-              "cash",
-              "other"
-            ],
-            "title": "Method",
-            "type": "string"
-          },
-          "received_on": {
-            "format": "date",
-            "title": "Received On",
-            "type": "string"
-          },
-          "ref": {
-            "description": "Payment reference (PMT-000123)",
-            "title": "Ref",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ref",
-          "kind",
-          "amount",
-          "currency",
-          "method",
-          "received_on"
-        ],
-        "title": "Payment",
-        "type": "object"
-      },
-      "PaymentChanges": {
-        "additionalProperties": false,
-        "properties": {
-          "note": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "reference": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reference"
-          }
-        },
-        "title": "PaymentChanges",
-        "type": "object"
-      },
       "PaymentTerms": {
         "additionalProperties": false,
         "properties": {
@@ -6252,23 +5447,6 @@
           "settlement_due_days"
         ],
         "title": "PaymentTerms",
-        "type": "object"
-      },
-      "Payments": {
-        "additionalProperties": false,
-        "properties": {
-          "invoices": {
-            "items": {
-              "$ref": "#/components/schemas/Invoice"
-            },
-            "title": "Invoices",
-            "type": "array"
-          }
-        },
-        "required": [
-          "invoices"
-        ],
-        "title": "Payments",
         "type": "object"
       },
       "PlanComponentIn": {
@@ -7798,153 +6976,6 @@
         "title": "RunRequest",
         "type": "object"
       },
-      "ScheduleRow": {
-        "additionalProperties": false,
-        "properties": {
-          "amount": {
-            "description": "Decimal string, 2 places",
-            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-            "title": "Amount",
-            "type": "string"
-          },
-          "due_date": {
-            "format": "date",
-            "title": "Due Date",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "deposit",
-              "second",
-              "final",
-              "other"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "remaining_amount": {
-            "description": "Decimal string, 2 places",
-            "pattern": "^-?[0-9]+\\.[0-9]{2}$",
-            "title": "Remaining Amount",
-            "type": "string"
-          },
-          "seq": {
-            "title": "Seq",
-            "type": "integer"
-          },
-          "state": {
-            "enum": [
-              "scheduled",
-              "due_soon",
-              "paid",
-              "overdue",
-              "cancelled"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "seq",
-          "kind",
-          "amount",
-          "due_date",
-          "remaining_amount",
-          "state"
-        ],
-        "title": "ScheduleRow",
-        "type": "object"
-      },
-      "ScheduleRowIn": {
-        "additionalProperties": false,
-        "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
-                "type": "string"
-              }
-            ],
-            "title": "Amount"
-          },
-          "due_date": {
-            "format": "date",
-            "title": "Due Date",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "deposit",
-              "second",
-              "final",
-              "other"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "amount",
-          "due_date"
-        ],
-        "title": "ScheduleRowIn",
-        "type": "object"
-      },
-      "SendBody": {
-        "additionalProperties": false,
-        "properties": {
-          "message": {
-            "maxLength": 10000,
-            "minLength": 1,
-            "title": "Message",
-            "type": "string"
-          },
-          "subject": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Subject",
-            "type": "string"
-          },
-          "to": {
-            "anyOf": [
-              {
-                "maxLength": 254,
-                "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "must be the customer's e-mail (read-only in the UI)",
-            "title": "To"
-          },
-          "valid_until": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "default: today + quote_validity_days (7-30)",
-            "title": "Valid Until"
-          }
-        },
-        "required": [
-          "subject",
-          "message"
-        ],
-        "title": "SendBody",
-        "type": "object"
-      },
       "ServiceFields": {
         "additionalProperties": false,
         "properties": {
@@ -9046,123 +8077,10 @@
         "title": "Travellers",
         "type": "object"
       },
-      "TripRef": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "description": "Booking trip reference (TC-000123)",
-            "title": "Code",
-            "type": "string"
-          },
-          "end_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "End Date"
-          },
-          "planner_trip_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The TripPlanner trip this booking came from, if any",
-            "title": "Planner Trip Id"
-          },
-          "start_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Date"
-          }
-        },
-        "required": [
-          "code",
-          "planner_trip_id",
-          "start_date",
-          "end_date"
-        ],
-        "title": "TripRef",
-        "type": "object"
-      },
       "UseForTripCase": {
         "additionalProperties": false,
-        "description": "``trip_case`` (a case UUID or code) adds a version to that case; otherwise a new case is created for\n``customer_id`` or ``new_customer`` (same fields as ``POST /booking/trip-cases``).",
+        "description": "``trip_case`` (a case UUID or code) gets a new version from the plan. Without it the request asked for a new\nstaff-made case, a B2C case retired with the B2C half (AA-1046): 410 ``b2b_only``.",
         "properties": {
-          "assignee": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignee"
-          },
-          "countries": {
-            "items": {
-              "pattern": "^[A-Za-z]{2}$",
-              "type": "string"
-            },
-            "maxItems": 20,
-            "title": "Countries",
-            "type": "array"
-          },
-          "currency": {
-            "default": "USD",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency",
-            "type": "string"
-          },
-          "customer_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Customer Id"
-          },
-          "initial_status": {
-            "default": "new_inquiry",
-            "enum": [
-              "new_inquiry",
-              "discovery"
-            ],
-            "title": "Initial Status",
-            "type": "string"
-          },
-          "new_customer": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NewCustomer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "notes": {
             "anyOf": [
               {
@@ -9174,57 +8092,6 @@
               }
             ],
             "title": "Notes"
-          },
-          "pax": {
-            "anyOf": [
-              {
-                "maximum": 999.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pax"
-          },
-          "pax_adults": {
-            "anyOf": [
-              {
-                "maximum": 999.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pax Adults"
-          },
-          "pax_children": {
-            "anyOf": [
-              {
-                "maximum": 998.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pax Children"
-          },
-          "start_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Date"
           },
           "trip_case": {
             "anyOf": [
@@ -9238,18 +8105,6 @@
               }
             ],
             "title": "Trip Case"
-          },
-          "trip_style": {
-            "anyOf": [
-              {
-                "maxLength": 60,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trip Style"
           }
         },
         "title": "UseForTripCase",
@@ -9360,11 +8215,6 @@
       },
       "m2m": {
         "description": "Cognito aa-m2m client-credentials access token (booking.b2b.v1)",
-        "scheme": "bearer",
-        "type": "http"
-      },
-      "traveller": {
-        "description": "Cognito EXTERNAL access token of a signed-in traveller (clients tripplanner, booking-customer)",
         "scheme": "bearer",
         "type": "http"
       }
@@ -13068,34 +11918,6 @@
         ]
       }
     },
-    "/booking/billing/summary": {
-      "get": {
-        "operationId": "billing_summary_booking_billing_summary_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Billing Summary Booking Billing Summary Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Billing Summary",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
     "/booking/case-lifecycle/runs": {
       "get": {
         "operationId": "lifecycle_runs_booking_case_lifecycle_runs_get",
@@ -14785,7 +13607,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -15058,448 +13880,6 @@
         "summary": "List Countries",
         "tags": [
           "reference"
-        ]
-      }
-    },
-    "/booking/customer/v1/invoices/{number}": {
-      "get": {
-        "operationId": "getMyInvoice",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123)",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123)",
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Invoice"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "traveller": []
-          }
-        ],
-        "summary": "Get My Invoice",
-        "tags": [
-          "customer"
-        ]
-      }
-    },
-    "/booking/customer/v1/payments": {
-      "get": {
-        "operationId": "listMyPayments",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Payments"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "traveller": []
-          }
-        ],
-        "summary": "List My Payments",
-        "tags": [
-          "customer"
-        ]
-      }
-    },
-    "/booking/customers": {
-      "get": {
-        "operationId": "list_customers_booking_customers_get",
-        "parameters": [
-          {
-            "description": "name, e-mail, phone or code",
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 200,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "name, e-mail, phone or code",
-              "title": "Q"
-            }
-          },
-          {
-            "description": "lead | active | past | blocked",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 20,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "lead | active | past | blocked",
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "merge_review",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Merge Review"
-            }
-          },
-          {
-            "description": "manual | otp | tripplanner_lead",
-            "in": "query",
-            "name": "source",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 20,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "manual | otp | tripplanner_lead",
-              "title": "Source"
-            }
-          },
-          {
-            "description": "last_activity_at | created_at | name, -desc",
-            "in": "query",
-            "name": "sort",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 30,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "last_activity_at | created_at | name, -desc",
-              "title": "Sort"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 25,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Customers Booking Customers Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Customers",
-        "tags": [
-          "customers"
-        ]
-      },
-      "post": {
-        "operationId": "create_customer_booking_customers_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewCustomer"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Customer Booking Customers Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create Customer",
-        "tags": [
-          "customers"
-        ]
-      }
-    },
-    "/booking/customers/{customer_ref}": {
-      "delete": {
-        "operationId": "archive_customer_booking_customers__customer_ref__delete",
-        "parameters": [
-          {
-            "description": "Customer UUID or code (CUS-000123)",
-            "in": "path",
-            "name": "customer_ref",
-            "required": true,
-            "schema": {
-              "description": "Customer UUID or code (CUS-000123)",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Customer Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Archive Customer",
-        "tags": [
-          "customers"
-        ]
-      },
-      "get": {
-        "operationId": "get_customer_booking_customers__customer_ref__get",
-        "parameters": [
-          {
-            "description": "Customer UUID or code (CUS-000123)",
-            "in": "path",
-            "name": "customer_ref",
-            "required": true,
-            "schema": {
-              "description": "Customer UUID or code (CUS-000123)",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Customer Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Customer Booking Customers  Customer Ref  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Customer",
-        "tags": [
-          "customers"
-        ]
-      },
-      "patch": {
-        "operationId": "patch_customer_booking_customers__customer_ref__patch",
-        "parameters": [
-          {
-            "description": "Customer UUID or code (CUS-000123)",
-            "in": "path",
-            "name": "customer_ref",
-            "required": true,
-            "schema": {
-              "description": "Customer UUID or code (CUS-000123)",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Customer Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CustomerPatch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Customer Booking Customers  Customer Ref  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Patch Customer",
-        "tags": [
-          "customers"
         ]
       }
     },
@@ -16285,682 +14665,6 @@
         ]
       }
     },
-    "/booking/invoices": {
-      "get": {
-        "operationId": "list_invoices_booking_invoices_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "draft",
-                    "sent",
-                    "partially_paid",
-                    "paid",
-                    "cancelled",
-                    "open",
-                    "all"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "overdue",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Overdue"
-            }
-          },
-          {
-            "description": "trip case code or UUID",
-            "in": "query",
-            "name": "case",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 64,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "trip case code or UUID",
-              "title": "Case"
-            }
-          },
-          {
-            "description": "invoice number, case code or customer name",
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 100,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "invoice number, case code or customer name",
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Invoices Booking Invoices Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Invoices",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/invoices/{number}": {
-      "delete": {
-        "operationId": "delete_invoice_booking_invoices__number__delete",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Invoice Booking Invoices  Number  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Invoice",
-        "tags": [
-          "billing"
-        ]
-      },
-      "get": {
-        "operationId": "get_invoice_booking_invoices__number__get",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Invoice Booking Invoices  Number  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Invoice",
-        "tags": [
-          "billing"
-        ]
-      },
-      "patch": {
-        "operationId": "patch_invoice_booking_invoices__number__patch",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InvoiceChanges"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Invoice Booking Invoices  Number  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Patch Invoice",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/invoices/{number}/amend": {
-      "post": {
-        "operationId": "amend_invoice_booking_invoices__number__amend_post",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Amendment"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Amend Invoice Booking Invoices  Number  Amend Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Amend Invoice",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/invoices/{number}/cancel": {
-      "post": {
-        "operationId": "cancel_invoice_booking_invoices__number__cancel_post",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancel Invoice Booking Invoices  Number  Cancel Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Cancel Invoice",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/invoices/{number}/payments": {
-      "post": {
-        "operationId": "record_payment_booking_invoices__number__payments_post",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          },
-          {
-            "description": "8-200 characters, one per request",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 200,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "8-200 characters, one per request",
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewPayment"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Record Payment Booking Invoices  Number  Payments Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Record Payment",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/invoices/{number}/remind": {
-      "post": {
-        "operationId": "remind_invoice_booking_invoices__number__remind_post",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Remind Invoice Booking Invoices  Number  Remind Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Remind Invoice",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/invoices/{number}/send": {
-      "post": {
-        "operationId": "send_invoice_booking_invoices__number__send_post",
-        "parameters": [
-          {
-            "description": "Invoice number (INV-000123) or UUID",
-            "in": "path",
-            "name": "number",
-            "required": true,
-            "schema": {
-              "description": "Invoice number (INV-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Number",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Send Invoice Booking Invoices  Number  Send Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Send Invoice",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
     "/booking/media/{media_id}": {
       "patch": {
         "operationId": "patch_media_booking_media__media_id__patch",
@@ -17220,7 +14924,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -17337,7 +15041,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -17532,458 +15236,6 @@
         "summary": "Approve Terms Clause",
         "tags": [
           "agency-billing"
-        ]
-      }
-    },
-    "/booking/payments": {
-      "get": {
-        "operationId": "list_payments_booking_payments_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "recorded",
-                    "verified",
-                    "voided"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "State"
-            }
-          },
-          {
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "receipt",
-                    "refund"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          },
-          {
-            "in": "query",
-            "name": "method",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "bank_transfer",
-                    "card_offline",
-                    "cash",
-                    "other"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Method"
-            }
-          },
-          {
-            "in": "query",
-            "name": "invoice",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 64,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Invoice"
-            }
-          },
-          {
-            "in": "query",
-            "name": "case",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 64,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Case"
-            }
-          },
-          {
-            "description": "payment ref, invoice number, case code, reference",
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 100,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "payment ref, invoice number, case code, reference",
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Payments Booking Payments Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Payments",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/payments/{ref}": {
-      "get": {
-        "operationId": "get_payment_booking_payments__ref__get",
-        "parameters": [
-          {
-            "description": "Payment ref (PMT-000123) or UUID",
-            "in": "path",
-            "name": "ref",
-            "required": true,
-            "schema": {
-              "description": "Payment ref (PMT-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Payment Booking Payments  Ref  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Payment",
-        "tags": [
-          "billing"
-        ]
-      },
-      "patch": {
-        "operationId": "patch_payment_booking_payments__ref__patch",
-        "parameters": [
-          {
-            "description": "Payment ref (PMT-000123) or UUID",
-            "in": "path",
-            "name": "ref",
-            "required": true,
-            "schema": {
-              "description": "Payment ref (PMT-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PaymentChanges"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Payment Booking Payments  Ref  Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Patch Payment",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/payments/{ref}/verify": {
-      "post": {
-        "operationId": "verify_payment_booking_payments__ref__verify_post",
-        "parameters": [
-          {
-            "description": "Payment ref (PMT-000123) or UUID",
-            "in": "path",
-            "name": "ref",
-            "required": true,
-            "schema": {
-              "description": "Payment ref (PMT-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Verify Payment Booking Payments  Ref  Verify Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Verify Payment",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/booking/payments/{ref}/void": {
-      "post": {
-        "operationId": "void_payment_booking_payments__ref__void_post",
-        "parameters": [
-          {
-            "description": "Payment ref (PMT-000123) or UUID",
-            "in": "path",
-            "name": "ref",
-            "required": true,
-            "schema": {
-              "description": "Payment ref (PMT-000123) or UUID",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Void Payment Booking Payments  Ref  Void Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Void Payment",
-        "tags": [
-          "billing"
         ]
       }
     },
@@ -21431,7 +18683,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -21496,7 +18748,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -21561,7 +18813,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -21626,7 +18878,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -21681,7 +18933,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -21746,7 +18998,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -22895,7 +20147,7 @@
             }
           },
           {
-            "description": "case code, customer code, name or e-mail",
+            "description": "case code",
             "in": "query",
             "name": "q",
             "required": false,
@@ -22909,7 +20161,7 @@
                   "type": "null"
                 }
               ],
-              "description": "case code, customer code, name or e-mail",
+              "description": "case code",
               "title": "Q"
             }
           },
@@ -22930,23 +20182,6 @@
               ],
               "description": "tripplanner | manual | cis | crm",
               "title": "Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "customer_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Customer Id"
             }
           },
           {
@@ -23064,16 +20299,6 @@
       },
       "post": {
         "operationId": "create_trip_case_booking_trip_cases_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CaseCreate"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "content": {
@@ -23088,17 +20313,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           }
         },
         "security": [
@@ -23233,7 +20448,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23383,7 +20598,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23449,7 +20664,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23522,7 +20737,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23580,7 +20795,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23717,7 +20932,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23801,7 +21016,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -23940,7 +21155,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -24018,7 +21233,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -24039,136 +21254,6 @@
         "summary": "Price Version",
         "tags": [
           "trip-cases"
-        ]
-      }
-    },
-    "/booking/trip-cases/{case_ref}/versions/{version_number}/send": {
-      "post": {
-        "operationId": "send_version_booking_trip_cases__case_ref__versions__version_number__send_post",
-        "parameters": [
-          {
-            "description": "Trip case UUID or code (TC-000123)",
-            "in": "path",
-            "name": "case_ref",
-            "required": true,
-            "schema": {
-              "description": "Trip case UUID or code (TC-000123)",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Case Ref",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version_number",
-            "required": true,
-            "schema": {
-              "maximum": 32767,
-              "minimum": 1,
-              "title": "Version Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SendBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Send Version Booking Trip Cases  Case Ref  Versions  Version Number  Send Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Send Version",
-        "tags": [
-          "trip-cases"
-        ]
-      }
-    },
-    "/booking/trip-cases/{ref}/billing": {
-      "get": {
-        "operationId": "case_billing_booking_trip_cases__ref__billing_get",
-        "parameters": [
-          {
-            "description": "Trip case UUID or code (TC-000123)",
-            "in": "path",
-            "name": "ref",
-            "required": true,
-            "schema": {
-              "description": "Trip case UUID or code (TC-000123)",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Case Billing Booking Trip Cases  Ref  Billing Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Case Billing",
-        "tags": [
-          "billing"
         ]
       }
     },
@@ -24265,7 +21350,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -24286,91 +21371,6 @@
         "summary": "Add Check",
         "tags": [
           "operations"
-        ]
-      }
-    },
-    "/booking/trip-cases/{ref}/invoices": {
-      "post": {
-        "operationId": "create_invoice_booking_trip_cases__ref__invoices_post",
-        "parameters": [
-          {
-            "description": "Trip case UUID or code (TC-000123)",
-            "in": "path",
-            "name": "ref",
-            "required": true,
-            "schema": {
-              "description": "Trip case UUID or code (TC-000123)",
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Ref",
-              "type": "string"
-            }
-          },
-          {
-            "description": "8-200 characters, one per request",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 200,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "8-200 characters, one per request",
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewInvoice"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Invoice Booking Trip Cases  Ref  Invoices Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Create Invoice",
-        "tags": [
-          "billing"
         ]
       }
     },
@@ -24467,7 +21467,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -24523,7 +21523,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -24818,7 +21818,7 @@
             "description": "Successful Response"
           },
           "410": {
-            "description": "b2b_only: the B2C part is switched off (B2C_INTAKE_ENABLED, root ADR 0019 d8); nothing was written"
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
           },
           "422": {
             "content": {
@@ -24847,7 +21847,7 @@
         "operationId": "list_versions_booking_versions_get",
         "parameters": [
           {
-            "description": "case code, customer, version title",
+            "description": "case code, version title",
             "in": "query",
             "name": "q",
             "required": false,
@@ -24861,7 +21861,7 @@
                   "type": "null"
                 }
               ],
-              "description": "case code, customer, version title",
+              "description": "case code, version title",
               "title": "Q"
             }
           },

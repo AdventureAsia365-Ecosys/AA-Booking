@@ -16,10 +16,10 @@ from tests.unit.fakes import ScriptedConn
 
 
 def test_expected_seconds_and_default() -> None:
-    assert expected_seconds("bk_inquiry_pull") == 60
+    assert expected_seconds("bk_tour_lifecycle_pull") == 120
     assert expected_seconds("bk_retention_job") == 900
     assert expected_seconds("bk_unknown") == DEFAULT_EXPECTED_SECONDS == 300
-    assert overdue_after_seconds("bk_notify_email") == 120
+    assert overdue_after_seconds("bk_ops_reminders") == 240
     assert overdue_after_seconds("bk_unknown") == 600
     assert all(kind.startswith("bk_") for kind in EXPECTED_SECONDS)
 
@@ -38,23 +38,23 @@ def test_a_healthy_running_job_zeroes_the_queue_age() -> None:
 
 
 def test_an_overdue_running_job_counts_and_does_not_hide_the_queue() -> None:
-    s = backlog_sample(1000.0, [("bk_inquiry_process", 121.0)])  # > 2 x 60
+    s = backlog_sample(1000.0, [("bk_ops_reminders", 241.0)])  # > 2 x 120
     assert (s.oldest_queued_age_s, s.overdue_running) == (1000.0, 1)
 
 
 def test_overdue_threshold_is_strict_and_unknown_kinds_use_the_default() -> None:
-    assert backlog_sample(None, [("bk_notify_email", 120.0)]).overdue_running == 0
+    assert backlog_sample(None, [("bk_ops_reminders", 240.0)]).overdue_running == 0
     assert backlog_sample(None, [("bk_x6_probe", 600.0), ("bk_x6_probe", 601.0)]).overdue_running == 1
 
 
 def test_one_healthy_job_among_overdue_ones_still_zeroes_the_queue_age() -> None:
     # Rolling deploy: two workers, one stuck, one healthy. The stuck one shows as overdue.
-    s = backlog_sample(950.0, [("bk_inquiry_pull", 500.0), ("bk_inquiry_pull", 5.0)])
+    s = backlog_sample(950.0, [("bk_tour_lifecycle_pull", 500.0), ("bk_tour_lifecycle_pull", 5.0)])
     assert (s.oldest_queued_age_s, s.overdue_running) == (0.0, 1)
 
 
 def test_unknown_attempt_age_is_healthy_and_negative_ages_clamp() -> None:
-    s = backlog_sample(-3.0, [("bk_inquiry_pull", None)])
+    s = backlog_sample(-3.0, [("bk_tour_lifecycle_pull", None)])
     assert (s.oldest_queued_age_s, s.overdue_running, s.due_queued_age_s) == (0.0, 0, 0.0)
 
 
@@ -95,7 +95,7 @@ def _conn(oldest: Any = 1000.0, running: Any = ()) -> ScriptedConn:
 @pytest.mark.asyncio
 async def test_sample_once_hands_the_findings_to_the_publisher(caplog: pytest.LogCaptureFixture) -> None:
     pub = FakePublisher()
-    sampler = JobMetricsSampler(_pool(_conn(1000.0, [("bk_inquiry_pull", 700.0)])), publisher=pub)  # type: ignore[arg-type]
+    sampler = JobMetricsSampler(_pool(_conn(1000.0, [("bk_tour_lifecycle_pull", 700.0)])), publisher=pub)  # type: ignore[arg-type]
     caplog.set_level(logging.INFO, logger="app.jobs.metrics")
     sample = await sampler.sample_once()
     assert sample == Sample(1000.0, 1, 1, 1000.0)

@@ -52,7 +52,6 @@ def test_list_passes_filters_and_resolves_me(make_client, monkeypatch: pytest.Mo
         "assignee": "u-1",
         "q": None,
         "source": None,
-        "customer_id": None,
         "created_from": None,
         "created_to": None,
         "sort": None,
