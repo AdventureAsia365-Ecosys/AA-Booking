@@ -6,15 +6,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { allowedOriginForRequest, cognitoConfigured, startSignIn } from "@/lib/cognito";
+import { redirectToPath } from "@/lib/redirect";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const origin = allowedOriginForRequest(request);
   if (!origin || !cognitoConfigured()) {
-    const url = new URL("/login", request.url);
-    url.searchParams.set("reason", "cognito_unavailable");
-    return NextResponse.redirect(url, { status: 303 });
+    // AA-911: relative Location (lib/redirect.ts): behind the ALB request.url names the server's bind address.
+    return redirectToPath("/login?reason=cognito_unavailable");
   }
   const { authorizeUrl, setTxCookie } = await startSignIn(origin, request.nextUrl.searchParams.get("next") ?? "/");
   const response = NextResponse.redirect(authorizeUrl, { status: 303 });

@@ -1,0 +1,10 @@
+node_modules
+.next
+out
+coverage
+e2e
+*.tsbuildinfo
+.env*
+.vercel
+Dockerfile
+.dockerignore

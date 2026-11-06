@@ -9,11 +9,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { CognitoAuthError, readRefreshCookie, refreshStaffTokens, setStaffSessionCookies } from "@/lib/cognito";
 import { ACCESS_COOKIE, clearSessionCookies, needsRefresh } from "@/lib/session";
 import { safeNext } from "@/lib/safeNext";
+import { redirectToPath } from "@/lib/redirect";
 
 export const dynamic = "force-dynamic";
 
-function redirect(request: NextRequest, path: string): NextResponse {
-  const response = NextResponse.redirect(new URL(path, request.url), { status: 303 });
+// AA-911: relative Location (lib/redirect.ts): behind the ALB request.url names the server's bind address.
+function redirect(_request: NextRequest, path: string): NextResponse {
+  const response = redirectToPath(path);
   response.headers.set("Cache-Control", "no-store");
   return response;
 }
