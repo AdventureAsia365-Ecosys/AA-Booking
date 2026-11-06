@@ -2,6 +2,14 @@
 # AA-993 H1: run the CI checks locally before a push (installed by scripts/install-hooks.sh).
 # Skip once: git push --no-verify. Full mode: AA_PREPUSH=full git push.
 root="$(git rev-parse --show-toplevel)" || exit 1
+# AA-1024 l22: a push in the middle of a rebase sends only the commits replayed so far (lesson S257, CIS #1144).
+for state in rebase-merge rebase-apply; do
+  d="$(git rev-parse --path-format=absolute --git-path "$state")" || exit 1
+  if [[ -e "$d" ]]; then
+    echo "pre-push: a rebase is in progress ($d): finish it (git rebase --continue or --abort), check git status, then push" >&2
+    exit 1
+  fi
+done
 head="$(git rev-parse HEAD 2>/dev/null)" || head=""
 # The checks read HEAD and the working tree, so every pushed commit must be HEAD. Branch deletions (all-zero sha)
 # need no check; an annotated tag is compared through the commit it points to.

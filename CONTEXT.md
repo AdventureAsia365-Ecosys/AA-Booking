@@ -318,7 +318,8 @@ docs/implementation-notes/ per-issue decisions (AA-678.md, AA-679.md, AA-680.md,
                            AA-974.md, AA-835.md, AA-682.md, AA-993.md)
 .github/workflows/         ci.yml (5 required checks + non-required Frontend Build, Vendored CIS copies and Migration
                            preflight, AA-993 M4b: expand / contract class, number = main max + 1, no edit of a copied
-                           file), deploy-dev.yml (its Schema gate job waits until /booking/health/ready lists every
+                           file, AA-1024 l22: no added line naming a migration by an old number after a renumber,
+                           .github/scripts/migration_refs.py), deploy-dev.yml (its Schema gate job waits until /booking/health/ready lists every
                            bk- key the commit needs), migration-sync-wake.yml (after a push to main touching
                            migrations/, rings the AA-CIS-Infra Migration Sync doorbell),
                            post-deploy-verify.yml (AA-993: called by deploy-dev.yml, also dispatchable with expected_sha),
