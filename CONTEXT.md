@@ -148,7 +148,7 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
 | DB access | asyncpg with plain SQL, no ORM in request paths; `ssl="require"` |
 | Lint / tests | ruff, pytest + pytest-asyncio, migration guard, integration tests on Postgres 15 |
 | Runtime | ECS Fargate service `aa-booking-dev-api` on `aa-cis-dev-cluster` (acc2, us-west-1) |
-| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the UI kit core tokens (`frontend/ui/core`, root ADR 0016), react-query, TanStack Table. Vercel project `aa-booking-admin`, deployed by CI (`.github/workflows/vercel-deploy.yml`, see Staff admin frontend); also on ECS as a container of the staff web task (AA-911, `deploy-admin-dev.yml`). Customer surface (O8) not started |
+| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the UI kit core tokens (`frontend/ui/core`, root ADR 0016), react-query, TanStack Table. Vercel project `aa-booking-admin`, deployed by CI (`.github/workflows/vercel-deploy.yml`, see Staff admin frontend); also on ECS as its own service `aa-booking-dev-admin` (AA-911, `deploy-admin-dev.yml`). Customer surface (O8) not started |
 
 ## Layout
 
@@ -1767,10 +1767,10 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   the Hobby team cap (~100 deployments / 24 h for all projects, canceled ones included) was being used up. Needs the
   repo secret `VERCEL_TOKEN`.
 - Frontend on ECS (AA-911, root ADR 0019 d23): the same app also runs as the `booking-admin` container (port 3001) of
-  the staff web task `aa-staff-dev-web` (AA-CIS-Infra `modules/environment/staff_web.tf`; the CIS admin is the other
-  container). `.github/workflows/deploy-admin-dev.yml` builds `frontend/Dockerfile` (Next standalone, only when
+  its own service `aa-booking-dev-admin` (AA-CIS-Infra `modules/environment/staff_web.tf`, S271 amendment of ADR 0019
+  d23: one service per staff app; the CIS admin is a separate service). `.github/workflows/deploy-admin-dev.yml` builds `frontend/Dockerfile` (Next standalone, only when
   `NEXT_OUTPUT=standalone`: Vercel builds are unchanged) on an arm64 runner, pushes `aa-booking-dev-admin:<sha>`
-  (IMMUTABLE), copies the latest revision of the family with only this container's image swapped, rolls the service
+  (IMMUTABLE), copies the latest revision of family `aa-booking-dev-admin` with only the image swapped (env and secrets from that revision), rolls the service
   and checks `https://booking.lumiguides.it.com/api/healthz` answers this commit from ECS (resolved to the ALB on the
   runner before the cut-over, `vars.STAFF_WEB_ALB_DNS`). `booking.` moves from Vercel to the ALB at the cut-over (root
   runbook `docs/ops/runbooks/staff-web-ecs-cutover.md`). Behind the ALB the standalone server's `request.url` /

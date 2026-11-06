@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # AA-911 (root ADR 0019 d23) — Booking admin image: the Next.js standalone server, run as the `booking-admin` container
-# of the staff web task on ECS Dev (AA-CIS-Infra modules/environment/staff_web.tf: Fargate ARM64, port 3001, health
-# check /api/healthz; the CIS admin is the other container of the same task, on 3000). Built natively on an arm64
+# of the ECS Dev service aa-booking-dev-admin (AA-CIS-Infra modules/environment/staff_web.tf: Fargate ARM64, port
+# 3001, health check /api/healthz). Built natively on an arm64
 # runner (.github/workflows/deploy-admin-dev.yml). Same shape as AA-Partner web/Dockerfile and the CIS admin image.
 FROM node:22-alpine AS build
 WORKDIR /app
