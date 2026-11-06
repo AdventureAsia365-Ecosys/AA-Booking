@@ -2,12 +2,12 @@
 
 A required check must report on every pull request and on every merge-queue group (merge_group), under a name that
 never changes (the tech lead's branch-protection script and verify-h3.sh pin it). So `.github/workflows/visual.yml`
-has no `paths:` on pull_request, a merge_group trigger, the job `pr` keeps its name and runs on merge_group (the
-`deployed` job never does), and its Scope step matches the old path list exactly (frontend/**, the workflow itself)
-and, on no match, skips every later step so the job ends green. The skip is step-level: a job-level skip reports
-"skipped", which GitHub counts as passed even when the job it depended on failed. The Scope step's script is run here
-with bash in a scratch git repository. The workflow is read as text (no YAML parser in the backend dependencies), like
-test_vercel_deploy_smoke.py.
+has no `paths:` on pull_request, a merge_group trigger, the job `pr` keeps its name, is skipped on pull_request (S271:
+reported "skipped" = passed) and runs on merge_group (the `deployed` job never does), and its Scope step matches the
+old path list exactly (frontend/**, the workflow itself) and, on no match, skips every later step so the job ends
+green. The skip is step-level: a job-level skip reports "skipped", which GitHub counts as passed even when the job it
+depended on failed. The Scope step's script is run here with bash in a scratch git repository. The workflow is read as
+text (no YAML parser in the backend dependencies), like test_vercel_deploy_smoke.py.
 """
 
 from __future__ import annotations
@@ -83,7 +83,9 @@ def test_the_pr_job_keeps_its_required_name_and_runs_on_merge_group() -> None:
     job = _pr_job()
     assert f"    name: {NAME}\n" in job
     cond = " ".join(job[job.index("    if: >-\n") : job.index("    runs-on:")].split())
-    assert "github.event_name == 'pull_request'" in cond
+    # S271 (CI minutes): skipped on pull_request (reported "skipped" = passed, so the PR can enter the queue); the queue
+    # group runs it, so every frontend change is still checked before main.
+    assert "'pull_request'" not in cond
     assert "github.event_name == 'merge_group'" in cond
     assert "\n    needs:" not in job, "a job-level dependency would turn a failure into a passing 'skipped'"
 
@@ -106,7 +108,7 @@ def test_each_queue_group_gets_its_own_concurrency_group() -> None:
     assert group.endswith("|| github.run_id }}")
 
 
-def test_every_step_after_scope_is_scoped_and_the_comment_is_pr_only() -> None:
+def test_every_step_after_scope_is_scoped() -> None:
     steps = _steps(_pr_job())
     assert steps[0][0] == "checkout" and "fetch-depth: 0" in steps[0][1]
     assert steps[1][0] == "Scope" and "id: scope" in steps[1][1] and not _if(steps[1][1])
@@ -114,9 +116,11 @@ def test_every_step_after_scope_is_scoped_and_the_comment_is_pr_only() -> None:
     assert "working-directory: ." in steps[1][1]
     for name, block in steps[2:]:
         assert SCOPED in _if(block), f"{name} must be guarded by the Scope step"
-    for name in ("Summary", "Upload screenshots and report", "Comment the summary on the PR"):
+    for name in ("Summary", "Upload screenshots and report"):
         assert _if(_step(name)).startswith("always() && "), name
-    assert "github.event_name == 'pull_request'" in _if(_step("Comment the summary on the PR"))
+    # The PR comment went with the per-PR run (S271): nothing in the job writes to a PR any more.
+    assert not any("comment" in name.lower() for name, _ in steps)
+    assert "pull-requests: write" not in _text()
 
 
 def test_changed_pages_diffs_a_queue_group_against_its_base() -> None:

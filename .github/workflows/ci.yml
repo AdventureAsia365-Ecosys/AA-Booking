@@ -11,15 +11,30 @@ name: CI
 # against frontend/kit.lock.json, kit lint at error with a suppressions file that only shrinks), not by "Vendored CIS
 # copies".
 
+#
+# S271 (CI minutes, AA-889 merge queue): what runs on which event. Main is protected by the merge queue: every commit
+# that lands on main is a queue group commit that passed the FULL run first, so the run on `push` to main (the same
+# tree tested again) is gone; Deploy Dev and Vercel Deploy trigger on push themselves, never on this workflow.
+#   merge_group, workflow_dispatch: every job, no path filter, no skip. The merge queue's guarantee is unchanged.
+#   pull_request: the fast checks (Lint, Vendored CIS copies, Security Audit, Unit Tests, Migration preflight, and
+#     Frontend Build without `next build`: kit checks, lint, type check, unit tests). The heavy jobs (Integration
+#     Tests, Docker Build Check, the frontend build; Visual in visual.yml) run on the queue, unless the PR touches
+#     their area (Lint step Scope, .github/scripts/ci_scope.py): migrations or integration tests -> Integration Tests,
+#     the API image inputs -> Docker Build Check. Frontend Build is skipped for a PR that does not touch frontend/; a
+#     docs-only PR (every path under docs/ or *.md) skips the test jobs; a PR that changes .github/ runs everything.
+#   A skipped job reports "skipped", which counts as passed for a required check, so every required check still
+#   reports on a PR and it can enter the queue. Trade-off: a heavy failure is found in the queue (the group fails, the
+#   PR leaves the queue) instead of on the PR. To see the heavy jobs before queueing, dispatch this workflow on the PR
+#   branch (gh workflow run ci.yml --ref <branch>): its checks land on the PR head.
+
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
   # AA-889 (merge queue): the queue tests each group on a temporary gh-readonly-queue/main/* commit and waits for
   # every required check there. All jobs run on it, with no path filter, so no required check is left unreported.
   merge_group:
     types: [checks_requested]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,11 +48,35 @@ defaults:
     working-directory: backend
 
 jobs:
+  # S271: Lint also carries the CI scope of a pull request (its outputs gate the test and build jobs below; the step
+  # never fails the job, and a broken scope leaves the outputs empty, so every gated job runs: they test != 'false').
+  # "Vendored CIS copies" stays its own non-required job: it compares with CIS main, which a PR here does not
+  # control, so folding it into the required Lint would let a CIS change block every PR of this repo.
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.scope.outputs.tests }}
+      integration: ${{ steps.scope.outputs.integration }}
+      docker: ${{ steps.scope.outputs.docker }}
+      frontend: ${{ steps.scope.outputs.frontend }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2    # the pull_request merge commit and its first parent (the base tip)
+
+      - name: Scope (what this pull request needs)
+        id: scope
+        continue-on-error: true
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          python3 .github/scripts/ci_scope.py --event "$EVENT" \
+            --area integration=migrations/,backend/tests/integration/ \
+            --area docker=backend/Dockerfile,backend/.dockerignore,backend/requirements.txt,.trivyignore \
+            --area frontend=frontend/,backend/scripts/check_kit_provenance.py \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7.1.0
@@ -83,8 +122,11 @@ jobs:
           pip-audit -r requirements.txt
           pip-audit -r requirements-dev.txt
 
+  # S271: skipped only for a docs-only pull request (Lint's scope output tests=false); a failed scope runs it.
   test-unit:
     name: Unit Tests
+    needs: lint
+    if: ${{ !cancelled() && needs.lint.outputs.tests != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -117,8 +159,11 @@ jobs:
   # aa_cis_admin NOSUPERUSER CREATEROLE CREATEDB (owner of the database, member of bk_owner), bk_owner
   # NOLOGIN, booking LOGIN. The tests then run as that non-superuser, like DB Migrate on RDS, and each file
   # runs as its migration role (SET ROLE bk_owner from bk-015 on, XD8).
+  # S271: merge_group and dispatch always; a pull request only when it touches migrations or the integration tests.
   test-integration:
     name: Integration Tests
+    needs: lint
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.lint.outputs.integration != 'false') }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -160,8 +205,11 @@ jobs:
             echo "::error::integration tests were skipped"; exit 1
           fi
 
+  # S271: merge_group and dispatch always; a pull request only when it changes the API image inputs.
   docker-build:
     name: Docker Build Check
+    needs: lint
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.lint.outputs.docker != 'false') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -248,7 +296,7 @@ jobs:
   # Same steps in AA-CIS-App, AA-Booking and AA-Partner; only the env block differs.
   migration-preflight:
     name: Migration preflight
-    if: github.event_name != 'push'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -394,8 +442,12 @@ jobs:
   # Non-required (ADR 0004 decision 3): eslint, tsc and `next build` of the staff admin in frontend/.
   # Mirrors the CIS frontend checks. Needs no secret: the app reads BOOKING_API_URL / CIS_API_URL at
   # runtime and falls back to the Dev defaults in frontend/lib/config.ts.
+  # S271: skipped for a pull request that does not touch frontend/ (Lint's scope output frontend); on a pull request
+  # `next build` waits for the queue (the type check and the unit tests still run).
   frontend-build:
     name: Frontend Build
+    needs: lint
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.lint.outputs.frontend != 'false') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -489,6 +541,7 @@ jobs:
         run: npm run test:unit
 
       - name: Build (next build)
+        if: github.event_name != 'pull_request'
         env:
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build
