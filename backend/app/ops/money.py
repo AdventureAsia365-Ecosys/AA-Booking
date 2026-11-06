@@ -25,7 +25,6 @@ MAX_AMOUNT = Decimal("99999999999999.99")  # numeric(16,2)
 SCHEDULE_KINDS = ("deposit", "second", "final", "other")
 MAX_SCHEDULE_ROWS = 10
 # What a sent invoice's status means for its trip case (design §4).
-CASE_STATUS_OF_INVOICE = {"sent": "invoice_sent", "partially_paid": "payment_pending", "paid": "paid"}
 DIGIT_RUN = re.compile(r"\d(?:[ -]?\d)*")
 
 

@@ -7,8 +7,8 @@ required). Life: ``open`` → ``done`` | ``not_applicable``, and back to ``open`
 ``not_applicable`` goes through ``open`` in the same transaction (the guard knows only those edges).
 
 Next to the stored checks a case has two **derived** checks, never stored (``booking.v_trip_check_board``):
-``suppliers_confirmed`` (supply state ``booked`` or ``none``, bk-026) and ``payment_verified`` (``None`` until the
-invoices of bk-028).
+``suppliers_confirmed`` (supply state ``booked`` or ``none``, bk-026) and ``payment_verified`` (``None`` on every case
+since the customer invoices retired with the B2C half, AA-1046 / bk-045; agency money is agency billing).
 
 **Emergency contact** (name + phone of a third person, ``pii:emergency_contact``): B2C cases only. On a B2B case the
 row stays ``not_applicable`` without contact fields (DM-6.8: the agency keeps traveller data); the database refuses
@@ -17,8 +17,8 @@ only with both fields. The fields and the notes are cleared at trip end + ``emer
 ``bk_case_lifecycle`` job (:mod:`app.ops.lifecycle`); a cleared check takes no contact again (409 ``check_cleared``).
 Audit rows name the fields that changed, never their values.
 
-Permissions: ``ops.read`` / ``ops.write`` (admin, sales, contracting); the customer name in the list needs
-``customer.read`` as well. Writes lock the case row (one writer per case at a time) and add one audit row.
+Permissions: ``ops.read`` / ``ops.write`` (admin, sales, contracting). Writes lock the case row (one writer per case
+at a time) and add one audit row.
 """
 
 from __future__ import annotations
@@ -71,13 +71,11 @@ CHECK_COLUMNS = """
     k.id::text AS id, k.trip_case_id::text AS trip_case_id, tc.code AS trip_case_code, tc.channel,
     tc.status AS trip_case_status, tc.start_date, tc.end_date, k.code, k.title, k.status, k.due_date,
     k.assignee_ref, sa.name AS assignee_name, k.done_by, sd.name AS done_by_name, k.done_at, k.note,
-    k.emergency_contact_name, k.emergency_contact_phone, k.cleared_at, k.created_by, k.created_at, k.updated_at,
-    cu.name AS customer_name
+    k.emergency_contact_name, k.emergency_contact_phone, k.cleared_at, k.created_by, k.created_at, k.updated_at
 """
 CHECK_FROM = """
 FROM booking.trip_case_checks k
 JOIN booking.trip_cases tc ON tc.id = k.trip_case_id
-LEFT JOIN booking.customers cu ON cu.id = tc.customer_id
 LEFT JOIN booking.staff_users sa ON sa.cis_user_id = k.assignee_ref
 LEFT JOIN booking.staff_users sd ON sd.cis_user_id = k.done_by
 """
@@ -123,9 +121,7 @@ def check_out(row: Any, staff: Staff) -> dict[str, Any]:
         "channel": out.pop("channel"),
         "start_date": out.pop("start_date"),
         "end_date": out.pop("end_date"),
-        "customer_name": out.pop("customer_name") if staff.can("customer.read") else None,
     }
-    out.pop("customer_name", None)
     out["assignee"] = {"id": out["assignee_ref"], "name": out.pop("assignee_name")} if out["assignee_ref"] else None
     out.pop("assignee_name", None)
     out["done_by"] = {"id": out["done_by"], "name": out.pop("done_by_name")} if out["done_by"] else None
@@ -167,7 +163,7 @@ def derived_checks(board: dict[str, Any] | None) -> list[dict[str, Any]]:
             if board is None or board["payment_verified"] is None
             else ("done" if board["payment_verified"] else "open"),
             "detail": None,
-            # bk-028 (AA-682 S3): the B2C invoice is paid by verified payments; NULL on B2B (no customer invoice).
+            # NULL on every case since bk-045 (AA-1046): the customer invoice retired with the B2C half.
             "available": board is not None and board["payment_verified"] is not None,
         },
     ]

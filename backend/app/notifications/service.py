@@ -4,10 +4,9 @@ A staff member sees the shared staff queue (``recipient_type = 'staff'`` with no
 addressed to them (``recipient_ref`` = their CIS user id, bk-005). Read state is per person in
 ``booking.notification_reads`` (bk-005), because one queue row is shared by every staff member; the bk-002
 ``read_at`` column is not used for staff rows. Customer rows (``recipient_type = 'customer'``) never show
-here: they are the customer's "My Trips" feed (O8).
+here: they were the traveller's feed of the retired B2C half (AA-1046), kept as history; nothing writes one now.
 
-A notification is a row. The only e-mail is the staff "new inquiry" e-mail, sent by the ``bk_notify_email`` job
-that intake queues next to its notification (``app/notifications/staff_email.py``, AA-811); these helpers send none.
+A notification is a row; these helpers send no e-mail (the staff "new inquiry" e-mail went with the inquiry intake).
 """
 
 from __future__ import annotations
@@ -106,68 +105,6 @@ async def notify_staff_once(
         RETURNING id::text
         """,
         recipient_ref,
-        type,
-        title,
-        message,
-        entity_type,
-        entity_id,
-        json.dumps({**(data or {}), "reminder_key": reminder_key}, default=str),
-    )
-    return written is not None
-
-
-async def notify_customer(
-    conn: asyncpg.Connection,
-    *,
-    customer_id: str,
-    type: str,  # noqa: A002
-    title: str,
-    message: str | None,
-    entity_type: str,
-    entity_id: str,
-    data: dict[str, Any],
-) -> str:
-    return await conn.fetchval(
-        """
-        INSERT INTO booking.notifications
-            (recipient_type, recipient_id, type, title, message, entity_type, entity_id, data)
-        VALUES ('customer', $1::uuid, $2, $3, $4, $5, $6::uuid, $7::jsonb)
-        RETURNING id::text
-        """,
-        customer_id,
-        type,
-        title,
-        message,
-        entity_type,
-        entity_id,
-        json.dumps(data, default=str),
-    )
-
-
-async def notify_customer_once(
-    conn: asyncpg.Connection,
-    *,
-    customer_id: str,
-    type: str,  # noqa: A002
-    title: str,
-    message: str | None,
-    entity_type: str,
-    entity_id: str,
-    reminder_key: str,
-    data: dict[str, Any] | None = None,
-) -> bool:
-    """A customer reminder written at most once per ``(type, entity_id, reminder_key)`` (``notifications_reminder_uq``
-    includes ``recipient_type``, so the staff row of the same reminder never collides; critic B7). ON CONFLICT DO
-    NOTHING keeps a duplicate from aborting the caller's (job) transaction. True when the row was written."""
-    written = await conn.fetchval(
-        """
-        INSERT INTO booking.notifications
-            (recipient_type, recipient_id, type, title, message, entity_type, entity_id, data)
-        VALUES ('customer', $1::uuid, $2, $3, $4, $5, $6::uuid, $7::jsonb)
-        ON CONFLICT DO NOTHING
-        RETURNING id::text
-        """,
-        customer_id,
         type,
         title,
         message,

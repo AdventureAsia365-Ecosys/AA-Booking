@@ -799,9 +799,9 @@ async def _open_case(
         "SELECT set_config('booking.status_note', $1, true)", f"B2B confirm by {caller.actor} of hold {hold['id']}"
     )
     case = await conn.fetchrow(
-        "INSERT INTO booking.trip_cases (customer_id, status, source_system, source_id, channel, party_tenant_id,"
+        "INSERT INTO booking.trip_cases (status, source_system, source_id, channel, party_tenant_id,"
         " start_date, end_date, pax, pax_adults, pax_children, currency, idempotency_key)"
-        " VALUES (NULL, 'confirmed', 'crm', $1, 'b2b', $2::uuid, $3, $4, $5, $6, $7, $8, $9)"
+        " VALUES ('confirmed', 'crm', $1, 'b2b', $2::uuid, $3, $4, $5, $6, $7, $8, $9)"
         " RETURNING id::text AS id, code",
         hold["proposal_ref"],
         caller.tenant_id,

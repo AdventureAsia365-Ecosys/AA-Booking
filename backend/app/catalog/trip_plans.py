@@ -748,19 +748,11 @@ def items_from_days(days: list[dict[str, Any]], tour: dict[str, Any]) -> list[ve
     return [versions.Item(title=title, day_from=1, day_to=duration, source_tour_id=source_id)]
 
 
-async def _country_code(conn: asyncpg.Connection, country: str | None) -> list[str]:
-    """The ISO-2 of the tour's CIS country name when the bk-005 list knows it (the catalog has names, not codes)."""
-    if not country:
-        return []
-    code = await conn.fetchval("SELECT iso2::text FROM booking.countries WHERE lower(name) = lower($1)", country)
-    return [code] if code else []
-
-
 async def use_for_trip_case(
     conn: asyncpg.Connection, staff: Staff, source_id: str, data: dict[str, Any]
 ) -> dict[str, Any]:
-    """Start a proposal from a sellable plan. ``data["trip_case"]`` (a case ref) adds a version to that case;
-    otherwise a new case is created from ``data`` (the ``POST /booking/trip-cases`` fields) with V1 from the plan."""
+    """Start a proposal from a sellable plan: ``data["trip_case"]`` (a case ref) gets a new version from the plan.
+    A new case from a plan was a staff-made B2C case, retired with the B2C half (AA-1046): the router refuses it."""
     tour = await _tour(conn, source_id)
     if not tour["sellable"]:
         raise Conflict("trip_plan_not_sellable", "mark the trip plan sellable before using it for a trip case")
@@ -771,14 +763,6 @@ async def use_for_trip_case(
         source_id=source_id,
         label=tour["sku"] or (tour["title"] or source_id)[:80],
     )
-    if data.get("trip_case"):
-        ref = data["trip_case"]
-        version = await versions.create_version(conn, staff, ref, data.get("notes"), seed=seed)
-        return {"mode": "new_version", "trip_case": await trip_cases.get_case(conn, ref), "version": version}
-    case_data = {**data}
-    case_data["trip_style"] = case_data.get("trip_style") or tour["trip_style"]
-    if not case_data.get("countries"):
-        case_data["countries"] = await _country_code(conn, tour["country"])
-    case = await trip_cases.create_case(conn, staff, case_data, source=(SOURCE_SYSTEM, source_id))
-    version = await versions.create_version(conn, staff, case["id"], None, seed=seed)
-    return {"mode": "new_case", "trip_case": await trip_cases.get_case(conn, case["id"]), "version": version}
+    ref = data["trip_case"]
+    version = await versions.create_version(conn, staff, ref, data.get("notes"), seed=seed)
+    return {"mode": "new_version", "trip_case": await trip_cases.get_case(conn, ref), "version": version}
