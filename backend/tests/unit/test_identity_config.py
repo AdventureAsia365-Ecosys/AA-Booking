@@ -1,5 +1,5 @@
-"""Booking staff issuers (AA-680 Phase 2): WORKFORCE x {booking-staff, breakglass} + the CIS bridge, env overrides,
-issuer kinds and the lifespan JWKS prefetch. No network: local issuers from tests/staff_tokens.py."""
+"""Booking staff issuers (AA-680 Phase 2): WORKFORCE x {booking-staff, breakglass} (the CIS bridge is off, AA-911),
+env overrides, issuer kinds and the lifespan JWKS prefetch. No network: local issuers from tests/staff_tokens.py."""
 
 from __future__ import annotations
 
@@ -15,9 +15,10 @@ from app.settings import Settings, SettingsError, load_settings
 from tests.staff_tokens import ISSUER, WORKFORCE_ISSUER, LocalCis
 
 
-def test_defaults_are_the_dev_pool_clients_and_the_cis_bridge() -> None:
+def test_defaults_are_the_dev_pool_clients_and_no_bridge() -> None:
     settings = load_settings({})
-    workforce, bridge = identity_config.booking_staff_issuers(settings)
+    (workforce,) = identity_config.booking_staff_issuers(settings)
+    bridge = identity_config.bridge_config(settings)  # described, never accepted in production (AA-911)
     assert workforce.name == identity_config.WORKFORCE
     assert workforce.issuer == identity_config.DEV_WORKFORCE_ISSUER
     assert workforce.jwks_url == f"{identity_config.DEV_WORKFORCE_ISSUER}/.well-known/jwks.json"
@@ -39,7 +40,7 @@ def test_defaults_are_the_dev_pool_clients_and_the_cis_bridge() -> None:
 
 
 def test_cis_admin_client_is_not_accepted_by_default() -> None:
-    (workforce, _) = identity_config.booking_staff_issuers(load_settings({}))
+    (workforce,) = identity_config.booking_staff_issuers(load_settings({}))
     assert "3oqkumijh04cp81k3nlnub6qtv" not in workforce.client_ids
 
 
@@ -51,7 +52,7 @@ def test_env_overrides_and_blank_values() -> None:
             "COGNITO_BREAKGLASS_CLIENT_ID": "   ",
         }
     )
-    workforce, _ = identity_config.booking_staff_issuers(settings)
+    (workforce,) = identity_config.booking_staff_issuers(settings)
     assert workforce.issuer == WORKFORCE_ISSUER
     preview = {identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID} - {""}
     assert workforce.client_ids == frozenset({"abc123", identity_config.DEV_BREAKGLASS_CLIENT_ID} | preview)
@@ -71,10 +72,13 @@ def test_bad_overrides_are_refused(env: dict[str, str]) -> None:
         load_settings(env)
 
 
-def test_bridge_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(identity_config, "BRIDGE_ENABLED", False)
+def test_bridge_is_off_in_production() -> None:
+    """AA-911: the CIS bridge issuer is accepted only when a caller asks for it explicitly (the test issuer)."""
+    assert identity_config.BRIDGE_ENABLED is False
     (only,) = identity_config.booking_staff_issuers(load_settings({}))
     assert only.name == identity_config.WORKFORCE
+    names = [i.name for i in identity_config.booking_staff_issuers(load_settings({}), include_bridge=True)]
+    assert names == [identity_config.WORKFORCE, identity_config.BRIDGE]
 
 
 def test_issuer_kind() -> None:

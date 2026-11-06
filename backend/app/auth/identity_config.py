@@ -51,8 +51,11 @@ DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID = "7tlhphjurhqio0l26uh20valpp"
 WORKFORCE = "workforce"
 BRIDGE = "bridge"
 
-# AA-680 PR-4 (bridge retirement) turns this off and then deletes the bridge code paths.
-BRIDGE_ENABLED = True
+# AA-911 (S271, root ADR 0019 d23): the bridge is OFF. The staff admin runs on its own host with the WORKFORCE
+# booking-staff client, and CIS no longer mints bridge tokens (/auth/booking-token is gone). Production accepts the
+# WORKFORCE issuer only; a bridge token is 401. The bridge code paths below are kept only for the test issuer of
+# tests/staff_tokens.py (include_bridge=True) until the endpoint tests move to WORKFORCE tokens, then deleted.
+BRIDGE_ENABLED = False
 BRIDGE_AUDIENCE = "booking"
 
 
@@ -89,15 +92,18 @@ def bridge_config(settings: Settings) -> IssuerConfig:
     )
 
 
-def booking_staff_issuers(settings: Settings) -> tuple[IssuerConfig, ...]:
+def booking_staff_issuers(settings: Settings, *, include_bridge: bool | None = None) -> tuple[IssuerConfig, ...]:
+    """The accepted staff issuers. ``include_bridge`` None = :data:`BRIDGE_ENABLED` (production: off)."""
     issuers = [workforce_config(settings)]
-    if BRIDGE_ENABLED:
+    if BRIDGE_ENABLED if include_bridge is None else include_bridge:
         issuers.append(bridge_config(settings))
     return tuple(issuers)
 
 
-def build_staff_verifier(settings: Settings, fetcher: JwksFetcher | None = None) -> MultiIssuerVerifier:
-    return MultiIssuerVerifier(booking_staff_issuers(settings), fetcher)
+def build_staff_verifier(
+    settings: Settings, fetcher: JwksFetcher | None = None, *, include_bridge: bool | None = None
+) -> MultiIssuerVerifier:
+    return MultiIssuerVerifier(booking_staff_issuers(settings, include_bridge=include_bridge), fetcher)
 
 
 def issuer_kind(verifier: MultiIssuerVerifier, iss: str) -> str | None:

@@ -42,9 +42,8 @@ Set in Vercel (or `.env.local` for local runs). All are optional; defaults are i
 | Name | Where | Default | What |
 |---|---|---|---|
 | `BOOKING_API_URL` | server | Dev custom domain `https://api-booking.lumiguides.it.com` | Booking API base; `/booking/...` is appended |
-| `CIS_API_URL` | server | `https://api-cis.lumiguides.it.com` | CIS API for `/auth/admin-login` and `/auth/booking-token` |
 | `NEXT_PUBLIC_CIS_ADMIN_URL` | browser | `https://aa-cis.lumiguides.it.com` | "Open CIS admin" / "Managed in CIS" links |
-| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret**, Production target only | unset | Secret of the Cognito `booking-staff` app client (AA-680). Unset = no "Sign in with company email" button, only the legacy CIS password form |
+| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret**, Production target only | unset | Secret of the Cognito `booking-staff` app client (AA-680). Unset = no "Sign in with company email" button (no way in: the legacy CIS password form is retired, AA-911) |
 | `COGNITO_BOOKING_STAFF_CLIENT_ID` | server | `5ifl9dgkr8a5outnmsjc8v1kt3` | booking-staff client id (Dev); override only for another pool |
 | `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET` | server, **secret**, Preview target only | unset | Secret of the Preview-only `booking-staff-preview` client (AA-911). A preview build reads only this one, never the production secret |
 | `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID` | server | code constant (empty until the Infra apply) | booking-staff-preview client id; empty = no company sign-in on preview builds |
@@ -53,7 +52,7 @@ Set in Vercel (or `.env.local` for local runs). All are optional; defaults are i
 
 Company e-mail sign-in is offered only on `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app` (the
 registered callback hosts; plus `localhost:3001` under `next dev`) when the client secret is set. Tokens stay in
-httpOnly cookies (`bk_access`, `bk_staff_rt`; legacy `bk_cis_session`).
+httpOnly cookies (`bk_access`, `bk_staff_rt`; a leftover legacy `bk_cis_session` is cleared, AA-911).
 
 ## Layout
 
@@ -61,12 +60,11 @@ httpOnly cookies (`bk_access`, `bk_staff_rt`; legacy `bk_cis_session`).
 app/
   login/                 sign-in page (public)
   api/auth/signin|callback/cognito, refresh   company e-mail sign-in (Cognito booking-staff, PKCE) + token refresh
-  api/auth/login|logout  BFF: legacy CIS login → Booking token → httpOnly cookies; logout (revokes Cognito)
+  api/auth/logout        BFF: logout (revokes Cognito); the legacy CIS login route is retired (AA-911)
   api/booking/[...path]  BFF proxy to <BOOKING_API_URL>/booking/<path> with the Bearer token
   (staff)/layout.tsx     GET /booking/staff/me → shell, or pending-activation / unavailable screens
   (staff)/**/page.tsx    every route of UI spec §3 (wave 1 real, wave 2/3 layout frame)
-proxy.ts                 Next 16 middleware: no session → /login; Cognito token near expiry → /api/auth/refresh;
-                         re-mints the legacy Booking token
+proxy.ts                 Next 16 middleware: no session → /login; Cognito token near expiry → /api/auth/refresh
 lib/                     config, session cookies, rbac (page roles), typed API client + types
 ui/index.ts              the barrel: pages import from "@/ui" only
 ui/core/                 UI kit core: byte copy of AA-CIS-App frontend/app/_kit/core (kit-sync, kit.lock.json)

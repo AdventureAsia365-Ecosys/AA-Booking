@@ -18,10 +18,6 @@ export function bookingApiUrl(): string {
   return trimSlash(process.env.BOOKING_API_URL || DEV_BOOKING_API_URL);
 }
 
-/** CIS API base (server only): `/auth/admin-login`, `/auth/booking-token`. */
-export function cisApiUrl(): string {
-  return trimSlash(process.env.CIS_API_URL || DEV_CIS_API_URL);
-}
 
 /** CIS admin web app, for "Managed in CIS" / "Open CIS admin" links. */
 export const CIS_ADMIN_URL = trimSlash(process.env.NEXT_PUBLIC_CIS_ADMIN_URL || DEV_CIS_ADMIN_URL);
