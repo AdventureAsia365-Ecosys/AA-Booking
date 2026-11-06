@@ -100,11 +100,14 @@ async def _file(conn: asyncpg.Connection, kind: str, entity_type: str, entity_id
 
 
 async def test_registered_rerunnable_and_grants(admin: asyncpg.Connection) -> None:
-    await admin.execute("SET ROLE bk_owner")
-    try:
-        await admin.execute(MIGRATION.read_text(encoding="utf-8"))  # a second run is a no-op
-    finally:
-        await admin.execute("RESET ROLE")
+    # AA-1046: bk-030 checks that booking.payments (bk-028) exists first; bk-045 dropped it, so after bk-045 the file
+    # is superseded and never re-run (DB Migrate never re-runs a registered file either).
+    if not await admin.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = 'bk-045'"):
+        await admin.execute("SET ROLE bk_owner")
+        try:
+            await admin.execute(MIGRATION.read_text(encoding="utf-8"))  # a second run is a no-op
+        finally:
+            await admin.execute("RESET ROLE")
     await apply_migrations(admin, only=range(31, 1000))
     assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-030'") == 1
     for rel in ("supplier_bills", "supplier_bill_items", "supplier_payouts", "v_supplier_bill_balance"):

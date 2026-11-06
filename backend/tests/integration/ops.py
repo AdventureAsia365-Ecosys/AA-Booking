@@ -22,8 +22,14 @@ NOTE = "it-682"
 LOCKED = ("booking.version_item_costs", "booking.trip_case_version_itinerary", "booking.trip_case_versions")
 START = date.today() + timedelta(days=40)
 # A b2c case is history since the B2C retirement: bk-045's trip_cases_channel_chk lets one in only when it was created
-# before the drop.
-B2C_CREATED_AT = datetime(2026, 1, 15, tzinfo=UTC)
+# before the drop (the session replay applies bk-045 minutes before a test runs). Relative to today, so a 400-day
+# window (the ops funnel) still sees it.
+B2C_CREATED_AT = datetime.now(UTC) - timedelta(days=60)
+# bk-045's cut-off, the timestamp literal in trip_cases_channel_chk (NULL before bk-045).
+CUTOFF_SQL = (
+    "SELECT substring(pg_get_constraintdef(oid) FROM 'created_at < ''([^'']+)''')::timestamptz"
+    " FROM pg_constraint WHERE conname = 'trip_cases_channel_chk'"
+)
 
 
 async def _as_owner(conn: asyncpg.Connection) -> None:
@@ -226,6 +232,13 @@ async def b2c_case(
     return await insert_b2c_case(
         conn, tag=tag, status=status, start=start, end=start + timedelta(days=4) if start else None
     )
+
+
+async def latest_b2c_created_at(conn: asyncpg.Connection) -> datetime:
+    """The latest ``created_at`` a b2c case may have: one second before bk-045's cut-off (the time it was applied,
+    written into ``trip_cases_channel_chk``), or now before bk-045."""
+    cutoff = await conn.fetchval(CUTOFF_SQL)
+    return (cutoff - timedelta(seconds=1)) if cutoff else datetime.now(UTC)
 
 
 async def insert_b2c_case(

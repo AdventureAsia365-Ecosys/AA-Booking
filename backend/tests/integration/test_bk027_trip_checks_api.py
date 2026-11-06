@@ -92,8 +92,8 @@ async def test_case_checks_flow(client: Client, admin: asyncpg.Connection) -> No
         "open",
         "confirming",
     )
-    # bk-028: a B2C case's payment check reads its invoice (none yet: open).
-    assert (payment["available"], payment["status"]) == (True, "open")
+    # bk-045 (AA-1046): no customer invoice any more, so the payment check is not available on any case.
+    assert (payment["available"], payment["status"]) == (False, None)
     contact = next(i for i in out["items"] if i["code"] == "emergency_contact")
     assert contact["contact_allowed"] is True
     insurance = next(i for i in out["items"] if i["code"] == "insurance")

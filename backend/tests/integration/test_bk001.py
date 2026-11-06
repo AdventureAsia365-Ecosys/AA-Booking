@@ -17,15 +17,13 @@ from tests.migration_guard import MASTER_ROLE, OWNER_ROLE, OWNER_TRANSFER
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-BK001_TABLES = {"customers", "customer_otps", "customer_sessions", "media_files", "audit_logs", "inbox_events"}
+# AA-1046: bk-045 dropped the bk-001 B2C tables (customers, customer_otps, customer_sessions, media_files).
+BK001_TABLES = {"audit_logs", "inbox_events"}
+BK001_DROPPED_BY_BK045 = {"customers", "customer_otps", "customer_sessions", "media_files"}
 # Every bk-NNN in migrations/, in order (later migrations are applied too).
 VERSIONS = [f"bk-{p.name[:3]}" for p in MIGRATIONS]
 # Owner of every booking.* object after the replay: the RDS master until bk-014 is in migrations/, then bk_owner (X1).
 OWNER_AFTER_REPLAY = OWNER_ROLE if max(int(p.name[:3]) for p in MIGRATIONS) >= OWNER_TRANSFER else MASTER_ROLE
-
-
-def _email() -> str:
-    return f"{uuid.uuid4().hex}@example.test"
 
 
 async def test_registered_once_and_rerun_is_a_noop(migrated_admin_dsn: str) -> None:
@@ -56,6 +54,7 @@ async def test_tables_exist_and_are_owned_by_the_migration_role(migrated_admin_d
     try:
         rows = await conn.fetch("SELECT tablename, tableowner FROM pg_tables WHERE schemaname = 'booking'")
         assert BK001_TABLES <= {r["tablename"] for r in rows}
+        assert not BK001_DROPPED_BY_BK045 & {r["tablename"] for r in rows}
         assert {r["tableowner"] for r in rows} == {OWNER_AFTER_REPLAY}
         assert await conn.fetchval("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'booking'") is True  # set by test
     finally:
@@ -78,27 +77,21 @@ async def test_default_privileges_cover_future_tables(migrated_admin_dsn: str, m
         await admin.close()
 
 
-@pytest.mark.usefixtures("b2c_insert_regranted")  # AA-1034 R0: bk-036 revoked INSERT on the B2C tables
 async def test_booking_role_reads_and_writes_its_tables(migrated_booking_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_booking_dsn)
     try:
-        customer_id = await conn.fetchval("INSERT INTO booking.customers (email) VALUES ($1) RETURNING id", _email())
-        await conn.execute(
-            "INSERT INTO booking.customer_otps (customer_id, otp_hash, channel, expires_at)"
-            " VALUES ($1, 'h', 'email', now() + interval '5 minutes')",
-            customer_id,
-        )
+        entity = uuid.uuid4()
         await conn.execute(
             "INSERT INTO booking.audit_logs (actor_type, action, entity_type, entity_id)"
-            " VALUES ('system', 'test', 'customer', $1)",
-            customer_id,
+            " VALUES ('system', 'test', 'trip_case', $1)",
+            entity,
         )
         await conn.execute(
             "INSERT INTO booking.inbox_events (source, contract, idempotency_key, payload)"
             " VALUES ('tripplanner', 'inquiry.submitted', $1, '{}'::jsonb)",
             uuid.uuid4().hex,
         )
-        assert await conn.fetchval("SELECT count(*) FROM booking.customers WHERE id = $1", customer_id) == 1
+        assert await conn.fetchval("SELECT count(*) FROM booking.audit_logs WHERE entity_id = $1", entity) == 1
     finally:
         await conn.close()
 
@@ -113,7 +106,7 @@ async def test_booking_role_reads_and_writes_its_tables(migrated_booking_dsn: st
         "SELECT * FROM shared.schema_versions",
         "CREATE TABLE booking.app_created (id int)",
         "CREATE TABLE public.app_created (id int)",
-        "TRUNCATE booking.customers CASCADE",
+        "TRUNCATE booking.trip_cases CASCADE",
     ],
 )
 async def test_booking_role_is_least_privilege(migrated_booking_dsn: str, statement: str) -> None:
@@ -130,47 +123,6 @@ async def test_view_shows_only_booking_versions(migrated_booking_dsn: str) -> No
     try:
         versions = [r["version"] for r in await conn.fetch("SELECT version FROM booking.v_schema_versions ORDER BY 1")]
         assert versions == VERSIONS  # the stub CIS row '222' is not visible
-    finally:
-        await conn.close()
-
-
-@pytest.mark.usefixtures("b2c_insert_regranted")  # AA-1034 R0: bk-036 revoked INSERT on the B2C tables
-async def test_customer_constraints(migrated_booking_dsn: str) -> None:
-    conn = await asyncpg.connect(migrated_booking_dsn)
-    try:
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute("INSERT INTO booking.customers (name) VALUES ('no contact')")
-
-        # bk-002: email is unique among VERIFIED live customers (leads may repeat an email).
-        email = _email()
-        insert_verified = "INSERT INTO booking.customers (email, verified) VALUES ($1, true) RETURNING id"
-        first = await conn.fetchval(insert_verified, email)
-        with pytest.raises(asyncpg.UniqueViolationError):
-            await conn.execute(insert_verified, email.upper())
-
-        before = await conn.fetchval("SELECT updated_at FROM booking.customers WHERE id = $1", first)
-        await conn.execute("UPDATE booking.customers SET deleted_at = now() WHERE id = $1", first)
-        after = await conn.fetchval("SELECT updated_at FROM booking.customers WHERE id = $1", first)
-        assert after > before  # set_updated_at trigger
-
-        # A soft-deleted customer does not block re-registration.
-        await conn.fetchval(insert_verified, email)
-
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute(
-                "INSERT INTO booking.customer_otps (customer_id, otp_hash, channel, expires_at)"
-                " VALUES ($1, 'h', 'pigeon', now())",
-                first,
-            )
-        key = uuid.uuid4().hex
-        insert_event = (
-            "INSERT INTO booking.inbox_events (source, contract, idempotency_key, payload)"
-            " VALUES ($1, 'inquiry.submitted', $2, '{}'::jsonb)"
-        )
-        await conn.execute(insert_event, "tripplanner", key)
-        await conn.execute(insert_event, "cis", key)  # unique per (source, contract, key), not globally
-        with pytest.raises(asyncpg.UniqueViolationError):
-            await conn.execute(insert_event, "tripplanner", key)
     finally:
         await conn.close()
 

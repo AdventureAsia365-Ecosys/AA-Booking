@@ -117,6 +117,17 @@ def booking_dsn(admin_dsn: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+# AA-1046: bk-045 (destructive) dropped the B2C objects files bk-001..bk-036 create or alter (customers and their
+# identities, OTPs and sessions, media_files, the customer invoices and payments, v_ops_inquiry_inbox,
+# trip_cases.customer_id). A RE-RUN after the drop (the idempotency checks of this suite) starts at bk-037: DB Migrate
+# never runs a registered file again, and re-running an older one fails on a dropped object or recreates it (S271,
+# each of bk-001, 002, 005, 014, 018, 020, 024, 025, 028, 030, 035, 036 did; the files between them only re-grant what
+# the next of those revokes, so a re-run that skips some of them leaves grants the first pass never left). The first
+# pass always runs every file.
+SUPERSEDED_BY_BK045 = frozenset(range(1, 37))
+BK045 = 45
+
+
 async def apply_migrations(
     conn: asyncpg.Connection, *, first_pass: bool = False, only: Iterable[int] | None = None
 ) -> None:
@@ -127,12 +138,18 @@ async def apply_migrations(
     booking when the file starts, XD8): a mismatch fails here, before the Dev apply. A re-run (the idempotency
     check) uses the same per-file role; DB Migrate itself never re-runs a registered file. After a switched file
     the login role may own nothing in schema booking (the runner's ownership post-check). ``only`` limits the run to
-    those bk- numbers, in file order (e.g. ``range(1, 18)`` = the state before bk-018).
+    those bk- numbers, in file order (e.g. ``range(1, 18)`` = the state before bk-018). A re-run once bk-045 is
+    registered skips :data:`SUPERSEDED_BY_BK045`.
     """
     login = await conn.fetchval("SELECT session_user")
     wanted = None if only is None else set(only)
+    dropped = not first_pass and bool(
+        await conn.fetchval("SELECT 1 FROM shared.schema_versions WHERE version = $1", f"bk-{BK045:03d}")
+    )
     for path in MIGRATIONS:
         if wanted is not None and int(path.name[:3]) not in wanted:
+            continue
+        if dropped and int(path.name[:3]) in SUPERSEDED_BY_BK045:
             continue
         role = migration_role(int(path.name[:3]))
         if first_pass:
@@ -189,6 +206,8 @@ B2C_TABLES = ("customers", "customer_identities", "customer_otps", "customer_ses
 async def _set_b2c_insert(admin_dsn: str, grant: bool) -> None:
     conn = await asyncpg.connect(admin_dsn)
     try:
+        if await conn.fetchval("SELECT to_regclass('booking.customers')") is None:
+            return  # AA-1046: bk-045 dropped them (only a module that rebuilt the schema before it still has them)
         async with as_booking_owner(conn):
             verb = "GRANT INSERT ON {} TO booking" if grant else "REVOKE INSERT ON {} FROM booking"
             await conn.execute(verb.format(", ".join(f"booking.{t}" for t in B2C_TABLES)))

@@ -17,6 +17,8 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from tests.integration import ops
+
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 FUNNEL = "booking.v_ops_funnel_daily"
@@ -53,17 +55,18 @@ def _delta(after: dict, before: dict) -> dict:
 
 
 async def _case(conn: asyncpg.Connection, source_system: str) -> str:
-    customer = await conn.fetchval(
-        "INSERT INTO booking.customers (name, email) VALUES ('Ops view lead', $1) RETURNING id",
-        f"{uuid.uuid4().hex}@x.test",
+    """A kept b2c case written in SQL (AA-1046: the intake is retired; bk-045 lets one in only as history)."""
+    case = await ops.insert_b2c_case(
+        conn, tag=uuid.uuid4().hex[:8], status="new_inquiry", start=None, end=None, source_system=source_system
     )
-    return await conn.fetchval(
-        "INSERT INTO booking.trip_cases (customer_id, source_system, inquiry_snapshot, currency)"
-        " VALUES ($1, $2, $3::jsonb, 'USD') RETURNING id::text",
-        customer,
-        source_system,
+    # The funnel counts the cases created today: the latest moment bk-045's channel rule still lets a b2c case in.
+    await conn.execute(
+        "UPDATE booking.trip_cases SET inquiry_snapshot = $2::jsonb, created_at = $3 WHERE id = $1::uuid",
+        case["id"],
         json.dumps({}),
+        await ops.latest_b2c_created_at(conn),
     )
+    return case["id"]
 
 
 async def _walk(conn: asyncpg.Connection, case_id: str, *statuses: str) -> None:
@@ -156,7 +159,7 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         await admin.execute("SET LOCAL ROLE cis_app")
         await admin.fetch(f"SELECT * FROM {FUNNEL} LIMIT 1")
         await admin.fetch(f"SELECT * FROM {CASE_STATUS} LIMIT 1")
-        for table in ("booking.customers", "booking.trip_cases", "booking.inbox_events"):
+        for table in ("booking.trip_cases", "booking.inbox_events"):
             # A savepoint per read: the expected 42501 rolls it back and the outer transaction goes on.
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 async with admin.transaction():
@@ -178,8 +181,7 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         # bk-025 (AA-992): the data coverage contract views (test_bk025_ops_views.py).
         ("v_ops_data_totals", "SELECT"),
         ("v_ops_trip_plan_keys", "SELECT"),
-        # bk-035 (AA-1003): the inquiry inbox key view (test_bk035_ops_inquiry_inbox.py).
-        ("v_ops_inquiry_inbox", "SELECT"),
+        # bk-035's inquiry inbox key view is gone: bk-045 dropped it with the B2C half (AA-1046).
         # bk-040 (AA-1029): the public from price view price.from.v1 (test_bk040_from_prices_cis_reader.py).
         ("v_from_prices", "SELECT"),
         # bk-042 (AA-1037): agency billing status for the CIS tenant_billing_tick (test_bk041_agency_billing_schema).
