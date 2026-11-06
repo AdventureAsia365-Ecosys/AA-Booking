@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  // AA-911 (root ADR 0019 d23): the ECS image (frontend/Dockerfile) builds the standalone server; Vercel builds stay
+  // as they are until the Vercel project is retired.
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   poweredByHeader: false,
   async headers() {
     // AA-879: the same six security headers as the CIS admin, the CIS portal and TripPlanner (AA-876 /

@@ -19,14 +19,14 @@ import {
   setStaffSessionCookies,
 } from "@/lib/cognito";
 import { fetchStaffMe } from "@/lib/api/server";
+import { redirectToPath } from "@/lib/redirect";
 import { CIS_SESSION_COOKIE, clearSessionCookies, cookieOptions } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-function toLogin(request: NextRequest, reason: string): NextResponse {
-  const url = new URL("/login", request.url);
-  url.searchParams.set("reason", reason);
-  const response = NextResponse.redirect(url, { status: 303 });
+// AA-911: relative Location (lib/redirect.ts): behind the ALB request.url names the server's bind address.
+function toLogin(_request: NextRequest, reason: string): NextResponse {
+  const response = redirectToPath(`/login?${new URLSearchParams({ reason }).toString()}`);
   clearOAuthTx(response);
   response.headers.set("Cache-Control", "no-store");
   return response;
