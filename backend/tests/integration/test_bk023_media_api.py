@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import struct
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +27,11 @@ from app.catalog import liveness
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
+from tests.integration import ops
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "023_supply_outbox_media.sql"
 MAKER, SALES = "it-835-media-maker", "it-835-media-sales"
@@ -97,7 +98,8 @@ async def _clean(conn: asyncpg.Connection) -> None:
         NOTE,
     )
     await conn.execute("DELETE FROM booking.trip_cases WHERE notes = $1", NOTE)
-    await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-835-media-%'")
+    if await conn.fetchval("SELECT to_regclass('booking.customers')") is not None:  # before bk-045 (AA-1046)
+        await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-682-it-835-media-%'")
     await conn.execute("DELETE FROM booking.supplier_contracts")
     await conn.execute("DELETE FROM booking.suppliers")
     await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type = ANY($1::text[])", AUDITED)
@@ -132,9 +134,7 @@ async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
 ) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis, FakeStore]]:
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis, store = Database(settings), LocalCis(), FakeStore()
     app = create_app(settings, db, cis.verifier(), media_store=store)
     try:
@@ -249,14 +249,8 @@ async def test_read_back_and_published_text_on_proposal_items(
     c, cis, _ = client
     maker, sales = _auth(cis, MAKER), _auth(cis, SALES)
     hotel, room, svc = await _hotel_and_service(c, maker)
-    customer_id = await admin.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ('it-835-media-1@example.test') RETURNING id"
-    )
-    case = await admin.fetchrow(
-        "INSERT INTO booking.trip_cases (customer_id, start_date, pax, notes) VALUES ($1, '2027-03-10', 2, $2)"
-        " RETURNING id, code",
-        customer_id,
-        NOTE,
+    case = await ops.insert_b2c_case(
+        admin, tag="it-835-media-1", status="new_inquiry", start=date(2027, 3, 10), end=None, notes=NOTE
     )
     await admin.execute(
         "INSERT INTO booking.trip_case_versions (trip_case_id, version_number) VALUES ($1, 1)", case["id"]

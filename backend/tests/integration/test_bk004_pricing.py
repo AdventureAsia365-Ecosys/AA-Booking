@@ -25,10 +25,11 @@ from app.settings import Settings
 from app.trip_cases import service as cases
 from app.trip_cases import versions
 from app.trip_cases.versions import Item
+from tests.integration import ops
 from tests.integration.conftest import MIGRATIONS
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 SEED_DAY = date(2026, 10, 14)
 BK004 = next(p for p in MIGRATIONS if p.name.startswith("004_"))
@@ -199,10 +200,8 @@ async def test_repository_picks_row_in_force(app_conn: asyncpg.Connection) -> No
 
 
 async def _version_item(admin: asyncpg.Connection) -> tuple[uuid.UUID, uuid.UUID]:
-    customer_id = await admin.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ($1) RETURNING id", f"{uuid.uuid4().hex}@example.test"
-    )
-    case_id = await admin.fetchval("INSERT INTO booking.trip_cases (customer_id) VALUES ($1) RETURNING id", customer_id)
+    case = await ops.insert_b2c_case(admin, tag=uuid.uuid4().hex[:8], status="new_inquiry", start=None, end=None)
+    case_id = uuid.UUID(case["id"])
     version_id = await admin.fetchval(
         "INSERT INTO booking.trip_case_versions (trip_case_id, version_number) VALUES ($1, 1) RETURNING id", case_id
     )
@@ -257,9 +256,7 @@ async def test_quote_preview_end_to_end(admin: asyncpg.Connection, migrated_book
     )
     await admin.execute(APPROVE_ALL_FX)
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     # Real staff auth (AA-681): a CIS-signed JWT for the active contracting row the fixture made, and one for
@@ -343,7 +340,7 @@ async def test_item_costs_survive_an_item_save(admin: asyncpg.Connection, migrat
 
 
 async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migrated_booking_dsn: str) -> None:
-    """S236 review finding 3 (+ 2 and 7): costs saved with the items, POST …/price, send, sent cost lock, Vn copy."""
+    """S236 review finding 3 (+ 2 and 7): costs saved with the items, POST …/price, sent cost lock, Vn copy."""
     version_id, item_id = await _version_item(admin)
     case_ref = await admin.fetchval(
         "SELECT c.code FROM booking.trip_cases c JOIN booking.trip_case_versions v ON v.trip_case_id = c.id"
@@ -357,9 +354,7 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
     await admin.execute(APPROVE_ALL_FX)
     await admin.execute("UPDATE booking.staff_users SET role = 'sales' WHERE cis_user_id = $1", STAFF_ID)
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     sales = {"Authorization": f"Bearer {cis.token(sub=STAFF_ID, cis_role='reviewer')}"}
@@ -425,10 +420,11 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
         async with pool.acquire() as conn:
             async with conn.transaction():
                 await cases.change_status(conn, staff, case_ref, "discovery", None)
-            async with conn.transaction():
-                await versions.send_version(
-                    conn, staff, case_ref, 1, to=None, subject="s", message="m", valid_until=None
-                )
+            # AA-1046: no Send route any more; a version sent before keeps its locks (the way Send marked it).
+            await admin.execute(
+                "UPDATE booking.trip_case_versions SET is_sent_to_customer = true, sent_at = now() WHERE id = $1",
+                version_id,
+            )
             # bk-006: the costs behind a sent price are locked, like its items (bk-005).
             with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
                 await conn.execute(

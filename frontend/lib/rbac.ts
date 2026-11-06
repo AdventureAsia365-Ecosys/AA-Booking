@@ -46,8 +46,6 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/cases", roles: [A, S, C] },
   { pattern: "/cases/*", roles: [A, S, C] },
   { pattern: "/proposals", roles: [A, S, C] },
-  { pattern: "/customers", roles: [A, S] },
-  { pattern: "/customers/*", roles: [A, S] },
   { pattern: "/pricing/calculator", roles: [A, S, C] },
   // Admin (W1 / W2)
   { pattern: "/staff", roles: [A] },
@@ -73,10 +71,9 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/catalog/trip-plans/:id/commercial", roles: [A, C] },
   { pattern: "/catalog/*", roles: ALL },
   // Operations (W3)
-  // AA-682 S4: contracting opens /billing for its Supplier bills tab only (API bill.*; invoices stay billing.read).
-  // AA-1035: finance works the invoices and payments (API billing.read / billing.write; verifying stays admin).
-  { pattern: "/billing", roles: [A, S, C, F] },
-  { pattern: "/billing/*", roles: [A, S, F] },
+  // AA-682 S4: /billing is the supplier bills (API bill.read: admin, sales, contracting). AA-1046: the customer
+  // invoices and payments (and their detail pages) are retired; finance works agency billing.
+  { pattern: "/billing", roles: [A, S, C] },
   // AA-1037 R4 (root ADR 0019 d9): agency billing, every invoice from AA to an agency (software fee + tour
   // settlement), payments with maker-checker and the billing settings (API agency_billing.*, billing_config.write).
   { pattern: "/agency-billing", roles: [A, F] },

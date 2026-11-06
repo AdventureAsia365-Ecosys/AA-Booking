@@ -263,7 +263,6 @@ def _list_row(**extra: Any) -> dict[str, Any]:
         "created_by": "system",
         "created_at": datetime(2026, 11, 1, tzinfo=UTC),
         "updated_at": datetime(2026, 11, 1, tzinfo=UTC),
-        "customer_name": "Ann Lead",
         "case_checks_total": 4,
         "case_checks_done": 2,
         "case_checks_not_applicable": 1,
@@ -286,7 +285,7 @@ async def test_list_counts_every_status_and_rows_carry_trip_progress() -> None:
     assert out["counts"] == counts and out["total"] == 5
     (row,) = out["items"]
     assert row["trip_case"]["checks"] == {"total": 4, "done": 2, "not_applicable": 1}
-    assert row["trip_case"]["sales_name"] == "Sam Sales" and row["trip_case"]["customer_name"] == "Ann Lead"
+    assert row["trip_case"]["sales_name"] == "Sam Sales" and "customer_name" not in row["trip_case"]
     assert not {"case_checks_total", "case_checks_done", "sales_name", "customer_name"} & set(row)
     # The counts ignore the status and due filters (the tabs choose between them) but keep owner and search.
     (count_args,) = conn.sql("AS not_applicable")

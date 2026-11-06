@@ -18,9 +18,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, Hammer, Hotel, Inbox, Lock, Send, UserCheck, UserPlus } from "lucide-react";
+import { ArrowRight, Hammer, Hotel, Lock, Send, UserCheck, UserPlus } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
-import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { supplierBookingsApi } from "@/lib/api/supplierBookings";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
 import { canSeePage } from "@/lib/rbac";
@@ -34,7 +33,6 @@ import {
   ManagedInCisLink,
   PageFrame,
   PersonCell,
-  Pill,
   STATUS_PHASES,
   Section,
   SkeletonBar,
@@ -45,15 +43,14 @@ import {
   useStaff,
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 /** Worked on by staff, not yet sent to the customer (phase "Inquiry" after triage + "Proposal" building). */
 const IN_PROGRESS: TripCaseStatus[] = ["discovery", "building"];
 /** Every status that still needs work (the summary's `open` uses the same rule). */
 const OPEN_STATUSES = STATUS_PHASES.flatMap((p) => p.statuses).filter((s) => s !== "completed");
 
-const EMPTY_CASES = B2C_INTAKE_OPEN
-  ? "Inquiries from TripPlanner and cases created by staff appear here."
-  : "Partner agency bookings appear here.";
+const EMPTY_CASES = "Partner agency bookings appear here.";
 
 const casesHref = (statuses: readonly string[]) => `/cases?status=${encodeURIComponent(statuses.join(","))}`;
 
@@ -166,18 +163,7 @@ function SalesDashboard({ role }: { role: string }) {
   return (
     <>
       <div className="aa-kpi-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        {/* AA-1034 R0: TripPlanner inquiries are the frozen B2C intake (root ADR 0019), so the tile is hidden. */}
-        {B2C_INTAKE_OPEN && (
-          <TileLink href={casesHref(["new_inquiry"])} label="New inquiries: open the inquiry list">
-            <KpiTile
-              label="New inquiries"
-              icon={<Inbox size={16} />}
-              value={v((x) => x.new_inquiry)}
-              hint={s ? (s.new_inquiry > 0 ? "Needs attention" : "Nothing waiting") : undefined}
-              hintTone={s && s.new_inquiry > 0 ? "danger" : "neutral"}
-            />
-          </TileLink>
-        )}
+        {/* AA-1046: no "New inquiries" tile: TripPlanner inquiries were the B2C intake, retired with it. */}
         <TileLink href={casesHref(IN_PROGRESS)} label="In progress: open the cases being worked on">
           <KpiTile
             label="In progress"
@@ -290,14 +276,13 @@ const RECENT_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   { id: "code", header: "Case", accessorKey: "code", cell: ({ row }) => <Code>{row.original.code}</Code> },
   {
     id: "customer",
-    header: "Customer",
-    accessorKey: "customer_name",
+    header: "For",
+    accessorFn: (r) => casePartyLabel(r),
     cell: ({ row }) => (
       <PersonCell
         className="md:max-w-[220px]"
-        name={row.original.customer_name}
-        sub={row.original.customer_email ?? row.original.customer_phone}
-        chips={!row.original.customer_verified ? <Pill tone="accent" dot={false}>Unverified</Pill> : null}
+        name={casePartyLabel(row.original)}
+        sub={row.original.channel === "b2b" ? row.original.party_tenant_id : "read-only"}
       />
     ),
   },
@@ -373,7 +358,7 @@ function RecentCards({
               <Code>{c.code}</Code>
               <TripCaseStatusBadge status={c.status} />
             </span>
-            <span className="truncate text-[13.5px] font-semibold text-ink">{c.customer_name ?? "Unnamed customer"}</span>
+            <span className="truncate text-[13.5px] font-semibold text-ink">{casePartyLabel(c)}</span>
             <TripText item={c} />
             <span className="flex items-center justify-between gap-2 text-xs text-muted">
               <span className="truncate">{salesOf(c)}</span>
@@ -482,7 +467,7 @@ function MyQueue() {
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <Code>{c.code}</Code>
-                  <span className="truncate text-[13px] text-ink">{c.customer_name ?? "Unnamed customer"}</span>
+                  <span className="truncate text-[13px] text-ink">{casePartyLabel(c)}</span>
                 </span>
                 <TripCaseStatusBadge status={c.status} />
               </Link>

@@ -19,22 +19,18 @@
 //     moved on show the notice; "Refresh from CIS" copies today's titles into the draft (nothing is written until
 //     Save); a multi-day item names its tour; the customer-style preview never scrolls sideways at 390 (it did by
 //     257 px), in light and dark.
-// AA-1037 (root ADR 0019 d8): the fixture cases are b2c, so their write affordances (status menu, Convert / Decline,
-// proposal row actions, the builder's edit controls) are checked only on a build with the B2C part open
-// (NEXT_PUBLIC_B2C_INTAKE=on); the default (closed) build checks instead that every route of a b2c case (workspace,
-// builder, preview), the cross-case /proposals rows and the /trip-checks drawer offer no write, while a B2B row keeps
-// its actions.
+// AA-1037 / AA-1046 (root ADR 0019 d8): the fixture cases are b2c, which are read-only history since the B2C half of
+// Booking is retired (no build switch any more): every route of a b2c case (workspace, builder, preview), the
+// cross-case /proposals rows and the /trip-checks drawer offer no write, while a B2B row keeps its actions.
 // Shots: $LAYOUT_SHOTS_DIR (default e2e/layout/results) as slice4-<name>-<width>.png.
 
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { CUSTOM_CASE, INQUIRY_CASE, READBACK_VERSION, caseAnswer } from "./case-fixtures";
+import { CUSTOM_CASE, READBACK_VERSION, caseAnswer } from "./case-fixtures";
 import { answer, CLOCK } from "./fixtures";
 import { OUT } from "./paths";
 
-const B2C_OPEN = process.env.NEXT_PUBLIC_B2C_INTAKE === "on";
-const OPEN_ONLY = "a b2c case is read-only while the B2C part is closed (AA-1037)";
 
 type Collected = { unmocked: string[]; consoleErrors: string[]; posts: string[] };
 
@@ -234,39 +230,22 @@ test.describe("proposal read-back after a CIS rewrite", () => {
     await expect(notice).toContainText("2 item titles differ");
     await expect(notice).toContainText("Lantern Ridge Trek and the Seven Springs Monastery — 5 Days");
     // A closed build: the b2c case gives no version.write, so the notice names no action of its own (AA-1037).
-    await expect(notice).toContainText(B2C_OPEN ? "Refresh from CIS" : "Staff who edit proposals can refresh the titles");
+    await expect(notice).toContainText("Staff who edit proposals can refresh the titles");
     await expect(page.getByText("Salt Bay Escape — 3 Days").first()).toBeVisible(); // one line per day it spans
     await expect(page.getByRole("button", { name: "Refresh from CIS" })).toHaveCount(0);
     expect(c.posts).toEqual([]);
   });
 
-  test("builder: Refresh from CIS copies today's titles into the draft and waits for Save", async ({ page, baseURL }) => {
-    test.skip(!B2C_OPEN, OPEN_ONLY);
-    const c = await prepare(page, baseURL!);
-    await open(page, `/cases/${CUSTOM_CASE}/proposals/${READBACK_VERSION}`, NOTICE, c);
-    await expect(page.getByTestId("cis-new-title")).toHaveCount(2);
-    await expect(page.getByTestId("cis-new-title").first()).toContainText("CIS now: Lantern Ridge arrival and the lakeside lodge transfer");
-    await shot(page, "builder-cis-updated-before", 1440);
-    await page.getByRole("button", { name: "Refresh from CIS" }).click();
-    await expect(page.getByTestId("cis-updated-notice")).toHaveCount(0);
-    await expect(page.getByTestId("cis-new-title")).toHaveCount(0);
-    await expect(page.getByText("Lantern Ridge arrival and the lakeside lodge transfer", { exact: true })).toBeVisible();
-    await expect(page.getByText("Seven Springs monastery ridge crossing", { exact: true })).toBeVisible();
-    await expect(page.getByText("Upper lake walk", { exact: true })).toBeVisible();
-    await expect(page.getByText("Unsaved changes")).toBeVisible();
-    await shot(page, "builder-cis-updated-after", 1440);
-    expect(c.posts, "a refresh writes nothing until Save").toEqual([]);
-  });
 });
 
 test.describe("slice 4 behaviour at 1440", () => {
   test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
 
-  test("overview: trip facts lead the main column, header names customer and agent", async ({ page, baseURL }) => {
+  test("overview: trip facts lead the main column, header names who the case is for and the agent", async ({ page, baseURL }) => {
     const c = await prepare(page, baseURL!);
     await open(page, `/cases/${CUSTOM_CASE}`, '[data-testid="trip-facts"]', c);
     const meta = page.getByTestId("case-meta");
-    await expect(meta).toContainText("Alexandra Catherine Montgomery-Whitfield");
+    await expect(meta).toContainText("Traveller (B2C history)");
     await expect(meta).toContainText("Agent: Pham Quoc Bao-Long Sales Lead");
     await expect(meta).toContainText("12 Nov 2026 – 26 Nov 2026 (15 days)");
     const facts = page.getByTestId("trip-facts");
@@ -285,45 +264,6 @@ test.describe("slice 4 behaviour at 1440", () => {
     expect(factsBox.y, "trip facts sit above the TripPlanner inquiry").toBeLessThan(inquiryBox.y);
     expect(c.unmocked).toEqual([]);
     expect(c.consoleErrors).toEqual([]);
-  });
-
-  test("proposals tab: row actions follow the version state", async ({ page, baseURL }) => {
-    test.skip(!B2C_OPEN, OPEN_ONLY);
-    const c = await prepare(page, baseURL!);
-    await open(page, `/cases/${CUSTOM_CASE}?tab=proposals`, ROW, c);
-    await expect(page.getByTestId("version-actions")).toHaveCount(3);
-    await expect(page.getByRole("button", { name: `Preview ${CUSTOM_CASE} V2` })).toBeEnabled();
-    await expect(page.getByRole("button", { name: `Send ${CUSTOM_CASE} V3 to the customer` })).toBeDisabled(); // unpriced draft
-    await expect(page.getByRole("button", { name: `Send ${CUSTOM_CASE} V2 to the customer` })).toBeDisabled(); // approved
-    await expect(page.getByRole("button", { name: `Discard draft ${CUSTOM_CASE} V2` })).toBeDisabled();
-    await page.getByRole("button", { name: `Discard draft ${CUSTOM_CASE} V3` }).click();
-    const dialog = page.getByTestId("confirm-dialog");
-    await expect(dialog).toContainText(`Discard draft ${CUSTOM_CASE} V3?`);
-    expect(new URL(page.url()).pathname, "an action never opens the builder").toBe(`/cases/${CUSTOM_CASE}`);
-    await shot(page, "case-proposals-discard", 1440);
-    expect(c.posts, "nothing was written").toEqual([]);
-    expect(c.consoleErrors).toEqual([]);
-  });
-
-  test("builder: read-only quote explained, locked version shows the saved price", async ({ page, baseURL }) => {
-    test.skip(!B2C_OPEN, OPEN_ONLY);
-    const c = await prepare(page, baseURL!);
-    await open(page, `/cases/${CUSTOM_CASE}/proposals/3`, '[data-testid="quote-read-only"]', c);
-    await expect(page.getByTestId("quote-read-only")).toContainText("Live quote not available in this session");
-    await expect(page.getByTestId("quote-read-only")).toContainText("The saved version total below is still correct."); // builder only
-    await expect(page.getByText("No access to pricing")).toHaveCount(0);
-    expect(c.posts).toContain("POST pricing/quote-preview");
-
-    const locked = await prepare(page, baseURL!);
-    await open(page, `/cases/${CUSTOM_CASE}/proposals/2`, '[data-testid="locked-price"]', locked);
-    const panel = page.getByTestId("locked-price");
-    await expect(panel).toContainText("4,385.00");
-    await expect(panel).toContainText("1 USD = 0.920000 EUR");
-    await expect(panel).toContainText("Approved");
-    await expect(page.getByText("No quote yet")).toHaveCount(0);
-    await page.waitForTimeout(800); // past the 500 ms quote debounce
-    expect(locked.posts.filter((p) => p.includes("quote-preview")), "a locked version never asks for a live quote").toEqual([]);
-    await shot(page, "builder-locked-panel", 1440);
   });
 
   test("trip checks: tabs with counts, progress, Overdue tab, drawer context", async ({ page, baseURL }) => {
@@ -380,67 +320,10 @@ test.describe("slice 4 behaviour at 1440", () => {
     expect(c.consoleErrors).toEqual([]);
   });
 
-  test("kit buttons: case tabs, status menu, builder controls", async ({ page, baseURL }) => {
-    test.skip(!B2C_OPEN, OPEN_ONLY);
-    const c = await prepare(page, baseURL!);
-    await open(page, `/cases/${CUSTOM_CASE}`, '[data-testid="trip-facts"]', c);
-    const tabs = page.getByRole("tablist", { name: "Trip case sections" });
-    await expect(tabs.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    await expect(tabs.getByRole("tab", { name: /Proposals\s*3/ })).toHaveAttribute("aria-selected", "false");
-    // One tab stop: the arrow keys move along the strip and select (the URL follows).
-    await tabs.getByRole("tab", { name: "Overview" }).focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(tabs.getByRole("tab", { name: /Proposals/ })).toHaveAttribute("aria-selected", "true");
-    await expect(page).toHaveURL(/[?&]tab=proposals/);
-    await expect(page.locator(ROW).first()).toBeVisible();
-
-    const trigger = page.getByRole("button", { name: /Change status/ });
-    await expect(trigger).toHaveAttribute("aria-haspopup", "menu");
-    await expect(trigger).toHaveAttribute("aria-expanded", "false");
-    await trigger.click();
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await expect(page.getByRole("menu").getByRole("menuitem", { name: /Cancel case/ })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("menu")).toHaveCount(0);
-
-    await open(page, `/cases/${CUSTOM_CASE}/proposals/3`, '[data-testid="quote-read-only"]', c);
-    await expect(page.getByRole("button", { name: "Back to the case" })).toBeVisible();
-    const day = page.getByRole("button", { name: /^(Collapse|Expand) day 1$/ });
-    await expect(day).toHaveAttribute("aria-expanded", "true");
-    const groups = page.getByRole("group", { name: /^Actions for / });
-    await expect(groups.first().getByRole("button", { name: /^Remove / })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Add another day" })).toBeVisible();
-    expect(c.posts.filter((p) => !p.includes("quote-preview")), "nothing was written").toEqual([]);
-    expect(c.unmocked).toEqual([]);
-    expect(c.consoleErrors).toEqual([]);
-  });
-
-  test("convert and decline dialogs keep their buttons in the footer band", async ({ page, baseURL }) => {
-    test.skip(!B2C_OPEN, OPEN_ONLY);
-    const c = await prepare(page, baseURL!);
-    await open(page, `/cases/${INQUIRY_CASE}`, '[data-testid="trip-facts"]', c);
-    for (const [open, action] of [
-      ["Convert to discovery", "Convert"],
-      ["Decline", "Decline inquiry"],
-    ] as const) {
-      await page.getByRole("button", { name: open, exact: true }).click();
-      const dialog = page.getByRole("dialog");
-      await expect(dialog).toBeVisible();
-      const footer = dialog.locator(":scope > div").last();
-      await expect(footer.getByRole("button", { name: action, exact: true }), `${action} sits in the footer band`).toBeVisible();
-      await expect(footer.getByRole("button", { name: /^(Cancel|Keep case)$/ })).toBeVisible();
-      await shot(page, `dialog-${action.toLowerCase().replace(/\s+/g, "-")}`, 1440);
-      await page.keyboard.press("Escape");
-      await expect(dialog).toHaveCount(0);
-    }
-    expect(c.posts, "nothing was written").toEqual([]);
-    expect(c.consoleErrors).toEqual([]);
-  });
 });
 
 test.describe("AA-1037: a b2c case offers no write while the B2C part is closed", () => {
   test.use({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
-  test.skip(B2C_OPEN, "the B2C part is open in this build");
 
   test("workspace, builder and preview of a b2c case are read-only", async ({ page, baseURL }) => {
     const c = await prepare(page, baseURL!);

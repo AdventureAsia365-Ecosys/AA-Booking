@@ -18,8 +18,8 @@ requested, ``failed`` after ``MAX_RELEASES``), instead of staying ``running`` un
 in ``no_release`` (it keeps no progress checkpoint, so running it again could repeat work an approval capped, e.g.
 the retention kinds) is failed at once instead, which is what the reaper did to it before.
 
-Switched-off kinds (AA-1034 R0, root ADR 0019 d8): a kind in ``disabled_kinds`` (the B2C intake while
-``B2C_INTAKE_ENABLED`` is off, ``app.b2c``) is taken out of the handlers and the recurring schedule, so it is neither
+Switched-off kinds (AA-1034 R0, root ADR 0019 d8): a kind in ``disabled_kinds`` (the retired B2C kinds,
+``app.b2c.RETIRED_KINDS``, AA-1046) is taken out of the handlers and the recurring schedule, so it is neither
 scheduled nor claimed, and each maintenance pass cancels its queued rows (:func:`app.jobs.queue.cancel_queued`) so a
 leftover row cannot sit due and trip the ``jobs_stuck`` check. The worker logs the switched-off kinds once, at start.
 """
@@ -52,7 +52,7 @@ MaintenanceHook = Callable[[asyncpg.Pool], Awaitable[Any]]
 
 ERROR_MAX_CHARS = 2000
 NOT_RELEASED_ERROR = "stopped mid-run on shutdown; this kind is not run again (no progress checkpoint)"
-DISABLED_ERROR = "kind switched off (B2C intake off, B2B-only model, root ADR 0019); not run"
+DISABLED_ERROR = "kind switched off (B2C retired, B2B-only model, root ADR 0019); not run"
 
 
 def _report_failed(job: Job, exc: BaseException, status: str) -> None:

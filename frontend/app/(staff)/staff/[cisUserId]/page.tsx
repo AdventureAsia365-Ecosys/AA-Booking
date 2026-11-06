@@ -35,6 +35,7 @@ import {
 } from "@/ui";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { useStaffActions } from "../_parts/useStaffActions";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 const ACTIVITY_PAGE = 50;
 
@@ -187,7 +188,7 @@ function AssignedCases({ rows, total }: { rows: StaffAssignmentRow[]; total: num
   const router = useRouter();
   const columns: ColumnDef<StaffAssignmentRow, unknown>[] = [
     { id: "code", header: "Case", accessorKey: "code", cell: ({ row }) => <Code>{row.original.code}</Code> },
-    { id: "customer", header: "Customer", accessorFn: (r) => r.customer_name ?? "", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.customer_name ?? "—"}</span> },
+    { id: "customer", header: "For", accessorFn: (r) => casePartyLabel(r), cell: ({ row }) => <span className="text-[13px] text-body">{casePartyLabel(row.original)}</span> },
     { id: "role", header: "Assigned as", accessorKey: "role", cell: ({ row }) => <span className="text-[13px] capitalize text-body">{row.original.role}</span> },
     { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <TripCaseStatusBadge status={row.original.status} /> },
     { id: "start", header: "Trip starts", accessorKey: "start_date", cell: ({ row }) => <DateText value={row.original.start_date} className="text-[13px] text-body" /> },

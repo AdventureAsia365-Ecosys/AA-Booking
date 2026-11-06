@@ -1,20 +1,13 @@
 """The case auto-advance after the sale (AA-682 design D2, D3, §4): one function moves a sold trip case along the
-supply track (bk-026) and the money track (bk-028) from the facts, through the DB-checked edges.
+supply track (bk-026) from the facts, through the DB-checked edges.
 
-Order of the milestones: ``confirmed`` < ``supplier_confirming`` (a supplier was asked) < ``invoice_sent`` <
-``payment_pending`` (part paid) < ``paid``; supply and money may happen in either order and the case shows the
-furthest milestone (D3), so a B2C case with a sent invoice follows its invoice:
-
-- invoice ``sent`` → ``invoice_sent``; ``partially_paid`` → ``payment_pending``; ``paid`` → ``paid`` (forward on a
-  verify, back on a void or an amendment);
-- no sent invoice (none yet, or it was cancelled): ``supplier_confirming`` while a supplier was asked (requested or
-  confirmed booking), else ``confirmed``; a ``supplier_confirming`` case keeps its status while any booking is live
-  (the S1 rule).
-
-A B2B case never takes a money status (no customer invoice, design D12). Travel statuses (``pre_departure`` onwards)
-belong to the lifecycle job and never step back here (critic note 12). Every move is a system UPDATE (empty
-``booking.actor``, status note "Auto: …", audit actor ``aa682:advance_case``) that ``trip_cases_post_sale_guard``
-checks again.
+``supplier_confirming`` while a supplier was asked (requested or confirmed booking), else ``confirmed``; a
+``supplier_confirming`` case keeps its status while any booking is live (the S1 rule). The money track of a B2C case
+(``invoice_sent`` / ``payment_pending`` / ``paid`` from the customer invoice, bk-028) is gone with the customer
+invoices (AA-1046): no case takes a money status (``trip_cases_post_sale_guard`` refuses one since bk-045). Travel
+statuses (``pre_departure`` onwards) belong to the lifecycle job and never step back here (critic note 12). Every move
+is a system UPDATE (empty ``booking.actor``, status note "Auto: …", audit actor ``aa682:advance_case``) that
+``trip_cases_post_sale_guard`` checks again.
 """
 
 from __future__ import annotations
@@ -25,22 +18,19 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.ops.money import CASE_STATUS_OF_INVOICE
 
 log = logging.getLogger(__name__)
 
-TRACK_STATUSES = frozenset({"confirmed", "supplier_confirming", "invoice_sent", "payment_pending", "paid"})
+TRACK_STATUSES = frozenset({"confirmed", "supplier_confirming"})
 ACTOR = "aa682:advance_case"
 
 
-def next_status(status: str, channel: str, *, live: int, asked: int, invoice_status: str | None) -> str | None:
-    """The status the facts call for, or None when the case stays (pure)."""
+def next_status(status: str, *, live: int, asked: int) -> str | None:
+    """The status the facts call for, or None when the case stays (pure). A kept b2c case left in a money status
+    (``invoice_sent`` / ``payment_pending`` / ``paid``) is not on the track any more and never moves."""
     if status not in TRACK_STATUSES:
         return None
-    money = CASE_STATUS_OF_INVOICE.get(invoice_status or "") if channel == "b2c" else None
-    if money:
-        target = money
-    elif status == "supplier_confirming":
+    if status == "supplier_confirming":
         target = "supplier_confirming" if live else "confirmed"
     else:
         target = "supplier_confirming" if asked else "confirmed"
@@ -56,13 +46,7 @@ async def advance_case(conn: asyncpg.Connection, case: Any, *, cause: str) -> st
         case["id"],
     )
     status = await conn.fetchval("SELECT status FROM booking.trip_cases WHERE id = $1::uuid", case["id"])
-    invoice_status = await conn.fetchval(
-        "SELECT status FROM booking.invoices WHERE trip_case_id = $1::uuid AND deleted_at IS NULL"
-        " AND status IN ('sent', 'partially_paid', 'paid')",
-        case["id"],
-    )
-    channel = case["channel"] if "channel" in case.keys() else "b2c"  # noqa: SIM118 — asyncpg Record
-    target = next_status(status, channel, live=counts["live"], asked=counts["asked"], invoice_status=invoice_status)
+    target = next_status(status, live=counts["live"], asked=counts["asked"])
     if target is None:
         return None
     note = f"Auto: {cause}"[:500]

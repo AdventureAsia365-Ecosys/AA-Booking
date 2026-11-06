@@ -2,8 +2,8 @@
 // ui/local/CommandPalette.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/CommandPalette.tsx (CIS commit 039bb250): the ⌘K /
 // Ctrl K palette. Same dialog, keyboard handling and look. Booking sources: the role's pages (ui/nav.tsx),
-// trip cases (GET /booking/trip-cases?q=, roles with trip_case.read) and customers (GET /booking/customers?q=,
-// roles with customer.read). Each search is skipped for a role that cannot read it.
+// trip cases (GET /booking/trip-cases?q=, roles with trip_case.read). A search is skipped for a role that cannot read
+// it. The customers search is retired with the B2C half of Booking (AA-1046).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -15,11 +15,11 @@ import { useStaff } from "./StaffContext";
 import { api } from "@/lib/api/client";
 import { canSeePage } from "@/lib/rbac";
 import { TRIP_CASE_STATUS_META } from "../booking/StatusBadge";
+import { casePartyLabel } from "../booking/caseFacts";
 
 type Row =
   | { kind: "page"; label: string; href: string; icon: React.ReactNode }
   | { kind: "case"; label: string; sub: string; href: string }
-  | { kind: "customer"; label: string; sub: string; href: string };
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   // Returning null when closed unmounts the dialog, so each open starts with fresh state — no
@@ -32,7 +32,6 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { role } = useStaff();
   const canCases = canSeePage(role, "/cases");
-  const canCustomers = canSeePage(role, "/customers");
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [selected, setSelected] = useState(0);
@@ -58,13 +57,6 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
     staleTime: 30_000,
     retry: false,
   });
-  const { data: customers } = useQuery({
-    queryKey: ["command-palette", "customers", debounced],
-    queryFn: () => api.customers.list({ q: debounced, limit: 5 }),
-    enabled: enabled && canCustomers,
-    staleTime: 30_000,
-    retry: false,
-  });
 
   // Build the flat, grouped row list. Pages are a client-side match over the nav entries.
   const groups = useMemo(() => {
@@ -77,22 +69,15 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
     }));
     const caseRows: Row[] = (cases?.items ?? []).map((c) => ({
       kind: "case" as const,
-      label: `${c.code} · ${c.customer_name ?? "Unnamed customer"}`,
+      label: `${c.code} · ${casePartyLabel(c)}`,
       sub: [c.trip_title ?? "Custom trip", TRIP_CASE_STATUS_META[c.status]?.label].filter(Boolean).join(" · "),
       href: `/cases/${encodeURIComponent(c.code)}`,
-    }));
-    const customerRows: Row[] = (customers?.items ?? []).map((c) => ({
-      kind: "customer" as const,
-      label: c.name ?? "Unnamed customer",
-      sub: [c.code, c.email ?? c.phone].filter(Boolean).join(" · "),
-      href: `/customers/${encodeURIComponent(c.code ?? c.id)}`,
     }));
     return [
       { title: "Pages", rows: pages },
       { title: "Trip cases", rows: caseRows },
-      { title: "Customers", rows: customerRows },
     ].filter((g) => g.rows.length > 0);
-  }, [cases, customers, debounced, role]);
+  }, [cases, debounced, role]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
 
@@ -147,8 +132,8 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
             ref={inputRef}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(0); }}
-            placeholder="Search pages, trip cases, customers…"
-            aria-label="Search pages, trip cases, customers"
+            placeholder="Search pages and trip cases…"
+            aria-label="Search pages and trip cases"
             style={{
               flex: 1, border: "none", outline: "none", background: "transparent",
               fontSize: 15, color: K.ink, fontFamily: sans,

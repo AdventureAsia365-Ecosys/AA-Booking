@@ -21,7 +21,10 @@ every deploy, and interrupting it is harmless (a release puts it back, the next 
 holds a deploy back for one short run at most (DM-11.4 stays the default). ``bk_tour_lifecycle_pull`` (AA-986 L5) is
 not exempt either, for the same reason: queued only while the CIS lifecycle outbox has new rows, done in seconds. Same
 exemption idea as CIS ``deploy_gate_exempt``; the two lists stay separate until one registry exists (X1).
-``bk_noop_sleep`` (AA-993 G4 proof, test-only) is exempt like the CIS ``noop_sleep``.
+``bk_noop_sleep`` (AA-993 G4 proof, test-only) is exempt like the CIS ``noop_sleep``. AA-1046: the B2C kinds
+(``bk_inquiry_pull``, ``bk_inquiry_process``, ``bk_notify_email``) have no handler any more and leave
+``EXPECTED_SECONDS``; ``bk_inquiry_pull`` stays exempt so the deploy-gate answer (read by Deploy Dev) keeps its
+shape, and a leftover row is cancelled by the worker anyway (``app.b2c.RETIRED_KINDS``).
 """
 
 from __future__ import annotations
@@ -47,9 +50,6 @@ DEPLOY_BLOCKING_HORIZON_SECONDS = 900
 TEST_KINDS: frozenset[str] = frozenset({"bk_noop_sleep"})
 
 EXPECTED_SECONDS: dict[str, int] = {
-    "bk_inquiry_pull": 60,
-    "bk_inquiry_process": 60,
-    "bk_notify_email": 60,
     "bk_retention_job": 900,
     "bk_retention_inbox_redact": 900,
     "bk_b2b_hold_expire": 120,

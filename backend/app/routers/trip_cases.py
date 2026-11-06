@@ -8,10 +8,10 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import b2c
@@ -32,10 +32,10 @@ CanWriteVersions = Annotated[Staff, Depends(require("version.write"))]
 CanPriceVersions = CanWriteVersions
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 CountryCode = Annotated[str, Field(pattern=r"^[A-Za-z]{2}$")]
-Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
-PositiveMoney = Annotated[Decimal, Field(gt=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
 # A plain shape check (no email-validator dependency); deliverability is not Booking's to judge.
 Email = Annotated[str, Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
+Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
+PositiveMoney = Annotated[Decimal, Field(gt=0, max_digits=16, decimal_places=2, allow_inf_nan=False)]
 
 
 class CasePatch(BaseModel):
@@ -49,45 +49,6 @@ class CasePatch(BaseModel):
     trip_style: str | None = Field(default=None, max_length=60)
     notes: str | None = Field(default=None, max_length=10_000)
     countries: list[CountryCode] | None = Field(default=None, max_length=service.MAX_COUNTRIES)
-
-
-class NewCustomer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=200)
-    email: Email | None = None
-    phone: str | None = Field(default=None, min_length=3, max_length=40)
-    address: str | None = Field(default=None, max_length=500)
-    contact_consent: bool = False
-
-    @model_validator(mode="after")
-    def _contact(self) -> NewCustomer:
-        if not self.email and not self.phone:
-            raise ValueError("email or phone is required")
-        return self
-
-
-class CaseCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    customer_id: uuid.UUID | None = None
-    new_customer: NewCustomer | None = None
-    start_date: date | None = None
-    pax: int | None = Field(default=None, ge=1, le=999)
-    pax_adults: int | None = Field(default=None, ge=1, le=999)
-    pax_children: int | None = Field(default=None, ge=0, le=998)
-    currency: Currency = "USD"
-    trip_style: str | None = Field(default=None, max_length=60)
-    notes: str | None = Field(default=None, max_length=10_000)
-    countries: list[CountryCode] = Field(default_factory=list, max_length=service.MAX_COUNTRIES)
-    assignee: str | None = Field(default=None, min_length=1, max_length=128)
-    initial_status: Literal["new_inquiry", "discovery"] = "new_inquiry"
-
-    @model_validator(mode="after")
-    def _one_customer(self) -> CaseCreate:
-        if (self.customer_id is None) == (self.new_customer is None):
-            raise ValueError("send exactly one of customer_id or new_customer")
-        return self
 
 
 class StatusChange(BaseModel):
@@ -168,15 +129,6 @@ class PriceBody(BaseModel):
     override_reason: str | None = Field(default=None, max_length=500, description="required when below the floor")
 
 
-class SendBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    to: Email | None = Field(default=None, description="must be the customer's e-mail (read-only in the UI)")
-    subject: str = Field(min_length=1, max_length=200)
-    message: str = Field(min_length=1, max_length=10_000)
-    valid_until: date | None = Field(default=None, description="default: today + quote_validity_days (7-30)")
-
-
 class ApproveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -199,9 +151,8 @@ async def list_trip_cases(
     pool: Pool,
     status: Annotated[list[str] | None, Query(description="repeat or comma-separate")] = None,
     assignee: Annotated[str | None, Query(max_length=128, description="CIS user id, 'me' or 'none'")] = None,
-    q: Annotated[str | None, Query(max_length=200, description="case code, customer code, name or e-mail")] = None,
+    q: Annotated[str | None, Query(max_length=200, description="case code")] = None,
     source: Annotated[str | None, Query(max_length=20, description="tripplanner | manual | cis | crm")] = None,
-    customer_id: Annotated[uuid.UUID | None, Query()] = None,
     created_from: Annotated[date | None, Query()] = None,
     created_to: Annotated[date | None, Query(description="inclusive")] = None,
     sort: Annotated[str | None, Query(max_length=20, description="created_at | updated_at | start_date, -desc")] = None,
@@ -215,7 +166,6 @@ async def list_trip_cases(
             assignee=_assignee(assignee, staff),
             q=q,
             source=source,
-            customer_id=str(customer_id) if customer_id else None,
             created_from=created_from,
             created_to=created_to,
             sort=sort,
@@ -225,14 +175,11 @@ async def list_trip_cases(
 
 
 @router.post("/trip-cases", status_code=201, responses=b2c.GONE_RESPONSE)
-async def create_trip_case(body: CaseCreate, staff: CanWrite, pool: Pool, request: Request) -> dict[str, Any]:
-    # AA-1034 R0 / AA-1037: a staff-made case is always for a customer (new or existing), a B2C case; B2B cases come
-    # only from the B2B confirm path (POST /booking/b2b/v1/holds/{id}/confirm).
-    b2c.refuse_b2c_write(request)
-    data = body.model_dump()
-    data["customer_id"] = str(body.customer_id) if body.customer_id else None
-    async with pool.acquire() as conn, conn.transaction():
-        return await service.create_case(conn, staff, data)
+async def create_trip_case(_: CanWrite) -> dict[str, Any]:
+    # AA-1046: a staff-made case was always for a traveller customer (a B2C case), retired with the B2C half; B2B cases
+    # come only from the B2B confirm path (POST /booking/b2b/v1/holds/{id}/confirm).
+    b2c.refuse_new_case()
+    return {}
 
 
 @router.get("/trip-cases/summary")
@@ -244,10 +191,7 @@ async def trip_case_summary(staff: CanRead, pool: Pool) -> dict[str, Any]:
 @router.get("/trip-cases/{case_ref}")
 async def get_trip_case(case_ref: CaseRef, staff: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        case = await service.get_case(conn, case_ref)
-    if not staff.can("billing.read"):
-        case["money"] = None  # AA-682 S3: customer money is billing data (contracting, preview sessions)
-    return case
+        return await service.get_case(conn, case_ref)
 
 
 @router.get("/trip-cases/{case_ref}/activity")
@@ -268,10 +212,9 @@ async def patch_trip_case(
     case_ref: CaseRef,
     staff: CanWrite,
     pool: Pool,
-    request: Request,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await service.update_case(conn, staff, case_ref, body.model_dump(exclude_unset=True))
 
 
@@ -281,10 +224,9 @@ async def change_trip_case_status(
     case_ref: CaseRef,
     staff: CanWrite,
     pool: Pool,
-    request: Request,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await service.change_status(conn, staff, case_ref, body.to_status, body.reason)
 
 
@@ -294,10 +236,9 @@ async def assign_trip_case(
     case_ref: CaseRef,
     staff: CanAssign,
     pool: Pool,
-    request: Request,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await service.assign(conn, staff, case_ref, body.cis_user_id, body.role)
 
 
@@ -306,11 +247,10 @@ async def create_trip_case_version(
     case_ref: CaseRef,
     staff: CanWriteVersions,
     pool: Pool,
-    request: Request,
     body: VersionCreate | None = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.create_version(conn, staff, case_ref, body.notes if body else None)
 
 
@@ -327,10 +267,9 @@ async def patch_version(
     version_number: VersionNumber,
     staff: CanWriteVersions,
     pool: Pool,
-    request: Request,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.update_version(conn, staff, case_ref, version_number, body.model_dump(exclude_unset=True))
 
 
@@ -340,10 +279,9 @@ async def delete_version(
     version_number: VersionNumber,
     staff: CanWriteVersions,
     pool: Pool,
-    request: Request,
 ) -> Response:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         await versions.delete_version(conn, staff, case_ref, version_number)
     return Response(status_code=204)
 
@@ -361,7 +299,6 @@ async def put_version_items(
     version_number: VersionNumber,
     staff: CanWriteVersions,
     pool: Pool,
-    request: Request,
 ) -> dict[str, Any]:
     items = [
         versions.Item(
@@ -388,7 +325,7 @@ async def put_version_items(
         for item in body.items
     ]
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.replace_items(conn, staff, case_ref, version_number, items)
 
 
@@ -399,11 +336,10 @@ async def price_version(
     version_number: VersionNumber,
     staff: CanPriceVersions,
     pool: Pool,
-    request: Request,
 ) -> dict[str, Any]:
     """Price a draft from its stored net cost lines (same engine as quote-preview) and save the total."""
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.price_version(
             conn,
             staff,
@@ -417,40 +353,16 @@ async def price_version(
         )
 
 
-@router.post("/trip-cases/{case_ref}/versions/{version_number}/send", responses=b2c.GONE_RESPONSE)
-async def send_version(
-    body: SendBody,
-    case_ref: CaseRef,
-    version_number: VersionNumber,
-    staff: CanWriteVersions,
-    pool: Pool,
-    request: Request,
-) -> dict[str, Any]:
-    async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
-        return await versions.send_version(
-            conn,
-            staff,
-            case_ref,
-            version_number,
-            to=str(body.to) if body.to else None,
-            subject=body.subject,
-            message=body.message,
-            valid_until=body.valid_until,
-        )
-
-
 @router.post("/trip-cases/{case_ref}/versions/{version_number}/approve", responses=b2c.GONE_RESPONSE)
 async def approve_version(
     case_ref: CaseRef,
     version_number: VersionNumber,
     staff: CanWriteVersions,
     pool: Pool,
-    request: Request,
     body: ApproveBody | None = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        await b2c.refuse_b2c_case_write(request, conn, case_ref)  # AA-1037: a b2c case is read-only
+        await b2c.refuse_b2c_case_write(conn, case_ref)  # AA-1037: a b2c case is read-only
         return await versions.approve_version(conn, staff, case_ref, version_number, body.note if body else None)
 
 
@@ -458,7 +370,7 @@ async def approve_version(
 async def list_versions(
     staff: CanRead,
     pool: Pool,
-    q: Annotated[str | None, Query(max_length=200, description="case code, customer, version title")] = None,
+    q: Annotated[str | None, Query(max_length=200, description="case code, version title")] = None,
     badge: Annotated[str | None, Query(max_length=20, description="draft | sent | approved | superseded")] = None,
     assignee: Annotated[str | None, Query(max_length=128, description="sales owner: id, 'me' or 'none'")] = None,
     updated_from: Annotated[date | None, Query()] = None,

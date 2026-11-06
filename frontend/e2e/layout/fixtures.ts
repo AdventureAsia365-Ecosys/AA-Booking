@@ -12,14 +12,10 @@
 //
 // Nothing here is real: names, codes and e-mails are invented (example.test domains).
 
-// AA-996 slice 5: the invoice detail fixture (kept on its own line, apart from the billing list types).
-import type { InvoiceDetail } from "../../lib/api/billing";
 import type {
   AuditLogItem,
   CaseVersion,
   CursorPage,
-  CustomerDetail,
-  CustomerSummary,
   NotificationFeed,
   OffsetPage,
   StaffDetail,
@@ -56,7 +52,7 @@ import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/a
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
-import type { BillingSummary, InvoiceStatus, InvoiceSummary, Kpi, Page as BillingPage, Payment } from "../../lib/api/billing";
+import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
@@ -135,7 +131,7 @@ function staffDetail(id: string): StaffDetail {
       code: `TC-${pad(i + 1)}`,
       status: OPEN_STATUSES[i % OPEN_STATUSES.length],
       start_date: "2027-01-14",
-      customer_name: `Alexandra Catherine Montgomery-Whitfield ${i}`,
+      channel: i % 7 === 3 ? ("b2b" as const) : ("b2c" as const),
     })),
     counts: { open_assignments: 12, assignments: 57 },
   };
@@ -165,7 +161,6 @@ function tripCase(i: number): TripCaseListItem {
     id: uuid("c", i),
     code: `TC-${pad(i + 1)}`,
     status: OPEN_STATUSES[i % OPEN_STATUSES.length],
-    customer_id: uuid("d", i),
     channel: i % 7 === 3 ? "b2b" : "b2c",
     party_tenant_id: i % 7 === 3 ? "agency-tenant-with-a-long-identifier-0001" : null,
     trip_style: "Private family adventure with soft trekking",
@@ -180,12 +175,6 @@ function tripCase(i: number): TripCaseListItem {
     source_id: i % 3 === 0 ? `inq-${pad(i, 10)}` : null,
     created_at: EARLIER,
     updated_at: NOW,
-    customer_code: `CUS-${pad(i + 1)}`,
-    customer_name: `Alexandra Catherine Montgomery-Whitfield ${i}`,
-    customer_email: `alexandra.montgomery.whitfield.${i}@very-long-customer-domain.example.test`,
-    customer_phone: "+44 20 7946 0958 ext 1234",
-    customer_verified: i % 2 === 0,
-    customer_needs_merge_review: i % 9 === 0,
     assignees: [
       { cis_user_id: "u-001", role: "sales", name: `${PERSON_NAMES[3]}`, assigned_at: EARLIER },
       { cis_user_id: "u-002", role: "operations", name: `${PERSON_NAMES[1]}`, assigned_at: EARLIER },
@@ -282,52 +271,10 @@ function versionListItem(i: number): VersionListItem {
     start_date: "2027-01-14",
     end_date: "2027-02-02",
     sales_id: "u-001",
-    customer: { id: uuid("d", i), name: `Alexandra Catherine Montgomery-Whitfield ${i}` },
     updated_by: { id: "u-001", name: PERSON_NAMES[3] },
     leg_titles: tripCase(i).leg_titles,
     trip_title: tripCase(i).trip_title,
     duration_days: 20,
-  };
-}
-
-// ── Customers ────────────────────────────────────────────────────────────────
-const CUSTOMER_STATUSES = ["lead", "active", "past", "blocked"] as const;
-function customer(i: number): CustomerSummary {
-  return {
-    id: uuid("d", i),
-    code: `CUS-${pad(i + 1)}`,
-    name: `Alexandra Catherine Montgomery-Whitfield ${i}`,
-    email: `alexandra.montgomery.whitfield.${i}@very-long-customer-domain.example.test`,
-    phone: i % 5 === 4 ? null : "+44 20 7946 0958 ext 1234",
-    address: "Flat 12, 221B Long Riverside Embankment Road, Kensington and Chelsea, London SW3 5XX",
-    verified: i % 2 === 0,
-    is_blocked: i % 11 === 10,
-    // Rows 10 and 21 carry three badges in the status cell: their status, Blocked and Merge review.
-    needs_merge_review: i % 9 === 0 || i % 11 === 10,
-    merge_candidate_id: i % 9 === 0 ? uuid("d", i + 100) : null,
-    source: (["manual", "otp", "tripplanner_lead"] as const)[i % 3],
-    contact_consent: i % 2 === 1,
-    contact_consent_at: i % 2 === 1 ? EARLIER : null,
-    case_count: 7,
-    open_case_count: 3,
-    last_activity_at: NOW,
-    status: CUSTOMER_STATUSES[i % 4],
-    created_at: EARLIER,
-    updated_at: NOW,
-  };
-}
-
-function customerDetail(ref: string): CustomerDetail {
-  return {
-    ...customer(0),
-    code: ref,
-    merge_candidate: { id: uuid("d", 100), code: "CUS-000101", name: "Alexandra C. Montgomery Whitfield", verified: false, archived: false },
-    cases: range(12).map(tripCase),
-    inquiries: range(6).map((i) => {
-      const c = tripCase(i);
-      return { id: c.id, code: c.code, status: c.status, created_at: c.created_at, trip_title: c.trip_title, leg_titles: c.leg_titles, duration_days: c.duration_days };
-    }),
-    recent_activity: ACTIVITY,
   };
 }
 
@@ -394,53 +341,6 @@ function auditLogs(): CursorPage<AuditLogItem> {
   };
 }
 
-// ── AA-996 slice 5: invoice and payment detail ───────────────────────────────
-// A partially paid VND invoice with an adjustment (the totals footer shows both rows), three schedule rows (one
-// overdue) and two payments (one waiting for verification), every optional value long.
-function invoiceDetail(number: string): InvoiceDetail {
-  const base = invoice(1);
-  return {
-    ...base,
-    invoice_number: number,
-    status: "partially_paid",
-    overdue: true,
-    overdue_amount: "500000000",
-    next_due_date: "2026-10-01",
-    bill_to_address: "12 Hang Bac Street, Hoan Kiem District, Hanoi, Vietnam",
-    terms: "Deposit to confirm, balance 30 days before the trip.",
-    items: [
-      { id: "l-1", position: 1, kind: "version_total", description: "Grand Indochina Discovery: approved proposal V2 for a family of six", quantity: "1", unit_price: "1250000000", amount: "1250000000", reason: null, created_by: "u-002", created_at: EARLIER },
-      { id: "l-2", position: 2, kind: "adjustment", description: "Extra night in Hoi An (riverside family suite)", quantity: "1", unit_price: "34500000", amount: "34500000", reason: "Customer asked on the phone", created_by: "u-002", created_at: EARLIER },
-    ],
-    schedule: [
-      { id: "s-1", seq: 1, kind: "deposit", amount: "385350000", due_date: "2026-09-25", covered_amount: "385350000", remaining_amount: "0", state: "paid", days_overdue: null },
-      { id: "s-2", seq: 2, kind: "second", amount: "500000000", due_date: "2026-10-01", covered_amount: "0", remaining_amount: "500000000", state: "overdue", days_overdue: 22 },
-      { id: "s-3", seq: 3, kind: "final", amount: "399150000", due_date: "2026-11-15", covered_amount: "0", remaining_amount: "399150000", state: "scheduled", days_overdue: null },
-    ],
-    payments: [
-      { ...payment(1), state: "verified", actions: { edit: false, attach: false, verify: false, void: true } },
-      { ...payment(3), state: "recorded", actions: { edit: true, attach: true, verify: true, void: true } },
-    ],
-    issuer: { name: "Adventure Asia Travel Company Limited", address: "Floor 9, 123 Long Registered Office Street, Hanoi" },
-    payment_instructions: "Bank transfer to Vietcombank account 0000 0000 0000, reference the invoice number.",
-    actions: { edit: false, send: false, delete: false, amend: true, cancel: false, remind: true, record_payment: true },
-  };
-}
-function paymentDetail(ref: string): Payment {
-  const p = payment(1);
-  return {
-    ...p,
-    ref,
-    state: "verified",
-    note: "Deposit for the Grand Indochina Discovery; the bank slip shows the family name only.",
-    invoice: { ...p.invoice, currency: "VND", total_amount: "1284500000", net_paid: "385350000", balance: "899150000" },
-    trip_case: { ...p.trip_case, status: "payment_pending", trip_style: "Family adventure and cultural discovery", start_date: "2026-12-04", end_date: "2026-12-23", pax: 6, channel: "b2c" },
-    customer: { id: uuid("9", 1), code: "CUS-000002", name: PERSON_NAMES[1], email: "tran.van.contracting.officer@long-company-mail-domain.example.test", phone: "+84 912 345 678" },
-    actions: { edit: false, attach: false, verify: false, void: true },
-  };
-}
-
-// ── Supply ───────────────────────────────────────────────────────────────────
 const SUP_ID = uuid("1", 0);
 const HOTEL_ID = uuid("2", 0);
 const SVC_ID = uuid("3", 0);
@@ -1177,98 +1077,6 @@ function countryDetail(iso: string): CountryDetail {
 }
 
 // ── Router ───────────────────────────────────────────────────────────────────
-// ── Billing (AA-996: the widest staff table, 9 columns; AA-682 S3) ─────────────
-// Long customer names, two currencies (VND amounts are the widest money strings), every optional value filled.
-const INVOICE_STATUSES: InvoiceStatus[] = ["sent", "partially_paid", "draft", "paid", "cancelled"];
-function invoice(i: number): InvoiceSummary {
-  const vnd = i % 3 !== 2;
-  const currency = vnd ? "VND" : "USD";
-  const total = vnd ? "1284500000" : "48250.00";
-  const paid = vnd ? "385350000" : "14475.00";
-  const balance = vnd ? "899150000" : "33775.00";
-  const status = INVOICE_STATUSES[i % INVOICE_STATUSES.length];
-  return {
-    id: uuid("7", i),
-    invoice_number: `INV-${pad(i + 1)}`,
-    status,
-    document_type: "proforma",
-    currency,
-    total_amount: total,
-    net_paid: paid,
-    verified_received: paid,
-    verified_refunded: "0",
-    unverified_amount: "0",
-    unverified_count: 0,
-    balance: status === "cancelled" ? null : balance,
-    next_due_date: status === "draft" ? null : "2026-11-15",
-    overdue_amount: i % 4 === 0 ? balance : "0",
-    oldest_overdue_date: i % 4 === 0 ? "2026-10-01" : null,
-    overdue: i % 4 === 0,
-    bill_to_name: `${PERSON_NAMES[i % 4]} and the Northern Highlands Family Travel Group`,
-    bill_to_email: `traveller.${i}@example.test`,
-    bill_to_address: null,
-    notes: null,
-    terms: null,
-    issued_at: status === "draft" ? null : EARLIER,
-    sent_by: status === "draft" ? null : person("u-002", 1),
-    cancelled_at: null,
-    cancel_reason: null,
-    created_by: "u-002",
-    created_at: EARLIER,
-    updated_at: NOW,
-    trip_case: { id: uuid("8", i), code: `TC-${pad(i + 1)}`, status: "confirmed", channel: "b2c", start_date: "2026-12-04" },
-    customer: { id: uuid("9", i), code: `CUS-${pad(i + 1)}`, name: PERSON_NAMES[i % 4] },
-    version: { id: uuid("a", i), number: 2, title: null, fx_rate_locked: vnd ? "25410.000000" : null },
-  };
-}
-function payment(i: number): Payment {
-  const vnd = i % 3 !== 2;
-  return {
-    id: uuid("b", i),
-    ref: `PAY-${pad(i + 1)}`,
-    kind: i % 7 === 6 ? "refund" : "receipt",
-    amount: vnd ? "385350000" : "14475.00",
-    currency: vnd ? "VND" : "USD",
-    method: (["bank_transfer", "card_offline", "cash", "other"] as const)[i % 4],
-    received_on: "2026-10-02",
-    reference: `Vietcombank transfer ${pad(i, 10)}`,
-    note: null,
-    received_amount: null,
-    received_currency: null,
-    evidence_file_id: null,
-    state: (["recorded", "verified", "voided"] as const)[i % 3],
-    recorded_by: person("u-002", i),
-    recorded_at: EARLIER,
-    verified_by: i % 3 === 1 ? person("u-003", 2) : null,
-    verified_at: i % 3 === 1 ? NOW : null,
-    voided_by: null,
-    voided_at: null,
-    void_reason: null,
-    invoice: { id: uuid("7", i), number: `INV-${pad(i + 1)}`, status: "partially_paid" },
-    trip_case: { id: uuid("8", i), code: `TC-${pad(i + 1)}` },
-    files: [],
-    needs_evidence: false,
-    actions: { edit: false, attach: false, verify: false, void: false },
-  };
-}
-const kpi = (count: number): Kpi => ({
-  count,
-  by_currency: [
-    { currency: "VND", amount: "8991500000" },
-    { currency: "USD", amount: "33775.00" },
-  ],
-  usd: "387625.40",
-  unconverted: 0,
-});
-const BILLING_SUMMARY: BillingSummary = {
-  outstanding: kpi(18),
-  overdue: kpi(4),
-  received_this_month: kpi(9),
-  awaiting_verification: kpi(3),
-  invoices: { draft: 3, sent: 9, partially_paid: 6, paid: 11, cancelled: 2 },
-  month_start: "2026-10-01",
-  today: "2026-10-23",
-};
 const billingPage = <T,>(items: T[], total: number): BillingPage<T> => ({ items, total, limit: ROWS, offset: 0 });
 
 // ── Supplier bills (AA-996 review fix: the list exports CSV like every list page) ─────────────────────────────────────
@@ -1352,7 +1160,6 @@ function tripCheck(i: number): TripCheck {
       channel: b2b ? "b2b" : "b2c",
       start_date: "2026-09-28",
       end_date: "2026-10-17",
-      customer_name: b2b ? null : `Alexandra Catherine Montgomery-Whitfield ${i}`,
     },
   };
 }
@@ -1658,8 +1465,6 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "notifications") return ok(NOTIFICATIONS);
   if (p === "countries") return ok({ items: [{ iso2: "VN", name: "Vietnam" }, { iso2: "KH", name: "Cambodia" }, { iso2: "LA", name: "Laos" }, { iso2: "TH", name: "Thailand" }] });
   if (p === "audit-logs") return ok(auditLogs());
-  if (at(0) === "invoices" && seg.length === 2) return ok(invoiceDetail(at(1)));
-  if (at(0) === "payments" && seg.length === 2) return ok(paymentDetail(at(1)));
 
   if (p === "trip-cases/summary") return ok(TRIP_CASE_SUMMARY);
   if (p === "trip-cases") {
@@ -1671,11 +1476,6 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "versions") return ok(page(range(ROWS).map(versionListItem), 96));
 
-  if (p === "customers") {
-    const limit = Number(query.get("limit") || ROWS);
-    return ok(page(range(Math.min(limit, ROWS)).map(customer), 1284));
-  }
-  if (at(0) === "customers" && seg.length === 2) return ok(customerDetail(at(1)));
 
   if (p === "suppliers") return ok(page(range(ROWS).map(supplier), 132) satisfies SupplierList);
   if (p === "suppliers/summary") return ok({ total: 132, active: 118, inactive: 14, countries: 6, contracts_ending_30d: 4 } satisfies SupplierSummary);
@@ -1726,12 +1526,9 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "catalog/geo/countries") return ok(COUNTRY_LIST);
   if (at(0) === "catalog" && at(1) === "geo" && at(2) === "countries" && seg.length === 4) return ok(countryDetail(at(3)));
 
-  if (p === "billing/summary") return ok(BILLING_SUMMARY);
   if (p === "trip-checks") return ok({ items: range(ROWS).map(tripCheck), total: 73, limit: ROWS, offset: 0 } satisfies TripCheckPage);
   if (p === "case-lifecycle/runs") return ok({ items: LIFECYCLE_RUNS, scheduled_mode: "live", schedule_utc_hour: 1 });
   if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
-  if (p === "invoices") return ok(billingPage(range(ROWS).map(invoice), 31));
-  if (p === "payments") return ok(billingPage(range(ROWS).map(payment), 58));
   if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));
 

@@ -33,7 +33,7 @@ from app.settings import Settings
 from tests.integration import ops
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 SALES, CONTRACTING, CREATOR = "it-682-sales", "it-682-contracting", "it-682-creator"
 BUCKET = "aa-booking-dev-ops-docs-000000000000"
@@ -70,7 +70,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 
 def _app(dsn: str, store: FakeOpsStore | None) -> tuple[Any, Database, LocalCis]:
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(database_url=dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True)
+    settings = Settings(database_url=dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     return create_app(settings, db, cis.verifier(), ops_store=store), db, cis
 

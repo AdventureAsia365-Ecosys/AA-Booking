@@ -1,5 +1,5 @@
 // ui/booking/notifications.test.mjs — AA-996 slice 5: every staff notification type has a label, and each item
-// leads to its record (invoice, payment, case checks, supplier bookings).
+// leads to its record (case checks, supplier bookings; retired invoice / payment rows lead nowhere).
 // Run: node --test ui/booking/*.test.mjs (Node 22 strips the TypeScript types of notifications.ts itself).
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -22,15 +22,11 @@ test("every backend staff type has a human label (no raw key in a chip or the Ty
   }
 });
 
-test("invoice rows open the invoice by number", () => {
-  const t = notificationTarget(n({ type: "invoice.overdue", entity_type: "invoice", entity_id: "uuid-1", data: { invoice_number: "INV-000004", case_code: "TC-000022" } }));
-  assert.deepEqual(t, { href: "/billing/invoices/INV-000004", label: "Open invoice" });
-  assert.equal(notificationTarget(n({ type: "payment.due_soon", entity_type: "invoice", entity_id: "uuid-1", data: {} })), null);
-});
-
-test("a recorded payment opens the payment to verify", () => {
-  const t = notificationTarget(n({ type: "payment.recorded", entity_type: "payment", entity_id: "p-1", data: { ref: "PMT-000007", invoice_number: "INV-000004" } }));
-  assert.deepEqual(t, { href: "/billing/payments/PMT-000007", label: "Open payment" });
+test("retired B2C rows (invoice, payment, customer) open nothing (AA-1046)", () => {
+  for (const [type, entity_type] of [["invoice.overdue", "invoice"], ["payment.recorded", "payment"], ["trip_case.new_inquiry", "customer"]]) {
+    const t = notificationTarget(n({ type, entity_type, entity_id: "uuid-1", data: { invoice_number: "INV-000004", ref: "PMT-000007" } }));
+    assert.equal(t, null, `${entity_type} opens nothing`);
+  }
 });
 
 test("operations reminders name the case in case_code", () => {

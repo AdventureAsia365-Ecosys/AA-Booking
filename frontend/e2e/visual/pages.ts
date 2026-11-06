@@ -59,8 +59,6 @@ export const PAGES: VisualPage[] = [
   { slug: "audit-log", route: "/audit-log", path: "/audit-log", auth: "staff" },
   { slug: "b2b-desk", route: "/b2b-desk", path: "/b2b-desk", auth: "staff" },
   { slug: "billing", route: "/billing", path: "/billing", auth: "staff" },
-  { slug: "invoice", route: "/billing/invoices/[number]", path: "/billing/invoices/INV-000004", auth: "staff" },
-  { slug: "payment", route: "/billing/payments/[ref]", path: "/billing/payments/PMT-000007", auth: "staff" },
   { slug: "cases", route: "/cases", path: "/cases", auth: "staff" },
   { slug: "case", route: "/cases/[code]", path: "/cases/TC-000001", auth: "staff" },
   { slug: "countries", route: "/catalog/countries", path: "/catalog/countries", auth: "staff" },
@@ -68,8 +66,6 @@ export const PAGES: VisualPage[] = [
   { slug: "destinations", route: "/catalog/destinations", path: "/catalog/destinations", auth: "staff" },
   { slug: "trip-plans", route: "/catalog/trip-plans", path: "/catalog/trip-plans", auth: "staff" },
   { slug: "trip-plan", route: "/catalog/trip-plans/[sourceId]", path: "/catalog/trip-plans/tour-00001", auth: "staff" },
-  { slug: "customers", route: "/customers", path: "/customers", auth: "staff" },
-  { slug: "customer", route: "/customers/[id]", path: "/customers/CUS-000001", auth: "staff" },
   { slug: "hotels", route: "/hotels", path: "/hotels", auth: "staff" },
   { slug: "notifications", route: "/notifications", path: "/notifications", auth: "staff" },
   { slug: "pricing-rules", route: "/pricing/rules", path: "/pricing/rules", auth: "staff" },
@@ -110,7 +106,6 @@ export function expectedOutcome(page: VisualPage, onHost: boolean): { status: nu
 
 /** Routes with a page.tsx that the run does not open, each with its reason. */
 export const EXCLUDED: Record<string, string> = {
-  "/cases/new": "a write form (new trip case): the layout-mock API answers reads only, so the form cannot load its pickers",
   "/cases/[code]/proposals/[n]": "a proposal version: no layout-mock fixture for the version endpoints yet",
   "/cases/[code]/proposals/[n]/preview": "the customer preview of a proposal version: no layout-mock fixture for it yet",
   "/catalog/trip-plans/[sourceId]/commercial": "the commercial editor of a trip plan (writes): no layout-mock fixture for it yet",

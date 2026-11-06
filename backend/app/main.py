@@ -3,17 +3,16 @@
 Every public path is under ``/booking``: the shared ALB forwards ``/booking/*`` to this service and
 the Booking REST API proxies ``/booking/{proxy+}`` (root ADR 0004 decision 5).
 
-Staff routes (everything under ``/booking`` except ``/booking/health*``, ``/booking/ops/*``, ``/booking/b2b/v1`` and
-``/booking/customer/v1``) verify a Cognito WORKFORCE access token (clients booking-staff / breakglass) or, during the
+Staff routes (everything under ``/booking`` except ``/booking/health*``, ``/booking/ops/*`` and ``/booking/b2b/v1``)
+verify a Cognito WORKFORCE access token (clients booking-staff / breakglass) or, during the
 transition, the CIS bridge token, with the multi-issuer verifier (``app.auth.identity_config``, AA-680 Phase 2), and
 require an active ``booking.staff_users`` row. The lifespan prefetches both issuers' JWKS in the background. The one
 machine route, ``/booking/ops/deploy-gate``, accepts only the Deploy Dev workflow's GitHub OIDC token (``app.auth.ci``).
 The B2B API ``/booking/b2b/v1`` (AA-972, contract booking.b2b.v1) accepts only aa-m2m client-credentials tokens
 (``app.auth.m2m``, its own verifier; none when the M2M settings are unset, then every B2B route answers 503) and
 answers errors in the contract's Problem shape (``app.b2b.errors``).
-The customer routes ``/booking/customer/v1`` (AA-682 S5, contract booking.customer.v1: My Payments, read only) accept
-only a Cognito EXTERNAL access token of the tripplanner / booking-customer clients (``app.auth.customer``, its own
-verifier, keys prefetched in the background like the others).
+The customer routes ``/booking/customer/v1`` (AA-682 S5, My Payments) are gone with the B2C half of Booking (AA-1046,
+root ADR 0019): agencies are the only customers.
 
 When ``WORKER_ENABLED`` is on, the lifespan also runs the ``booking.job`` worker loop
 (``app.jobs.worker``) as one background task of this process — never from a request path — and, next to it, the
@@ -39,7 +38,6 @@ from fastapi.exceptions import RequestValidationError
 from app import b2c
 from app.agency_billing import drafts as agency_drafts
 from app.agency_billing import reminders as agency_reminders
-from app.auth import customer as customer_auth
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
@@ -50,11 +48,9 @@ from app.catalog import cost_sheet, trip_plan_sync
 from app.catalog import lifecycle as tour_lifecycle
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
-from app.inquiry import intake
 from app.jobs import noop_sleep
 from app.jobs.metrics import JobMetricsSampler
 from app.jobs.worker import Worker
-from app.notifications import staff_email
 from app.observability import setup as setup_observability
 from app.observability.request_id import RequestIdMiddleware, unhandled_error_handler
 from app.ops import files as ops_files
@@ -67,10 +63,7 @@ from app.routers import (
     b2b,
     b2b_desk,
     b2b_partners,
-    billing,
     catalog,
-    customer,
-    customers,
     docs,
     health,
     notifications,
@@ -103,14 +96,12 @@ def create_app(
     m2m_verifier: MultiIssuerVerifier | None = None,
     media_store: media.MediaStore | None = None,
     ops_store: ops_files.OpsStore | None = None,
-    customer_verifier: MultiIssuerVerifier | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
     verifier = verifier or identity_config.build_staff_verifier(settings)
     deploy_verifier = deploy_verifier or GithubDeployVerifier.default()
     m2m_verifier = m2m_verifier or m2m.build_m2m_verifier(settings)
-    customer_verifier = customer_verifier or customer_auth.build_customer_verifier(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -122,17 +113,13 @@ def create_app(
         m2m_prefetch_task = (
             identity_config.start_staff_jwks_prefetch(m2m_verifier, settings) if m2m_verifier is not None else None
         )
-        # AA-682 S5: the EXTERNAL pool's keys for the customer routes, same background prefetch.
-        customer_prefetch_task = identity_config.start_staff_jwks_prefetch(customer_verifier, settings)
         if settings.worker_enabled and db.configured:
             handlers = {
-                **intake.build_handlers(settings),
-                staff_email.KIND: staff_email.build_handler(settings),
                 **retention_jobs.build_handlers(),
                 **b2b_expiry.HANDLERS,
                 **tour_lifecycle.HANDLERS,
-                # AA-1037: off, the case lifecycle and the reminders leave the frozen B2C cases and invoices alone.
-                **ops_lifecycle.build_handlers(settings.b2c_intake_enabled),
+                # AA-1046: the case lifecycle and the reminders move and name B2B cases only (b2c cases are history).
+                **ops_lifecycle.build_handlers(),
                 # AA-1028 R1 slice 2: booking.b2b_partners, the projection of every CIS tenant (catalog view, CIS 357).
                 tenant_pull.KIND: tenant_pull.build_handler(settings.cognito_m2m_crm_client_id),
                 # AA-1029 R4: every published CIS tour gets a trip plan; the cost sheet prices plans from the rates.
@@ -148,7 +135,6 @@ def create_app(
             worker = Worker(
                 db.pool,
                 handlers,
-                recurring=intake.RECURRING,
                 hooks=(
                     retention_jobs.DailySchedule(),
                     b2b_expiry.ExpirySchedule(),
@@ -166,8 +152,8 @@ def create_app(
                     OutboxSequencer(),
                 ),
                 no_release=retention_jobs.NOT_RELEASED,
-                # AA-1034 R0 (root ADR 0019 d8): the TripPlanner intake is off unless B2C_INTAKE_ENABLED is on.
-                disabled_kinds=frozenset() if settings.b2c_intake_enabled else b2c.INTAKE_KINDS,
+                # AA-1046 (root ADR 0019 d8): the B2C kinds are retired; a leftover queued row is cancelled.
+                disabled_kinds=b2c.RETIRED_KINDS,
             )
             task = asyncio.create_task(worker.run_forever(stop), name="booking-job-worker")
             # Independent of the worker task (AA-751): a stuck worker loop must still show in the job checks.
@@ -176,7 +162,6 @@ def create_app(
         stop.set()
         await identity_config.stop_staff_jwks_prefetch(prefetch_task)
         await identity_config.stop_staff_jwks_prefetch(m2m_prefetch_task)
-        await identity_config.stop_staff_jwks_prefetch(customer_prefetch_task)
         if sampler_task is not None:
             # Cancelled at once (a sample in flight is simply lost), before the pool closes.
             sampler_task.cancel()
@@ -200,7 +185,6 @@ def create_app(
     app.state.staff_verifier = verifier
     app.state.deploy_verifier = deploy_verifier
     app.state.m2m_verifier = m2m_verifier
-    app.state.customer_verifier = customer_verifier
     # AA-835: the supply-media bucket (None without SUPPLY_MEDIA_BUCKET: uploads answer 503). Tests pass a fake.
     app.state.media_store = media_store if media_store is not None else media.store_from_settings(settings)
     # AA-682 S1: the ops-docs bucket (None without OPS_DOCS_BUCKET: uploads / downloads answer 503). Tests pass a fake.
@@ -216,7 +200,6 @@ def create_app(
     app.include_router(docs.router)
     app.include_router(staff.router)
     app.include_router(trip_cases.router)
-    app.include_router(customers.router)
     app.include_router(notifications.router)
     app.include_router(reference.router)
     app.include_router(pricing.router)
@@ -231,9 +214,7 @@ def create_app(
     app.include_router(b2b_desk.router)
     app.include_router(supplier_bookings.router)
     app.include_router(trip_checks.router)
-    app.include_router(billing.router)
     app.include_router(supplier_bills.router)
-    app.include_router(customer.router)
     app.include_router(agency_billing.router)
     return app
 

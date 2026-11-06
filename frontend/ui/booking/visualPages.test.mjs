@@ -56,7 +56,7 @@ test("slugs are unique and file-name safe; staff pages render the kit frame", ()
 
 test("changed-pages: a folder touches its pages, shared files every page, a backend file none", () => {
   assert.deepEqual(changedSlugs(["frontend/app/(staff)/hotels/page.tsx"]), ["hotels"]);
-  assert.deepEqual(changedSlugs(["frontend/app/(staff)/billing/invoices/[number]/page.tsx"]), ["invoice"]);
+  assert.deepEqual(changedSlugs(["frontend/app/(staff)/agency-billing/invoices/[ref]/page.tsx"]), ["agency-invoice", "agency-settlement"]);
   assert.deepEqual(
     changedSlugs(["frontend/app/(staff)/suppliers/_parts/SupplierForm.tsx"]),
     PAGES.filter((p) => p.route.startsWith("/suppliers")).map((p) => p.slug).sort(),

@@ -14,9 +14,9 @@ related: [ARCH-01, ARCH-05, ARCH-08, docs/adr/README.md]
 
 # AA-Booking — Repo Context
 
-AA-Booking (AAA) is the booking back office of the Adventure Asia ecosystem: customers (OTP
-identity), trip cases opened from TripPlanner inquiries, proposals, suppliers, invoices and
-payments. It is built in-house from scratch (no vendor code was delivered). Today the repo holds
+AA-Booking (AAA) is the booking back office of the Adventure Asia ecosystem: trip cases, proposals,
+suppliers and the B2B partner API for the partner agencies, and agency billing. (Its B2C half, customers, TripPlanner
+inquiries, customer invoices and payments, is retired since AA-1046: see "The B2C part is retired".) It is built in-house from scratch (no vendor code was delivered). Today the repo holds
 the **bootstrap health slice** (FastAPI service with liveness/readiness, the 5-check CI, the Dev deploy
 workflow, migration `bk-001`) and **slice 2 "inquiry intake"** (AA-681: migration `bk-002`, the
 `booking.job` worker, TripPlanner `inquiry.submitted` → lead customer + trip case + staff notification) and
@@ -159,7 +159,6 @@ backend/
   app/routers/docs.py      GET /booking/openapi.json, GET /booking/docs (staff.admin outside test/local, AA-876)
   app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff (PATCH `reason`: audit row only, AA-996)
   app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
-  app/routers/customers.py  /booking/customers* (directory, detail, manual lead, edit/block, archive)
   app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
   app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin; `q` text search, AA-996)
   app/auth/                identity_verifier.py (byte copy of AA-CIS-App api/core/identity_verifier.py, the multi-issuer
@@ -168,8 +167,6 @@ backend/
                            deploy workflow GitHub OIDC verifier (ci.py, AA-751) over the single-issuer cache (tokens.py)
   app/auth/m2m.py          aa-m2m client-credentials tokens for the B2B API (AA-972): IssuerConfig over the vendored
                            verifier (scope claim as groups), 401 / 403 split, scope constants
-  app/auth/customer.py     signed-in travellers for the customer routes (AA-682 S5): EXTERNAL issuer x {tripplanner,
-                           booking-customer} over the vendored verifier, 401 sign_in_required / 503 auth_unavailable
   app/b2b/                 booking.b2b.v1 (AA-972): access.py (scope + partner check), errors.py (contract Problem),
                            components.py (component ids, net cost of a line from rates in force), quotes.py (price,
                            price_hash, append-only store), reads.py (products, FX rates, price parity), partners.py and
@@ -191,10 +188,8 @@ backend/
                            cascade, B2B line tie-in), files.py (ops-docs bucket: base64 upload, attachment download);
                            S2 (bk-027): trip_checks.py (list / case / custom / patch, derived checks, B2C-only emergency
                            contact), lifecycle.py (bk_case_lifecycle + bk_ops_reminders, OpsDailySchedule hook);
-                           S3 (bk-028): invoices.py (create / edit draft / send / cancel / amend / remind, case Billing
-                           tab, KPIs, case cancel cascade), payments.py (record / edit / verify / void, maker-checker),
-                           money.py (Decimal amounts, default schedule, waterfall, request hash, card refusal),
-                           track.py (case auto-advance over the supply and money tracks);
+                           money.py (Decimal amounts, request hash, card refusal; the S3 customer invoices are retired,
+                           AA-1046), track.py (case auto-advance over the supply track);
                            S4 (bk-030): supplier_bills.py (enter / edit / approve / cancel bills, payouts and their
                            void, billable bookings, KPIs, case cost vs billed)
   app/agency_billing/      AA-1037 R4 (bk-041 / bk-042): config.py (billing entity, tax rules, payment terms), invoices.py
@@ -207,22 +202,15 @@ backend/
                            /booking/billing-entities*, /booking/tax-rules*, /booking/billing-terms* (agency_billing.read /
                            .write, agency_payment.approve, billing_config.write = admin, finance);
                            /booking/agency-billing/export.csv, /booking/partner-terms-clauses* (terms_clause.approve = admin)
-  app/routers/billing.py   /booking/invoices (GET, GET/PATCH/DELETE /{number}, …/send|cancel|amend|remind|payments),
-                           /booking/trip-cases/{ref}/billing (GET), /booking/trip-cases/{ref}/invoices (POST),
-                           /booking/payments (GET, GET/PATCH /{ref}, …/verify|void), /booking/billing/summary —
-                           billing.read / billing.write / payment.verify (AA-682 S3)
-  app/routers/customer.py  /booking/customer/v1/payments, /booking/customer/v1/invoices/{number} — My Payments for a
-                           signed-in traveller (AA-682 S5, contract booking.customer.v1; scope in app/ops/my_payments.py)
   app/routers/supplier_bookings.py  /booking/trip-cases/{ref}/supplier-bookings (GET, POST, …/generate),
                            /booking/supplier-bookings (list, summary, GET/PATCH /{id}, …/request|confirm|decline|cancel|
                            rerequest), /booking/ops-files (POST, /{id}/download, /{id}/remove) — ops.read / ops.write
   app/routers/trip_checks.py  /booking/trip-checks (GET, PATCH /{id}), /booking/trip-cases/{ref}/checks (GET, POST),
                            /booking/case-lifecycle/runs (GET) — ops.read / ops.write (AA-682 S2)
-  app/trip_cases/          trip case service (list, summary, detail, activity, create, edit, status, assign),
-                           versions (items upsert by id, send, approve, soft delete, cross-case list), sql.py fragments
-  app/customers/           customers over booking.v_customer_summary (status lead/active/past), leads, archive
-  app/notifications/       staff feed + notify helpers (service.py, rows); staff_email.py = bk_notify_email, the
-                           "new inquiry" e-mail to the staff inbox (AA-811)
+  app/trip_cases/          trip case service (list, summary, detail, activity, edit, status, assign), versions (items
+                           upsert by id, approve, soft delete, cross-case list), sql.py fragments
+  app/b2c.py               the retired B2C half (AA-1046): the 410 guards on b2c cases, the retired job kinds
+  app/notifications/       staff feed + notify helpers (service.py, rows)
   app/mailer.py            SES v2 send helper (boto3 sesv2 send_email, From + configuration set from settings, AA-811)
   app/paging.py            keyset cursors (next_before) + ILIKE escaping; app/reference.py settings/countries
   app/audit.py, errors.py  audit_logs writes; service errors → HTTP 404/409/422
@@ -241,8 +229,8 @@ backend/
                            jobs (modes, handlers, daily schedule hook, admin status)
   app/routers/retention.py /booking/retention (status), POST /booking/retention/runs (DRY RUN default),
                            GET /booking/retention/runs/{job_id} — retention.admin (admin only)
-  app/inquiry/             inquiry.submitted validation (contract.py) + bk_inquiry_pull/process (intake.py)
-                           + leg catalog tour key resolve / back-fill (leg_keys.py, `python -m app.inquiry.leg_keys`)
+  app/inquiry/             leg catalog tour key resolve / back-fill (leg_keys.py, `python -m app.inquiry.leg_keys`) of
+                           the kept b2c cases; the intake and its contract parser are retired (AA-1046)
   app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py, approved
                            rows only) + rules/FX admin with maker-checker (policy.py, bk-007)
   app/routers/catalog.py   GET /booking/catalog/destinations (place picker, any active staff, AA-822);
@@ -367,16 +355,11 @@ Process environment (set by the task definition): `DATABASE_URL` (from the secre
 `.release-please-manifest.json`, AA-891), `DB_SSL` (only `test`/`local` may set `disable`), `WORKER_ENABLED`
 (optional; default on when `ENVIRONMENT=dev` and `DATABASE_URL` is set), `CIS_JWKS_URL` and
 `STAFF_JWT_ISSUER` (optional; the CIS bridge, default the Dev CIS, `https://api-cis.lumiguides.it.com[/auth/.well-known/jwks.json]`).
-`B2C_INTAKE_ENABLED` (optional, default **off**, not set on Dev; AA-1034 R0, root ADR 0019 d8 B2B-only model): off, the
-worker neither schedules nor claims `bk_inquiry_pull` / `bk_inquiry_process` and cancels their queued rows
-(`Worker(disabled_kinds=...)`, `app/b2c.py`), and every staff path that would create a traveller record
-(`POST /booking/customers`, a trip case or trip-plan case with `new_customer`) answers 410 `b2b_only`. bk-036 revokes
-INSERT on the `booking.customer*` tables from role `booking` as the database half of the freeze. The staff admin hides
-the same entry points unless the build sets `NEXT_PUBLIC_B2C_INTAKE=on` (`frontend/lib/config.ts`). AA-1037 widens
-the same switch to every B2C write: see "The B2C part is read-only".
+`B2C_INTAKE_ENABLED` is retired with the B2C half (AA-1046); a value left in the task definition is ignored.
 Cognito (AA-680, all optional and **not set on Dev**, defaults are code constants in `app/auth/identity_config.py`):
 `COGNITO_WORKFORCE_ISSUER`, `COGNITO_BOOKING_STAFF_CLIENT_ID`, `COGNITO_BREAKGLASS_CLIENT_ID` (same names as CIS).
-E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the new inquiry e-mail; empty = no e-mail),
+E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the Dev copies of the agency invoice reminders;
+empty = no e-mail outside prod),
 `SES_FROM_ADDRESS` (must equal the Infra `ses_from_address`, the only From the task role may use; empty = no e-mail),
 `SES_CONFIGURATION_SET` (Infra `aa-email-<env>-transactional`), `SES_REGION` (default `us-west-1`), `STAFF_ADMIN_URL`
 (links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
@@ -390,11 +373,8 @@ object verb denied to any principal but the Booking task role) and the task-role
 `s3:GetObject` on `ops-docs/*`): `OPS_DOCS_BUCKET` (the
 `aa-booking-<env>-ops-docs-<account>` bucket, checked against the bk-026 naming rule at start-up; empty = uploads and
 downloads answer 503 `ops_storage_unavailable`, everything else works) and `OPS_DOCS_REGION` (default `us-west-1`).
-Signed-in travellers (AA-908, optional, never set on Dev): `COGNITO_EXTERNAL_ISSUER`, the only issuer the inquiry intake
-accepts for a v1.4 `customer.identity` (default the Dev EXTERNAL pool, `identity_config.DEV_EXTERNAL_ISSUER`; must
-differ from the WORKFORCE and M2M issuers); since AA-682 S5 also the issuer of the customer routes, with the two
-traveller clients `COGNITO_TRIPPLANNER_CLIENT_ID` / `COGNITO_BOOKING_CUSTOMER_CLIENT_ID` (defaults the Dev clients in
-`identity_config`, never set on Dev; letters and digits, never a staff or M2M client).
+Signed-in travellers: `COGNITO_EXTERNAL_ISSUER`, `COGNITO_TRIPPLANNER_CLIENT_ID`, `COGNITO_BOOKING_CUSTOMER_CLIENT_ID`
+are retired with the intake and the customer routes (AA-1046); old values are ignored.
 Error tracking (AA-871, optional): `SENTRY_DSN` (Sentry off when empty; never logged) and `SENTRY_REQUIRED` (`true` =
 start-up fails without a DSN, the missing-DSN guard; off until Infra wires the DSN secret).
 
@@ -439,62 +419,57 @@ staff admin calls them) are reported as warnings. Each release gets the document
 ## E-mail (AA-811)
 
 Booking sends transactional e-mail through **Amazon SES** on acc2 (identity `lumiguides.it.com`, Infra
-`accounts/aa365/ses.tf`; the task role may send only as `ses_from_address`, IAM `ses:FromAddress`). Today there is one
-message: the staff **"new inquiry"** e-mail. Booking sends it, not TripPlanner (S238 decision, ADR 0004 boundary:
-TripPlanner is the front door, Booking owns customers, trip cases and notifications); TripPlanner's `notify.py` only
-logs. Sending happens in a `booking.job` (`bk_notify_email`), never in a request path or inside the intake
-transaction. Templates are in code (`app/notifications/staff_email.py`). **Agency invoice reminders** (AA-1037 G4,
+`accounts/aa365/ses.tf`; the task role may send only as `ses_from_address`, IAM `ses:FromAddress`). The staff "new
+inquiry" e-mail (`bk_notify_email`) is retired with the B2C intake (AA-1046). **Agency invoice reminders** (AA-1037 G4,
 `bk_agency_invoice_reminders`, daily, `app/agency_billing/reminders.py`): an overdue issued agency invoice gets one
 e-mail per step it reaches (setting `agency_reminder_steps_days`, default 1 / 7 / 14 days overdue, plus the credit-stop
 step at the agency's `suspend_after_days`; only the highest step reached), to the bill-to billing e-mail of the
 invoice, recorded once per (invoice, step) in `booking.agency_invoice_reminder` (bk-044). Outside `prod` every
 reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). Bounce/complaint suppression in Booking
-tables is not built yet (the SES configuration set's account suppression list applies). Customer e-mail (proposal
-send, OTP) is not built: those still write rows only.
+tables is not built yet (the SES configuration set's account suppression list applies).
 
-## The B2C part is read-only (AA-1034 R0, AA-1037; root ADR 0019 d8)
+## The B2C part is retired (AA-1046; AA-1034 R0 and AA-1037 before it; root ADR 0019 d8)
 
-Adventure Asia sells to partner agencies only. Until the B2C tables are dropped (a destructive-ops DRY RUN, later),
-the B2C part of Booking is **read-only** while `B2C_INTAKE_ENABLED` is off (the default; one switch reverts all of it,
-`app/b2c.py`). B2B cases come only from the B2B confirm path (`POST /booking/b2b/v1/holds/{id}/confirm`).
+Adventure Asia sells to partner agencies only. The B2C code is gone (AA-1046 part 1): the customers (`/booking/customers`,
+traveller sign-in), the customer invoices and payments (`/booking/invoices`, `/booking/payments`,
+`/booking/billing/summary`, `/booking/trip-cases/{ref}/billing`), My Payments (`/booking/customer/v1`, contract
+`booking.customer.v1`, retired with the TripPlanner My Payments section), Send to the customer
+(`…/versions/{n}/send`), the TripPlanner inquiry intake (`bk_inquiry_pull` / `bk_inquiry_process`) and its staff
+e-mail (`bk_notify_email`), the customer payment reminders, customer payment evidence files, and the settings
+`B2C_INTAKE_ENABLED`, `COGNITO_EXTERNAL_ISSUER`, `COGNITO_TRIPPLANNER_CLIENT_ID`, `COGNITO_BOOKING_CUSTOMER_CLIENT_ID`
+(an old value in the task definition is ignored). B2B cases come only from the B2B confirm path
+(`POST /booking/b2b/v1/holds/{id}/confirm`).
 
-- **Refused before any read or write of the service, 410 `{"detail": "b2b_only", ...}`** (the same code and message as the
-  R0 intake refusal; each route lists the 410 in `docs/api/openapi.json`):
-  - routes that only exist for B2C (`b2c.refuse_b2c_write`, the first call of the handler): `POST /customers`,
-    `PATCH` / `DELETE /customers/{ref}`; `POST /trip-cases` (a staff-made case is always for a customer);
-    `POST /trip-plans/{source_id}/trip-cases` for a new case; every customer invoice and payment write:
-    `POST /trip-cases/{ref}/invoices`, `PATCH` / `DELETE /invoices/{number}`, `POST /invoices/{number}/send`,
-    `/cancel`, `/amend`, `/remind`, `/payments`, `PATCH /payments/{ref}`, `POST /payments/{ref}/verify`, `/void`
-    (`booking.invoices` and `booking.payments` are B2C-only);
-  - routes shared with B2B cases, refused only for a `channel = 'b2c'` case (`b2c.refuse_b2c_case_write` and its
-    siblings read only the case's channel, then the service answers its usual 404 for an unknown ref):
-    `PATCH /trip-cases/{ref}`, `POST .../status`, `.../assign`, the proposal versions (`POST .../versions`,
-    `PATCH` / `DELETE .../versions/{n}`, `PUT .../items`, `POST .../price`, `.../send`, `.../approve`), an existing
-    case in `POST /trip-plans/{source_id}/trip-cases`, supplier bookings (`generate`, create, `PATCH`, `request`,
-    `confirm`, `decline`, `cancel`, `rerequest`), trip checks (`POST /trip-cases/{ref}/checks`,
-    `PATCH /trip-checks/{id}`) and operations files (`POST /ops-files` for payment evidence or a b2c case's supplier
-    booking, `POST /ops-files/{id}/remove` on those files).
-- **Stays open**: every GET (the billing reads come back with every `actions` flag false and `invoiceable` false,
-  reason `b2b_only`, so the pages draw no write button); supplier bills and payouts (AA's own payables, even for a
-  past B2C trip); the B2B API and the B2B desk; catalog, supply and pricing.
-- **Jobs**: `bk_inquiry_pull` / `bk_inquiry_process` are neither scheduled nor claimed (R0), so nothing queues
-  `bk_notify_email` (it only reads and sends the staff e-mail of a new inquiry). `bk_case_lifecycle` moves only B2B
-  cases and `bk_ops_reminders` names only B2B cases and skips the customer payment reminders (each result says
-  `"b2c": "frozen"`). Retention is not a staff write and keeps running on every row: the DM-7 clearing of trip-check
-  emergency contacts (`bk_case_lifecycle`), `bk_retention_inbox_redact`, and the DM-6.7 traveller erasure, a reviewed
-  DB Migrate `run-script` (root `docs/legal/dsar-erasure-runbook.md`).
-- **No DB backstop yet**: a `trip_cases` CHECK `channel = 'b2b'` `NOT VALID` would also refuse every UPDATE of an old
-  b2c row, the erasure script's redaction of `notes` / `inquiry_snapshot` included. The b2b-only CHECK comes with the
-  B2C drop (DRY RUN lane), once the b2c rows are handled.
-- **Staff admin**: the same switch at build time (`NEXT_PUBLIC_B2C_INTAKE`, `frontend/ui/booking/b2cFrozen.ts`) takes
-  the B2C-only write permissions out of the staff profile (`billing.write`, `payment.verify`, `customer.write`,
-  `customer.admin`) and, inside a b2c case (`app/(staff)/cases/[code]/layout.tsx`: the workspace, the proposal
-  builder and its preview), the case, version and operations writes too; a b2c case shows a "Read-only" pill. The
-  pages outside a case gate per row: `/proposals` reads `trip_case_channel` (`GET /booking/versions`) and the check
-  drawer of `/trip-checks` the check's case channel; `ui/booking/b2cFrozen.test.mjs` fails on any other page that
-  reads a case, version or operations write permission until it is gated and listed. The nav leads with B2B (Partners = Agency billing > Agencies, Settlement = Agency billing, B2B
-  desk) and moves Customers and Payments & Invoices to the "B2C records (read-only)" group; the phone bottom nav
-  shows the B2B desk instead of Customers.
+- **The tables go next**: Booking bk-045 (`-- migrate: destructive`, DRY RUN + tech-lead approval, root
+  `docs/audits/2026-11-05-S270-aa1037-b2c-drop-dryrun/`) drops the customer and customer money tables, archives the
+  money rows whole into the owner-only `booking.retired_b2c_record` (10 years, DM-7.1 accounting exception), drops
+  `trip_cases.customer_id`, and lets a new trip case in only as b2b. This build reads none of the dropped objects, so
+  it runs on either side of bk-045.
+- **b2c trip cases are kept history, read-only**: every staff write on a `channel = 'b2c'` case answers 410
+  `{"detail": "b2b_only", ...}` before any write (`app.b2c.refuse_b2c_case_write` and its siblings read only the
+  case's channel; each route lists the 410 in `docs/api/openapi.json`): `PATCH /trip-cases/{ref}`, `POST .../status`,
+  `.../assign`, the proposal versions (`POST .../versions`, `PATCH` / `DELETE .../versions/{n}`, `PUT .../items`,
+  `POST .../price`, `.../approve`), a new version from a trip plan, supplier bookings (`generate`, create, `PATCH`,
+  `request`, `confirm`, `decline`, `cancel`, `rerequest`), trip checks and operations files (customer payment
+  evidence, or a b2c case's supplier booking). A staff-made case (`POST /booking/trip-cases`, a new case from a trip
+  plan) was always a B2C case: 410 too (`app.b2c.refuse_new_case`).
+- **Reads stay**: the trip case list, detail, versions, checks and supplier bills of the kept b2c cases (no customer
+  columns any more: a b2c case names no traveller; the staff admin labels it "Traveller (B2C history)").
+- **Stays open**: supplier bills and payouts (AA's own payables, even for a past B2C trip); the B2B API and desk;
+  catalog, supply, pricing, agency billing.
+- **Jobs**: the retired kinds (`app.b2c.RETIRED_KINDS`) have no handler; the worker cancels a leftover queued row.
+  `bk_case_lifecycle` moves only B2B cases and `bk_ops_reminders` names only B2B cases (each result says
+  `"b2c": "frozen"`). Retention keeps running on every row: the DM-7 clearing of trip-check emergency contacts,
+  `bk_retention_inbox_redact` on the kept inquiry inbox rows (DM-6.6), and the DM-6.7 traveller erasure, a reviewed DB
+  Migrate `run-script` (root `docs/legal/dsar-erasure-runbook.md`).
+- **DB backstop**: bk-045 swaps `trip_cases_channel_chk` for "b2b, or b2c created before the drop" (the kept rows stay
+  valid and redactable). A strict `CHECK (channel = 'b2b')` would refuse every UPDATE of a kept b2c row, the erasure
+  redaction included (even `NOT VALID`), so it is not added while b2c rows exist.
+- **Staff admin**: `lib/config.ts` `B2C_INTAKE_OPEN` is `false` for good; `ui/booking/b2cFrozen.ts` takes the
+  B2C-only permissions out of the staff profile and, inside a b2c case, the case, version and operations writes; a b2c
+  case shows a "Read-only" pill. The Customers pages, the customer invoice and payment pages, the case Billing tab and
+  money badge, Send to customer and `/cases/new` are gone; `/billing` is the supplier bills. Source guards:
+  `ui/booking/b2cOff.test.mjs`, `ui/booking/b2cFrozen.test.mjs`.
 
 ## Staff authentication and permissions (AA-680; root ADR 0006 / 0006a, ADR 0004 O1)
 
@@ -925,54 +900,15 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   leaves Booking. No column, field or key is named `supplier_net` (unit test over the B2B OpenAPI, integration test
   over the schema).
 
-## Invoices and manual payments (AA-682 S3, bk-028; S252 design §3.3, §4, §5, critic B4–B6, B9)
+## Invoices and manual payments (AA-682 S3, bk-028): retired (AA-1046)
 
-- An **invoice** (`booking.invoices`, `INV-000123`) is a **proforma payment request** (design D7: prices tax-inclusive,
-  no tax line; the legal VAT e-invoice stays outside Booking) for the customer of a **B2C** case, in the currency of
-  the approved version, **one live per case**. Created from the case's approved, priced version (409
-  `no_approved_version` / `version_not_priced` / `b2b_no_invoice` / `invoice_exists` / `case_not_invoiceable`, the
-  last when the case is not `confirmed` / `supplier_confirming`). Lines: the version total (locked) + adjustments with
-  a reason. Schedule: given rows that add up to the total (422 `schedule_mismatch`), or the default from settings:
-  `deposit_pct` due `deposit_due_days` after the issue day + the rest `balance_due_days_before_start` before the trip,
-  one payment when the trip is too close; amounts in the currency's minor units, the remainder on the last row.
-- Life: `draft` (edit, soft-delete) → `sent` (bill-to snapshot, one customer notification row, case → `invoice_sent`)
-  → `partially_paid` ⇄ `paid`; `sent` → `cancelled` (reason; only with net verified paid 0 and nothing waiting: 409
-  `invoice_has_payments`; a partially paid invoice is refunded back to `sent` first). **The money states are derived by the database** from verified payments (`invoice_settle`,
-  guarded by `invoices_guard`): no route, script or app bug can mark an invoice paid without verified money.
-  **Amendment** (`POST …/amend`, critic B5): a sent invoice takes appended adjustment lines; rows the verified payments
-  already cover stay, the rest is re-planned (or the difference goes on the last unpaid row); a paid invoice may drop
-  to partially paid; the customer feed says "updated". It runs in the **amendment window**: one transaction sets
-  `invoices.amending = true`, writes lines and rows, then sets it back to false, which is where the database checks
-  that the schedule adds up to the new total (409 `invalid_amendment`). Outside the window the database refuses any
-  change to a sent invoice's lines or schedule, and while it is open no payment is verified or voided. `POST …/remind` writes one customer row a day.
-- A **payment** (`booking.payments`, `PMT-000123`) is recorded by hand (no provider, D6): receipt or refund, amount,
-  method, `received_on`, bank / receipt reference (a card-like number is 422 `card_number_not_allowed`), note,
-  optional amount that arrived in another currency (informational). **Maker-checker**: an admin who did not record it
-  verifies it (403 `maker_checker`; CHECK in the DB), with the evidence file unless cash (422 `evidence_required`;
-  `POST /booking/ops-files` kind `payment_evidence`, entity the payment, which becomes its `evidence_file_id`; bk-028
-  re-checks at verify that it is still an active file, and removing the attached evidence of a recorded payment
-  detaches it first). Only verified, non-voided payments count. Void = reason, final; a verified one needs `payment.verify`. A refund never
-  takes the net paid below 0 (409 `refund_exceeds_paid`). Same method + reference again = 409 `duplicate_reference`
-  unless `allow_duplicate_reference`.
-- **Idempotency-Key** (8–200 chars) on `POST …/invoices` (unique per case) and `POST …/payments` (unique per invoice):
-  same key + same body → the stored row (200, `replayed: true`); other body → 409 `idempotency_conflict`; missing →
-  422 `idempotency_key_required`. The staff BFF forwards the header; the UI makes one key per opening of a form.
-- **Case money track** (`app.ops.track.advance_case`, one function for both tracks): a B2C case follows its sent
-  invoice (`sent` → `invoice_sent`, `partially_paid` → `payment_pending`, `paid` → `paid`), forward on a verify, back
-  on a void / amendment, back to `supplier_confirming` / `confirmed` when the invoice is cancelled; the bk-028 guard
-  refuses any other money status. B2C reaches `pre_departure` (lifecycle job) only once paid. Travel statuses never
-  step back: a void after departure raises `invoice.balance_reopened` for staff instead (critic note 12). Lock order
-  everywhere: case → invoice → payment (the settle trigger locks the invoice first, critic B4).
-- **Case cancel / reopen** (critic B9): a staff cancel deletes a draft invoice and, for a sent one, raises
-  `invoice.case_cancelled` (refund, then cancel it); reopening is 409 `live_invoice` while an invoice is not cancelled
-  or a payment waits (the guard refuses it too).
-- Settings (policy data; Ms. Thư's answers change values by migration or run-script): `deposit_pct` (bk-005),
-  `deposit_due_days`, `balance_due_days_before_start`, `payment_due_soon_days`, `payment_overdue_reminder_days`;
-  `invoice_issuer` and `payment_instructions` are **placeholders** in the public migration, set for real by a DB
-  Migrate run-script (never in Git).
-- KPIs (`GET /booking/billing/summary`): left to pay, overdue, received this month (verified, net of refunds),
-  waiting for verification, per currency plus a USD total at each version's locked FX (`fx_rate_locked`, critic note
-  5: the rate the quote was sold at, ADR 0005 d5).
+The customer proforma invoices, their schedule and the manual payments (with maker-checker) were the money of the B2C
+half. Their routes, services (`app/ops/invoices.py`, `app/ops/payments.py`), reminders and staff pages are gone; agency
+money is agency billing (bk-041..044, below). Booking bk-045 archives their rows whole into `booking.retired_b2c_record`
+and drops the tables. The pure money helpers (`app/ops/money.py`: minor units, line amounts, the request hash, the
+card-number refusal) stay for supplier bills and agency billing. The case money track is gone too: no case takes
+`invoice_sent` / `payment_pending` / `paid` any more (bk-045 makes the guard refuse them), and a kept b2c case left in
+one never moves (`app.ops.track.next_status`).
 
 ## Supplier bills and payouts (AA-682 S4, bk-030; S252 design §3.4, §4, §5, critic B4, B6)
 
@@ -1001,28 +937,10 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   once more when overdue) to the shared staff queue. Staff UI: `/billing?tab=supplier-bills`, the supplier Bills tab,
   the bill drawer and payout modal, the case Suppliers tab's cost vs billed panel.
 
-## My Payments: customer routes (AA-682 S5; S252 design §5, §7, §8, critic note 10; contract `booking.customer.v1`)
+## My Payments: customer routes (AA-682 S5, contract `booking.customer.v1`): retired (AA-1046)
 
-- **Route class**: `/booking/customer/v1/*` accepts only a Cognito EXTERNAL access token of the `tripplanner` or
-  `booking-customer` client (`app.auth.customer`, its own verifier over the vendored module, keys prefetched in the
-  lifespan like the staff and M2M ones). Anything else (no token, a staff WORKFORCE or bridge token, an M2M token, an ID
-  token, the `cis-portal` client, a client-credentials shape) is 401 `sign_in_required`; keys never loaded is 503
-  `auth_unavailable`. A traveller token never opens a staff route (unknown issuer for the staff verifier). The caller
-  today is the TripPlanner BFF (`/api/me/payments`), which forwards the traveller's token; no gateway change (the REST
-  API proxies `/booking/{proxy+}` with no auth, the app authenticates).
-- **Scope** (`app.ops.my_payments`, all in SQL): `(iss, sub)` → `customer_identities` → a live customer; that
-  customer's B2C cases (`trip_cases.customer_id`, so a merge that re-points the case carries its invoices); invoices
-  not deleted and not `draft`. Everything else is 404 `invoice_not_found` (another customer's number, a draft, a
-  malformed number); an unlinked sign-in (a guest lead is never linked) gets an empty list.
-- **Fields** (allow-list = the router's response models, `extra="forbid"`): number, status, proforma, currency,
-  total, paid (verified receipts - refunds), balance, next due, overdue amount, issue time; the trip's code, dates and
-  TripPlanner trip id (`source_id` of a `tripplanner` case); schedule rows with the customer chip state
-  (`scheduled`, `due_soon`, `paid`, `overdue`, `cancelled`); **verified, non-voided** payments (ref, kind, amount,
-  currency, method, received date); `payment_instructions` only while money is owed (`sent`, `partially_paid`). Never
-  a staff member, evidence, bank reference, note, reason, bill-to snapshot, internal id, net cost or supplier field
-  (unit + integration tests walk every key; the root contract checker enforces the same policy on the contract and
-  its samples). Read only, `Cache-Control: no-store` on every answer (401/404/503 included), nothing about the
-  identity logged.
+`/booking/customer/v1` and its traveller verifier (`app.auth.customer`) are gone with the B2C half; TripPlanner
+removed My Payments in the same change. The root contract file is marked retired.
 
 ## Deferred work (`booking.job`, O3/O9)
 

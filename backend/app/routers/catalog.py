@@ -38,7 +38,7 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import b2c, catalog
@@ -47,8 +47,7 @@ from app.b2b import departures, plan_components
 from app.catalog import cost_sheet, geo, price_history, price_readiness, trip_plan_prices, trip_plans
 from app.errors import NotFound
 from app.pricing import engine
-from app.routers.trip_cases import CountryCode, Currency, NewCustomer
-from app.trip_cases import service
+from app.routers.trip_cases import Currency
 
 router = APIRouter(prefix="/booking/catalog", tags=["catalog"])
 
@@ -158,35 +157,13 @@ def _patch(body: BaseModel) -> dict[str, Any]:
 
 
 class UseForTripCase(BaseModel):
-    """``trip_case`` (a case UUID or code) adds a version to that case; otherwise a new case is created for
-    ``customer_id`` or ``new_customer`` (same fields as ``POST /booking/trip-cases``)."""
+    """``trip_case`` (a case UUID or code) gets a new version from the plan. Without it the request asked for a new
+    staff-made case, a B2C case retired with the B2C half (AA-1046): 410 ``b2b_only``."""
 
     model_config = ConfigDict(extra="forbid")
 
     trip_case: str | None = Field(default=None, min_length=1, max_length=64)
-    customer_id: uuid.UUID | None = None
-    new_customer: NewCustomer | None = None
-    start_date: date | None = None
-    pax: int | None = Field(default=None, ge=1, le=999)
-    pax_adults: int | None = Field(default=None, ge=1, le=999)
-    pax_children: int | None = Field(default=None, ge=0, le=998)
-    currency: Currency = "USD"
-    trip_style: str | None = Field(default=None, max_length=60)
     notes: str | None = Field(default=None, max_length=10_000)
-    countries: list[CountryCode] = Field(default_factory=list, max_length=service.MAX_COUNTRIES)
-    assignee: str | None = Field(default=None, min_length=1, max_length=128)
-    initial_status: Literal["new_inquiry", "discovery"] = "new_inquiry"
-
-    @model_validator(mode="after")
-    def _one_target(self) -> UseForTripCase:
-        has_customer = self.customer_id is not None or self.new_customer is not None
-        if self.trip_case is not None:
-            if has_customer:
-                raise ValueError("send trip_case or a customer, not both")
-            return self
-        if (self.customer_id is None) == (self.new_customer is None):
-            raise ValueError("send trip_case, or exactly one of customer_id or new_customer")
-        return self
 
 
 @router.get("/destinations")
@@ -413,21 +390,14 @@ async def review_trip_plan_reference(source_id: SourceId, staff: CanWritePlans, 
 
 
 @router.post("/trip-plans/{source_id}/trip-cases", status_code=201, responses=b2c.GONE_RESPONSE)
-async def use_trip_plan(
-    body: UseForTripCase, source_id: SourceId, staff: CanStartCase, pool: Pool, request: Request
-) -> dict[str, Any]:
+async def use_trip_plan(body: UseForTripCase, source_id: SourceId, staff: CanStartCase, pool: Pool) -> dict[str, Any]:
     if not staff.can("version.write"):
         raise HTTPException(status_code=403, detail="forbidden")
     if body.trip_case is None:
-        # AA-1034 R0 / AA-1037: a new case here is always for a customer (new or existing), a B2C case.
-        b2c.refuse_b2c_write(request)
-    data = body.model_dump()
-    if data.get("customer_id"):
-        data["customer_id"] = str(data["customer_id"])
+        b2c.refuse_new_case()  # AA-1046: a new case here was always for a traveller customer, a B2C case
     async with pool.acquire() as conn, conn.transaction():
-        if body.trip_case is not None:
-            await b2c.refuse_b2c_case_write(request, conn, body.trip_case)  # AA-1037: a b2c case is read-only
-        return await trip_plans.use_for_trip_case(conn, staff, source_id, data)
+        await b2c.refuse_b2c_case_write(conn, body.trip_case)  # AA-1037: a b2c case is read-only
+        return await trip_plans.use_for_trip_case(conn, staff, source_id, body.model_dump())
 
 
 # ── Bookable components of a plan (bk-019, AA-972: what booking.b2b.v1 /products lists and a tp: line prices) ──

@@ -412,12 +412,8 @@ async def test_use_for_trip_case_needs_a_sellable_plan() -> None:
 
 
 @pytest.mark.asyncio
-async def test_use_for_trip_case_new_case_and_new_version(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_use_for_trip_case_adds_a_version(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, Any] = {}
-
-    async def create_case(conn: Any, staff: Staff, data: dict[str, Any], *, source: Any) -> dict[str, Any]:
-        calls["case"] = (data, source)
-        return {"id": "c-1"}
 
     async def create_version(conn: Any, staff: Staff, ref: str, notes: Any, *, seed: versions.Seed) -> dict[str, Any]:
         calls.setdefault("versions", []).append((ref, notes, seed))
@@ -426,32 +422,17 @@ async def test_use_for_trip_case_new_case_and_new_version(monkeypatch: pytest.Mo
     async def get_case(conn: Any, ref: str) -> dict[str, Any]:
         return {"id": ref}
 
-    monkeypatch.setattr(trip_plans.trip_cases, "create_case", create_case)
     monkeypatch.setattr(trip_plans.trip_cases, "get_case", get_case)
     monkeypatch.setattr(trip_plans.versions, "create_version", create_version)
-
-    conn = plan_conn().on("FROM booking.countries", "BT")
-    out = await trip_plans.use_for_trip_case(conn, SALES, SOURCE_ID, {"customer_id": "x", "notes": "case notes"})
-    assert out == {"mode": "new_case", "trip_case": {"id": "c-1"}, "version": {"version_number": 1}}
-    data, source = calls["case"]
-    assert source == ("cis", SOURCE_ID) and data["trip_style"] == "Private" and data["countries"] == ["BT"]
-    ref, notes, seed = calls["versions"][0]
-    assert ref == "c-1" and notes is None and seed.title == "Bhutan Dragon Trails" and seed.label == "BT-7D"
-    assert seed.channel == "b2c_tailor_made" and [i.title for i in seed.items] == ["Arrive"]
-
     out = await trip_plans.use_for_trip_case(
         plan_conn(tour_row(country=None, sku=None)), SALES, SOURCE_ID, {"trip_case": "TC-000001", "notes": "opt 2"}
     )
-    assert out["mode"] == "new_version" and out["trip_case"] == {"id": "TC-000001"}
-    assert (
-        calls["versions"][1][:2] == ("TC-000001", "opt 2") and calls["versions"][1][2].label == "Bhutan Dragon Trails"
-    )
-
-
-@pytest.mark.asyncio
-async def test_country_code_without_country_or_match() -> None:
-    assert await trip_plans._country_code(ScriptedConn(), None) == []
-    assert await trip_plans._country_code(ScriptedConn(), "Atlantis") == []
+    assert out == {"mode": "new_version", "trip_case": {"id": "TC-000001"}, "version": {"version_number": 1}}
+    ref, notes, seed = calls["versions"][0]
+    assert (ref, notes) == ("TC-000001", "opt 2") and seed.label == "Bhutan Dragon Trails"
+    assert seed.channel == "b2c_tailor_made" and [i.title for i in seed.items] == ["Arrive"]
+    # AA-1046: a new staff-made case from a plan was a B2C case; the service no longer creates one
+    assert not hasattr(trip_plans.trip_cases, "create_case")
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -513,20 +494,13 @@ def test_routes_map_arguments_and_permissions(monkeypatch: pytest.MonkeyPatch) -
     assert make_client(ADMIN).put(url, json={"trip_style": "x"}).status_code == 422  # sellable is required
 
     use_url = f"/booking/catalog/trip-plans/{SOURCE_ID}/trip-cases"
-    customer = "55555555-5555-4555-8555-555555555555"
-    # AA-1037: a new case here is a customer (B2C) case: 410 b2b_only while B2C_INTAKE_ENABLED is off.
-    assert make_client(SALES).post(use_url, json={"customer_id": customer}).status_code == 410
+    # AA-1046: a new case here was a traveller customer (B2C) case: 410 b2b_only before the service is called.
+    assert make_client(SALES).post(use_url, json={}).status_code == 410
     assert use.calls == []
-    b2c_on = make_client(SALES, b2c_intake_enabled=True)
-    assert b2c_on.post(use_url, json={"customer_id": customer}).status_code == 201
-    assert use.calls[0][0][2]["customer_id"] == customer and use.calls[0][0][2]["currency"] == "USD"
-    assert make_client(SALES).post(use_url, json={"trip_case": "TC-000001"}).status_code == 201
-    assert make_client(CONTRACTING).post(use_url, json={"customer_id": customer}).status_code == 403
-    for invalid in (
-        {},
-        {"trip_case": "TC-1", "customer_id": customer},
-        {"customer_id": customer, "new_customer": {"name": "A", "phone": "123"}},
-    ):
+    assert make_client(SALES).post(use_url, json={"trip_case": "TC-000001", "notes": "opt 2"}).status_code == 201
+    assert use.calls[0][0][2] == {"trip_case": "TC-000001", "notes": "opt 2"}
+    assert make_client(CONTRACTING).post(use_url, json={"trip_case": "TC-000001"}).status_code == 403
+    for invalid in ({"customer_id": "55555555-5555-4555-8555-555555555555"}, {"trip_case": ""}):
         assert make_client(SALES).post(use_url, json=invalid).status_code == 422
 
 

@@ -20,6 +20,7 @@ import { TripPlanPicker } from "../_parts/TripPlanPicker";
 import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { friendlyError } from "../_parts/QueryError";
 import { useAssign, useChangeStatus } from "./useCaseMutations";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 // AA-682 (bk-026, critic B1): post-sale statuses follow supplier bookings, invoices and dates; the API answers
 // status_system_managed, so they are never offered. Confirmed is reached by approval (or by the system after a
@@ -255,7 +256,7 @@ function CancelModal({
     >
       <div className="flex flex-col gap-4 font-sans">
         <p className="text-sm text-body">
-          {decline ? "Decline" : "Cancel"} <strong className="font-mono">{c.code}</strong> from <strong>{c.customer_name ?? "this customer"}</strong>? The
+          {decline ? "Decline" : "Cancel"} <strong className="font-mono">{c.code}</strong> for <strong>{casePartyLabel(c)}</strong>? The
           case moves to Cancelled and keeps its history. It can be reopened later with a reason.
         </p>
         <Field label={decline ? "Reason for declining" : "Reason for cancelling"} required>
@@ -333,7 +334,7 @@ function ConvertModal({ c, onClose }: { c: TripCaseDetail; onClose: () => void }
     >
       <div className="flex flex-col gap-4 font-sans">
         <p className="text-sm text-body">
-          Start working on this inquiry from <strong>{c.customer_name ?? "the customer"}</strong>. The case moves to Discovery: talk with the customer, then
+          Start working on this inquiry (<strong>{casePartyLabel(c)}</strong>). The case moves to Discovery: talk with the customer, then
           build a proposal.
         </p>
         <Field label="Sales rep" hint={canAssign ? undefined : "Your role cannot change the assignment."}>

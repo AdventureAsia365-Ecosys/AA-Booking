@@ -8,9 +8,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { api } from "@/lib/api/client";
-import { B2C_INTAKE_OPEN } from "@/lib/config";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
 import { useOffsetPage, PAGE_SIZES } from "@/lib/useOffsetPage";
 import {
@@ -23,7 +22,6 @@ import {
   Pill,
   Section,
   TripCaseStatusBadge,
-  useCan,
   useUrlFilters,
   formatDay,
 } from "@/ui";
@@ -31,6 +29,7 @@ import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { QueryError, isForbidden } from "./_parts/QueryError";
 import { StatusMultiSelect, parseStatuses } from "./_parts/StatusMultiSelect";
 import { sortStaff, useStaffDirectory } from "./_parts/StaffSelect";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 const PRE_SALE: TripCaseStatus[] = ["new_inquiry", "discovery", "building", "proposal_sent"];
 const CLOSED: TripCaseStatus[] = ["completed", "cancelled"];
@@ -58,7 +57,6 @@ function tabCount(key: string, s: TripCaseSummary | undefined): number | undefin
 
 export default function TripCasesPage() {
   const router = useRouter();
-  const canWrite = useCan("trip_case.write");
   const { get, set } = useUrlFilters();
   const paging = useOffsetPage();
   const tab = CASE_TABS.find((t) => t.key === get("tab")) ?? CASE_TABS[0];
@@ -85,7 +83,7 @@ export default function TripCasesPage() {
   // AA-996 (audit slice 1): drawn in the table toolbar, so the filters and the Columns / CSV tools share one row.
   const filterBar = (
     <FilterBar
-      search={{ placeholder: "Search case code, customer name or e-mail" }}
+      search={{ placeholder: "Search case code" }}
       selects={[
         {
           key: "sales",
@@ -123,17 +121,7 @@ export default function TripCasesPage() {
     <PageFrame
       title="Trip cases"
       description="Every inquiry and booking in one list, from the first TripPlanner inquiry to the trip itself."
-      actions={
-        // AA-1034 R0: staff-made customer cases are part of the frozen B2C intake (root ADR 0019).
-        B2C_INTAKE_OPEN && canWrite ? (
-          <Link
-            href="/cases/new"
-            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.06em] text-on-accent hover:bg-accent-deep"
-          >
-            <Plus size={15} /> New trip case
-          </Link>
-        ) : undefined
-      }
+      // AA-1046: no "New trip case": a staff-made case was a B2C case; B2B cases come from the partner API.
     >
       {forbidden ? (
         <Section>
@@ -198,27 +186,14 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   { id: "code", header: "Case", accessorKey: "code", cell: ({ row }) => <Code>{row.original.code}</Code> },
   {
     id: "customer",
-    header: "Customer",
-    accessorKey: "customer_name",
+    header: "For",
+    accessorFn: (r) => casePartyLabel(r),
     cell: ({ row }) => (
       <PersonCell
         className="md:max-w-[140px] min-[1200px]:max-w-[180px]"
-        name={row.original.customer_name}
-        sub={row.original.customer_email ?? row.original.customer_phone}
-        chips={
-          <>
-            {!row.original.customer_verified && (
-              <Pill tone="accent" dot={false}>
-                Unverified
-              </Pill>
-            )}
-            {row.original.customer_needs_merge_review && (
-              <Pill tone="warning" dot={false}>
-                Merge review
-              </Pill>
-            )}
-          </>
-        }
+        name={casePartyLabel(row.original)}
+        sub={row.original.channel === "b2b" ? row.original.party_tenant_id : "read-only"}
+        chips={row.original.channel === "b2b" ? <Pill tone="accent" dot={false}>B2B</Pill> : null}
       />
     ),
   },

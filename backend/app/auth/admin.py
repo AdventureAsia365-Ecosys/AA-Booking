@@ -129,11 +129,9 @@ async def staff_detail(conn: asyncpg.Connection, viewer: Staff, cis_user_id: str
         raise NotFound("staff_not_found", f"staff user {cis_user_id} not found")
     assignments = await conn.fetch(
         """
-        SELECT a.role, a.assigned_at, tc.id::text AS trip_case_id, tc.code, tc.status, tc.start_date,
-               c.name AS customer_name
+        SELECT a.role, a.assigned_at, tc.id::text AS trip_case_id, tc.code, tc.status, tc.start_date, tc.channel
         FROM booking.staff_assignments a
         JOIN booking.trip_cases tc ON tc.id = a.trip_case_id AND tc.deleted_at IS NULL
-        LEFT JOIN booking.customers c ON c.id = tc.customer_id
         WHERE a.staff_user_id = $1 AND a.unassigned_at IS NULL
         ORDER BY a.assigned_at DESC
         """,

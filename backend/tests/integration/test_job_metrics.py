@@ -86,8 +86,8 @@ async def test_healthy_running_job_zeroes_age_and_overdue_uses_the_attempt_start
 
     await admin.execute("TRUNCATE booking.job")
     await queued(admin, "bk_inquiry_process", "20 minutes")
-    await running(admin, "bk_notify_email", "1 hour", "3 minutes")  # > 2 x 60 s
-    await running(admin, "bk_inquiry_pull", "30 minutes", None)  # no attempt stamp: started_at, > 2 x 60 s
+    await running(admin, "bk_ops_reminders", "1 hour", "5 minutes")  # > 2 x 120 s
+    await running(admin, "bk_tour_lifecycle_pull", "30 minutes", None)  # no attempt stamp: started_at, > 2 x 120 s
     s = await read_sample(pool)
     assert s.overdue_running == 2
     assert s.oldest_queued_age_s >= 1195  # nothing healthy runs, so the queue ages

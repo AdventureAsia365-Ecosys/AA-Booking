@@ -1,8 +1,7 @@
 """AA-682 S3 (bk-028) pure rules: money amounts in minor units without floats, the default schedule (deposit % with
 the remainder on the last row, one payment when the trip is close), staff schedules that must add up, the waterfall,
-the canonical request hash of an Idempotency-Key call, the card-number refusal, the case track across supply and
-money, the overdue reminder steps, the billing permissions (preview never, verify admin only) and the payment
-actions (maker-checker)."""
+the canonical request hash of an Idempotency-Key call, the card-number refusal, the case track (supply only since the
+customer invoices retired, AA-1046) and the billing permissions (preview never, verify admin only)."""
 
 from __future__ import annotations
 
@@ -13,7 +12,7 @@ import pytest
 
 from app.auth.staff import PREVIEW_PERMISSIONS, Staff
 from app.errors import Invalid
-from app.ops import invoices, lifecycle, money, payments, track
+from app.ops import money, track
 
 ISSUE = date(2026, 11, 2)
 POLICY = money.SchedulePolicy(Decimal(30), 3, 30)
@@ -154,34 +153,22 @@ def test_idempotency_key_length() -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "channel", "live", "asked", "invoice", "target"),
+    ("status", "live", "asked", "target"),
     [
-        ("confirmed", "b2c", 0, 0, "sent", "invoice_sent"),
-        ("supplier_confirming", "b2c", 2, 1, "sent", "invoice_sent"),
-        ("invoice_sent", "b2c", 0, 0, "partially_paid", "payment_pending"),
-        ("payment_pending", "b2c", 0, 0, "paid", "paid"),
-        ("paid", "b2c", 0, 0, "partially_paid", "payment_pending"),  # a void
-        ("payment_pending", "b2c", 0, 0, "sent", "invoice_sent"),
-        ("invoice_sent", "b2c", 1, 1, None, "supplier_confirming"),  # invoice cancelled, a supplier asked
-        ("invoice_sent", "b2c", 0, 0, None, "confirmed"),
-        ("invoice_sent", "b2c", 0, 0, "sent", None),
-        ("confirmed", "b2b", 1, 1, "sent", "supplier_confirming"),  # never a money status on B2B
-        ("pre_departure", "b2c", 0, 0, "partially_paid", None),  # travel statuses never step back
-        ("cancelled", "b2c", 0, 0, "paid", None),
+        ("confirmed", 1, 1, "supplier_confirming"),
+        ("confirmed", 1, 0, None),
+        ("supplier_confirming", 1, 1, None),  # keeps its status while a booking is live
+        ("supplier_confirming", 0, 1, "confirmed"),
+        # AA-1046: the money track is gone; a kept b2c case left in a money status never moves
+        ("invoice_sent", 0, 0, None),
+        ("payment_pending", 1, 1, None),
+        ("paid", 0, 0, None),
+        ("pre_departure", 0, 0, None),  # travel statuses never step back
+        ("cancelled", 0, 0, None),
     ],
 )
-def test_next_status(status: str, channel: str, live: int, asked: int, invoice: str | None, target: str | None) -> None:
-    assert track.next_status(status, channel, live=live, asked=asked, invoice_status=invoice) == target
-
-
-# ── Reminders ────────────────────────────────────────────────────────────────
-
-
-def test_overdue_steps() -> None:
-    assert lifecycle.overdue_steps("[7, 1]") == (1, 7)
-    for bad in ("[]", "[0]", '"x"', None, "[true]"):
-        assert lifecycle.overdue_steps(bad) == lifecycle.DEFAULT_OVERDUE_STEPS
-    assert [lifecycle.overdue_step(d, (1, 7)) for d in (None, 0, 1, 6, 7, 30)] == [None, None, 1, 1, 7, 7]
+def test_next_status(status: str, live: int, asked: int, target: str | None) -> None:
+    assert track.next_status(status, live=live, asked=asked) == target
 
 
 # ── Permissions and actions ──────────────────────────────────────────────────
@@ -193,51 +180,6 @@ def test_billing_permissions() -> None:
     assert not staff("contracting").can("billing.read") and not staff("content_creator").can("billing.read")
     assert not {"billing.read", "billing.write", "payment.verify"} & PREVIEW_PERMISSIONS  # critic note 8
     assert not staff("admin", preview=True).can("billing.read")
-
-
-def _payment(state: str, recorder: str = "u-1", method: str = "bank_transfer", evidence: str | None = None) -> dict:
-    return {
-        "id": "p",
-        "ref": "PMT-000001",
-        "state": state,
-        "method": method,
-        "evidence_file_id": evidence,
-        "recorded_by": recorder,
-        "recorded_by_name": recorder,
-        "verified_by": None,
-        "verified_by_name": None,
-        "voided_by": None,
-        "voided_by_name": None,
-        "invoice_id": "i",
-        "invoice_number": "INV-000001",
-        "invoice_status": "sent",
-        "trip_case_id": "c",
-        "trip_case_code": "TC-000001",
-    }
-
-
-def test_payment_actions_follow_maker_checker() -> None:
-    assert not payments.payment_out(_payment("recorded"), staff("admin", "u-1"))["actions"]["verify"]
-    assert payments.payment_out(_payment("recorded"), staff("admin", "u-2"))["actions"]["verify"]
-    assert not payments.payment_out(_payment("recorded"), staff("sales", "u-2"))["actions"]["verify"]
-    verified = payments.payment_out(_payment("verified"), staff("sales", "u-2"))
-    assert not verified["actions"]["void"] and not verified["actions"]["edit"]
-    assert payments.payment_out(_payment("verified"), staff("admin", "u-2"))["actions"]["void"]
-    assert payments.payment_out(_payment("recorded"), staff("sales"))["needs_evidence"]
-    assert not payments.payment_out(_payment("recorded", method="cash"), staff("sales"))["needs_evidence"]
-
-
-def test_invoice_actions() -> None:
-    sales = staff("sales")
-    assert invoices.actions({"status": "draft", "balance": "2400.00"}, sales)["send"]
-    sent = invoices.actions({"status": "sent", "balance": "2400.00"}, sales)
-    assert sent["record_payment"] and sent["remind"] and sent["cancel"] and not sent["send"]
-    paid = invoices.actions({"status": "paid", "balance": "0.00"}, sales)
-    assert not paid["remind"] and not paid["cancel"] and paid["amend"]
-    # A partially paid invoice has net verified paid > 0: refund it back to sent first (no partially_paid edge).
-    part = invoices.actions({"status": "partially_paid", "balance": "1680.00"}, sales)
-    assert not part["cancel"] and part["remind"] and part["record_payment"]
-    assert not any(invoices.actions({"status": "sent", "balance": "1.00"}, staff("contracting")).values())
 
 
 def test_finance_issues_invoices_and_records_payments_but_does_not_verify() -> None:
