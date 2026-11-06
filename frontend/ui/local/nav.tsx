@@ -30,9 +30,7 @@ import {
   Shield,
   SquareCheck,
   Store,
-  Users,
 } from "lucide-react";
-import { B2C_INTAKE_OPEN } from "@/lib/config";
 import { canSeePage } from "@/lib/rbac";
 import { hrefPath, navActive, type NavMatch } from "./navMatch";
 
@@ -79,18 +77,12 @@ const B2B_GROUP: NavGroup = {
   ],
 };
 
-const CUSTOMERS: NavEntry = { href: "/customers", label: "Customers", icon: <Users size={ICON} />, wave: 1, shipped: true };
-const CUSTOMER_BILLING: NavEntry = {
-  href: "/billing",
-  label: "Payments & Invoices",
-  icon: <CreditCard size={ICON} />,
-  wave: 3,
-  shipped: true,
-};
+// AA-682 S4: AA's own payables. The customer invoices and payments that shared /billing are retired with the B2C half
+// of Booking (AA-1046), and so are the Customers pages.
+const SUPPLIER_BILLS: NavEntry = { href: "/billing", label: "Supplier bills", icon: <CreditCard size={ICON} />, wave: 3, shipped: true };
 
-/** The nav groups for a build: with the B2C part closed (the default) the B2C records (customers, customer invoices
- *  and payments) move to a read-only group near the end; open, they sit in Sales and Operations as before. */
-export function navGroups(b2cOpen: boolean): NavGroup[] {
+/** The nav groups (AA-1046: B2B only; the read-only group of retired traveller records went with the customer pages). */
+export function navGroups(): NavGroup[] {
   return [
     {
       label: "Overview",
@@ -102,14 +94,13 @@ export function navGroups(b2cOpen: boolean): NavGroup[] {
       items: [
         { href: "/cases", label: "Trip Cases", icon: <Briefcase size={ICON} />, wave: 1, shipped: true },
         { href: "/proposals", label: "Proposals", icon: <MapIcon size={ICON} />, wave: 1, shipped: true },
-        ...(b2cOpen ? [CUSTOMERS] : []),
         { href: "/pricing/calculator", label: "Pricing calculator", icon: <Calculator size={ICON} />, wave: 1, shipped: true },
       ],
     },
     {
       label: "Operations",
       items: [
-        ...(b2cOpen ? [CUSTOMER_BILLING] : []),
+        SUPPLIER_BILLS,
         { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: true },
       ],
     },
@@ -133,7 +124,6 @@ export function navGroups(b2cOpen: boolean): NavGroup[] {
         { href: "/catalog/countries", label: "Countries", icon: <Globe size={ICON} />, wave: 2, shipped: true },
       ],
     },
-    ...(b2cOpen ? [] : [{ label: "B2C records (read-only)", items: [CUSTOMERS, CUSTOMER_BILLING] }]),
     {
       label: "Admin",
       items: [
@@ -144,7 +134,7 @@ export function navGroups(b2cOpen: boolean): NavGroup[] {
   ];
 }
 
-export const NAV_GROUPS: NavGroup[] = navGroups(B2C_INTAKE_OPEN);
+export const NAV_GROUPS: NavGroup[] = navGroups();
 
 /** Footer / avatar-menu entry (all roles). */
 export const SETTINGS_ENTRY: NavEntry = {

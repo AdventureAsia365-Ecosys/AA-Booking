@@ -5,9 +5,9 @@
 //
 // Data: GET /booking/trip-cases/{code} + GET …/versions/{n}/items (items with their net cost lines). Save =
 // PUT …/items (items keep their ids, D2; each item carries its costs[]). Title / notes = PATCH …/versions/{n}.
-// Delete draft = DELETE …/versions/{n}. Send = the shared send modal. Price panel = POST
-// /booking/pricing/quote-preview, live and debounced on the draft lines; "Apply price" = POST
-// …/versions/{n}/price, which prices the SAVED lines on the server and stores the total that Send locks.
+// Delete draft = DELETE …/versions/{n}. Price panel = POST /booking/pricing/quote-preview, live and debounced on
+// the draft lines; "Apply price" = POST …/versions/{n}/price, which prices the SAVED lines on the server and stores the
+// total. Send to the customer is retired with the B2C half of Booking (AA-1046); a version sent before stays locked.
 // Saving changed items or costs clears that total on the server (S236 review finding 2).
 // AA-996 (Figma audit items 11, 12): a sent or approved version shows its saved price (total, channel, FX lock, sent /
 // approved dates) instead of a live quote; a read-only session's 403 on the quote is explained (PricePanel); "Record
@@ -36,7 +36,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Send,
   Trash2,
 } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
@@ -86,11 +85,11 @@ import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { CostLinesEditor, FxNotice, PriceSettings, QuoteResult, useQuotePreview, type PriceSettingsValue } from "@/ui/booking/PricePanel";
 import { dayDate, useVersion } from "@/app/(staff)/_parts/useVersion";
-import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisNewTitle, cisTourName, cisUpdates, refreshFromCis } from "@/ui/booking/cisReadback";
 import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 import { ItemDrawer, type ItemDraftFields } from "./ItemDrawer";
+import { casePartyLabel } from "@/ui/booking/caseFacts";
 
 const TERMINAL = ["completed", "cancelled"];
 
@@ -146,7 +145,6 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const [removing, setRemoving] = useState<DraftItem | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
-  const [sendOpen, setSendOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -303,16 +301,6 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
     setDrawer(null);
   };
 
-  const sendBlocked = itemsDirty
-    ? "Save your changes first."
-    : v.total_price == null
-      ? "The version has no total price yet: apply a price in the Price panel."
-      : !["discovery", "building", "proposal_sent"].includes(c.status)
-        ? `The case is ${c.status.replace(/_/g, " ")}.`
-        : items.length === 0
-          ? "Add at least one item."
-          : null;
-
   return (
     <PageFrame width="full">
       <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
@@ -335,7 +323,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
                 <Code>{c.code}</Code>
                 <span>·</span>
-                <span>{c.customer_name ?? "Unnamed customer"}</span>
+                <span>{casePartyLabel(c)}</span>
                 {v.title && (
                   <>
                     <span>·</span>
@@ -365,11 +353,6 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                 <Save size={14} /> {save.isPending ? "Saving…" : "Save"}
               </Button>
             )}
-            {editable && (
-              <Button variant="primary" onClick={() => setSendOpen(true)} disabled={!!sendBlocked} title={sendBlocked ?? undefined}>
-                <Send size={14} /> Send to customer
-              </Button>
-            )}
             {canWrite && v.badge === "sent" && c.status === "proposal_sent" && (
               <Button
                 variant="primary"
@@ -383,9 +366,6 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           </div>
         </div>
 
-        {editable && sendBlocked && items.length > 0 && !itemsDirty && (
-          <p className="-mt-2 text-xs text-muted">Send is not available: {sendBlocked}</p>
-        )}
         {canWrite && v.badge === "sent" && c.status === "proposal_sent" && v.items.length === 0 && (
           <p role="alert" className="-mt-2 text-xs text-danger">
             This sent version has no items, so it cannot be approved. Create a new version with the itinerary and send that one.
@@ -709,7 +689,6 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
         error={approve.error?.message}
       />
       {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={v.title} notes={v.notes} onClose={() => setDetailsOpen(false)} />}
-      <SendProposalModal open={sendOpen} onClose={() => setSendOpen(false)} code={c.code} n={v.version_number} />
     </PageFrame>
   );
 }

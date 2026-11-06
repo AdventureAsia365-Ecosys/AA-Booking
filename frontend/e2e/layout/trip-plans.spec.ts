@@ -10,7 +10,7 @@
 //   - commercial drawer: Supplier select, the price matrix rows (priced, hand and override rows), read-only Included /
 //     Not included from CIS;
 //   - detail: supplier, price from and the price matrix panel;
-//   - /cases/new: "Start from a trip plan" lists sellable plans and keeps the picked one.
+//   (AA-1046: the /cases/new check went with the page: a staff-made case was a B2C case.)
 // Shots: $LAYOUT_SHOTS_DIR (default e2e/layout/results) as slice2-<name>-<width>.png.
 
 import fs from "node:fs";
@@ -151,19 +151,6 @@ for (const width of [1440, 390] as const) {
       expect(text).toContain("15 days / 14 nights");
       expect(text).toContain("11+ pax");
       await shot(page, "detail", width);
-      await fits(page, c);
-    });
-
-    test(`new trip case at ${width}: start from a trip plan`, async ({ page, baseURL }) => {
-      const c = await prepare(page, baseURL!);
-      await open(page, "/cases/new", 'text="Start from a trip plan"', c);
-      await page.getByPlaceholder("Search sellable trip plans by title, SKU or CIS id").click();
-      const options = page.getByRole("option");
-      await expect(options.first()).toBeVisible();
-      await shot(page, "new-case-picker", width);
-      await options.first().click();
-      await expect(page.locator('[data-testid="trip-plan-picked"]')).toBeVisible();
-      await shot(page, "new-case-picked", width);
       await fits(page, c);
     });
   });

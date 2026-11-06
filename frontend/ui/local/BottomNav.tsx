@@ -1,14 +1,12 @@
 "use client";
 // ui/local/BottomNav.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — adapted copy of AA-CIS-App frontend/app/_kit/BottomNav.tsx (CIS commit 039bb250): fixed phone
-// nav (< 768 px, ui/local/shell.css). Booking items (UI spec §2.1): Dashboard, Cases, Customers, Notifications,
-// More (opens the drawer with the full nav). Items the role cannot open are left out.
-// AA-1037 (root ADR 0019 d8): with the B2C part closed (NEXT_PUBLIC_B2C_INTAKE unset, the default) the third item is
-// the B2B desk instead of Customers (frozen B2C records, still under More).
+// nav (< 768 px, ui/local/shell.css). Booking items (UI spec §2.1): Dashboard, Cases, B2B desk, Notifications,
+// More (opens the drawer with the full nav). Items the role cannot open are left out. AA-1037 / AA-1046: the B2B desk
+// took the place of Customers (retired with the B2C half of Booking).
 
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Briefcase, Handshake, LayoutGrid, Menu, Users } from "lucide-react";
-import { B2C_INTAKE_OPEN } from "@/lib/config";
+import { Bell, Briefcase, Handshake, LayoutGrid, Menu } from "lucide-react";
 import { K } from "../core/tokens";
 import { navActive } from "./nav";
 import { useStaff } from "./StaffContext";
@@ -17,9 +15,7 @@ import { canSeePage } from "@/lib/rbac";
 const ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
   { href: "/cases", label: "Cases", icon: Briefcase },
-  B2C_INTAKE_OPEN
-    ? { href: "/customers", label: "Customers", icon: Users }
-    : { href: "/b2b-desk", label: "B2B desk", icon: Handshake },
+  { href: "/b2b-desk", label: "B2B desk", icon: Handshake },
   { href: "/notifications", label: "Alerts", icon: Bell },
 ];
 

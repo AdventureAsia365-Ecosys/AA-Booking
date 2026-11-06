@@ -1,11 +1,10 @@
 "use client";
 // app/(staff)/cases/[code]/proposals/[n]/preview/page.tsx — Customer-style preview (W1, UI spec §4.9;
 // Figma ITINERARY PREVIEW): header bar with back, title row "TC-… · trip" + case status, meta line (dates,
-// customer, countries) and the actions Edit / Send to customer; day cards with a cream header and the
-// gold day number; side panels Overview and Price.
+// countries) and the action Edit; day cards with a cream header and the gold day number; side panels Overview and
+// Price. Send to the customer is retired with the B2C half of Booking (AA-1046).
 //
-// Data: GET /booking/trip-cases/{code} + GET …/versions/{n}/items. Send = the shared send modal
-// (POST …/versions/{n}/send), which marks the version sent and locks it; it never claims an e-mail.
+// Data: GET /booking/trip-cases/{code} + GET …/versions/{n}/items.
 // The day titles are the text stored on the version (copied from CIS when it was made). AA-1013: when CIS has since
 // changed a day title, a notice names the tour (refresh happens in the builder, on a draft); an item spanning days
 // names its CIS tour. The day column is a minmax(0, 1fr) track so long titles wrap instead of widening the page at
@@ -15,11 +14,11 @@
 // AA-1037: on a b2c case while the B2C part is closed, the case layout (../../../layout.tsx) takes version.write out,
 // so Send is not offered.
 
-import { use, useState } from "react";
+import { use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, Eye, Lock, MapPin, Pencil, Send, User } from "lucide-react";
+import { ArrowLeft, CalendarDays, Eye, Lock, MapPin, Pencil, User } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
 import { settingsFromApi } from "@/lib/bookingConfig";
 import {
@@ -38,14 +37,12 @@ import {
   useCan,
 } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
-import { caseCountries } from "@/ui/booking/caseFacts";
+import { caseCountries, casePartyLabel } from "@/ui/booking/caseFacts";
 import { dayDate, itemsByDay, useVersion } from "@/app/(staff)/_parts/useVersion";
-import { SendProposalModal } from "@/app/(staff)/proposals/_parts/SendProposalModal";
 import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisTourName, cisUpdates } from "@/ui/booking/cisReadback";
 import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 
-const SENDABLE_FROM = ["discovery", "building", "proposal_sent"];
 
 function longDate(d: Date | null): string | null {
   if (!d) return null;
@@ -59,7 +56,6 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const { tripCase, version } = useVersion(code, n);
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.reference.settings, staleTime: 10 * 60_000 });
   const canWrite = useCan("version.write");
-  const [sendOpen, setSendOpen] = useState(false);
   const router = useRouter();
 
   if (!Number.isInteger(n) || n < 1) return <PageError error={new ApiError("Not found", 404)} what="this proposal version" />;
@@ -83,7 +79,6 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const locked = v.is_sent_to_customer || v.is_approved;
   // AA-835: supply descriptions are read live from CIS, not stored with the version (snapshot comes with e-mail / PDF).
   const liveSupplyText = v.items.some((it) => it.supply?.description);
-  const canSend = canWrite && !locked && SENDABLE_FROM.includes(c.status);
   const builderHref = `/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}`;
   const tripName = v.title ?? c.trip_title ?? "Custom trip";
   const dates = c.start_date
@@ -123,7 +118,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                 <CalendarDays size={14} /> {dates}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <User size={14} /> {c.customer_name ?? "Unnamed customer"}
+                <User size={14} /> {casePartyLabel(c)}
               </span>
               {countries.length > 0 && (
                 <span className="inline-flex items-center gap-1.5">
@@ -140,11 +135,6 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
             ) : (
               <Button variant="secondary" onClick={() => router.push(builderHref)}>
                 <Eye size={14} /> Open builder
-              </Button>
-            )}
-            {canSend && (
-              <Button variant="primary" onClick={() => setSendOpen(true)}>
-                <Send size={14} /> Send to customer
               </Button>
             )}
           </div>
@@ -274,8 +264,8 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Customer</dt>
-                  <dd className="mt-0.5 text-ink">{c.customer_name ?? "—"}</dd>
+                  <dt className="text-xs text-muted">For</dt>
+                  <dd className="mt-0.5 text-ink">{casePartyLabel(c)}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-muted">Dates</dt>
@@ -334,7 +324,6 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
           </div>
         </div>
       </div>
-      <SendProposalModal open={sendOpen} onClose={() => setSendOpen(false)} code={c.code} n={v.version_number} />
     </PageFrame>
   );
 }

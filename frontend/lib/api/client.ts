@@ -8,11 +8,6 @@ import type {
   Country,
   CursorPage,
   AuditLogItem,
-  CustomerDetail,
-  CustomerPatchBody,
-  CustomerPatchResult,
-  CustomerSummary,
-  NewCustomerBody,
   NotificationFeed,
   OffsetPage,
   SettingsResponse,
@@ -166,7 +161,6 @@ export const api = {
     get: (ref: string) => bkGet<TripCaseDetail>(`trip-cases/${enc(ref)}`),
     activity: (ref: string, before?: string) =>
       bkGet<CursorPage<ActivityItem>>(`trip-cases/${enc(ref)}/activity`, { before }),
-    create: (body: Record<string, unknown>) => bkSend<TripCaseDetail>("trip-cases", { body }),
     update: (ref: string, body: Record<string, unknown>) =>
       bkSend<TripCaseDetail>(`trip-cases/${enc(ref)}`, { method: "PATCH", body }),
     changeStatus: (ref: string, to_status: string, reason?: string) =>
@@ -186,25 +180,6 @@ export const api = {
       offset?: number;
     } = {}) => bkGet<OffsetPage<VersionListItem>>("versions", q),
     items: (ref: string, n: number) => bkGet<VersionWithItems>(`trip-cases/${enc(ref)}/versions/${n}/items`),
-  },
-  customers: {
-    list: (q: {
-      q?: string;
-      status?: string;
-      merge_review?: boolean;
-      source?: string;
-      sort?: string;
-      limit?: number;
-      offset?: number;
-    } = {}) => bkGet<OffsetPage<CustomerSummary>>("customers", q),
-    get: (ref: string) => bkGet<CustomerDetail>(`customers/${enc(ref)}`),
-    /** POST /booking/customers: a manual, unverified lead (O6). One of email / phone is required. */
-    create: (body: NewCustomerBody) => bkSend<CustomerDetail>("customers", { body }),
-    /** PATCH /booking/customers/{ref}: name, phone, address, email (unverified only), is_blocked (admin). */
-    update: (ref: string, body: CustomerPatchBody) =>
-      bkSend<CustomerPatchResult>(`customers/${enc(ref)}`, { method: "PATCH", body }),
-    /** DELETE /booking/customers/{ref}: archive (soft delete, admin); 409 `customer_has_cases`. */
-    archive: (ref: string) => bkSend<void>(`customers/${enc(ref)}`, { method: "DELETE" }),
   },
   notifications: {
     list: (q: { unread?: boolean; type?: string; q?: string; limit?: number; before?: string } = {}) =>

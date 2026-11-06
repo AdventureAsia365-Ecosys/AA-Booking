@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { checkProgress } from "@/ui/booking/caseFacts";
+import { casePartyLabel, checkProgress } from "@/ui/booking/caseFacts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type FieldError } from "@/lib/api/client";
 import { B2C_INTAKE_OPEN } from "@/lib/config";
@@ -92,7 +92,7 @@ function TripContext({ check }: { check: TripCheck }) {
   return (
     <div className="rounded-md border border-line bg-panel px-3 py-3" data-testid="check-trip-context">
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-        {fact(t.channel === "b2b" ? "Agency" : "Customer", t.channel === "b2b" ? "B2B agency" : (t.customer_name ?? "—"))}
+        {fact(t.channel === "b2b" ? "Agency" : "Traveller", casePartyLabel(t))}
         {fact("Sales", t.sales_name ?? "Unassigned")}
         {fact("Trip status", <TripCaseStatusBadge status={t.status as TripCaseStatus} />)}
         {fact(
