@@ -27,11 +27,11 @@ from app.retention.policy import INBOX_KIND, JOB_KIND
 from app.settings import Settings
 from tests import inquiry_samples as samples
 from tests.integration import ops
-from tests.integration.test_bk002_intake import INTAKE_TABLES, drain, publish
+from tests.integration.handoff import LEG_TABLES, inbox_row
 from tests.staff_tokens import LocalCis
 
 # AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -55,7 +55,7 @@ R = "/booking/retention"
 @pytest_asyncio.fixture
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
-    await conn.execute(f"TRUNCATE {INTAKE_TABLES} CASCADE")
+    await conn.execute(f"TRUNCATE {LEG_TABLES} CASCADE")
     await conn.execute("TRUNCATE tripplanner.outbox RESTART IDENTITY")
     await conn.execute("TRUNCATE catalog.v_tour, catalog.stub_parsed_day, catalog.v_tour_photo")
     for staff_id, role in ((ADMIN_ID, "admin"), (SALES_ID, "sales")):
@@ -285,7 +285,9 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
 ) -> None:
     with_note = samples.v1("old-lead@example.test")
     with_note["itinerary"]["custom_days"][0]["note"] = "Linh says call +84900000001"
-    old = [with_note, samples.v1_1("old-lead2@example.test"), samples.legacy_guest()]
+    # The rows the retired intake (AA-1046) left: two processed, one parked (legacy guest), three failed.
+    legacy = samples.legacy_guest()
+    old = [with_note, samples.v1_1("old-lead2@example.test"), legacy]
     old.append(samples.with_changes(samples.v1_1("bad@example.test"), version=2))  # failed
     # Failed rows that do not keep the contract's shape: PII under an unknown key, and a customer that is a string.
     extra = samples.v1_1("extra@example.test")
@@ -294,8 +296,12 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
     old.append(extra)
     old.append(samples.with_changes(samples.v1_1(), customer="Jane Doe <jane@example.test>"))
     for p in old:
-        await publish(admin, p)
-    await drain(pool)
+        if p is legacy:
+            await inbox_row(admin, p, status="parked", error="legacy guest hand-off: customer is null (O6)")
+        elif p in old[:2]:
+            await inbox_row(admin, p)
+        else:
+            await inbox_row(admin, p, status="failed", error="contract error at jane@example.test")
     await admin.execute("UPDATE booking.inbox_events SET received_at = now() - interval '91 days'")
     # A failed row whose payload is not an object at all.
     not_object_key = "not-object-key"
@@ -313,8 +319,7 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
         stuck_key,
         json.dumps(samples.v1_1("stuck@example.test")),
     )
-    await publish(admin, samples.v1_1("recent@example.test"))
-    await drain(pool)
+    await inbox_row(admin, samples.v1_1("recent@example.test"))
     before = {r["idempotency_key"]: r for r in await admin.fetch("SELECT * FROM booking.inbox_events")}
     assert {r["status"] for r in before.values()} == {"processed", "parked", "failed", "received"}
     s3 = StubS3()
@@ -362,12 +367,9 @@ async def test_inbox_redaction_removes_pii_keeps_dedupe_and_skips_unprocessed_ro
     for untouched in (stuck_key, next(iter(set(after) - old_keys - {stuck_key, not_object_key}))):
         assert after[untouched]["redacted_at"] is None and after[untouched]["payload"] == before[untouched]["payload"]
 
-    # Dedupe still works: a full re-scan of the outbox inserts nothing and opens no second trip case.
-    cases = await admin.fetchval("SELECT count(*) FROM booking.trip_cases")
-    await admin.execute("UPDATE booking.inbox_cursor SET safe_id = 0")
-    await drain(pool)
-    assert await admin.fetchval("SELECT count(*) FROM booking.inbox_events") == len(after)
-    assert await admin.fetchval("SELECT count(*) FROM booking.trip_cases") == cases
+    # The dedupe key stays: a second row with the same key is refused (inbox_events_key_uq).
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await inbox_row(admin, samples.v1_1(), key=with_note["idempotency_key"])
 
     # Idempotent: nothing left to redact.
     again = result(await run(pool, s3, INBOX_KIND, dry_run=False, max_rows=10))
@@ -436,11 +438,9 @@ async def test_override_run_deletes_young_jobs_by_an_explicit_cutoff_and_never_b
 
 async def test_override_redacts_young_processed_inbox_rows_only(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
     for p in (samples.v1_1("override-a@example.test"), samples.v1_1("override-b@example.test")):
-        await publish(admin, p)
-    await drain(pool)
+        await inbox_row(admin, p)
     await admin.execute("UPDATE booking.inbox_events SET received_at = now() - interval '10 days'")
-    await publish(admin, samples.v1_1("override-recent@example.test"))  # received now: newer than the cutoff
-    await drain(pool)
+    await inbox_row(admin, samples.v1_1("override-recent@example.test"))  # received now: newer than the cutoff
     stuck_key = "override-stuck"
     await admin.execute(
         "INSERT INTO booking.inbox_events (source, contract, idempotency_key, payload, received_at, status)"
