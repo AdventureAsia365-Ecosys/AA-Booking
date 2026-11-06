@@ -16,10 +16,11 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
+from tests.integration import ops
 from tests.staff_tokens import LocalCis
 
-# AA-1034 R0: the frozen B2C code inserts traveller rows as role booking (bk-036 revoked that; conftest regrants).
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_insert_regranted")]
+# AA-1046: the services run on the sold b2c case of tests.integration.ops (conftest `b2c_guard_off`).
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 BHUTAN_A = "aa679000-0000-4000-8000-00000000000a"
 BHUTAN_B = "aa679000-0000-4000-8000-00000000000b"
@@ -30,7 +31,7 @@ TABLES = (
     "booking.notification_reads, booking.trip_case_countries, booking.trip_case_version_itinerary, "
     "booking.trip_case_versions, booking.staff_assignments, booking.trip_case_status_history, "
     "booking.trip_case_legs, booking.notifications, booking.trip_cases, booking.trip_plans, booking.staff_users, "
-    "booking.audit_logs, booking.customers"
+    "booking.audit_logs"
 )
 
 
@@ -85,9 +86,7 @@ async def client(
     admin: asyncpg.Connection, migrated_booking_dsn: str
 ) -> AsyncIterator[tuple[httpx.AsyncClient, LocalCis]]:
     # AA-1034 R0: the frozen B2C path (a case with a new lead) stays tested with the intake on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     try:
@@ -211,23 +210,25 @@ async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], adm
     c, cis = client
     contracting, sales = _auth(cis, CONTRACTING), _auth(cis, SALES)
     use = f"/catalog/trip-plans/{BHUTAN_A}/trip-cases"
-    body = {"new_customer": {"name": "Ana Traveller", "email": "ana@example.com"}, "pax_adults": 2}
+    target = await ops.b2c_case(admin, tag="aa679-use", status="building")
+    body = {"trip_case": target["code"]}
 
     not_sellable = await c.post(use, json=body, headers=sales)
     assert not_sellable.status_code == 409 and not_sellable.json()["detail"] == "trip_plan_not_sellable"
     await c.put(f"/catalog/trip-plans/{BHUTAN_A}/commercial", json=COMMERCIAL, headers=contracting)
     assert (await c.post(use, json=body, headers=contracting)).status_code == 403
+    # AA-1046: a new case from a plan was a staff-made traveller (B2C) case: retired, 410 before any read.
+    new_case = await c.post(use, json={}, headers=sales)
+    assert new_case.status_code == 410 and new_case.json()["detail"] == "b2b_only"
 
-    runs = [await c.post(use, json=body, headers=sales) for _ in range(2)]
+    runs = [await c.post(use, json={**body, "notes": f"option {n}"}, headers=sales) for n in (1, 2)]
     assert [r.status_code for r in runs] == [201, 201], runs[0].text
-    cases = [r.json() for r in runs]
-    assert cases[0]["trip_case"]["code"] != cases[1]["trip_case"]["code"]
-    for out in cases:
-        assert out["mode"] == "new_case"
-        case, version = out["trip_case"], out["version"]
-        assert case["source_system"] == "cis" and case["source_id"] == BHUTAN_A
-        assert case["trip_style"] == "Private" and case["countries"] == ["BT"]
-        assert version["version_number"] == 1 and version["title"] == "Bhutan Dragon Trails"
+    for n, run in enumerate(runs, start=1):
+        out = run.json()
+        assert out["mode"] == "new_version" and out["trip_case"]["code"] == target["code"]
+        version = out["version"]
+        assert version["version_number"] == n and version["title"] == "Bhutan Dragon Trails"
+        assert version["notes"] == f"option {n}"
         assert version["channel"] == "b2c_tailor_made" and version["total_price"] is None
         items = version["items"]
         assert [(i["title"], i["day_from"], i["day_to"]) for i in items] == [
@@ -237,31 +238,22 @@ async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], adm
         ]
         assert {i["source_tour_id"] for i in items} == {BHUTAN_A}
     days = await admin.fetchval("SELECT count(*) FROM catalog.v_tour_day WHERE source_id = $1", BHUTAN_A)
-    assert len(cases[0]["version"]["items"]) == days
-
-    # A new version of an existing case from the plan (V2; V1 stays).
-    code = cases[0]["trip_case"]["code"]
-    v2 = await c.post(use, json={"trip_case": code, "notes": "second option"}, headers=sales)
-    assert v2.status_code == 201, v2.text
-    assert v2.json()["mode"] == "new_version" and v2.json()["version"]["version_number"] == 2
-    assert v2.json()["version"]["notes"] == "second option" and len(v2.json()["version"]["items"]) == 3
-    both = await c.post(use, json={**body, "trip_case": code}, headers=sales)
-    assert both.status_code == 422
+    assert len(runs[0].json()["version"]["items"]) == days
+    retired = await c.post(use, json={**body, "customer_id": "55555555-5555-4555-8555-555555555555"}, headers=sales)
+    assert retired.status_code == 422  # the customer fields are gone
 
     # A sellable plan without canonical days gives one item over its duration.
     await c.put(f"/catalog/trip-plans/{BHUTAN_B}/commercial", json={"sellable": True}, headers=contracting)
     plain = (await c.post(f"/catalog/trip-plans/{BHUTAN_B}/trip-cases", json=body, headers=sales)).json()
     assert [(i["title"], i["day_from"], i["day_to"]) for i in plain["version"]["items"]] == [("Bhutan Valleys", 1, 5)]
-    assert plain["version"]["channel"] is None and plain["trip_case"]["trip_style"] is None
+    assert plain["version"]["channel"] is None
 
     detail = (await c.get(f"/catalog/trip-plans/{BHUTAN_A}", headers=sales)).json()
-    assert detail["cases_started"] == 2
-    listed = (await c.get("/trip-cases", params={"source": "cis"}, headers=sales)).json()
-    assert listed["total"] == 3
+    assert detail["cases_started"] == 0  # versions only: no case was opened from the plan
     actions = await admin.fetch(
         "SELECT action, summary FROM booking.audit_logs WHERE action = 'trip_case_version.created' ORDER BY created_at"
     )
-    assert all(r["summary"].endswith("from trip plan BT-7D") or "BT-5D" in r["summary"] for r in actions)
+    assert actions and all(r["summary"].endswith("from trip plan BT-7D") or "BT-5D" in r["summary"] for r in actions)
 
 
 async def test_items_read_back_a_cis_rewrite_and_staff_refresh_them(
@@ -272,8 +264,10 @@ async def test_items_read_back_a_cis_rewrite_and_staff_refresh_them(
     c, cis = client
     contracting, sales = _auth(cis, CONTRACTING), _auth(cis, SALES)
     await c.put(f"/catalog/trip-plans/{BHUTAN_A}/commercial", json=COMMERCIAL, headers=contracting)
-    body = {"new_customer": {"name": "Ana Traveller", "email": "ana@example.com"}, "pax_adults": 2}
-    made = (await c.post(f"/catalog/trip-plans/{BHUTAN_A}/trip-cases", json=body, headers=sales)).json()
+    target = await ops.b2c_case(admin, tag="aa679-cis", status="building")
+    made = (
+        await c.post(f"/catalog/trip-plans/{BHUTAN_A}/trip-cases", json={"trip_case": target["code"]}, headers=sales)
+    ).json()
     code = made["trip_case"]["code"]
     assert [i["cis"]["changed"] for i in made["version"]["items"]] == [False, False, False]
     assert made["version"]["items"][0]["cis"]["tour_title"] == "Bhutan Dragon Trails"
@@ -332,13 +326,12 @@ async def test_one_day_tripplanner_legs_are_not_read_as_cis_day_copies(
     3-day CIS tour, and a one-day CIS tour whose leg has no named snapshot day."""
     c, cis = client
     snapshot = {"days": [{"day": 1, "source_tour_id": BHUTAN_A, "name": "Paro valley evening"}], "custom_days": []}
-    customer = await admin.fetchval(
-        "INSERT INTO booking.customers (name, email) VALUES ('Lead', 'lead-1013@example.com') RETURNING id"
+    case = await ops.insert_b2c_case(
+        admin, tag="aa1013-lead", status="new_inquiry", start=None, end=None, source_system="tripplanner"
     )
-    case = await admin.fetchrow(
-        "INSERT INTO booking.trip_cases (customer_id, source_system, inquiry_snapshot, currency)"
-        " VALUES ($1, 'tripplanner', $2::jsonb, 'USD') RETURNING id::text AS id, code",
-        customer,
+    await admin.execute(
+        "UPDATE booking.trip_cases SET inquiry_snapshot = $2::jsonb WHERE id = $1::uuid",
+        case["id"],
         json.dumps(snapshot),
     )
     await admin.executemany(
@@ -371,7 +364,7 @@ async def test_tour_leaving_the_catalog_drops_out(
     assert (await c.get(f"/catalog/trip-plans/{LAOS}", headers=contracting)).status_code == 404
     use = await c.post(
         f"/catalog/trip-plans/{LAOS}/trip-cases",
-        json={"new_customer": {"name": "X", "phone": "+8412345"}},
+        json={"trip_case": (await ops.b2c_case(admin, tag="aa679-laos", status="building"))["code"]},
         headers=_auth(cis, SALES),
     )
     assert use.status_code == 404

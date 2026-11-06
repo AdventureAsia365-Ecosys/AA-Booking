@@ -180,10 +180,9 @@ def migrated_booking_dsn(migrated_admin_dsn: str) -> str:
 
 
 # ── AA-1034 R0: the frozen B2C tables (bk-036 REVOKEs INSERT on them from role booking) ──────────────────────────
-# The B2C code (TripPlanner intake, staff leads, traveller sign-in) stays in the repo until the tables are dropped, so
-# its tests keep running: a module that exercises it marks itself with `b2c_insert_regranted`, which gives role
-# booking INSERT back for the test and takes it away again afterwards (the bk-036 state). tests/integration/
-# test_bk036_schema.py tests the revoke itself.
+# The B2C code is retired (AA-1046); the schema tests of the old B2C migrations that insert a traveller row as role
+# booking mark themselves with `b2c_insert_regranted`, which gives role booking INSERT back for the test and takes it
+# away again afterwards (the bk-036 state). tests/integration/test_bk036_schema.py tests the revoke itself.
 B2C_TABLES = ("customers", "customer_identities", "customer_otps", "customer_sessions")
 
 
@@ -210,6 +209,29 @@ def b2c_insert_regranted(migrated_admin_dsn: str) -> Iterator[None]:
         yield
     finally:
         _run_set_b2c_insert(migrated_admin_dsn, False)
+
+
+# ── AA-1046: the b2c write guard, off for the tests of the services behind it ─────────────────────────────────────────
+# A staff write on a b2c trip case (kept history) answers 410 (app.b2c; tests/unit/test_aa1046_b2c_retired.py).
+# The API tests of the operations services (supplier bookings, vouchers, checks, bills) still drive them over HTTP on
+# the sold b2c case of tests/integration/ops.py: a module that does so uses `b2c_guard_off`.
+
+
+@pytest.fixture
+def b2c_guard_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import b2c
+
+    async def passes(*_: object) -> None:
+        return None
+
+    for name in (
+        "refuse_b2c_case_write",
+        "refuse_b2c_supplier_booking_write",
+        "refuse_b2c_check_write",
+        "refuse_b2c_file_upload",
+        "refuse_b2c_file_remove",
+    ):
+        monkeypatch.setattr(b2c, name, passes)
 
 
 # ── AA-996 perf guard: every catalog read of every route a test exercises ─────

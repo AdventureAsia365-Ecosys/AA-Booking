@@ -382,7 +382,7 @@ async def test_departures_quote_hold_confirm(
     _problem(await c.delete(f"/b2b/v1/holds/{hold['hold_id']}", headers=_m2m(m2m)), 422, "invalid")
 
     case = await admin.fetchrow(
-        "SELECT id::text AS id, code, channel, customer_id, party_tenant_id::text AS party, source_system, source_id,"
+        "SELECT id::text AS id, code, channel, party_tenant_id::text AS party, source_system, source_id,"
         " status, start_date, end_date, pax, currency FROM booking.trip_cases WHERE id = $1::uuid",
         booking["booking_id"],
     )
@@ -390,7 +390,6 @@ async def test_departures_quote_hold_confirm(
         "id": None,
         "code": booking["trip_case_code"],
         "channel": "b2b",
-        "customer_id": None,
         "party": TENANT,
         "source_system": "crm",
         "source_id": "PRO-1",
@@ -451,7 +450,8 @@ async def test_departures_quote_hold_confirm(
 
     # Staff see the B2B case (no customer) in the list and the detail.
     listed = await _ok(await c.get("/trip-cases?source=crm", headers=boss))
-    assert [(i["code"], i["channel"], i["customer_name"]) for i in listed["items"]] == [(case["code"], "b2b", None)]
+    assert [(i["code"], i["channel"]) for i in listed["items"]] == [(case["code"], "b2b")]
+    assert "customer_name" not in listed["items"][0]  # AA-1046: no customer columns any more
     detail = await _ok(await c.get(f"/trip-cases/{case['code']}", headers=boss))
     assert detail["party_tenant_id"] == TENANT and detail["versions"][0]["channel"] == "b2b"
     # ... but do not move it: a staff cancel would leave the seats sold (cancel is the partner API, AA-974).

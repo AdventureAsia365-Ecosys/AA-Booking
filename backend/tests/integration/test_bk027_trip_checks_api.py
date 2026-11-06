@@ -29,7 +29,7 @@ from app.settings import Settings
 from tests.integration import ops
 from tests.staff_tokens import LocalCis
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio, pytest.mark.usefixtures("b2c_guard_off")]
 
 SALES, CONTRACTING, CREATOR, GONE = "it-682-sales", "it-682-contracting", "it-682-creator", "it-682-gone"
 Client = tuple[httpx.AsyncClient, LocalCis]
@@ -51,9 +51,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 @pytest_asyncio.fixture
 async def client(admin: asyncpg.Connection, migrated_booking_dsn: str) -> AsyncIterator[Client]:
     # AA-1037: these flows run on b2c cases, which are read-only unless the B2C switch is on.
-    settings = Settings(
-        database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci", b2c_intake_enabled=True
-    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
     db, cis = Database(settings), LocalCis()
     app = create_app(settings, db, cis.verifier())
     try:
@@ -209,7 +207,7 @@ async def test_trip_checks_list_filters(client: Client, admin: asyncpg.Connectio
     soon_checks = (await _ok(await c.get(f"/trip-cases/{soon['code']}/checks", headers=sales)))["items"]
     await _ok(await c.patch(f"/trip-checks/{soon_checks[2]['id']}", json={"assignee_ref": SALES}, headers=sales))
     page = await _ok(await c.get("/trip-checks", params={"case": soon["code"]}, headers=sales))
-    assert page["total"] == 3 and page["items"][0]["trip_case"]["customer_name"] is None  # no name on the fixture
+    assert page["total"] == 3 and "customer_name" not in page["items"][0]["trip_case"]  # AA-1046: no customer join
     mine = await _ok(await c.get("/trip-checks", params={"assignee": "me"}, headers=sales))
     assert [i["id"] for i in mine["items"]] == [soon_checks[2]["id"]]
     unassigned = await _ok(await c.get("/trip-checks", params={"assignee": "none", "q": late["code"]}, headers=sales))
