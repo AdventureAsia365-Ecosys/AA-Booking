@@ -73,8 +73,9 @@
 -- Outside this file: the S3 objects of media_files rows (if any; 0 on Dev) are purged after the apply. The ops-docs
 -- objects of ops_files rows stay (their rows stay). TripPlanner's own customer tables are a TripPlanner migration.
 --
--- Locks: ACCESS EXCLUSIVE on every dropped table and view and on trip_cases (DROP COLUMN, constraint swap) for the
--- length of the transaction. Apply while the job tables are idle (DB Migrate waits for that) and Booking traffic is
+-- Locks: SHARE ROW EXCLUSIVE on the nine dropped tables and trip_cases from the first statement (no write lands
+-- between the guards and the drops), then ACCESS EXCLUSIVE on every dropped table and view and on trip_cases (DROP
+-- COLUMN, constraint swap) for the length of the transaction. Apply while the job tables are idle (DB Migrate waits for that) and Booking traffic is
 -- low; lock_timeout 5s, retry on a timeout.
 -- Undo: none in SQL. Restore from the pre-apply snapshot (db-migrate-bk-045-<run>-<attempt>); the archived money
 -- rows can also be read back from booking.retired_b2c_record.record.
@@ -90,6 +91,24 @@ SET LOCAL DateStyle = 'ISO, YMD';
 SET LOCAL IntervalStyle = 'postgres';
 SET LOCAL extra_float_digits = 1;
 SET LOCAL bytea_output = 'hex';
+
+-- Hold the checked tables still from the guards to the drops: SHARE ROW EXCLUSIVE lets other sessions read them but
+-- makes every INSERT / UPDATE / DELETE wait until COMMIT (or this file fail on lock_timeout first), so the pins, the
+-- 30-day guard and the archive check still describe the rows at DROP time and no row committed in between is dropped
+-- unarchived. trip_cases is in the set because step 5 alters it anyway. Skipped on a re-run (the tables are gone)
+-- and, like every guard, when not running as bk_owner (the guard block then refuses).
+-- lock:begin
+DO $$
+BEGIN
+    IF current_user = 'bk_owner' AND to_regclass('booking.customers') IS NOT NULL
+       AND to_regclass('booking.invoices') IS NOT NULL THEN
+        LOCK TABLE booking.customers, booking.customer_identities, booking.customer_otps, booking.customer_sessions,
+                   booking.media_files, booking.invoices, booking.invoice_items, booking.payment_schedule,
+                   booking.payments, booking.trip_cases
+            IN SHARE ROW EXCLUSIVE MODE;
+    END IF;
+END $$;
+-- lock:end
 
 -- ── 0. Guards ────────────────────────────────────────────────────────────────
 

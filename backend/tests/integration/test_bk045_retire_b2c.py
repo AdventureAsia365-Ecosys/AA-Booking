@@ -14,6 +14,7 @@ and a CIS catalog inbox row that must survive. Then:
 - bk-045 refuses: fresh B2C rows (30-day guard, including a fresh supplier payout, bill line, OTP use or operations
   file of a b2c case), unfilled pins, a moved count, a changed pinned code, moved ids, a queued intake job;
 - its 30-day block, pinned table list and pinned columns are the DRY RUN script's, word for word;
+- from its first statement it holds the checked tables (SHARE ROW EXCLUSIVE): a concurrent write waits, a read goes on;
 - with the rows backdated 40 days and the pins pasted, it applies: the customer and customer money tables are gone,
   every money row is in booking.retired_b2c_record (whole row, retain_until 10 years on), the b2c cases with their
   supplier bookings, bills, payouts, files, audit and notification rows stay, a new b2c case is refused, the B2B rows
@@ -58,6 +59,19 @@ PINS_RE = re.compile(r"pins jsonb := '(\{.*?\})';", re.S)
 LAST_WRITE_RE = re.compile(r"-- last-write:begin\n(.*?)\n\s*-- last-write:end", re.S)
 PIN_TABLES_RE = re.compile(r"-- pin-tables:begin\n(.*?)\n\s*-- pin-tables:end", re.S)
 PIN_COLUMNS_RE = re.compile(r"-- pin-columns:begin\n\s*pin_columns jsonb := '(\{.*?\})';\n\s*-- pin-columns:end", re.S)
+LOCK_RE = re.compile(r"-- lock:begin\n(.*?)\n-- lock:end", re.S)
+LOCKED_TABLES = (
+    "customers",
+    "customer_identities",
+    "customer_otps",
+    "customer_sessions",
+    "media_files",
+    "invoices",
+    "invoice_items",
+    "payment_schedule",
+    "payments",
+    "trip_cases",
+)
 PII_GUARD = ROOT / ".claude" / "hooks" / "pilot_pii_guard.py"
 B2C_TABLES = (
     "booking.customers",
@@ -259,7 +273,14 @@ async def world(migrated_admin_dsn: str) -> AsyncIterator[dict[str, Any]]:
         b2b["id"],
     )
     try:
-        yield {"conn": conn, "b2b": b2b, "b2b_booking": b2b_booking, "sold": sold, "lead": lead}
+        yield {
+            "conn": conn,
+            "dsn": migrated_admin_dsn,
+            "b2b": b2b,
+            "b2b_booking": b2b_booking,
+            "sold": sold,
+            "lead": lead,
+        }
     finally:
         await conn.close()
         await _reset_and_migrate(migrated_admin_dsn)  # the full replay (bk-045 included) for the next modules
@@ -472,6 +493,38 @@ async def test_draft_refuses_while_the_intake_runs(world: dict[str, Any]) -> Non
             await _apply(conn, _draft(await _pins(conn)))
     finally:
         await conn.execute("DELETE FROM booking.job WHERE id = $1", job)
+
+
+async def test_draft_holds_writes_from_the_guards_to_the_drops(world: dict[str, Any]) -> None:
+    """From its first statement the draft holds every checked table: a concurrent write waits (here: times out), a
+    read goes on. So no row committed after the pin / archive checks is dropped unarchived."""
+    conn = world["conn"]
+    draft = _draft(await _pins(conn))
+    head = draft[: draft.index("-- ── 0. Guards")]
+    lock = LOCK_RE.search(head)
+    assert lock, "the lock block runs before the guards"
+    assert re.findall(r"booking\.([a-z_]+)", lock.group(1).split("LOCK TABLE", 1)[1]) == list(LOCKED_TABLES)
+    assert set(_dry_run().PIN_TABLES) < set(LOCKED_TABLES)
+    other = await asyncpg.connect(world["dsn"])
+    try:
+        await conn.execute('SET ROLE "bk_owner"')
+        await conn.execute(head)  # BEGIN, the SET LOCALs and the lock; the transaction stays open
+        await other.execute("SET lock_timeout = '200ms'")
+        for table in LOCKED_TABLES:
+            with pytest.raises(asyncpg.LockNotAvailableError):
+                await other.execute(f"DELETE FROM booking.{table} WHERE false")  # noqa: S608 — constant names
+            assert await other.fetchval(f"SELECT count(*) >= 0 AS ok FROM booking.{table}") is True  # noqa: S608
+    finally:
+        await conn.execute("ROLLBACK")
+        await conn.execute("RESET ROLE")
+        await other.close()
+    # once the transaction ends the tables take writes again
+    other = await asyncpg.connect(world["dsn"])
+    try:
+        await other.execute("SET lock_timeout = '200ms'")
+        await other.execute("DELETE FROM booking.payments WHERE false")
+    finally:
+        await other.close()
 
 
 async def test_dry_run_is_ready_once_frozen(world: dict[str, Any]) -> None:
