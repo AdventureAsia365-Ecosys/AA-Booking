@@ -8,8 +8,15 @@ name: Deploy Admin Dev
 # reaches the task on the next deploy) -> update the service -> wait stable -> check the running task has this image
 # -> verify.
 #
-# Runs next to vercel-deploy.yml until the cut-over (root runbook docs/ops/runbooks/staff-web-ecs-cutover.md): Vercel
-# keeps serving booking.lumiguides.it.com until the DNS moves to the ALB; this workflow keeps the ECS copy current.
+# The only deploy of the Booking admin since the Vercel retirement (AA-911, S272; root runbook
+# docs/ops/runbooks/staff-web-ecs-cutover.md section 4): booking.lumiguides.it.com points at the shared ALB.
+#
+# AA-993 V5 + AA-1008, moved here from the retired vercel-deploy.yml: after a verified deploy, job `smoke` runs the
+# Playwright project `smoke-public` (frontend/e2e/smoke-public/) against https://booking.lumiguides.it.com: /login answers
+# 200 and renders, no console error, no failed same-origin request, the next.config.ts security headers. Signed out,
+# no secret. Job `visual-production` then runs visual.yml (public pages, report-only). Job `result` is the run's
+# verdict: red unless config, deploy, verify AND smoke succeeded (verify and smoke may skip only when the service runs
+# no task). Per-PR UI evidence needs no deployment: Visual (next start) is the required check (root ADR 0019 d23 R7).
 #
 # Configuration (GitHub environment `dev`):
 #   vars.AWS_ROLE_ARN       the Booking deploy role (shared with Deploy Dev; AA-CIS-Infra
@@ -207,13 +214,73 @@ jobs:
           [ "$CODE" = "200" ] || { echo "::error::/login answered $CODE"; exit 1; }
           echo "ECS serves ${PUBLIC_HOST}: healthz on ${GITHUB_SHA::7}, /login 200"
 
+  # ── AA-993 V5: public smoke of the deployed staff admin ──
+  smoke:
+    name: Public smoke (production)
+    needs: verify
+    if: needs.verify.result == 'success'
+    # Pinned: ubuntu-latest became Ubuntu 26.04 (19/10/2026), where Playwright has no chromium build (S253).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      # A deploy runs on the pushed or dispatched ref, so github.sha is the deployed commit. No `ref:` and no npm
+      # cache: a cached step after checking out another ref is a cache-poisoning path (CodeQL high, #103 review).
+      - name: Checkout the deployed commit
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      # Public page only: no cookie, no token, nothing written. 2 retries on CI (playwright.config.ts).
+      - name: Smoke /login on the production host
+        run: SMOKE_BASE_URL="https://$PUBLIC_HOST" npm run test:smoke-public
+
+      - name: Upload the screenshot
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: booking-admin-smoke-public
+          path: frontend/e2e/smoke-public/results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # AA-1008 (root ADR 0016 decision 9) — after the deploy and its smoke: the visual run (visual.yml job `deployed`) of
+  # the public pages on the production host, 1440 / 390, light / dark. Report-only: the `result` verdict does not wait
+  # on it. Permissions cover every nested job of visual.yml (GitHub checks them at startup, S247).
+  visual-production:
+    name: Visual (production, public pages)
+    needs: [verify, smoke]
+    if: always() && needs.verify.result == 'success' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/visual.yml
+    with:
+      base_url: https://booking.lumiguides.it.com
+      sha: ${{ github.sha }}
+
   result:
     name: Deploy Admin Dev result
     runs-on: ubuntu-latest
     if: always() && github.event_name != 'pull_request'
-    needs: [config, deploy, verify]
+    needs: [config, deploy, verify, smoke]
     steps:
-      - name: Every job succeeded (verify may skip only when the service runs no task)
+      - name: Every job succeeded (verify and smoke may skip only when the service runs no task)
         env:
           NEEDS: ${{ toJSON(needs) }}
           RUNNING: ${{ needs.deploy.outputs.running }}
@@ -221,7 +288,7 @@ jobs:
           set -uo pipefail
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           BAD=$(echo "$NEEDS" | jq -r --arg running "$RUNNING" '[to_entries[]
-            | select(.value.result != "success" and ((.key == "verify" and .value.result == "skipped" and $running == "false") | not))
+            | select(.value.result != "success" and (((.key == "verify" or .key == "smoke") and .value.result == "skipped" and $running == "false") | not))
             | "\(.key)=\(.value.result)"] | join(", ")')
           if [ -n "$BAD" ]; then
             echo "::error::Deploy Admin Dev is not verified: $BAD"

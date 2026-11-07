@@ -6,13 +6,13 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  // AA-911 (root ADR 0019 d23): the ECS image (frontend/Dockerfile) builds the standalone server; Vercel builds stay
-  // as they are until the Vercel project is retired.
+  // AA-911 (root ADR 0019 d23): the ECS image (frontend/Dockerfile) builds the standalone server; the CI builds
+  // (Frontend Build, Visual's `next start`) keep the default output.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   poweredByHeader: false,
   async headers() {
     // AA-879: the same six security headers as the CIS admin, the CIS portal and TripPlanner (AA-876 /
-    // AA-885), checked on every deployment by .github/scripts/check_security_headers.sh. The CSP is
+    // AA-885), checked after every deploy by the public smoke (e2e/smoke-public/login.spec.ts). The CSP is
     // deliberately minimal (no script-src / style-src: Next inline scripts and inline styles); it only stops
     // framing, <base> hijacking, foreign form posts and plugins. Staff sign-in leaves through a redirect
     // (Cognito managed login), not a form post, so form-action 'self' does not touch it.
@@ -27,10 +27,6 @@ const nextConfig: NextConfig = {
       },
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
     ];
-    // AA-911: Preview builds (served on booking-preview.lumiguides.it.com when aliased) are never indexed.
-    if (process.env.VERCEL_ENV === "preview") {
-      headers.push({ key: "X-Robots-Tag", value: "noindex, nofollow" });
-    }
     return [{ source: "/:path*", headers }];
   },
 };

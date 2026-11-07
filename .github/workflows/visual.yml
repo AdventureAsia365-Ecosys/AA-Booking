@@ -28,7 +28,7 @@ name: Visual
 #             kit gallery (every core component, the ShellFrame demo included). It first runs the SELF-TEST: the
 #             gallery with a planted overflow (document and frame) must make the run fail, and summary.mjs --selftest
 #             checks that each planted capture was caught; a self-test that passes is red.
-#   deployed  workflow_call from vercel-deploy.yml after the production deploy and its smoke, and dispatch from main
+#   deployed  workflow_call from deploy-admin-dev.yml after the verified ECS deploy and its smoke, and dispatch from main
 #             with base_url: the public pages (login, and the unknown path, which the deployed proxy.ts sends to
 #             /login when signed out: pages.ts `deployed`) on the deployed host. Staff pages are not captured there:
 #             Booking has no E2E sign-in from CI yet (root ADR 0016 plan, hand steps H4 / H5); the per-PR run covers
@@ -231,18 +231,18 @@ jobs:
     env:
       VISUAL_BASE_URL: ${{ inputs.base_url }}
     steps:
-      - name: Only the Booking admin hosts
+      - name: Only the Booking admin host
         working-directory: .
         env:
           URL: ${{ inputs.base_url }}
         run: |
           case "${URL%/}" in
-            https://booking.lumiguides.it.com|https://booking-preview.lumiguides.it.com) echo "Visual run on $URL" ;;
-            *) echo "::error::base_url must be https://booking.lumiguides.it.com or https://booking-preview.lumiguides.it.com (got $URL)"; exit 1 ;;
+            https://booking.lumiguides.it.com) echo "Visual run on $URL" ;;
+            *) echo "::error::base_url must be https://booking.lumiguides.it.com (got $URL)"; exit 1 ;;
           esac
 
       # Runs only from main (job condition), so the checkout is main's commit. No npm cache after checking out a
-      # given ref (cache-poisoning path, CodeQL high, #103 review), like the smoke job of vercel-deploy.yml.
+      # given ref (cache-poisoning path, CodeQL high, #103 review), like the smoke job of deploy-admin-dev.yml.
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha || github.sha }}

@@ -11,7 +11,7 @@ name: Release Please
 #   AA_CI_BOT_PRIVATE_KEY   secret, the App private key (PEM)
 #
 # A merged release PR changes only CHANGELOG.md, the manifest and backend/pyproject.toml: Deploy Dev ignores those
-# paths and Vercel Deploy only watches frontend/**, so a release never deploys by itself.
+# paths and Deploy Admin Dev only watches frontend/**, so a release never deploys by itself.
 
 on:
   push:

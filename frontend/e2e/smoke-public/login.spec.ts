@@ -1,6 +1,6 @@
 // e2e/smoke-public/login.spec.ts
 // AA-993 V5 — public smoke of the DEPLOYED staff admin (project `smoke-public` in playwright.config.ts). Runs after
-// every production deploy (.github/workflows/vercel-deploy.yml, job `smoke`) against the production host. Public
+// every deploy (.github/workflows/deploy-admin-dev.yml, job `smoke`) against the production host. Public
 // page only: no sign-in, no cookie, no secret, nothing written. /login is the one page that answers 200 without a
 // session (proxy.ts PUBLIC_PATHS); every other page redirects to it.
 //
@@ -34,7 +34,6 @@ async function configuredHeaders(): Promise<Record<string, string>> {
   const rules = (await nextConfig.headers?.()) ?? [];
   const all = rules.find((r) => r.source === "/:path*");
   expect(all, "next.config.ts headers() has a /:path* rule").toBeTruthy();
-  // VERCEL_ENV is unset here, so this is the production set (the preview build adds only X-Robots-Tag).
   return Object.fromEntries(all!.headers.map((h) => [h.key.toLowerCase(), h.value]));
 }
 

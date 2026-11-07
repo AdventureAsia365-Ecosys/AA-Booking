@@ -133,11 +133,11 @@ def _deploys(paths: list[str], changed: str) -> bool:
 
 def test_release_commit_files_trigger_no_deploy() -> None:
     release_files = ["CHANGELOG.md", ".release-please-manifest.json", "backend/pyproject.toml"]
-    for workflow in ("deploy-dev.yml", "vercel-deploy.yml"):
+    for workflow in ("deploy-dev.yml", "deploy-admin-dev.yml"):
         paths = _push_paths(workflow)
         assert paths, workflow
         for changed in release_files:
             assert not _deploys(paths, changed), f"{workflow} deploys on {changed}"
     # Sanity: app code still deploys.
     assert _deploys(_push_paths("deploy-dev.yml"), "backend/app/main.py")
-    assert _deploys(_push_paths("vercel-deploy.yml"), "frontend/package.json")
+    assert _deploys(_push_paths("deploy-admin-dev.yml"), "frontend/package.json")

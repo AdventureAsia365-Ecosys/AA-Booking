@@ -170,11 +170,19 @@ def test_staff_can_is_capped_for_a_preview_session() -> None:
     assert all(p.endswith(".read") or p == "staff.directory" for p in PREVIEW_PERMISSIONS)
 
 
+# The booking-staff-preview client id the Vercel Preview host used until the AA-911 Vercel retirement (S272).
+RETIRED_PREVIEW_CLIENT_ID = "7tlhphjurhqio0l26uh20valpp"
+
+
 def test_default_settings_accept_no_preview_client() -> None:
+    # AA-911 Vercel retirement: the Preview host and its client are gone; only an env override brings one back (capped).
     settings = load_settings({})
-    assert identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID == "" or settings.cognito_booking_staff_preview_client_id
+    assert identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID == ""
+    assert settings.cognito_booking_staff_preview_client_id == ""
     (workforce, *_) = identity_config.booking_staff_issuers(settings)
-    assert identity_config.preview_client_ids(settings) <= workforce.client_ids
+    assert identity_config.preview_client_ids(settings) == frozenset()
+    assert RETIRED_PREVIEW_CLIENT_ID not in workforce.client_ids
+    assert not identity_config.is_preview_client(settings, RETIRED_PREVIEW_CLIENT_ID)
     assert not identity_config.is_preview_client(settings, settings.cognito_booking_staff_client_id)
     assert not identity_config.is_preview_client(settings, None)
 

@@ -15,11 +15,12 @@ a byte copy of the CIS verifier) **and** the matching active ``booking.staff_use
   Later tokens refresh the profile fields (email, name, cis_role, last_seen_at) but never the role or the active flag.
 
 **Preview cap (AA-911 decision D-1, root ADR 0006a A11).** A WORKFORCE token from the Preview-only
-``booking-staff-preview`` client (the fixed Preview host ``booking-preview.lumiguides.it.com``, which runs unmerged PR
-code) is a read-only session whatever ``booking-*`` group the user holds: any request other than GET / HEAD / OPTIONS
-is 403 ``preview_read_only`` before anything is read or written, and :meth:`Staff.can` grants only
-:data:`PREVIEW_PERMISSIONS` (reads; never ``staff.admin``, ``audit.read`` or any write). ``/booking/staff/me`` reports
-``preview_viewer: true`` and the capped permission list, so the UI hides write actions.
+``booking-staff-preview`` client (the fixed Preview host, which ran unmerged PR code; retired with Vercel in S272, so
+only a client set through ``COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID`` is affected) is a read-only session whatever
+``booking-*`` group the user holds: any request other than GET / HEAD / OPTIONS is 403 ``preview_read_only`` before
+anything is read or written, and :meth:`Staff.can` grants only :data:`PREVIEW_PERMISSIONS` (reads; never
+``staff.admin``, ``audit.read`` or any write). ``/booking/staff/me`` reports ``preview_viewer: true`` and the capped
+permission list, so the UI hides write actions.
 
 **E2E test session cap (AA-910, root ADR 0006a A10a).** The temporary WORKFORCE E2E user
 :data:`E2E_TEST_STAFF_EMAIL` holds ``booking-admin`` so a signed-in smoke can read every staff page (``/staff`` and

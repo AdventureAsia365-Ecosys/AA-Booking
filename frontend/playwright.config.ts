@@ -17,7 +17,7 @@
 // Clock: the spec freezes the browser clock at fixtures.ts CLOCK, so the result does not depend on the day it runs.
 //
 //   • "smoke-public" (AA-993 V5) — e2e/smoke-public/*.spec.ts: GET /login on a DEPLOYED admin (SMOKE_BASE_URL, the
-//     production host in .github/workflows/vercel-deploy.yml job `smoke`): 200, renders, no console error, no failed
+//     production host in .github/workflows/deploy-admin-dev.yml job `smoke`): 200, renders, no console error, no failed
 //     same-origin request, the next.config.ts security headers. Public page only: no sign-in, no secret.
 //     With SMOKE_BASE_URL set no local server is started (nothing to build).
 // Run:   npm run test:smoke-public   (defaults to https://booking.lumiguides.it.com; SMOKE_BASE_URL=<url> to change)
