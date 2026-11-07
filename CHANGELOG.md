@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.15.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.14.0...v0.15.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* retire the B2C half of Booking (customer routes, customer billing, inquiry intake, staff pages) ([#199](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/199))
+
+### Features
+
+* agency billing API, draft jobs and staff pages (readiness bk-042) ([#187](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/187)) ([592727c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/592727ce02c912327fbca3bc63540f7b3c31b420))
+* agency billing in the visual run (layout-mock fixtures) and the ?tenant= agency filter on its invoices ([#196](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/196)) ([2984f6e](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/2984f6e92a78de2cbeb783d0380ac58a5ab05c26))
+* agency price tiers on B2B quotes (tier discount, contract rate cards with end cards, Booking admin Pricing &gt; Agency tiers) ([#190](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/190)) ([5e822dc](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/5e822dcc1b8c0d0c2ccb5ebe4f69bee2c9a36b49))
+* agency tariff export (per-agency price per tour, season and pax band; CSV and printable page) ([#192](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/192)) ([f81ecac](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f81ecac68f3d784034b26864e5998aea2cccf3c0))
+* B2C intake off by default (B2C_INTAKE_ENABLED) ([#171](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/171)) ([dd22318](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/dd22318129217923aeb8c8f712a444480717a984))
+* bk_tenant_pull projects every CIS tenant into booking.b2b_partners ([#175](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/175)) ([ae598af](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ae598afd2bd6abdd3d7c453001b9111e400bbcb5))
+* bk-037 booking.b2b_partners.projected_at (bk_tenant_pull projection marker) ([#174](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/174)) ([fbb92e9](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/fbb92e9a91b59aacb6d85eddd04b404858629222))
+* bk-038 booking.staff_users.role accepts finance ([#177](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/177)) ([3bff949](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/3bff9491498dc0e5a06c7b85ead8ef0d94388f56))
+* bk-039 tour price chain storage and the price.from.v1 view ([#179](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/179)) ([c18cb5f](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c18cb5f738994cb3eb1bacda4b15802e3afbd726))
+* bk-041 agency billing tables (expand) and bk-042 guards + v_tenant_billing_status (contract) ([#186](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/186)) ([53fc942](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/53fc942bcb26ae01e6ec0dceab523ebf18fb9dac))
+* bk-043 agency price tiers storage (tiers, approved discounts, partner rate cards with end cards, quote columns) ([#188](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/188)) ([7cd0bf2](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/7cd0bf28e71fb7986f904f06d7c2cede0cec9b46))
+* bk-044 agency invoice reminder log and partner terms clauses (expand) ([#189](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/189)) ([ad1550b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ad1550bca45c6aa2e8e6e6aced91e3b4541d3bdd))
+* Booking admin image and Deploy Admin Dev to its own ECS service; redirects and origin check work behind the ALB ([#201](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/201)) ([840637e](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/840637e26e70c900efe524c36247fc92300b85cb))
+* Booking admin on the kit ShellFrame, visual job and empty kit suppressions ([#184](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/184)) ([566cc9b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/566cc9be0b33e40fa232f19b778eb5d0912fbbb6))
+* Booking admin sidebar groups fold with the kit NavGroup ([#169](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/169)) ([1fceb3c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/1fceb3c4116c545dc88b7f5a0119867f9279fd78))
+* Booking finance role from the booking-finance group, gating invoices and payments ([#178](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/178)) ([f2cb0cb](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f2cb0cbb57c25ce8d3647d95bae9a8e2ad69e964))
+* Booking shows the CIS AI mark on supply text (content.ai, supply.ai, AI-assisted badge) ([#176](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/176)) ([a8d98a1](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/a8d98a1e1dde4f2f5af58c7264f7757537a1a449))
+* booking.b2b.v1 1.3 policy on quotes and holds, booking confirmation, credit stop, terms; agency reminders, accountant CSV, terms clauses ([#191](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/191)) ([9493f12](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/9493f12c492716fd18014745363dde616c09aee1))
+* booking.b2b.v1 1.5 agency invoices read (own issued, paid and void invoices; billing status) ([#195](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/195)) ([b30f633](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/b30f63334da15edf89e3ddeb6ab844e18c476ad0))
+* case-lifecycle clearing and inbox redaction skip the pilot tenant ([#182](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/182)) ([60a8c79](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/60a8c793e79d978da283487fd163fc75b7248e57))
+* catalog price readiness report and rate-sheet dry-run impact ([#198](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/198)) ([5066f75](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/5066f7539ad7da9c394dce6482e9c94dc6554728))
+* grant the price.from.v1 view to cis_app for the Content studio Marketplace (bk-040) ([#181](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/181)) ([3c2722e](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/3c2722e68a3c12d39164dcf8fa62587346d2af6c))
+* in-app job checks replace the Booking CloudWatch job alarms (S263 alert diet) ([#167](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/167)) ([967f9b2](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/967f9b2c5d239115891014da839df778a0b1b882))
+* mark CIS places hidden from customers on Booking destination screens ([#160](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/160)) ([636df62](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/636df62c8286910004e6783c702e470e7ddec91e))
+* proposal items read back today's CIS text; B2B confirm names what was sold; preview fits 390 px ([#163](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/163)) ([16fbed6](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/16fbed68bcb7995d6635a24adce62d7c6b855a98))
+* refuse migration references left behind by a renumber, and a push mid-rebase ([#205](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/205)) ([c9305c4](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c9305c48bc820ea0a652b50eb7507c9231931c6b))
+* retire the B2C half of Booking (customer routes, customer billing, inquiry intake, staff pages) ([#199](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/199)) ([28f6983](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/28f6983ce1901b445dd6ea9c36da2a03c43f4571))
+* tour price chain (catalog bridge, cost sheet from supplier rates, RRP from price, rate-sheet import, price history) ([#180](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/180)) ([3ef1434](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/3ef1434b4ea8b3133361c315d4bd1f74c00f6174))
+
+
+### Bug Fixes
+
+* Deploy Admin Dev result step parses with jq ([#203](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/203)) ([207b26f](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/207b26f1b84d5f905359ec956cc006ad2b88c483))
+* migration reference check reads non-UTF-8 diff lines; pin that it runs on every PR ([#206](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/206)) ([75de70c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/75de70c62c54d45dbaed6a27ba286d2249f50661))
+* refuse every B2C staff write while the B2C switch is off (410 b2b_only) ([#194](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/194)) ([b9872b3](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/b9872b3e9690373d84aed8e56b92896d1f546891))
+* tariff answers 422 invalid for a quote currency without an approved FX rate today ([#197](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/197)) ([62ac390](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/62ac39032fb0d1e57e13e7e61516ac760e37b02e))
+* the visual check reports on every PR and on the merge queue; deployed not-found expects the /login redirect ([#193](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/193)) ([d0e3b49](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d0e3b498f3676974fccbd80feb504ed7d7c7a52e))
+* upgrade the API image's Debian packages (apt fix the base image lacks) ([#183](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/183)) ([9861504](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/986150488091c5e3e5cf29a5dcc44ad8502bc38e))
+
 ## [0.14.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.13.0...v0.14.0) (2026-10-30)
 
 
