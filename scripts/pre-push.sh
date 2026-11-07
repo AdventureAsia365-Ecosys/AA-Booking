@@ -19,6 +19,11 @@
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "pre-push: not inside a git repo" >&2; exit 2; }
+# S272 incident: git exports GIT_DIR (and friends) to a hook; a test that runs git init / config / commit in a temp dir
+# with the inherited env then writes into THIS clone (core.bare, user identity, fake commits, origin/main). Drop them;
+# git finds the repo from the working directory.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+  GIT_NAMESPACE GIT_PREFIX
 BYPASS_HINT="push without the checks (once): git push --no-verify"
 
 # ---------------------------------------------------------------------------------------------------------------
