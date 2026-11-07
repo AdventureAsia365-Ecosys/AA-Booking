@@ -109,8 +109,8 @@ curl -s localhost:8000/booking/health
   environment variable `AWS_ROLE_ARN`, ECR push with the git-SHA tag, new task definition revision,
   update service, wait stable, then `post-deploy-verify.yml` (AA-993: ECS rollout + image, `/booking/health` +
   `/booking/health/ready`; desired count 0 is red). Red, not skipped, while the variable is unset.
-- **Frontend deploys:** CI-created via `.github/workflows/vercel-deploy.yml` (only when `frontend/**`
-  changes: PR → preview, `main` → production); the Vercel Git integration is off via
-  `frontend/vercel.json` (`git.deploymentEnabled: false`). Needs the repo secret `VERCEL_TOKEN`.
-  Production runs end with a public Playwright smoke of `/login` on the production host (`npm run test:smoke-public`
-  in `frontend/`, AA-993); the run is red unless deploy and smoke both succeeded.
+- **Frontend deploys:** `.github/workflows/deploy-admin-dev.yml` on a push to `main` that touches `frontend/**`:
+  arm64 image to ECR `aa-booking-dev-admin`, new task definition revision, ECS service `aa-booking-dev-admin` behind the
+  shared ALB, verify on `https://booking.lumiguides.it.com/api/healthz`, then a public Playwright smoke of `/login`
+  (`npm run test:smoke-public` in `frontend/`, AA-993); the run is red unless deploy, verify and smoke succeeded.
+  Vercel was retired in S272 (AA-911).

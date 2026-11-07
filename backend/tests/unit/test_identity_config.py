@@ -22,7 +22,7 @@ def test_defaults_are_the_dev_pool_clients_and_no_bridge() -> None:
     assert workforce.name == identity_config.WORKFORCE
     assert workforce.issuer == identity_config.DEV_WORKFORCE_ISSUER
     assert workforce.jwks_url == f"{identity_config.DEV_WORKFORCE_ISSUER}/.well-known/jwks.json"
-    # AA-911 D-1: plus the Preview-only booking-staff-preview client once its id is filled in (empty until then).
+    # AA-911: the Preview-only booking-staff-preview client is empty since the Vercel retirement (S272).
     preview = {identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID} - {""}
     assert workforce.client_ids == frozenset(
         {identity_config.DEV_BOOKING_STAFF_CLIENT_ID, identity_config.DEV_BREAKGLASS_CLIENT_ID} | preview

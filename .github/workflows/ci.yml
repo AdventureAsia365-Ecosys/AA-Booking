@@ -14,7 +14,7 @@ name: CI
 #
 # S271 (CI minutes, AA-889 merge queue): what runs on which event. Main is protected by the merge queue: every commit
 # that lands on main is a queue group commit that passed the FULL run first, so the run on `push` to main (the same
-# tree tested again) is gone; Deploy Dev and Vercel Deploy trigger on push themselves, never on this workflow.
+# tree tested again) is gone; Deploy Dev and Deploy Admin Dev trigger on push themselves, never on this workflow.
 #   merge_group, workflow_dispatch: every job, no path filter, no skip. The merge queue's guarantee is unchanged.
 #   pull_request: the fast checks (Lint, Vendored CIS copies, Security Audit, Unit Tests, Migration preflight, and
 #     Frontend Build without `next build`: kit checks, lint, type check, unit tests). The heavy jobs (Integration

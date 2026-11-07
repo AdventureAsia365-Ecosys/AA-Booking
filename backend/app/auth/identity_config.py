@@ -2,12 +2,12 @@
 
 Booking staff routes accept exactly:
 
-- **WORKFORCE** (Cognito staff pool) x {booking-staff, breakglass, booking-staff-preview}: access tokens only
+- **WORKFORCE** (Cognito staff pool) x {booking-staff, breakglass}: access tokens only
   (``token_use == "access"``), audience = the ``client_id`` claim (Cognito access tokens carry no ``aud``), roles from
-  ``cognito:groups``. ``booking-staff-preview`` (AA-911 decision D-1, root ADR 0006a A11) is the client of the fixed
-  Preview host ``booking-preview.lumiguides.it.com`` only: its sessions are capped at read-only by ``app.auth.staff``
-  (:func:`is_preview_client`), whatever groups the user holds. Its id is empty until the AA-CIS-Infra apply creates
-  the client; while it is empty, a preview token is simply refused (401), never accepted uncapped.
+  ``cognito:groups``. The Preview-only ``booking-staff-preview`` client (AA-911 decision D-1, root ADR 0006a A11) went
+  with the Vercel Preview host ``booking-preview.`` (AA-911 Vercel retirement, S272, root ADR 0006a A13): its default
+  id is empty, so a token of the deleted client is 401. A client set through ``COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID``
+  is still capped at read-only by ``app.auth.staff`` (:func:`is_preview_client`), never accepted uncapped.
   ``cis-admin`` is deliberately left out until a CIS screen really calls the Booking API (least privilege; ADR 0006
   §8 rule 6 lists it, the AA-680 notes record the deviation).
 - **BRIDGE** (the CIS-minted Booking token, ADR 0004 O1 / CIS PR #721) during the transition only (ADR 0006a A6):
@@ -43,9 +43,9 @@ log = logging.getLogger(__name__)
 DEV_WORKFORCE_ISSUER = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_bCcFvbSOS"  # docs-lint: ignore
 DEV_BOOKING_STAFF_CLIENT_ID = "5ifl9dgkr8a5outnmsjc8v1kt3"
 DEV_BREAKGLASS_CLIENT_ID = "2g3f3ncfuqdiuu1o5b70o4h0lq"
-# AA-911 D-1: the Preview-only booking-staff-preview client (AA-CIS-Infra identity.tf). Empty until the Infra apply
-# creates it; then the id is filled in here. Empty = no preview client accepted (fail closed).
-DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID = "7tlhphjurhqio0l26uh20valpp"
+# AA-911 D-1: the Preview-only booking-staff-preview client. Empty since the Vercel retirement (S272): AA-CIS-Infra
+# deletes the client with the booking-preview. host. Empty = no preview client accepted (fail closed).
+DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID = ""
 
 # IssuerConfig.name of each accepted issuer; app.auth.staff picks the identity rules by it.
 WORKFORCE = "workforce"

@@ -25,8 +25,9 @@ Cognito WORKFORCE staff sign-in (AA-680 Phase 2, root ADR 0006 §8; ``app.auth.i
 - ``COGNITO_WORKFORCE_ISSUER``: the WORKFORCE pool issuer (``https://cognito-idp.<region>.amazonaws.com/<pool id>``).
 - ``COGNITO_BOOKING_STAFF_CLIENT_ID``: the ``booking-staff`` app client (the Booking staff UI's sign-in).
 - ``COGNITO_BREAKGLASS_CLIENT_ID``: the ``breakglass`` app client.
-- ``COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID``: the Preview-only ``booking-staff-preview`` app client (AA-911 D-1).
-  Default :data:`~app.auth.identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID`; empty = no preview client accepted.
+- ``COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID``: a Preview-only app client, capped at read-only (AA-911 D-1).
+  Default :data:`~app.auth.identity_config.DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID`, empty since the Vercel retirement
+  (S272); empty = no preview client accepted.
   Its sessions are capped at read-only. It must differ from the two clients above.
 
 Cognito M2M (AA-972, root ADR 0006b decision 7; ``app.auth.m2m``): service-to-service tokens of the ``aa-m2m-<env>``

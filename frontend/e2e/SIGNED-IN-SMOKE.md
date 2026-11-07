@@ -29,9 +29,8 @@ the production host after each production deploy) are the only Playwright projec
 
 ## Flow to automate
 
-1. Open `https://booking.lumiguides.it.com/login` (production client `booking-staff`; per-PR `*.vercel.app` previews
-   have no company sign-in, the fixed Preview host `booking-preview.lumiguides.it.com` is read-only capped and may
-   sit behind Vercel Authentication).
+1. Open `https://booking.lumiguides.it.com/login` (production client `booking-staff`, the ECS staff web; the
+   only registered callback host since the Vercel retirement, AA-911).
 2. Click **"Sign in with company email"** → managed login on `staff-auth.lumiguides.it.com`.
 3. Snapshot the mailbox keys, type the address, ask for a code.
 4. Poll `inbound/` for a NEW message addressed to `e2e-booking@…`, pull the 6–8 digit code, type it.
@@ -70,5 +69,5 @@ the admin role). Run with `AWS_PROFILE=aa365-admin AWS_REGION=us-west-1` and
 2. This repo: GitHub environment `e2e` (branch policy `main`), secret `E2E_MAIL_ROLE_ARN` = that role's ARN.
 3. Workflow job: `environment: e2e`, `permissions: id-token: write, contents: read`, `concurrency` group shared
    by every run, `aws-actions/configure-aws-credentials` with `role-to-assume: ${{ secrets.E2E_MAIL_ROLE_ARN }}`,
-   region `us-west-1`, then `npx playwright test --project=signed-in`. Trigger: after the production Vercel deploy
-   on `main` and `workflow_dispatch`. The role trusts `refs/heads/main` only, so PR runs cannot use it.
+   region `us-west-1`, then `npx playwright test --project=signed-in`. Trigger: after `Deploy Admin Dev` on `main`
+   and `workflow_dispatch`. The role trusts `refs/heads/main` only, so PR runs cannot use it.

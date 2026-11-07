@@ -36,22 +36,20 @@ the server environment points elsewhere (see below).
 
 ## Environment
 
-Set in Vercel (or `.env.local` for local runs). All are optional; defaults are in `lib/config.ts` and
+Set on the ECS task definition (AA-CIS-Infra `modules/environment/staff_web.tf`; or `.env.local` for local runs). All are optional; defaults are in `lib/config.ts` and
 `lib/cognito.ts`.
 
 | Name | Where | Default | What |
 |---|---|---|---|
 | `BOOKING_API_URL` | server | Dev custom domain `https://api-booking.lumiguides.it.com` | Booking API base; `/booking/...` is appended |
 | `NEXT_PUBLIC_CIS_ADMIN_URL` | browser | `https://aa-cis.lumiguides.it.com` | "Open CIS admin" / "Managed in CIS" links |
-| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret**, Production target only | unset | Secret of the Cognito `booking-staff` app client (AA-680). Unset = no "Sign in with company email" button (no way in: the legacy CIS password form is retired, AA-911) |
+| `COGNITO_BOOKING_STAFF_CLIENT_SECRET` | server, **secret** (task secret `booking/dev/admin-web`) | unset | Secret of the Cognito `booking-staff` app client (AA-680). Unset = no "Sign in with company email" button (no way in: the legacy CIS password form is retired, AA-911) |
 | `COGNITO_BOOKING_STAFF_CLIENT_ID` | server | `5ifl9dgkr8a5outnmsjc8v1kt3` | booking-staff client id (Dev); override only for another pool |
-| `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET` | server, **secret**, Preview target only | unset | Secret of the Preview-only `booking-staff-preview` client (AA-911). A preview build reads only this one, never the production secret |
-| `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID` | server | code constant (empty until the Infra apply) | booking-staff-preview client id; empty = no company sign-in on preview builds |
 | `COGNITO_WORKFORCE_DOMAIN` | server | `https://staff-auth.lumiguides.it.com` | managed-login domain |
 | `COGNITO_WORKFORCE_ISSUER` | server | the Dev WORKFORCE pool issuer | checked against the ID / access token `iss` |
 
-Company e-mail sign-in is offered only on `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app` (the
-registered callback hosts; plus `localhost:3001` under `next dev`) when the client secret is set. Tokens stay in
+Company e-mail sign-in is offered only on `booking.lumiguides.it.com` (the registered callback host; plus
+`localhost:3001` under `next dev`) when the client secret is set. Tokens stay in
 httpOnly cookies (`bk_access`, `bk_staff_rt`; a leftover legacy `bk_cis_session` is cleared, AA-911).
 
 ## Layout

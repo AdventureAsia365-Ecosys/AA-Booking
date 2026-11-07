@@ -212,7 +212,7 @@ SCOPE_CASES: list[tuple[dict[str, str | None], bool]] = [
     ({"docs/readme.md": "changed\n"}, False),
     ({"frontendx/a.ts": "x\n"}, False),
     ({".github/workflows/ci.yml": "x\n"}, False),
-    ({".github/workflows/vercel-deploy.yml": "x\n"}, False),
+    ({".github/workflows/deploy-admin-dev.yml": "x\n"}, False),
     ({".github/workflows/visual.yml.bak": "x\n"}, False),
 ]
 

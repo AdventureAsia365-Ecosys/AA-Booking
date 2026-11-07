@@ -37,6 +37,6 @@ Refs AA-
 
 - [ ] CI green (Lint, Security Audit, Unit Tests, Integration Tests, Docker Build Check; Vendored CIS copies and Frontend Build when touched)
 - [ ] Migration `bk-NNN`: identical copy in AA-CIS-Infra `db/migrations/booking/`, applied on Dev by DB Migrate before this merges; or N/A
-- [ ] Staff admin change: Vercel preview checked on desktop and mobile; or N/A
+- [ ] Staff admin change: Visual (next start) report checked on desktop and mobile; or N/A
 - [ ] After deploy: `GET /booking/health` and `/booking/health/ready` return 200, and the changed endpoint is verified live (status + shape)
 - Evidence (commands, output, screenshots):

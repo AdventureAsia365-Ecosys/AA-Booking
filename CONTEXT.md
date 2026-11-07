@@ -148,7 +148,7 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
 | DB access | asyncpg with plain SQL, no ORM in request paths; `ssl="require"` |
 | Lint / tests | ruff, pytest + pytest-asyncio, migration guard, integration tests on Postgres 15 |
 | Runtime | ECS Fargate service `aa-booking-dev-api` on `aa-cis-dev-cluster` (acc2, us-west-1) |
-| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the UI kit core tokens (`frontend/ui/core`, root ADR 0016), react-query, TanStack Table. Vercel project `aa-booking-admin`, deployed by CI (`.github/workflows/vercel-deploy.yml`, see Staff admin frontend); also on ECS as its own service `aa-booking-dev-admin` (AA-911, `deploy-admin-dev.yml`). Customer surface (O8) not started |
+| Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the UI kit core tokens (`frontend/ui/core`, root ADR 0016), react-query, TanStack Table. On ECS as its own service `aa-booking-dev-admin` (AA-911, `deploy-admin-dev.yml`, see Staff admin frontend; the Vercel project was retired in S272). Customer surface (O8) not started |
 
 ## Layout
 
@@ -363,7 +363,7 @@ E-mail (AA-811, all optional): `STAFF_NOTIFY_EMAIL` (staff inbox for the Dev cop
 empty = no e-mail outside prod),
 `SES_FROM_ADDRESS` (must equal the Infra `ses_from_address`, the only From the task role may use; empty = no e-mail),
 `SES_CONFIGURATION_SET` (Infra `aa-email-<env>-transactional`), `SES_REGION` (default `us-west-1`), `STAFF_ADMIN_URL`
-(links in staff e-mail; default the Dev Vercel alias `https://aa-booking-admin.vercel.app`).
+(links in staff e-mail; default `https://booking.lumiguides.it.com`).
 B2B API (AA-972, both set by AA-CIS-Infra `booking.tf` from the M2M pool and the AA-Partner client; empty = every
 `/booking/b2b/v1` route answers 503): `COGNITO_M2M_ISSUER`, `COGNITO_M2M_CRM_CLIENT_ID`.
 Supplier photos (AA-835 S4, set by AA-CIS-Infra `booking_media.tf` / `booking.tf`): `SUPPLY_MEDIA_BUCKET` (the
@@ -386,7 +386,7 @@ One version for the whole repo (API image and staff admin), kept by release-plea
 breaking change bumps the minor, a `fix` the patch). `.github/workflows/release-please.yml` keeps one release PR open on
 `main`, opened with a token of the GitHub App `aa-ecosys-ci-bot` (environment `release`) so the required checks run on
 it; merging it tags the release. The version also lives in `backend/pyproject.toml` (an `extra-files` entry, bumped by the
-same PR). A release commit deploys nothing (Deploy Dev ignores those files, Vercel Deploy watches `frontend/**` only);
+same PR). A release commit deploys nothing (Deploy Dev ignores those files, Deploy Admin Dev watches `frontend/**` only);
 the next backend deploy, or a Deploy Dev dispatch on `main`, bakes the new version, which `GET /booking/health` returns
 as `version` next to `git_sha`. Details: `docs/implementation-notes/AA-891.md`.
 
@@ -1612,8 +1612,8 @@ AA-1029 bridge copies catalog keys and the reference price text only), catalog t
 supply facts from a rate sheet (the import only prices existing hotels / services), the tax table (ADR 0005 d10),
 agency tier discounts (ADR 0019 b15, AA-1030), contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
-`shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (Vercel
-project `aa-booking-admin` exists since S236, root `frontend/`).
+`shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (the ECS
+service `aa-booking-dev-admin` serves `booking.lumiguides.it.com` since AA-911, root `frontend/`).
 
 ## AI boundary for high-risk advice (AA-820)
 
@@ -1644,26 +1644,15 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   access token; the cookie lives for the 12 h session) + `bk_staff_rt` (refresh token, path `/api`). `proxy.ts` sends a
   page whose Cognito token is under 2 min from expiry to `GET /api/auth/refresh?next=…`; the BFF proxy refreshes
   itself (single-flight). `POST /api/auth/logout` revokes the refresh token and returns the Cognito `/logout` URL.
-  Offered only on the registered hosts with the build's client secret set: a Vercel production build uses the
-  `booking-staff` client (`COGNITO_BOOKING_STAFF_CLIENT_SECRET`, Production target only) and accepts
-  `booking.lumiguides.it.com` and `aa-booking-admin.vercel.app`; a preview build uses the Preview-only
-  `booking-staff-preview` client (`COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_SECRET`, Preview target only; client id a code
-  constant filled in after the Infra apply) and accepts only the fixed Preview host `booking-preview.lumiguides.it.com`;
-  `next dev` uses `booking-staff` on the production hosts and `localhost:3001` (`VERCEL_ENV` picks client and list). Per-deployment `*.vercel.app` preview URLs get only the legacy form; the Preview
-  host never shows the legacy form and answers 404 on `POST /api/auth/login`.
-- **Preview sign-in (AA-911, root ADR 0006a A11):** `booking-preview.lumiguides.it.com` is a Vercel domain of
-  `aa-booking-admin` (bound to the never-pushed branch `preview-signin`, so production deploys never claim it) and
-  the only callback / sign-out URL of the Preview-only `booking-staff-preview` client (AA-911 decision D-1; the
-  production `booking-staff` client does not list it). The Vercel Deploy workflow points it at a preview only on
-  opt-in: the PR carries the label `preview-signin` when its preview deploys, or a dispatch with
-  `alias_only_url=<https://aa-booking-admin-….vercel.app>` (checked over the Vercel REST API: this project, not
-  production, READY). Preview builds send `X-Robots-Tag: noindex, nofollow`. Under Standard Deployment Protection the
-  host is most likely behind Vercel Authentication (Hobby: only the owner passes; automation needs the project's
-  protection-bypass value). Unmerged same-repo PR code on that host sees the Booking tokens of whoever signs in,
-  but those are `booking-staff-preview` tokens, which the API caps at read-only (`app/auth/staff.py`: any
-  non-GET/HEAD/OPTIONS is 403 `preview_read_only` before any DB access; permissions limited to `PREVIEW_PERMISSIONS`;
-  `/booking/staff/me` says `preview_viewer: true`). Runbook: root
-  `docs/ops/runbooks/preview-staff-sign-in.md`.
+  Offered only on the registered host with the client secret set: the `booking-staff` client
+  (`COGNITO_BOOKING_STAFF_CLIENT_SECRET`, from the task's secret `booking/dev/admin-web`) on `booking.lumiguides.it.com`;
+  `next dev` adds `localhost:3001`. Any other host gets no company e-mail sign-in.
+- **Preview sign-in: retired (AA-911, S272; root ADR 0006a A11 superseded by A13).** The fixed Preview host
+  `booking-preview.lumiguides.it.com`, the Vercel alias `aa-booking-admin.vercel.app`, the Vercel project
+  `aa-booking-admin` and the Preview-only `booking-staff-preview` client are gone. The API keeps the read-only cap for
+  a client set through `COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID` (`app/auth/staff.py`: any non-GET/HEAD/OPTIONS is
+  403 `preview_read_only`; permissions limited to `PREVIEW_PERMISSIONS`), but the default is empty, so a token of the
+  deleted client is 401.
 - **Legacy CIS password bridge: retired (AA-911, S271).** `POST /api/auth/login` and the password form are gone;
   `proxy.ts` sends a browser that still holds `bk_cis_session` (or a non-Cognito `bk_access`) to `/login` with the
   cookies cleared, and the BFF answers 401 without a company e-mail session.
@@ -1763,31 +1752,29 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   `COGNITO_WORKFORCE_ISSUER` (Dev defaults in code).
   Public: `NEXT_PUBLIC_CIS_ADMIN_URL`. Staff never sign in with Google (ADR 0006a A9): the AA-703 Google placeholder is
   removed.
-- Frontend deploys (S241): CI-created via `.github/workflows/vercel-deploy.yml` (Vercel project `aa-booking-admin`),
-  only when a PR or a push to `main` touches `frontend/**` — PR → preview + one PR comment with the URL (and whether
-  the Preview sign-in host now serves it), `main` → production. The Vercel Git integration is off via `frontend/vercel.json` (`git.deploymentEnabled: false`) because
-  the Hobby team cap (~100 deployments / 24 h for all projects, canceled ones included) was being used up. Needs the
-  repo secret `VERCEL_TOKEN`.
-- Frontend on ECS (AA-911, root ADR 0019 d23): the same app also runs as the `booking-admin` container (port 3001) of
+- Frontend on Vercel: retired (AA-911, S272). `vercel-deploy.yml`, `frontend/vercel.json`,
+  `.github/scripts/check_security_headers.sh`, the per-PR previews and the `preview-signin` label are gone. Per-PR UI
+  evidence is the required check `Visual (next start, mocked API + kit gallery)` (root ADR 0019 d23 R7).
+- Frontend on ECS (AA-911, root ADR 0019 d23): the app runs as the `booking-admin` container (port 3001) of
   its own service `aa-booking-dev-admin` (AA-CIS-Infra `modules/environment/staff_web.tf`, S271 amendment of ADR 0019
   d23: one service per staff app; the CIS admin is a separate service). `.github/workflows/deploy-admin-dev.yml` builds `frontend/Dockerfile` (Next standalone, only when
-  `NEXT_OUTPUT=standalone`: Vercel builds are unchanged) on an arm64 runner, pushes `aa-booking-dev-admin:<sha>`
+  `NEXT_OUTPUT=standalone`) on an arm64 runner, pushes `aa-booking-dev-admin:<sha>`
   (IMMUTABLE), copies the latest revision of family `aa-booking-dev-admin` with only the image swapped (env and secrets from that revision), rolls the service
   and checks `https://booking.lumiguides.it.com/api/healthz` answers this commit from ECS (resolved to the ALB on the
-  runner before the cut-over, `vars.STAFF_WEB_ALB_DNS`). `booking.` moves from Vercel to the ALB at the cut-over (root
-  runbook `docs/ops/runbooks/staff-web-ecs-cutover.md`). Behind the ALB the standalone server's `request.url` /
+  runner through `vars.STAFF_WEB_ALB_DNS`); `booking.` points at the shared ALB since the cut-over (root runbook
+  `docs/ops/runbooks/staff-web-ecs-cutover.md`). Behind the ALB the standalone server's `request.url` /
   `nextUrl` name its bind address (`https://0.0.0.0:3001`), so the auth redirects use a relative Location
   (`lib/redirect.ts`) and `lib/sameOrigin.ts` takes the public origin from `Host` when `X-Forwarded-Proto` is https.
 - Security headers (AA-879): `frontend/next.config.ts` sends the same six headers as the CIS admin, the CIS portal and
   TripPlanner (HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal CSP `frame-ancestors 'none';
-  base-uri 'self'; form-action 'self'; object-src 'none'`, `Permissions-Policy`). Every preview and production
-  deployment is checked by the step "Check the security headers" (`.github/scripts/check_security_headers.sh`, GET
-  `/login` through `vercel curl`, which uses the project's automation-bypass token with `VERCEL_TOKEN`).
-- Public smoke (AA-993 V5): on a production run the job `smoke` of `vercel-deploy.yml` runs the Playwright project
+  base-uri 'self'; form-action 'self'; object-src 'none'`, `Permissions-Policy`). Every deploy checks them on the
+  production host through the public smoke below.
+- Public smoke (AA-993 V5): after a verified deploy the job `smoke` of `deploy-admin-dev.yml` runs the Playwright project
   `smoke-public` (`frontend/e2e/smoke-public/`) against `booking.lumiguides.it.com` after the deploy: GET `/login` 200
   on the same host, the card and "Sign in with company email" render, no console error, no failed same-origin request,
   every `next.config.ts` header with its value. Signed out, no secret; screenshot artifact `booking-admin-smoke-public`.
-  Job `result` is red on a production run unless deploy and smoke both succeeded; previews are not gated by it.
+  Job `result` is red unless config, deploy, verify and smoke succeeded (verify and smoke may skip only when the
+  service runs no task). Job `visual-production` then runs `visual.yml` (public pages, report-only).
 - Signed-in smoke (AA-910, design note only, no job yet): `frontend/e2e/SIGNED-IN-SMOKE.md`. E2E staff user
   `e2e-booking@e2e-mail.lumiguides.it.com`, group `booking-admin` only, email code read from the SES test mailbox
   (root ADR 0006a A10a); no password, no secret. Its session is read-only on every client: non-safe methods are

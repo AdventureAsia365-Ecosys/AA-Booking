@@ -1,8 +1,7 @@
 // app/api/auth/signin/cognito/route.ts
 // AA-680 — GET: starts the company e-mail sign-in (authorization code + PKCE, booking-staff client) and redirects
 // to the managed login on staff-auth.lumiguides.it.com. `?next=` is kept (same-origin paths only, lib/safeNext).
-// A host that is not on the allowlist (a Vercel preview) or a missing client secret → back to /login, where the
-// legacy CIS password form is shown instead.
+// A host that is not on the allowlist or a missing client secret → back to /login (no sign-in is offered there).
 
 import { NextRequest, NextResponse } from "next/server";
 import { allowedOriginForRequest, cognitoConfigured, startSignIn } from "@/lib/cognito";
