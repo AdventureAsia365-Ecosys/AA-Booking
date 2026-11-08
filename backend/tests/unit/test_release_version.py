@@ -105,10 +105,10 @@ def test_release_workflow_uses_the_ci_bot_app_token() -> None:
     ]
     assert "environment: release" in text
     assert "if: github.ref == 'refs/heads/main'" in text
-    assert "uses: actions/create-github-app-token@v3" in text
+    assert re.search(r"uses: actions/create-github-app-token@[0-9a-f]{40} # v3\.", text)
     assert "app-id: ${{ vars.AA_CI_BOT_APP_ID }}" in text
     assert "private-key: ${{ secrets.AA_CI_BOT_PRIVATE_KEY }}" in text
-    assert "uses: googleapis/release-please-action@v5" in text
+    assert re.search(r"uses: googleapis/release-please-action@[0-9a-f]{40} # v5\.", text)
     assert "token: ${{ steps.app-token.outputs.token }}" in text
     assert "GITHUB_TOKEN" not in text.split("\njobs:")[1]
 

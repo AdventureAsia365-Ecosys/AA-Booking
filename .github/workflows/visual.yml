@@ -94,7 +94,7 @@ jobs:
       # The gated kit gallery route answers only on a KIT_GALLERY=1 server (playwright.config.ts passes it to next start).
       KIT_GALLERY: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -132,7 +132,7 @@ jobs:
 
       - name: Set up Node 22
         if: steps.scope.outputs.run == 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           package-manager-cache: false
@@ -253,13 +253,13 @@ jobs:
 
       # Runs only from main (job condition), so the checkout is main's commit. No npm cache after checking out a
       # given ref (cache-poisoning path, CodeQL high, #103 review), like the smoke job of deploy-admin-dev.yml.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
 
       - name: Set up Node 22
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           package-manager-cache: false
