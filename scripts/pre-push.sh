@@ -306,7 +306,7 @@ resolve_docs_python() {
 # ---------------------------------------------------------------------------------------------------------------
 FAILED=()
 WARNED=()
-LYCHEE_HINT="install lychee v0.24.2 (the version lychee-action v2.9.0 runs in CI): a release binary from https://github.com/lycheeverse/lychee/releases, or cargo install lychee --version 0.24.2"
+LYCHEE_HINT="install lychee v0.24.2 (the version CI runs; the CI binary, sha256-checked: python3 .github/scripts/lychee_bin.py fetch --dest /tmp/lychee-cache --bin ~/.local/bin)"
 
 # run_step <check id> <dir relative to repo root> <ci reference> <display command> -- <argv...>
 run_step() {
