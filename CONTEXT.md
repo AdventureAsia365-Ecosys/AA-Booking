@@ -1622,8 +1622,10 @@ instalments, refunds or claims decisions, or visas and immigration, unless a qua
 recommendation, with authority to change it, before it is sent, **and** the traveller is clearly told that AI was
 used. AI-drafted proposals and quotes stay behind the existing staff review before sending. Any traveller-facing chat
 must disclose AI at the start of each session. Source: Anthropic Usage Policy high-risk use case requirements
-(effective 12/11/2026); proposal wording in root `docs/legal/tenant-terms-ai-clause-draft.md` §5, may be tightened
-after the business review. Today Booking makes no AI calls, so this is a rule for future features. When a feature
+(effective 12/11/2026). The same rule binds agencies through clause .3(8) of the tenant AI Schedule v1.0 (root
+`docs/legal/tenant-ai-schedule.md`, approved by the tech lead under root ADR 0019 b20; counsel reviews it before the
+first paying agency, and a rewrite there is mirrored here). Today Booking makes no AI calls, so this is a rule for
+future features. When a feature
 needs AI it goes through CIS jobs (as the supply content writer does, AA-835) or the shared AI gateway core of
 AA-CIS-App (`shared/aa_llm/`, vendored), so every call is budgeted and written to the shared ledger (root ADR 0009
 decision 13); never a provider SDK called directly.
