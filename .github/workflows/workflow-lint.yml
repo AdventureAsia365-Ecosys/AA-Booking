@@ -11,6 +11,9 @@ name: Workflow Lint
 #   binary from a cached, hash-checked copy, .github/actions/lychee).
 #   WL1 (no sensitive `vars.*`) is skipped here: deploy-dev.yml and friends still read vars.AWS_ROLE_ARN; moving it to
 #   a secret is a repo-settings step for the tech lead. Drop `--skip WL1` once it is a secret.
+# WL6 (S273, AA-1024, root ADR 0021 decision 2.3): every `uses:` names a full-length commit SHA with its release tag
+# in a `# vX.Y.Z` comment (the org setting that refuses tag pins); .github/dependabot.yml moves the pins weekly,
+# in one grouped PR that is never auto-merged (its shape is checked by the unit tests here).
 # Offline apart from the actionlint download on a cache miss; no secret, no AWS. Not a required check (the ruleset is the tech lead's).
 
 on:
@@ -21,6 +24,7 @@ on:
       - ".github/actions/**"
       - ".github/actionlint.yaml"
       - ".github/scripts/workflow_lint.py"
+      - ".github/dependabot.yml"
       - ".github/scripts/release_bin.py"
       - ".github/scripts/test_release_bin.py"
       - ".github/scripts/cache_cleanup.py"
@@ -36,6 +40,7 @@ on:
       - ".github/actions/**"
       - ".github/actionlint.yaml"
       - ".github/scripts/workflow_lint.py"
+      - ".github/dependabot.yml"
       - ".github/scripts/release_bin.py"
       - ".github/scripts/test_release_bin.py"
       - ".github/scripts/cache_cleanup.py"

@@ -33,7 +33,8 @@ updates:
     commit-message:
       prefix: "chore(deps)"
   - package-ecosystem: github-actions
-    directory: "/"
+    # "/" reads .github/workflows; the composite actions in .github/actions/<name>/action.yml are read too (AA-1024)
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
       day: monday
