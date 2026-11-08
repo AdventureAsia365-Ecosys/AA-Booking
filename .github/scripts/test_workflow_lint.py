@@ -187,6 +187,23 @@ class WorkflowLintRules(unittest.TestCase):
                       skip-setup-trivy: "true"
             """)
         self.assertEqual(ok, [])
+        nested = _lint("""
+            on: pull_request
+            jobs:
+              a:
+                runs-on: ubuntu-24.04
+                steps:
+                  - uses: actions/cache/restore@v6
+                    with:
+                      path: ~/.npm
+                      key: npm-${{ hashFiles('apps/${{ matrix.app }}/package-lock.json') }}
+                  - uses: actions/cache/restore@v6
+                    with:
+                      path: ~/.npm
+                      key: npm-${{ hashFiles(format('apps/{0}/package-lock.json', matrix.app)) }}
+            """)
+        self.assertEqual(len(nested), 1)
+        self.assertIn("inside an expression", nested[0])
         self.assertEqual(_lint("""
             on: push
             jobs:
