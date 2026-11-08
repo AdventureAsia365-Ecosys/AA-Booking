@@ -82,8 +82,16 @@ jobs:
         uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/requirements-dev.txt
+
+      # S273 (workflow_lint WL4): restore on every ref; only the default branch saves this cache
+      # (a pull request or merge-queue copy is readable only by that ref).
+      - name: Restore pip cache
+        id: pip-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-${{ hashFiles('backend/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-
 
       - name: Install ruff
         run: pip install "$(grep '^ruff==' requirements-dev.txt)"
@@ -135,8 +143,16 @@ jobs:
         uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/requirements-dev.txt
+
+      # S273 (workflow_lint WL4): restore on every ref; only the default branch saves this cache
+      # (a pull request or merge-queue copy is readable only by that ref).
+      - name: Restore pip cache
+        id: pip-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-${{ hashFiles('backend/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -186,8 +202,16 @@ jobs:
         uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/requirements-dev.txt
+
+      # S273 (workflow_lint WL4): restore on every ref; only the default branch saves this cache
+      # (a pull request or merge-queue copy is readable only by that ref).
+      - name: Restore pip cache
+        id: pip-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-${{ hashFiles('backend/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
@@ -249,6 +273,26 @@ jobs:
         working-directory: .
         run: python3 .github/scripts/check_trivyignore.py .trivyignore
 
+      # S273 (AA-1024): trivy from the cached, sha256-pinned release-bin action (pins.txt), not setup-trivy's
+      # download on every run; the vulnerability DB restores from the default branch's daily entry (the Cache
+      # warm workflow saves it; trivy-action's own DB cache saved a copy on every ref). A missing or stale DB
+      # is downloaded by trivy itself, as before.
+      - name: Install trivy (pinned, cached)
+        uses: ./.github/actions/release-bin
+        with:
+          tool: trivy
+
+      - name: Trivy DB cache key (UTC day)
+        id: trivy-day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore trivy DB
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: trivy-db-${{ steps.trivy-day.outputs.day }}
+          restore-keys: trivy-db-
+
       - name: Scan image for vulnerabilities (Trivy, failing on fixable CRITICAL/HIGH)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -258,14 +302,31 @@ jobs:
           ignore-unfixed: true
           trivyignores: ".trivyignore"
           exit-code: "1"
+          cache: "false"
+          skip-setup-trivy: "true"
+
+      # S273 (AA-1024): syft from the cached, sha256-pinned release-bin action (pins.txt): anchore/sbom-action
+      # downloaded syft through an install script on every run ("The Syft installer failed", HTTP 504). Same
+      # syft version (v1.54.0), same CycloneDX JSON file, same artifact name.
+      - name: Install syft (pinned, cached)
+        uses: ./.github/actions/release-bin
+        with:
+          tool: syft
 
       - name: Generate SBOM (syft, CycloneDX)
-        uses: anchore/sbom-action@v0.24.3
+        working-directory: .
+        env:
+          IMAGE: "aa-booking-api:ci-${{ github.sha }}"
+          OUT: sbom-${{ github.sha }}.cdx.json
+          SYFT_CHECK_FOR_APP_UPDATE: "false"
+        run: syft scan "docker:${IMAGE}" --output "cyclonedx-json=${OUT}"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
         with:
-          image: "aa-booking-api:ci-${{ github.sha }}"
-          format: cyclonedx-json
-          output-file: sbom-${{ github.sha }}.cdx.json
-          artifact-name: sbom-${{ github.sha }}.cdx.json
+          name: sbom-${{ github.sha }}.cdx.json
+          path: sbom-${{ github.sha }}.cdx.json
+          if-no-files-found: error
 
   # Non-required (AA-751, S240 decision): byte copies of AA-CIS-App files — backend/tests/job_template/ (shared/jobs/
   # job_table_template.sql + job_table_shape.py, ADR 0003a decision 2; Integration Tests compares booking.job with that
@@ -462,8 +523,17 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          package-manager-cache: false
+
+      # S273 (workflow_lint WL4): restore on every ref; only the default branch saves this cache
+      # (a pull request or merge-queue copy is readable only by that ref).
+      - name: Restore npm cache
+        id: npm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-${{ runner.arch }}-
 
       # AA-994 S4b (root ADR 0016 decision 5) — the vendored UI kit core, before npm ci (dependency-free). Integrity:
       # every file of ui/core has the sha256 of its MANIFEST.json, no file is missing or extra, the manifest is the one
