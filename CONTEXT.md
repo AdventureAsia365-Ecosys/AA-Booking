@@ -1759,7 +1759,9 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   its own service `aa-booking-dev-admin` (AA-CIS-Infra `modules/environment/staff_web.tf`, S271 amendment of ADR 0019
   d23: one service per staff app; the CIS admin is a separate service). `.github/workflows/deploy-admin-dev.yml` builds `frontend/Dockerfile` (Next standalone, only when
   `NEXT_OUTPUT=standalone`) on an arm64 runner, pushes `aa-booking-dev-admin:<sha>`
-  (IMMUTABLE), copies the latest revision of family `aa-booking-dev-admin` with only the image swapped (env and secrets from that revision), rolls the service
+  (IMMUTABLE), copies the latest revision of family `aa-booking-dev-admin` with only the image of `booking-admin` swapped (env and secrets from that revision;
+  any other container of the family is kept as it is: AA-1060, the non-essential WordPress test site sidecar `test-wp` that
+  AA-CIS-Infra `modules/environment/test_wp.tf` adds; the deploy requires exactly one essential `booking-admin`), rolls the service
   and checks `https://booking.lumiguides.it.com/api/healthz` answers this commit from ECS (resolved to the ALB on the
   runner through `vars.STAFF_WEB_ALB_DNS`); `booking.` points at the shared ALB since the cut-over (root runbook
   `docs/ops/runbooks/staff-web-ecs-cutover.md`). Behind the ALB the standalone server's `request.url` /
