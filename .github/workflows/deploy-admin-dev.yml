@@ -148,8 +148,12 @@ jobs:
           aws ecs describe-task-definition --task-definition "$ECS_TASK_FAMILY" --query 'taskDefinition' --output json > /tmp/td.json
           # family:revision only: the full ARN names the AWS account (public logs).
           echo "base task definition: $(jq -r '.taskDefinitionArn | split("/") | last' /tmp/td.json)"
-          jq -e --arg c "$CONTAINER" '(.containerDefinitions | length) == 1 and .containerDefinitions[0].name == $c' /tmp/td.json >/dev/null \
-            || { echo "::error::$ECS_TASK_FAMILY must have exactly one container, $CONTAINER"; exit 1; }
+          # The family may carry extra containers that Terraform owns (AA-1060: the non-essential WordPress test site
+          # sidecar of AA-CIS-Infra modules/environment/test_wp.tf). The copy keeps them as they are and swaps only the
+          # image of $CONTAINER, which must be there exactly once and essential.
+          jq -e --arg c "$CONTAINER" '[.containerDefinitions[] | select(.name == $c)] | length == 1 and .[0].essential != false' /tmp/td.json >/dev/null \
+            || { echo "::error::$ECS_TASK_FAMILY must have exactly one essential container named $CONTAINER"; exit 1; }
+          echo "containers: $(jq -r '[.containerDefinitions[].name] | join(", ")' /tmp/td.json)"
           jq --arg img "$DEPLOY_IMAGE" --arg c "$CONTAINER" \
             'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
              | .containerDefinitions |= map(if .name == $c then .image = $img else . end)' \
