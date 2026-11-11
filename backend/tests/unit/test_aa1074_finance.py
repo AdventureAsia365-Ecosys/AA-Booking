@@ -9,6 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+import asyncpg
 import pytest
 
 from app import mailer
@@ -307,6 +308,39 @@ async def test_departure_reads_hide_realised_profit_without_profit_read() -> Non
         item = page["items"][0]
         assert all(item[k] is None for k in costs.LIST_PROFIT_FIELDS)
         assert item["cost_usd"] == "1000" and item["sold_seats"] == 6
+
+
+CATALOG = "FROM catalog.v_tour WHERE source_system = 'cis'"
+TOUR_SOURCE = "6f1c2a9e-0000-4000-8000-000000000041"
+
+
+async def test_departure_reads_carry_the_catalog_tour_title() -> None:
+    """S277 UAT fix: the finance departure list, the departure view and the profit per departure name the tour from
+    the CIS catalog (one read per page), not the raw catalog key; a missing title or an unreadable catalog leaves
+    ``tour_title`` null and the read still answers."""
+    row = {"id": DEP, "trip_plan_source_id": TOUR_SOURCE, "sold_seats": 6, "cost_usd": Decimal("1000")}
+    other = {"id": COST, "trip_plan_source_id": "tour-unknown", "sold_seats": 0, "cost_usd": None}
+    titles = [{"source_id": TOUR_SOURCE, "title": "Lantern Coast Loop"}]
+    conn = ScriptedConn([("count(*)", 2), ("FROM booking.departures d JOIN", [row, other]), (CATALOG, titles)])
+    page = await costs.list_departures(conn, ADMIN)
+    assert [i["tour_title"] for i in page["items"]] == ["Lantern Coast Loop", None]
+    assert conn.sql(CATALOG) == [([TOUR_SOURCE, "tour-unknown"],)]  # one catalog read for the page
+
+    broken = ScriptedConn([("count(*)", 1), ("FROM booking.departures d JOIN", [row])])
+    broken.on(CATALOG, asyncpg.UndefinedTableError("no catalog"))
+    assert (await costs.list_departures(broken, SALES))["items"][0]["tour_title"] is None
+
+    view = departure_view_conn().on(CATALOG, [{"source_id": "tour-1", "title": "Lantern Coast Loop"}])
+    out = await costs.departure_costs(view, OPS, DEP)
+    assert out["departure"]["tour_title"] == "Lantern Coast Loop"
+    assert out["departure"]["trip_plan_source_id"] == "tour-1"
+    assert (await costs.departure_costs(departure_view_conn(), OPS, DEP))["departure"]["tour_title"] is None
+
+    profit_row = {"departure_id": DEP, "trip_plan_source_id": TOUR_SOURCE, "profit_usd": Decimal("10")}
+    deps = ScriptedConn([("FROM booking.v_departure_profit p", [profit_row]), (CATALOG, titles)])
+    prof = await profit.departures(deps)
+    assert prof["items"][0]["tour_title"] == "Lantern Coast Loop" and prof["totals"]["profit_usd"] == "10"
+    assert (await profit.departures(ScriptedConn(), offset=5))["items"] == []
 
 
 async def test_recompute_job_and_schedule() -> None:
@@ -705,3 +739,7 @@ def test_routes_give_sales_no_profit_figures() -> None:
     )
     admin = client(ADMIN, listing_conn()).get("/booking/finance/departures").json()
     assert admin["items"][0]["profit_usd"] == "1000" and admin["items"][0]["margin"] == "0.5"
+    named = listing_conn().on("FROM catalog.v_tour", [{"source_id": "tour-1", "title": "Lantern Coast Loop"}])
+    named.on("FROM booking.departures d JOIN", [{"id": DEP, "trip_plan_source_id": "tour-1", "sold_seats": 6}])
+    item = client(ADMIN, named).get("/booking/finance/departures").json()["items"][0]
+    assert item["tour_title"] == "Lantern Coast Loop" and item["trip_plan_source_id"] == "tour-1"

@@ -9,7 +9,7 @@ Departure costs (``app.finance.departure_costs``; read ``bill.read``, write ``op
 - ``POST /departures/{id}/costs`` (rate: ``service_id``; manual: ``supplier_id``, ``basis``, ``unit_amount``,
   ``currency``) · ``PATCH /departure-costs/{id}`` · ``POST /departure-costs/{id}/order`` (makes its departure-level
   supplier booking) · ``POST /departure-costs/{id}/remove`` (reason).
-- ``GET /finance/departures?from&to``: departures with sold seats, shared cost lines and profit.
+- ``GET /finance/departures?from&to``: departures with their tour title, sold seats, shared cost lines and profit.
 
 Purchase orders (``app.finance.supplier_orders``; read ``ops.read``, write ``ops.write``):
 - ``GET /supplier-orders`` (``status``, ``supplier_id``) · ``POST /supplier-orders`` (``trip_cases`` codes / ids,
