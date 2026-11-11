@@ -608,6 +608,9 @@ async def test_http_w1_routes_and_roles(migrated_booking_dsn: str, admin: asyncp
         },
         "payment_instructions": "Payment details will be confirmed by your trip consultant.",
         "supplier_bill_due_soon_days": 3,  # bk-030 (AA-682 S4)
+        "b2b_ops_contact": {},  # bk-047 (AA-1075): the voucher's ops desk line, empty until set
+        "b2b_child_age_max": 11,
+        "b2b_infant_age_max": 1,
     }
     assert {"iso2": "VN", "name": "Vietnam"} in countries.json()["items"]
     assert audit_denied.status_code == 403 and audit_ok.status_code == 200 and audit_ok.json()["items"]
