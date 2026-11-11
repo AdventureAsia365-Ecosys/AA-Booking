@@ -4,20 +4,28 @@
 // Bookings AA staff enter for an agency that wrote by e-mail or chat: one call quotes, holds and confirms with the
 // agency API's own rules (seats, allotments, credit stop, cancellation policy), and the agency's CRM imports the
 // booking from its event feed. A price below the floor margin waits here until a second person approves it (never the
-// one who entered it); the seats stay held meanwhile. Travellers are counts only.
+// one who entered it); the seats stay held meanwhile. Travellers are counts only. The form takes the tour's room mix
+// (empty = the engine default: doubles plus a single when the party is odd) and extra hotel rooms or services from
+// supply, each its own line with the tour's travellers.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { ApiError, type FieldError } from "@/lib/api/client";
 import {
   ENTRY_STATUS_LABEL,
+  OCCUPANCIES,
+  OCCUPANCY_LABEL,
   actionKey,
   agencyOpsApi,
   type DeskEntry,
+  type EntryLine,
   type EntryStatus,
+  type Occupancy,
+  type RoomMix,
 } from "@/lib/api/agencyOps";
+import type { SupplyOption } from "@/lib/api/supply";
 import { departuresApi } from "@/lib/api/departures";
 import type { TripPlanListItem } from "@/lib/api/tripPlans";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
@@ -28,6 +36,7 @@ import {
   DateText,
   Field,
   FormDrawer,
+  IconButton,
   Input,
   Pill,
   SegmentedControl,
@@ -39,6 +48,8 @@ import {
   type BookingTone,
 } from "@/ui";
 import { TripPlanPicker } from "../../cases/_parts/TripPlanPicker";
+import { SupplyPicker } from "../../cases/[code]/proposals/[n]/SupplyPicker";
+import { defaultRoomsLabel, deskLines } from "@/ui/booking/deskEntry";
 
 const STATUS_TONE: Record<EntryStatus, BookingTone> = {
   awaiting_approval: "warning",
@@ -234,6 +245,8 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
   const [adult, setAdult] = useState("2");
   const [child, setChild] = useState("0");
   const [infant, setInfant] = useState("0");
+  const [rooms, setRooms] = useState<RoomMix[]>([]);
+  const [extras, setExtras] = useState<Extra[]>([]);
   const [override, setOverride] = useState("");
   const [reason, setReason] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
@@ -249,20 +262,20 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
   const save = useMutation({
     mutationFn: () => {
       const dep = upcoming.find((d) => d.id === departure);
+      const lines: EntryLine[] = deskLines({
+        planId: plan?.plan_id ?? "",
+        departureId: dep?.id ?? null,
+        start: dep?.start_date ?? serviceDate,
+        pax: { adult: Number(adult) || 0, child: Number(child) || 0, infant: Number(infant) || 0 },
+        rooms,
+        extras: extras.map((x) => ({ kind: x.option.kind, id: x.option.id, date: x.date, nights: x.nights })),
+      });
       return agencyOpsApi.enter(
         {
           partner_id: partner,
           agency_ref: agencyRef.trim(),
           currency,
-          lines: [
-            {
-              line_ref: "tour",
-              component_id: `tp:${plan?.plan_id ?? ""}`,
-              departure_id: dep?.id ?? null,
-              service_date: dep?.start_date ?? serviceDate,
-              pax: { adult: Number(adult) || 0, child: Number(child) || 0, infant: Number(infant) || 0 },
-            },
-          ],
+          lines,
           override_total: override.trim() || null,
           override_reason: override.trim() ? reason.trim() || null : null,
         },
@@ -343,6 +356,8 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
             <Input type="number" min={0} max={20} value={infant} onChange={(e) => setInfant(e.target.value)} />
           </Field>
         </div>
+        <RoomMixEditor rooms={rooms} onChange={setRooms} party={(Number(adult) || 0) + (Number(child) || 0)} />
+        <ExtrasEditor extras={extras} onChange={setExtras} />
         <Field label="Price override (total)" hint="Leave empty for the agency's price. Below the floor margin a second person approves it.">
           <Input inputMode="decimal" value={override} placeholder="e.g. 1250.00" onChange={(e) => setOverride(e.target.value)} />
         </Field>
@@ -353,5 +368,107 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
         )}
       </div>
     </FormDrawer>
+  );
+}
+
+/** One extra line of a staff booking: a hotel room or a service from supply, for the tour's travellers. */
+interface Extra {
+  key: string;
+  option: SupplyOption;
+  date: string; // empty = the tour's start date
+  nights: string; // rooms only
+}
+
+/** The tour's room mix. Empty = the engine default (doubles plus a single when the party is odd). */
+function RoomMixEditor({ rooms, onChange, party }: { rooms: RoomMix[]; onChange: (r: RoomMix[]) => void; party: number }) {
+  const used = new Set(rooms.map((r) => r.occupancy));
+  const next = OCCUPANCIES.find((o) => !used.has(o));
+  const set = (i: number, patch: Partial<RoomMix>) => onChange(rooms.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <Field
+      label="Room mix"
+      as="div"
+      hint={
+        rooms.length
+          ? "The rooms must hold the adults; children may share."
+          : `Empty = ${defaultRoomsLabel(party)} for ${party || 0} travellers (doubles, plus a single when odd).`
+      }
+    >
+      <div className="flex flex-col gap-2" data-testid="desk-room-mix">
+        {rooms.map((r, i) => (
+          <div key={r.occupancy} className="grid grid-cols-[1fr_96px_auto] items-center gap-2">
+            <Select
+              aria-label="Room occupancy"
+              value={r.occupancy}
+              onChange={(e) => set(i, { occupancy: e.target.value as Occupancy })}
+              options={OCCUPANCIES.filter((o) => o === r.occupancy || !used.has(o)).map((o) => ({
+                value: o,
+                label: OCCUPANCY_LABEL[o],
+              }))}
+            />
+            <Input
+              aria-label="Rooms"
+              type="number"
+              min={1}
+              max={30}
+              value={String(r.count)}
+              onChange={(e) => set(i, { count: Math.min(30, Math.max(0, Number(e.target.value) || 0)) })}
+            />
+            <IconButton title="Remove" label={`Remove the ${OCCUPANCY_LABEL[r.occupancy]} rooms`} onClick={() => onChange(rooms.filter((_, j) => j !== i))}>
+              <X size={14} />
+            </IconButton>
+          </div>
+        ))}
+        {next && (
+          <span>
+            <Button size="sm" variant="ghost" onClick={() => onChange([...rooms, { occupancy: next, count: 1 }])}>
+              <Plus size={14} /> Add rooms
+            </Button>
+          </span>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+/** Extra hotel rooms or services (transfers, activities, guides) booked with the tour, each its own priced line. */
+function ExtrasEditor({ extras, onChange }: { extras: Extra[]; onChange: (x: Extra[]) => void }) {
+  const set = (key: string, patch: Partial<Extra>) => onChange(extras.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+  return (
+    <Field label="Extra rooms and services" as="div" hint="Priced at the supplier rate in force, for the same travellers. Date empty = the tour's start.">
+      <div className="flex flex-col gap-2" data-testid="desk-extras">
+        {extras.map((x) => (
+          <div key={x.key} className="flex flex-col gap-2 rounded-lg border border-line2 p-2">
+            <div className="flex items-center justify-between gap-2 text-[13px]">
+              <span className="min-w-0 truncate text-ink">
+                <span className="text-muted">{x.option.kind === "room_type" ? "Room · " : "Service · "}</span>
+                {x.option.label}
+              </span>
+              <IconButton title="Remove" label={`Remove ${x.option.label}`} onClick={() => onChange(extras.filter((y) => y.key !== x.key))}>
+                <X size={14} />
+              </IconButton>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <DateField value={x.date} onChange={(d) => set(x.key, { date: d })} />
+              {x.option.kind === "room_type" && (
+                <Input
+                  aria-label="Nights"
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={x.nights}
+                  onChange={(e) => set(x.key, { nights: e.target.value })}
+                />
+              )}
+            </div>
+          </div>
+        ))}
+        {extras.length < 20 && (
+          <SupplyPicker
+            onPick={(o) => onChange([...extras, { key: `${o.kind}:${o.id}:${Date.now()}`, option: o, date: "", nights: "1" }])}
+          />
+        )}
+      </div>
+    </Field>
   );
 }

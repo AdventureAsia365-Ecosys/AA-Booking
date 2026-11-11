@@ -13,6 +13,8 @@
     "agency_billing.write",
     "agency_payment.approve",
     "audit.read",
+    "b2b_desk.approve",
+    "b2b_desk.book",
     "b2b_desk.read",
     "b2b_desk.write",
     "bill.read",

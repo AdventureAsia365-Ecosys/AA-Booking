@@ -88,6 +88,22 @@ export interface EntryLine {
   service_date: IsoDate;
   nights?: number | null;
   pax: Pax;
+  /** The room mix (contract Room); empty = the engine default (doubles plus a single when the party is odd). */
+  rooms?: RoomMix[];
+}
+
+export const OCCUPANCIES = ["single", "double", "twin", "triple", "family"] as const;
+export type Occupancy = (typeof OCCUPANCIES)[number];
+export const OCCUPANCY_LABEL: Record<Occupancy, string> = {
+  single: "Single",
+  double: "Double",
+  twin: "Twin",
+  triple: "Triple",
+  family: "Family",
+};
+export interface RoomMix {
+  occupancy: Occupancy;
+  count: number;
 }
 
 export interface NewEntry {
