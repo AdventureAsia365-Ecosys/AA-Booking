@@ -50,6 +50,9 @@
 -- DM-7.1 rows for the three new tables: root docs/architecture/data-standards/02-data-management.md (AA-1075 root PR,
 -- merged before the Infra copy). DM-6.1: override and agency amounts conf:commercial; waive_reason, override_reason and
 -- voucher_note pii:free_text (staff text; never traveller data by rule, tagged in case); no traveller name anywhere.
+-- Erasure (DM-6.7): the two guard triggers allow one move on any row, override_reason / waive_reason set to the
+-- fixed marker '[redacted]' with every other column unchanged; it runs as bk_owner in a reviewed DB Migrate
+-- run-script (root docs/legal/dsar-erasure-runbook.md), the app role gets no new grant for it.
 --
 -- Locks: ACCESS EXCLUSIVE for the nullable / constant-default ADD COLUMNs (no rewrite) and CHECK adds on trip_cases,
 -- supplier_bookings, b2b_cancellations, trip_plan_prices, trip_plans, pricing_rules (tens to hundreds of rows) and the
@@ -160,18 +163,28 @@ COMMENT ON COLUMN booking.b2b_desk_bookings.floor_total IS
 COMMENT ON COLUMN booking.b2b_desk_bookings.override_total IS
     'conf:commercial; bk-047: the total staff set instead of quoted_total (the quote lines carry it, scaled).';
 COMMENT ON COLUMN booking.b2b_desk_bookings.override_reason IS
-    'pii:free_text; also conf:commercial (bk-047: why the price was overridden; staff text, never traveller data).';
+    'pii:free_text; also conf:commercial (bk-047: why the price was overridden; staff text, never traveller data). Erasure: set to ''[redacted]'' by a reviewed DB Migrate run-script as bk_owner (the guard allows that move only).';
 
 CREATE OR REPLACE FUNCTION booking.b2b_desk_bookings_guard() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path = pg_catalog
 AS $$
+DECLARE
+    unredacted booking.b2b_desk_bookings;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW.status NOT IN ('awaiting_approval', 'booked') THEN
             RAISE EXCEPTION 'a staff booking starts awaiting_approval or booked, not %', NEW.status
                 USING ERRCODE = 'check_violation';
         END IF;
+        RETURN NEW;
+    END IF;
+    -- DM-6.7 erasure: the one move allowed on any row, final or not: override_reason set to the fixed marker
+    -- '[redacted]', every other column unchanged (run as bk_owner by a reviewed DB Migrate run-script).
+    unredacted := NEW;
+    unredacted.override_reason := OLD.override_reason;
+    IF NEW.override_reason = '[redacted]' AND OLD.override_reason IS NOT NULL
+       AND OLD.override_reason IS DISTINCT FROM NEW.override_reason AND unredacted IS NOT DISTINCT FROM OLD THEN
         RETURN NEW;
     END IF;
     IF (NEW.partner_id, NEW.agency_ref, NEW.quote_id, NEW.hold_id, NEW.currency, NEW.quoted_total, NEW.floor_total,
@@ -187,7 +200,7 @@ BEGIN
     RETURN NEW;
 END $$;
 COMMENT ON FUNCTION booking.b2b_desk_bookings_guard() IS
-    'bk-047 (AA-1075): a staff booking starts awaiting_approval or booked; its facts never change; only an awaiting row moves (booked, rejected or lapsed), once.';
+    'bk-047 (AA-1075): a staff booking starts awaiting_approval or booked; its facts never change; only an awaiting row moves (booked, rejected or lapsed), once. Erasure (DM-6.7): override_reason may be set to ''[redacted]'' with nothing else changed.';
 
 DROP TRIGGER IF EXISTS b2b_desk_bookings_guard ON booking.b2b_desk_bookings;
 CREATE TRIGGER b2b_desk_bookings_guard
@@ -311,13 +324,23 @@ COMMENT ON COLUMN booking.b2b_cancellations.entered_via IS
 COMMENT ON COLUMN booking.b2b_cancellations.fee_override_pct IS
     'conf:commercial; bk-047 (AA-1075, bk-14): a lower fee % staff asked for (0 = waive); fee_amount changes only once a second staff member approves it.';
 COMMENT ON COLUMN booking.b2b_cancellations.waive_reason IS
-    'pii:free_text; bk-047 (AA-1075, bk-14): why the fee is lowered or waived (staff text, never traveller data by rule).';
+    'pii:free_text; bk-047 (AA-1075, bk-14): why the fee is lowered or waived (staff text, never traveller data by rule). Erasure: set to ''[redacted]'' by a reviewed DB Migrate run-script as bk_owner (the guard allows that move only).';
 
 CREATE OR REPLACE FUNCTION booking.b2b_cancellations_guard() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path = pg_catalog
 AS $$
+DECLARE
+    unredacted booking.b2b_cancellations;
 BEGIN
+    -- DM-6.7 erasure: the one move allowed on any row, approved or not: waive_reason set to the fixed marker
+    -- '[redacted]', every other column unchanged (run as bk_owner by a reviewed DB Migrate run-script).
+    unredacted := NEW;
+    unredacted.waive_reason := OLD.waive_reason;
+    IF NEW.waive_reason = '[redacted]' AND OLD.waive_reason IS NOT NULL
+       AND OLD.waive_reason IS DISTINCT FROM NEW.waive_reason AND unredacted IS NOT DISTINCT FROM OLD THEN
+        RETURN NEW;
+    END IF;
     IF (NEW.hold_id, NEW.trip_case_id, NEW.partner_id, NEW.m2m_client_id, NEW.policy_id, NEW.reason_code,
         NEW.idempotency_key, NEW.departure_date, NEW.days_before_departure, NEW.fee_pct, NEW.currency,
         NEW.total_b2b_price, NEW.cancelled_at, NEW.entered_via, NEW.entered_by)
@@ -340,7 +363,7 @@ BEGIN
     RETURN NEW;
 END $$;
 COMMENT ON FUNCTION booking.b2b_cancellations_guard() IS
-    'bk-047 (AA-1075): a cancellation''s facts never change; the fee and refundable amounts change once, to a lower fee, in the update that approves the override; an approved override is final.';
+    'bk-047 (AA-1075): a cancellation''s facts never change; the fee and refundable amounts change once, to a lower fee, in the update that approves the override; an approved override is final. Erasure (DM-6.7): waive_reason may be set to ''[redacted]'' with nothing else changed.';
 
 DROP TRIGGER IF EXISTS b2b_cancellations_guard ON booking.b2b_cancellations;
 CREATE TRIGGER b2b_cancellations_guard

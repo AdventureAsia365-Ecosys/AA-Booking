@@ -452,3 +452,97 @@ async def test_cis_app_reads_none_of_the_new_tables(migrated_admin_dsn: str) -> 
             )
     finally:
         await admin.close()
+
+
+async def test_erasure_redacts_the_staff_reasons_and_nothing_else(migrated_admin_dsn: str) -> None:
+    """DM-6.7: override_reason / waive_reason are pii:free_text; on erasure they are set to '[redacted]' (bk_owner,
+    a reviewed DB Migrate run-script), even on a final row. Any other change in the same update is still refused."""
+    admin = await asyncpg.connect(migrated_admin_dsn)
+    await apply_migrations(admin, only=[47])
+    tx = admin.transaction()
+    await tx.start()
+    try:
+        for staff_id, role in ((MAKER, "sales"), (CHECKER, "admin")):
+            await admin.execute(
+                "INSERT INTO booking.staff_users (cis_user_id, role, active, name) VALUES ($1, $2, true, $1)"
+                " ON CONFLICT (cis_user_id) DO NOTHING",
+                staff_id,
+                role,
+            )
+        # A booked staff booking (final) with an override reason.
+        partner, tenant = await _partner(admin)
+        quote = await _quote(admin, partner)
+        hold = await _hold(admin, partner, quote)
+        desk = await admin.fetchval(
+            "INSERT INTO booking.b2b_desk_bookings (partner_id, agency_ref, quote_id, hold_id, status, currency,"
+            " quoted_total, floor_total, override_total, override_reason, idempotency_key, entered_by)"
+            " VALUES ($1::uuid, 'AG-3307', $2::uuid, $3::uuid, 'awaiting_approval', 'USD', 1000, 900, 850,"
+            " 'Matched an offer from a rival desk', $4, $5) RETURNING id::text",
+            partner,
+            quote,
+            hold,
+            f"desk-{uuid.uuid4().hex[:10]}",
+            MAKER,
+        )
+        case = await _case(admin, tenant, entered_via="staff", entered_by=MAKER)
+        await admin.execute(
+            "UPDATE booking.b2b_holds SET status = 'confirmed', confirmed_at = now(), trip_case_id = $2::uuid"
+            " WHERE id = $1::uuid",
+            hold,
+            case,
+        )
+        await admin.execute(
+            "UPDATE booking.b2b_desk_bookings SET status = 'booked', trip_case_id = $2::uuid, decided_by = $3,"
+            " decided_at = now() WHERE id = $1::uuid",
+            desk,
+            case,
+            CHECKER,
+        )
+        for bad in ("override_reason = 'Something else'", "override_reason = '[redacted]', override_total = 1"):
+            with pytest.raises(asyncpg.CheckViolationError):
+                async with admin.transaction():
+                    await admin.execute(f"UPDATE booking.b2b_desk_bookings SET {bad} WHERE id = $1::uuid", desk)  # noqa: S608
+        await admin.execute(
+            "UPDATE booking.b2b_desk_bookings SET override_reason = '[redacted]' WHERE id = $1::uuid", desk
+        )
+        row = await admin.fetchrow(
+            "SELECT override_reason, override_total, status FROM booking.b2b_desk_bookings WHERE id = $1::uuid", desk
+        )
+        assert (row["override_reason"], row["override_total"], row["status"]) == (
+            "[redacted]",
+            Decimal("850"),
+            "booked",
+        )
+
+        # An approved (final) fee override with a waive reason.
+        cancel, _, _ = await _cancelled_booking(admin)
+        await admin.execute(
+            "UPDATE booking.b2b_cancellations SET fee_override_pct = 10, waive_reason = 'Rebooked by a colleague',"
+            " override_by = $2, override_at = now() WHERE id = $1::uuid",
+            cancel,
+            MAKER,
+        )
+        await admin.execute(
+            "UPDATE booking.b2b_cancellations SET override_approved_by = $2, override_approved_at = now(),"
+            " fee_amount = 100, refundable_amount = 900 WHERE id = $1::uuid",
+            cancel,
+            CHECKER,
+        )
+        for bad in ("waive_reason = 'Something else'", "waive_reason = '[redacted]', fee_amount = 50"):
+            with pytest.raises(asyncpg.CheckViolationError):
+                async with admin.transaction():
+                    await admin.execute(f"UPDATE booking.b2b_cancellations SET {bad} WHERE id = $1::uuid", cancel)  # noqa: S608
+        await admin.execute(
+            "UPDATE booking.b2b_cancellations SET waive_reason = '[redacted]' WHERE id = $1::uuid", cancel
+        )
+        row = await admin.fetchrow(
+            "SELECT waive_reason, fee_amount FROM booking.b2b_cancellations WHERE id = $1::uuid", cancel
+        )
+        assert (row["waive_reason"], row["fee_amount"]) == ("[redacted]", Decimal("100.00"))
+        # The app role gets no new grant for it: override_reason stays out of its column grants.
+        assert not await admin.fetchval(
+            "SELECT has_column_privilege('booking', 'booking.b2b_desk_bookings', 'override_reason', 'UPDATE') AS ok"
+        )
+    finally:
+        await tx.rollback()
+        await admin.close()
