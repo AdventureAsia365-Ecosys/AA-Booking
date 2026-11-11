@@ -10996,7 +10996,7 @@
     },
     "/booking/b2b-desk/agencies": {
       "get": {
-        "description": "The active agencies a booking can be entered for (the picker of \"New agency booking\").",
+        "description": "The active agencies a booking can be entered for (the picker of \"New agency booking\" and of a tour's terms).",
         "operationId": "get_agencies_booking_b2b_desk_agencies_get",
         "responses": {
           "200": {

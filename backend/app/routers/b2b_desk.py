@@ -35,10 +35,10 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth.staff import Staff, get_pool, require
+from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import amendments, confirmation, departure_watch, desk, desk_bookings, manifest, quotes, vouchers
 from app.b2b.components import LineAsk, RoomAsk
 from app.errors import NotFound
@@ -213,9 +213,17 @@ FROM booking.b2b_partners WHERE status = 'active' ORDER BY agency_name
 """
 
 
+async def _agency_picker(staff: Annotated[Staff, Depends(current_staff)]) -> Staff:
+    """Who picks an agency: staff entering a booking (``b2b_desk.book``) or setting a tour's agency terms
+    (``billing_config.write``, finance)."""
+    if not (staff.can("b2b_desk.book") or staff.can("billing_config.write")):
+        raise HTTPException(status_code=403, detail="forbidden")
+    return staff
+
+
 @router.get("/agencies")
-async def get_agencies(_: CanBook, pool: Pool) -> dict[str, Any]:
-    """The active agencies a booking can be entered for (the picker of "New agency booking")."""
+async def get_agencies(_: Annotated[Staff, Depends(_agency_picker)], pool: Pool) -> dict[str, Any]:
+    """The active agencies a booking can be entered for (the picker of "New agency booking" and of a tour's terms)."""
     async with pool.acquire() as conn:
         return {"items": [dict(r) for r in await conn.fetch(AGENCIES_SQL)]}
 
