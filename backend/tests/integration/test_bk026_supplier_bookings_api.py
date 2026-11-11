@@ -269,6 +269,9 @@ async def test_case_cancel_cascade_and_reopen(client: Client, admin: asyncpg.Con
     room = next(b for b in made["items"] if b["item_position"] == 1)
     service = next(b for b in made["items"] if b["item_position"] == 2)
     await _ok(await c.post(f"/supplier-bookings/{room['id']}/request", headers=sales))
+    # AA-1075 (bk-14): a confirmed booking stays to cancel with the supplier; pending and requested ones are cancelled.
+    await _ok(await c.post(f"/supplier-bookings/{room['id']}/confirm", json={"confirmation_ref": "HTL-77"},
+                           headers=sales))  # fmt: skip
     body = {"to_status": "cancelled", "reason": "Customer cancelled"}
     await _ok(await c.post(f"/trip-cases/{sold['code']}/status", json=body, headers=sales))
     rows = {
@@ -277,7 +280,7 @@ async def test_case_cancel_cascade_and_reopen(client: Client, admin: asyncpg.Con
             "SELECT id::text AS id, status FROM booking.supplier_bookings WHERE trip_case_id = $1::uuid", sold["id"]
         )
     }
-    assert rows == {room["id"]: "requested", service["id"]: "cancelled"}
+    assert rows == {room["id"]: "confirmed", service["id"]: "cancelled"}
     note = await admin.fetchrow(
         "SELECT title, data FROM booking.notifications WHERE type = 'supplier_booking.cancel_with_supplier'"
         " AND entity_id = $1::uuid",

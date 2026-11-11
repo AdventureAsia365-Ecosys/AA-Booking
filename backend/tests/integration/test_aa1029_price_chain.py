@@ -404,6 +404,8 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
                     "net_amount",
                     "net_currency",
                     "computed",
+                    # AA-1075 (bk-047): the per-type values are sent back as read, like the editor does.
+                    *trip_plan_prices.PAX_TYPE_FIELDS,
                 )
             }
             | {"amount": Decimal("190.00") if (r["pax_min"], r["valid_from"]) == (2, TODAY) else None}
@@ -411,6 +413,8 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
         ]
         for item in items:
             item["net_amount"] = Decimal(item["net_amount"])
+            for key in trip_plan_prices.PAX_TYPE_FIELDS:
+                item[key] = Decimal(item[key]) if item[key] is not None else None
         await trip_plan_prices.replace_prices(conn, _staff(MAKER), TOUR, items)
     before = datetime.now(UTC)
     await cost_sheet.run(pool)

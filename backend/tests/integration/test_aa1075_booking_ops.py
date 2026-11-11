@@ -24,7 +24,7 @@ import pytest
 import pytest_asyncio
 
 from app.db import Database
-from tests.integration.conftest import apply_migrations
+from tests.integration.conftest import apply_migrations, as_booking_owner
 from tests.integration.test_bk020_b2b import (  # noqa: F401 — fixtures admin, client, plan are used by name
     ADMIN,
     CHECKER,
@@ -54,15 +54,26 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 Client = tuple[httpx.AsyncClient, LocalCis, LocalM2M, Database]
 
 
+NEW_EVENTS = ["booking.created_by_aa", "booking.line_reduced", "booking.fee_changed"]
+
+
 @pytest_asyncio.fixture
 async def bk047(migrated_admin_dsn: str) -> AsyncIterator[None]:
-    """Tests of bk-022 / bk-045 / bk-046 re-run those files (older outbox trigger, CHECKs, views): put bk-047 back."""
+    """Tests of bk-022 / bk-045 / bk-046 re-run those files (older outbox trigger, CHECKs, views): put bk-047 back
+    first; afterwards delete the outbox rows of the bk-047 event types, so a later re-run of an older file's CHECK
+    finds none (the flow commits)."""
     conn = await asyncpg.connect(migrated_admin_dsn)
     try:
         await apply_migrations(conn, only=[47])
     finally:
         await conn.close()
     yield
+    conn = await asyncpg.connect(migrated_admin_dsn)
+    try:
+        async with as_booking_owner(conn):
+            await conn.execute("DELETE FROM booking.outbox WHERE event_type = ANY($1::text[])", NEW_EVENTS)
+    finally:
+        await conn.close()
 
 
 def _entry(partner: str, line: dict, **extra: object) -> dict:
