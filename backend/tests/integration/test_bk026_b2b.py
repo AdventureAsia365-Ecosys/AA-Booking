@@ -209,4 +209,6 @@ async def test_confirm_racing_the_agency_cancel_never_deadlocks(
     )
     assert line == "cancelled"
     final = await admin.fetchval("SELECT status FROM booking.supplier_bookings WHERE id = $1::uuid", sb["id"])
-    assert final == ("confirmed" if confirm.status_code == 200 else "requested")
+    # AA-1075 (bk-047): a case cancel withdraws a requested supplier booking (cancelled) and keeps a confirmed one for
+    # staff to cancel with the supplier.
+    assert final == ("confirmed" if confirm.status_code == 200 else "cancelled")
