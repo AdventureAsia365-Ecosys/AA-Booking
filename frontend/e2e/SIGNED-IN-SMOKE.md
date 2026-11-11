@@ -1,8 +1,22 @@
-# Signed-in smoke of the staff admin (AA-910) — helper note, no CI job yet
+# Signed-in smoke of the staff admin (AA-910 design; built for AA-1073 / AA-1074) — agent-run, no CI job yet
 
-Status: **design note**. Nothing in this folder signs in yet, and no workflow runs a signed-in check. The
-`layout-mock` project (`playwright.config.ts`) and the signed-out `smoke-public` project (AA-993 V5, `/login` on
-the production host after each production deploy) are the only Playwright projects until the job below is added.
+Status: **built, agent-run** (AA-1073 / AA-1074, S277). The specs live in `signed-in/`: the setup project
+`signed-in-setup` (`signed-in/auth.setup.ts`) asks for one code and saves the session to `e2e/results/.auth/`
+(gitignored), and the project `signed-in` walks the staff pages read-only. No workflow runs it yet (last section).
+
+```
+cd frontend
+AWS_PROFILE=aa365-admin AWS_REGION=us-west-1 npm run test:signed-in
+# rerun without a new code while the saved session is valid:
+BOOKING_E2E_REUSE_STATE=1 AWS_PROFILE=aa365-admin AWS_REGION=us-west-1 npm run test:signed-in
+```
+
+What it checks: (a) the shell and `GET /api/booking/staff/me` (role `admin`, not a preview session); (b) Costs & profit,
+its three tabs (rows or the kit empty state, never the load error) and a trip case's cost in USD; (c) a trip plan's
+Departures tab, the departure drawer (rules, allotments) and the B2B desk "Departures at risk" tile; (d) the agency
+booking pages (B2B desk "Agency bookings" tab, departure manifest), skipped with the reason while not deployed. Every
+test fails on an uncaught page error, a same-origin 5xx or any non-GET request. Screenshots at 1440 and 390, light and
+dark, land in `e2e/results/signed-in/` (`BOOKING_E2E_SHOTS_DIR` to change), one JSON per shot in `report/`.
 
 ## The account
 
@@ -38,9 +52,9 @@ the production host after each production deploy) are the only Playwright projec
    `preview_viewer` false; then visit the pages under test (read-only: the backend refuses this user's writes with
    403 `e2e_read_only`).
 
-## Helpers to copy (do not import across repos)
+## Helpers (copied, not imported across repos)
 
-AA-CIS-App already solved steps 2–4; copy, do not re-invent:
+AA-CIS-App solved steps 2–4; `signed-in/helpers/` holds copies (the header of each names the CIS commit):
 
 - `tests/e2e/helpers/mailbox.ts` — S3 list/get through the AWS CLI (`execFile`, no npm dependency), MIME decode,
   recipient check, `waitForSignInCode({ since, baseline, recipient })` with a hard 90 s cap. Pass
@@ -48,13 +62,14 @@ AA-CIS-App already solved steps 2–4; copy, do not re-invent:
 - `tests/e2e/helpers/cognitoSignIn.ts` — managed-login steps (`reachCodeStep`, `signInByEmailCode`). Make the
   address a parameter instead of the CIS constant.
 
-Place them under `frontend/e2e/signed-in/helpers/`, add a Playwright project `signed-in` with
-`testMatch: /signed-in\/.*\.spec\.ts$/`, `baseURL` from `BOOKING_E2E_BASE_URL`, `workers: 1`, `retries: 1`, and a
-`storageState` setup project so the code is requested once per run.
+The project `signed-in` has `testMatch: /signed-in\/.*\.spec\.ts$/`, `baseURL` from `BOOKING_E2E_BASE_URL` (default the
+production host; set by the npm script, which also keeps the local server off), `workers: 1`, `retries: 1`, and depends
+on the `storageState` setup project, so the code is requested once per run (the setup has `retries: 0`).
 
 Rules (lessons log, Frontend): every wait has its own cap; never `networkidle`; fill-until-kept on inputs that
 hydrate late. The sign-in code is a live credential: never log it, never screenshot the managed-login page after it
-is typed, no trace on that step (`trace: 'off'` for the setup project).
+is typed, no trace on that step. Both projects run with `trace: 'off'` and `video: 'off'` (a trace records request
+headers and cookies, which carry the session).
 
 ## Running it as an agent (local, no CI)
 

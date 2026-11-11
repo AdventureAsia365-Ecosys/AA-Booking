@@ -29,7 +29,18 @@
 //     as layout-mock (staff pages included); with it, the public pages of a deployed host. KIT_GALLERY=1 on the local
 //     server serves the gated kit gallery route (the per-PR run and its planted-overflow self-test).
 // Run:   npm run build && KIT_GALLERY=1 VISUAL_GALLERY=1 npx playwright test --project=visual-1440 --project=visual-390
+//
+//   • "signed-in" (AA-1073 / AA-1074, design e2e/SIGNED-IN-SMOKE.md) — e2e/signed-in/*.spec.ts: the DEPLOYED staff admin
+//     signed in as the read-only E2E staff user (e2e-booking@…, booking-admin; the backend answers 403 e2e_read_only to
+//     every write): shell + staff/me, Costs & profit, a trip plan's Departures tab and drawer, the B2B desk, and the
+//     agency booking operations pages when deployed. Screenshots 1440 and 390, light and dark. Its setup project
+//     "signed-in-setup" (e2e/signed-in/auth.setup.ts) asks for ONE email code, reads it from the SES test mailbox with
+//     the runner's AWS credentials, and saves the session to e2e/results/.auth/ (gitignored). Agent-run, no CI job yet.
+//     No local server (BOOKING_E2E_BASE_URL is set by the npm script; default the production host).
+// Run:   AWS_PROFILE=aa365-admin AWS_REGION=us-west-1 npm run test:signed-in   (BOOKING_E2E_REUSE_STATE=1 reuses a live session)
+// Shots: BOOKING_E2E_SHOTS_DIR=<dir> (default e2e/results/signed-in), one JSON per shot in report/.
 import { defineConfig, devices } from "@playwright/test";
+import { DEFAULT_BASE_URL, STATE_FILE } from "./e2e/signed-in/helpers/env";
 
 const PORT = Number(process.env.LAYOUT_PORT || 3199);
 const STUB_PORT = Number(process.env.LAYOUT_STUB_PORT || 55481);
@@ -37,6 +48,17 @@ const STUB_PORT = Number(process.env.LAYOUT_STUB_PORT || 55481);
 const SMOKE_BASE_URL = process.env.SMOKE_BASE_URL?.replace(/\/+$/, "");
 // AA-1008: set → the visual projects capture this deployed host (public pages) and no local server is started.
 const VISUAL_BASE_URL = process.env.VISUAL_BASE_URL?.replace(/\/+$/, "");
+// AA-1073 / AA-1074: set (by `npm run test:signed-in`) → the signed-in projects run against this deployed host and no
+// local server is started.
+const SIGNED_IN_BASE_URL = process.env.BOOKING_E2E_BASE_URL?.replace(/\/+$/, "");
+const SIGNED_IN_USE = {
+  ...devices["Desktop Chrome"],
+  baseURL: SIGNED_IN_BASE_URL || DEFAULT_BASE_URL,
+  reducedMotion: "reduce" as const,
+  // No trace or video: a trace records request headers and cookies (a live session), and the setup types a sign-in code.
+  trace: "off" as const,
+  video: "off" as const,
+};
 const VISUAL_USE = {
   ...devices["Desktop Chrome"],
   reducedMotion: "reduce" as const,
@@ -95,8 +117,24 @@ export default defineConfig({
       timeout: 120_000,
       use: { ...VISUAL_USE, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
     },
+    {
+      name: "signed-in-setup",
+      testMatch: /signed-in\/auth\.setup\.ts$/,
+      outputDir: "./e2e/results/test-output",
+      retries: 0, // a retry would ask Cognito for a second code
+      use: { ...SIGNED_IN_USE, screenshot: "off" },
+    },
+    {
+      name: "signed-in",
+      testMatch: /signed-in\/.*\.spec\.ts$/,
+      dependencies: ["signed-in-setup"],
+      outputDir: "./e2e/results/test-output",
+      timeout: 240_000, // four re-renders (1440 / 390, light / dark) of live pages per test
+      retries: 1, // the live host: a network blip or a deployment rolling mid-run
+      use: { ...SIGNED_IN_USE, storageState: STATE_FILE, screenshot: "only-on-failure", viewport: { width: 1440, height: 900 } },
+    },
   ],
-  webServer: SMOKE_BASE_URL || VISUAL_BASE_URL ? undefined : [
+  webServer: SMOKE_BASE_URL || VISUAL_BASE_URL || SIGNED_IN_BASE_URL ? undefined : [
     {
       command: `node e2e/layout/stub-api.mjs ${STUB_PORT}`,
       url: `http://127.0.0.1:${STUB_PORT}/health`,

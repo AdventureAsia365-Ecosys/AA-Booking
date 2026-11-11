@@ -1875,7 +1875,9 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   every `next.config.ts` header with its value. Signed out, no secret; screenshot artifact `booking-admin-smoke-public`.
   Job `result` is red unless config, deploy, verify and smoke succeeded (verify and smoke may skip only when the
   service runs no task). Job `visual-production` then runs `visual.yml` (public pages, report-only).
-- Signed-in smoke (AA-910, design note only, no job yet): `frontend/e2e/SIGNED-IN-SMOKE.md`. E2E staff user
+- Signed-in smoke (AA-910 design, built for AA-1073 / AA-1074; agent-run, no CI job yet):
+  `frontend/e2e/SIGNED-IN-SMOKE.md`, specs `frontend/e2e/signed-in/` (Playwright projects `signed-in-setup` +
+  `signed-in`, `npm run test:signed-in` with `AWS_PROFILE=aa365-admin`). E2E staff user
   `e2e-booking@e2e-mail.lumiguides.it.com`, group `booking-admin` only, email code read from the SES test mailbox
   (root ADR 0006a A10a); no password, no secret. Its session is read-only on every client: non-safe methods are
   403 `e2e_read_only` before any DB access (`app/auth/staff.py` `E2E_TEST_STAFF_EMAIL`), reads keep admin.
