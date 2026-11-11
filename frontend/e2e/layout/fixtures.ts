@@ -51,6 +51,7 @@ import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow,
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
+import type { Allotment, AllotmentList, Departure, DepartureList } from "../../lib/api/departures";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
 import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
@@ -962,7 +963,7 @@ function onRequestLine(i: number): OnRequestLine {
     departure: i % 3 ? { id: uuid("b", i), start_date: "2027-01-10" } : null,
   };
 }
-const DESK_SUMMARY: DeskSummary = { on_request: { open: 23, overdue: 4, due_soon: 6 }, open_incidents: 2, due_soon_hours: 24 };
+const DESK_SUMMARY: DeskSummary = { on_request: { open: 23, overdue: 4, due_soon: 6 }, open_incidents: 2, departures_at_risk: 3, due_soon_hours: 24 };
 function deskDepartures(): DeskDepartures {
   return {
     from: "2026-10-24",
@@ -980,11 +981,58 @@ function deskDepartures(): DeskDepartures {
       status: (["scheduled", "guaranteed", "cancelled"] as const)[i % 3],
       auto_confirm: i % 2 === 0,
       partners: 5,
+      // AA-1073: a minimum on every other departure, one at risk in four, allotments on some.
+      min_to_operate: i % 2 ? 16 : 0,
+      decision_date: "2026-12-20",
+      at_risk: i % 3 === 0 && i % 2 === 1, // scheduled, with a minimum
+      allotted: i % 3 === 0 ? 8 : 0,
+      allotment_unused: i % 3 === 0 ? 5 : 0,
       open_incident:
         i % 4 === 0
           ? { id: `inc-${i}`, departure_id: uuid("b", i), incident_code: "political", flagged_at: NOW, flagged_by: person("u-002", 1), cleared_at: null, cleared_by: null }
           : null,
     })),
+  };
+}
+
+// ── AA-1073: the Departures tab of a trip plan and the allotments of one departure ────────────────────────────────
+const AGENCIES_1073 = ["Southeast Asia Discovery Travel and Incentives Agency Ltd", "Lanternfield Travel", "Copperbay Trips"];
+
+function planDeparture(i: number): Departure {
+  const day = `2027-0${1 + (i % 6)}-${String(10 + (i % 18)).padStart(2, "0")}`;
+  return {
+    id: uuid("b", i), trip_plan_id: uuid("6", 2), start_date: day, capacity: 24, held: 3, sold: 9 + (i % 5),
+    available: 4, allotted: i % 3 === 0 ? 8 : 0, allotment_unused: i % 3 === 0 ? 5 : 0,
+    status: (["scheduled", "guaranteed", "cancelled", "scheduled"] as const)[i % 4], auto_confirm: i % 2 === 0,
+    min_to_operate: i % 2 ? 16 : 0, seats_to_guarantee: i % 2 ? 4 : null, sales_cutoff_days: 7, decision_days_before: 21,
+    sales_close_date: day, decision_date: "2026-12-20", at_risk_at: i % 4 === 3 ? NOW : null, at_risk: i % 4 === 3,
+    created_at: EARLIER, updated_at: NOW,
+  };  // prettier-ignore
+}
+
+function planDepartures(sourceId: string): DepartureList {
+  return { trip_plan_id: uuid("6", 2), source_id: sourceId, items: range(12).map(planDeparture) };
+}
+
+function allotment(i: number, departureId: string): Allotment {
+  const state = (["in_force", "pending", "released", "ended"] as const)[i % 4];
+  return {
+    id: `ab000000-0000-4000-8000-${pad(i, 12)}`, departure_id: departureId,
+    partner: { id: uuid("9", i), agency_name: AGENCIES_1073[i % 3]! }, seats: 4 + i, release_days_before: 14,
+    release_date: "2026-12-27", state, replaces_id: null, created_by: person("u-002", 1), created_at: EARLIER,
+    approved_by: state === "pending" ? null : person("u-001", 0), approved_at: state === "pending" ? null : NOW,
+    released_at: state === "released" ? NOW : null, ended_by: state === "ended" ? person("u-001", 0) : null,
+    ended_at: state === "ended" ? NOW : null, end_reason: state === "ended" ? "withdrawn" : null,
+    used: state === "in_force" ? 2 : null, unused: state === "in_force" ? 2 + i : null,
+  };  // prettier-ignore
+}
+
+function departureAllotments(departureId: string): AllotmentList {
+  const departure = { ...planDeparture(0), id: departureId };
+  return {
+    departure,
+    items: range(4).map((i) => allotment(i, departureId)),
+    partner_options: AGENCIES_1073.map((name, i) => ({ id: uuid("9", i), agency_name: name })),
   };
 }
 
@@ -1652,6 +1700,8 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "prices") return ok({ ...PRICE_MATRIX, source_id: at(2) });
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "departures" && seg.length === 4) return ok(planDepartures(at(2)));
+  if (at(0) === "catalog" && at(1) === "departures" && at(3) === "allotments") return ok(departureAllotments(at(2)));
   if (at(0) === "catalog" && at(1) === "trip-plans" && seg.length === 3) return ok(tripPlanDetail(at(2)));
   if (p === "catalog/trip-plans") {
     if (query.get("orphaned") === "true") return ok(page(range(9).map(orphanedPlan), 9));

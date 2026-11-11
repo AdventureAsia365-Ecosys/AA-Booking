@@ -57,6 +57,14 @@ const PAGES: PageCase[] = [
   { name: "proposals", path: "/proposals" },
   { name: "trip-plans", path: "/catalog/trip-plans" },
   { name: "trip-plans-orphaned", path: "/catalog/trip-plans?show=orphaned" },
+  // AA-1073: the Departures tab of a trip plan and one departure's drawer (rules + agency allotments).
+  { name: "trip-plan-departures", path: "/catalog/trip-plans/tour-00002?tab=departures" },
+  {
+    name: "trip-plan-departure-drawer",
+    path: "/catalog/trip-plans/tour-00002?tab=departures&departure=bbbb-0000-4000-8000-000000000000",
+    ready: '[data-testid="allotments"]',
+    noTable: true,
+  },
   { name: "destinations", path: "/catalog/destinations" },
   { name: "destination-drawer", path: "/catalog/destinations?place=dddd-0000-4000-8000-000000000005", ready: '[role="dialog"]', noTable: true },
   { name: "countries", path: "/catalog/countries", ready: "text=Area: Indochina", noTable: true },
