@@ -2,6 +2,8 @@
 // AA-1074 signed-in smoke (b): Operations → Costs & profit on Dev. The three tabs (Profit, Departure costs, Purchase
 // orders) render their table with live rows or the kit empty state (never the load error), and a trip case with
 // supplier bookings shows its costs in USD on the Suppliers tab (the CostVsBilled panel, `case-costs-usd`).
+// S277 UAT fixes: the Tour column of Departure costs and Profit → Per departure names the tour (never the raw catalog
+// id), and the case panel prints the USD totals once (the per-currency line keeps only other currencies).
 // Read-only: no button that writes is clicked (the E2E user gets 403 e2e_read_only on writes anyway).
 import { expect, test, type Page } from "@playwright/test";
 import { assertClean, bffGet, capture, firstTableItem, pageSettled, tableSettled, watch } from "./helpers/page";
@@ -10,6 +12,15 @@ type Page_<T> = { items: T[]; total: number };
 type CaseProfit = { code: string; planned_cost_usd: string; actual_cost_usd: string; cancelled: boolean };
 type CaseListItem = { code: string };
 type CaseCosts = { lines: unknown[]; usd?: { cost: string } };
+
+// A raw catalog key (a UUID) in a Tour cell: the tour title is missing from the API or the page (S277 UAT finding 1).
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/** The rows of the settled table in <main> name their tour, not the raw catalog key. */
+async function expectNoRawTourKey(page: Page, where: string): Promise<void> {
+  const rows = await page.locator("main [data-kit-row]").allInnerTexts();
+  expect(rows.join("\n"), `${where}: a Tour cell shows the raw catalog id instead of the tour name`).not.toMatch(UUID);
+}
 
 const TABS = [
   { key: "profit", label: "Profit", query: "?period=all" },
@@ -48,12 +59,19 @@ test("Costs & profit: three tabs render with data or the empty state", async ({ 
     const main = page.locator("main").first();
     const state = await tableSettled(main);
     results.push(`${t.label}: ${state}`);
+    if (state === "rows" && t.key === "departures") await expectNoRawTourKey(page, t.label);
     await page.goto(`/finance${t.query}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await capture(page, `finance-${t.key}`, async () => {
       await pageSettled(page);
       await tableSettled(page.locator("main").first());
     }, () => firstTableItem(page));
   }
+  // Profit, per departure: the same Tour column (GET /finance/profit/departures carries tour_title).
+  await page.goto("/finance?view=departures&period=all", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await pageSettled(page);
+  const perDeparture = await tableSettled(page.locator("main").first());
+  results.push(`Profit per departure: ${perDeparture}`);
+  if (perDeparture === "rows") await expectNoRawTourKey(page, "Profit per departure");
   test.info().annotations.push({ type: "tables", description: results.join("; ") });
   assertClean(w, "finance");
 });
@@ -70,6 +88,9 @@ test("trip case Suppliers tab shows the costs in USD", async ({ page, baseURL })
   await expect(usd, "the cost panel shows the USD line").toBeVisible({ timeout: 30_000 });
   await expect(usd).toContainText("USD");
   await expect(usd).toContainText(/Best cost/);
+  // S277 UAT finding 2: next to the USD summary the per-currency line keeps only other currencies, so no second
+  // "USD: net … · billed … · variance …" line repeats it.
+  expect(await page.locator("main").first().innerText(), "the USD totals are shown once").not.toMatch(/USD:\s*net\s/);
   await capture(page, "case-costs-usd", async () => {
     await pageSettled(page);
     await expect(page.getByTestId("case-costs-usd")).toBeVisible({ timeout: 30_000 });
