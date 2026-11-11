@@ -29,6 +29,12 @@ const LINE_LABEL: Record<ManifestBooking["line_status"], string> = {
   cancelled: "Cancelled",
 };
 
+const DEP_LABEL: Record<Manifest["departure"]["status"], string> = {
+  scheduled: "Scheduled",
+  guaranteed: "Guaranteed",
+  cancelled: "Cancelled",
+};
+
 function rooms(r: { occupancy: string; count: number }[]): string {
   return r.map((x) => `${x.count} x ${x.occupancy}`).join(", ") || "—";
 }
@@ -62,7 +68,7 @@ export function ManifestView({ departureId }: { departureId: string }) {
       }
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label="Departure" value={<DateText value={m.departure.start_date} />} hint={m.departure.status} hintTone="neutral" />
+        <KpiTile label="Departure" value={<DateText value={m.departure.start_date} />} hint={DEP_LABEL[m.departure.status]} hintTone="neutral" />
         <KpiTile
           label="Seats sold"
           value={`${m.totals.seats} / ${m.departure.capacity}`}

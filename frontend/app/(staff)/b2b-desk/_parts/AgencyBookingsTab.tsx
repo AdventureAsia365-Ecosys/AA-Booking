@@ -132,7 +132,7 @@ export function AgencyBookingsTab() {
       header: "Status",
       accessorFn: (r) => r.status,
       cell: ({ row }) => (
-        <span className="flex flex-col gap-1">
+        <span className="flex flex-col items-start gap-1">
           <Pill tone={STATUS_TONE[row.original.status]}>{ENTRY_STATUS_LABEL[row.original.status]}</Pill>
           <span className="text-xs text-muted">
             {row.original.entered_by.name ?? "Staff"} · <DateText value={row.original.entered_at} relative />
