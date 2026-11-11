@@ -70,6 +70,7 @@ EVENT_KEYS = {
     "incident_code",
     "decline_code",
     "new_start_time",
+    "fee",  # 1.8 (AA-1073 rest): the fee of departure.fee_charged, null otherwise
 }
 
 

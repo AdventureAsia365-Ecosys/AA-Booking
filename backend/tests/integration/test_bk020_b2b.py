@@ -84,6 +84,11 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.b2b_quote_lines")
         await conn.execute("DELETE FROM booking.b2b_quotes")
         await conn.execute("DELETE FROM booking.departure_incidents")  # AA-975 (bk-022), references departures
+        # AA-1073 rest (bk-048): ops staff, price adjustments and fees reference departures (fee lines first).
+        await conn.execute("DELETE FROM booking.departure_staff")
+        await conn.execute("DELETE FROM booking.departure_price_adjustments")
+        await conn.execute("DELETE FROM booking.agency_invoice_line WHERE source_fee_id IS NOT NULL")
+        await conn.execute("DELETE FROM booking.departure_fees")
         await conn.execute("DELETE FROM booking.departure_allotments")  # AA-1073 (bk-046), references both
         await conn.execute("DELETE FROM booking.departures")
         await conn.execute("DELETE FROM booking.b2b_partners")
@@ -301,6 +306,9 @@ async def test_departures_quote_hold_confirm(
         "seats_to_guarantee": None,
         "last_sale_date": (DAY1_DATE - timedelta(days=1)).isoformat(),
         "allotment": None,
+        # 1.8 (AA-1073 rest): no meeting point or time set.
+        "meeting_point": None,
+        "meeting_time": None,
     }
     products = await _ok(await c.get("/b2b/v1/products", headers=_m2m(m2m, scope="booking.b2b/read")))
     assert products["items"][0]["has_fixed_departures"] is True

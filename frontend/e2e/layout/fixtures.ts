@@ -52,6 +52,7 @@ import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/a
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { Allotment, AllotmentList, Departure, DepartureList } from "../../lib/api/departures";
+import type { BoardDeparture, BoardDetail, BoardPage } from "../../lib/api/departureBoard";
 import type { CountryDetail, CountryItem, CountryList, DestinationDetail, DestinationItem, DestinationPage } from "../../lib/api/geo";
 import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
@@ -608,6 +609,10 @@ const RULES: PolicyList<PricingRuleRow> = {
     card_fee_pct: "0.03",
     valid_from: "2026-10-01",
     note: "Peak season uplift agreed with sales for the Christmas, New Year and Tet period across all channels",
+    // AA-1073 rest (bk-17): the widest Margin cell (child + infant line and the early-booking line) on the b2b row,
+    // the early-booking line alone on the fixed departure row.
+    ...(channel === "b2b" ? { child_pct: "0.5000", infant_flat_usd: "120.00", early_days: 120, early_discount_pts: "0.0250" } : {}),
+    ...(channel === "fixed_departure" ? { early_days: 60, early_discount_pts: "0.0500" } : {}),
   })),
 };
 
@@ -1068,6 +1073,91 @@ function departureAllotments(departureId: string): AllotmentList {
     departure,
     items: range(4).map((i) => allotment(i, departureId)),
     partner_options: AGENCIES_1073.map((name, i) => ({ id: uuid("9", i), agency_name: name })),
+  };
+}
+
+// ── AA-1073 rest (bk-048): the departure board, its drawer (agencies, ops, fees, price) ──────────────────────────
+const BOARD_TOURS = [
+  "Grand Indochina Discovery: Hanoi, Ha Long Bay, Hoi An, Angkor and the Mekong Delta",
+  "Invented Lantern Valley Trek",
+  "Copper Coast Cycling Week",
+];
+
+function boardDeparture(i: number, month: string): BoardDeparture {
+  const day = `${month}-${String(1 + ((i * 3) % 28)).padStart(2, "0")}`;
+  const status = (["scheduled", "guaranteed", "cancelled", "scheduled"] as const)[i % 4];
+  return {
+    id: uuid("c", i), trip_plan_id: uuid("6", i % 3), source_id: `tour-${pad((i % 3) + 1, 5)}`,
+    tour_title: BOARD_TOURS[i % 3]!, country: ["Vietnam", "Laos", "Cambodia"][i % 3]!, start_date: day, status,
+    capacity: 24, held: 3, sold: status === "cancelled" ? 0 : 6 + (i % 9), allotted: i % 3 === 0 ? 8 : 0,
+    allotment_unused: i % 3 === 0 ? 5 : 0, free: status === "cancelled" ? 0 : 7, occupancy_pct: `${(37.5 + (i % 5) * 10).toFixed(1)}`,
+    min_to_operate: i % 2 ? 16 : 0, at_risk: i % 4 === 3, open_incident: i % 5 === 0 ? { id: `inc-${i}`, incident_code: "road" } : null,
+    agencies_count: 1 + (i % 4), auto_confirm: i % 2 === 0, meeting_point: i % 2 ? "Old Quarter lantern gate, Hang Bac street" : null,
+    meeting_time: i % 2 ? "07:30:00" : null,
+    price: {
+      hint: { amount: "1249.00", currency: "USD", basis: "per_person" },
+      adjustment: i % 3 === 1 ? { id: uuid("e", i), adjust_pct: "-0.1000", amount: null, currency: null } : null,
+      early_booking: i % 4 === 0 ? { days: 60, pts: "0.0300", until: "2026-12-01" } : null,
+    },
+  };  // prettier-ignore
+}
+
+function boardPage(query: URLSearchParams): BoardPage {
+  const month = (query.get("from") ?? "2026-10-01").slice(0, 7);
+  let items = range(16).map((i) => boardDeparture(i, month));
+  if (query.get("status")) items = items.filter((d) => d.status === query.get("status"));
+  if (query.get("at_risk") === "true") items = items.filter((d) => d.at_risk);
+  return {
+    items, total: items.length, limit: 500, offset: 0, from: `${month}-01`, to: `${month}-28`,
+    totals: { departures: items.length, capacity: 24 * items.length, held: 3 * items.length, sold: 140, free: 90, at_risk: 4, incidents: 4 },
+    countries: ["Cambodia", "Laos", "Vietnam"],
+    plans: BOARD_TOURS.map((title, i) => ({ source_id: `tour-${pad(i + 1, 5)}`, title })),
+  };  // prettier-ignore
+}
+
+function boardDetail(id: string): BoardDetail {
+  const departure = { ...boardDeparture(1, "2026-10"), id };
+  return {
+    departure,
+    agencies: AGENCIES_1073.map((agency_name, i) => ({
+      partner_id: uuid("9", i), agency_name, held: i, sold: 2 + i, cases: [{ id: uuid("1", i), code: `TC-${pad(4100 + i)}` }],
+      allotment: i === 0 ? { id: uuid("a", i), seats: 8, state: "in_force", release_date: "2026-12-27", used: 2, unused: 6 } : null,
+    })),  // prettier-ignore
+    ops: {
+      meeting_point: "Old Quarter lantern gate, Hang Bac street", meeting_time: "07:30:00", ops_note: "Coach two waits at gate B",
+      staff: [
+        { id: uuid("f", 0), role: "tour_leader", staff: person("u-002", 1), supplier: null, assigned_by: person("u-001", 0), assigned_at: EARLIER },
+        { id: uuid("f", 1), role: "guide", staff: null, supplier: { id: uuid("5", 1), code: "SUP-000041", name: "Ridgeway Guides Company" }, assigned_by: person("u-001", 0), assigned_at: EARLIER },
+      ],
+      staff_options: [person("u-001", 0), person("u-002", 1)],
+      supplier_options: [{ id: uuid("5", 1), code: "SUP-000041", name: "Ridgeway Guides Company" }],
+    },  // prettier-ignore
+    fees: [
+      {
+        id: uuid("d", 0), departure_id: id, start_date: departure.start_date, partner: { id: uuid("9", 0), agency_name: AGENCIES_1073[0]! },
+        reason: "min_shortfall", seats: 4, price_per_seat: "25.50", currency: "USD", amount: "102.00", note: null, status: "pending",
+        created_by: person("u-002", 1), created_at: EARLIER, decided_by: null, decided_at: null, billed: false, invoice_number: null,
+        can_decide: true,
+      },
+      {
+        id: uuid("d", 1), departure_id: id, start_date: departure.start_date, partner: { id: uuid("9", 1), agency_name: AGENCIES_1073[1]! },
+        reason: "allotment_unreleased", seats: 2, price_per_seat: "40.00", currency: "USD", amount: "80.00", note: "Two seats kept past the release date",
+        status: "approved", created_by: person("u-002", 1), created_at: EARLIER, decided_by: person("u-001", 0), decided_at: NOW, billed: true,
+        invoice_number: "AAT-2026-000012", can_decide: false,
+      },
+    ],  // prettier-ignore
+    fee_suggestions: [
+      { reason: "min_shortfall", partner_id: null, seats: 5 },
+      { reason: "allotment_unreleased", partner_id: uuid("9", 0), seats: 6 },
+    ],
+    price_adjustments: [
+      {
+        id: uuid("e", 1), departure_id: id, adjust_pct: "-0.1000", amount: null, currency: null, reason: "Low season push for the Hanoi group",
+        state: "in_force", replaces_id: null, created_by: person("u-002", 1), created_at: EARLIER, approved_by: person("u-001", 0),
+        approved_at: NOW, ended_by: null, ended_at: null, end_reason: null, can_approve: false,
+      },
+    ],  // prettier-ignore
+    partner_options: AGENCIES_1073.map((agency_name, i) => ({ id: uuid("9", i), agency_name })),
   };
 }
 
@@ -1699,6 +1789,9 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
     return ok({ ...page(range(ROWS).map(onRequestLine), 63), state } satisfies OnRequestPage);
   }
   if (p === "b2b-desk/departures") return ok(deskDepartures());
+  // AA-1073 rest (bk-048): the departure board and one departure's drawer.
+  if (p === "b2b-desk/departure-board") return ok(boardPage(query));
+  if (at(0) === "b2b-desk" && at(1) === "departure-board" && seg.length === 3) return ok(boardDetail(at(2)));
   if (at(0) === "b2b-desk" && at(1) === "departures" && at(3) === "incidents") return ok({ items: [] });
   // AA-1075 (bk-047): the manifest, the staff-entered bookings and the after-sale panel of an agency booking.
   if (at(0) === "b2b-desk" && at(1) === "departures" && at(3) === "manifest") return ok(manifest(at(2)));

@@ -23,6 +23,7 @@ import { CHANNELS } from "@/lib/api/proposals";
 import { pct } from "@/lib/proposalDraft";
 import { pricingPolicyApi, type FxRateRow, type PolicyPerson, type PolicyStatus, type PricingRuleRow } from "@/lib/api/pricingPolicy";
 import { Button, ConfirmDialog, DataTable, DateText, PageFrame, Pill, Section, useCan, useToast, useUrlFilters, type BookingTone } from "@/ui";
+import { earlyBookingLabel } from "@/ui/booking/earlyBooking";
 import { SavedTabs } from "../../../_parts/SavedTabs";
 import { NewFxRateDrawer, NewRuleDrawer } from "./PolicyDrawers";
 
@@ -136,19 +137,34 @@ export function PricingRulesView() {
       id: "margin",
       header: "Margin",
       accessorFn: (r) => Number(r.target_margin),
-      cell: ({ row }) => (
-        <span className="flex flex-col whitespace-nowrap tabular-nums" title="Target margin, then the floor margin">
-          <span className="text-ink">{pct(row.original.target_margin)}</span>
-          <span className="text-xs text-muted">floor {pct(row.original.floor_margin)}</span>
-          {(row.original.child_pct || row.original.infant_flat_usd) && (
-            // AA-1075 (bk-15): the child share of the adult price and the infant net of the rule.
-            <span className="text-xs text-muted">
-              child {row.original.child_pct ? pct(row.original.child_pct) : "as adult"} · infant{" "}
-              {row.original.infant_flat_usd ? `${row.original.infant_flat_usd} USD` : "free"}
-            </span>
-          )}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const early = earlyBookingLabel(row.original);
+        return (
+          <span className="flex flex-col whitespace-nowrap tabular-nums" title="Target margin, then the floor margin">
+            <span className="text-ink">{pct(row.original.target_margin)}</span>
+            <span className="text-xs text-muted">floor {pct(row.original.floor_margin)}</span>
+            {(row.original.child_pct || row.original.infant_flat_usd) && (
+              // AA-1075 (bk-15): the child share of the adult price and the infant net of the rule. One short line each
+              // (AA-1073 rest): on one line they widened the nowrap Margin column past the 1084 px budget.
+              <span className="flex flex-col text-xs text-muted" title="Child share of the adult price, then the infant net per trip">
+                <span>child {row.original.child_pct ? pct(row.original.child_pct) : "as adult"}</span>
+                <span>infant {row.original.infant_flat_usd ? `${Number(row.original.infant_flat_usd)} USD` : "free"}</span>
+              </span>
+            )}
+            {early && (
+              // AA-1073 rest (bk-17): the early-booking discount, under the margin it comes off (no extra column: the
+              // table keeps its 1084 px budget).
+              <span
+                className="flex flex-col text-xs text-muted"
+                title="Early booking: margin points off for a quote made at least this many days before the departure starts"
+              >
+                <span>{early[0]}</span>
+                <span>{early[1]}</span>
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     { id: "peak", header: "Peak uplift", accessorFn: (r) => Number(r.peak_uplift_pts), cell: ({ row }) => `+${pct(row.original.peak_uplift_pts).replace("%", "")} pts` },
     { id: "card", header: "Card fee", accessorFn: (r) => Number(r.card_fee_pct), cell: ({ row }) => pct(row.original.card_fee_pct) },

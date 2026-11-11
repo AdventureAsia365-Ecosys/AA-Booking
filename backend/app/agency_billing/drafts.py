@@ -30,6 +30,10 @@ drafting):
 - a cancelled booking (cancelled before the period end): one ``cancellation_fee`` line = the fee less what was billed
   (a credit when negative), and nothing else after it.
 
+- an approved departure fee (AA-1073 rest, bk-048 ``departure_fees``, approved before the period end): one
+  ``departure_fee`` line (seats x price per seat, in the fee's currency) naming the fee (``source_fee_id``; one live
+  line per fee, bk-048 index), on the agency's draft even when it has no booking that month.
+
 One live line per (hold, role) (bk-041 index), so nothing is billed twice; an event of an earlier period that was never
 billed lands on the next run. Lines go on the agency's draft of the period in the quote's currency; when that invoice is
 already issued they wait for the next period (``period_issued``).
@@ -69,6 +73,12 @@ ROLE_LABEL = {
     "balance": "Balance",
     "full": "Full payment",
     "cancellation_fee": "Cancellation fee",
+    "departure_fee": "Departure fee",
+}
+FEE_REASON_LABEL = {
+    "min_shortfall": "minimum not reached",
+    "allotment_unreleased": "allotted seats not released",
+    "other": "other",
 }
 PRODUCT_LABEL = {"content": "Content", "crm": "CRM", "tripplanner": "Trip planner"}
 
@@ -241,8 +251,8 @@ async def _insert_lines(conn: asyncpg.Connection, invoice_id: str, kind: str, li
         amount = (ln["quantity"] * ln["unit_price"]).quantize(CENT, rounding=ROUND_HALF_UP)
         await conn.execute(
             "INSERT INTO booking.agency_invoice_line (invoice_id, invoice_kind, line_no, line_role, product, plan_key,"
-            " source_hold_id, description, quantity, unit_price, amount, created_by)"
-            " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12)",
+            " source_hold_id, description, quantity, unit_price, amount, created_by, source_fee_id)"
+            " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12, $13::uuid)",
             invoice_id,
             kind,
             n,
@@ -255,6 +265,7 @@ async def _insert_lines(conn: asyncpg.Connection, invoice_id: str, kind: str, li
             ln["unit_price"],
             amount,
             actor,
+            ln.get("source_fee_id"),
         )
     return len(lines)
 
@@ -347,6 +358,32 @@ SELECT source_hold_id::text AS hold_id, line_role, sum(amount) AS amount
 """
 
 
+# AA-1073 rest (bk-048): approved departure fees not on a live line yet, by agency.
+FEES_SQL = """
+SELECT f.id::text AS fee_id, p.tenant_id, f.currency, f.seats, f.price_per_seat, f.reason, d.start_date
+  FROM booking.departure_fees f
+  JOIN booking.b2b_partners p ON p.id = f.partner_id
+  JOIN booking.departures d ON d.id = f.departure_id
+ WHERE f.status = 'approved' AND f.decided_at < $1
+   AND ($2::uuid IS NULL OR p.tenant_id = $2::uuid)
+   AND NOT EXISTS (SELECT 1 FROM booking.agency_invoice_line il WHERE il.source_fee_id = f.id AND NOT il.voided)
+ ORDER BY p.tenant_id, f.decided_at, f.id
+"""
+
+
+def fee_line(fee: Any) -> dict[str, Any]:
+    """The settlement line of one approved departure fee (pure): seats x price per seat, naming the fee."""
+    reason = FEE_REASON_LABEL.get(fee["reason"], fee["reason"])
+    return {
+        "line_role": "departure_fee",
+        "source_fee_id": fee["fee_id"],
+        "quantity": Decimal(int(fee["seats"])),
+        "unit_price": Decimal(fee["price_per_seat"]),
+        "description": f"{ROLE_LABEL['departure_fee']} ({reason}): departure {fee['start_date'].isoformat()},"
+        f" {int(fee['seats'])} seats"[:300],
+    }
+
+
 async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | None, actor: str
                          ) -> dict[str, Any]:  # fmt: skip
     today = datetime.now(UTC).date()
@@ -354,6 +391,10 @@ async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: s
     end_ts = datetime(end.year, end.month, end.day, tzinfo=UTC)
     async with pool.acquire() as conn:
         rows = await conn.fetch(HOLDS_SQL, end_ts, tenant_id)
+        fee_rows = await conn.fetch(FEES_SQL, end_ts, tenant_id)
+    fees_by_tenant: dict[Any, list[Any]] = defaultdict(list)
+    for f in fee_rows:
+        fees_by_tenant[f["tenant_id"]].append(f)
     holds: dict[Any, list[Hold]] = defaultdict(list)
     for r in rows:
         # AA-1075 (bk-14): partial cancellations take their refundable part off the total (their fee stays billed);
@@ -376,7 +417,8 @@ async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: s
             )  # fmt: skip
         )
     counts = _empty_counts()
-    for tid, agency_holds in holds.items():
+    for tid in list(holds) + [t for t in fees_by_tenant if t not in holds]:
+        agency_holds = holds.get(tid, [])
         counts["agencies"] += 1
         try:
             async with pool.acquire() as conn, conn.transaction():
@@ -395,6 +437,8 @@ async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: s
                     per_currency[h.currency] += settlement_lines(
                         h, billed.get(h.hold_id, {}), by_plan.get(h.plan_id, terms), end
                     )
+                for f in fees_by_tenant.get(tid, []):
+                    per_currency[f["currency"].strip()].append(fee_line(f))
                 done: dict[str, int] = defaultdict(int)
                 for currency, lines in per_currency.items():
                     if not lines:

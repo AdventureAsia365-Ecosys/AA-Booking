@@ -180,7 +180,11 @@ backend/
                            the minimum / sales cutoff / decision date, the allotment seat count and the recurring
                            generator, allotments.py (agency seat allotments: propose, approve maker-checker, end,
                            bk_allotment_release), departure_watch.py (bk_departure_watch: guarantee at the minimum,
-                           at risk on the decision date; DepartureDailySchedule; staff "Run checks now")
+                           at risk on the decision date; DepartureDailySchedule; staff "Run checks now"); AA-1073
+                           rest (bk-048): departure_board.py (the board over v_departure_occupancy + drill-down),
+                           departure_ops.py (meeting point / time / note, departure_staff), departure_fees.py (fees
+                           charged to agencies, maker-checker), price_adjustments.py (per-departure price changes,
+                           maker-checker; applied by quotes.py with the early-booking discount)
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
                            /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
                            /bookings/{id}/cancel (AA-974); /bookings/{id}/confirmation, /terms (AA-1037, minor 1.3)
@@ -621,6 +625,23 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   every hold under the lock), so a client is never told the seats they hold are sold out. A
   `departure_id` only belongs to the `tp:` line of its own plan on its `start_date` (else 422 `invalid`). Products
   report `has_fixed_departures`.
+- **Departure board, ops sheet, fees, price adjustments (AA-1073 rest, bk-048, contract minor 1.8)**: the staff page
+  `/departures` (b2b_desk.read) reads `booking.v_departure_occupancy` (held, sold, allotted, unused allotment, free,
+  occupancy %, minimum, at risk, open incident, agencies; counted at read time like `departures.py`) through `GET
+  /booking/b2b-desk/departure-board` (month window, country / trip plan / status / at-risk filters, paged; the filter
+  options come from every plan of the window) and `…/{id}` (seats by agency with their cases, ops sheet, fees, price
+  adjustments). **Ops sheet**: `departures.meeting_point` / `meeting_time` (sent to the agencies: event
+  `departure.updated`, `Departure.meeting_point` / `meeting_time` in `GET /departures`) and `ops_note` (staff only);
+  `departure_staff` (guide / tour leader / driver: a staff member or a supplier; never sent, no names stored); writes
+  `ops.write`. **Departure fees** (`departure_fees`): proposed with `b2b_desk.write`, approved or rejected by another
+  person with `b2b_desk.approve` (403 `maker_checker`, CHECK); approval emits `departure.fee_charged` (`Event.fee`: id,
+  amount, currency) and `bk_settlement_draft` bills it once as a `departure_fee` line (`agency_invoice_line.source_fee_id`);
+  the agency invoice API shows that line as `adjustment` until the CRM reads the new role. The draft terms clause
+  `departure_fees` reaches `GET /terms` once the business owner approves it. **Price adjustments**
+  (`departure_price_adjustments`, `pricing.write` maker and a different checker): one in force per departure, a
+  fraction or an amount per traveller; the quote engine applies it to `tp:` lines on that departure after the agency
+  discount, and a b2b rule with `early_days` / `early_discount_pts` takes the points off the margin when the quote day
+  is on or before `start - early_days`; the line's `price_note` records what applied (and `below_floor`: still sold).
 - **Minimum, cutoff, decision date, allotments (AA-1073, bk-046, contract minor 1.6)**: a departure has
   `min_to_operate` (0 = no minimum: status by hand), `sales_cutoff_days` (sales close on `start_date - cutoff`, that day
   included; a line then is `sold_out`, "sales closed on …"; 0 = the start day, the old rule) and
@@ -703,7 +724,9 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   200, max 500) returns the calling agency's events oldest first: `hold.expired`, `hold.extended`, `line.confirmed`,
   `line.declined` (+ `decline_code`), `booking.cancelled`, `departure.guaranteed`, `departure.cancelled`,
   `departure.incident` / `departure.incident_cleared` (+ `incident_code`); 1.6 (AA-1073): `departure.at_risk` (fan-out
-  like `departure.guaranteed`) and `allotment.released` (the one agency whose allotment went back to sale). Ids and codes only (no payload, no free
+  like `departure.guaranteed`) and `allotment.released` (the one agency whose allotment went back to sale); 1.8 (AA-1073
+  rest): `departure.updated` (fan-out; the meeting point or time changed) and `departure.fee_charged` (the one agency,
+  with `fee`: id, amount, currency). Ids and codes only (no payload, no free
   text: an event can never carry traveller data). Every event is a row of the **shared outbox** `booking.outbox`
   written by a trigger in the transaction of the change (holds, hold lines, cancellations, departures, incidents), so
   every path emits (requests, the expiry job, lazy expiry, the desk, AA-682 later; memo seam 8). Departure events fan
@@ -1779,6 +1802,18 @@ and nets; `trip_plans` gains `child_age_max` / `infant_age_max`; `pricing_rules`
 `booking.created_by_aa` when a staff-entered case's hold is confirmed. `v_cost_variance` / `v_case_profit` replaced
 with the same columns (recorded supplier cancel fees, partial cancellations). Settings `b2b_ops_contact` (empty),
 `b2b_child_age_max`, `b2b_infant_age_max`. DM-7.1 rows in the root data standards. `cis_app` reads none of it.
+
+### `bk-048` (AA-1073 rest: departure board view, ops sheet, departure fees, price adjustments, early booking — needs `bk-022`, `bk-041`, `bk-044`, `bk-046`, `bk-047`)
+
+A **contract** file (MIG-4). `departures` gains `meeting_point`, `meeting_time`, `ops_note` (`pii:free_text`); new
+`departure_staff` (role guide / tour_leader / driver, a staff user XOR a supplier); `departures_outbox` also emits
+`departure.updated` on a meeting change (trigger on status, at_risk_at, meeting_point, meeting_time). New
+`departure_fees` (maker-checker, decision final, guard; `departure.fee_charged` trigger) and outbox columns `fee_id`,
+`amount`, `currency`; `agency_invoice_line` gains `source_fee_id` and the settlement role `departure_fee` (role / source
+CHECKs replaced, one live line per fee). New `departure_price_adjustments` (append-only, maker-checker, one in force and
+one pending per departure); `pricing_rules` gains `early_days` / `early_discount_pts` (b2b and fixed_departure only,
+points at most the target margin); `b2b_quote_lines` gains `price_note` (jsonb object). View `v_departure_occupancy`.
+A draft partner terms clause `departure_fees`. DM-7.1 rows in the root data standards. `cis_app` reads none of it.
 
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679

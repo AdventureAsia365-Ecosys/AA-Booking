@@ -10,11 +10,14 @@ every change committed before it.
   issued to it), is 422 ``invalid``.
 - **At least once**: replaying from an older cursor returns the same events again, same ``event_id`` and order, each
   once (Linear AA-975 E); consumers dedupe on ``event_id``.
-- **No personal data**: ids and codes only (the outbox has no other column).
+- **No personal data**: ids and codes only, and since 1.8 (AA-1073 rest, bk-048) the ``fee`` of
+  ``departure.fee_charged`` (fee id, amount, currency). ``departure.updated`` names the departure only: the agency reads
+  the new meeting point and time from ``GET /departures``.
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
@@ -27,7 +30,8 @@ MAX_LIMIT = 500
 
 FEED_SQL = """
 SELECT event_id::text AS event_id, feed_seq, event_type, occurred_at, hold_id::text AS hold_id,
-       booking_id::text AS booking_id, line_ref, departure_id::text AS departure_id, incident_code, decline_code
+       booking_id::text AS booking_id, line_ref, departure_id::text AS departure_id, incident_code, decline_code,
+       fee_id::text AS fee_id, amount, currency
 FROM booking.outbox
 WHERE stream = 'b2b' AND partner_id = $1::uuid AND feed_seq IS NOT NULL AND feed_seq > $2
 ORDER BY feed_seq
@@ -40,6 +44,19 @@ HEAD_SQL = (
     "SELECT coalesce(max(feed_seq), 0) FROM booking.outbox"
     " WHERE stream = 'b2b' AND partner_id = $1::uuid AND feed_seq IS NOT NULL"
 )
+
+
+def fee_out(row: Any) -> dict[str, Any] | None:
+    """1.8 (AA-1073 rest): the fee of a ``departure.fee_charged`` event; None on every other event."""
+    fee_id = row.get("fee_id") if hasattr(row, "get") else None
+    if fee_id is None:
+        return None
+    amount = row["amount"]
+    return {
+        "fee_id": fee_id,
+        "amount": format(amount.quantize(Decimal("0.01")), "f"),
+        "currency": row["currency"].strip(),
+    }
 
 
 def event_out(row: Any) -> dict[str, Any]:
@@ -55,6 +72,7 @@ def event_out(row: Any) -> dict[str, Any]:
         "incident_code": row["incident_code"],
         "decline_code": row["decline_code"],
         "new_start_time": None,  # departure.time_change has no producer yet (departures carry no start time)
+        "fee": fee_out(row),
     }
 
 

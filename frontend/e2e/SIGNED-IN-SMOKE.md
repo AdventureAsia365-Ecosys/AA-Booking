@@ -50,7 +50,8 @@ dark, land in `e2e/results/signed-in/` (`BOOKING_E2E_SHOTS_DIR` to change), one 
 4. Poll `inbound/` for a NEW message addressed to `e2e-booking@…`, pull the 6–8 digit code, type it.
 5. Back on the app: assert the shell renders and `GET /api/booking/staff/me` says `role: "admin"`,
    `preview_viewer` false; then visit the pages under test (read-only: the backend refuses this user's writes with
-   403 `e2e_read_only`).
+   403 `e2e_read_only`). AA-1073 rest: `departure-board.spec.ts` opens Operations → Departures (calendar, table) and
+   one departure's drawer (Seats by agency, Ops, Departure fees, Price); nothing is saved.
 
 ## Helpers (copied, not imported across repos)
 

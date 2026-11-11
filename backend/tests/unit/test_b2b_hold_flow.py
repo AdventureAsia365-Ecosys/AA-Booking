@@ -638,6 +638,9 @@ async def test_list_for_tour_counts_held_and_sold() -> None:
         "seats_to_guarantee": None,
         "last_sale_date": "2027-02-28",
         "allotment": None,
+        # 1.8 (AA-1073 rest): no meeting point or time set.
+        "meeting_point": None,
+        "meeting_time": None,
     }
     assert out["items"][1]["available"] == 0 and out["items"][1]["held"] == 0
     [args] = conn.sql("JOIN booking.trip_plans p")

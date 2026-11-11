@@ -90,10 +90,16 @@ def issuer(snapshot: Any) -> dict[str, Any] | None:
     return {k: _text(snapshot.get(k)) for k in ISSUER_KEYS}
 
 
+# AA-1073 rest (bk-048): a departure fee line reaches the agency as an ``adjustment`` (its description says
+# "Departure fee ..."): the contract 1.5 line_role enum has no departure_fee and the AA-Partner CRM refuses a role it
+# does not know. The CRM learns the role first; a later minor then sends it as it is.
+AGENCY_LINE_ROLE = {"departure_fee": "adjustment"}
+
+
 def line(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "line_no": int(row["line_no"]),
-        "line_role": row["line_role"],
+        "line_role": AGENCY_LINE_ROLE.get(row["line_role"], row["line_role"]),
         "description": row["description"],
         "quantity": amount(row["quantity"]),
         "unit_price": amount(row["unit_price"]),

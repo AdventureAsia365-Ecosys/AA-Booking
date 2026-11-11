@@ -45,12 +45,14 @@ LIST_DAYS = 366
 
 DEPARTURE_COLUMNS = """
 d.id::text AS id, d.trip_plan_id::text AS trip_plan_id, d.start_date, d.capacity, d.status, d.auto_confirm,
-d.min_to_operate, d.sales_cutoff_days, d.decision_days_before, d.at_risk_at, d.created_at, d.updated_at
+d.min_to_operate, d.sales_cutoff_days, d.decision_days_before, d.at_risk_at, d.meeting_point, d.meeting_time,
+d.created_at, d.updated_at
 """
 # The columns of a departure row written by the staff endpoints (RETURNING; no table alias there).
 RETURNING = """
 RETURNING id::text AS id, trip_plan_id::text AS trip_plan_id, start_date, capacity, status, auto_confirm,
-          min_to_operate, sales_cutoff_days, decision_days_before, at_risk_at, created_at, updated_at
+          min_to_operate, sales_cutoff_days, decision_days_before, at_risk_at, meeting_point, meeting_time,
+          created_at, updated_at
 """
 MAX_CUTOFF_DAYS = 90
 MAX_DECISION_DAYS = 365
@@ -300,6 +302,12 @@ def _allotment_out(row: Any, own: Allotment | None) -> dict[str, Any] | None:
     }
 
 
+def meeting_time_text(row: Any) -> str | None:
+    """``HH:MM`` of the meeting time (AA-1073 rest, bk-048), None when not set."""
+    value = row.get("meeting_time") if hasattr(row, "get") else row["meeting_time"]
+    return value.strftime("%H:%M") if value is not None else None
+
+
 def seats_to_guarantee(row: Any, sold: int) -> int | None:
     """Seats still to sell before the minimum is met: None without a minimum, 0 once met or no longer scheduled."""
     minimum = int(row["min_to_operate"])
@@ -326,7 +334,8 @@ ORDER BY d.start_date, d.id
 def departure_out(row: Any, held: int, sold: int, *, reserved: int = 0, own: Allotment | None = None) -> dict[str, Any]:
     """The contract ``Departure``. ``available`` is what the calling agency can hold: the general free seats plus its
     own unused allotment (``reserved`` = the other agencies' unused allotments). 1.6 (AA-1073): ``min_to_operate``,
-    ``seats_to_guarantee``, ``last_sale_date`` and the caller's ``allotment``."""
+    ``seats_to_guarantee``, ``last_sale_date`` and the caller's ``allotment``. 1.8 (AA-1073 rest): ``meeting_point``
+    and ``meeting_time`` (local time on the start date; event ``departure.updated`` when they change)."""
     available = 0 if row["status"] == "cancelled" else free_seats(row, held, sold, reserved)
     return {
         "departure_id": row["id"],
@@ -342,6 +351,8 @@ def departure_out(row: Any, held: int, sold: int, *, reserved: int = 0, own: All
         "seats_to_guarantee": seats_to_guarantee(row, sold),
         "last_sale_date": (sales_close_date(row) - timedelta(days=1)).isoformat(),
         "allotment": _allotment_out(row, own),
+        "meeting_point": row.get("meeting_point"),
+        "meeting_time": meeting_time_text(row),
     }
 
 
@@ -413,6 +424,8 @@ def staff_out(row: Any, held: int, sold: int, allots: list[Allotment] | None = N
         "decision_date": decision_date(row),
         "at_risk_at": row["at_risk_at"],
         "at_risk": is_at_risk(row, sold),
+        "meeting_point": row.get("meeting_point"),
+        "meeting_time": meeting_time_text(row),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

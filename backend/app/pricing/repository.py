@@ -17,7 +17,7 @@ from app.pricing.engine import BASE_CURRENCY, Channel, FxRate, PricingRule
 
 RULE_SQL = """
 SELECT r.channel, r.target_margin, r.floor_margin, r.peak_uplift_pts, r.card_fee_pct, r.valid_from,
-       r.rrp_markup_pct, r.child_pct, r.infant_flat_usd
+       r.rrp_markup_pct, r.child_pct, r.infant_flat_usd, r.early_days, r.early_discount_pts
 FROM booking.pricing_rules r
 JOIN booking.policy_approvals a ON a.pricing_rule_id = r.id
 WHERE r.channel = $1 AND r.valid_from <= $2
@@ -45,6 +45,10 @@ class DatedRule:
     # infant_flat_usd of net (USD) priced by the rule. None = a child pays like an adult / an infant is free.
     child_pct: Decimal | None = None
     infant_flat_usd: Decimal | None = None
+    # bk-048 (AA-1073, bk-17): b2b / fixed_departure; a quote made on or before start - early_days of a departure
+    # takes early_discount_pts off the margin. None = no early-booking discount.
+    early_days: int | None = None
+    early_discount_pts: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,8 @@ async def rule_in_force(conn: Any, channel: Channel, on: date) -> DatedRule | No
         rrp_markup_pct=row.get("rrp_markup_pct"),
         child_pct=row.get("child_pct"),
         infant_flat_usd=row.get("infant_flat_usd"),
+        early_days=row.get("early_days"),
+        early_discount_pts=row.get("early_discount_pts"),
     )
 
 
