@@ -41,6 +41,7 @@ import asyncpg
 from app import audit
 from app.auth.staff import Staff
 from app.b2b import departures as b2b_departures
+from app.b2b.desk import tour_titles
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.jobs import queue
 from app.jobs.queue import Job
@@ -544,9 +545,10 @@ async def departure_costs(conn: asyncpg.Connection, staff: Staff, departure_ref:
     profit = await conn.fetchrow("SELECT * FROM booking.v_departure_profit WHERE departure_id = $1::uuid", dep["id"])
     sold = await sold_seats(conn, dep["id"])
     active = [c for c in costs if c["status"] == "active"]
+    titles = await tour_titles(conn, [dep["trip_plan_source_id"]] if dep["trip_plan_source_id"] else [])
     return jsonable(
         {
-            "departure": {**dict(dep), "sold_seats": sold},
+            "departure": {**dict(dep), "sold_seats": sold, "tour_title": titles.get(dep["trip_plan_source_id"])},
             "shared_costs": [cost_out(c) for c in costs],
             "cases": [without_profit(dict(c), CASE_PROFIT_FIELDS, staff) for c in cases],
             "bills": [dict(b) for b in bills],
@@ -600,7 +602,17 @@ async def list_departures(
         offset,
     )
     items = [without_profit(dict(r), LIST_PROFIT_FIELDS, staff) for r in rows]
+    await with_tour_titles(conn, items)
     return jsonable({"items": items, "total": int(total or 0), "limit": limit, "offset": offset})
+
+
+async def with_tour_titles(conn: asyncpg.Connection, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Set ``tour_title`` on each item from the CIS catalog by its ``trip_plan_source_id`` (one read for the page;
+    ``None`` when the catalog has no title or cannot be read, the UI then shows a short key)."""
+    titles = await tour_titles(conn, [k for i in items if (k := i.get("trip_plan_source_id"))])
+    for item in items:
+        item["tour_title"] = titles.get(item.get("trip_plan_source_id") or "")
+    return items
 
 
 # ── Re-pricing job ───────────────────────────────────────────────────────────

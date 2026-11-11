@@ -23,6 +23,7 @@ import {
 } from "@/lib/api/finance";
 import { supplyApi } from "@/lib/api/supply";
 import { suppliersApi } from "@/lib/api/suppliers";
+import { tourLabel } from "@/ui/booking/financeLabels";
 import {
   Button,
   DataTable,
@@ -59,7 +60,15 @@ function withoutProfit<T>(columns: ColumnDef<T, unknown>[], canProfit: boolean):
 
 const LIST_COLUMNS: ColumnDef<FinanceDeparture, unknown>[] = [
   { id: "start", header: "Departure", cell: ({ row }) => <DateText value={row.original.start_date} className="font-semibold" /> },
-  { id: "tour", header: "Tour", cell: ({ row }) => <span className="block max-w-[220px] truncate text-[13px]">{row.original.trip_plan_source_id}</span> },
+  {
+    id: "tour",
+    header: "Tour",
+    cell: ({ row }) => (
+      <span className="block max-w-[220px] truncate text-[13px]" title={row.original.tour_title ?? row.original.trip_plan_source_id}>
+        {tourLabel(row.original.tour_title, row.original.trip_plan_source_id)}
+      </span>
+    ),
+  },
   { id: "seats", header: "Sold seats", cell: ({ row }) => `${row.original.sold_seats} / ${row.original.capacity}` },
   { id: "costs", header: "Shared costs", cell: ({ row }) => row.original.shared_cost_lines || "—" },
   {
@@ -332,7 +341,7 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
       {d && t && (
         <div className="flex flex-col gap-4">
           <p className="text-[13px] text-body">
-            {d.departure.trip_plan_source_id} · {d.departure.sold_seats} of {d.departure.capacity} seats sold · {d.departure.status}
+            {tourLabel(d.departure.tour_title, d.departure.trip_plan_source_id)} · {d.departure.sold_seats} of {d.departure.capacity} seats sold · {d.departure.status}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {canProfit && t.revenue !== null && <KpiTile label="Revenue (USD)" value={<Money amount={t.revenue} currency="USD" />} size="sm" />}

@@ -995,7 +995,11 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
 - **Planned vs actual** (`v_cost_variance`): per booking, planned (net at the snapshot) against billed (approved / paid
   bill lines), variance only once billed. `GET /departures/{id}/costs`: shared costs, the sold cases with their share,
   the departure's bills, profit (revenue, profit and margin there and in `GET /finance/departures` are `null` without
-  `profit.read`: sales and contracting see the costs only). The case cost panel adds USD per line, totals and the departure share.
+  `profit.read`: sales and contracting see the costs only). The case cost panel adds USD per line, totals and the departure share;
+  with the USD summary it keeps a per-currency line only for currencies other than USD. Every finance departure read
+  (`GET /finance/departures`, `GET /departures/{id}/costs`, `GET /finance/profit/departures`) carries `tour_title`
+  (`catalog.v_tour` by `source_id`, one read per page, the B2B desk lookup; `null` when the catalog has none or
+  cannot be read); the UI shows it, else `Tour <key prefix>`, never the raw key.
 - **Profit** (`v_case_profit`, `v_departure_profit`, `v_agency_profit_month`; `GET /finance/profit/cases | departures |
   agencies`, permission **`profit.read`** = admin, finance; proposed default): revenue = the confirmed quote total (or
   the cancellation fee), costs = billed, else planned, else the quote while nothing is booked; margin = profit /

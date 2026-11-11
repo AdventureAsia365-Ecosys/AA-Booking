@@ -83,6 +83,7 @@ export interface DepartureCosts {
   departure: {
     id: string;
     trip_plan_source_id: string;
+    tour_title: string | null;
     start_date: IsoDate;
     capacity: number;
     status: string;
@@ -112,6 +113,7 @@ export interface FinanceDeparture {
   status: string;
   capacity: number;
   trip_plan_source_id: string;
+  tour_title: string | null;
   sold_seats: number;
   cases: number;
   shared_cost_lines: number;
@@ -202,6 +204,7 @@ export interface CaseProfit {
 export interface DepartureProfit {
   departure_id: string;
   trip_plan_source_id: string;
+  tour_title: string | null;
   start_date: IsoDate;
   status: string;
   capacity: number;
