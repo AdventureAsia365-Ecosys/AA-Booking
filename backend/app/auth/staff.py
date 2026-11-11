@@ -120,6 +120,12 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # role reads and answers it (no separate ops role exists); content creators do not.
     "b2b_desk.read": frozenset({"admin", "sales", "contracting"}),
     "b2b_desk.write": frozenset({"admin", "sales", "contracting"}),
+    # AA-1075 (bk-047, root S275 study bk-11 / bk-14): enter a booking for an agency (e-mail / chat), cancel or reduce
+    # one for it and ask for a lower cancellation fee = admin, sales (who talk to agencies). A price below the floor
+    # margin and a lower cancellation fee need a second person with b2b_desk.approve = admin, contracting (who own
+    # the pricing), never the one who asked (maker-checker, 403 maker_checker + CHECKs). Not in preview sessions.
+    "b2b_desk.book": frozenset({"admin", "sales"}),
+    "b2b_desk.approve": frozenset({"admin", "contracting"}),
     # Operations (bk-026, AA-682 S1): supplier bookings of a sold trip and their documents. Every operational role
     # books and chases suppliers (no separate ops role yet, design D16); content creators do not.
     "ops.read": frozenset({"admin", "sales", "contracting"}),

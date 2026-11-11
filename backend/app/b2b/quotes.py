@@ -45,7 +45,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any
 
 import asyncpg
@@ -288,21 +288,69 @@ async def price_basis(
     )
 
 
-def price_line(basis: PriceBasis, cost: LineCost, plan_id: str | None) -> LinePrice:
+def pax_sell_usd(
+    sell_usd: Decimal, rule: repository.DatedRule, margin: Decimal, pax: tuple[int, int, int] | None
+) -> tuple[Decimal, Decimal]:
+    """AA-1075 (bk-15): a trip plan line's sell price (USD) and extra net (USD) for its travellers by age band. The
+    components price every adult and child alike (rooms and services for the party); with the rule's ``child_pct`` a
+    child pays that fraction of the adult price (sell x (adults + children x pct) / (adults + children)); with
+    ``infant_flat_usd`` each infant adds that net, priced by the same rule. Without either (or without ``pax``) the
+    line prices as before."""
+    if pax is None:
+        return sell_usd, engine.ZERO
+    adults, children, infants = pax
+    if children and rule.child_pct is not None and adults + children > 0:
+        sell_usd = sell_usd * (adults + children * rule.child_pct) / (adults + children)
+    extra_net = engine.ZERO
+    if infants and rule.infant_flat_usd:
+        extra_net = rule.infant_flat_usd * infants
+        sell_usd += engine.sell_price_usd(extra_net, margin, rule.rule.card_fee_pct)
+    return sell_usd, extra_net
+
+
+def price_line(
+    basis: PriceBasis, cost: LineCost, plan_id: str | None, *, pax: tuple[int, int, int] | None = None
+) -> LinePrice:
     """The ``b2b_price`` of one line: its nets to USD, the rule's price (``net / (1 - margin - card fee)``) in the quote
-    currency, less the partner's discount for the line's plan, rounded up (:func:`round_line`). Raises
+    currency, less the partner's discount for the line's plan, rounded up (:func:`round_line`). A trip plan line with
+    ``pax`` (adults, children, infants) takes the rule's child and infant prices (:func:`pax_sell_usd`). Raises
     ``engine.PricingError`` (a missing FX rate, a bad rule)."""
     net_usd = sum((engine.to_usd(amount, cur, basis.rates) for amount, cur in cost.costs), start=engine.ZERO)
-    sell = engine.from_usd(
-        engine.sell_price_usd(net_usd, basis.margin, basis.rule.rule.card_fee_pct), basis.rates.get(basis.currency)
-    )
+    sell_usd = engine.sell_price_usd(net_usd, basis.margin, basis.rule.rule.card_fee_pct)
+    sell_usd, extra_net = pax_sell_usd(sell_usd, basis.rule, basis.margin, pax if plan_id else None)
+    sell = engine.from_usd(sell_usd, basis.rates.get(basis.currency))
     discount, card_id = basis.terms.discount_for(plan_id)
     return LinePrice(
-        net_usd=net_usd,
+        net_usd=net_usd + extra_net,
         discount=discount,
         rate_card_id=card_id,
         b2b_price=round_line(agency_pricing.apply_discount(sell, discount), basis.currency),
     )
+
+
+def floor_price(basis: PriceBasis, cost: LineCost, plan_id: str | None, *, pax: tuple[int, int, int] | None) -> Decimal:
+    """AA-1075 (bk-11): the line at the rule's floor margin (no agency discount, rounded up like a line): the lowest
+    price staff may enter for an agency without a second approver."""
+    net_usd = sum((engine.to_usd(amount, cur, basis.rates) for amount, cur in cost.costs), start=engine.ZERO)
+    floor = basis.rule.rule.floor_margin
+    sell_usd = engine.sell_price_usd(net_usd, floor, basis.rule.rule.card_fee_pct)
+    sell_usd, _ = pax_sell_usd(sell_usd, basis.rule, floor, pax if plan_id else None)
+    return round_line(engine.from_usd(sell_usd, basis.rates.get(basis.currency)), basis.currency)
+
+
+def scale_prices(prices: list[Decimal], target: Decimal, currency: str) -> list[Decimal]:
+    """AA-1075 (bk-11): line prices scaled to a staff override total, each rounded down to the currency unit and the
+    rest on the last line, so the lines sum to ``target`` exactly. All zero lines: the rest on the last line."""
+    unit = LINE_INCREMENTS.get(currency) or (engine.ONE if currency in ZERO_DECIMAL_CURRENCIES else engine.CENT)
+    total = sum(prices, start=engine.ZERO)
+    if not prices:
+        return []
+    out: list[Decimal] = []
+    for price in prices[:-1]:
+        share = price * target / total if total > 0 else engine.ZERO
+        out.append(((share / unit).to_integral_value(rounding=ROUND_FLOOR) * unit).quantize(engine.CENT))
+    out.append((target - sum(out, start=engine.ZERO)).quantize(engine.CENT))
+    return out
 
 
 async def create_quote(
@@ -317,6 +365,47 @@ async def create_quote(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Price, hash and store one quote; returns the contract ``Quote`` body. Raises B2BError."""
+    async with pool.acquire() as conn:
+        stored = await quote_in(
+            conn,
+            partner_id=partner_id,
+            client_id=client_id,
+            proposal_ref=proposal_ref,
+            proposal_version=proposal_version,
+            currency=currency,
+            lines=lines,
+            now=now,
+        )
+    return stored.body
+
+
+@dataclass(frozen=True)
+class StoredQuote:
+    """What :func:`quote_in` stored: the contract ``Quote`` body, the total at the rule (``quoted_total``, before an
+    override), the total at the floor margin and the stored total (AA-1075 staff desk)."""
+
+    body: dict[str, Any]
+    quote_id: str
+    quoted_total: Decimal
+    floor_total: Decimal
+    total: Decimal
+
+
+async def quote_in(
+    conn: asyncpg.Connection,
+    *,
+    partner_id: str,
+    client_id: str,
+    proposal_ref: str,
+    proposal_version: int,
+    currency: str,
+    lines: list[AskLine],
+    now: datetime | None = None,
+    override_total: Decimal | None = None,
+) -> StoredQuote:
+    """:func:`create_quote` on one connection. ``override_total`` (AA-1075, staff only, never the agency API): the
+    lines are scaled to that total (:func:`scale_prices`) before they are hashed and stored, so the hold and the
+    booking carry the staff price; ``quoted_total`` / ``floor_total`` say what the rule would charge."""
     if currency not in QUOTE_CURRENCIES:
         allowed = ", ".join(sorted(QUOTE_CURRENCIES))
         raise B2BError("invalid", f"{currency} is not a quote currency (one of {allowed})")
@@ -326,144 +415,151 @@ async def create_quote(
     now = now or datetime.now(UTC)
     on = now.date()
 
-    async with pool.acquire() as conn:
-        # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
-        await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
-        costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
-        own_hold = await conn.fetchval(OWN_HOLD_SQL, partner_id, proposal_ref, proposal_version)
-        seats = await departures.availability(
-            conn,
-            [
-                departures.SeatAsk(
-                    line_ref=line.ask.line_ref,
-                    component_id=line.ask.component_id,
-                    service_date=line.ask.service_date,
-                    departure_id=line.departure_id,
-                    seats=departures.seats(line.ask.adult, line.ask.child),
-                )
-                for line in lines
-            ],
-            today=on,
-            exclude_hold=own_hold,
-            partner_id=partner_id,
-        )
-        basis = await price_basis(
-            conn,
-            partner_id=partner_id,
-            currency=currency,
-            cost_currencies={cur for lc in costs for _, cur in lc.costs},
-            on=on,
-        )
-        fx, rule, margin, terms = basis.fx, basis.rule, basis.margin, basis.terms
+    # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
+    await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
+    costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
+    own_hold = await conn.fetchval(OWN_HOLD_SQL, partner_id, proposal_ref, proposal_version)
+    seats = await departures.availability(
+        conn,
+        [
+            departures.SeatAsk(
+                line_ref=line.ask.line_ref,
+                component_id=line.ask.component_id,
+                service_date=line.ask.service_date,
+                departure_id=line.departure_id,
+                seats=departures.seats(line.ask.adult, line.ask.child),
+            )
+            for line in lines
+        ],
+        today=on,
+        exclude_hold=own_hold,
+        partner_id=partner_id,
+    )
+    basis = await price_basis(
+        conn,
+        partner_id=partner_id,
+        currency=currency,
+        cost_currencies={cur for lc in costs for _, cur in lc.costs},
+        on=on,
+    )
+    fx, rule, margin, terms = basis.fx, basis.rule, basis.margin, basis.terms
 
-        priced: list[dict[str, Any]] = []
-        for no, (line, lc, (availability, departure_id, _)) in enumerate(
-            zip(lines, costs, seats, strict=True), start=1
+    priced: list[dict[str, Any]] = []
+    floor_total = engine.ZERO
+    for no, (line, lc, (availability, departure_id, _)) in enumerate(zip(lines, costs, seats, strict=True), start=1):
+        ask = line.ask
+        plan = _line_plan(ask.component_id)
+        pax = (ask.adult, ask.child, ask.infant)
+        try:
+            price = price_line(basis, lc, plan, pax=pax)
+            floor_total += floor_price(basis, lc, plan, pax=pax)
+        except engine.PricingError as exc:
+            raise B2BError("unavailable", f"line {ask.line_ref}: {exc}") from None
+        priced.append(
+            {
+                "line_no": no,
+                "line_ref": ask.line_ref,
+                "component_id": ask.component_id,
+                "component_kind": lc.kind,
+                "service_date": ask.service_date,
+                "nights": ask.nights,
+                "pax_adult": ask.adult,
+                "pax_child": ask.child,
+                "pax_infant": ask.infant,
+                "rooms": line.rooms,
+                "unit": UNIT,
+                "availability": availability,
+                "departure_id": departure_id,
+                "b2b_price": price.b2b_price,
+                "net_cost_usd": price.net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+                "supplier_rate_ids": lc.rate_ids,
+                "agency_discount_pct": price.discount,
+                "rate_card_id": price.rate_card_id,
+            }
+        )
+    quoted_total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
+    if override_total is not None:
+        for p, scaled in zip(
+            priced, scale_prices([p["b2b_price"] for p in priced], override_total, currency), strict=True
         ):
-            ask = line.ask
-            try:
-                price = price_line(basis, lc, _line_plan(ask.component_id))
-            except engine.PricingError as exc:
-                raise B2BError("unavailable", f"line {ask.line_ref}: {exc}") from None
-            priced.append(
-                {
-                    "line_no": no,
-                    "line_ref": ask.line_ref,
-                    "component_id": ask.component_id,
-                    "component_kind": lc.kind,
-                    "service_date": ask.service_date,
-                    "nights": ask.nights,
-                    "pax_adult": ask.adult,
-                    "pax_child": ask.child,
-                    "pax_infant": ask.infant,
-                    "rooms": line.rooms,
-                    "unit": UNIT,
-                    "availability": availability,
-                    "departure_id": departure_id,
-                    "b2b_price": price.b2b_price,
-                    "net_cost_usd": price.net_usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-                    "supplier_rate_ids": lc.rate_ids,
-                    "agency_discount_pct": price.discount,
-                    "rate_card_id": price.rate_card_id,
-                }
-            )
-        total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
-        rounding = rounding_rule(currency)
-        digest = price_hash(
-            currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total, rounding=rounding
-        )
-        valid_until = now + timedelta(hours=await _valid_hours(conn))
-        policy = await cancellation.policy_for_lines(conn, priced, on)
+            p["b2b_price"] = scaled
+    total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
+    rounding = rounding_rule(currency)
+    digest = price_hash(
+        currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total, rounding=rounding
+    )
+    valid_until = now + timedelta(hours=await _valid_hours(conn))
+    policy = await cancellation.policy_for_lines(conn, priced, on)
 
-        async with conn.transaction():
-            quote_id = await conn.fetchval(
-                """
-                INSERT INTO booking.b2b_quotes
-                    (partner_id, m2m_client_id, proposal_ref, proposal_version, currency, fx_rate_per_usd,
-                     fx_buffer_pct, fx_as_of, fx_source, pricing_rule_valid_from, margin_applied, card_fee_pct,
-                     rounding, priced_on, total_b2b_price, price_hash, valid_until, created_at, partner_tier_code,
-                     tier_discount_pct)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                        $20)
-                RETURNING id::text
-                """,
-                partner_id,
-                client_id,
-                proposal_ref,
-                proposal_version,
-                currency,
-                fx.rate_per_usd,
-                fx.buffer_pct,
-                fx.as_of,
-                fx.source,
-                rule.valid_from,
-                margin,
-                rule.rule.card_fee_pct,
-                rounding,
-                on,
-                total,
-                digest,
-                valid_until,
-                now,
-                terms.tier_code,
-                terms.tier_discount,
-            )
-            await conn.executemany(
-                """
-                INSERT INTO booking.b2b_quote_lines
-                    (quote_id, line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult,
-                     pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids,
-                     departure_id, agency_discount_pct, rate_card_id)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[],
-                        $17::uuid, $18, $19::uuid)
-                """,
-                [
-                    (
-                        quote_id,
-                        p["line_no"],
-                        p["line_ref"],
-                        p["component_id"],
-                        p["component_kind"],
-                        p["service_date"],
-                        p["nights"],
-                        p["pax_adult"],
-                        p["pax_child"],
-                        p["pax_infant"],
-                        json.dumps(p["rooms"]),
-                        p["unit"],
-                        p["availability"],
-                        p["b2b_price"],
-                        p["net_cost_usd"],
-                        p["supplier_rate_ids"],
-                        p["departure_id"],
-                        p["agency_discount_pct"],
-                        p["rate_card_id"],
-                    )
-                    for p in priced
-                ],
-            )
+    async with conn.transaction():
+        quote_id = await conn.fetchval(
+            """
+            INSERT INTO booking.b2b_quotes
+                (partner_id, m2m_client_id, proposal_ref, proposal_version, currency, fx_rate_per_usd,
+                 fx_buffer_pct, fx_as_of, fx_source, pricing_rule_valid_from, margin_applied, card_fee_pct,
+                 rounding, priced_on, total_b2b_price, price_hash, valid_until, created_at, partner_tier_code,
+                 tier_discount_pct)
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                    $20)
+            RETURNING id::text
+            """,
+            partner_id,
+            client_id,
+            proposal_ref,
+            proposal_version,
+            currency,
+            fx.rate_per_usd,
+            fx.buffer_pct,
+            fx.as_of,
+            fx.source,
+            rule.valid_from,
+            margin,
+            rule.rule.card_fee_pct,
+            rounding,
+            on,
+            total,
+            digest,
+            valid_until,
+            now,
+            terms.tier_code,
+            terms.tier_discount,
+        )
+        await conn.executemany(
+            """
+            INSERT INTO booking.b2b_quote_lines
+                (quote_id, line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult,
+                 pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids,
+                 departure_id, agency_discount_pct, rate_card_id)
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[],
+                    $17::uuid, $18, $19::uuid)
+            """,
+            [
+                (
+                    quote_id,
+                    p["line_no"],
+                    p["line_ref"],
+                    p["component_id"],
+                    p["component_kind"],
+                    p["service_date"],
+                    p["nights"],
+                    p["pax_adult"],
+                    p["pax_child"],
+                    p["pax_infant"],
+                    json.dumps(p["rooms"]),
+                    p["unit"],
+                    p["availability"],
+                    p["b2b_price"],
+                    p["net_cost_usd"],
+                    p["supplier_rate_ids"],
+                    p["departure_id"],
+                    p["agency_discount_pct"],
+                    p["rate_card_id"],
+                )
+                for p in priced
+            ],
+        )
     log.info("b2b_quote_created quote=%s partner=%s lines=%s", quote_id, partner_id, len(priced))
-    return {
+    body = {
         "quote_id": quote_id,
         "currency": currency,
         "fx": {
@@ -488,3 +584,4 @@ async def create_quote(
         "total_b2b_price": money(total, currency),
         "cancellation_policy": cancellation.policy_out(policy, basis=cancellation.BASIS_TODAY),
     }
+    return StoredQuote(body=body, quote_id=quote_id, quoted_total=quoted_total, floor_total=floor_total, total=total)

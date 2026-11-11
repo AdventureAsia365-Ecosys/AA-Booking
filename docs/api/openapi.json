@@ -1,6 +1,40 @@
 {
   "components": {
     "schemas": {
+      "AgeBandsBody": {
+        "additionalProperties": false,
+        "description": "bk-047 (AA-1075, bk-15): the oldest ages at the child and infant prices (None = the default).",
+        "properties": {
+          "child_age_max": {
+            "anyOf": [
+              {
+                "maximum": 17.0,
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Age Max"
+          },
+          "infant_age_max": {
+            "anyOf": [
+              {
+                "maximum": 4.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infant Age Max"
+          }
+        },
+        "title": "AgeBandsBody",
+        "type": "object"
+      },
       "AgencyDraftRunIn": {
         "additionalProperties": false,
         "properties": {
@@ -1342,6 +1376,18 @@
       "BookingFacts": {
         "additionalProperties": false,
         "properties": {
+          "dropoff_point": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff Point"
+          },
           "hotel_room_type_id": {
             "anyOf": [
               {
@@ -1432,6 +1478,18 @@
             ],
             "title": "Pax"
           },
+          "pickup_point": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Point"
+          },
           "service_date": {
             "anyOf": [
               {
@@ -1456,6 +1514,18 @@
             ],
             "title": "Service Id"
           },
+          "service_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Time"
+          },
           "supplier_id": {
             "anyOf": [
               {
@@ -1467,6 +1537,18 @@
               }
             ],
             "title": "Supplier Id"
+          },
+          "voucher_note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voucher Note"
           }
         },
         "title": "BookingFacts",
@@ -1496,6 +1578,177 @@
           "status"
         ],
         "title": "BookingLine",
+        "type": "object"
+      },
+      "BookingVouchers": {
+        "additionalProperties": false,
+        "description": "1.7 (AA-1075): one service voucher per confirmed supplier booking. No traveller names, no prices.",
+        "properties": {
+          "booking_id": {
+            "maxLength": 64,
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "issued_at": {
+            "format": "date-time",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "ops_contact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsContact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal_ref": {
+            "maxLength": 64,
+            "title": "Proposal Ref",
+            "type": "string"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "status": {
+            "enum": [
+              "confirmed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trip_case_code": {
+            "maxLength": 32,
+            "title": "Trip Case Code",
+            "type": "string"
+          },
+          "vouchers": {
+            "items": {
+              "$ref": "#/components/schemas/Voucher"
+            },
+            "title": "Vouchers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "booking_id",
+          "trip_case_code",
+          "proposal_ref",
+          "status",
+          "issued_at",
+          "start_date",
+          "end_date",
+          "ops_contact",
+          "vouchers"
+        ],
+        "title": "BookingVouchers",
+        "type": "object"
+      },
+      "CancelFeeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "supplier_cancel_fee": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Cancel Fee"
+          },
+          "supplier_cancel_fee_currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Cancel Fee Currency"
+          }
+        },
+        "required": [
+          "supplier_cancel_fee",
+          "supplier_cancel_fee_currency"
+        ],
+        "title": "CancelFeeIn",
+        "type": "object"
+      },
+      "CancelIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "supplier_cancel_fee": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Cancel Fee"
+          },
+          "supplier_cancel_fee_currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Cancel Fee Currency"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CancelIn",
         "type": "object"
       },
       "CancelRequest": {
@@ -3128,6 +3381,72 @@
         "title": "DestinationPatch",
         "type": "object"
       },
+      "EntryIn": {
+        "additionalProperties": false,
+        "properties": {
+          "agency_ref": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Agency Ref",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/QuoteLineRequest"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "override_reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Reason"
+          },
+          "override_total": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override Total"
+          },
+          "partner_id": {
+            "format": "uuid",
+            "title": "Partner Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "partner_id",
+          "agency_ref",
+          "currency",
+          "lines"
+        ],
+        "title": "EntryIn",
+        "type": "object"
+      },
       "Event": {
         "additionalProperties": false,
         "properties": {
@@ -3255,7 +3574,10 @@
               "departure.incident_cleared",
               "departure.time_change",
               "departure.at_risk",
-              "allotment.released"
+              "allotment.released",
+              "booking.created_by_aa",
+              "booking.line_reduced",
+              "booking.fee_changed"
             ],
             "title": "Type",
             "type": "string"
@@ -4240,6 +4562,72 @@
         "title": "LineOut",
         "type": "object"
       },
+      "LineReduction": {
+        "additionalProperties": false,
+        "description": "1.7 (AA-1075): a partial cancellation: fewer travellers on one line, its fee and refundable part.",
+        "properties": {
+          "booking_id": {
+            "maxLength": 64,
+            "title": "Booking Id",
+            "type": "string"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "fee": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "fee_basis": {
+            "$ref": "#/components/schemas/FeeBasis"
+          },
+          "line_ref": {
+            "maxLength": 64,
+            "title": "Line Ref",
+            "type": "string"
+          },
+          "reduced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reduced At"
+          },
+          "refundable_b2b_amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "removed": {
+            "$ref": "#/components/schemas/Travellers"
+          },
+          "removed_b2b_amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "seats_after": {
+            "minimum": 1.0,
+            "title": "Seats After",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "booking_id",
+          "line_ref",
+          "dry_run",
+          "removed",
+          "seats_after",
+          "removed_b2b_amount",
+          "fee",
+          "refundable_b2b_amount",
+          "fee_basis",
+          "reduced_at"
+        ],
+        "title": "LineReduction",
+        "type": "object"
+      },
       "Link": {
         "additionalProperties": false,
         "properties": {
@@ -4446,6 +4834,18 @@
       "NewBooking": {
         "additionalProperties": false,
         "properties": {
+          "dropoff_point": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff Point"
+          },
           "hotel_room_type_id": {
             "anyOf": [
               {
@@ -4536,6 +4936,18 @@
             ],
             "title": "Pax"
           },
+          "pickup_point": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Point"
+          },
           "service_date": {
             "anyOf": [
               {
@@ -4560,6 +4972,18 @@
             ],
             "title": "Service Id"
           },
+          "service_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Time"
+          },
           "supplier_id": {
             "format": "uuid",
             "title": "Supplier Id",
@@ -4576,6 +5000,18 @@
               }
             ],
             "title": "Version Item Id"
+          },
+          "voucher_note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voucher Note"
           }
         },
         "required": [
@@ -5732,6 +6168,49 @@
         "title": "NewSupplier",
         "type": "object"
       },
+      "OpsContact": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          }
+        },
+        "title": "OpsContact",
+        "type": "object"
+      },
       "OrderScope": {
         "additionalProperties": false,
         "properties": {
@@ -5756,6 +6235,37 @@
           }
         },
         "title": "OrderScope",
+        "type": "object"
+      },
+      "OverrideIn": {
+        "additionalProperties": false,
+        "properties": {
+          "fee_override_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Fee Override Pct"
+          },
+          "waive_reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Waive Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee_override_pct",
+          "waive_reason"
+        ],
+        "title": "OverrideIn",
         "type": "object"
       },
       "PartnerCreate": {
@@ -5991,6 +6501,23 @@
             "pattern": "^\\d+(\\.\\d{1,2})?$",
             "title": "Deposit Pct",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "agency_tour",
+                  "tour",
+                  "agency",
+                  "default"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
           },
           "settlement_due_days": {
             "minimum": 0.0,
@@ -6252,6 +6779,38 @@
           "channel": {
             "$ref": "#/components/schemas/Channel"
           },
+          "child_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Amount"
+          },
+          "child_net_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Net Amount"
+          },
           "computed": {
             "default": false,
             "description": "a cost sheet row sent back as read; with an amount it becomes overridden",
@@ -6263,6 +6822,38 @@
             "pattern": "^[A-Z]{3}$",
             "title": "Currency",
             "type": "string"
+          },
+          "infant_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infant Amount"
+          },
+          "infant_net_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infant Net Amount"
           },
           "net_amount": {
             "anyOf": [
@@ -6329,6 +6920,38 @@
               }
             ],
             "title": "Season"
+          },
+          "single_supplement_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Single Supplement Amount"
+          },
+          "single_supplement_net_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Single Supplement Net Amount"
           },
           "valid_from": {
             "format": "date",
@@ -7220,6 +7843,86 @@
         "title": "ReasonIn",
         "type": "object"
       },
+      "ReduceIn": {
+        "additionalProperties": false,
+        "properties": {
+          "adult": {
+            "default": 0,
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Adult",
+            "type": "integer"
+          },
+          "child": {
+            "default": 0,
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Child",
+            "type": "integer"
+          },
+          "infant": {
+            "default": 0,
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Infant",
+            "type": "integer"
+          },
+          "reason_code": {
+            "enum": [
+              "client_cancelled",
+              "agency_cancelled",
+              "other"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "ReduceIn",
+        "type": "object"
+      },
+      "ReduceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "adult": {
+            "default": 0,
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Adult",
+            "type": "integer"
+          },
+          "child": {
+            "default": 0,
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Child",
+            "type": "integer"
+          },
+          "infant": {
+            "default": 0,
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Infant",
+            "type": "integer"
+          },
+          "reason_code": {
+            "enum": [
+              "client_cancelled",
+              "agency_cancelled",
+              "other"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "ReduceRequest",
+        "type": "object"
+      },
       "Room": {
         "additionalProperties": false,
         "properties": {
@@ -7356,6 +8059,23 @@
           "channel": {
             "$ref": "#/components/schemas/Channel"
           },
+          "child_pct": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,1}|(?=[\\d.]{1,6}0*$)\\d{0,1}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Pct"
+          },
           "floor_margin": {
             "anyOf": [
               {
@@ -7369,6 +8089,23 @@
               }
             ],
             "title": "Floor Margin"
+          },
+          "infant_flat_usd": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 10000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,8}|(?=[\\d.]{1,11}0*$)\\d{0,8}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infant Flat Usd"
           },
           "note": {
             "anyOf": [
@@ -7695,6 +8432,55 @@
           }
         },
         "title": "ServiceFields",
+        "type": "object"
+      },
+      "StaffCancelIn": {
+        "additionalProperties": false,
+        "properties": {
+          "fee_override_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee Override Pct"
+          },
+          "reason_code": {
+            "enum": [
+              "client_cancelled",
+              "agency_cancelled",
+              "departure_cancelled",
+              "other"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "waive_reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waive Reason"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "StaffCancelIn",
         "type": "object"
       },
       "StaffPatch": {
@@ -8626,6 +9412,49 @@
         "title": "TourKey",
         "type": "object"
       },
+      "TourTermsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "balance_days_before_departure": {
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Balance Days Before Departure",
+            "type": "integer"
+          },
+          "deposit_pct": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,1}|(?=[\\d.]{1,6}0*$)\\d{0,1}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Deposit Pct"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "deposit_pct",
+          "balance_days_before_departure"
+        ],
+        "title": "TourTermsIn",
+        "type": "object"
+      },
       "Travellers": {
         "additionalProperties": false,
         "properties": {
@@ -8775,6 +9604,147 @@
           }
         },
         "title": "VersionPatch",
+        "type": "object"
+      },
+      "Voucher": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmation_ref": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Ref"
+          },
+          "dropoff_point": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff Point"
+          },
+          "line_ref": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Ref"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "pickup_point": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Point"
+          },
+          "service": {
+            "maxLength": 500,
+            "title": "Service",
+            "type": "string"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
+          },
+          "service_time": {
+            "anyOf": [
+              {
+                "maxLength": 5,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Time"
+          },
+          "supplier": {
+            "$ref": "#/components/schemas/VoucherSupplier"
+          },
+          "travellers": {
+            "$ref": "#/components/schemas/Travellers"
+          },
+          "voucher_no": {
+            "maxLength": 32,
+            "title": "Voucher No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "voucher_no",
+          "service",
+          "service_date",
+          "supplier",
+          "travellers"
+        ],
+        "title": "Voucher",
+        "type": "object"
+      },
+      "VoucherSupplier": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "VoucherSupplier",
         "type": "object"
       },
       "WeeklyPattern": {
@@ -10064,6 +11034,341 @@
         ]
       }
     },
+    "/booking/b2b-desk/agencies": {
+      "get": {
+        "description": "The active agencies a booking can be entered for (the picker of \"New agency booking\").",
+        "operationId": "get_agencies_booking_b2b_desk_agencies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Agencies Booking B2B Desk Agencies Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Agencies",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/cancel": {
+      "post": {
+        "operationId": "cancel_for_agency_booking_b2b_desk_bookings__ref__cancel_post",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffCancelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel For Agency Booking B2B Desk Bookings  Ref  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel For Agency",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/cancellation": {
+      "get": {
+        "operationId": "get_cancellation_booking_b2b_desk_bookings__ref__cancellation_get",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Cancellation Booking B2B Desk Bookings  Ref  Cancellation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Cancellation",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/cancellation/override": {
+      "post": {
+        "operationId": "request_fee_override_booking_b2b_desk_bookings__ref__cancellation_override_post",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Request Fee Override Booking B2B Desk Bookings  Ref  Cancellation Override Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Fee Override",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/cancellation/override/approve": {
+      "post": {
+        "operationId": "approve_fee_override_booking_b2b_desk_bookings__ref__cancellation_override_approve_post",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Fee Override Booking B2B Desk Bookings  Ref  Cancellation Override Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Fee Override",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/cancellation/override/reject": {
+      "post": {
+        "operationId": "reject_fee_override_booking_b2b_desk_bookings__ref__cancellation_override_reject_post",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Fee Override Booking B2B Desk Bookings  Ref  Cancellation Override Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Fee Override",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
     "/booking/b2b-desk/bookings/{ref}/confirmation": {
       "get": {
         "operationId": "get_booking_confirmation_booking_b2b_desk_bookings__ref__confirmation_get",
@@ -10129,6 +11434,224 @@
           }
         ],
         "summary": "Get Booking Confirmation",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/lines/{line_ref}/reduce": {
+      "post": {
+        "operationId": "reduce_for_agency_booking_b2b_desk_bookings__ref__lines__line_ref__reduce_post",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_ref",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Line Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReduceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reduce For Agency Booking B2B Desk Bookings  Ref  Lines  Line Ref  Reduce Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reduce For Agency",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/reductions": {
+      "get": {
+        "operationId": "get_reductions_booking_b2b_desk_bookings__ref__reductions_get",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Reductions Booking B2B Desk Bookings  Ref  Reductions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Reductions",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/bookings/{ref}/vouchers": {
+      "get": {
+        "operationId": "get_vouchers_booking_b2b_desk_bookings__ref__vouchers_get",
+        "parameters": [
+          {
+            "description": "trip case id or code",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "trip case id or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "html",
+              "enum": [
+                "json",
+                "html"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Vouchers Booking B2B Desk Bookings  Ref  Vouchers Get"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Vouchers",
         "tags": [
           "b2b"
         ]
@@ -10410,6 +11933,367 @@
           }
         ],
         "summary": "Flag Incident",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departures/{departure_id}/manifest": {
+      "get": {
+        "operationId": "get_manifest_booking_b2b_desk_departures__departure_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "html"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Manifest Booking B2B Desk Departures  Departure Id  Manifest Get"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Manifest",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/entries": {
+      "get": {
+        "operationId": "get_entries_booking_b2b_desk_entries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "awaiting_approval",
+                    "booked",
+                    "rejected",
+                    "lapsed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Entries Booking B2B Desk Entries Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Entries",
+        "tags": [
+          "b2b"
+        ]
+      },
+      "post": {
+        "operationId": "post_entry_booking_b2b_desk_entries_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Entry Booking B2B Desk Entries Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Entry",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/entries/{entry_id}": {
+      "get": {
+        "operationId": "get_entry_booking_b2b_desk_entries__entry_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Entry Booking B2B Desk Entries  Entry Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Entry",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/entries/{entry_id}/approve": {
+      "post": {
+        "operationId": "approve_entry_booking_b2b_desk_entries__entry_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Entry Booking B2B Desk Entries  Entry Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Entry",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/entries/{entry_id}/reject": {
+      "post": {
+        "operationId": "reject_entry_booking_b2b_desk_entries__entry_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Entry Booking B2B Desk Entries  Entry Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Entry",
         "tags": [
           "b2b"
         ]
@@ -11073,6 +12957,203 @@
           }
         ],
         "summary": "Get Booking Confirmation",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/bookings/{booking_id}/lines/{line_ref}/reduce": {
+      "post": {
+        "description": "1.7 (AA-1075): a partial cancellation (fewer travellers on one per-person line; ``?dry_run=true`` previews).",
+        "operationId": "reduce_booking_line_booking_b2b_v1_bookings__booking_id__lines__line_ref__reduce_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Booking Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_ref",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Line Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 8,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReduceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineReduction"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "Reduce Booking Line",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/bookings/{booking_id}/vouchers": {
+      "get": {
+        "description": "1.7 (AA-1075): the service vouchers of the caller's own booking (no traveller names, no prices).",
+        "operationId": "get_booking_vouchers_booking_b2b_v1_bookings__booking_id__vouchers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Booking Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "html"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingVouchers"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "Get Booking Vouchers",
         "tags": [
           "b2b"
         ]
@@ -12257,8 +14338,27 @@
     },
     "/booking/b2b/v1/terms": {
       "get": {
+        "description": "1.7 (AA-1075): ``?source_id=`` (a CIS tour id) answers the payment terms of that tour.",
         "operationId": "get_partner_terms_booking_b2b_v1_terms_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
           {
             "description": "The calling agency's CIS tenant id (uuid)",
             "in": "header",
@@ -13861,6 +15961,68 @@
           }
         ],
         "summary": "Get Trip Plan",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/age-bands": {
+      "put": {
+        "operationId": "put_trip_plan_age_bands_booking_catalog_trip_plans__source_id__age_bands_put",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgeBandsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Trip Plan Age Bands Booking Catalog Trip Plans  Source Id  Age Bands Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Trip Plan Age Bands",
         "tags": [
           "catalog"
         ]
@@ -20389,7 +22551,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReasonIn"
+                "$ref": "#/components/schemas/CancelIn"
               }
             }
           },
@@ -20428,6 +22590,72 @@
           }
         ],
         "summary": "Cancel Booking",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/supplier-bookings/{booking_id}/cancel-fee": {
+      "post": {
+        "description": "AA-1075 (bk-14): the supplier's fee for a cancelled booking (null clears it); ``pricing.read`` too.",
+        "operationId": "record_cancel_fee_booking_supplier_bookings__booking_id__cancel_fee_post",
+        "parameters": [
+          {
+            "description": "supplier booking UUID",
+            "in": "path",
+            "name": "booking_id",
+            "required": true,
+            "schema": {
+              "description": "supplier booking UUID",
+              "format": "uuid",
+              "title": "Booking Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelFeeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Cancel Fee Booking Supplier Bookings  Booking Id  Cancel Fee Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Cancel Fee",
         "tags": [
           "operations"
         ]
@@ -22200,6 +24428,179 @@
           }
         ],
         "summary": "Update Tax Rule",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/tour-terms/{source_id}": {
+      "delete": {
+        "operationId": "delete_tour_terms_booking_tour_terms__source_id__delete",
+        "parameters": [
+          {
+            "description": "CIS tour id of the trip plan",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS tour id of the trip plan",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Tour Terms",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "get": {
+        "operationId": "list_tour_terms_booking_tour_terms__source_id__get",
+        "parameters": [
+          {
+            "description": "CIS tour id of the trip plan",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS tour id of the trip plan",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Tour Terms Booking Tour Terms  Source Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Tour Terms",
+        "tags": [
+          "agency-billing"
+        ]
+      },
+      "put": {
+        "operationId": "put_tour_terms_booking_tour_terms__source_id__put",
+        "parameters": [
+          {
+            "description": "CIS tour id of the trip plan",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS tour id of the trip plan",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TourTermsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Tour Terms Booking Tour Terms  Source Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Tour Terms",
         "tags": [
           "agency-billing"
         ]

@@ -15,6 +15,8 @@ of bk-038). Not in preview sessions; the E2E session stays read-only (global rul
 - ``POST /agency-billing/runs`` (queue a draft job) · ``GET /agency-billing/runs``
 - ``GET|POST /billing-entities``, ``PATCH /billing-entities/{id}`` · ``GET|POST /tax-rules``, ``PATCH /tax-rules/{id}``
 - ``GET /billing-terms`` · ``PUT /billing-terms/default`` · ``PUT|DELETE /billing-terms/agencies/{tenant_id}``
+- ``GET|PUT|DELETE /tour-terms/{source_id}`` (AA-1075 bk-18): a tour's deposit % and balance days, for every agency
+  or one (``tenant_id``); writes ``billing_config.write``
 - AA-1037 extras: ``GET /agency-billing/export.csv`` (``what`` invoices|payments, ``from``, ``to``; G5) ·
   ``GET /partner-terms-clauses`` · ``PUT /partner-terms-clauses/{code}`` (``billing_config.write``) ·
   ``POST /partner-terms-clauses/{code}/approve`` (``terms_clause.approve``, never the last editor; G6)
@@ -397,6 +399,46 @@ async def put_agency_terms(tenant_id: UUID, body: BillingTermsIn, staff: CanConf
 async def delete_agency_terms(tenant_id: UUID, staff: CanConfigure, pool: Pool) -> Response:
     async with pool.acquire() as conn:
         await config.delete_terms_override(conn, str(tenant_id), staff.cis_user_id)
+    return Response(status_code=204)
+
+
+# ── AA-1075 (bk-18): per-tour deposit and balance terms ──────────────────────
+
+SourceId = Annotated[str, Path(min_length=1, max_length=128, description="CIS tour id of the trip plan")]
+
+
+class TourTermsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: UUID | None = None  # None = the tour's terms for every agency
+    deposit_pct: Decimal = Field(ge=0, le=1, max_digits=5, decimal_places=4)
+    balance_days_before_departure: int = Field(ge=0, le=365)
+
+
+@router.get("/tour-terms/{source_id}")
+async def list_tour_terms(source_id: SourceId, _: CanRead, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return {"items": await config.list_plan_terms(conn, source_id)}
+
+
+@router.put("/tour-terms/{source_id}")
+async def put_tour_terms(source_id: SourceId, body: TourTermsIn, staff: CanConfigure, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await config.put_plan_terms(
+            conn,
+            source_id,
+            str(body.tenant_id) if body.tenant_id else None,
+            body.model_dump(include={"deposit_pct", "balance_days_before_departure"}),
+            staff.cis_user_id,
+        )
+
+
+@router.delete("/tour-terms/{source_id}", status_code=204)
+async def delete_tour_terms(
+    source_id: SourceId, staff: CanConfigure, pool: Pool, tenant_id: UUID | None = None
+) -> Response:
+    async with pool.acquire() as conn:
+        await config.delete_plan_terms(conn, source_id, str(tenant_id) if tenant_id else None, staff.cis_user_id)
     return Response(status_code=204)
 
 

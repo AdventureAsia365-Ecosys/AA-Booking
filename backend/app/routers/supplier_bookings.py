@@ -16,7 +16,7 @@ global rule in ``app.auth.staff``.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -63,6 +63,11 @@ class BookingFacts(BaseModel):
     net_amount: Money | None = None
     net_currency: Currency | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    # AA-1075 (bk-12): what the agency voucher prints; never traveller names.
+    service_time: time | None = None
+    pickup_point: str | None = Field(default=None, max_length=200)
+    dropoff_point: str | None = Field(default=None, max_length=200)
+    voucher_note: str | None = Field(default=None, max_length=500)
 
 
 class NewBooking(BookingFacts):
@@ -87,6 +92,19 @@ class ReasonIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: Reason
+
+
+class CancelIn(ReasonIn):
+    # AA-1075 (bk-14): the supplier's cancellation fee when it is already known (else recorded later).
+    supplier_cancel_fee: Money | None = None
+    supplier_cancel_fee_currency: Currency | None = None
+
+
+class CancelFeeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    supplier_cancel_fee: Money | None
+    supplier_cancel_fee_currency: Currency | None
 
 
 class NewFile(BaseModel):
@@ -190,10 +208,27 @@ async def decline_booking(body: DeclineIn, booking_id: BookingId, staff: CanWrit
 
 
 @router.post("/supplier-bookings/{booking_id}/cancel", responses=b2c.GONE_RESPONSE)
-async def cancel_booking(body: ReasonIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+async def cancel_booking(body: CancelIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         await b2c.refuse_b2c_supplier_booking_write(conn, str(booking_id))  # AA-1037
-        return await service.cancel(conn, staff, str(booking_id), reason=body.reason)
+        return await service.cancel(
+            conn,
+            staff,
+            str(booking_id),
+            reason=body.reason,
+            supplier_cancel_fee=body.supplier_cancel_fee,
+            supplier_cancel_fee_currency=body.supplier_cancel_fee_currency,
+        )
+
+
+@router.post("/supplier-bookings/{booking_id}/cancel-fee", responses=b2c.GONE_RESPONSE)
+async def record_cancel_fee(body: CancelFeeIn, booking_id: BookingId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+    """AA-1075 (bk-14): the supplier's fee for a cancelled booking (null clears it); ``pricing.read`` too."""
+    async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_supplier_booking_write(conn, str(booking_id))  # AA-1037
+        return await service.record_cancel_fee(
+            conn, staff, str(booking_id), fee=body.supplier_cancel_fee, currency=body.supplier_cancel_fee_currency
+        )
 
 
 @router.post("/supplier-bookings/{booking_id}/rerequest", responses=b2c.GONE_RESPONSE)

@@ -35,6 +35,8 @@ RULE_FIELDS = (
     "valid_from",
     "note",
     "rrp_markup_pct",
+    "child_pct",
+    "infant_flat_usd",
 )
 FX_FIELDS = ("currency", "rate_per_usd", "buffer_pct", "as_of", "source")
 
@@ -56,7 +58,8 @@ WITH in_force AS (
     ORDER BY r.channel, r.valid_from DESC
 )
 SELECT p.id::text AS id, p.channel, p.target_margin, p.floor_margin, p.peak_uplift_pts, p.card_fee_pct,
-       p.valid_from, p.note, p.rrp_markup_pct, p.created_at, p.created_by, cs.name AS created_by_name,
+       p.valid_from, p.note, p.rrp_markup_pct, p.child_pct, p.infant_flat_usd, p.created_at, p.created_by,
+       cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
        {_STATUS.format(day="valid_from")} AS status
 FROM booking.pricing_rules p
@@ -144,6 +147,8 @@ def _rule(row: Any, staff: Staff) -> dict[str, Any]:
         "valid_from": row["valid_from"],
         "note": row["note"],
         "rrp_markup_pct": row.get("rrp_markup_pct"),
+        "child_pct": row.get("child_pct"),
+        "infant_flat_usd": row.get("infant_flat_usd"),
     }
 
 
@@ -215,8 +220,8 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
             """
             INSERT INTO booking.pricing_rules
                 (channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct, valid_from, note, created_by,
-                 rrp_markup_pct)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 rrp_markup_pct, child_pct, infant_flat_usd)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id::text
             """,
             channel.value,
@@ -228,6 +233,8 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
             note,
             staff.cis_user_id,
             markup,
+            data.get("child_pct"),
+            data.get("infant_flat_usd"),
         )
     except asyncpg.UniqueViolationError:
         raise Conflict(

@@ -68,14 +68,22 @@ def credit_out(row: Any) -> dict[str, Any]:
     }
 
 
-async def partner_terms(conn: asyncpg.Connection, *, tenant_id: str, today: date) -> dict[str, Any]:
-    terms = await config.terms_for(conn, tenant_id)
+async def partner_terms(
+    conn: asyncpg.Connection, *, tenant_id: str, today: date, source_id: str | None = None
+) -> dict[str, Any]:
+    """AA-1075 (bk-18): with ``source_id`` (a CIS tour) the deposit % and balance days of that tour's most specific
+    terms row (agency + tour > tour > agency > default); an unknown tour reads the agency's terms."""
+    plan_id = None
+    if source_id is not None:
+        plan_id = await conn.fetchval("SELECT id::text FROM booking.trip_plans WHERE source_id = $1", source_id)
+    terms = await config.plan_terms(conn, tenant_id, plan_id)
     payment = None
     if terms is not None:
         payment = {
             "deposit_pct": pct_text(terms["deposit_pct"]),
             "balance_days_before_departure": int(terms["balance_days_before_departure"]),
             "settlement_due_days": int(terms["settlement_due_days"]),
+            "scope": terms["scope"],
         }
     status = await conn.fetchrow(STATUS_SQL, tenant_id)
     policy = await cancellation.policy_in_force(conn, None, today)

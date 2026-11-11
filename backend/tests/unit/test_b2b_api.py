@@ -483,6 +483,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/invoices",  # 1.5 (AA-1037)
         "/booking/b2b/v1/invoices/{number}",  # 1.5 (AA-1037)
         "/booking/b2b/v1/billing-status",  # 1.5 (AA-1037)
+        "/booking/b2b/v1/bookings/{booking_id}/vouchers",  # 1.7 (AA-1075)
+        "/booking/b2b/v1/bookings/{booking_id}/lines/{line_ref}/reduce",  # 1.7 (AA-1075)
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -508,6 +510,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "AgencyInvoicePage",
         "AgencyInvoice",
         "BillingStatus",
+        "BookingVouchers",
+        "LineReduction",
     }
     keys: set[str] = set()
     pending, seen = list(refs), set()

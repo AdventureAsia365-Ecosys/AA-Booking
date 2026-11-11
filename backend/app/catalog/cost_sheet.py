@@ -190,6 +190,8 @@ class NetRow:
     net_currency: str
     season: str | None
     peak: bool
+    # bk-047 (AA-1075, bk-15): the single supplement per person (net_currency) of the window, None without a room.
+    single_net: Decimal | None = None
 
 
 @dataclass
@@ -314,6 +316,52 @@ def per_person(cell: Cell, party: int, fx: dict[str, engine.FxRate]) -> tuple[De
     return (total / party).quantize(CENT, rounding=ROUND_HALF_UP), currency
 
 
+def single_supplement(
+    win: Window, parts: Sequence[Part], found: dict[RateAsk, dict[str, Any] | None], fx: dict[str, engine.FxRate]
+) -> tuple[Decimal, str] | None:
+    """AA-1075 (bk-15): the net single supplement per person of a start date window: for every room component that
+    holds two, the single room rate less half the double rate of its night (never below 0). None when the plan has
+    no such room or a rate is missing. The asks of bands 1 and 2 already read both rates."""
+    cell = Cell()
+    rooms = 0
+    for part in parts:
+        if not part.room_type_id or (part.max_occupancy is not None and part.max_occupancy < 2):
+            continue
+        rooms += 1
+        on = win.start + timedelta(days=part.offset)
+        single = found.get(RateAsk(part.room_type_id, None, on, 1))
+        double = found.get(RateAsk(part.room_type_id, None, on, 2))
+        if single is None or double is None:
+            return None
+        cell.add(single_part(single, double, fx), engine.BASE_CURRENCY if single["currency"] != double["currency"]
+                 else single["currency"], None)  # fmt: skip
+    if not rooms:
+        return None
+    return per_person(cell, 1, fx)
+
+
+def single_part(single: dict[str, Any], double: dict[str, Any], fx: dict[str, engine.FxRate]) -> Decimal:
+    """single - double / 2 of one night, in the rates' currency (USD when the two differ), never below 0."""
+    one, two = Decimal(str(single["net_amount"])), Decimal(str(double["net_amount"]))
+    if single["currency"] != double["currency"]:
+        one, two = engine.to_usd(one, single["currency"], fx), engine.to_usd(two, double["currency"], fx)
+    return max(one - two / 2, Decimal(0))
+
+
+def in_currency(amount: Decimal, currency: str, target: str, fx: dict[str, engine.FxRate]) -> Decimal | None:
+    """``amount`` of ``currency`` in ``target`` at the plain rates (None without a rate), to the cent."""
+    if currency == target:
+        return amount
+    try:
+        usd = engine.to_usd(amount, currency, fx)
+        out = engine.from_usd(usd, fx.get(target), buffer=False) if target != engine.BASE_CURRENCY else usd
+    except engine.MissingFxRate:
+        return None
+    if target != engine.BASE_CURRENCY and target not in fx:
+        return None
+    return out.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
 def season_label(cell: Cell) -> tuple[str | None, bool]:
     labels = sorted(cell.seasons)
     label = " / ".join(labels)[:SEASON_MAX] or None
@@ -321,31 +369,40 @@ def season_label(cell: Cell) -> tuple[str | None, bool]:
 
 
 def net_rows(
-    wins: Sequence[Window], grid: Sequence[Sequence[Cell]], fx: dict[str, engine.FxRate]
+    wins: Sequence[Window],
+    grid: Sequence[Sequence[Cell]],
+    fx: dict[str, engine.FxRate],
+    singles: Sequence[tuple[Decimal, str] | None] | None = None,
 ) -> tuple[list[NetRow], int]:
-    """Merge the windows whose nets, season and peak match; returns the rows and the count of unpriced cells."""
+    """Merge the windows whose nets, season, peak and single supplement match; returns the rows and the count of
+    unpriced cells. ``singles`` (AA-1075): the single supplement of each window (:func:`single_supplement`)."""
     unpriced = 0
-    keyed: list[tuple[Window, tuple[Any, ...], str | None, bool]] = []
+    keyed: list[tuple[Window, tuple[Any, ...], str | None, bool, Any]] = []
     two = next(i for i, (low, _) in enumerate(PAX_BANDS) if low == 2)
-    for win, row in zip(wins, grid, strict=True):
+    for i, (win, row) in enumerate(zip(wins, grid, strict=True)):
         nets = []
         for (low, _), cell in zip(PAX_BANDS, row, strict=True):
             value = per_person(cell, low, fx)
             unpriced += value is None
             nets.append(value)
         season, peak = season_label(row[two])
-        keyed.append((win, tuple(nets), season, peak))
-    merged: list[tuple[Window, tuple[Any, ...], str | None, bool]] = []
-    for win, nets, season, peak in keyed:
-        if merged and merged[-1][1:] == (nets, season, peak) and merged[-1][0].end + timedelta(days=1) == win.start:
-            merged[-1] = (Window(merged[-1][0].start, win.end), nets, season, peak)
+        keyed.append((win, tuple(nets), season, peak, singles[i] if singles else None))
+    merged: list[tuple[Window, tuple[Any, ...], str | None, bool, Any]] = []
+    for win, nets, season, peak, single in keyed:
+        if (
+            merged
+            and merged[-1][1:] == (nets, season, peak, single)
+            and merged[-1][0].end + timedelta(days=1) == win.start
+        ):
+            merged[-1] = (Window(merged[-1][0].start, win.end), nets, season, peak, single)
         else:
-            merged.append((win, nets, season, peak))
+            merged.append((win, nets, season, peak, single))
     out: list[NetRow] = []
-    for win, nets, season, peak in merged:
+    for win, nets, season, peak, single in merged:
         for (low, high), value in zip(PAX_BANDS, nets, strict=True):
             if value is not None:
-                out.append(NetRow(win.start, win.end, low, high, value[0], value[1], season, peak))
+                single_net = in_currency(single[0], single[1], value[1], fx) if single else None
+                out.append(NetRow(win.start, win.end, low, high, value[0], value[1], season, peak, single_net))
     return out, unpriced
 
 
@@ -429,6 +486,7 @@ def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str
             if quote.final_total <= 0 or quote.final_total >= prices.MAX_AMOUNT:
                 refused += 1
                 continue
+            extra = pax_type_prices(net, dated, pricing)
             out.append(
                 {
                     "channel": channel.value,
@@ -448,9 +506,48 @@ def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str
                     "computed": True,
                     "rrp_amount": prices.rrp_for(channel.value, quote.final_total, SELLING_CURRENCY, pricing.markup),
                     "created_by": None,
+                    **extra,
                 }
             )
     return out, refused
+
+
+def _sell(net: Decimal | None, row: NetRow, rule: repository.DatedRule, pricing: Pricing) -> Decimal | None:
+    """One per-person net priced by the channel's rule like the adult price (None without a net or on an error)."""
+    if net is None:
+        return None
+    if net == 0:
+        return Decimal("0.00")
+    try:
+        quote = engine.price_quote(
+            [engine.CostLine(net, row.net_currency)], rule.rule, currency=SELLING_CURRENCY, peak=row.peak,
+            rates=pricing.fx,
+        )  # fmt: skip
+    except engine.PricingError:
+        return None
+    return quote.final_total if 0 < quote.final_total < prices.MAX_AMOUNT else None
+
+
+def pax_type_prices(row: NetRow, rule: repository.DatedRule, pricing: Pricing) -> dict[str, Decimal | None]:
+    """AA-1075 (bk-15): the child, infant and single supplement nets and prices of one computed row: child = the adult
+    net x the rule's ``child_pct``; infant = the rule's ``infant_flat_usd`` in the row's net currency; single = the
+    window's single supplement (:func:`single_supplement`). Each priced by the same rule; None when not set."""
+    child_net = (
+        (row.net_amount * rule.child_pct).quantize(CENT, rounding=ROUND_HALF_UP) if rule.child_pct is not None else None
+    )
+    infant_net = (
+        in_currency(rule.infant_flat_usd, engine.BASE_CURRENCY, row.net_currency, pricing.fx)
+        if rule.infant_flat_usd is not None
+        else None
+    )
+    return {
+        "child_net_amount": child_net,
+        "child_amount": _sell(child_net, row, rule, pricing),
+        "infant_net_amount": infant_net,
+        "infant_amount": _sell(infant_net, row, rule, pricing),
+        "single_supplement_net_amount": row.single_net,
+        "single_supplement_amount": _sell(row.single_net, row, rule, pricing),
+    }
 
 
 def fit(row: dict[str, Any], kept: Sequence[dict[str, Any]], today: date) -> dict[str, Any] | None:
@@ -520,7 +617,8 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
     info["windows"] = len(wins)
     wanted = asks(wins, parts)
     found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
-    nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx)
+    singles = [single_supplement(w, parts, found, pricing.fx) for w in wins]
+    nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx, singles)
     rows, info["refused"] = priced_rows(nets, pricing)
     if not rows:
         info["reason"] = NO_RATES

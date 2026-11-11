@@ -138,15 +138,27 @@ FROM booking.b2b_quote_lines WHERE quote_id = $1::uuid ORDER BY line_no
 
 @dataclass(frozen=True)
 class Caller:
-    """Who acts: the partner row id, its agency tenant and the M2M client (``app.b2b.access.B2BContext``)."""
+    """Who acts: the partner row id, its agency tenant and the M2M client (``app.b2b.access.B2BContext``).
+
+    AA-1075 (bk-11): ``staff_ref`` is set when AA staff act for the agency (``app.b2b.desk_bookings``): the quote and
+    hold still carry the partner's M2M client (the CHECKs of bk-019 / bk-020), the audit rows name the staff member and
+    the trip case is stamped ``entered_via = 'staff'``."""
 
     partner_id: str
     tenant_id: str
     client_id: str
+    staff_ref: str | None = None
+    # The staff member who keyed the booking in, when another one confirms it (an approved price override); the
+    # trip case names this person (``entered_by``), the audit rows the one acting (``staff_ref``).
+    entered_by: str | None = None
 
     @property
     def actor(self) -> str:
-        return f"{ACTOR_PREFIX}{self.client_id}"
+        return self.staff_ref or f"{ACTOR_PREFIX}{self.client_id}"
+
+    @property
+    def actor_type(self) -> str:
+        return "staff" if self.staff_ref else "system"
 
 
 def _id(value: str) -> str | None:
@@ -391,6 +403,30 @@ async def create_hold(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+async def place_in(
+    conn: asyncpg.Connection,
+    caller: Caller,
+    *,
+    quote_id: str,
+    price_hash: str,
+    proposal_ref: str,
+    proposal_version: int,
+    idempotency_key: str,
+    now: datetime,
+) -> dict[str, Any]:
+    """:func:`create_hold` inside the caller's transaction (AA-1075: the staff desk books in one transaction)."""
+    return await _create(
+        conn,
+        caller,
+        quote_id=quote_id,
+        price_hash=price_hash,
+        proposal_ref=proposal_ref,
+        proposal_version=proposal_version,
+        idempotency_key=idempotency_key,
+        now=now,
+    )
+
+
 async def _create(
     conn: asyncpg.Connection,
     caller: Caller,
@@ -496,7 +532,7 @@ async def _create(
     )
     await audit.record(
         conn,
-        actor_type="system",
+        actor_type=caller.actor_type,
         actor_ref=caller.actor,
         action="b2b_hold.placed",
         entity_type="b2b_hold",
@@ -542,7 +578,7 @@ async def release_hold(pool: asyncpg.Pool, caller: Caller, hold_id: str) -> None
         )
         await audit.record(
             conn,
-            actor_type="system",
+            actor_type=caller.actor_type,
             actor_ref=caller.actor,
             action="b2b_hold.released",
             entity_type="b2b_hold",
@@ -601,7 +637,7 @@ async def extend_hold(
         )
         await audit.record(
             conn,
-            actor_type="system",
+            actor_type=caller.actor_type,
             actor_ref=caller.actor,
             action="b2b_hold.extended",
             entity_type="b2b_hold",
@@ -653,57 +689,75 @@ async def confirm_hold(
     """Confirm an active hold (contract ``Booking`` body). Idempotent on the hold itself: a confirmed hold returns its
     booking whatever ``Idempotency-Key`` the retry carries (the key is kept in the audit row)."""
     async with pool.acquire() as conn, conn.transaction():
-        hold = await _find(conn, caller, hold_id, lock=True)
-        quote = await _quote(conn, caller, hold["quote_id"])
-        _same_hash(quote, price_hash)
-        if hold["stored_status"] == "confirmed":
-            return await _booking_out(conn, hold)
-        if hold["status"] != "active":
-            raise B2BError("hold_expired", f"the hold is {hold['status']}; place a new hold")
-        lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
-        # AA-986 L5: never sell a tour that left the catalog; a confirmed hold above still returns its booking.
-        await served.require_served(conn, [(r["line_ref"], r["component_id"]) for r in lines])
-        held = await conn.fetch(LINES_SQL, hold["id"])
-        await _recheck_under_lock(conn, hold, held)
-        case_id, code = await _open_case(conn, caller, hold, quote, lines)
-        # AA-974: the cancellation policy in force today is locked on the hold; a later cancel charges by it.
-        policy = await cancellation.policy_for_lines(conn, lines, datetime.now(UTC).date())
-        # The hold first: the line.confirmed events (bk-022 trigger on the lines) read its trip case as booking_id.
-        await conn.execute(
-            "UPDATE booking.b2b_holds SET status = 'confirmed', confirmed_at = now(), trip_case_id = $2::uuid,"
-            " deposit_ref = $3, cancellation_policy_id = $4::uuid WHERE id = $1::uuid",
-            hold["id"],
-            case_id,
-            deposit_ref,
-            policy.id if policy is not None else None,
+        out, code = await confirm_in(
+            conn, caller, hold_id, price_hash=price_hash, deposit_ref=deposit_ref, idempotency_key=idempotency_key
         )
-        await conn.execute(
-            "UPDATE booking.b2b_hold_lines SET status = 'confirmed' WHERE hold_id = $1::uuid AND held_as = 'available'",
-            hold["id"],
-        )
-        # AA-975: on-request lines go to the desk with their answer deadline (1 business day, ops time zone).
-        await desk.open_requests(conn, hold_id=hold["id"], case_id=case_id, case_code=code)
-        await audit.record(
-            conn,
-            actor_type="system",
-            actor_ref=caller.actor,
-            action="b2b_hold.confirmed",
-            entity_type="b2b_hold",
-            entity_id=hold["id"],
-            before={"status": "active"},
-            after={
-                "status": "confirmed",
-                "trip_case_id": case_id,
-                "deposit_ref": deposit_ref,
-                "idempotency_key": idempotency_key,
-            },
-            entity_label=code,
-            summary=f"B2B hold confirmed as {code}",
-        )
-        confirmed = await conn.fetchrow(HOLD_SQL + " WHERE h.id = $1::uuid", hold["id"])
-        out = await _booking_out(conn, confirmed)
-    log.info("b2b_hold_confirmed hold=%s trip_case=%s partner=%s", hold["id"], code, caller.partner_id)
+    log.info("b2b_hold_confirmed hold=%s trip_case=%s partner=%s", out["hold_id"], code, caller.partner_id)
     return out
+
+
+async def confirm_in(
+    conn: asyncpg.Connection,
+    caller: Caller,
+    hold_id: str,
+    *,
+    price_hash: str,
+    deposit_ref: str | None,
+    idempotency_key: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    """:func:`confirm_hold` inside the caller's transaction (AA-1075: the staff desk books in one transaction).
+    Returns the contract ``Booking`` body and the trip case code."""
+    hold = await _find(conn, caller, hold_id, lock=True)
+    quote = await _quote(conn, caller, hold["quote_id"])
+    _same_hash(quote, price_hash)
+    if hold["stored_status"] == "confirmed":
+        out = await _booking_out(conn, hold)
+        return out, out["trip_case_code"]
+    if hold["status"] != "active":
+        raise B2BError("hold_expired", f"the hold is {hold['status']}; place a new hold")
+    lines = await conn.fetch(QUOTE_LINES_SQL, quote["id"])
+    # AA-986 L5: never sell a tour that left the catalog; a confirmed hold above still returns its booking.
+    await served.require_served(conn, [(r["line_ref"], r["component_id"]) for r in lines])
+    held = await conn.fetch(LINES_SQL, hold["id"])
+    await _recheck_under_lock(conn, hold, held)
+    case_id, code = await _open_case(conn, caller, hold, quote, lines)
+    # AA-974: the cancellation policy in force today is locked on the hold; a later cancel charges by it.
+    policy = await cancellation.policy_for_lines(conn, lines, datetime.now(UTC).date())
+    # The hold first: the line.confirmed events (bk-022 trigger on the lines) read its trip case as booking_id.
+    await conn.execute(
+        "UPDATE booking.b2b_holds SET status = 'confirmed', confirmed_at = now(), trip_case_id = $2::uuid,"
+        " deposit_ref = $3, cancellation_policy_id = $4::uuid WHERE id = $1::uuid",
+        hold["id"],
+        case_id,
+        deposit_ref,
+        policy.id if policy is not None else None,
+    )
+    await conn.execute(
+        "UPDATE booking.b2b_hold_lines SET status = 'confirmed' WHERE hold_id = $1::uuid AND held_as = 'available'",
+        hold["id"],
+    )
+    # AA-975: on-request lines go to the desk with their answer deadline (1 business day, ops time zone).
+    await desk.open_requests(conn, hold_id=hold["id"], case_id=case_id, case_code=code)
+    await audit.record(
+        conn,
+        actor_type=caller.actor_type,
+        actor_ref=caller.actor,
+        action="b2b_hold.confirmed",
+        entity_type="b2b_hold",
+        entity_id=hold["id"],
+        before={"status": "active"},
+        after={
+            "status": "confirmed",
+            "trip_case_id": case_id,
+            "deposit_ref": deposit_ref,
+            "idempotency_key": idempotency_key,
+        },
+        entity_label=code,
+        summary=f"B2B hold confirmed as {code}",
+    )
+    confirmed = await conn.fetchrow(HOLD_SQL + " WHERE h.id = $1::uuid", hold["id"])
+    out = await _booking_out(conn, confirmed)
+    return out, code
 
 
 async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[Any]) -> dict[str, Any]:
@@ -794,14 +848,16 @@ async def _open_case(
 
     # The status history's changed_by is a staff key (FK): a machine change is a system change (empty actor); the
     # note names the M2M client and the hold.
-    await conn.execute("SELECT set_config('booking.actor', '', true)")
+    # A staff booking (AA-1075) names the staff member; the trip case says it was entered by AA staff, so the
+    # b2b_holds trigger (bk-047) emits booking.created_by_aa when the hold is confirmed below.
+    await conn.execute("SELECT set_config('booking.actor', $1, true)", caller.staff_ref or "")
     await conn.execute(
         "SELECT set_config('booking.status_note', $1, true)", f"B2B confirm by {caller.actor} of hold {hold['id']}"
     )
     case = await conn.fetchrow(
         "INSERT INTO booking.trip_cases (status, source_system, source_id, channel, party_tenant_id,"
-        " start_date, end_date, pax, pax_adults, pax_children, currency, idempotency_key)"
-        " VALUES ('confirmed', 'crm', $1, 'b2b', $2::uuid, $3, $4, $5, $6, $7, $8, $9)"
+        " start_date, end_date, pax, pax_adults, pax_children, currency, idempotency_key, entered_via, entered_by)"
+        " VALUES ('confirmed', 'crm', $1, 'b2b', $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
         " RETURNING id::text AS id, code",
         hold["proposal_ref"],
         caller.tenant_id,
@@ -812,6 +868,8 @@ async def _open_case(
         biggest["pax_child"],
         quote["currency"],
         f"{CASE_KEY_PREFIX}{hold['id']}",
+        "staff" if caller.staff_ref else "api",
+        caller.entered_by or caller.staff_ref,
     )
     titles = await _line_titles(conn, lines, plan_source)
     # AA-1013: the version reads as the trip sold (the first trip plan line's tour, else the first line); the agency's
@@ -868,7 +926,7 @@ async def _open_case(
     )
     await audit.record(
         conn,
-        actor_type="system",
+        actor_type=caller.actor_type,
         actor_ref=caller.actor,
         action="trip_case.created",
         entity_type="trip_case",
@@ -878,6 +936,7 @@ async def _open_case(
             "party_tenant_id": caller.tenant_id,
             "status": "confirmed",
             "source_system": "crm",
+            "entered_via": "staff" if caller.staff_ref else "api",
             "hold_id": hold["id"],
             "quote_id": quote["id"],
             "lines": len(lines),

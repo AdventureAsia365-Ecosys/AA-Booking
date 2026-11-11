@@ -105,7 +105,8 @@ DETAIL_COLUMNS = f"""
     t.inclusions, t.exclusions, t.best_time_to_go, t.group_size, t.lifecycle_stage, t.itinerary_text,
     t.cover_photo_path, t.photo_count, t.published_at, t.updated_at, t.content_hash, {PLAN_COLUMNS},
     p.commercial_notes, p.created_by, cb.name AS created_by_name, p.created_at AS commercial_created_at,
-    p.updated_by, ub.name AS updated_by_name, p.updated_at AS commercial_updated_at
+    p.updated_by, ub.name AS updated_by_name, p.updated_at AS commercial_updated_at,
+    p.child_age_max, p.infant_age_max
 """
 JOIN = (
     "FROM catalog.v_tour t LEFT JOIN booking.trip_plans p"
@@ -715,6 +716,48 @@ async def save_commercial(
         summary=_summary(created, new, changed),
     )
     return {**await get_plan(conn, staff, source_id), "changed": changed}
+
+
+async def save_age_bands(
+    conn: asyncpg.Connection, staff: Staff, source_id: str, *, child_age_max: int | None, infant_age_max: int | None
+) -> dict[str, Any]:
+    """AA-1075 (bk-15, bk-047): the oldest ages at the child and infant prices of a plan (None = the defaults in
+    settings ``b2b_child_age_max`` / ``b2b_infant_age_max``). Needs the plan's commercial row; audited."""
+    if child_age_max is not None and infant_age_max is not None and infant_age_max >= child_age_max:
+        raise Invalid("invalid_age_bands", "the infant age must be below the child age")
+    row = await conn.fetchrow(
+        "SELECT id::text AS id, child_age_max, infant_age_max FROM booking.trip_plans"
+        " WHERE source_system = $1 AND source_id = $2 FOR UPDATE",
+        SOURCE_SYSTEM,
+        source_id,
+    )
+    if row is None:
+        raise NotFound("trip_plan_not_found", "save the commercial details of this tour first")
+    if (row["child_age_max"], row["infant_age_max"]) != (child_age_max, infant_age_max):
+        try:
+            await conn.execute(
+                "UPDATE booking.trip_plans SET child_age_max = $2, infant_age_max = $3, updated_by = $4"
+                " WHERE id = $1::uuid",
+                row["id"],
+                child_age_max,
+                infant_age_max,
+                staff.cis_user_id,
+            )
+        except asyncpg.CheckViolationError as exc:
+            raise Invalid("invalid_age_bands", exc.constraint_name or "check violation") from exc
+        await audit.record(
+            conn,
+            actor_type="staff",
+            actor_ref=staff.cis_user_id,
+            action="trip_plan.age_bands_set",
+            entity_type="trip_plan",
+            entity_id=row["id"],
+            before={"child_age_max": row["child_age_max"], "infant_age_max": row["infant_age_max"]},
+            after={"child_age_max": child_age_max, "infant_age_max": infant_age_max},
+            entity_label=source_id[:80],
+            summary=f"Age bands: child up to {child_age_max or 'default'}, infant up to {infant_age_max or 'default'}",
+        )
+    return await get_plan(conn, staff, source_id)
 
 
 def _summary(created: bool, new: dict[str, Any], changed: list[str]) -> str:
