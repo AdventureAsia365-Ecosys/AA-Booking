@@ -92,6 +92,10 @@ def departure_row(**kw: Any) -> dict[str, Any]:
         "capacity": 6,
         "status": "scheduled",
         "auto_confirm": True,
+        "min_to_operate": 0,  # AA-1073 (bk-046)
+        "sales_cutoff_days": 0,
+        "decision_days_before": 21,
+        "at_risk_at": None,
         "created_at": NOW,
         "updated_at": NOW,
         "source_id": "src-1",
@@ -292,10 +296,16 @@ def test_answer_line_refusals_and_replays() -> None:
 
 
 def test_summary_counts() -> None:
-    conn = ScriptedConn().on("FILTER", {"open": 3, "overdue": 1, "due_soon": 1}).on("departure_incidents", 2)
+    conn = (
+        ScriptedConn()
+        .on("FILTER", {"open": 3, "overdue": 1, "due_soon": 1})
+        .on("departure_incidents", 2)
+        .on("d.at_risk_at IS NOT NULL", 1)  # AA-1073
+    )
     assert run(desk.summary(conn, now=NOW)) == {
         "on_request": {"open": 3, "overdue": 1, "due_soon": 1},
         "open_incidents": 2,
+        "departures_at_risk": 1,
         "due_soon_hours": desk.DUE_SOON_HOURS,
     }
     [args] = conn.sql("FILTER")

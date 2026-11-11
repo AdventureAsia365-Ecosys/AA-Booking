@@ -463,7 +463,7 @@ async def _create(
         )
         for r in lines
     ]
-    result, locked = await departures.lock_departures(conn, asks, today=now.date())
+    result, locked = await departures.lock_departures(conn, asks, today=now.date(), partner_id=caller.partner_id)
     await _check_departure_rehold_limit(conn, caller, list(locked), now)
     for ask, (availability, _, why) in zip(asks, result, strict=True):
         if availability == departures.SOLD_OUT:

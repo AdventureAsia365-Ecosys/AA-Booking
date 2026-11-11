@@ -43,7 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import b2c, catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
-from app.b2b import departures, plan_components
+from app.b2b import allotments, departures, plan_components
 from app.catalog import cost_sheet, geo, price_history, price_readiness, trip_plan_prices, trip_plans
 from app.errors import NotFound
 from app.pricing import engine
@@ -59,6 +59,8 @@ CanStartCase = Annotated[Staff, Depends(require("trip_case.write"))]
 CanReadSupply = Annotated[Staff, Depends(require("supply.read"))]
 CanReadPrices = Annotated[Staff, Depends(require("pricing.read"))]
 CanAdminCatalog = Annotated[Staff, Depends(require("catalog.admin"))]
+CanReadDesk = Annotated[Staff, Depends(require("b2b_desk.read"))]
+CanWriteDesk = Annotated[Staff, Depends(require("b2b_desk.write"))]
 IsoCode = Annotated[str, Path(pattern=r"^[A-Za-z]{2}$", description="ISO 3166-1 alpha-2 country code")]
 GeoStatus = Literal["active", "inactive"]
 ReadinessStatus = Literal[
@@ -448,6 +450,11 @@ async def put_trip_plan_components(
 # ── Fixed departures of a plan (bk-020, AA-973: what booking.b2b.v1 /departures lists and holds take seats from) ──
 
 
+MinToOperate = Annotated[int, Field(ge=0, le=departures.MAX_CAPACITY)]
+CutoffDays = Annotated[int, Field(ge=0, le=departures.MAX_CUTOFF_DAYS)]
+DecisionDays = Annotated[int, Field(ge=0, le=departures.MAX_DECISION_DAYS)]
+
+
 class DepartureIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -455,6 +462,10 @@ class DepartureIn(BaseModel):
     capacity: int = Field(ge=0, le=departures.MAX_CAPACITY)
     auto_confirm: bool = True
     status: Literal["scheduled", "guaranteed"] = "scheduled"
+    # AA-1073 (bk-046): 0 = no minimum; sales close on start - cutoff; the go / cancel decision on start - decision.
+    min_to_operate: MinToOperate = 0
+    sales_cutoff_days: CutoffDays = 0
+    decision_days_before: DecisionDays = departures.DEFAULT_DECISION_DAYS
 
 
 class DeparturePatch(BaseModel):
@@ -463,6 +474,47 @@ class DeparturePatch(BaseModel):
     capacity: int | None = Field(default=None, ge=0, le=departures.MAX_CAPACITY)
     status: Literal["scheduled", "guaranteed", "cancelled"] | None = None
     auto_confirm: bool | None = None
+    min_to_operate: MinToOperate | None = None
+    sales_cutoff_days: CutoffDays | None = None
+    decision_days_before: DecisionDays | None = None
+
+
+class WeeklyPattern(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["weekly"]
+    weekdays: list[Annotated[int, Field(ge=1, le=7)]] = Field(min_length=1, max_length=7)
+
+
+class MonthlyPattern(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["monthly"]
+    day: int = Field(ge=1, le=31)
+
+
+class DepartureGenerateIn(BaseModel):
+    """AA-1073 (bk-02): departures of a weekly or monthly pattern; dates the plan already has are skipped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    date_from: date
+    date_to: date
+    pattern: Annotated[WeeklyPattern | MonthlyPattern, Field(discriminator="kind")]
+    capacity: int = Field(ge=0, le=departures.MAX_CAPACITY)
+    min_to_operate: MinToOperate = 0
+    sales_cutoff_days: CutoffDays = 0
+    decision_days_before: DecisionDays = departures.DEFAULT_DECISION_DAYS
+    auto_confirm: bool = True
+    dry_run: bool = False
+
+
+class AllotmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    partner_id: uuid.UUID
+    seats: int = Field(ge=1, le=allotments.MAX_SEATS)
+    release_days_before: int = Field(ge=0, le=allotments.MAX_RELEASE_DAYS)
 
 
 @router.get("/trip-plans/{source_id}/departures")
@@ -485,9 +537,53 @@ async def post_trip_plan_departure(
         return await departures.create_departure(conn, staff, source_id, body.model_dump())
 
 
+@router.post("/trip-plans/{source_id}/departures:generate")
+async def post_generate_departures(
+    body: DepartureGenerateIn, source_id: SourceId, staff: CanWritePlans, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await departures.generate_departures(conn, staff, source_id, body.model_dump())
+
+
 @router.patch("/departures/{departure_id}")
 async def patch_departure(
     body: DeparturePatch, departure_id: Annotated[uuid.UUID, Path()], staff: CanWritePlans, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await departures.update_departure(conn, staff, str(departure_id), body.model_dump(exclude_none=True))
+
+
+# ── Agency allotments on a departure (bk-046, AA-1073: seats kept for one agency until a release date) ──
+
+
+@router.get("/departures/{departure_id}/allotments")
+async def get_departure_allotments(
+    departure_id: Annotated[uuid.UUID, Path()], _: CanReadDesk, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await allotments.list_for_departure(conn, str(departure_id))
+
+
+@router.post("/departures/{departure_id}/allotments", status_code=201)
+async def post_departure_allotment(
+    body: AllotmentIn, departure_id: Annotated[uuid.UUID, Path()], staff: CanWriteDesk, pool: Pool
+) -> dict[str, Any]:
+    data = body.model_dump() | {"partner_id": str(body.partner_id)}
+    async with pool.acquire() as conn, conn.transaction():
+        return await allotments.create(conn, staff, str(departure_id), data)
+
+
+@router.post("/allotments/{allotment_id}/approve")
+async def post_allotment_approve(
+    allotment_id: Annotated[uuid.UUID, Path()], staff: CanWriteDesk, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await allotments.approve(conn, staff, str(allotment_id))
+
+
+@router.post("/allotments/{allotment_id}/end")
+async def post_allotment_end(
+    allotment_id: Annotated[uuid.UUID, Path()], staff: CanWriteDesk, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await allotments.end(conn, staff, str(allotment_id))

@@ -205,6 +205,13 @@ class FxRates(Strict):
     rates: list[FxRate]
 
 
+class DepartureAllotment(Strict):
+    seats: int = Field(ge=0)
+    used: int = Field(ge=0)
+    available: int = Field(ge=0)
+    release_date: date
+
+
 class Departure(Strict):
     departure_id: str = Field(max_length=64)
     tour: TourKey
@@ -215,6 +222,13 @@ class Departure(Strict):
     available: int = Field(ge=0)
     status: Literal["scheduled", "guaranteed", "cancelled"]
     auto_confirm: bool
+    # 1.6 (AA-1073): the minimum to operate (0 = none), the seats still to sell before it is met (null without a
+    # minimum), the last day the departure sells, and the caller's own allotment (null without one). ``available``
+    # already counts the caller's own unused allotment and leaves out the other agencies'.
+    min_to_operate: int | None = Field(default=None, ge=0)
+    seats_to_guarantee: int | None = Field(default=None, ge=0)
+    last_sale_date: date | None = None
+    allotment: DepartureAllotment | None = None
 
 
 class DeparturePage(Strict):
@@ -281,6 +295,9 @@ EventType = Literal[
     "departure.incident",
     "departure.incident_cleared",
     "departure.time_change",
+    # 1.6 (AA-1073): the decision date came with the minimum not met; the caller's allotment went back to sale.
+    "departure.at_risk",
+    "allotment.released",
 ]
 IncidentCode = Literal["weather", "road", "health", "political", "supplier", "other"]
 DeclineCode = Literal["sold_out", "supplier_unavailable", "minimum_not_met", "other"]
@@ -614,7 +631,13 @@ async def list_departures(
     end: Annotated[date | None, Query(alias="to")] = None,
 ) -> dict:
     return await departures.list_for_tour(
-        ctx.pool, source_system=source_system, source_id=source_id, start=start, end=end, today=datetime.now(UTC).date()
+        ctx.pool,
+        source_system=source_system,
+        source_id=source_id,
+        start=start,
+        end=end,
+        today=datetime.now(UTC).date(),
+        partner_id=ctx.partner_id,
     )
 
 

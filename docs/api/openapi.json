@@ -643,6 +643,35 @@
         "title": "AgencyReasonIn",
         "type": "object"
       },
+      "AllotmentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "partner_id": {
+            "format": "uuid",
+            "title": "Partner Id",
+            "type": "string"
+          },
+          "release_days_before": {
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Release Days Before",
+            "type": "integer"
+          },
+          "seats": {
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Seats",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "partner_id",
+          "seats",
+          "release_days_before"
+        ],
+        "title": "AllotmentIn",
+        "type": "object"
+      },
       "ApproveBody": {
         "additionalProperties": false,
         "properties": {
@@ -2586,6 +2615,16 @@
       "Departure": {
         "additionalProperties": false,
         "properties": {
+          "allotment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DepartureAllotment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "auto_confirm": {
             "title": "Auto Confirm",
             "type": "boolean"
@@ -2609,6 +2648,42 @@
             "minimum": 0.0,
             "title": "Held",
             "type": "integer"
+          },
+          "last_sale_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sale Date"
+          },
+          "min_to_operate": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min To Operate"
+          },
+          "seats_to_guarantee": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seats To Guarantee"
           },
           "sold": {
             "minimum": 0.0,
@@ -2647,6 +2722,130 @@
         "title": "Departure",
         "type": "object"
       },
+      "DepartureAllotment": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "minimum": 0.0,
+            "title": "Available",
+            "type": "integer"
+          },
+          "release_date": {
+            "format": "date",
+            "title": "Release Date",
+            "type": "string"
+          },
+          "seats": {
+            "minimum": 0.0,
+            "title": "Seats",
+            "type": "integer"
+          },
+          "used": {
+            "minimum": 0.0,
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seats",
+          "used",
+          "available",
+          "release_date"
+        ],
+        "title": "DepartureAllotment",
+        "type": "object"
+      },
+      "DepartureChecksIn": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          }
+        },
+        "title": "DepartureChecksIn",
+        "type": "object"
+      },
+      "DepartureGenerateIn": {
+        "additionalProperties": false,
+        "description": "AA-1073 (bk-02): departures of a weekly or monthly pattern; dates the plan already has are skipped.",
+        "properties": {
+          "auto_confirm": {
+            "default": true,
+            "title": "Auto Confirm",
+            "type": "boolean"
+          },
+          "capacity": {
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Capacity",
+            "type": "integer"
+          },
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "decision_days_before": {
+            "default": 21,
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Decision Days Before",
+            "type": "integer"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "min_to_operate": {
+            "default": 0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Min To Operate",
+            "type": "integer"
+          },
+          "pattern": {
+            "discriminator": {
+              "mapping": {
+                "monthly": "#/components/schemas/MonthlyPattern",
+                "weekly": "#/components/schemas/WeeklyPattern"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WeeklyPattern"
+              },
+              {
+                "$ref": "#/components/schemas/MonthlyPattern"
+              }
+            ],
+            "title": "Pattern"
+          },
+          "sales_cutoff_days": {
+            "default": 0,
+            "maximum": 90.0,
+            "minimum": 0.0,
+            "title": "Sales Cutoff Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to",
+          "pattern",
+          "capacity"
+        ],
+        "title": "DepartureGenerateIn",
+        "type": "object"
+      },
       "DepartureIn": {
         "additionalProperties": false,
         "properties": {
@@ -2659,6 +2858,27 @@
             "maximum": 1000.0,
             "minimum": 0.0,
             "title": "Capacity",
+            "type": "integer"
+          },
+          "decision_days_before": {
+            "default": 21,
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Decision Days Before",
+            "type": "integer"
+          },
+          "min_to_operate": {
+            "default": 0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Min To Operate",
+            "type": "integer"
+          },
+          "sales_cutoff_days": {
+            "default": 0,
+            "maximum": 90.0,
+            "minimum": 0.0,
+            "title": "Sales Cutoff Days",
             "type": "integer"
           },
           "start_date": {
@@ -2726,6 +2946,45 @@
               }
             ],
             "title": "Capacity"
+          },
+          "decision_days_before": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Days Before"
+          },
+          "min_to_operate": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min To Operate"
+          },
+          "sales_cutoff_days": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sales Cutoff Days"
           },
           "status": {
             "anyOf": [
@@ -2994,7 +3253,9 @@
               "departure.cancelled",
               "departure.incident",
               "departure.incident_cleared",
-              "departure.time_change"
+              "departure.time_change",
+              "departure.at_risk",
+              "allotment.released"
             ],
             "title": "Type",
             "type": "string"
@@ -4057,6 +4318,28 @@
           "currency"
         ],
         "title": "Money",
+        "type": "object"
+      },
+      "MonthlyPattern": {
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Day",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "monthly",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "day"
+        ],
+        "title": "MonthlyPattern",
         "type": "object"
       },
       "NewBill": {
@@ -8493,6 +8776,33 @@
         },
         "title": "VersionPatch",
         "type": "object"
+      },
+      "WeeklyPattern": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "weekly",
+            "title": "Kind",
+            "type": "string"
+          },
+          "weekdays": {
+            "items": {
+              "maximum": 7.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "title": "Weekdays",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "weekdays"
+        ],
+        "title": "WeeklyPattern",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -9819,6 +10129,105 @@
           }
         ],
         "summary": "Get Booking Confirmation",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departure-checks/runs": {
+      "get": {
+        "operationId": "get_departure_checks_booking_b2b_desk_departure_checks_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Departure Checks Booking B2B Desk Departure Checks Runs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Departure Checks",
+        "tags": [
+          "b2b"
+        ]
+      },
+      "post": {
+        "description": "AA-1073: queue the departure watch (guarantee / at risk) and the allotment release now.",
+        "operationId": "post_departure_checks_booking_b2b_desk_departure_checks_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DepartureChecksIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Departure Checks Booking B2B Desk Departure Checks Runs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Departure Checks",
         "tags": [
           "b2b"
         ]
@@ -12263,6 +12672,106 @@
         ]
       }
     },
+    "/booking/catalog/allotments/{allotment_id}/approve": {
+      "post": {
+        "operationId": "post_allotment_approve_booking_catalog_allotments__allotment_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "allotment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Allotment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Allotment Approve Booking Catalog Allotments  Allotment Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Allotment Approve",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/allotments/{allotment_id}/end": {
+      "post": {
+        "operationId": "post_allotment_end_booking_catalog_allotments__allotment_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "allotment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Allotment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Allotment End Booking Catalog Allotments  Allotment Id  End Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Allotment End",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
     "/booking/catalog/departures/{departure_id}": {
       "patch": {
         "operationId": "patch_departure_booking_catalog_departures__departure_id__patch",
@@ -12318,6 +12827,114 @@
           }
         ],
         "summary": "Patch Departure",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/departures/{departure_id}/allotments": {
+      "get": {
+        "operationId": "get_departure_allotments_booking_catalog_departures__departure_id__allotments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Departure Allotments Booking Catalog Departures  Departure Id  Allotments Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Departure Allotments",
+        "tags": [
+          "catalog"
+        ]
+      },
+      "post": {
+        "operationId": "post_departure_allotment_booking_catalog_departures__departure_id__allotments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllotmentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Departure Allotment Booking Catalog Departures  Departure Id  Allotments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Departure Allotment",
         "tags": [
           "catalog"
         ]
@@ -13564,6 +14181,68 @@
           }
         ],
         "summary": "Post Trip Plan Departure",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/departures:generate": {
+      "post": {
+        "operationId": "post_generate_departures_booking_catalog_trip_plans__source_id__departures_generate_post",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DepartureGenerateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Generate Departures Booking Catalog Trip Plans  Source Id  Departures Generate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Generate Departures",
         "tags": [
           "catalog"
         ]

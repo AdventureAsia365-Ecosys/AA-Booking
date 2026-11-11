@@ -73,6 +73,10 @@ EXPECTED_SECONDS: dict[str, int] = {
     # departure, tens of rows), and e-mail one purchase order (one SES call); not exempt (seconds).
     "bk_departure_cost_recompute": 300,
     "bk_supplier_order_send": 120,
+    # AA-1073 (bk-046): once a day, the scheduled departures with a minimum (at most 500 per run, a few statements
+    # each) and the allotments due for release (one UPDATE of at most 500 rows); not exempt (seconds).
+    "bk_departure_watch": 300,
+    "bk_allotment_release": 120,
     # AA-993 G4 proof (test-only, JOB_TEST_KINDS): sleeps up to 3600 s.
     "bk_noop_sleep": 3660,
 }
