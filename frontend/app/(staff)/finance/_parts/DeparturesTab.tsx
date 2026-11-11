@@ -5,6 +5,8 @@
 // for the sold seats, or by hand; Order makes the supplier booking, which freezes the price once requested), each
 // sold trip case with its share, the bills of the departure, and planned against actual in USD.
 // B2C history gate: ops.write here writes departure-level costs and bookings only, never a trip case.
+// Realised revenue, profit and margin show only with profit.read (admin, finance); the API sends them as null to the
+// other roles (sales, contracting), which see the costs.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -48,6 +50,13 @@ function errorText(e: unknown, fallback = "Something went wrong"): string {
   return e instanceof ApiError ? e.message : fallback;
 }
 
+// Columns of realised revenue / profit: shown only with profit.read.
+const PROFIT_COLUMN_IDS = new Set(["profit", "revenue"]);
+
+function withoutProfit<T>(columns: ColumnDef<T, unknown>[], canProfit: boolean): ColumnDef<T, unknown>[] {
+  return canProfit ? columns : columns.filter((c) => !PROFIT_COLUMN_IDS.has(c.id ?? ""));
+}
+
 const LIST_COLUMNS: ColumnDef<FinanceDeparture, unknown>[] = [
   { id: "start", header: "Departure", cell: ({ row }) => <DateText value={row.original.start_date} className="font-semibold" /> },
   { id: "tour", header: "Tour", cell: ({ row }) => <span className="block max-w-[220px] truncate text-[13px]">{row.original.trip_plan_source_id}</span> },
@@ -81,6 +90,7 @@ const LIST_COLUMNS: ColumnDef<FinanceDeparture, unknown>[] = [
 
 export function DeparturesTab() {
   const { get, setMany } = useUrlFilters();
+  const canProfit = useCan("profit.read");
   const span = periodWindow(get("period") || "next_3", new Date());
   const q = { ...span, limit: 100 };
   const list = useQuery({ queryKey: ["finance", "departures", q], queryFn: () => financeApi.departures(q) });
@@ -97,7 +107,7 @@ export function DeparturesTab() {
         csvFilename="departure-costs.csv"
         tableId="finance-departures"
         data={list.data?.items ?? []}
-        columns={LIST_COLUMNS}
+        columns={withoutProfit(LIST_COLUMNS, canProfit)}
         getRowId={(r) => r.id}
         onRowClick={(r) => setMany({ departure: r.id })}
         loading={list.isLoading}
@@ -280,14 +290,23 @@ const CASE_COLUMNS: ColumnDef<DepartureCaseRow, unknown>[] = [
     ),
   },
   { id: "seats", header: "Seats", cell: ({ row }) => row.original.seats },
-  { id: "revenue", header: "Revenue", cell: ({ row }) => <Money amount={row.original.revenue_usd} currency="USD" className="text-[13px]" /> },
+  {
+    id: "revenue",
+    header: "Revenue",
+    cell: ({ row }) => (row.original.revenue_usd ? <Money amount={row.original.revenue_usd} currency="USD" className="text-[13px]" /> : "—"),
+  },
   { id: "own", header: "Own cost", cell: ({ row }) => <Money amount={String(Number(row.original.cost_usd) - Number(row.original.shared_cost_usd))} currency="USD" className="text-[13px]" /> },
   { id: "share", header: "Shared share", cell: ({ row }) => <Money amount={row.original.shared_cost_usd} currency="USD" className="text-[13px]" /> },
-  { id: "profit", header: "Profit", cell: ({ row }) => <Money amount={row.original.profit_usd} currency="USD" strong className="text-[13px]" /> },
+  {
+    id: "profit",
+    header: "Profit",
+    cell: ({ row }) => (row.original.profit_usd ? <Money amount={row.original.profit_usd} currency="USD" strong className="text-[13px]" /> : "—"),
+  },
 ];
 
 function DepartureDrawer({ departureId, onClose }: { departureId: string | null; onClose: () => void }) {
   const canWrite = useCan("ops.write");
+  const canProfit = useCan("profit.read");
   const qc = useQueryClient();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -316,10 +335,16 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
             {d.departure.trip_plan_source_id} · {d.departure.sold_seats} of {d.departure.capacity} seats sold · {d.departure.status}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiTile label="Revenue (USD)" value={<Money amount={t.revenue} currency="USD" />} size="sm" />
+            {canProfit && t.revenue !== null && <KpiTile label="Revenue (USD)" value={<Money amount={t.revenue} currency="USD" />} size="sm" />}
             <KpiTile label="Shared cost (USD)" value={<Money amount={t.shared_cost} currency="USD" />} hint={`Planned ${t.shared_planned} · billed ${t.shared_billed}`} size="sm" />
-            <KpiTile label="Profit (USD)" value={<Money amount={t.profit} currency="USD" />} valueTone={Number(t.profit) < 0 ? "danger" : undefined} size="sm" />
-            <KpiTile label="Per seat · margin" value={`${t.profit_per_seat ?? "—"} · ${marginLabel(t.margin)}`} size="sm" />
+            {canProfit && t.profit !== null ? (
+              <>
+                <KpiTile label="Profit (USD)" value={<Money amount={t.profit} currency="USD" />} valueTone={Number(t.profit) < 0 ? "danger" : undefined} size="sm" />
+                <KpiTile label="Per seat · margin" value={`${t.profit_per_seat ?? "—"} · ${marginLabel(t.margin)}`} size="sm" />
+              </>
+            ) : (
+              <KpiTile label="Total cost (USD)" value={<Money amount={t.cost} currency="USD" />} hint={`Own costs of the cases ${t.case_cost}`} size="sm" />
+            )}
           </div>
           <Section
             title="Shared costs"
@@ -352,7 +377,7 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
               searchable={false}
               tableId="finance-departure-cases"
               data={d.cases}
-              columns={CASE_COLUMNS}
+              columns={withoutProfit(CASE_COLUMNS, canProfit)}
               getRowId={(r) => r.trip_case_id}
               emptyTitle="No trip case sold yet"
               tableMinWidth={680}

@@ -20,7 +20,10 @@ ordered one only while its booking is pending (the booking is cancelled with it)
 the remainder stays with the departure). The departure cost view (:func:`departure_costs`) shows the shared costs,
 each sold case's own costs and share, the bills of the departure, planned against actual in USD.
 
-Permissions: reads ``bill.read`` + ``pricing.read`` (net amounts); writes ``ops.write`` + ``pricing.read``.
+Permissions: reads ``bill.read`` + ``pricing.read`` (net amounts); writes ``ops.write`` + ``pricing.read``. The
+realised revenue, profit and margin in the reads (:data:`CASE_PROFIT_FIELDS`, :data:`TOTAL_PROFIT_FIELDS`,
+:data:`LIST_PROFIT_FIELDS`) are ``null`` without ``profit.read`` (admin, finance): sales and contracting see the costs,
+not the realised profit.
 """
 
 from __future__ import annotations
@@ -80,19 +83,23 @@ SELECT d.id::text AS id, d.trip_plan_id::text AS trip_plan_id, tp.source_id AS t
  WHERE d.id = $1::uuid
 """
 
-# The watermark of the re-pricing inputs: the sold seats of every departure that has an active, unfrozen rate cost,
-# and the newest rate change (a new rate band re-prices too).
+# The watermark of the re-pricing inputs: per departure that has an active, unfrozen rate cost, its sold seats and the
+# newest change of a hold or hold line on it (``updated_at``, kept by the set_updated_at triggers); and the newest rate
+# change (a new rate band re-prices too). The hold part makes the watermark move forward even when the sold seats go
+# back to an earlier count (4 -> 5 -> 4): the key of a past run is never met again, so the revert is re-priced.
 WATERMARK_SQL = """
 SELECT concat_ws('|',
-    (SELECT string_agg(x.departure_id::text || ':' || x.sold, ',' ORDER BY x.departure_id)
-       FROM (SELECT dc.departure_id,
-                    coalesce((SELECT sum(l.seats) FROM booking.b2b_hold_lines l
-                                JOIN booking.b2b_holds h ON h.id = l.hold_id
-                               WHERE l.departure_id = dc.departure_id AND h.status = 'confirmed'
-                                 AND l.status NOT IN ('declined', 'cancelled')), 0) AS sold
-               FROM booking.departure_costs dc
-              WHERE dc.status = 'active' AND dc.frozen_at IS NULL AND dc.pricing = 'rate'
-              GROUP BY dc.departure_id) x),
+    (SELECT string_agg(x.departure_id::text || ':' || x.sold || ':' || coalesce(x.touched::text, ''), ','
+                       ORDER BY x.departure_id)
+       FROM (SELECT d.departure_id,
+                    coalesce(sum(l.seats) FILTER (WHERE h.status = 'confirmed'
+                                                    AND l.status NOT IN ('declined', 'cancelled')), 0) AS sold,
+                    max(greatest(l.updated_at, h.updated_at)) AS touched
+               FROM (SELECT DISTINCT dc.departure_id FROM booking.departure_costs dc
+                      WHERE dc.status = 'active' AND dc.frozen_at IS NULL AND dc.pricing = 'rate') d
+               LEFT JOIN booking.b2b_hold_lines l ON l.departure_id = d.departure_id
+               LEFT JOIN booking.b2b_holds h ON h.id = l.hold_id
+              GROUP BY d.departure_id) x),
     (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.supplier_rates))
 """
 
@@ -492,13 +499,25 @@ async def order(conn: asyncpg.Connection, staff: Staff, cost_id: str) -> dict[st
 # ── Reads ────────────────────────────────────────────────────────────────────
 
 
+# Realised revenue / profit fields of the reads: null without profit.read (the costs stay).
+CASE_PROFIT_FIELDS = ("revenue", "revenue_usd", "profit_usd", "margin")
+TOTAL_PROFIT_FIELDS = ("revenue", "profit", "profit_per_seat", "margin")
+LIST_PROFIT_FIELDS = ("revenue_usd", "profit_usd", "profit_per_seat_usd", "margin")
+
+
+def without_profit(row: dict[str, Any], fields: tuple[str, ...], staff: Staff) -> dict[str, Any]:
+    """``row`` as is for a role with ``profit.read``; else with the realised profit fields set to ``None``."""
+    return row if staff.can("profit.read") else {**row, **dict.fromkeys(fields)}
+
+
 def _sum(values: list[Any]) -> Decimal:
     return sum((Decimal(str(v)) for v in values if v is not None), Decimal(0))
 
 
 async def departure_costs(conn: asyncpg.Connection, staff: Staff, departure_ref: str) -> dict[str, Any]:
     """The departure's costs, planned against actual in USD: its shared costs (each with its booking's billed amount),
-    every sold trip case (revenue, own costs, share), the bills of the departure, and the profit."""
+    every sold trip case (revenue, own costs, share), the bills of the departure, and the profit (revenue, profit and
+    margin only with profit.read)."""
     _need_pricing(staff)
     dep = await _departure(conn, departure_ref)
     costs = await conn.fetch(
@@ -529,20 +548,24 @@ async def departure_costs(conn: asyncpg.Connection, staff: Staff, departure_ref:
         {
             "departure": {**dict(dep), "sold_seats": sold},
             "shared_costs": [cost_out(c) for c in costs],
-            "cases": [dict(c) for c in cases],
+            "cases": [without_profit(dict(c), CASE_PROFIT_FIELDS, staff) for c in cases],
             "bills": [dict(b) for b in bills],
-            "totals_usd": {
-                "shared_planned": _sum([c["planned_usd"] for c in active]),
-                "shared_billed": _sum([c["billed_usd"] for c in active if c["billed"]]),
-                "shared_cost": _sum([c["cost_usd"] for c in active]),
-                "revenue": profit["revenue_usd"] if profit else Decimal(0),
-                "case_cost": profit["case_cost_usd"] if profit else Decimal(0),
-                "cost": profit["cost_usd"] if profit else Decimal(0),
-                "profit": profit["profit_usd"] if profit else Decimal(0),
-                "profit_per_seat": profit["profit_per_seat_usd"] if profit else None,
-                "margin": profit["margin"] if profit else None,
-                "fx_missing": bool(profit["fx_missing"]) if profit else False,
-            },
+            "totals_usd": without_profit(
+                {
+                    "shared_planned": _sum([c["planned_usd"] for c in active]),
+                    "shared_billed": _sum([c["billed_usd"] for c in active if c["billed"]]),
+                    "shared_cost": _sum([c["cost_usd"] for c in active]),
+                    "revenue": profit["revenue_usd"] if profit else Decimal(0),
+                    "case_cost": profit["case_cost_usd"] if profit else Decimal(0),
+                    "cost": profit["cost_usd"] if profit else Decimal(0),
+                    "profit": profit["profit_usd"] if profit else Decimal(0),
+                    "profit_per_seat": profit["profit_per_seat_usd"] if profit else None,
+                    "margin": profit["margin"] if profit else None,
+                    "fx_missing": bool(profit["fx_missing"]) if profit else False,
+                },
+                TOTAL_PROFIT_FIELDS,
+                staff,
+            ),
         }
     )
 
@@ -556,7 +579,8 @@ async def list_departures(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    """Departures in a date window with their sold seats, shared costs and profit (USD), soonest first."""
+    """Departures in a date window with their sold seats, shared costs and profit (USD; profit.read only), soonest
+    first."""
     _need_pricing(staff)
     if not 1 <= limit <= 100 or offset < 0:
         raise Invalid("invalid_page", "limit is 1..100 and offset >= 0")
@@ -575,7 +599,8 @@ async def list_departures(
         limit,
         offset,
     )
-    return jsonable({"items": [dict(r) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset})
+    items = [without_profit(dict(r), LIST_PROFIT_FIELDS, staff) for r in rows]
+    return jsonable({"items": items, "total": int(total or 0), "limit": limit, "offset": offset})
 
 
 # ── Re-pricing job ───────────────────────────────────────────────────────────
@@ -650,9 +675,10 @@ HANDLERS = {KIND: handle}
 
 
 class RecomputeSchedule:
-    """Worker maintenance hook: one ``bk_departure_cost_recompute`` run per new watermark (the sold seats of every
-    departure with an unfrozen rate cost, and the newest rate change): a hold confirmed or cancelled re-prices within
-    one worker pass. The idempotency key is the watermark's hash, so a watermark is run once."""
+    """Worker maintenance hook: one ``bk_departure_cost_recompute`` run per new watermark (per departure with an
+    unfrozen rate cost its sold seats and newest hold change, and the newest rate change): a hold confirmed or
+    cancelled re-prices within one worker pass. The idempotency key is the watermark's hash, so a watermark is run
+    once; the hold change time only moves forward, so a later state never meets the key of an earlier run."""
 
     def __init__(self, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         self._now = now

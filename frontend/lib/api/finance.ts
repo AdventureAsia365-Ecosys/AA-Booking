@@ -64,13 +64,14 @@ export interface DepartureCaseRow {
   status: string;
   agency_name: string | null;
   currency: string;
-  revenue: DecimalString;
-  revenue_usd: DecimalString;
+  // Realised revenue / profit / margin: null without profit.read (sales, contracting).
+  revenue: DecimalString | null;
+  revenue_usd: DecimalString | null;
   planned_cost_usd: DecimalString;
   actual_cost_usd: DecimalString;
   shared_cost_usd: DecimalString;
   cost_usd: DecimalString;
-  profit_usd: DecimalString;
+  profit_usd: DecimalString | null;
   margin: DecimalString | null;
   unbilled_bookings: number;
   fx_missing: boolean;
@@ -94,10 +95,11 @@ export interface DepartureCosts {
     shared_planned: DecimalString;
     shared_billed: DecimalString;
     shared_cost: DecimalString;
-    revenue: DecimalString;
+    // revenue, profit, profit_per_seat, margin: null without profit.read.
+    revenue: DecimalString | null;
     case_cost: DecimalString;
     cost: DecimalString;
-    profit: DecimalString;
+    profit: DecimalString | null;
     profit_per_seat: DecimalString | null;
     margin: DecimalString | null;
     fx_missing: boolean;

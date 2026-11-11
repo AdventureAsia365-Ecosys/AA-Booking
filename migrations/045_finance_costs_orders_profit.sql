@@ -59,6 +59,8 @@
 -- Locks: ACCESS EXCLUSIVE on supplier_bookings and supplier_bills for nullable ADD COLUMNs, DROP NOT NULL and the
 -- CHECK / FK adds (a scan of a few hundred rows at most), on departures / suppliers / services / supplier_rates for the
 -- FKs of the new tables (SHARE ROW EXCLUSIVE, a moment). lock_timeout 5s.
+-- Key guard: refuses to run when shared.schema_versions already holds bk-045 with another description (a second file
+-- under the same number would be silently skipped by ON CONFLICT DO NOTHING).
 -- Re-runnable (the integration tests replay every file): IF NOT EXISTS, DROP CONSTRAINT / TRIGGER IF EXISTS before each
 -- ADD / CREATE, CREATE OR REPLACE FUNCTION / VIEW (views dropped first: their column lists are new), grants repeat.
 -- Undo (a later bk- file, after the code is reverted and while no departure-level supplier booking exists): DROP the five
@@ -78,6 +80,12 @@ BEGIN
        OR to_regclass('booking.departures') IS NULL OR to_regclass('booking.b2b_holds') IS NULL
        OR to_regclass('booking.policy_approvals') IS NULL OR to_regclass('booking.b2b_cancellations') IS NULL THEN
         RAISE EXCEPTION 'bk-045: needs bk-007, bk-019 .. bk-021, bk-026 and bk-030 first';
+    END IF;
+    -- The key bk-045 is this file's (AA-1074 finance). Another file registered under it would make the
+    -- ON CONFLICT DO NOTHING below record nothing while readiness reports bk-045: stop instead of passing silently.
+    IF EXISTS (SELECT 1 FROM shared.schema_versions
+                WHERE version = 'bk-045' AND description NOT LIKE 'AA-1074:%') THEN
+        RAISE EXCEPTION 'bk-045: the key bk-045 is already held by another migration (not AA-1074 finance): renumber one';
     END IF;
 END $$;
 

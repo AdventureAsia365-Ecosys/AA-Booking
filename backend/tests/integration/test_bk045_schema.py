@@ -236,6 +236,24 @@ async def test_registered_and_rerunnable(migrated_admin_dsn: str) -> None:
         await c.close()
 
 
+async def test_refuses_a_bk045_key_held_by_another_file(migrated_admin_dsn: str) -> None:
+    """Two files under one number: the second would record nothing (ON CONFLICT DO NOTHING) while readiness reports
+    bk-045. The key guard stops the file instead."""
+    c = await asyncpg.connect(migrated_admin_dsn)
+    real = await c.fetchval("SELECT description FROM shared.schema_versions WHERE version = 'bk-045'")
+    try:
+        await c.execute("UPDATE shared.schema_versions SET description = 'another file' WHERE version = 'bk-045'")
+        await c.execute("SET ROLE bk_owner")
+        with pytest.raises(asyncpg.RaiseError, match="already held by another migration"):
+            await c.execute(BK045.read_text(encoding="utf-8"))
+        await c.execute("ROLLBACK")
+    finally:
+        await c.execute("RESET ROLE")
+        await c.execute("UPDATE shared.schema_versions SET description = $1 WHERE version = 'bk-045'", real)
+        await c.close()
+    assert real.startswith("AA-1074:")
+
+
 async def test_booking_cannot_delete_costs_or_orders(conn: asyncpg.Connection) -> None:
     for table in ("departure_costs", "supplier_orders"):
         assert not await conn.fetchval("SELECT has_table_privilege('booking.' || $1, 'DELETE')", table)

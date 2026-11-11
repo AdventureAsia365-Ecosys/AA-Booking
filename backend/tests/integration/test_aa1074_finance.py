@@ -52,6 +52,13 @@ class OneConnPool:
         yield self.conn
 
 
+class QueuePool(OneConnPool):
+    """OneConnPool that also answers ``fetchval`` (app.jobs.queue.enqueue takes a pool or a connection)."""
+
+    async def fetchval(self, sql: str, *args: object) -> object:
+        return await self.conn.fetchval(sql, *args)
+
+
 @pytest_asyncio.fixture
 async def conn(migrated_booking_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     c = await asyncpg.connect(migrated_booking_dsn)
@@ -275,6 +282,44 @@ async def test_departure_cost_by_sold_seats_order_and_freeze(conn: asyncpg.Conne
     with pytest.raises(Conflict) as exc:
         await departure_costs.remove(conn, OPS, shared["id"], "not needed")
     assert exc.value.code == "departure_cost_ordered"
+
+
+def _segment(mark: str, departure: str) -> tuple[int, str]:
+    """(sold seats, newest hold change) of the departure's part of the re-pricing watermark."""
+    part = next(p for p in mark.split("|")[0].split(",") if p.startswith(departure))
+    _, sold, touched = part.split(":", 2)
+    return int(sold), touched
+
+
+async def test_recompute_watermark_moves_on_when_the_seats_go_back(conn: asyncpg.Connection) -> None:
+    """The watermark carries the newest hold change of the departure, so sold seats that go back to an earlier count
+    (0 -> 3 -> 0 here: a line confirmed, then cancelled) give a new watermark and a new job, not the key of the first
+    run. In one test transaction now() does not move; across real transactions it only moves forward."""
+    sup = await _supplier(conn, "Ospreyline Coaches", bands=((1, 29, "300.00"),))
+    dep = await _departure(conn)
+    await departure_costs.create(conn, OPS, dep, {"service_id": sup["service"], "quantity": 1})
+    pool, sched = QueuePool(conn), departure_costs.RecomputeSchedule()
+    first = await conn.fetchval(departure_costs.WATERMARK_SQL)
+    assert _segment(first, dep) == (0, "")
+    assert await sched(pool)  # type: ignore[arg-type]
+
+    await _sold_case(conn, dep, seats=3, total="600.00", agency="Willowmere Travel")
+    sold = await conn.fetchval(departure_costs.WATERMARK_SQL)
+    assert _segment(sold, dep) == (3, await conn.fetchval("SELECT now()::text"))
+    assert await sched(pool)  # type: ignore[arg-type]
+
+    await conn.execute(
+        "UPDATE booking.b2b_hold_lines SET status = 'cancelled' WHERE departure_id = $1::uuid", dep
+    )  # back to 0 seats
+    back = await conn.fetchval(departure_costs.WATERMARK_SQL)
+    assert _segment(back, dep)[0] == 0 and back != first
+    assert await sched(pool)  # a third job: the revert is re-priced  # type: ignore[arg-type]
+    jobs = await conn.fetchval(
+        "SELECT count(*) FROM booking.job WHERE kind = $1 AND created_by = $2",
+        departure_costs.KIND,
+        departure_costs.SCHEDULER,
+    )
+    assert jobs >= 3
 
 
 async def test_manual_cost_reprices_its_pending_booking(conn: asyncpg.Connection) -> None:

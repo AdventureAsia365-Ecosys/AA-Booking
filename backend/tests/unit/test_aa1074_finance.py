@@ -29,6 +29,8 @@ pytestmark = pytest.mark.asyncio
 OPS = Staff("c-1", None, "Ops One", "contracting", True, "reviewer")
 FIN = Staff("f-1", None, "Fin One", "finance", True, "reviewer")
 WRITER = Staff("w-1", None, "Writer", "content_creator", True, "content")
+SALES = Staff("s-1", None, "Sales One", "sales", True, "reviewer")
+ADMIN = Staff("a-1", None, "Admin One", "admin", True, "reviewer")
 DEP = "00000000-0000-4000-8000-00000000d001"
 COST = "00000000-0000-4000-8000-00000000c001"
 SUP = "00000000-0000-4000-8000-00000000a001"
@@ -253,12 +255,14 @@ async def test_order_and_remove() -> None:
     assert (await costs.remove(done, OPS, COST, "again"))["status"] == "cancelled" and actions(done) == []
 
 
-async def test_departure_view_and_list() -> None:
-    case = {"trip_case_id": "tc-1", "code": "TC-1", "shared_cost_usd": Decimal("360.00")}
+def departure_view_conn() -> ScriptedConn:
+    case = {"trip_case_id": "tc-1", "code": "TC-1", "agency_name": "Heron Trails", "revenue": Decimal("2000"),
+            "revenue_usd": Decimal("2000"), "cost_usd": Decimal("1000"), "shared_cost_usd": Decimal("360.00"),
+            "profit_usd": Decimal("1000"), "margin": Decimal("0.5")}  # fmt: skip
     prof = {"revenue_usd": Decimal("2000"), "case_cost_usd": Decimal("400"), "cost_usd": Decimal("1000"),
             "profit_usd": Decimal("1000"), "profit_per_seat_usd": Decimal("100"), "margin": Decimal("0.5"),
             "fx_missing": False}  # fmt: skip
-    conn = cost_conn(
+    return cost_conn(
         **{
             COST_ROW: [cost_row(billed=True, billed_usd=Decimal("620.00")), cost_row(status="cancelled")],
             "FROM booking.v_case_profit p": [case],
@@ -266,18 +270,43 @@ async def test_departure_view_and_list() -> None:
             "FROM booking.v_departure_profit WHERE": prof,
         }
     )
-    out = await costs.departure_costs(conn, OPS, DEP)
+
+
+def listing_conn() -> ScriptedConn:
+    row = {"id": DEP, "sold_seats": 6, "cost_usd": Decimal("1000"), "revenue_usd": Decimal("2000"),
+           "profit_usd": Decimal("1000"), "profit_per_seat_usd": Decimal("100"), "margin": Decimal("0.5")}  # fmt: skip
+    return ScriptedConn([("count(*)", 1), ("FROM booking.departures d JOIN", [row])])
+
+
+async def test_departure_view_and_list() -> None:
+    out = await costs.departure_costs(departure_view_conn(), ADMIN, DEP)
     assert out["departure"]["sold_seats"] == 6 and len(out["shared_costs"]) == 2
     assert out["totals_usd"]["shared_billed"] == "620.00" and out["totals_usd"]["profit"] == "1000"
+    assert out["cases"][0]["profit_usd"] == "1000" and out["totals_usd"]["margin"] == "0.5"
     empty = await costs.departure_costs(cost_conn(**{COST_ROW: [], "FROM booking.v_departure_profit WHERE": None}),
-                                        OPS, DEP)  # fmt: skip
+                                        ADMIN, DEP)  # fmt: skip
     assert empty["totals_usd"]["profit"] == "0" and empty["totals_usd"]["margin"] is None
-    listing = ScriptedConn([("count(*)", 1), ("FROM booking.departures d JOIN", [{"id": DEP}])])
-    page = await costs.list_departures(listing,
-                                       OPS, start=DAY, end=DAY)  # fmt: skip
-    assert page["total"] == 1 and page["items"] == [{"id": DEP}]
+    page = await costs.list_departures(listing_conn(), ADMIN, start=DAY, end=DAY)
+    assert page["total"] == 1 and page["items"][0]["profit_usd"] == "1000"
     with pytest.raises(Invalid):
         await costs.list_departures(ScriptedConn(), OPS, limit=0)
+
+
+async def test_departure_reads_hide_realised_profit_without_profit_read() -> None:
+    """Sales and contracting read the costs (bill.read + pricing.read) but not the realised revenue / profit / margin:
+    that is profit.read (admin, finance)."""
+    for staff in (SALES, OPS):
+        assert not staff.can("profit.read")
+        out = await costs.departure_costs(departure_view_conn(), staff, DEP)
+        case, totals = out["cases"][0], out["totals_usd"]
+        assert all(case[k] is None for k in costs.CASE_PROFIT_FIELDS)
+        assert case["cost_usd"] == "1000" and case["shared_cost_usd"] == "360.00" and case["agency_name"]
+        assert all(totals[k] is None for k in costs.TOTAL_PROFIT_FIELDS)
+        assert totals["shared_billed"] == "620.00" and totals["cost"] == "1000" and totals["case_cost"] == "400"
+        page = await costs.list_departures(listing_conn(), staff)
+        item = page["items"][0]
+        assert all(item[k] is None for k in costs.LIST_PROFIT_FIELDS)
+        assert item["cost_usd"] == "1000" and item["sold_seats"] == 6
 
 
 async def test_recompute_job_and_schedule() -> None:
@@ -294,9 +323,32 @@ async def test_recompute_job_and_schedule() -> None:
     with pytest.raises(RuntimeError, match="1 departure"):
         await costs.run(broken)  # type: ignore[arg-type]
     sched = costs.RecomputeSchedule()
-    pool = ScriptedConn([("concat_ws", "d1:6|3:x"), ("INSERT INTO booking.job", "job-1")])
+    pool = ScriptedConn([("concat_ws", "d1:6:t1|3:x"), ("INSERT INTO booking.job", "job-1")])
     assert await sched(pool) == "job-1"  # type: ignore[arg-type]
     assert await sched(pool) is None  # the same watermark: once  # type: ignore[arg-type]
+
+
+async def test_schedule_requeues_when_the_seats_go_back() -> None:
+    """4 seats sold (job A), a 5th confirmed (job B), then cancelled: back to 4 seats, but the hold change time moved
+    on, so the watermark (and the job key) is new and a third job re-prices for 4. The queue's unique key is modelled
+    by a set: a key met before gets no job, as booking.job's unique idempotency index does."""
+    marks = iter(["d1:4:2026-12-01 10:00:00+00|3:x", "d1:5:2026-12-01 10:05:00+00|3:x",
+                  "d1:4:2026-12-01 10:09:00+00|3:x"])  # fmt: skip
+    keys: list[str] = []
+
+    async def enqueue(_pool: Any, kind: str, payload: dict[str, Any], *, idempotency_key: str, **_: Any) -> str | None:
+        if idempotency_key in keys:
+            return None
+        keys.append(idempotency_key)
+        return f"job-{len(keys)}"
+
+    pool = ScriptedConn()
+    pool.on("concat_ws", lambda *_: next(marks))
+    sched = costs.RecomputeSchedule()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(costs.queue, "enqueue", enqueue)
+        jobs = [await sched(pool) for _ in range(3)]  # type: ignore[arg-type]
+    assert jobs == ["job-1", "job-2", "job-3"] and len(set(keys)) == 3
 
 
 # ── Purchase orders ──────────────────────────────────────────────────────────
@@ -624,3 +676,32 @@ def test_routes_refuse_roles_without_the_permission(monkeypatch: pytest.MonkeyPa
     assert c.get("/booking/supplier-orders").status_code == 403
     c, _ = route_client(WRITER, monkeypatch)
     assert c.get(f"/booking/departures/{DEP}/costs").status_code == 403
+
+
+def test_routes_give_sales_no_profit_figures() -> None:
+    """Through the routes (real services, scripted DB): a sales user reads the departure costs and the departure list
+    without revenue, profit or margin; an admin gets them."""
+    from fastapi.testclient import TestClient
+
+    from app.auth.staff import current_staff, get_pool
+    from app.main import create_app
+
+    def client(staff: Staff, pool: ScriptedConn) -> TestClient:
+        app = create_app(Settings(database_url=None, environment="test"))
+        app.dependency_overrides[current_staff] = lambda: staff
+        app.dependency_overrides[get_pool] = lambda: pool
+        return TestClient(app)
+
+    view = client(SALES, departure_view_conn()).get(f"/booking/departures/{DEP}/costs")
+    assert view.status_code == 200
+    body = view.json()
+    assert {k: body["cases"][0][k] for k in costs.CASE_PROFIT_FIELDS} == dict.fromkeys(costs.CASE_PROFIT_FIELDS)
+    assert {k: body["totals_usd"][k] for k in costs.TOTAL_PROFIT_FIELDS} == dict.fromkeys(costs.TOTAL_PROFIT_FIELDS)
+    assert body["totals_usd"]["cost"] == "1000"
+    listing = client(SALES, listing_conn()).get("/booking/finance/departures")
+    assert listing.status_code == 200
+    assert {k: listing.json()["items"][0][k] for k in costs.LIST_PROFIT_FIELDS} == dict.fromkeys(
+        costs.LIST_PROFIT_FIELDS
+    )
+    admin = client(ADMIN, listing_conn()).get("/booking/finance/departures").json()
+    assert admin["items"][0]["profit_usd"] == "1000" and admin["items"][0]["margin"] == "0.5"
