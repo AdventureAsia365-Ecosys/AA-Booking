@@ -1593,6 +1593,22 @@ An **expand** file: `booking.agency_invoice_reminder` (one row per overdue agenc
 `price_error`, DRAFT wording for the business owner to approve. SELECT / INSERT (and UPDATE on clauses) to `booking`.
 The code raises readiness to bk-044.
 
+### `bk-045` (AA-1074 finance: FX-normalised costs, departure shared costs, purchase orders, profit — needs `bk-007`, `bk-019`–`bk-021`, `bk-026`, `bk-030`)
+
+A **contract** file (MIG-4: migration-only PR, applied by Infra Migration Apply once every job table is idle, then the
+code PR raises readiness to bk-045). `booking.fx_plain_rate(currency, day)` (the approved plain rate in force, no
+buffer; 1 for USD). FX snapshots `fx_rate_per_usd` + `fx_as_of` on `supplier_bookings` (taken at confirm, cleared by a
+re-request) and `supplier_bills` (taken once, with the approval). New tables `booking.departure_costs` (a cost shared by
+a departure: rate band for the sold seats or manual, frozen when its departure-level supplier booking is requested)
+and `booking.supplier_orders` (`PO-000123`: draft → sending → sent, → cancelled; snapshot of what the supplier received).
+`supplier_bookings.trip_case_id` becomes nullable with `departure_id` (exactly one of the two) and `supplier_order_id`;
+`supplier_bills.departure_id` (a bill of one departure's shared costs; a case or a departure, never both). The three
+supplier guards are replaced (bk-026 / bk-030 bodies plus the departure, order and FX rules). Views (`conf:commercial`,
+staff only, never in `booking.b2b.v1`): `v_cost_variance`, `v_departure_cost_lines`, `v_departure_cost_share`,
+`v_case_profit`, `v_departure_profit`, `v_agency_profit_month`. USD rule: each native amount converted per line and
+rounded half up to the cent; totals are sums of cents. DM-7.1 rows for the two tables are in the root data standards.
+No row of `booking` can be deleted from either table; `cis_app` reads none of it.
+
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679
 follow-up). `v_from_prices` shipped with bk-039 (AA-1029). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
