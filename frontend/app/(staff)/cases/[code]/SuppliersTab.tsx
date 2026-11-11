@@ -28,6 +28,7 @@ import {
   type UnbookedItem,
 } from "@/lib/api/supplierBookings";
 import type { TripCaseDetail } from "@/lib/api/types";
+import { agencyOpsApi } from "@/lib/api/agencyOps";
 import { CostVsBilled } from "./CostVsBilled";
 import {
   Input,
@@ -50,6 +51,7 @@ import {
   RowMenu,
   type RowMenuItem,
   DateField,
+  Field,
 } from "@/ui";
 import { prepareUpload } from "../../_parts/SupplyContent";
 
@@ -88,12 +90,15 @@ type Dialog =
   | { kind: "decline"; b: SupplierBooking }
   | { kind: "cancel"; b: SupplierBooking }
   | { kind: "rerequest"; b: SupplierBooking }
+  | { kind: "voucher"; b: SupplierBooking }
+  | { kind: "fee"; b: SupplierBooking }
   | { kind: "add"; item: UnbookedItem | null }
   | null;
 
 export function SuppliersTab({ c }: { c: TripCaseDetail }) {
   const canWrite = useCan("ops.write");
   const canDesk = useCan("b2b_desk.write");
+  const canPrice = useCan("pricing.read");
   const qc = useQueryClient();
   const toast = useToast();
   const key = ["supplier-bookings", c.code];
@@ -135,6 +140,11 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
       items.push({ label: "Declined by supplier…", onSelect: () => setDialog({ kind: "decline", b }), disabled: !deskOk });
     }
     if (b.status === "confirmed" && !linked) items.push({ label: "Change with supplier…", onSelect: () => setDialog({ kind: "rerequest", b }) });
+    // AA-1075 (bk-12, bk-14): the agency voucher's time and points; the supplier's fee once cancelled.
+    if (b.live) items.push({ label: "Voucher details…", onSelect: () => setDialog({ kind: "voucher", b }) });
+    if (b.status === "cancelled" && canPrice) {
+      items.push({ label: "Supplier's cancellation fee…", onSelect: () => setDialog({ kind: "fee", b }) });
+    }
     if (b.live) {
       items.push({
         label: "Cancel booking…",
@@ -211,6 +221,12 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
             <SupplierBookingStatusBadge status={b.status} />
             {b.confirmation_ref && <span className="text-xs text-muted">Ref {b.confirmation_ref}</span>}
             {b.decline_code && <span className="text-xs text-muted">{DECLINE_LABEL[b.decline_code]}</span>}
+            {b.service_time && <span className="text-xs text-muted">At {b.service_time}{b.pickup_point ? ` · ${b.pickup_point}` : ""}</span>}
+            {b.supplier_cancel_fee && (
+              <span className="text-xs text-muted">
+                Supplier fee {b.supplier_cancel_fee} {b.supplier_cancel_fee_currency}
+              </span>
+            )}
             {b.cancel_reason && (
               <span className="max-w-[200px] truncate text-xs text-muted" title={b.cancel_reason}>
                 {b.cancel_reason}
@@ -260,7 +276,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
         }
         description={
           data?.trip_case.channel === "b2b"
-            ? "Each booking of an on-request line answers the agency: Confirm accepts the line, Declined declines it. No vouchers or documents for B2B trips: keep the supplier's confirmation ref only."
+            ? "Each booking of an on-request line answers the agency: Confirm accepts the line, Declined declines it. No uploaded documents for B2B trips: keep the supplier's confirmation ref, and the voucher details (time, pick-up) the agency's vouchers print."
             : "Book every room and service of the approved version with its supplier. The case moves to Supplier confirming on the first request; when every booking is confirmed it shows Confirmed & Booked."
         }
         actions={
@@ -325,6 +341,8 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
 
       {dialog?.kind === "confirm" && <ConfirmBooking b={dialog.b} documents={!!data?.documents_allowed} onClose={close} onDone={refresh} />}
       {dialog?.kind === "decline" && <DeclineBooking b={dialog.b} onClose={close} onDone={refresh} />}
+      {dialog?.kind === "voucher" && <VoucherDetails b={dialog.b} onClose={close} onDone={refresh} />}
+      {dialog?.kind === "fee" && <CancelFee b={dialog.b} onClose={close} onDone={refresh} />}
       {dialog?.kind === "add" && data && <AddBooking c={c} data={data} item={dialog.item} onClose={close} onDone={refresh} />}
       <ReasonDialog
         open={dialog?.kind === "cancel"}
@@ -655,6 +673,91 @@ function AddBooking({
           {c.channel === "b2b" && <span className="text-xs text-muted">B2B trip: never write traveller names here.</span>}
         </label>
         <p className="text-xs text-muted">For an item of the proposal, empty fields take the item&apos;s date, nights, pax and net cost.</p>
+      </div>
+    </FormDrawer>
+  );
+}
+
+
+// AA-1075 (bk-12): the time and points the agency's voucher prints; never traveller names.
+function VoucherDetails({ b, onClose, onDone }: { b: SupplierBooking; onClose: () => void; onDone: () => void }) {
+  const [time, setTime] = useState(b.service_time ?? "");
+  const [pickup, setPickup] = useState(b.pickup_point ?? "");
+  const [dropoff, setDropoff] = useState(b.dropoff_point ?? "");
+  const [note, setNote] = useState(b.voucher_note ?? "");
+  const save = useMutation({
+    mutationFn: () =>
+      supplierBookingsApi.update(b.id, {
+        service_time: time || null,
+        pickup_point: pickup.trim() || null,
+        dropoff_point: dropoff.trim() || null,
+        voucher_note: note.trim() || null,
+      }),
+    onSuccess: () => {
+      onDone();
+      onClose();
+    },
+  });
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={`Voucher details · ${b.code}`}
+      onSubmit={() => save.mutate()}
+      busy={save.isPending}
+      dirty
+      error={save.isError ? errorText(save.error) : null}
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-[13px] text-muted">Printed on the agency&apos;s voucher. Never write traveller names here.</p>
+        <Field label="Time (local)">
+          <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </Field>
+        <Field label="Pick-up point">
+          <Input value={pickup} maxLength={200} onChange={(e) => setPickup(e.target.value)} placeholder="e.g. hotel lobby" />
+        </Field>
+        <Field label="Drop-off point">
+          <Input value={dropoff} maxLength={200} onChange={(e) => setDropoff(e.target.value)} />
+        </Field>
+        <Field label="Note on the voucher">
+          <Textarea value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </div>
+    </FormDrawer>
+  );
+}
+
+// AA-1075 (bk-14): what the supplier charges for the cancel; the profit pages count it until its bill is approved.
+function CancelFee({ b, onClose, onDone }: { b: SupplierBooking; onClose: () => void; onDone: () => void }) {
+  const [fee, setFee] = useState(b.supplier_cancel_fee ?? "");
+  const [currency, setCurrency] = useState(b.supplier_cancel_fee_currency ?? b.net_currency ?? "USD");
+  const save = useMutation({
+    mutationFn: () => agencyOpsApi.supplierCancelFee(b.id, fee.trim() || null, fee.trim() ? currency : null),
+    onSuccess: () => {
+      onDone();
+      onClose();
+    },
+  });
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={`Supplier's cancellation fee · ${b.code}`}
+      onSubmit={() => save.mutate()}
+      busy={save.isPending}
+      dirty
+      error={save.isError ? errorText(save.error) : null}
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-[13px] text-muted">What the supplier charges for this cancel. Leave it empty when it charges nothing.</p>
+        <div className="grid grid-cols-[1fr_120px] gap-3">
+          <Field label="Fee">
+            <Input inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} />
+          </Field>
+          <Field label="Currency">
+            <Input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+          </Field>
+        </div>
       </div>
     </FormDrawer>
   );

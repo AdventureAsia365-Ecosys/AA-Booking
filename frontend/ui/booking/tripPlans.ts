@@ -57,6 +57,9 @@ export interface PriceDraft {
   net_currency: string;
   /** A row the cost sheet wrote (AA-1029): sent back as such while it keeps its net cost. */
   computed: boolean;
+  /** AA-1075 (bk-15): the child / infant / single supplement values of the row, sent back as read (the editor does
+   *  not change them; the cost sheet computes them). Absent when the row has none. */
+  pax_prices?: Record<string, string>;
 }
 
 export interface PriceRowBody {
@@ -157,6 +160,7 @@ export function draftsFrom(
   }[],
 ): PriceDraft[] {
   return rows.map((r) => ({
+    ...paxPricesOf(r),
     key: `row-${r.position}`,
     channel: r.channel,
     season: r.season ?? "",
@@ -171,6 +175,26 @@ export function draftsFrom(
     net_currency: r.net_currency ?? "USD",
     computed: Boolean(r.computed),
   }));
+}
+
+export const PAX_PRICE_FIELDS = [
+  "child_amount",
+  "infant_amount",
+  "single_supplement_amount",
+  "child_net_amount",
+  "infant_net_amount",
+  "single_supplement_net_amount",
+] as const;
+
+/** AA-1075: `{pax_prices}` with the row's set child / infant / single values, or nothing. */
+function paxPricesOf(row: object): { pax_prices?: Record<string, string> } {
+  const src = row as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  for (const k of PAX_PRICE_FIELDS) {
+    const v = src[k];
+    if (typeof v === "string" && v !== "") out[k] = v;
+  }
+  return Object.keys(out).length ? { pax_prices: out } : {};
 }
 
 function overlaps(a: PriceRowBody, b: PriceRowBody): boolean {
@@ -215,6 +239,10 @@ export function draftsToBody(drafts: PriceDraft[]): { items: PriceRowBody[]; err
       net_currency: net ? d.net_currency : null,
       // A cost sheet row stays one only while it keeps its net cost (the API refuses a computed row without one).
       computed: d.computed && Boolean(net),
+      // AA-1075: the per-type values ride along unchanged (nets only on a row that keeps its net cost).
+      ...(d.pax_prices
+        ? Object.fromEntries(Object.entries(d.pax_prices).filter(([k]) => net || !k.endsWith("_net_amount")))
+        : {}),
     });
   });
   if (!errors.length) {

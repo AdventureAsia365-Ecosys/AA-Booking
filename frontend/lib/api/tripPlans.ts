@@ -84,6 +84,9 @@ export interface TripPlanPhoto {
 }
 
 export interface TripPlanDetail extends TripPlanListItem {
+  /** AA-1075 (bk-15): the oldest ages at the child and infant prices; null = the defaults (11 and 1). */
+  child_age_max?: number | null;
+  infant_age_max?: number | null;
   source_version: number | null;
   slug: string | null;
   subtitle: string | null;
@@ -174,6 +177,13 @@ export interface PriceRow {
   computed: boolean;
   /** b2b rows: the suggested retail price per person (the agency price + the b2b rule's RRP markup). */
   rrp_amount: DecimalString | null;
+  /** AA-1075 (bk-15): per child / infant and the single supplement, per person (null = not set), and their nets. */
+  child_amount?: DecimalString | null;
+  infant_amount?: DecimalString | null;
+  single_supplement_amount?: DecimalString | null;
+  child_net_amount?: DecimalString | null;
+  infant_net_amount?: DecimalString | null;
+  single_supplement_net_amount?: DecimalString | null;
 }
 
 /** The CIS source price text of the tour, kept as a reference only (never a selling price). */
@@ -220,6 +230,12 @@ export interface PriceRowInput {
   net_currency: string | null;
   /** A cost sheet row sent back as read; with an amount it becomes an override the next recompute keeps. */
   computed?: boolean;
+  child_amount?: string | null;
+  infant_amount?: string | null;
+  single_supplement_amount?: string | null;
+  child_net_amount?: string | null;
+  infant_net_amount?: string | null;
+  single_supplement_net_amount?: string | null;
 }
 
 export interface PricesBody {

@@ -58,6 +58,8 @@ export const PAGES: VisualPage[] = [
   { slug: "agency-settlement", route: "/agency-billing/invoices/[ref]", path: "/agency-billing/invoices/AAT-2026-000001", auth: "staff" },
   { slug: "audit-log", route: "/audit-log", path: "/audit-log", auth: "staff" },
   { slug: "b2b-desk", route: "/b2b-desk", path: "/b2b-desk", auth: "staff" },
+  // AA-1075: the departure manifest (counts only).
+  { slug: "b2b-desk-manifest", route: "/b2b-desk/manifest/[id]", path: "/b2b-desk/manifest/00000000-0000-4000-8000-000000000b01", auth: "staff" },
   { slug: "billing", route: "/billing", path: "/billing", auth: "staff" },
   // AA-1074: Costs & profit, its three tabs, a departure's costs drawer and a purchase order drawer.
   { slug: "finance", route: "/finance", path: "/finance", auth: "staff" },

@@ -17,6 +17,18 @@ function todayUtc(): string {
 }
 
 /** "30" → "0.3000"; "" → "0.0000" when optional; null when not a percentage in [0, 100) with ≤ 2 decimals. */
+/** "50" -> "0.5000": a child share from 0 to 100 % (null when not a number in range). */
+function childFraction(text: string): string | null {
+  const n = Number(text.trim());
+  return text.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= 100 ? (n / 100).toFixed(4) : null;
+}
+
+/** "12.5" -> "12.50": a USD amount from 0 to 9,999.99 (null when not one). */
+function usdAmount(text: string): string | null {
+  const n = Number(text.trim());
+  return text.trim() !== "" && Number.isFinite(n) && n >= 0 && n < 10000 ? n.toFixed(2) : null;
+}
+
 export function percentToFraction(value: string, optional = false): string | null {
   const v = value.trim();
   if (!v) return optional ? "0.0000" : null;
@@ -61,6 +73,8 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
     valid_from: todayUtc(),
     note: "",
     rrp: "25",
+    child: "",
+    infant: "",
   });
   const [localError, setLocalError] = useState<string | null>(null);
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -82,7 +96,10 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
     const card = percentToFraction(form.card, true);
     // AA-1029 (root ADR 0019 b15): the suggested retail price markup, b2b rules only; empty = no RRP published.
     const rrp = form.channel === "b2b" && form.rrp.trim() ? percentToFraction(form.rrp) : undefined;
-    if (!target || !floor || !peak || !card || rrp === null) {
+    // AA-1075 (bk-15): the child share of the adult price (100 allowed) and the infant net in USD; empty = not set.
+    const child = form.child.trim() ? childFraction(form.child) : undefined;
+    const infant = form.infant.trim() ? usdAmount(form.infant) : undefined;
+    if (!target || !floor || !peak || !card || rrp === null || child === null || infant === null) {
       setLocalError("Enter each percentage as a number from 0 to 99.99, for example 30 or 2.5.");
       return;
     }
@@ -100,6 +117,8 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
       valid_from: form.valid_from,
       note: form.note.trim() || undefined,
       ...(rrp ? { rrp_markup_pct: rrp } : {}),
+      ...(child ? { child_pct: child } : {}),
+      ...(infant ? { infant_flat_usd: infant } : {}),
     });
   }
 
@@ -152,6 +171,22 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
           <PercentInput value={form.rrp} onChange={set("rrp")} />
         </FormField>
       )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FormField
+          label="Child price"
+          hint="Share of the adult price a child pays on a tour (50 = half). Empty = like an adult."
+          error={errorFor(fe, "child_pct")}
+        >
+          <PercentInput value={form.child} onChange={set("child")} />
+        </FormField>
+        <FormField
+          label="Infant net cost (USD)"
+          hint="Per infant per trip, priced by this rule. Empty = infants free."
+          error={errorFor(fe, "infant_flat_usd")}
+        >
+          <Input className={inputCls} inputMode="decimal" value={form.infant} onChange={(e) => set("infant")(e.target.value)} />
+        </FormField>
+      </div>
       <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
         <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
       </FormField>

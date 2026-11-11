@@ -964,6 +964,41 @@ function onRequestLine(i: number): OnRequestLine {
   };
 }
 const DESK_SUMMARY: DeskSummary = { on_request: { open: 23, overdue: 4, due_soon: 6 }, open_incidents: 2, departures_at_risk: 3, due_soon_hours: 24 };
+// AA-1075: a departure manifest (counts only) and staff-entered agency bookings.
+function manifest(id: string) {
+  return {
+    departure: { id, start_date: "2027-01-10", status: "guaranteed", capacity: 24, min_to_operate: 12, source_id: "tour-00001",
+                 title: "Grand Indochina Discovery: Hanoi, Ha Long Bay, Hoi An, Angkor and the Mekong Delta" },
+    generated_at: NOW,
+    totals: { adult: 14, child: 3, infant: 1, seats: 17, bookings: 5 },
+    rooms: [{ occupancy: "double", count: 7 }, { occupancy: "single", count: 2 }],
+    bookings: range(5).map((i) => ({
+      trip_case_id: uuid("c", i), trip_case_code: `TC-${pad(i + 1, 6)}`, agency: `Lanternfield Travel ${i + 1}`,
+      agency_ref: `AG-${2040 + i}`, entered_via: i % 2 ? "staff" : "api", line_ref: "tour",
+      line_status: i === 4 ? "on_request" : "confirmed", travellers: { adult: 3, child: i % 2, infant: i === 0 ? 1 : 0 },
+      rooms: [{ occupancy: "double", count: 1 }, { occupancy: "single", count: 1 }],
+    })),
+    supplier_bookings: range(3).map((i) => ({
+      code: `SB-${pad(i + 1, 6)}`, trip_case_code: i ? `TC-${pad(i, 6)}` : null, service: "Airport transfer, private van",
+      supplier: "Ferncliff Coaches", service_date: "2027-01-10", service_time: "07:45", pickup_point: "Lobby, Willowmere Hotel",
+      status: "confirmed", confirmation_ref: `FC-${100 + i}`,
+    })),
+  };
+}
+
+function deskEntry(i: number) {
+  const waiting = i < 2;
+  return {
+    id: uuid("e", i), status: waiting ? "awaiting_approval" : i % 5 === 4 ? "rejected" : "booked",
+    agency: { partner_id: uuid("a", i), name: `Lanternfield Travel ${i + 1}`, tenant_id: uuid("t", i) },
+    agency_ref: `AG-MAIL-${100 + i}`, quote_id: uuid("q", i), hold_id: uuid("h", i), hold_expires_at: NOW,
+    trip_case: waiting ? null : { id: uuid("c", i), code: `TC-${pad(i + 1, 6)}` }, currency: "USD",
+    total: waiting ? "1180.00" : "1450.00", quoted_total: "1450.00", floor_total: "1300.00",
+    override_total: waiting ? "1180.00" : null, override_reason: waiting ? "Repeat group, matched an offer" : null,
+    entered_by: person("u-002", 1), entered_at: NOW, decided_by: null, decided_at: null, can_decide: waiting,
+  };
+}
+
 function deskDepartures(): DeskDepartures {
   return {
     from: "2026-10-24",
@@ -1664,6 +1699,13 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   }
   if (p === "b2b-desk/departures") return ok(deskDepartures());
   if (at(0) === "b2b-desk" && at(1) === "departures" && at(3) === "incidents") return ok({ items: [] });
+  // AA-1075 (bk-047): the manifest, the staff-entered bookings and the after-sale panel of an agency booking.
+  if (at(0) === "b2b-desk" && at(1) === "departures" && at(3) === "manifest") return ok(manifest(at(2)));
+  if (p === "b2b-desk/entries") return ok({ ...page(range(ROWS).map(deskEntry), 12), awaiting_approval: 2 });
+  if (p === "b2b-desk/agencies") return ok({ items: range(3).map((i) => ({ partner_id: uuid("a", i), tenant_id: uuid("t", i), agency_name: `Lanternfield Travel ${i + 1}`, billing_currency: "USD", tier_code: "standard" })) });
+  if (at(0) === "b2b-desk" && at(1) === "bookings" && at(3) === "cancellation") return ok({ cancellation: null });
+  if (at(0) === "b2b-desk" && at(1) === "bookings" && at(3) === "reductions") return ok({ items: [] });
+  if (at(0) === "tour-terms") return ok({ items: [] });
 
   if (p === "catalog/geo/destinations") return ok(destinationPage());
   if (at(0) === "catalog" && at(1) === "geo" && at(2) === "destinations" && seg.length === 4) return ok(destinationDetail(at(3)));

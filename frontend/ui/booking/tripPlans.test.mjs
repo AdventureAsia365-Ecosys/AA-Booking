@@ -113,3 +113,23 @@ test("draftsFrom blanks a computed price (computed again on save) and keeps an o
   assert.equal(sheet.computed, true);
   assert.equal(hand.computed, false);
 });
+
+test("AA-1075: child / infant / single values ride through the editor unchanged", () => {
+  const api = {
+    position: 1, channel: "b2b", season: null, peak: false, valid_from: "2027-01-01", valid_to: "2027-12-31",
+    pax_min: 2, pax_max: 2, currency: "USD", amount: "500.00", net_amount: "400.00", net_currency: "USD",
+    priced: true, computed: true, child_amount: "375.00", infant_amount: null, single_supplement_amount: "90.00",
+    child_net_amount: "300.00",
+  };
+  const [draft] = draftsFrom([api]);
+  assert.deepEqual(draft.pax_prices, { child_amount: "375.00", single_supplement_amount: "90.00", child_net_amount: "300.00" });
+  const [body] = draftsToBody([draft]).items;
+  assert.equal(body.child_amount, "375.00");
+  assert.equal(body.child_net_amount, "300.00");
+  // A hand row without a net cost keeps the sell amounts only (the API keeps nets on priced rows only).
+  const [hand] = draftsToBody([{ ...draft, net_amount: "", amount: "520", computed: false }]).items;
+  assert.equal(hand.child_amount, "375.00");
+  assert.equal(hand.child_net_amount, undefined);
+  // A row without any keeps the old shape.
+  assert.equal("pax_prices" in draftsFrom([{ ...api, child_amount: null, single_supplement_amount: null, child_net_amount: null }])[0], false);
+});

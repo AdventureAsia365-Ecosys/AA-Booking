@@ -151,6 +151,17 @@ export function PricingRulesView() {
       accessorFn: (r) => Number(r.rrp_markup_pct ?? -1),
       cell: ({ row }) => (row.original.rrp_markup_pct ? `+${pct(row.original.rrp_markup_pct)}` : "—"),
     },
+    {
+      // AA-1075 (bk-15): the child share and the infant net of the rule.
+      id: "child",
+      header: "Child / infant",
+      accessorFn: (r) => Number(r.child_pct ?? -1),
+      cell: ({ row }) => {
+        const r = row.original;
+        if (!r.child_pct && !r.infant_flat_usd) return "—";
+        return `${r.child_pct ? pct(r.child_pct) : "adult"} / ${r.infant_flat_usd ? `${r.infant_flat_usd} USD` : "free"}`;
+      },
+    },
     { id: "valid_from", header: "Valid from", accessorKey: "valid_from", cell: ({ row }) => <DateText value={row.original.valid_from} /> },
     {
       id: "status",
