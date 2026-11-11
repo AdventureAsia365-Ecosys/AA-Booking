@@ -50,6 +50,11 @@ export interface PricingRuleRow extends PolicyRowBase {
   child_pct?: DecimalString | null;
   /** AA-1075 (bk-15): net cost per infant per trip in USD, priced by the rule; null = infants free. */
   infant_flat_usd?: DecimalString | null;
+  /** AA-1073 rest (bk-048, b2b and fixed_departure rules only): a quote made at least this many days before the
+   *  departure starts takes early_discount_pts off the margin; both null = no early-booking discount. */
+  early_days?: number | null;
+  /** Margin points off as a fraction ("0.0500" = 5 points), never more than the target margin. */
+  early_discount_pts?: DecimalString | null;
 }
 
 export interface FxRateRow extends PolicyRowBase {
@@ -78,6 +83,9 @@ export interface NewRuleBody {
   rrp_markup_pct?: string;
   child_pct?: string;
   infant_flat_usd?: string;
+  /** Both or neither; b2b and fixed_departure only (422 invalid_early_booking / early_booking_channel). */
+  early_days?: number;
+  early_discount_pts?: string;
 }
 
 export interface NewFxRateBody {

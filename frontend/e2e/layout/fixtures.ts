@@ -609,6 +609,10 @@ const RULES: PolicyList<PricingRuleRow> = {
     card_fee_pct: "0.03",
     valid_from: "2026-10-01",
     note: "Peak season uplift agreed with sales for the Christmas, New Year and Tet period across all channels",
+    // AA-1073 rest (bk-17): the widest Margin cell (child + infant line and the early-booking line) on the b2b row,
+    // the early-booking line alone on the fixed departure row.
+    ...(channel === "b2b" ? { child_pct: "0.5000", infant_flat_usd: "120.00", early_days: 120, early_discount_pts: "0.0250" } : {}),
+    ...(channel === "fixed_departure" ? { early_days: 60, early_discount_pts: "0.0500" } : {}),
   })),
 };
 

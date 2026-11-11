@@ -794,6 +794,56 @@ for (const vp of [{ width: 390, height: 844 }, { width: 1400, height: 900 }]) {
   });
 }
 
+// AA-1073 rest (bk-17): the "New pricing rule" drawer sets the early-booking discount of a b2b / fixed departure rule:
+// the inputs show for those channels only, both or neither are sent, and the API's 422 code lands under its input.
+for (const vp of [{ width: 390, height: 844 }, { width: 1400, height: 900 }]) {
+  test.describe(`${vp.width} px: the pricing rule drawer`, () => {
+    test.use({ viewport: vp, colorScheme: "light" });
+    test("early-booking inputs follow the channel and send both values", async ({ page, baseURL }) => {
+      const c = await prepare(page, baseURL!);
+      const posted: Record<string, unknown>[] = [];
+      // Registered after prepare(), so it answers the POST first (Playwright runs the newest matching route first).
+      await page.route("**/api/booking/pricing/rules", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        posted.push(route.request().postDataJSON() as Record<string, unknown>);
+        return route.fulfill({
+          status: 422,
+          json: { detail: "invalid_early_booking", message: "early_discount_pts is at most the target margin" },
+        });
+      });
+      await open(page, { name: "pricing-rules", path: "/pricing/rules" }, c);
+      await expect(page.locator("main").getByText("early −5 pts", { exact: true }).first()).toBeVisible();
+      await page.getByRole("button", { name: "New rule" }).click();
+      const drawer = page.locator('[role="dialog"]');
+      const early = drawer.locator('[data-testid="rule-early-booking"]');
+      await expect(early, "b2b is the default channel and carries the discount").toBeVisible();
+      const channel = drawer.getByRole("combobox", { name: /^Channel/ });
+      const firstOther = await channel.locator("option").evaluateAll((os) =>
+        (os as HTMLOptionElement[]).map((o) => o.value).find((v) => v !== "b2b" && v !== "fixed_departure"),
+      );
+      await channel.selectOption(firstOther!);
+      await expect(early, "hidden for a channel without the discount").toHaveCount(0);
+      await channel.selectOption("fixed_departure");
+      await expect(early).toBeVisible();
+      await drawer.getByRole("textbox", { name: /^Target margin/ }).fill("30");
+      await drawer.getByRole("textbox", { name: /^Floor margin/ }).fill("18");
+      await drawer.getByRole("textbox", { name: /^Early booking: days before start/ }).fill("60");
+      await drawer.getByRole("button", { name: "Save as pending" }).click();
+      await expect(early.getByText("Enter the margin points off, or clear the days.")).toBeVisible();
+      expect(posted, "one value alone is not sent").toEqual([]);
+      const fit = await drawer.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(fit.scroll, "the drawer has no horizontal scroll").toBeLessThanOrEqual(fit.client);
+      expect(c.consoleErrors, "console is clean").toEqual([]);
+      await drawer.getByRole("textbox", { name: /^Early booking: margin points off/ }).fill("5");
+      await drawer.getByRole("button", { name: "Save as pending" }).click();
+      await expect.poll(() => posted.length).toBe(1);
+      expect(posted[0]).toMatchObject({ channel: "fixed_departure", early_days: 60, early_discount_pts: "0.0500" });
+      await expect(early.getByText("Enter both values, with no more margin points off than the target margin.")).toBeVisible();
+      expect(c.unmocked, "every call has a fixture").toEqual([]);
+    });
+  });
+}
+
 test.afterAll(() => {
   if (!fs.existsSync(MEASURE_DIR)) return;
   const rows = fs

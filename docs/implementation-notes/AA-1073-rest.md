@@ -51,6 +51,12 @@ nothing of the OPL-1 app is copied.
   before, so existing quotes keep their hash.
 - **Early booking** lives on the b2b and fixed_departure rules (CHECK); the B2B engine applies the b2b rule's. The
   fixed_departure rule stores it for the day a B2C fixed-departure quote exists (no B2C quote path today, AA-1046).
+- **Early booking in the admin** (review fix): the "New pricing rule" drawer has "Early booking: days before start" and
+  "margin points off" for the b2b and fixed_departure channels only; both or neither are sent (values left after a
+  switch to another channel are dropped); points are typed like peak uplift ("5" = 0.0500). The 422 codes
+  `invalid_early_booking` (under the points input) and `early_booking_channel` (under the days input) show inline, not
+  in the drawer banner. The pure rules live in `frontend/ui/booking/earlyBooking.ts` (unit test next to it). The rules
+  table shows "early −5 pts / from 60 d" under the margin (no new column).
 
 ## Changed (against the issue text)
 
@@ -84,6 +90,13 @@ nothing of the OPL-1 app is copied.
 - Tests that re-run bk-022 / bk-041 / bk-046 / bk-047 put back older CHECKs, trigger and the outbox column grant: the
   bk-048 tests replay bk-048 in their fixtures and delete the outbox rows of the two new types afterwards.
   `test_bk020_b2b._clean` deletes the bk-048 rows before the departures.
+- The rules table's Margin cell now puts child / infant on two short lines (one long line widened the nowrap column).
+  Layout-mock "pricing-rules fits 1440 / 1400" already failed before this lane (table 1112 px against a 1078 px budget,
+  measured with the old fixture); the new b2b fixture row (child + infant + early booking) makes it 1144 px. The
+  visual checks (1440 / 390, document and frame) pass; the table scrolls in its own box. Folding a column is a
+  follow-up, not part of this slice.
+- The layout-mock test "the pricing rule drawer" (390 and 1400 px) covers the channel switch, the one-value error, the
+  POST body and the 422 field mapping.
 - Layout and visual checks cover `/departures` (calendar), `?view=table` and the drawer; signed-in smoke
   `e2e/signed-in/departure-board.spec.ts`.
 - Business owner: approve the `departure_fees` clause wording (Agency billing → terms clauses) before any fee is

@@ -3,12 +3,15 @@
 // Staff type percentages ("30" for 30%); the API takes fractions ("0.3000", NUMERIC(5,4)). Both POSTs create a
 // PENDING row; the toast says a second person has to approve it. The API owns every check (ranges, floor <=
 // target, margin + uplift + fee < 100%, one row per channel / currency and date): its 422 / 409 show inline.
+// AA-1073 rest (bk-048, bk-17): a b2b or fixed_departure rule may carry an early-booking discount (days before start +
+// margin points off, both or neither); the 422 codes invalid_early_booking / early_booking_channel show under its inputs.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { CHANNELS, type Channel } from "@/lib/api/proposals";
 import { pricingPolicyApi } from "@/lib/api/pricingPolicy";
+import { earlyBookingAllowed, earlyBookingBody, earlyBookingError, type EarlyField } from "@/ui/booking/earlyBooking";
 import { Input, Select, FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 
@@ -40,6 +43,7 @@ function errorText(err: unknown): string | null {
   if (!err) return null;
   if (err instanceof ApiError) {
     if (err.fieldErrors.length) return null; // shown per field
+    if (earlyBookingError(err.code)) return null; // shown under the early-booking inputs
     return err.message;
   }
   return err instanceof Error ? err.message : "Could not save.";
@@ -75,10 +79,13 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
     rrp: "25",
     child: "",
     infant: "",
+    early_days: "",
+    early_pts: "",
   });
   const [localError, setLocalError] = useState<string | null>(null);
+  const [earlyError, setEarlyError] = useState<{ field: EarlyField; message: string } | null>(null);
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const dirty = !!(form.target || form.floor || form.note);
+  const dirty = !!(form.target || form.floor || form.note || form.early_days || form.early_pts);
 
   const create = useMutation({
     mutationFn: pricingPolicyApi.createRule,
@@ -107,7 +114,14 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
       setLocalError("Pick the day the rule takes effect.");
       return;
     }
+    const early = earlyBookingBody(form.channel, form.early_days, form.early_pts);
+    if (!early.ok) {
+      setLocalError(null);
+      setEarlyError({ field: early.field, message: early.message });
+      return;
+    }
     setLocalError(null);
+    setEarlyError(null);
     create.mutate({
       channel: form.channel,
       target_margin: target,
@@ -119,10 +133,14 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
       ...(rrp ? { rrp_markup_pct: rrp } : {}),
       ...(child ? { child_pct: child } : {}),
       ...(infant ? { infant_flat_usd: infant } : {}),
+      ...early.body,
     });
   }
 
   const fe = create.error instanceof ApiError ? create.error.fieldErrors : [];
+  const apiEarly = create.error instanceof ApiError ? earlyBookingError(create.error.code) : null;
+  const shownEarly = earlyError ?? apiEarly;
+  const earlyFor = (field: EarlyField) => errorFor(fe, field) ?? (shownEarly?.field === field ? shownEarly.message : null);
   return (
     <FormDrawer
       open
@@ -187,6 +205,31 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
           <Input className={inputCls} inputMode="decimal" value={form.infant} onChange={(e) => set("infant")(e.target.value)} />
         </FormField>
       </div>
+      {earlyBookingAllowed(form.channel) && (
+        // AA-1073 rest (bk-17): fixed-departure prices only (b2b agencies book them too); both or neither.
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="rule-early-booking">
+          <FormField
+            label="Early booking: days before start"
+            hint="A quote made at least this many days before the departure starts gets the discount. Empty = none."
+            error={earlyFor("early_days")}
+          >
+            <Input
+              className={`${inputCls} tabular-nums`}
+              inputMode="numeric"
+              maxLength={3}
+              value={form.early_days}
+              onChange={(e) => set("early_days")(e.target.value)}
+            />
+          </FormField>
+          <FormField
+            label="Early booking: margin points off"
+            hint="Taken off the target margin (5 = 30 % becomes 25 %). At most the target margin."
+            error={earlyFor("early_discount_pts")}
+          >
+            <PercentInput value={form.early_pts} onChange={set("early_pts")} />
+          </FormField>
+        </div>
+      )}
       <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
         <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
       </FormField>
