@@ -4097,7 +4097,7 @@
                 "type": "null"
               }
             ],
-            "description": "AA-1074: the departure whose shared costs the bill covers (never with trip_case)",
+            "description": "the departure whose shared costs the bill covers (never with trip_case)",
             "title": "Departure"
           },
           "due_date": {
@@ -19012,7 +19012,7 @@
             }
           },
           {
-            "description": "AA-1074: shared-cost bookings of one departure",
+            "description": "shared-cost bookings of one departure",
             "in": "query",
             "name": "departure",
             "required": false,
@@ -19026,7 +19026,7 @@
                   "type": "null"
                 }
               ],
-              "description": "AA-1074: shared-cost bookings of one departure",
+              "description": "shared-cost bookings of one departure",
               "title": "Departure"
             }
           }

@@ -66,7 +66,7 @@ class NewBill(BaseModel):
     supplier_id: UUID
     trip_case: str | None = Field(default=None, max_length=64, description="trip case code or UUID, when one")
     departure: UUID | None = Field(
-        default=None, description="AA-1074: the departure whose shared costs the bill covers (never with trip_case)"
+        default=None, description="the departure whose shared costs the bill covers (never with trip_case)"
     )
     bill_number: str = Field(min_length=1, max_length=100, description="the supplier's own bill number")
     currency: Currency
@@ -160,7 +160,7 @@ async def billable(
     supplier_id: Annotated[UUID, Query()],
     case: Annotated[str | None, Query(max_length=64)] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
-    departure: Annotated[UUID | None, Query(description="AA-1074: shared-cost bookings of one departure")] = None,
+    departure: Annotated[UUID | None, Query(description="shared-cost bookings of one departure")] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await bills.billable(

@@ -329,8 +329,9 @@ async def test_purchase_order_create_send_and_answers(conn: asyncpg.Connection) 
     sending = await supplier_orders.send(conn, OPS, order["code"], note="Late check-in for the group.")
     assert sending["status"] == "sending" and sending["total_net"] in ("200.00", "250.00")
     job = await conn.fetchval(
-        "SELECT payload ->> 'order_id' FROM booking.job WHERE kind = 'bk_supplier_order_send' ORDER BY created_at"
-        " DESC LIMIT 1"
+        "SELECT payload ->> 'order_id' FROM booking.job WHERE kind = 'bk_supplier_order_send'"
+        " AND payload ->> 'order_id' = $1",
+        order["id"],
     )
     assert job == order["id"]
 
