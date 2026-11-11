@@ -1016,7 +1016,9 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
   `holds.confirm_in`) with the partner's M2M client on the rows, so every rule applies (served tours, seats and
   allotments, credit stop, re-hold limit, the policy locked at confirm). The trip case says `entered_via = 'staff'`
   and `entered_by`; the bk-047 hold trigger emits `booking.created_by_aa` before the `line.confirmed` events so the
-  agency's CRM imports it. The agency reference is the proposal ref (next free version). **Price override**: staff
+  agency's CRM imports it. The agency reference is the proposal ref (next free version). The form sends the tour's
+  room mix (empty = the engine default) and any extra hotel rooms or services from supply as their own lines, for the
+  same travellers (`ui/booking/deskEntry.ts`). **Price override**: staff
   may set the total with a reason; the quote lines are scaled to it before hashing (`quotes.scale_prices`). At or above
   the floor (the rule's floor margin, `quotes.floor_price`; never above the rule price when the agency discount is
   lower) it books at once; below it the row waits `awaiting_approval` (the hold keeps the seats for
@@ -1037,7 +1039,11 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
 - **Cancellation** (`app.b2b.amendments`): staff cancel for the agency (`POST /booking/b2b-desk/bookings/{ref}/cancel`,
   dry run, `entered_via = 'staff'` on `b2b_cancellations`), optionally asking a lower fee % or a waiver with a reason;
   `…/cancellation/override` asks later, `…/approve` (a second person) lowers `fee_amount` / `refundable_amount` (the
-  only update the bk-047 guard lets through) and emits `booking.fee_changed`; `…/reject` clears the request. On any
+  only update the bk-047 guard lets through) and emits `booking.fee_changed`; `…/reject` clears the request. One open
+  request at a time (409 `override_pending`: a new value needs the pending one rejected first) and the approver sends
+  the fee % they saw (`{fee_override_pct}`; a different stored value is 409 `override_changed`), so a second person
+  never approves a value they did not see. Erasure: `waive_reason` / `override_reason` may be set to `[redacted]` (the
+  guards allow only that move, as `bk_owner` in a reviewed run-script). On any
   case cancel, pending and requested supplier bookings are cancelled (a request is withdrawn: staff tell the
   supplier) and confirmed ones raise "cancel with supplier"; the supplier's fee is recorded on the cancelled booking
   (`supplier_cancel_fee` + currency, `POST /booking/supplier-bookings/{id}/cancel-fee` or with the cancel) and is the
@@ -1057,7 +1063,10 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
   `child_amount`, `infant_amount` and `single_supplement_amount` (+ nets) on computed matrix rows (single supplement
   per night = single rate - half the double rate); hand rows may carry them. Plans carry `child_age_max` /
   `infant_age_max` (`PUT …/trip-plans/{source_id}/age-bands`; defaults in settings `b2b_child_age_max` 11,
-  `b2b_infant_age_max` 1).
+  `b2b_infant_age_max` 1). The agency reads them (contract 1.7): `GET /products` `age_bands` (the plan's, else the
+  defaults) and three sell-side tariff fields priced by the quote engine (`tariff._by_age_and_room`):
+  `child_price_per_person`, `infant_price` (what one infant adds) and `single_supplement_per_person` (the party in
+  single rooms less twin share; null when a single room has no rate), also the last three CSV columns. Never a net.
 - **Per-tour terms** (`booking.trip_plan_billing_terms`, staff `/booking/tour-terms/{source_id}`, trip plan page →
   "Agency terms"): a tour's deposit % and balance days for every agency or one. Most specific wins: agency + tour >
   tour > agency > default (`config.plan_terms`), on the settlement draft (the tour of the hold's first `tp:` line) and
