@@ -82,6 +82,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/trip-checks", roles: [A, S, C] },
   // B2B desk (AA-975): on-request lines and departure incidents; every operational role (API b2b_desk.*).
   { pattern: "/b2b-desk", roles: [A, S, C] },
+  // AA-1075 (bk-13): the operations manifest of a departure (API ops.read: admin, sales, contracting).
+  { pattern: "/b2b-desk/manifest/:id", roles: [A, S, C] },
   // AA-1074 (bk-045): costs & profit. Departure costs and purchase orders for the operational roles (API bill.read /
   // ops.read + pricing.read), profit for finance and admin (API profit.read); the page shows the tabs a role may use.
   { pattern: "/finance", roles: [A, S, C, F] },

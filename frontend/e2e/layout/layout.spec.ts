@@ -94,6 +94,14 @@ const PAGES: PageCase[] = [
   { name: "trip-checks", path: "/trip-checks" },
   { name: "b2b-desk-on-request", path: "/b2b-desk" },
   { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },
+  // AA-1075: staff-entered agency bookings and the departure manifest (counts only).
+  { name: "b2b-desk-agency-bookings", path: "/b2b-desk?tab=agency-bookings" },
+  {
+    name: "b2b-desk-manifest",
+    path: "/b2b-desk/manifest/00000000-0000-4000-8000-000000000b01",
+    ready: "text=Supplier bookings",
+    noTable: true,
+  },
   { name: "staff", path: "/staff" },
   { name: "staff-cases", path: "/staff/u-001?tab=cases" },
   // Not a kit DataTable: a feed of entries with an expandable before / after grid (opened on the first entry).

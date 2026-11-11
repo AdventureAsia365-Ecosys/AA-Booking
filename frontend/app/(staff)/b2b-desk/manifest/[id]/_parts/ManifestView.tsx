@@ -11,7 +11,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Printer, Users } from "lucide-react";
 import { agencyOpsApi, openBlob, paxText, type Manifest, type ManifestBooking } from "@/lib/api/agencyOps";
-import { Button, DateText, KpiTile, LightTable, PageFrame, Pill, Section, useCan, type BookingTone } from "@/ui";
+import { Button, DateText, KpiTile, LightTable, PageFrame, Pill, Section, type BookingTone } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 
 type SupplierRow = Manifest["supplier_bookings"][number];
@@ -34,14 +34,9 @@ function rooms(r: { occupancy: string; count: number }[]): string {
 }
 
 export function ManifestView({ departureId }: { departureId: string }) {
-  const canRead = useCan("ops.read");
-  const q = useQuery({
-    queryKey: ["manifest", departureId],
-    queryFn: () => agencyOpsApi.manifest(departureId),
-    enabled: canRead,
-  });
+  // ops.read is checked by the API (a 403 shows as the page error).
+  const q = useQuery({ queryKey: ["manifest", departureId], queryFn: () => agencyOpsApi.manifest(departureId) });
   const [printing, setPrinting] = useState(false);
-  if (!canRead) return <PageError error={new Error("forbidden")} what="the manifest" />;
   if (q.isLoading) return <PageSkeleton side={false} />;
   if (q.isError || !q.data) return <PageError error={q.error} onRetry={() => q.refetch()} what="the manifest" />;
   const m = q.data;

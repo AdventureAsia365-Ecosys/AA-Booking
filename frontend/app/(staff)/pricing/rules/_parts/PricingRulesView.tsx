@@ -140,6 +140,13 @@ export function PricingRulesView() {
         <span className="flex flex-col whitespace-nowrap tabular-nums" title="Target margin, then the floor margin">
           <span className="text-ink">{pct(row.original.target_margin)}</span>
           <span className="text-xs text-muted">floor {pct(row.original.floor_margin)}</span>
+          {(row.original.child_pct || row.original.infant_flat_usd) && (
+            // AA-1075 (bk-15): the child share of the adult price and the infant net of the rule.
+            <span className="text-xs text-muted">
+              child {row.original.child_pct ? pct(row.original.child_pct) : "as adult"} · infant{" "}
+              {row.original.infant_flat_usd ? `${row.original.infant_flat_usd} USD` : "free"}
+            </span>
+          )}
         </span>
       ),
     },
@@ -150,17 +157,6 @@ export function PricingRulesView() {
       header: "RRP markup",
       accessorFn: (r) => Number(r.rrp_markup_pct ?? -1),
       cell: ({ row }) => (row.original.rrp_markup_pct ? `+${pct(row.original.rrp_markup_pct)}` : "—"),
-    },
-    {
-      // AA-1075 (bk-15): the child share and the infant net of the rule.
-      id: "child",
-      header: "Child / infant",
-      accessorFn: (r) => Number(r.child_pct ?? -1),
-      cell: ({ row }) => {
-        const r = row.original;
-        if (!r.child_pct && !r.infant_flat_usd) return "—";
-        return `${r.child_pct ? pct(r.child_pct) : "adult"} / ${r.infant_flat_usd ? `${r.infant_flat_usd} USD` : "free"}`;
-      },
     },
     { id: "valid_from", header: "Valid from", accessorKey: "valid_from", cell: ({ row }) => <DateText value={row.original.valid_from} /> },
     {

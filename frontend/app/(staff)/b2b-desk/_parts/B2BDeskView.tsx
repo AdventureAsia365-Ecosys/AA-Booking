@@ -429,6 +429,12 @@ function DeparturesTab() {
           <span className="max-w-[300px] truncate text-xs text-muted" title={row.original.tour_title ?? row.original.source_id}>
             {row.original.tour_title ?? `Tour ${row.original.source_id.slice(0, 8)}`}
           </span>
+          {row.original.sold > 0 && (
+            // AA-1075 (bk-13): the operations manifest of the departure (counts only, printable).
+            <a className="text-xs font-medium text-accent-deep hover:underline" href={`/b2b-desk/manifest/${encodeURIComponent(row.original.id)}`}>
+              Manifest
+            </a>
+          )}
         </span>
       ),
     },
@@ -482,21 +488,6 @@ function DeparturesTab() {
           </span>
         );
       },
-    },
-    {
-      // AA-1075 (bk-13): the operations manifest of the departure (counts only, printable).
-      id: "manifest",
-      header: "",
-      enableSorting: false,
-      cell: ({ row }) =>
-        row.original.sold > 0 ? (
-          <a
-            className="whitespace-nowrap text-xs font-medium text-accent-deep hover:underline"
-            href={`/b2b-desk/manifest/${encodeURIComponent(row.original.id)}`}
-          >
-            Manifest
-          </a>
-        ) : null,
     },
     ...(canWrite
       ? [
