@@ -8,6 +8,7 @@
 //   GET  /booking/b2b-desk/departures?from&to                              departures, seats, agencies, open incident
 //   GET  /booking/b2b-desk/departures/{id}/incidents · POST (incident_code) = "Flag incident on departure"
 //   POST /booking/b2b-desk/incidents/{id}/clear
+//   POST /booking/b2b-desk/departure-checks/runs {dry_run} (AA-1073; called through lib/api/departures.ts)
 //
 // Agencies learn every answer, flag and clear as events on booking.b2b.v1 GET /events. No free text anywhere: an
 // incident is a code, so it can never carry traveller data.
@@ -79,6 +80,8 @@ export interface OnRequestPage {
 export interface DeskSummary {
   on_request: { open: number; overdue: number; due_soon: number };
   open_incidents: number;
+  /** AA-1073: scheduled departures flagged on their decision date, still short of their minimum. */
+  departures_at_risk?: number;
   due_soon_hours: number;
 }
 
@@ -107,6 +110,12 @@ export interface DeskDeparture {
   auto_confirm: boolean;
   partners: number;
   open_incident: Incident | null;
+  // AA-1073 (bk-046): minimum to operate (0 = none), the decision date, the at-risk flag and agency allotments.
+  min_to_operate: number;
+  decision_date: IsoDate;
+  at_risk: boolean;
+  allotted: number;
+  allotment_unused: number;
 }
 
 export interface DeskDepartures {

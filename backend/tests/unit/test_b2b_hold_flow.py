@@ -113,6 +113,10 @@ def dep_row(**kw: Any) -> dict[str, Any]:
         "capacity": 10,
         "status": "scheduled",
         "auto_confirm": True,
+        "min_to_operate": 0,  # AA-1073 (bk-046)
+        "sales_cutoff_days": 0,
+        "decision_days_before": 21,
+        "at_risk_at": None,
         "created_at": NOW,
         "updated_at": NOW,
     }
@@ -629,6 +633,11 @@ async def test_list_for_tour_counts_held_and_sold() -> None:
         "available": 5,
         "status": "scheduled",
         "auto_confirm": True,
+        # 1.6 (AA-1073): no minimum, sales until the day before the start, no allotment.
+        "min_to_operate": 0,
+        "seats_to_guarantee": None,
+        "last_sale_date": "2027-02-28",
+        "allotment": None,
     }
     assert out["items"][1]["available"] == 0 and out["items"][1]["held"] == 0
     [args] = conn.sql("JOIN booking.trip_plans p")
@@ -698,7 +707,7 @@ async def test_create_departure_writes_and_audits() -> None:
     out = await departures.create_departure(conn, ADMIN, "BT-7D", data)
     assert (out["capacity"], out["held"], out["sold"], out["available"]) == (12, 0, 0, 12)
     [insert] = conn.sql("INSERT INTO booking.departures")
-    assert insert == (PLAN, data["start_date"], 12, "guaranteed", False, "a-1")
+    assert insert == (PLAN, data["start_date"], 12, "guaranteed", False, 0, 0, 21, "a-1")
     assert conn.sql("UPDATE booking.trip_plans SET updated_at") == [(PLAN,)]
     [audit] = conn.sql("INSERT INTO booking.audit_logs")
     assert audit[3] == "departure.created" and "12 seats (guaranteed)" in audit[9]
@@ -734,7 +743,10 @@ def update_conn(before: dict[str, Any] | None = None, held: int = 0, sold: int =
     conn = ScriptedConn()
     conn.on("ORDER BY d.id FOR UPDATE", [before or dep_row()])
     conn.on("FROM booking.b2b_hold_lines l", [{"departure_id": DEP, "held": held, "sold": sold}])
-    conn.on("UPDATE booking.departures", lambda _id, cap, status, auto, by: dep_row(capacity=cap or 10, status=status))
+    conn.on(
+        "UPDATE booking.departures",
+        lambda _id, cap, status, auto, by, *_rules: dep_row(capacity=cap or 10, status=status or "scheduled"),
+    )
     return conn
 
 
@@ -743,7 +755,7 @@ async def test_update_departure_changes_and_audits_only_what_changed() -> None:
     conn = update_conn(held=2, sold=3)
     out = await departures.update_departure(conn, ADMIN, DEP, {"capacity": 5, "auto_confirm": True, "status": None})
     assert (out["capacity"], out["available"]) == (5, 0)
-    assert conn.sql("UPDATE booking.departures") == [(DEP, 5, None, None, "a-1")]
+    assert conn.sql("UPDATE booking.departures") == [(DEP, 5, None, None, "a-1", None, None, None)]
     [audit] = conn.sql("INSERT INTO booking.audit_logs")
     assert audit[3] == "departure.updated" and audit[9] == "Departure capacity 10 -> 5"
 
@@ -943,6 +955,9 @@ def test_staff_departure_routes(monkeypatch: pytest.MonkeyPatch) -> None:
         "capacity": 12,
         "auto_confirm": True,
         "status": "scheduled",
+        "min_to_operate": 0,  # AA-1073 defaults: no minimum, no cutoff, decision 21 days before
+        "sales_cutoff_days": 0,
+        "decision_days_before": 21,
     }
 
     patch = f"/booking/catalog/departures/{DEP}"

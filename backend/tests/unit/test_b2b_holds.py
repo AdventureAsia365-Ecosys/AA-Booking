@@ -29,6 +29,10 @@ def _row(**kw: object) -> dict[str, object]:
         "capacity": 4,
         "status": "scheduled",
         "auto_confirm": True,
+        "min_to_operate": 0,  # AA-1073 (bk-046)
+        "sales_cutoff_days": 0,
+        "decision_days_before": 21,
+        "at_risk_at": None,
     }
     return {**row, **kw}
 

@@ -345,6 +345,7 @@ async def create_quote(
             ],
             today=on,
             exclude_hold=own_hold,
+            partner_id=partner_id,
         )
         basis = await price_basis(
             conn,

@@ -7,12 +7,16 @@
 // Tab "Departures": departures from 14 days ago to 90 days ahead, seats, how many agencies are on each, and the open
 // incident; "Flag incident" picks a code (no free text: an incident never carries traveller data), "Clear" ends it.
 // Every answer, flag and clear reaches the agencies as an event on booking.b2b.v1 GET /events (the CRM shows it).
+// AA-1073: the Departures tab shows the minimum to operate and an "At risk" badge (the daily watch found the departure
+// short of its minimum on its decision date; decide on the trip plan's Departures tab: run anyway or cancel), and "Run
+// checks now" queues the watch and the allotment release at once.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { AlarmClock, CircleAlert, ClipboardCheck, Siren } from "lucide-react";
+import { AlarmClock, CircleAlert, ClipboardCheck, RefreshCw, Siren, TriangleAlert } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
+import { departuresApi, minimumLabel } from "@/lib/api/departures";
 import {
   DECLINE_CODES,
   DECLINE_LABEL,
@@ -91,7 +95,7 @@ export function B2BDeskView() {
       title="B2B desk"
       description="Agency bookings that need AA ops: on-request lines to accept or decline within 1 business day, and incidents on departures. Agencies see every answer in their CRM."
     >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <KpiTile label="On request" value={s?.on_request.open} icon={<ClipboardCheck size={16} />} hint="Waiting for an answer" hintTone="neutral" />
         <KpiTile
           label="Overdue"
@@ -114,13 +118,20 @@ export function B2BDeskView() {
           hint={s ? (s.open_incidents ? "Agencies were told" : "None") : undefined}
           hintTone={s?.open_incidents ? "warning" : "neutral"}
         />
+        <KpiTile
+          label="Departures at risk"
+          value={s?.departures_at_risk}
+          icon={<TriangleAlert size={16} />}
+          hint={s ? (s.departures_at_risk ? "Short of the minimum" : "None") : undefined}
+          hintTone={s?.departures_at_risk ? "warning" : "neutral"}
+        />
       </div>
       <Section>
         <div className="mb-4">
           <SavedTabs
             tabs={[
               { key: "on-request", label: "On request", count: s?.on_request.open },
-              { key: "departures", label: "Departures & incidents", count: s?.open_incidents },
+              { key: "departures", label: "Departures & incidents", count: s ? s.open_incidents + (s.departures_at_risk ?? 0) : undefined },
             ]}
           />
         </div>
@@ -421,15 +432,27 @@ function DeparturesTab() {
       id: "status",
       header: "Status",
       accessorFn: (r) => r.status,
-      cell: ({ row }) => <Pill tone={DEP_STATUS[row.original.status].tone}>{DEP_STATUS[row.original.status].label}</Pill>,
+      cell: ({ row }) => (
+        <span className="flex flex-wrap gap-1">
+          <Pill tone={DEP_STATUS[row.original.status].tone}>{DEP_STATUS[row.original.status].label}</Pill>
+          {row.original.at_risk && <Pill tone="warning">At risk</Pill>}
+        </span>
+      ),
     },
     {
       id: "seats",
       header: "Seats",
       accessorFn: (r) => r.sold,
       cell: ({ row }) => (
-        <span className="bk-tabular text-[13px] text-body">
-          {row.original.sold} sold · {row.original.held} held · {row.original.available} free / {row.original.capacity}
+        <span className="flex flex-col">
+          <span className="bk-tabular text-[13px] text-body">
+            {row.original.sold} sold · {row.original.held} held · {row.original.available} free / {row.original.capacity}
+          </span>
+          {(minimumLabel(row.original) || row.original.allotted > 0) && (
+            <span className="text-xs text-muted">
+              {[minimumLabel(row.original), row.original.allotted ? `${row.original.allotted} in allotments` : null].filter(Boolean).join(" · ")}
+            </span>
+          )}
         </span>
       ),
     },
@@ -486,6 +509,7 @@ function DeparturesTab() {
 
   return (
     <>
+      {canWrite && <RunChecks onDone={refresh} />}
       <DataTable<DeskDeparture>
         searchable={false}
         tableId="b2b-desk-departures"
@@ -506,6 +530,29 @@ function DeparturesTab() {
       </p>
       <FlagModal departure={flagging} onClose={() => setFlagging(null)} onDone={refresh} />
     </>
+  );
+}
+
+function RunChecks({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
+  const run = useMutation({
+    mutationFn: () => departuresApi.runChecks(false),
+    onSuccess: () => {
+      toast.success("Departure checks queued; the list updates in a minute");
+      setTimeout(onDone, 15_000);
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
+      <span>
+        Every day at 08:00 Vietnam time a check guarantees departures that reached their minimum, flags those short of it on their decision
+        date, and releases agency allotments that reached their release date.
+      </span>
+      <Button size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
+        <RefreshCw size={14} /> Run checks now
+      </Button>
+    </div>
   );
 }
 

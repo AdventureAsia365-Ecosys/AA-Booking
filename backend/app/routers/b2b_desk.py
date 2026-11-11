@@ -9,6 +9,8 @@ outcome as events on ``GET /booking/b2b/v1/events``.
 - ``GET /departures?from&to``: departures with seats, the agencies on them and the open incident.
 - ``GET /departures/{id}/incidents``, ``POST /departures/{id}/incidents`` (``incident_code``) = "Flag incident on
   departure"; ``POST /incidents/{id}/clear``.
+- ``POST /departure-checks/runs`` (``dry_run``) and ``GET /departure-checks/runs`` (AA-1073): queue now / list the
+  runs of ``bk_departure_watch`` (guarantee at the minimum, at risk on the decision date) and ``bk_allotment_release``.
 - ``GET /bookings/{ref}/confirmation`` (AA-1037 G2; ``ref`` = the trip case id or code): the booking confirmation of
   a confirmed B2B booking as the printable HTML file the agency gets (``format=json`` for the JSON body).
 """
@@ -24,7 +26,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.auth.staff import Staff, get_pool, require
-from app.b2b import confirmation, desk
+from app.b2b import confirmation, departure_watch, desk
 from app.errors import NotFound
 
 router = APIRouter(prefix="/booking/b2b-desk", tags=["b2b"])
@@ -88,6 +90,27 @@ async def get_departures(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await desk.list_departures(conn, start=start, end=end)
+
+
+class DepartureChecksIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = False
+
+
+@router.post("/departure-checks/runs", status_code=202)
+async def post_departure_checks(body: DepartureChecksIn, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+    """AA-1073: queue the departure watch (guarantee / at risk) and the allotment release now."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_watch.enqueue_now(conn, staff, dry_run=body.dry_run)
+
+
+@router.get("/departure-checks/runs")
+async def get_departure_checks(
+    _: CanRead, pool: Pool, limit: Annotated[int, Query(ge=1, le=100)] = 20
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await departure_watch.recent_runs(conn, limit)
 
 
 @router.get("/departures/{departure_id}/incidents")

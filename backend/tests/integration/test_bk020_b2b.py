@@ -81,6 +81,7 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.b2b_quote_lines")
         await conn.execute("DELETE FROM booking.b2b_quotes")
         await conn.execute("DELETE FROM booking.departure_incidents")  # AA-975 (bk-022), references departures
+        await conn.execute("DELETE FROM booking.departure_allotments")  # AA-1073 (bk-046), references both
         await conn.execute("DELETE FROM booking.departures")
         await conn.execute("DELETE FROM booking.b2b_partners")
     await conn.execute("DELETE FROM booking.trip_plan_components")
@@ -291,6 +292,11 @@ async def test_departures_quote_hold_confirm(
         "available": 4,
         "status": "scheduled",
         "auto_confirm": True,
+        # 1.6 (AA-1073): no minimum, sales until the day before the start, no allotment.
+        "min_to_operate": 0,
+        "seats_to_guarantee": None,
+        "last_sale_date": (DAY1_DATE - timedelta(days=1)).isoformat(),
+        "allotment": None,
     }
     products = await _ok(await c.get("/b2b/v1/products", headers=_m2m(m2m, scope="booking.b2b/read")))
     assert products["items"][0]["has_fixed_departures"] is True

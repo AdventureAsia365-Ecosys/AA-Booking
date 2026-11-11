@@ -41,8 +41,8 @@ from app.agency_billing import reminders as agency_reminders
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
+from app.b2b import departure_watch, tenant_pull
 from app.b2b import expiry as b2b_expiry
-from app.b2b import tenant_pull
 from app.b2b.errors import B2BError, b2b_error_handler, validation_error_handler
 from app.catalog import cost_sheet, trip_plan_sync
 from app.catalog import lifecycle as tour_lifecycle
@@ -135,6 +135,8 @@ def create_app(
                 # AA-1074 (bk-045): departure shared costs re-priced by sold seats; purchase orders e-mailed.
                 **finance_costs.HANDLERS,
                 finance_orders.KIND: finance_orders.build_handler(settings),
+                # AA-1073 (bk-046): departure guarantee / at risk at the minimum, agency allotment release.
+                **departure_watch.HANDLERS,
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }
@@ -154,6 +156,8 @@ def create_app(
                     agency_reminders.ReminderSchedule(),
                     # AA-1074: re-price departure costs when the sold seats (or a rate) move.
                     finance_costs.RecomputeSchedule(),
+                    # AA-1073: daily, the departure watch and the allotment release.
+                    departure_watch.DepartureDailySchedule(),
                     # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
                     ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.

@@ -176,7 +176,11 @@ backend/
                            AA-974: holds.py also extend once + re-hold limit, cancellation.py (fee policies: tiers,
                            in force, staff admin; cancel / dry run → b2b_cancellations); AA-1030: agency_pricing.py
                            (partner tiers, tier discounts, contract rate cards: the discount a quote line gets,
-                           maker-checker staff admin, partner tier assignment)
+                           maker-checker staff admin, partner tier assignment); AA-1073 (bk-046): departures.py also
+                           the minimum / sales cutoff / decision date, the allotment seat count and the recurring
+                           generator, allotments.py (agency seat allotments: propose, approve maker-checker, end,
+                           bk_allotment_release), departure_watch.py (bk_departure_watch: guarantee at the minimum,
+                           at risk on the decision date; DepartureDailySchedule; staff "Run checks now")
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
                            /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
                            /bookings/{id}/cancel (AA-974); /bookings/{id}/confirmation, /terms (AA-1037, minor 1.3)
@@ -237,6 +241,8 @@ backend/
                            GET /booking/catalog/trip-plans (+ /facets, /{source_id}), PUT …/{source_id}/commercial,
                            POST …/{source_id}/trip-cases (AA-679, bk-009); GET|PUT …/{source_id}/components (AA-972);
                            GET|POST …/{source_id}/departures, PATCH /booking/catalog/departures/{id} (AA-973);
+                           POST …/{source_id}/departures:generate, GET|POST /booking/catalog/departures/{id}/allotments,
+                           POST /booking/catalog/allotments/{id}/approve|end (AA-1073; b2b_desk.read / .write)
                            GET /booking/catalog/geo/destinations[/{id}], GET /booking/catalog/geo/countries[/{iso}]
                            (catalog.read), PATCH of both (catalog.admin) (AA-996, bk-029)
                            GET /booking/catalog/price-readiness?status=&country=&q=&format=json|csv (pricing.read,
@@ -609,6 +615,26 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   every hold under the lock), so a client is never told the seats they hold are sold out. A
   `departure_id` only belongs to the `tp:` line of its own plan on its `start_date` (else 422 `invalid`). Products
   report `has_fixed_departures`.
+- **Minimum, cutoff, decision date, allotments (AA-1073, bk-046, contract minor 1.6)**: a departure has
+  `min_to_operate` (0 = no minimum: status by hand), `sales_cutoff_days` (sales close on `start_date - cutoff`, that day
+  included; a line then is `sold_out`, "sales closed on …"; 0 = the start day, the old rule) and
+  `decision_days_before` (21). The daily job `bk_departure_watch` moves a scheduled departure with sold >= minimum >= 1
+  to `guaranteed` (event `departure.guaranteed`), and on the decision date stamps a scheduled one still short of it at
+  risk (`at_risk_at`, event `departure.at_risk` to the agencies on it, one staff notification `departure.at_risk`);
+  staff decide on the trip plan's Departures tab (run anyway = guaranteed, or cancel). Sold seats only, never held.
+  **Allotments** (`booking.departure_allotments`, `app/b2b/allotments.py`): seats of one departure kept for one agency
+  until `start_date - release_days_before`; proposed by one staff member, approved by another (`b2b_desk.write`, 403
+  `maker_checker`), refused when the general free seats would go below zero (409 `allotment_exceeds_free`); a change is
+  a new row replacing the one in force on approval; pending → rejected, in force → withdrawn, a cancelled departure
+  ends them. **Seat count** (counted under the departure lock, never stored): an agency's unused allotment (seats minus
+  its own held + sold) is kept from every other agency, so an agency can take `capacity - held - sold - unused
+  allotments of the others` (its own holds draw on its allotment first); a capacity edit is refused below held + sold +
+  unused allotments. `bk_allotment_release` stamps `released_at` on the release date (event `allotment.released` to that
+  agency). `GET /departures` 1.6 adds `min_to_operate`, `seats_to_guarantee` (null without a minimum), `last_sale_date`
+  and the caller's own `allotment` (`seats`, `used`, `available`, `release_date`); `available` is the caller's.
+  The recurring generator `POST …/{source_id}/departures:generate` (`trip_plan.write`): weekly (ISO weekdays) or
+  monthly (a day; a month without it is skipped), at most 400 days and 400 dates, `dry_run` preview, dates the plan
+  already has are skipped (`ON CONFLICT DO NOTHING`), one audit row per run.
 - **Holds (AA-973)**: `POST /holds` (scope `hold`, `Idempotency-Key` required) holds the lines of one quote for one
   proposal version: one `active` or `confirmed` set per `(partner, proposal_ref, proposal_version)` (the same quote
   again returns that hold; another quote is 422 `invalid` until it is released); the same key for another request is
@@ -670,7 +696,8 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
 - **Event feed (AA-975, bk-022, contract minor 1.1)**: `GET /events?after=<cursor>&limit=` (scope `read`; default
   200, max 500) returns the calling agency's events oldest first: `hold.expired`, `hold.extended`, `line.confirmed`,
   `line.declined` (+ `decline_code`), `booking.cancelled`, `departure.guaranteed`, `departure.cancelled`,
-  `departure.incident` / `departure.incident_cleared` (+ `incident_code`). Ids and codes only (no payload, no free
+  `departure.incident` / `departure.incident_cleared` (+ `incident_code`); 1.6 (AA-1073): `departure.at_risk` (fan-out
+  like `departure.guaranteed`) and `allotment.released` (the one agency whose allotment went back to sale). Ids and codes only (no payload, no free
   text: an event can never carry traveller data). Every event is a row of the **shared outbox** `booking.outbox`
   written by a trigger in the transaction of the change (holds, hold lines, cancellations, departures, incidents), so
   every path emits (requests, the expiry job, lazy expiry, the desk, AA-682 later; memo seam 8). Departure events fan
@@ -1047,6 +1074,8 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_agency_invoice_reminders` | AA-1037 extras G4: once a day (`ReminderSchedule`, key per day; payload `day`), the overdue issued agency invoices with a balance (at most 500): per invoice the highest step reached (`agency_reminder_steps_days` + the credit stop at `suspend_after_days`) not yet in `booking.agency_invoice_reminder` is e-mailed (outside prod to the staff inbox) and recorded, or recorded `skipped` without a billing e-mail. No `SES_FROM_ADDRESS` (or no staff inbox outside prod): `skipped`, nothing written. A failed send is counted, the others are kept and the run raises (retried); a sending pause fails it. Not deploy-gate exempt (seconds). |
 | `bk_settlement_draft` | AA-1037 R4: the tour settlement drafts of a month (default: the closed month): per confirmed B2B hold, `deposit` (deposit % of the B2B total) or `full` (booked inside the balance window), then `balance` once the balance date (departure - `balance_days_before_departure`) is before the period end, or one `cancellation_fee` line (the fee less what was billed; a credit when negative) for a cancelled booking; terms from `billing_terms` (agency override, else default); one live line per (hold, role), so nothing is billed twice and an unbilled earlier event lands on the next run. Queued daily by `DraftSchedule` for the previous month and by staff. Not deploy-gate exempt. |
 | `bk_departure_cost_recompute` | AA-1074 (bk-045): queued by a maintenance hook whenever the watermark (per departure with an unfrozen rate-priced shared cost: sold seats and newest hold / hold line change; the newest rate change) moves; key = its hash. One transaction per departure: each active, unfrozen `rate` cost re-reads the band for the sold seats; a pending booking behind it follows (net, pax, day). Audit `departure_cost.repriced`. Payload `{departure_id?}`. Not deploy-gate exempt (seconds). |
+| `bk_departure_watch` | AA-1073 (bk-046): queued once per UTC day by `DepartureDailySchedule` (first pass at or after 01:00 UTC, key `bk_departure_watch:<UTC date>`) and by staff (`POST /booking/b2b-desk/departure-checks/runs`, key per UTC minute; `dry_run` reports only). Scheduled departures with a minimum, not started, at most 500 per run, `FOR UPDATE SKIP LOCKED`: sold >= minimum → `guaranteed` (audit, event); else on or after the decision date and not stamped → `at_risk_at` (event `departure.at_risk`, one staff notification per departure, audit). Not deploy-gate exempt (seconds). |
+| `bk_allotment_release` | AA-1073 (bk-046): same daily hook and staff run. Stamps `released_at` on the allotments in force whose release date (`start_date - release_days_before`, UTC day) is today or earlier (at most 500, `SKIP LOCKED`); the trigger emits `allotment.released`; one audit row each. Not deploy-gate exempt (seconds). |
 | `bk_supplier_order_send` | AA-1074 (bk-045): one per Send of a purchase order (key per order and press). E-mails the order's snapshot through SES (outside prod to the staff inbox), then marks it `sent` and requests its pending lines; a permanent SES refusal (or no sender / staff inbox) puts the order back to `draft` with `send_error`; throttling retries. At least once (a worker dying after SES accepted re-sends). Not deploy-gate exempt. |
 | `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
@@ -1645,6 +1674,20 @@ staff only, never in `booking.b2b.v1`): `v_cost_variance`, `v_departure_cost_lin
 `v_case_profit`, `v_departure_profit`, `v_agency_profit_month`. USD rule: each native amount converted per line and
 rounded half up to the cent; totals are sums of cents. DM-7.1 rows for the two tables are in the root data standards.
 No row of `booking` can be deleted from either table; `cis_app` reads none of it.
+
+### `bk-046` (AA-1073 departures: minimum to operate, sales cutoff, at-risk stamp, agency allotments — needs `bk-019`, `bk-020`, `bk-022`)
+
+A **contract** file (MIG-4: migration-only PR, applied by Infra Migration Apply once every job table is idle, then the
+code PR raises readiness to bk-046). `departures` gains `min_to_operate` (0..capacity, 0 = none), `sales_cutoff_days`
+(0..90, default 0), `decision_days_before` (0..365, default 21) and `at_risk_at` (only with a minimum). The outbox takes
+the event types `departure.at_risk` and `allotment.released` (CHECK `outbox_allotment_chk`: it names its departure);
+`departures_outbox` also emits `departure.at_risk` when `at_risk_at` is first stamped on a scheduled departure (trigger
+on `status, at_risk_at`). New table `booking.departure_allotments` (departure, partner, `seats` 1..1000
+`conf:commercial`, `release_days_before` 0..365, `replaces_id`, created / approved / released / ended by + at,
+`end_reason` `replaced|withdrawn|rejected|departure_cancelled`): append-only facts (column UPDATE grants on the
+approve / release / end columns only, no DELETE), maker-checker CHECK, one in force and one pending per departure and
+agency (partial unique indexes), guard trigger (starts pending on a departure not cancelled, approved / released / ended
+once) and the release outbox trigger. DM-7.1 row in the root data standards. `cis_app` reads none of it.
 
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679

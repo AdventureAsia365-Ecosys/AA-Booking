@@ -389,13 +389,25 @@ WHERE l.held_as = 'on_request'
 """
 
 
+# AA-1073 (bk-046): departures the watch stamped at risk that are still scheduled and short of their minimum (the
+# rule of app.b2b.departures.is_at_risk; sold = confirmed lines not declined / cancelled).
+AT_RISK_SQL = """
+SELECT count(*)::int FROM booking.departures d
+WHERE d.status = 'scheduled' AND d.at_risk_at IS NOT NULL AND d.min_to_operate > coalesce((
+    SELECT sum(sl.seats) FROM booking.b2b_hold_lines sl JOIN booking.b2b_holds sh ON sh.id = sl.hold_id
+     WHERE sl.departure_id = d.id AND sh.status = 'confirmed' AND sl.status NOT IN ('declined', 'cancelled')), 0)
+"""
+
+
 async def summary(conn: asyncpg.Connection, *, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(UTC)
     row = await conn.fetchrow(SUMMARY_SQL, now, now + timedelta(hours=DUE_SOON_HOURS))
     incidents = await conn.fetchval("SELECT count(*)::int FROM booking.departure_incidents WHERE cleared_at IS NULL")
+    at_risk = await conn.fetchval(AT_RISK_SQL)
     return {
         "on_request": {"open": row["open"], "overdue": row["overdue"], "due_soon": row["due_soon"]},
         "open_incidents": int(incidents or 0),
+        "departures_at_risk": int(at_risk or 0),
         "due_soon_hours": DUE_SOON_HOURS,
     }
 
@@ -462,6 +474,7 @@ async def list_departures(
     )
     ids = [r["id"] for r in rows]
     used = await departures.usage(conn, ids) if ids else {}
+    allots = await departures.live_allotments(conn, ids)
     partners = await _partners(conn, ids)
     open_incidents = (
         {
@@ -480,7 +493,7 @@ async def list_departures(
     for r in rows:
         held, sold = used.get(r["id"], (0, 0))
         items.append(
-            departures.staff_out(r, held, sold)
+            departures.staff_out(r, held, sold, allots.get(r["id"]))
             | {
                 "source_id": r["source_id"],
                 "tour_title": titles.get(r["source_id"]),
