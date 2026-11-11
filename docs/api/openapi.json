@@ -1,6 +1,30 @@
 {
   "components": {
     "schemas": {
+      "AgeBands": {
+        "additionalProperties": false,
+        "description": "1.7 (AA-1075, bk-15): the oldest age (in whole years on the departure date) at the child and infant prices.",
+        "properties": {
+          "child_age_max": {
+            "maximum": 17.0,
+            "minimum": 2.0,
+            "title": "Child Age Max",
+            "type": "integer"
+          },
+          "infant_age_max": {
+            "maximum": 4.0,
+            "minimum": 0.0,
+            "title": "Infant Age Max",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "child_age_max",
+          "infant_age_max"
+        ],
+        "title": "AgeBands",
+        "type": "object"
+      },
       "AgeBandsBody": {
         "additionalProperties": false,
         "description": "bk-047 (AA-1075, bk-15): the oldest ages at the child and infant prices (None = the default).",
@@ -6209,6 +6233,31 @@
         "title": "OrderScope",
         "type": "object"
       },
+      "OverrideApproveIn": {
+        "additionalProperties": false,
+        "description": "The lower fee % the approver saw; a different stored value (asked again in between) is refused (409).",
+        "properties": {
+          "fee_override_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Fee Override Pct"
+          }
+        },
+        "required": [
+          "fee_override_pct"
+        ],
+        "title": "OverrideApproveIn",
+        "type": "object"
+      },
       "OverrideIn": {
         "additionalProperties": false,
         "properties": {
@@ -6978,6 +7027,16 @@
       "Product": {
         "additionalProperties": false,
         "properties": {
+          "age_bands": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgeBands"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "components": {
             "items": {
               "$ref": "#/components/schemas/Component"
@@ -8780,6 +8839,16 @@
             "title": "Agency Discount Pct",
             "type": "string"
           },
+          "child_price_per_person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "country": {
             "anyOf": [
               {
@@ -8802,6 +8871,16 @@
               }
             ],
             "title": "Duration Days"
+          },
+          "infant_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "pax_max": {
             "anyOf": [
@@ -8857,6 +8936,16 @@
               }
             ],
             "title": "Season"
+          },
+          "single_supplement_per_person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "title": {
             "anyOf": [
@@ -11241,6 +11330,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideApproveIn"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

@@ -31,6 +31,16 @@
 - **The asked currency must price today** (S270): a quote currency without an approved FX rate in force is refused
   as ``invalid`` (422, :func:`check_currency`, listing the currencies that do price), before any row is read; only
   the tariff does this, ``POST /quotes`` keeps its 503 ``unavailable``.
+- **Child, infant and single prices** (1.7, AA-1075 bk-15), each asked of the quote engine the same way, so a CRM
+  can show them before it asks for a quote: ``child_price_per_person`` = the engine's price of one child of the band's
+  smallest party (the rule's ``child_pct`` of the adult price; the adult price when the rule has none), so a quote of
+  a adults and c children charges a x ``price_per_person`` + c x ``child_price_per_person``, within the line's
+  rounding;
+  ``infant_price`` = what one infant adds to that party's line (the rule's ``infant_flat_usd`` sold at the rule; 0
+  when it has none); ``single_supplement_per_person`` = the party's line with every traveller in a single room,
+  per person, less ``price_per_person`` (0 for a tour without hotel rooms or a party of one, who already sleeps in a
+  single; ``null`` when a single room has no rate in force: ask a quote). The age bands that make a child or an
+  infant are on the product (``GET /products`` ``age_bands``). Sell side only, never a net.
 - **Never** a net cost, a supplier rate or a margin (the agency's own discount and the public RRP only).
 
 Read by staff (``GET /booking/pricing/partner-tariffs/{partner_id}``, ``pricing.read``, ``app.routers.
@@ -45,7 +55,7 @@ import io
 import logging
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -59,6 +69,7 @@ from app.b2b.components import (
     PREFIX_PLAN,
     LineAsk,
     LineCost,
+    RoomAsk,
     component_id,
     price_lines,
 )
@@ -109,6 +120,9 @@ CSV_COLUMNS: tuple[str, ...] = (
     "agency_discount_pct",
     "rrp_per_person",
     "rrp_currency",
+    "child_price_per_person",
+    "infant_price",
+    "single_supplement_per_person",
 )
 # Spreadsheet formula injection (OWASP CSV injection): a text cell starting with one of these is prefixed with "'".
 FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
@@ -125,6 +139,7 @@ class Cell:
     on: date
     end: date
     row_no: int = 0
+    singles: bool = False  # AA-1075: every traveller in a single room (the single supplement's line)
 
     @property
     def ask(self) -> LineAsk:
@@ -136,6 +151,7 @@ class Cell:
             adult=self.party,
             child=0,
             infant=0,
+            rooms=(RoomAsk("single", self.party),) if self.singles else (),
         )
 
     @property
@@ -278,7 +294,9 @@ async def build(
                 break
             cell = Cell(no=len(cells) + 1, row=row, party=int(row["pax_min"]), on=first, end=last, row_no=row_no)
             cells.append(cell)
-    costs = await _costs(conn, cells)
+    # AA-1075: the same cells with every traveller in a single room (a refusal there only empties the supplement).
+    singles = [replace(cell, no=cell.no + len(cells), singles=True) for cell in cells]
+    costs = await _costs(conn, [*cells, *singles])
     basis = await quotes.price_basis(
         conn,
         partner_id=partner_id,
@@ -297,10 +315,11 @@ async def build(
             continue
         try:
             price = quotes.price_line(basis, cost, cell.row["plan_id"])
+            extras = _by_age_and_room(basis, cell, cost, costs[cell.no + len(cells)], price, currency)
         except engine.PricingError as exc:
             refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, str(exc))))
             continue
-        items.append((cell.row_no, _item(cell, price, currency)))
+        items.append((cell.row_no, {**_item(cell, price, currency), **extras}))
     unpriced.extend(_joined(refused, ("reason",)))
     return {
         "currency": currency,
@@ -320,8 +339,44 @@ async def build(
     }
 
 
+def _by_age_and_room(
+    basis: quotes.PriceBasis,
+    cell: Cell,
+    cost: LineCost,
+    singles: LineCost | str,
+    price: quotes.LinePrice,
+    currency: str,
+) -> dict[str, Any]:
+    """AA-1075 (bk-15): the child price per person, the infant price and the single supplement per person of one
+    tariff row, each priced by the quote engine (see the module doc). Raises ``engine.PricingError`` like the row."""
+    plan, party = cell.row["plan_id"], cell.party
+    adult_pp = per_person(price.b2b_price, party, currency)
+    children = quotes.price_line(basis, cost, plan, pax=(0, party, 0)).b2b_price
+    with_infant = quotes.price_line(basis, cost, plan, pax=(party, 0, 1)).b2b_price
+    supplement: Decimal | None = None
+    if isinstance(singles, LineCost):
+        try:
+            single_pp = per_person(quotes.price_line(basis, singles, plan).b2b_price, party, currency)
+        except engine.PricingError:  # a single room's cost currency without a rate: the row stands, no supplement
+            single_pp = None
+        supplement = None if single_pp is None else max(single_pp - adult_pp, engine.ZERO)
+    return {
+        "child_price_per_person": quotes.money(per_person(children, party, currency), currency),
+        "infant_price": quotes.money(max(with_infant - price.b2b_price, engine.ZERO), currency),
+        "single_supplement_per_person": _money(supplement, currency),
+    }
+
+
 # Two neighbouring pieces of one matrix row with these equal are one tariff row (the later one's valid_to kept).
-SAME_PRICE = ("price", "price_per_person", "agency_discount_pct", "rate_card_id")
+SAME_PRICE = (
+    "price",
+    "price_per_person",
+    "agency_discount_pct",
+    "rate_card_id",
+    "child_price_per_person",
+    "infant_price",
+    "single_supplement_per_person",
+)
 
 
 def _joined(pieces_of: Sequence[tuple[int, dict[str, Any]]], same: Sequence[str]) -> list[dict[str, Any]]:
@@ -414,6 +469,9 @@ def to_csv(tariff: dict[str, Any]) -> str:
                 item["agency_discount_pct"],
                 rrp["amount"] if rrp else None,
                 rrp["currency"] if rrp else None,
+                (item.get("child_price_per_person") or {}).get("amount"),
+                (item.get("infant_price") or {}).get("amount"),
+                (item.get("single_supplement_per_person") or {}).get("amount"),
             )
         )
     return out.getvalue()

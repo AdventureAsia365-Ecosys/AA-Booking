@@ -145,6 +145,13 @@ class Component(Strict):
     destination_id: str | None = Field(default=None, max_length=64)
 
 
+class AgeBands(Strict):
+    """1.7 (AA-1075, bk-15): the oldest age (in whole years on the departure date) at the child and infant prices."""
+
+    child_age_max: int = Field(ge=2, le=17)
+    infant_age_max: int = Field(ge=0, le=4)
+
+
 class Product(Strict):
     tour: TourKey
     trip_plan_id: str = Field(max_length=64)
@@ -155,6 +162,8 @@ class Product(Strict):
     # AA-986 L5 (root ADR 0015): a delta lists a product whose tour was retired once, withdrawn (no components).
     withdrawn: bool = False
     withdrawn_reason: str | None = Field(default=None, max_length=64)
+    # 1.7 (AA-1075): how AA splits travellers by age for this plan (null on a withdrawn row).
+    age_bands: AgeBands | None = None
 
 
 class ProductPage(Strict):
@@ -510,6 +519,10 @@ class TariffItem(Strict):
     price_per_person: Money
     agency_discount_pct: str = Field(pattern=r"^\d+(\.\d{1,4})?$")
     rrp_per_person: Money | None = None
+    # 1.7 (AA-1075, bk-15): sell prices by age band and room, priced by the quote engine (never a net).
+    child_price_per_person: Money | None = None
+    infant_price: Money | None = None
+    single_supplement_per_person: Money | None = None
 
 
 class Tariff(Strict):
