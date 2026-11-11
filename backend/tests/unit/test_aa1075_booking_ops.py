@@ -340,15 +340,43 @@ async def test_override_request_checks_and_maker_checker() -> None:
     pending = _cancellation(fee_override_pct=D("10"), waive_reason="Rebooked", override_by="u-sales", override_at=NOW)
     with pytest.raises(Forbidden):
         await amendments.approve_override(_override_conn(pending), Staff("u-sales", None, "S", "admin", True, "x"),
-                                          "TC-000075")  # fmt: skip
+                                          "TC-000075", expected_fee_override_pct=D("10"))  # fmt: skip
     conn = _override_conn(pending)
-    await amendments.approve_override(conn, CONTRACTING, "TC-000075")
+    await amendments.approve_override(conn, CONTRACTING, "TC-000075", expected_fee_override_pct=D("10.00"))
     assert conn.sql("SET override_approved_by = $2") == [("x1", "u-con", D("100.00"), D("900.00"))]
     with pytest.raises(Conflict):
-        await amendments.approve_override(_override_conn(_cancellation()), CONTRACTING, "TC-000075")
+        await amendments.approve_override(
+            _override_conn(_cancellation()), CONTRACTING, "TC-000075", expected_fee_override_pct=D("10")
+        )
     out = amendments.cancellation_out(pending, CONTRACTING)
     assert out["override"]["status"] == "pending" and out["can_approve_override"] is True
     assert out["policy_fee"]["amount"] == "250.00"
+
+
+@pytest.mark.asyncio
+async def test_override_cannot_be_swapped_under_the_approver() -> None:
+    """Maker-checker: a pending lower fee is never replaced, and the approver approves only the value they saw."""
+    pending = _cancellation(fee_override_pct=D("20"), waive_reason="Rebooked", override_by="u-sales", override_at=NOW)
+    conn = _override_conn(pending)
+    with pytest.raises(Conflict) as e:  # the requester asks again for a lower value while 20 % waits
+        await amendments.request_override(conn, SALES, "TC-000075", fee_override_pct=D("0"), waive_reason="Waive")
+    assert e.value.code == "override_pending" and conn.sql("SET fee_override_pct = $2") == []
+    conn = _override_conn(pending)  # the same request again (double click): no change, no error
+    await amendments.request_override(conn, SALES, "TC-000075", fee_override_pct=D("20"), waive_reason=" Rebooked ")
+    assert conn.sql("SET fee_override_pct = $2") == []
+    conn = _override_conn(pending)
+    with pytest.raises(Conflict) as e:  # the approver saw another value
+        await amendments.approve_override(conn, CONTRACTING, "TC-000075", expected_fee_override_pct=D("0"))
+    assert e.value.code == "override_changed" and conn.sql("SET override_approved_by = $2") == []
+    approved = {**pending, "override_approved_by": "u-con", "override_approved_at": NOW}
+    with pytest.raises(Conflict) as e:  # already approved at 20 %: a different value is not "the same approval"
+        await amendments.approve_override(_override_conn(approved), CONTRACTING, "TC-000075",
+                                          expected_fee_override_pct=D("0"))  # fmt: skip
+    assert e.value.code == "override_changed"
+    out = await amendments.approve_override(
+        _override_conn(approved), CONTRACTING, "TC-000075", expected_fee_override_pct=D("20")
+    )
+    assert out["override"]["status"] == "approved"
 
 
 # ── Vouchers and manifest ────────────────────────────────────────────────────

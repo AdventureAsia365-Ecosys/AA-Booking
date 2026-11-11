@@ -99,7 +99,9 @@ export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
     qc.invalidateQueries({ queryKey: ["trip-case"] });
   };
   const decide = useMutation({
-    mutationFn: (approve: boolean) => (approve ? agencyOpsApi.approveOverride(c.code) : agencyOpsApi.rejectOverride(c.code)),
+    // Approve sends the % shown on screen: a value asked again in between is refused, never approved unseen.
+    mutationFn: ({ approve, pct }: { approve: boolean; pct: string }) =>
+      approve ? agencyOpsApi.approveOverride(c.code, pct) : agencyOpsApi.rejectOverride(c.code),
     onSuccess: (x) => {
       toast.success(x.override?.status === "approved" ? `Fee lowered to ${money(x.fee)}; the agency is told` : "The policy fee stays");
       refresh();
@@ -169,7 +171,7 @@ function CancellationCard({
   x: Cancellation;
   canAsk: boolean;
   onAsk: () => void;
-  decide: { mutate: (approve: boolean) => void; isPending: boolean };
+  decide: { mutate: (v: { approve: boolean; pct: string }) => void; isPending: boolean };
 }) {
   const pending = x.override?.status === "pending";
   return (
@@ -202,10 +204,10 @@ function CancellationCard({
           </p>
           {x.can_approve_override && (
             <span className="mt-2 flex gap-2">
-              <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => decide.mutate(true)}>
+              <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => x.override && decide.mutate({ approve: true, pct: x.override.fee_pct })}>
                 Approve lower fee
               </Button>
-              <Button size="sm" variant="danger" disabled={decide.isPending} onClick={() => decide.mutate(false)}>
+              <Button size="sm" variant="danger" disabled={decide.isPending} onClick={() => x.override && decide.mutate({ approve: false, pct: x.override.fee_pct })}>
                 Keep policy fee
               </Button>
             </span>

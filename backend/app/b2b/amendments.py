@@ -238,6 +238,19 @@ async def _request(conn: asyncpg.Connection, staff: Staff, booking: Any, pct: De
     row = await _locked_cancellation(conn, booking)
     if row["override_approved_by"] is not None:
         raise Conflict("override_final", "the fee override of this booking is already approved")
+    if row["override_by"] is not None:
+        if (
+            row["override_by"] == staff.cis_user_id
+            and Decimal(row["fee_override_pct"]) == pct
+            and row["waive_reason"] == reason
+        ):
+            return  # the same request again (a replayed cancel, a double click): nothing changes
+        # One open request at a time: the approver must decide the value they saw, so a new value is only asked
+        # after a colleague rejects the pending one (maker-checker).
+        raise Conflict(
+            "override_pending",
+            f"a lower fee of {row['fee_override_pct']} % already waits for approval; have it rejected first",
+        )
     if not Decimal(0) <= pct < Decimal(row["fee_pct"]):
         raise Invalid(
             "invalid_override",
@@ -283,14 +296,24 @@ async def request_override(
         return cancellation_out(await conn.fetchrow(CANCELLATION_SQL, booking["trip_case_id"]), staff)
 
 
-async def approve_override(pool: asyncpg.Pool, staff: Staff, ref: str) -> dict[str, Any]:
+async def approve_override(
+    pool: asyncpg.Pool, staff: Staff, ref: str, *, expected_fee_override_pct: Decimal
+) -> dict[str, Any]:
+    """Approve the pending lower fee. ``expected_fee_override_pct`` is the value the approver saw: a stored value
+    that differs (asked again in between) is refused, so the second person never approves a value they did not see."""
     async with pool.acquire() as conn, conn.transaction():
         booking = await staff_booking(conn, ref)
         row = await _locked_cancellation(conn, booking)
-        if row["override_approved_by"] is not None:
-            return cancellation_out(row, staff)
         if row["override_by"] is None:
             raise Conflict("no_override", "no lower fee was asked for on this cancellation")
+        if Decimal(row["fee_override_pct"]) != expected_fee_override_pct:
+            raise Conflict(
+                "override_changed",
+                f"the lower fee asked for is now {row['fee_override_pct']} %, not {expected_fee_override_pct} %;"
+                " reload and decide again",
+            )
+        if row["override_approved_by"] is not None:
+            return cancellation_out(row, staff)
         if row["override_by"] == staff.cis_user_id:
             raise Forbidden("maker_checker", "the person who asked for the lower fee cannot approve it")
         currency = row["currency"].strip()

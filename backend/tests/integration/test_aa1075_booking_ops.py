@@ -209,8 +209,17 @@ async def test_staff_entry_vouchers_manifest_reduce_and_cancel(
     assert x["entered_via"] == "staff" and x["override"]["status"] == "pending" and x["override"]["fee_pct"] == "0.00"
     fee_before = Decimal(x["fee"]["amount"])
     approve = f"/b2b-desk/bookings/{case_id}/cancellation/override/approve"
-    assert (await c.post(approve, headers=sales)).status_code == 403
-    done = await _ok(await c.post(approve, headers=maker))
+    seen = {"fee_override_pct": "0.00"}
+    assert (await c.post(approve, json=seen, headers=sales)).status_code == 403
+    # Maker-checker: the pending value is never swapped, and the approver approves only the value they saw.
+    override = f"/b2b-desk/bookings/{case_id}/cancellation/override"
+    other = {"fee_override_pct": "5", "waive_reason": "Changed my mind"}
+    for res, code in (
+        (await c.post(override, json=other, headers=sales), "override_pending"),
+        (await c.post(approve, json={"fee_override_pct": "5"}, headers=maker), "override_changed"),
+    ):
+        assert (res.status_code, res.json()["detail"]) == (409, code), res.text
+    done = await _ok(await c.post(approve, json=seen, headers=maker))
     assert done["fee"]["amount"] == "0.00" and done["override"]["status"] == "approved"
     events = await _events(c, m2m)
     assert "booking.cancelled" in [t for t, _ in events]
@@ -278,6 +287,17 @@ async def test_tour_terms_and_child_price(
         infant = {**_plan_line("tour", plan["plan"], None, adult=2), "pax": {"adult": 2, "child": 1, "infant": 1}}
         with_infant = await _ok(await _quote(c, m2m, "PRO-C3", [infant]), 201)
         assert Decimal(with_infant["total_b2b_price"]["amount"]) > Decimal(mixed["total_b2b_price"]["amount"])
+        # The agency reads which ages count as child and infant on the product (1.7): defaults, then the plan's own.
+        read = _m2m(m2m)
+
+        async def bands() -> dict[str, int]:
+            page = await _ok(await c.get("/b2b/v1/products", headers=read))
+            return next(p["age_bands"] for p in page["items"] if p["tour"]["source_id"] == SOURCE_ID)
+
+        assert await bands() == {"child_age_max": 11, "infant_age_max": 1}
+        body = {"child_age_max": 9, "infant_age_max": 2}
+        await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/age-bands", json=body, headers=boss))
+        assert await bands() == body
     finally:
         await admin.execute("DELETE FROM booking.policy_approvals WHERE pricing_rule_id = $1::uuid", rule)
         await admin.execute("DELETE FROM booking.pricing_rules WHERE id = $1::uuid", rule)

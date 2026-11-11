@@ -289,6 +289,14 @@ class OverrideIn(BaseModel):
     waive_reason: str = Field(min_length=1, max_length=500)
 
 
+class OverrideApproveIn(BaseModel):
+    """The lower fee % the approver saw; a different stored value (asked again in between) is refused (409)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fee_override_pct: Decimal = Field(ge=0, le=100, max_digits=5, decimal_places=2)
+
+
 class ReduceIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -328,8 +336,10 @@ async def request_fee_override(body: OverrideIn, ref: BookingRef, staff: CanBook
 
 
 @router.post("/bookings/{ref}/cancellation/override/approve")
-async def approve_fee_override(ref: BookingRef, staff: CanApprove, pool: Pool) -> dict[str, Any]:
-    return await amendments.approve_override(pool, staff, ref)
+async def approve_fee_override(
+    body: OverrideApproveIn, ref: BookingRef, staff: CanApprove, pool: Pool
+) -> dict[str, Any]:
+    return await amendments.approve_override(pool, staff, ref, expected_fee_override_pct=body.fee_override_pct)
 
 
 @router.post("/bookings/{ref}/cancellation/override/reject")

@@ -6,7 +6,7 @@
 //   GET  /booking/b2b-desk/entries?status&limit&offset · POST (Idempotency-Key)  staff-entered agency bookings
 //   POST /booking/b2b-desk/entries/{id}/approve | /reject                 a price below the floor (b2b_desk.approve)
 //   POST /booking/b2b-desk/bookings/{ref}/cancel?dry_run (Idempotency-Key) · GET …/cancellation
-//   POST /booking/b2b-desk/bookings/{ref}/cancellation/override | /approve | /reject
+//   POST /booking/b2b-desk/bookings/{ref}/cancellation/override | /approve {fee_override_pct seen} | /reject
 //   POST /booking/b2b-desk/bookings/{ref}/lines/{line_ref}/reduce?dry_run · GET …/reductions
 //   GET  /booking/b2b-desk/bookings/{ref}/vouchers (HTML) · GET /booking/b2b-desk/departures/{id}/manifest
 //   GET|PUT|DELETE /booking/tour-terms/{source_id}                        a tour's deposit terms (billing_config.write)
@@ -254,7 +254,11 @@ export const agencyOpsApi = {
   cancellation: (ref: string) => bkGet<{ cancellation: Cancellation | null }>(`b2b-desk/bookings/${enc(ref)}/cancellation`),
   requestOverride: (ref: string, body: { fee_override_pct: string; waive_reason: string }) =>
     bkSend<Cancellation>(`b2b-desk/bookings/${enc(ref)}/cancellation/override`, { body }),
-  approveOverride: (ref: string) => bkSend<Cancellation>(`b2b-desk/bookings/${enc(ref)}/cancellation/override/approve`),
+  // The approver sends the lower fee % they saw; a value asked again in between is refused (409 override_changed).
+  approveOverride: (ref: string, feeOverridePct: string) =>
+    bkSend<Cancellation>(`b2b-desk/bookings/${enc(ref)}/cancellation/override/approve`, {
+      body: { fee_override_pct: feeOverridePct },
+    }),
   rejectOverride: (ref: string) => bkSend<Cancellation>(`b2b-desk/bookings/${enc(ref)}/cancellation/override/reject`),
   reduce: (
     ref: string,
