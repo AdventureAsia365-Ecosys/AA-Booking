@@ -27,6 +27,12 @@ test("departure board: calendar, table and the departure drawer", async ({ page,
   await capture(page, "departure-board", async () => {
     await pageSettled(page);
     await expect(page.getByTestId("board-month")).toBeVisible({ timeout: 15_000 });
+    // S277: the month header renders before the board query answers; wait for the calendar to be filled (a chip or
+    // the empty month), never capture the loading state.
+    await expect(page.locator('[data-testid="board-calendar"][aria-busy="true"], [data-testid="board-day-list"][aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 });
+    if (board.body!.total > 0) {
+      await expect(page.locator('[data-testid="board-chip"]:visible').first()).toBeVisible({ timeout: 30_000 });
+    }
   });
 
   await page.goto("/departures?view=table", { waitUntil: "domcontentloaded", timeout: 30_000 });
