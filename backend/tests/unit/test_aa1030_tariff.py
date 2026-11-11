@@ -109,7 +109,11 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         for ask in asks:
             if ask.adult in state["refuse"]:
                 raise B2BError("invalid", f"line {ask.line_ref}: no rate in force on {ask.service_date} for 1 per room")
-        return [LineCost(kind="trip_plan", costs=[(D("82") * ask.adult, "USD")]) for ask in asks]
+        # AA-1075: every traveller in a single room adds 16.40 USD net each (a sell of 20 USD).
+        return [
+            LineCost(kind="trip_plan", costs=[((D("82") + (D("16.40") if ask.rooms else 0)) * ask.adult, "USD")])
+            for ask in asks
+        ]
 
     async def states(conn: Any, keys: Any, *, strict: bool = False) -> dict[str, liveness.KeyState]:
         served = state["served"]
@@ -171,7 +175,7 @@ async def test_rows_that_cannot_be_quoted_are_listed_with_the_reason(wired: dict
         ("tour-b", 2): "the trip plan has no bookable components",
         ("tour-a", 1): "no rate in force on 2026-11-05 for 1 per room",  # the internal line ref is cut off
     }
-    assert wired["calls"] == 3  # the chunk failed, then one call per cell
+    assert wired["calls"] == 5  # the chunk failed, then one call per cell (2 rows + their 2 single-room cells)
 
 
 @pytest.mark.asyncio
@@ -292,12 +296,15 @@ def test_the_csv_has_one_line_per_row_and_neutralises_formulas() -> None:
         "agency_discount_pct": "0.0300",
         "rate_card_id": None,
         "rrp_per_person": None,
+        "child_price_per_person": {"amount": "70.00", "currency": "USD"},
+        "infant_price": {"amount": "0.00", "currency": "USD"},
+        "single_supplement_per_person": None,
     }
     text = tariff.to_csv({"items": [item]})
     rows = list(csv.reader(io.StringIO(text)))
     assert rows[0] == list(tariff.CSV_COLUMNS)
     assert rows[1] == ["tour-a", "'=HYPERLINK(1)", "Invented Land", "3", "'-Green", "2027-01-01", "2027-03-31", "11",
-                       "", "11", "USD", "100.00", "1100.00", "0.0300", "", ""]  # fmt: skip
+                       "", "11", "USD", "100.00", "1100.00", "0.0300", "", "", "70.00", "0.00", ""]  # fmt: skip
     assert text.endswith("\r\n")
     view = tariff.agency_view(
         {"currency": "USD", "priced_on": ON, "basis": tariff.BASIS, "tier_code": "standard", "fx": {},
@@ -415,3 +422,68 @@ def test_the_cost_sheet_windows_use_the_same_cuts() -> None:
     assert cost_sheet.rate_cuts(parts, spans) == {date(2027, 1, 1), date(2027, 6, 1), date(2026, 12, 31)}
     wins = cost_sheet.windows(ON, parts, spans)
     assert {w.start for w in wins} <= cost_sheet.rate_cuts(parts, spans)
+
+
+# ── AA-1075 (bk-15): child, infant and single prices on the tariff ──────────
+
+
+@pytest.mark.asyncio
+async def test_child_infant_and_single_prices_come_from_the_quote_engine(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rule = repository.DatedRule(
+        rule=RULE.rule, valid_from=RULE.valid_from, child_pct=D("0.70"), infant_flat_usd=D("16.40")
+    )
+
+    async def price_basis(conn: Any, **kw: Any) -> quotes.PriceBasis:
+        return quotes.PriceBasis(
+            on=ON, currency="USD", rule=rule, rates={}, fx=quotes.FxLock("USD", D("1"), D("0"), ON, "base"),
+            terms=agency_pricing.NO_TERMS,
+        )  # fmt: skip
+
+    monkeypatch.setattr(quotes, "price_basis", price_basis)
+    out = await tariff.build(Conn([_row(PLAN_A, "tour-a", 2, 2)]), partner_id="p", currency="USD", on=ON)
+    (item,) = out["items"]
+    assert item["price_per_person"] == {"amount": "100.00", "currency": "USD"}
+    # A child pays 70 % of the adult price; an infant adds its net sold at the rule (16.40 / 0.82 = 20).
+    assert item["child_price_per_person"] == {"amount": "70.00", "currency": "USD"}
+    assert item["infant_price"] == {"amount": "20.00", "currency": "USD"}
+    # Every traveller in a single room: 120 per person, so 20 more than twin share.
+    assert item["single_supplement_per_person"] == {"amount": "20.00", "currency": "USD"}
+    # The same as a quote of that party asks the engine.
+    cost = LineCost(kind="trip_plan", costs=[(D("164"), "USD")])
+    basis = await price_basis(None)
+    assert quotes.price_line(basis, cost, PLAN_A, pax=(0, 2, 0)).b2b_price == D("140.00")
+    assert quotes.price_line(basis, cost, PLAN_A, pax=(2, 0, 1)).b2b_price == D("220.00")
+    # Sell side only: no net or margin field on a tariff row.
+    assert not [k for k in item if "net" in k or "margin" in k]
+
+
+@pytest.mark.asyncio
+async def test_without_child_or_infant_rule_a_child_pays_like_an_adult_and_an_infant_is_free(
+    wired: dict[str, Any],
+) -> None:
+    out = await tariff.build(Conn([_row(PLAN_B, "tour-b", 3, 4)]), partner_id="p", currency="USD", on=ON)
+    (item,) = out["items"]
+    assert item["child_price_per_person"] == item["price_per_person"] == {"amount": "100.00", "currency": "USD"}
+    assert item["infant_price"] == {"amount": "0.00", "currency": "USD"}
+    assert item["single_supplement_per_person"] == {"amount": "20.00", "currency": "USD"}
+
+
+@pytest.mark.asyncio
+async def test_a_single_room_without_a_rate_empties_only_the_supplement(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+        if any(ask.rooms for ask in asks):
+            raise B2BError("invalid", f"line {asks[0].line_ref}: no rate in force for 1 per room")
+        return [LineCost(kind="trip_plan", costs=[(D("82") * ask.adult, "USD")]) for ask in asks]
+
+    monkeypatch.setattr(tariff, "price_lines", price_lines)
+    out = await tariff.build(Conn([_row(PLAN_A, "tour-a", 2, 2)]), partner_id="p", currency="USD", on=ON)
+    (item,) = out["items"]
+    assert item["price"] == {"amount": "200.00", "currency": "USD"} and item["single_supplement_per_person"] is None
+    assert out["unpriced"] == []
+    lines = list(csv.reader(io.StringIO(tariff.to_csv(out))))
+    assert lines[0][-3:] == ["child_price_per_person", "infant_price", "single_supplement_per_person"]
+    assert lines[1][-3:] == ["100.00", "0.00", ""]

@@ -94,6 +94,14 @@ const PAGES: PageCase[] = [
   { name: "trip-checks", path: "/trip-checks" },
   { name: "b2b-desk-on-request", path: "/b2b-desk" },
   { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },
+  // AA-1075: staff-entered agency bookings and the departure manifest (counts only).
+  { name: "b2b-desk-agency-bookings", path: "/b2b-desk?tab=agency-bookings" },
+  {
+    name: "b2b-desk-manifest",
+    path: "/b2b-desk/manifest/00000000-0000-4000-8000-000000000b01",
+    ready: "text=Supplier bookings",
+    noTable: true,
+  },
   { name: "staff", path: "/staff" },
   { name: "staff-cases", path: "/staff/u-001?tab=cases" },
   // Not a kit DataTable: a feed of entries with an expandable before / after grid (opened on the first entry).
@@ -734,6 +742,41 @@ test.describe("390 x 844 phone, light", () => {
     });
   }
 });
+
+// AA-1075 (bk-11): the "New agency booking" drawer takes a room mix and extra rooms or services; it fits a phone and a
+// desktop without a horizontal scroll, and a room row offers only the occupancies not used yet.
+for (const vp of [{ width: 390, height: 844 }, { width: 1400, height: 900 }]) {
+  test.describe(`${vp.width} px: the agency booking drawer`, () => {
+    test.use({ viewport: vp, colorScheme: "light" });
+    test("room mix rows and the extras picker fit the drawer", async ({ page, baseURL }) => {
+      const c = await prepare(page, baseURL!);
+      await open(
+        page,
+        { name: "b2b-desk-agency-bookings", path: "/b2b-desk?tab=agency-bookings", ready: 'button:has-text("New agency booking")' },
+        c,
+      );
+      await page.getByRole("button", { name: "New agency booking" }).click();
+      const mix = page.locator('[data-testid="desk-room-mix"]');
+      await expect(mix).toBeVisible();
+      await expect(page.locator('[data-testid="desk-extras"] input[role="combobox"]')).toBeVisible();
+      await mix.getByRole("button", { name: "Add rooms" }).click();
+      await mix.getByRole("button", { name: "Add rooms" }).click();
+      const rows = mix.getByLabel("Room occupancy");
+      await expect(rows).toHaveCount(2);
+      await expect(rows.nth(0)).toHaveValue("single");
+      await expect(rows.nth(1)).toHaveValue("double");
+      await expect(rows.nth(1).locator("option")).toHaveCount(4); // its own + the three not used yet
+      const fit = await mix.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(fit.scroll, "the room rows fit the drawer").toBeLessThanOrEqual(fit.client);
+      const doc = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+      expect(doc.scroll, "no horizontal page scroll").toBeLessThanOrEqual(doc.inner);
+      await mix.getByRole("button", { name: "Remove the Single rooms" }).click();
+      await expect(rows).toHaveCount(1);
+      expect(c.unmocked, "every call has a fixture").toEqual([]);
+      expect(c.consoleErrors, "console is clean").toEqual([]);
+    });
+  });
+}
 
 test.afterAll(() => {
   if (!fs.existsSync(MEASURE_DIR)) return;

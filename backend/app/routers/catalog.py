@@ -128,6 +128,14 @@ class PriceRowIn(BaseModel):
     computed: bool = Field(
         default=False, description="a cost sheet row sent back as read; with an amount it becomes overridden"
     )
+    # bk-047 (AA-1075, bk-15): per child / infant and the single supplement, per person (the cost sheet fills them;
+    # staff may enter the sell amounts on a hand row). The nets only ride along on a cost sheet row sent back.
+    child_amount: NetCost | None = None
+    infant_amount: NetCost | None = None
+    single_supplement_amount: NetCost | None = None
+    child_net_amount: NetCost | None = None
+    infant_net_amount: NetCost | None = None
+    single_supplement_net_amount: NetCost | None = None
 
 
 class PricesBody(BaseModel):
@@ -324,6 +332,25 @@ async def put_trip_plan_commercial(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await trip_plans.save_commercial(conn, staff, source_id, body.data())
+
+
+class AgeBandsBody(BaseModel):
+    """bk-047 (AA-1075, bk-15): the oldest ages at the child and infant prices (None = the default)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    child_age_max: int | None = Field(default=None, ge=2, le=17)
+    infant_age_max: int | None = Field(default=None, ge=0, le=4)
+
+
+@router.put("/trip-plans/{source_id}/age-bands")
+async def put_trip_plan_age_bands(
+    body: AgeBandsBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await trip_plans.save_age_bands(
+            conn, staff, source_id, child_age_max=body.child_age_max, infant_age_max=body.infant_age_max
+        )
 
 
 @router.get("/trip-plans/{source_id}/prices")

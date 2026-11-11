@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.b2b import components, quotes
+from app.b2b import components, quotes, reads
 from app.b2b.components import LineAsk, RoomAsk
 from app.main import create_app
 from app.pricing import repository
@@ -378,6 +378,36 @@ def test_products_page() -> None:
     assert item["tour"] == {"source_system": "cis", "source_id": "src-1"} and item["has_fixed_departures"] is False
     assert [c["component_id"] for c in item["components"]] == [f"tp:{plan}", f"rt:{ROOM}"]
     assert item["components"][1]["kind"] == "hotel_room" and resp.json()["next_cursor"] is None
+    # 1.7 (AA-1075): the age bands; the plan sets none and the settings answer junk here, so the built-in defaults.
+    assert item["age_bands"] == {"child_age_max": 11, "infant_age_max": 1}
+
+
+@pytest.mark.parametrize(
+    ("child", "infant", "defaults", "expected"),
+    [
+        (None, None, (11, 1), {"child_age_max": 11, "infant_age_max": 1}),
+        (5, None, (11, 1), {"child_age_max": 5, "infant_age_max": 1}),
+        (None, 3, (11, 1), {"child_age_max": 11, "infant_age_max": 3}),
+        (
+            2,
+            None,
+            (11, 4),
+            {"child_age_max": 2, "infant_age_max": 1},
+        ),  # a default infant band never reaches the child's
+    ],
+)
+def test_age_bands_fall_back_to_the_defaults(
+    child: int | None, infant: int | None, defaults: tuple[int, int], expected: dict[str, int]
+) -> None:
+    assert reads.age_bands(child, infant, defaults) == expected
+
+
+@pytest.mark.asyncio
+async def test_default_age_bands_read_the_settings_and_ignore_bad_values() -> None:
+    conn = ScriptedConn().on("WHERE key = $1", "12")
+    assert await reads.default_age_bands(conn) == (12, 1)  # 12 is no infant age (0..4): the built-in 1
+    assert await reads.default_age_bands(ScriptedConn().on("WHERE key = $1", "true")) == (11, 1)
+    assert await reads.default_age_bands(ScriptedConn()) == (11, 1)
 
 
 def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:
@@ -483,6 +513,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "/booking/b2b/v1/invoices",  # 1.5 (AA-1037)
         "/booking/b2b/v1/invoices/{number}",  # 1.5 (AA-1037)
         "/booking/b2b/v1/billing-status",  # 1.5 (AA-1037)
+        "/booking/b2b/v1/bookings/{booking_id}/vouchers",  # 1.7 (AA-1075)
+        "/booking/b2b/v1/bookings/{booking_id}/lines/{line_ref}/reduce",  # 1.7 (AA-1075)
     }
     refs: set[str] = set()
     for op in (op for path in b2b_paths.values() for op in path.values()):
@@ -508,6 +540,8 @@ def test_b2b_responses_never_carry_net_cost_or_margin() -> None:
         "AgencyInvoicePage",
         "AgencyInvoice",
         "BillingStatus",
+        "BookingVouchers",
+        "LineReduction",
     }
     keys: set[str] = set()
     pending, seen = list(refs), set()
@@ -677,3 +711,14 @@ def test_quote_runs_a_fixed_number_of_queries() -> None:
     assert len(conn.sql("FROM booking.supplier_rates x")) == 1
     assert len(conn.sql("FROM booking.hotel_room_types rt JOIN booking.hotels")) == 1
     assert len(_rate_asks(conn)) == 5  # 200 planned lookups, deduplicated to the 5 distinct nights
+
+
+def test_tariff_and_product_rows_carry_no_net_price() -> None:
+    """1.7 (AA-1075, bk-15): child, infant and single prices reach the agency as sell prices only."""
+    from app.routers import b2b as b2b_router
+
+    for model in (b2b_router.TariffItem, b2b_router.Product, b2b_router.AgeBands):
+        assert not [f for f in model.model_fields if "net" in f or "margin" in f or "cost" in f], model.__name__
+    assert {"child_price_per_person", "infant_price", "single_supplement_per_person"} <= set(
+        b2b_router.TariffItem.model_fields
+    )

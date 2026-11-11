@@ -7,6 +7,8 @@
 // Tab "Departures": departures from 14 days ago to 90 days ahead, seats, how many agencies are on each, and the open
 // incident; "Flag incident" picks a code (no free text: an incident never carries traveller data), "Clear" ends it.
 // Every answer, flag and clear reaches the agencies as an event on booking.b2b.v1 GET /events (the CRM shows it).
+// Tab "Agency bookings" (AA-1075): bookings staff enter for an agency, and prices below the floor to approve; each
+// departure links to its operations manifest.
 // AA-1073: the Departures tab shows the minimum to operate and an "At risk" badge (the daily watch found the departure
 // short of its minimum on its decision date; decide on the trip plan's Departures tab: run anyway or cancel), and "Run
 // checks now" queues the watch and the allotment release at once.
@@ -48,6 +50,7 @@ import {
   type BookingTone,
 } from "@/ui";
 import { SavedTabs } from "../../_parts/SavedTabs";
+import { AgencyBookingsTab } from "./AgencyBookingsTab";
 import { formatDay } from "@/ui/booking/dates";
 
 const SLA_META: Record<Sla, { label: string; tone: BookingTone; help: string }> = {
@@ -132,10 +135,11 @@ export function B2BDeskView() {
             tabs={[
               { key: "on-request", label: "On request", count: s?.on_request.open },
               { key: "departures", label: "Departures & incidents", count: s ? s.open_incidents + (s.departures_at_risk ?? 0) : undefined },
+              { key: "agency-bookings", label: "Agency bookings" },
             ]}
           />
         </div>
-        {tab === "departures" ? <DeparturesTab /> : <OnRequestTab />}
+        {tab === "departures" ? <DeparturesTab /> : tab === "agency-bookings" ? <AgencyBookingsTab /> : <OnRequestTab />}
       </Section>
     </PageFrame>
   );
@@ -425,6 +429,12 @@ function DeparturesTab() {
           <span className="max-w-[300px] truncate text-xs text-muted" title={row.original.tour_title ?? row.original.source_id}>
             {row.original.tour_title ?? `Tour ${row.original.source_id.slice(0, 8)}`}
           </span>
+          {row.original.sold > 0 && (
+            // AA-1075 (bk-13): the operations manifest of the departure (counts only, printable).
+            <a className="text-xs font-medium text-accent-deep hover:underline" href={`/b2b-desk/manifest/${encodeURIComponent(row.original.id)}`}>
+              Manifest
+            </a>
+          )}
         </span>
       ),
     },

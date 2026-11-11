@@ -44,6 +44,7 @@ import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { caseCountries, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFacts";
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
+import { AgencyBookingPanel, VouchersButton } from "./AgencyBookingPanel";
 import { AssignModal } from "./AssignModal";
 import { ChecksTab } from "./ChecksTab";
 import { EditDetailsDrawer } from "./EditDetailsDrawer";
@@ -159,6 +160,7 @@ function Workspace({ c }: { c: TripCaseDetail }) {
                 </Button>
               )}
               {c.channel === "b2b" && <ConfirmationButton code={c.code} />}
+              {c.channel === "b2b" && <VouchersButton code={c.code} />}
               {c.channel !== "b2b" && <StatusActions c={c} />}
             </div>
           </div>
@@ -397,6 +399,7 @@ function Overview({
             </div>
           </div>
         </Section>
+        {c.channel === "b2b" && <AgencyBookingPanel c={c} />}
         <NotesCard c={c} />
       </div>
     </div>

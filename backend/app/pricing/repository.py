@@ -17,7 +17,7 @@ from app.pricing.engine import BASE_CURRENCY, Channel, FxRate, PricingRule
 
 RULE_SQL = """
 SELECT r.channel, r.target_margin, r.floor_margin, r.peak_uplift_pts, r.card_fee_pct, r.valid_from,
-       r.rrp_markup_pct
+       r.rrp_markup_pct, r.child_pct, r.infant_flat_usd
 FROM booking.pricing_rules r
 JOIN booking.policy_approvals a ON a.pricing_rule_id = r.id
 WHERE r.channel = $1 AND r.valid_from <= $2
@@ -41,6 +41,10 @@ class DatedRule:
     # bk-039 (AA-1029, root ADR 0019 b15): b2b rule only, the suggested retail price markup on the agency net price
     # (0.25 = RRP is net + 25 %); None = this rule publishes no RRP.
     rrp_markup_pct: Decimal | None = None
+    # bk-047 (AA-1075, bk-15): a child pays child_pct of the adult price of a trip plan; each infant adds
+    # infant_flat_usd of net (USD) priced by the rule. None = a child pays like an adult / an infant is free.
+    child_pct: Decimal | None = None
+    infant_flat_usd: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,8 @@ async def rule_in_force(conn: Any, channel: Channel, on: date) -> DatedRule | No
         ),
         valid_from=row["valid_from"],
         rrp_markup_pct=row.get("rrp_markup_pct"),
+        child_pct=row.get("child_pct"),
+        infant_flat_usd=row.get("infant_flat_usd"),
     )
 
 

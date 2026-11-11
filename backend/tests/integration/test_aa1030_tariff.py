@@ -22,6 +22,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from app.b2b import quotes
 from tests.integration.test_aa1030_tiers import TENANT_GOLD, TENANT_SILVER, _m2m, tiers_clean  # noqa: F401
 from tests.integration.test_bk019_b2b import (  # noqa: F401 — fixtures used by name
     ADMIN,
@@ -151,6 +152,25 @@ async def test_the_tariff_is_what_a_quote_charges(
             party = item["priced_for_pax"]
             per_person = D(item["price_per_person"]["amount"])
             assert per_person * party >= D(item["price"]["amount"]) > (per_person - D("0.01")) * party
+
+    # AA-1075 (bk-15): the child, infant and single prices of a row are quote answers too. This rule has no child or
+    # infant price (a child pays like an adult, an infant is free); a single room costs one more room night each.
+    pair = standard["items"][1]
+    assert pair["priced_for_pax"] == 2
+    assert pair["child_price_per_person"] == pair["price_per_person"]
+    assert pair["infant_price"] == {"amount": "0.00", "currency": "USD"}
+    singles = {
+        "line_ref": "plan",
+        "component_id": f"tp:{plan_id}",
+        "service_date": pair["priced_for_date"],
+        "pax": {"adult": 2},
+        "rooms": [{"occupancy": "single", "count": 2}],
+    }
+    request = {"proposal_ref": "TAR-SGL", "proposal_version": 1, "currency": "USD", "lines": [singles]}
+    single_quote = await _ok(await c.post("/b2b/v1/quotes", json=request, headers=_m2m(m2m, TENANT_STANDARD)), 201)
+    single_pp = quotes.round_line(D(single_quote["lines"][0]["b2b_price"]["amount"]) / 2, "USD")
+    supplement = D(pair["single_supplement_per_person"]["amount"])
+    assert supplement > 0 and single_pp == D(pair["price_per_person"]["amount"]) + supplement
 
     # Two partners on different tiers: different tariffs, the bigger discount the lower price, row by row.
     prices = {t: [D(i["price"]["amount"]) for i in tariffs[t]["items"]] for t in agencies}

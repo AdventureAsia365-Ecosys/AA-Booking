@@ -179,6 +179,12 @@ class RuleCreate(BaseModel):
     rrp_markup_pct: (
         Annotated[Decimal, Field(ge=0, lt=10, max_digits=6, decimal_places=4, allow_inf_nan=False)] | None
     ) = None
+    # bk-047 (AA-1075, bk-15): a child pays this fraction of the adult price of a trip plan (None = like an adult);
+    # each infant adds this net (USD) priced by the rule (None = infants free).
+    child_pct: Annotated[Decimal, Field(ge=0, le=1, max_digits=5, decimal_places=4, allow_inf_nan=False)] | None = None
+    infant_flat_usd: (
+        Annotated[Decimal, Field(ge=0, lt=10000, max_digits=10, decimal_places=2, allow_inf_nan=False)] | None
+    ) = None
 
 
 class FxRateCreate(BaseModel):

@@ -17,6 +17,9 @@ AA-1030 G3 (contract 1.4): the agency's own tariff ``GET /tariff`` (JSON or ``?f
 AA-1037 (contract 1.5, root ADR 0019 d17): the agency's own AA invoices ``GET /invoices``, ``GET /invoices/{number}``
 and its billing status ``GET /billing-status`` (``app.b2b.invoices``: scoped by the caller's partner, drafts never
 shown, a field allow-list without staff notes, reasons, staff names, bank references or the bill-to snapshot).
+AA-1075 (contract 1.7): the service vouchers ``GET /bookings/{booking_id}/vouchers`` (``app.b2b.vouchers``), the
+partial cancellation ``POST /bookings/{booking_id}/lines/{line_ref}/reduce`` (``app.b2b.amendments``), the tour's terms
+``GET /terms?source_id=`` and the events ``booking.created_by_aa``, ``booking.line_reduced``, ``booking.fee_changed``.
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -32,7 +35,19 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.m2m import SCOPE_BOOK, SCOPE_HOLD, SCOPE_QUOTE, SCOPE_READ
-from app.b2b import cancellation, confirmation, departures, events, holds, quotes, reads, tariff, terms
+from app.b2b import (
+    amendments,
+    cancellation,
+    confirmation,
+    departures,
+    events,
+    holds,
+    quotes,
+    reads,
+    tariff,
+    terms,
+    vouchers,
+)
 from app.b2b import invoices as agency_invoices
 from app.b2b.access import B2BContext, require_scope
 from app.b2b.components import LineAsk, RoomAsk
@@ -130,6 +145,13 @@ class Component(Strict):
     destination_id: str | None = Field(default=None, max_length=64)
 
 
+class AgeBands(Strict):
+    """1.7 (AA-1075, bk-15): the oldest age (in whole years on the departure date) at the child and infant prices."""
+
+    child_age_max: int = Field(ge=2, le=17)
+    infant_age_max: int = Field(ge=0, le=4)
+
+
 class Product(Strict):
     tour: TourKey
     trip_plan_id: str = Field(max_length=64)
@@ -140,6 +162,8 @@ class Product(Strict):
     # AA-986 L5 (root ADR 0015): a delta lists a product whose tour was retired once, withdrawn (no components).
     withdrawn: bool = False
     withdrawn_reason: str | None = Field(default=None, max_length=64)
+    # 1.7 (AA-1075): how AA splits travellers by age for this plan (null on a withdrawn row).
+    age_bands: AgeBands | None = None
 
 
 class ProductPage(Strict):
@@ -298,6 +322,11 @@ EventType = Literal[
     # 1.6 (AA-1073): the decision date came with the minimum not met; the caller's allotment went back to sale.
     "departure.at_risk",
     "allotment.released",
+    # 1.7 (AA-1075): AA staff entered a booking for the caller (import it: booking_id, hold_id); fewer travellers on
+    # one line (line_ref); the cancellation fee was lowered (re-read the cancel result or the confirmation).
+    "booking.created_by_aa",
+    "booking.line_reduced",
+    "booking.fee_changed",
 ]
 IncidentCode = Literal["weather", "road", "health", "political", "supplier", "other"]
 DeclineCode = Literal["sold_out", "supplier_unavailable", "minimum_not_met", "other"]
@@ -369,6 +398,68 @@ class PaymentTerms(Strict):
     deposit_pct: Pct
     balance_days_before_departure: int = Field(ge=0)
     settlement_due_days: int = Field(ge=0)
+    # 1.7 (AA-1075): which row the deposit % and balance days come from: the agency's terms for this tour, the tour's
+    # terms, the agency's terms or AA's default (asked with ?source_id).
+    scope: Literal["agency_tour", "tour", "agency", "default"] | None = None
+
+
+class ReduceRequest(Strict):
+    adult: int = Field(default=0, ge=0, le=60)
+    child: int = Field(default=0, ge=0, le=60)
+    infant: int = Field(default=0, ge=0, le=20)
+    reason_code: Literal["client_cancelled", "agency_cancelled", "other"]
+
+
+class LineReduction(Strict):
+    """1.7 (AA-1075): a partial cancellation: fewer travellers on one line, its fee and refundable part."""
+
+    booking_id: str = Field(max_length=64)
+    line_ref: str = Field(max_length=64)
+    dry_run: bool
+    removed: Travellers
+    seats_after: int = Field(ge=1)
+    removed_b2b_amount: Money
+    fee: Money
+    refundable_b2b_amount: Money
+    fee_basis: FeeBasis
+    reduced_at: datetime | None
+
+
+class OpsContact(Strict):
+    # AA's 24-hour operations desk (a company line); no contact field crosses the API (contract field policy).
+    label: str = Field(max_length=200)
+
+
+class VoucherSupplier(Strict):
+    name: str = Field(max_length=200)
+
+
+class Voucher(Strict):
+    voucher_no: str = Field(max_length=32)
+    line_ref: str | None = Field(default=None, max_length=64)
+    service: str = Field(max_length=500)
+    service_date: date | None
+    service_time: str | None = Field(default=None, max_length=5)
+    pickup_point: str | None = Field(default=None, max_length=200)
+    dropoff_point: str | None = Field(default=None, max_length=200)
+    supplier: VoucherSupplier
+    confirmation_ref: str | None = Field(default=None, max_length=100)
+    travellers: Travellers
+    note: str | None = Field(default=None, max_length=500)
+
+
+class BookingVouchers(Strict):
+    """1.7 (AA-1075): one service voucher per confirmed supplier booking. No traveller names, no prices."""
+
+    booking_id: str = Field(max_length=64)
+    trip_case_code: str = Field(max_length=32)
+    proposal_ref: str = Field(max_length=64)
+    status: Literal["confirmed", "cancelled"]
+    issued_at: datetime
+    start_date: date | None
+    end_date: date | None
+    ops_contact: OpsContact | None
+    vouchers: list[Voucher]
 
 
 class CreditStatus(Strict):
@@ -428,6 +519,10 @@ class TariffItem(Strict):
     price_per_person: Money
     agency_discount_pct: str = Field(pattern=r"^\d+(\.\d{1,4})?$")
     rrp_per_person: Money | None = None
+    # 1.7 (AA-1075, bk-15): sell prices by age band and room, priced by the quote engine (never a net).
+    child_price_per_person: Money | None = None
+    infant_price: Money | None = None
+    single_supplement_per_person: Money | None = None
 
 
 class Tariff(Strict):
@@ -720,10 +815,62 @@ async def get_booking_confirmation(
     return confirmation.public(doc)
 
 
-@router.get("/terms", response_model=PartnerTerms)
-async def get_partner_terms(ctx: CanRead) -> dict:
+@router.get(
+    "/bookings/{booking_id}/vouchers",
+    response_model=BookingVouchers,
+    responses={200: {"content": {"text/html": {"schema": {"type": "string"}}}}},
+)
+async def get_booking_vouchers(
+    booking_id: Annotated[str, Path(min_length=1, max_length=64)],
+    ctx: CanRead,
+    format: Literal["json", "html"] = "json",
+) -> dict | HTMLResponse:
+    """1.7 (AA-1075): the service vouchers of the caller's own booking (no traveller names, no prices)."""
     async with ctx.pool.acquire() as conn:
-        return await terms.partner_terms(conn, tenant_id=str(ctx.partner["tenant_id"]), today=datetime.now(UTC).date())
+        doc = await vouchers.load(conn, booking_id, partner_id=ctx.partner_id, now=datetime.now(UTC))
+    if doc is None:
+        raise B2BError("not_found", "booking not found")
+    if format == "html":
+        return vouchers.html_response(doc)
+    return vouchers.public(doc)
+
+
+@router.post("/bookings/{booking_id}/lines/{line_ref}/reduce", response_model=LineReduction)
+async def reduce_booking_line(
+    booking_id: Annotated[str, Path(min_length=1, max_length=64)],
+    line_ref: Annotated[str, Path(min_length=1, max_length=64)],
+    body: ReduceRequest,
+    ctx: CanBook,
+    idempotency_key: IdempotencyKey,
+    dry_run: bool = False,
+) -> dict:
+    """1.7 (AA-1075): a partial cancellation (fewer travellers on one per-person line; ``?dry_run=true`` previews)."""
+    async with ctx.pool.acquire() as conn, conn.transaction():
+        return await amendments.reduce_line(
+            conn,
+            partner_id=ctx.partner_id,
+            booking_id=booking_id,
+            line_ref=line_ref,
+            adults=body.adult,
+            children=body.child,
+            infants=body.infant,
+            reason_code=body.reason_code,
+            dry_run=dry_run,
+            idempotency_key=idempotency_key,
+            now=datetime.now(UTC),
+        )
+
+
+@router.get("/terms", response_model=PartnerTerms)
+async def get_partner_terms(
+    ctx: CanRead,
+    source_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+) -> dict:
+    """1.7 (AA-1075): ``?source_id=`` (a CIS tour id) answers the payment terms of that tour."""
+    async with ctx.pool.acquire() as conn:
+        return await terms.partner_terms(
+            conn, tenant_id=str(ctx.partner["tenant_id"]), today=datetime.now(UTC).date(), source_id=source_id
+        )
 
 
 NO_STORE = {"Cache-Control": "no-store"}

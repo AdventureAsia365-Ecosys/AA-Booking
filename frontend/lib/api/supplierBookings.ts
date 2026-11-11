@@ -78,6 +78,13 @@ export interface SupplierBooking {
   voucher_file_id: string | null;
   b2b_line: { hold_id: string; line_ref: string; status: string } | null;
   notes: string | null;
+  // AA-1075 (bk-047): what the agency voucher prints, and the supplier's fee for a cancel (null without pricing.read).
+  service_time: string | null;
+  pickup_point: string | null;
+  dropoff_point: string | null;
+  voucher_note: string | null;
+  supplier_cancel_fee: DecimalString | null;
+  supplier_cancel_fee_currency: string | null;
   files: OpsFile[];
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
@@ -128,6 +135,10 @@ export interface NewSupplierBooking {
   net_amount?: string | null;
   net_currency?: string | null;
   notes?: string | null;
+  service_time?: string | null;
+  pickup_point?: string | null;
+  dropoff_point?: string | null;
+  voucher_note?: string | null;
 }
 
 export const SUPPLIER_BOOKING_STATUSES: SupplierBookingStatus[] = ["pending", "requested", "confirmed", "declined", "cancelled"];

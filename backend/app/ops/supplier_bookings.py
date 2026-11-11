@@ -23,13 +23,15 @@ statuses (``app.trip_cases.service.change_status``: 409 ``status_system_managed`
 ``line.declined`` in ``booking.outbox`` for the agency's ``/events``); both need ``b2b_desk.write`` as well. The desk
 refuses to answer a line that has a live supplier booking (409 ``answer_from_suppliers_tab``). A line is answered once,
 so a linked booking whose line is confirmed cannot be cancelled or re-requested by staff (409 ``b2b_line_answered``;
-only the agency's cancel moves it), and a declined line is final (no replacement). B2B cases take no voucher or
-document (DM-6.8, ``app.ops.files``).
+only the agency's cancel moves it), and a declined line is final (no replacement). B2B cases take no uploaded voucher or
+document (DM-6.8, ``app.ops.files``); their agency vouchers are generated (AA-1075, ``app.b2b.vouchers``).
 
-**Case cancel cascade** (critic B2, B9, :func:`on_case_cancelled`): when a case is cancelled (staff, or the agency's
-``POST /bookings/{id}/cancel``), its pending bookings are cancelled in the same transaction; requested and confirmed
-ones stay (cancelling with a supplier is a real-world act with fees) and raise one staff notification "cancel with
-supplier". Reopening a case is refused while it has a live booking (bk-026 guard; 409 ``live_supplier_bookings``).
+**Case cancel cascade** (critic B2, B9, AA-1075 bk-14, :func:`on_case_cancelled`): when a case is cancelled (staff,
+or the agency's ``POST /bookings/{id}/cancel``), its pending and requested bookings are cancelled in the same
+transaction (a request not yet confirmed is withdrawn); confirmed ones stay (cancelling with a supplier is a
+real-world act with fees) and one staff notification asks to cancel them with the supplier and record its fee
+(:func:`record_cancel_fee`, ``supplier_cancel_fee``: the cost until the supplier's bill is approved). Reopening a
+case is refused while it has a live booking (bk-026 guard; 409 ``live_supplier_bookings``).
 
 Lock order (no deadlock with the B2B cancel, which locks the hold, then the case): the B2B hold of a linked booking,
 then the trip case, then the booking. Every write runs in the caller's transaction and writes one audit row.
@@ -76,6 +78,9 @@ FACT_FIELDS = (
     "net_amount",
     "net_currency",
 )
+# AA-1075 (bk-12): what an agency voucher prints; editable while the booking is live (the pick-up time often comes
+# with the supplier's confirmation). Never traveller names (field help).
+VOUCHER_FIELDS = ("service_time", "pickup_point", "dropoff_point", "voucher_note")
 MAX_PAGE = 100
 NOTIFY_CANCEL_TYPE = "supplier_booking.cancel_with_supplier"
 
@@ -91,7 +96,8 @@ BOOKING_COLUMNS = """
     sb.b2b_line_ref, l.status AS b2b_line_status, sb.notes, sb.created_by, sb.created_at, sb.updated_at,
     sb.departure_id::text AS departure_id, dp.start_date AS departure_start_date,
     sb.supplier_order_id::text AS supplier_order_id, so.code AS supplier_order_code, so.status AS supplier_order_status,
-    sb.fx_rate_per_usd, sb.fx_as_of
+    sb.fx_rate_per_usd, sb.fx_as_of, sb.service_time, sb.pickup_point, sb.dropoff_point, sb.voucher_note,
+    sb.supplier_cancel_fee, sb.supplier_cancel_fee_currency
 """
 BOOKING_FROM = """
 FROM booking.supplier_bookings sb
@@ -191,6 +197,10 @@ def booking_out(row: Any, staff: Staff, files: list[dict] | None = None) -> dict
         out["net_currency"] = None
         out["fx_rate_per_usd"] = None
         out["fx_as_of"] = None
+        out["supplier_cancel_fee"] = None
+        out["supplier_cancel_fee_currency"] = None
+    if out.get("service_time") is not None:
+        out["service_time"] = out["service_time"].strftime("%H:%M")
     case_id, case_code, case_status = out.pop("trip_case_id"), out.pop("trip_case_code"), out.pop("trip_case_status")
     out["trip_case"] = {"id": case_id, "code": case_code, "status": case_status} if case_id else None
     departure_id, departure_start = out.pop("departure_id", None), out.pop("departure_start_date", None)
@@ -667,6 +677,10 @@ async def update(conn: asyncpg.Connection, staff: Staff, booking_id: str, change
     facts = {k: v for k, v in changes.items() if k in FACT_FIELDS}
     if "notes" in changes:
         facts["notes"] = (changes["notes"] or "").strip() or None
+    for key in VOUCHER_FIELDS:
+        if key in changes:
+            value = changes[key]
+            facts[key] = (value or "").strip() or None if key != "service_time" else value
     changed = {
         k: v
         for k, v in facts.items()
@@ -674,6 +688,8 @@ async def update(conn: asyncpg.Connection, staff: Staff, booking_id: str, change
     }
     if any(k in FACT_FIELDS for k in changed) and row["status"] not in ("pending", "requested"):
         raise Conflict("supplier_booking_locked", f"{row['code']} is {row['status']}: only its notes change")
+    if any(k in VOUCHER_FIELDS for k in changed) and row["status"] not in LIVE:
+        raise Conflict("supplier_booking_locked", f"{row['code']} is {row['status']}: its voucher details are final")
     if "item_description" in changed and not (changed["item_description"] or "").strip():
         raise Invalid("description_required", "say what is booked")
     if not changed:
@@ -831,12 +847,66 @@ async def decline(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, de
     return await _one_out(conn, staff, row["id"])
 
 
-async def cancel(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, reason: str) -> dict[str, Any]:
-    """pending / requested / confirmed → cancelled with a reason. Refused on a B2B line the agency was told is
-    confirmed (only the agency's cancel moves it)."""
+def _check_fee(fee: Decimal | None, currency: str | None) -> None:
+    if (fee is None) != (currency is None):
+        raise Invalid("fee_pair", "the supplier's cancellation fee and its currency go together")
+    if fee is not None and fee < 0:
+        raise Invalid("invalid_fee", "the cancellation fee cannot be negative")
+
+
+async def record_cancel_fee(
+    conn: asyncpg.Connection, staff: Staff, booking_id: str, *, fee: Decimal | None, currency: str | None
+) -> dict[str, Any]:
+    """AA-1075 (bk-14): the supplier answered a cancel with its fee (or none: clear it). Only on a cancelled booking;
+    the profit views count it as the booking's cost until a bill of it is approved. Needs ``pricing.read`` too (a
+    net amount)."""
+    _need(staff, "pricing.read")
+    _check_fee(fee, currency)
+    _case, row = await _lock_for_write(conn, booking_id)
+    if row["status"] != "cancelled":
+        raise Conflict(
+            "not_cancelled", f"{row['code']} is {row['status']}; a cancellation fee needs a cancelled booking"
+        )
+    await conn.execute(
+        "UPDATE booking.supplier_bookings SET supplier_cancel_fee = $2, supplier_cancel_fee_currency = $3,"
+        " updated_by = $4 WHERE id = $1::uuid",
+        row["id"],
+        fee,
+        currency,
+        staff.cis_user_id,
+    )
+    await _audit(
+        conn,
+        staff,
+        "supplier_booking.cancel_fee_recorded",
+        row,
+        f"{row['supplier_name']} charges {fee} {currency} for cancelling {row['code']}"
+        if fee is not None
+        else f"No cancellation fee on {row['code']}",
+        before={"supplier_cancel_fee": row["supplier_cancel_fee"], "currency": row["supplier_cancel_fee_currency"]},
+        after={"supplier_cancel_fee": fee, "currency": currency},
+    )
+    return await _one_out(conn, staff, row["id"])
+
+
+async def cancel(
+    conn: asyncpg.Connection,
+    staff: Staff,
+    booking_id: str,
+    *,
+    reason: str,
+    supplier_cancel_fee: Decimal | None = None,
+    supplier_cancel_fee_currency: str | None = None,
+) -> dict[str, Any]:
+    """pending / requested / confirmed → cancelled with a reason (AA-1075: and the supplier's cancellation fee when it
+    is known; ``pricing.read``). Refused on a B2B line the agency was told is confirmed (only the agency's cancel
+    moves it)."""
     reason = (reason or "").strip()
     if not reason:
         raise Invalid("reason_required", "say why the booking is cancelled")
+    _check_fee(supplier_cancel_fee, supplier_cancel_fee_currency)
+    if supplier_cancel_fee is not None:
+        _need(staff, "pricing.read")
     case, row = await _lock_for_write(conn, booking_id)
     if row["status"] == "cancelled":
         return await _one_out(conn, staff, row["id"])
@@ -844,7 +914,13 @@ async def cancel(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, rea
         raise Conflict("b2b_line_answered", "the agency was told this line is confirmed; only its cancel moves it")
     if row["status"] not in LIVE:
         raise Conflict("illegal_transition", f"{row['code']} is {row['status']}", status=row["status"])
-    await _set_status(conn, staff, row, "cancelled", {"cancel_reason": reason[:500], "cancelled_at": _now()})
+    extra: dict[str, Any] = {"cancel_reason": reason[:500], "cancelled_at": _now()}
+    if supplier_cancel_fee is not None:
+        extra |= {
+            "supplier_cancel_fee": supplier_cancel_fee,
+            "supplier_cancel_fee_currency": supplier_cancel_fee_currency,
+        }
+    await _set_status(conn, staff, row, "cancelled", extra)
     await _audit(
         conn,
         staff,
@@ -852,7 +928,8 @@ async def cancel(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, rea
         row,
         f"Cancelled {row['code']}: {reason[:200]}",
         before={"status": row["status"]},
-        after={"status": "cancelled", "reason": reason[:500]},
+        after={"status": "cancelled", "reason": reason[:500]}
+        | ({"supplier_cancel_fee": supplier_cancel_fee} if supplier_cancel_fee is not None else {}),
     )
     await _advance(conn, case, cause=f"supplier booking {row['code']} cancelled")
     return await _one_out(conn, staff, row["id"])
@@ -906,30 +983,39 @@ async def rerequest(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, 
 
 
 async def on_case_cancelled(conn: asyncpg.Connection, *, case_id: str, case_code: str, cause: str) -> dict[str, int]:
-    """Called in the transaction that cancels a case (case row locked by the caller): pending bookings are cancelled,
-    requested / confirmed ones stay and raise one staff notification to cancel them with the supplier."""
+    """Called in the transaction that cancels a case (case row locked by the caller): pending and requested bookings
+    are cancelled (AA-1075 bk-14: a request not yet confirmed is withdrawn; staff tell the supplier), confirmed ones
+    stay and raise one staff notification to cancel them with the supplier and record its fee."""
     cancelled = await conn.fetch(
         "UPDATE booking.supplier_bookings SET status = 'cancelled', cancel_reason = $2, cancelled_at = now()"
-        " WHERE trip_case_id = $1::uuid AND status = 'pending' RETURNING code",
+        " WHERE trip_case_id = $1::uuid AND status IN ('pending', 'requested') RETURNING code, requested_at",
         case_id,
         f"Trip case cancelled: {cause}"[:500],
     )
+    withdrawn = [r["code"] for r in cancelled if r.get("requested_at") is not None]
     open_rows = await conn.fetch(
         "SELECT code, status FROM booking.supplier_bookings WHERE trip_case_id = $1::uuid"
-        " AND status IN ('requested', 'confirmed') ORDER BY code",
+        " AND status = 'confirmed' ORDER BY code",
         case_id,
     )
-    if open_rows:
+    if open_rows or withdrawn:
         codes = [r["code"] for r in open_rows]
+        parts = []
+        if codes:
+            parts.append(
+                f"Confirmed: {', '.join(codes)}. Cancel each with its supplier, then mark it cancelled with the"
+                " supplier's fee."
+            )
+        if withdrawn:
+            parts.append(f"Requested, now withdrawn: {', '.join(withdrawn)}. Tell the supplier.")
         await notifications.notify_staff(
             conn,
             type=NOTIFY_CANCEL_TYPE,
-            title=f"{case_code} cancelled: cancel {len(codes)} supplier booking(s) with the supplier",
-            message=f"Requested or confirmed: {', '.join(codes)}. Cancel each with its supplier, then mark it"
-            " cancelled.",
+            title=f"{case_code} cancelled: {len(codes) + len(withdrawn)} supplier booking(s) to tell the supplier",
+            message=" ".join(parts),
             entity_type="trip_case",
             entity_id=case_id,
-            data={"code": case_code, "supplier_bookings": codes},
+            data={"code": case_code, "supplier_bookings": codes, "withdrawn": withdrawn},
         )
     if cancelled or open_rows:
         await audit.record(
@@ -942,6 +1028,7 @@ async def on_case_cancelled(conn: asyncpg.Connection, *, case_id: str, case_code
             after={
                 "cancelled": [r["code"] for r in cancelled],
                 "to_cancel_with_supplier": [r["code"] for r in open_rows],
+                "withdrawn": withdrawn,
             },
             entity_label=case_code,
             summary=f"Case cancelled: {len(cancelled)} pending supplier booking(s) cancelled,"

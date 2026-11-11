@@ -131,10 +131,15 @@ class Fee:
     refundable: Decimal
 
 
+def compute_fee(total: Decimal, pct: Decimal, currency: str) -> Decimal:
+    """``total`` x ``pct`` / 100 half-up to the currency unit, never above the total."""
+    return min((total * pct / HUNDRED).quantize(unit(currency), rounding=ROUND_HALF_UP), total)
+
+
 def compute(tiers: Sequence[Tier], *, total: Decimal, currency: str, departure: date, today: date) -> Fee:
     days = (departure - today).days
     pct = fee_pct_for(tiers, days)
-    fee = min((total * pct / HUNDRED).quantize(unit(currency), rounding=ROUND_HALF_UP), total)
+    fee = compute_fee(total, pct, currency)
     return Fee(days_before=days, fee_pct=pct, fee=fee, refundable=total - fee)
 
 
@@ -253,8 +258,9 @@ QUOTE_LINES_SQL = "SELECT line_no, component_id FROM booking.b2b_quote_lines WHE
 INSERT_SQL = """
 INSERT INTO booking.b2b_cancellations
     (hold_id, trip_case_id, partner_id, m2m_client_id, policy_id, reason_code, idempotency_key, departure_date,
-     days_before_departure, fee_pct, currency, total_b2b_price, fee_amount, refundable_amount, cancelled_at)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     days_before_departure, fee_pct, currency, total_b2b_price, fee_amount, refundable_amount, cancelled_at,
+     entered_via, entered_by)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 """
 
 
@@ -334,93 +340,131 @@ async def cancel_booking(
         raise B2BError("not_found", "booking not found") from None
     now = now or datetime.now(UTC)
     async with pool.acquire() as conn, conn.transaction():
-        booking = await conn.fetchrow(BOOKING_SQL + ("" if dry_run else " FOR UPDATE OF h"), ident, partner_id)
-        if booking is None:
-            raise B2BError("not_found", "booking not found")
-        stored = await conn.fetchrow(STORED_SQL, booking["hold_id"])
-        if stored is not None:
-            return _stored(ident, stored)
-        # AA-682 (critic B2): once supplier bookings move the case along the supply track it is still the same
-        # confirmed booking for the agency, so supplier_confirming and pre_departure cancel too.
-        if booking["hold_status"] != "confirmed" or booking["status"] not in CANCELLABLE_CASE_STATUSES:
-            raise B2BError("invalid", f"the booking is {booking['status']}; only a confirmed booking can be cancelled")
-        if booking["start_date"] is None:
-            raise B2BError("unavailable", "the booking has no departure date")
-        quote = await conn.fetchrow(QUOTE_SQL, booking["quote_id"])
-        policy = await _booking_policy(conn, booking)
-        currency = quote["currency"].strip()
-        fee = compute(
-            policy.tiers,
-            total=Decimal(quote["total_b2b_price"]),
-            currency=currency,
-            departure=booking["start_date"],
-            today=now.astimezone(UTC).date(),
-        )
-        if await conn.fetchval(AA_CANCELLED_SQL, booking["hold_id"]):
-            # AA cancelled a departure of this booking: no fee, whatever reason_code the agency sends.
-            fee = Fee(
-                days_before=fee.days_before, fee_pct=Decimal("0"), fee=Decimal("0"), refundable=fee.fee + fee.refundable
-            )
-        if dry_run:
-            return _result(ident, dry_run=True, policy_id=policy.id, fee=fee, currency=currency, cancelled_at=None)
-        await conn.execute(
-            INSERT_SQL,
-            booking["hold_id"],
-            ident,
-            partner_id,
-            client_id,
-            policy.id,
-            reason_code,
-            idempotency_key,
-            booking["start_date"],
-            fee.days_before,
-            fee.fee_pct,
-            currency,
-            Decimal(quote["total_b2b_price"]),
-            fee.fee,
-            fee.refundable,
-            now,
-        )
-        await conn.execute(
-            "UPDATE booking.b2b_hold_lines SET status = 'cancelled' WHERE hold_id = $1::uuid"
-            " AND status IN ('available', 'on_request', 'confirmed')",
-            booking["hold_id"],
-        )
-        actor = f"m2m:{client_id}"
-        await conn.execute("SELECT set_config('booking.actor', '', true)")
-        await conn.execute(
-            "SELECT set_config('booking.status_note', $1, true)",
-            f"B2B cancel by {actor} ({reason_code}); fee {fee.fee_pct}% = {fee.fee} {currency}"[:500],
-        )
-        await conn.execute("UPDATE booking.trip_cases SET status = 'cancelled' WHERE id = $1::uuid", ident)
-        # AA-682: pending supplier bookings are cancelled; requested / confirmed ones raise "cancel with supplier".
-        cascade = await supplier_bookings.on_case_cancelled(
-            conn, case_id=ident, case_code=booking["code"], cause=f"agency cancel ({reason_code})"
-        )
-        await audit.record(
+        result = await cancel_in(
             conn,
-            actor_type="system",
-            actor_ref=actor,
-            action="b2b_booking.cancelled",
-            entity_type="trip_case",
-            entity_id=ident,
-            before={"status": booking["status"]},
-            after={
-                "status": "cancelled",
-                "hold_id": booking["hold_id"],
-                "supplier_bookings": cascade,
-                "reason_code": reason_code,
-                "policy_id": policy.id,
-                "days_before_departure": fee.days_before,
-                "fee_pct": fee.fee_pct,
-                "fee": fee.fee,
-                "currency": currency,
-                "idempotency_key": idempotency_key,
-            },
-            entity_label=booking["code"],
-            summary=f"B2B booking {booking['code']} cancelled ({reason_code}), fee {fee.fee} {currency}",
+            partner_id=partner_id,
+            client_id=client_id,
+            booking_id=ident,
+            reason_code=reason_code,
+            dry_run=dry_run,
+            idempotency_key=idempotency_key,
+            now=now,
         )
-    log.info("b2b_booking_cancelled trip_case=%s partner=%s fee_pct=%s", booking["code"], partner_id, fee.fee_pct)
+    if not dry_run:
+        log.info("b2b_booking_cancelled booking=%s partner=%s fee_pct=%s", ident, partner_id, result["fee_basis"])
+    return result
+
+
+# AA-1075 (bk-14): the removed seats of partial cancellations (app.b2b.reductions) leave the total a later cancel
+# charges by.
+REDUCED_SQL = "SELECT coalesce(sum(removed_amount), 0) FROM booking.b2b_line_reductions WHERE hold_id = $1::uuid"
+
+
+async def cancel_in(
+    conn: asyncpg.Connection,
+    *,
+    partner_id: str,
+    client_id: str,
+    booking_id: str,
+    reason_code: str,
+    dry_run: bool,
+    idempotency_key: str,
+    now: datetime,
+    entered_by: str | None = None,
+) -> dict[str, Any]:
+    """:func:`cancel_booking` inside the caller's transaction. ``entered_by`` (AA-1075, bk-14): AA staff cancel for
+    the agency (an e-mailed request); the row says ``entered_via = 'staff'`` and the audit names the staff member."""
+    ident = booking_id
+    booking = await conn.fetchrow(BOOKING_SQL + ("" if dry_run else " FOR UPDATE OF h"), ident, partner_id)
+    if booking is None:
+        raise B2BError("not_found", "booking not found")
+    stored = await conn.fetchrow(STORED_SQL, booking["hold_id"])
+    if stored is not None:
+        return _stored(ident, stored)
+    # AA-682 (critic B2): once supplier bookings move the case along the supply track it is still the same
+    # confirmed booking for the agency, so supplier_confirming and pre_departure cancel too.
+    if booking["hold_status"] != "confirmed" or booking["status"] not in CANCELLABLE_CASE_STATUSES:
+        raise B2BError("invalid", f"the booking is {booking['status']}; only a confirmed booking can be cancelled")
+    if booking["start_date"] is None:
+        raise B2BError("unavailable", "the booking has no departure date")
+    quote = await conn.fetchrow(QUOTE_SQL, booking["quote_id"])
+    policy = await _booking_policy(conn, booking)
+    currency = quote["currency"].strip()
+    total = Decimal(quote["total_b2b_price"]) - Decimal(await conn.fetchval(REDUCED_SQL, booking["hold_id"]) or 0)
+    fee = compute(
+        policy.tiers,
+        total=total,
+        currency=currency,
+        departure=booking["start_date"],
+        today=now.astimezone(UTC).date(),
+    )
+    if await conn.fetchval(AA_CANCELLED_SQL, booking["hold_id"]):
+        # AA cancelled a departure of this booking: no fee, whatever reason_code the agency sends.
+        fee = Fee(
+            days_before=fee.days_before, fee_pct=Decimal("0"), fee=Decimal("0"), refundable=fee.fee + fee.refundable
+        )
+    if dry_run:
+        return _result(ident, dry_run=True, policy_id=policy.id, fee=fee, currency=currency, cancelled_at=None)
+    await conn.execute(
+        INSERT_SQL,
+        booking["hold_id"],
+        ident,
+        partner_id,
+        client_id,
+        policy.id,
+        reason_code,
+        idempotency_key,
+        booking["start_date"],
+        fee.days_before,
+        fee.fee_pct,
+        currency,
+        total,
+        fee.fee,
+        fee.refundable,
+        now,
+        "staff" if entered_by else "api",
+        entered_by,
+    )
+    await conn.execute(
+        "UPDATE booking.b2b_hold_lines SET status = 'cancelled' WHERE hold_id = $1::uuid"
+        " AND status IN ('available', 'on_request', 'confirmed')",
+        booking["hold_id"],
+    )
+    actor = entered_by or f"m2m:{client_id}"
+    await conn.execute("SELECT set_config('booking.actor', $1, true)", entered_by or "")
+    await conn.execute(
+        "SELECT set_config('booking.status_note', $1, true)",
+        f"B2B cancel by {actor} ({reason_code}); fee {fee.fee_pct}% = {fee.fee} {currency}"[:500],
+    )
+    await conn.execute("UPDATE booking.trip_cases SET status = 'cancelled' WHERE id = $1::uuid", ident)
+    # AA-682: pending supplier bookings are cancelled; requested / confirmed ones raise "cancel with supplier".
+    cascade = await supplier_bookings.on_case_cancelled(
+        conn, case_id=ident, case_code=booking["code"], cause=f"agency cancel ({reason_code})"
+    )
+    await audit.record(
+        conn,
+        actor_type="staff" if entered_by else "system",
+        actor_ref=actor,
+        action="b2b_booking.cancelled",
+        entity_type="trip_case",
+        entity_id=ident,
+        before={"status": booking["status"]},
+        after={
+            "status": "cancelled",
+            "hold_id": booking["hold_id"],
+            "supplier_bookings": cascade,
+            "reason_code": reason_code,
+            "policy_id": policy.id,
+            "days_before_departure": fee.days_before,
+            "fee_pct": fee.fee_pct,
+            "fee": fee.fee,
+            "currency": currency,
+            "idempotency_key": idempotency_key,
+        },
+        entity_label=booking["code"],
+        summary=f"B2B booking {booking['code']} cancelled ({reason_code}), fee {fee.fee} {currency}"
+        + (" (entered by AA staff)" if entered_by else ""),
+    )
     return _result(ident, dry_run=False, policy_id=policy.id, fee=fee, currency=currency, cancelled_at=now)
 
 

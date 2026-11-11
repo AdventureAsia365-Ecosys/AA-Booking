@@ -759,21 +759,28 @@ async def test_rerequest_refusals() -> None:
 
 @pytest.mark.asyncio
 async def test_case_cancel_cancels_pending_and_flags_the_rest_for_the_supplier() -> None:
+    REQUESTED = datetime(2026, 11, 1)  # noqa: N806
+    # AA-1075 (bk-14): pending and requested bookings are cancelled (a request is withdrawn: tell the supplier);
+    # confirmed ones stay and are flagged to cancel with the supplier and record its fee.
     conn = ScriptedConn(
         [
-            ("SET status = 'cancelled', cancel_reason = $2", [{"code": "SB-000001"}]),
-            ("AND status IN ('requested', 'confirmed') ORDER BY code", [{"code": "SB-000002", "status": "requested"},
-                                                                        {"code": "SB-000003", "status": "confirmed"}]),
+            ("SET status = 'cancelled', cancel_reason = $2", [{"code": "SB-000001", "requested_at": None},
+                                                               {"code": "SB-000002", "requested_at": REQUESTED}]),
+            ("AND status = 'confirmed' ORDER BY code", [{"code": "SB-000003", "status": "confirmed"}]),
         ]
     )  # fmt: skip
     out = await sb.on_case_cancelled(conn, case_id=CASE_ID, case_code="TC-000001", cause="agency cancelled")
-    assert out == {"cancelled": 1, "to_cancel_with_supplier": 2}
+    assert out == {"cancelled": 2, "to_cancel_with_supplier": 1}
     assert conn.sql("SET status = 'cancelled'") == [(CASE_ID, "Trip case cancelled: agency cancelled")]
     (note,) = conn.sql("INSERT INTO booking.notifications")
-    assert note[1] == sb.NOTIFY_CANCEL_TYPE and note[2].startswith("TC-000001 cancelled: cancel 2")
-    assert json.loads(note[6]) == {"code": "TC-000001", "supplier_bookings": ["SB-000002", "SB-000003"]}
+    assert note[1] == sb.NOTIFY_CANCEL_TYPE and note[2].startswith("TC-000001 cancelled: 2 supplier booking(s)")
+    assert json.loads(note[6]) == {"code": "TC-000001", "supplier_bookings": ["SB-000003"], "withdrawn": ["SB-000002"]}
     (row,) = audits(conn)
-    assert row["after"] == {"cancelled": ["SB-000001"], "to_cancel_with_supplier": ["SB-000002", "SB-000003"]}
+    assert row["after"] == {
+        "cancelled": ["SB-000001", "SB-000002"],
+        "to_cancel_with_supplier": ["SB-000003"],
+        "withdrawn": ["SB-000002"],
+    }
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ import { daysNights, marginLabel, paxBandLabel } from "@/ui/booking/tripPlans";
 import { PageFrame, Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, formatDay, useCan, useStaff } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "../../../_parts/DetailHeader";
+import { AgencyTermsPanel } from "./AgencyTermsPanel";
 import { CommercialDrawer } from "./CommercialDrawer";
 import { DeparturesPanel } from "./DeparturesPanel";
 import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
@@ -297,6 +298,18 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                             {CHANNEL_LABEL[r.channel] ?? r.channel} · {formatDay(r.valid_from)} – {formatDay(r.valid_to)}
                             {r.priced && marginLabel(r.effective_margin) && ` · margin ${marginLabel(r.effective_margin)}`}
                           </span>
+                          {(r.child_amount || r.infant_amount || r.single_supplement_amount) && (
+                            <span className="block text-xs text-muted">
+                              {[
+                                r.child_amount && `child ${r.child_amount}`,
+                                r.infant_amount && `infant ${r.infant_amount}`,
+                                r.single_supplement_amount && `single +${r.single_supplement_amount}`,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}{" "}
+                              {r.currency}
+                            </span>
+                          )}
                         </span>
                         <Money amount={r.amount} currency={r.currency} strong className="shrink-0 text-[13px]" />
                       </li>
@@ -308,6 +321,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
           </div>
         </div>
       )}
+      {p.has_commercial_row && <AgencyTermsPanel plan={p} />}
       {editing && <CommercialDrawer plan={p} onClose={() => setEditing(false)} />}
       {using && <UseForTripCaseModal plan={p} onClose={() => setUsing(false)} />}
       {sellableToggle.dialogs}

@@ -45,13 +45,21 @@ WHERE h.status = 'confirmed' AND ($2::uuid IS NULL OR h.partner_id = $2::uuid)
 """
 BY_ID = BOOKING_SQL + " AND h.trip_case_id = $1::uuid"
 BY_CODE = BOOKING_SQL + " AND c.code = $1"
+# AA-1075 (bk-14): the travellers of a line are what was sold less its partial cancellations.
 LINES_SQL = """
-SELECT ql.line_no, ql.line_ref, ql.component_kind, ql.service_date, ql.nights, ql.pax_adult, ql.pax_child,
-       ql.pax_infant, ql.rooms::text AS rooms, hl.status AS line_status, it.title
+SELECT ql.line_no, ql.line_ref, ql.component_kind, ql.service_date, ql.nights,
+       ql.pax_adult - coalesce(r.adults, 0) AS pax_adult, ql.pax_child - coalesce(r.children, 0) AS pax_child,
+       ql.pax_infant - coalesce(r.infants, 0) AS pax_infant, ql.rooms::text AS rooms, hl.status AS line_status,
+       it.title
 FROM booking.b2b_quote_lines ql
 JOIN booking.b2b_hold_lines hl ON hl.hold_id = $2::uuid AND hl.line_ref = ql.line_ref
 LEFT JOIN booking.trip_case_versions v ON v.trip_case_id = $3::uuid AND v.version_number = 1
 LEFT JOIN booking.trip_case_version_itinerary it ON it.trip_case_version_id = v.id AND it.position = ql.line_no
+LEFT JOIN (
+    SELECT line_ref, sum(removed_adults) AS adults, sum(removed_children) AS children,
+           sum(removed_infants) AS infants
+    FROM booking.b2b_line_reductions WHERE hold_id = $2::uuid GROUP BY line_ref
+) r ON r.line_ref = ql.line_ref
 WHERE ql.quote_id = $1::uuid
 ORDER BY ql.line_no
 """

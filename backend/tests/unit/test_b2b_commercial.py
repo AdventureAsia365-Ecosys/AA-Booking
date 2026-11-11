@@ -249,7 +249,8 @@ async def test_cancel_inside_the_fee_window_charges_the_scheduled_fee() -> None:
     assert "FOR UPDATE OF h" in next(flat for flat, _ in conn.calls if "JOIN booking.trip_cases c" in flat)
     [row] = conn.sql("INSERT INTO booking.b2b_cancellations")
     assert row[:7] == (HOLD, CASE, PARTNER_ID, "crm-client", POLICY_ID, "client_cancelled", "cancel-0001")
-    assert row[7:] == (BOOKING["start_date"], 20, D("50.00"), "EUR", D("1150.00"), D("575.00"), D("575.00"), NOW)
+    assert row[7:15] == (BOOKING["start_date"], 20, D("50.00"), "EUR", D("1150.00"), D("575.00"), D("575.00"), NOW)
+    assert row[15:] == ("api", None)  # AA-1075: entered through the agency API
     assert conn.sql("SET status = 'cancelled' WHERE hold_id") == [(HOLD,)]
     assert conn.sql("UPDATE booking.trip_cases SET status = 'cancelled'") == [(CASE,)]
     [note] = conn.sql("set_config('booking.status_note'")

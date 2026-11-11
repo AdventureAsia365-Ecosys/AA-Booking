@@ -461,7 +461,7 @@ async def test_confirm_opens_a_b2b_case_with_an_approved_version() -> None:
     [case] = conn.sql("INSERT INTO booking.trip_cases")
     # source_id = proposal ref, the agency tenant, the plan's 3 days from 1 March; the room line ends after 2 nights
     # on 5 March, the service on 5 March; the biggest party is the plan line (2 adults + 1 child).
-    assert case == ("P-1", TENANT, START, date(2027, 3, 5), 3, 2, 1, "EUR", f"b2b_hold:{HOLD}")
+    assert case == ("P-1", TENANT, START, date(2027, 3, 5), 3, 2, 1, "EUR", f"b2b_hold:{HOLD}", "api", None)
     [version] = conn.sql("INSERT INTO booking.trip_case_versions")
     # AA-1013: the version and its items read as what was sold (tour, room, service), not component ids; the agency's
     # proposal ref / version and line refs move to the notes.

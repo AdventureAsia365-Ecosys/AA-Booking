@@ -17,7 +17,10 @@ the job's own subscription lines are replaced (a plan change shows), adjustments
 
 **Settlement** (:func:`run_settlement`): every confirmed B2B hold (``b2b_holds.status = confirmed``), its quote total
 and currency (``b2b_quotes``), its departure (the trip case ``start_date``, else the first quote line date) and its
-cancellation (``b2b_cancellations``), against the agency's terms (override, else default; read when drafting):
+cancellation (``b2b_cancellations``) and partial cancellations (``b2b_line_reductions``, AA-1075: their refundable part
+leaves the total, their fee stays and joins a later cancellation fee), against the agency's terms (override, else
+default; a tour's own deposit % and balance days win, AA-1075 bk-18: agency + tour > tour > agency > default; read when
+drafting):
 
 - first billing, when the confirmation is before the period end: ``full`` (the B2B total) when the balance date
   (departure - ``balance_days_before_departure``) is before the period end or the departure is unknown, else
@@ -144,6 +147,7 @@ class Hold:
     departure: date | None
     cancelled_on: date | None
     fee: Decimal | None
+    plan_id: str | None = None  # AA-1075 (bk-18): the tour of the first trip plan line (per-tour terms)
 
 
 def settlement_lines(hold: Hold, billed: dict[str, Decimal], terms: dict[str, Any], period_end: date
@@ -318,12 +322,19 @@ SELECT h.id::text AS hold_id, p.tenant_id, tc.code AS trip_case_code, h.proposal
        (h.confirmed_at AT TIME ZONE 'UTC')::date AS confirmed_on,
        coalesce(tc.start_date, (SELECT min(ql.service_date) FROM booking.b2b_quote_lines ql WHERE ql.quote_id = q.id))
            AS departure,
-       (c.cancelled_at AT TIME ZONE 'UTC')::date AS cancelled_on, c.fee_amount
+       (c.cancelled_at AT TIME ZONE 'UTC')::date AS cancelled_on, c.fee_amount,
+       (SELECT substr(ql.component_id, 4) FROM booking.b2b_quote_lines ql
+         WHERE ql.quote_id = q.id AND ql.component_id LIKE 'tp:%' ORDER BY ql.line_no LIMIT 1) AS plan_id,
+       r.refunded, r.fees
   FROM booking.b2b_holds h
   JOIN booking.b2b_partners p ON p.id = h.partner_id
   JOIN booking.b2b_quotes q ON q.id = h.quote_id
   LEFT JOIN booking.trip_cases tc ON tc.id = h.trip_case_id
   LEFT JOIN booking.b2b_cancellations c ON c.hold_id = h.id
+  LEFT JOIN LATERAL (
+      SELECT sum(x.refundable_amount) AS refunded, sum(x.fee_amount) AS fees
+        FROM booking.b2b_line_reductions x WHERE x.hold_id = h.id AND x.created_at < $1
+  ) r ON true
  WHERE h.status = 'confirmed' AND h.confirmed_at < $1
    AND ($2::uuid IS NULL OR p.tenant_id = $2::uuid)
  ORDER BY p.tenant_id, h.confirmed_at, h.id
@@ -345,6 +356,10 @@ async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: s
         rows = await conn.fetch(HOLDS_SQL, end_ts, tenant_id)
     holds: dict[Any, list[Hold]] = defaultdict(list)
     for r in rows:
+        # AA-1075 (bk-14): partial cancellations take their refundable part off the total (their fee stays billed);
+        # a cancel after them charges its fee on the rest, plus those fees.
+        refunded = Decimal(r.get("refunded") or 0)
+        fees = Decimal(r.get("fees") or 0)
         holds[r["tenant_id"]].append(
             Hold(
                 r["hold_id"],
@@ -352,11 +367,12 @@ async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: s
                 r["trip_case_code"],
                 r["proposal_ref"],
                 r["currency"],
-                Decimal(r["total_b2b_price"]),
+                Decimal(r["total_b2b_price"]) - refunded,
                 r["confirmed_on"],
                 r["departure"],
                 r["cancelled_on"],
-                Decimal(r["fee_amount"]) if r["fee_amount"] is not None else None,
+                Decimal(r["fee_amount"]) + fees if r["fee_amount"] is not None else None,
+                r.get("plan_id"),
             )  # fmt: skip
         )
     counts = _empty_counts()
@@ -367,12 +383,18 @@ async def run_settlement(pool: asyncpg.Pool, *, period: str | None, tenant_id: s
                 terms = await config.terms_for(conn, tid)
                 if terms is None:
                     raise RuntimeError("no billing terms row")
+                # AA-1075 (bk-18): the deposit % and balance days of the hold's tour when it has its own terms.
+                by_plan: dict[str | None, dict[str, Any]] = {None: terms}
+                for plan in {h.plan_id for h in agency_holds if h.plan_id}:
+                    by_plan[plan] = await config.plan_terms(conn, tid, plan) or terms
                 billed: dict[str, dict[str, Decimal]] = defaultdict(dict)
                 for b in await conn.fetch(BILLED_SQL, [h.hold_id for h in agency_holds]):
                     billed[b["hold_id"]][b["line_role"]] = Decimal(b["amount"])
                 per_currency: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for h in agency_holds:
-                    per_currency[h.currency] += settlement_lines(h, billed.get(h.hold_id, {}), terms, end)
+                    per_currency[h.currency] += settlement_lines(
+                        h, billed.get(h.hold_id, {}), by_plan.get(h.plan_id, terms), end
+                    )
                 done: dict[str, int] = defaultdict(int)
                 for currency, lines in per_currency.items():
                     if not lines:

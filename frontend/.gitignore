@@ -1,4 +1,5 @@
-node_modules/
+# A symlinked node_modules (a worktree reusing another install) is a file, not a folder: ignore both.
+/node_modules
 .next/
 out/
 *.tsbuildinfo

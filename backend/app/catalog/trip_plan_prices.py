@@ -75,7 +75,11 @@ ROWS_SQL = """
 SELECT pr.position, pr.channel, pr.season, pr.peak, pr.valid_from, pr.valid_to, pr.pax_min, pr.pax_max,
        pr.currency::text AS currency, pr.amount::text AS amount, pr.net_amount::text AS net_amount,
        pr.net_currency::text AS net_currency, pr.effective_margin::text AS effective_margin, pr.priced_on,
-       pr.overridden, pr.computed, pr.rrp_amount::text AS rrp_amount, pr.created_by
+       pr.overridden, pr.computed, pr.rrp_amount::text AS rrp_amount, pr.created_by,
+       pr.child_amount::text AS child_amount, pr.infant_amount::text AS infant_amount,
+       pr.single_supplement_amount::text AS single_supplement_amount, pr.child_net_amount::text AS child_net_amount,
+       pr.infant_net_amount::text AS infant_net_amount,
+       pr.single_supplement_net_amount::text AS single_supplement_net_amount
 FROM booking.trip_plan_prices pr
 WHERE pr.trip_plan_id = $1::uuid
 ORDER BY pr.position
@@ -122,6 +126,9 @@ class Row:
     net_amount: Decimal | None
     net_currency: str | None
     computed: bool = False
+    # bk-047 (AA-1075, bk-15): price per child / infant and the single supplement (and their nets on a cost sheet
+    # row), per person; None = not set.
+    pax_prices: tuple[tuple[str, Decimal | None], ...] = ()
 
     def overlaps(self, other: Row) -> bool:
         if (self.channel, self.currency) != (other.channel, other.currency):
@@ -130,6 +137,16 @@ class Row:
         top, other_top = self.pax_max or 999, other.pax_max or 999
         pax = self.pax_min <= other_top and other.pax_min <= top
         return dates and pax
+
+
+# bk-047 (AA-1075, bk-15): the per-traveller-type columns of a row (sell amounts, then the cost sheet's nets).
+PAX_TYPE_AMOUNTS = ("child_amount", "infant_amount", "single_supplement_amount")
+PAX_TYPE_NETS = ("child_net_amount", "infant_net_amount", "single_supplement_net_amount")
+PAX_TYPE_FIELDS = PAX_TYPE_AMOUNTS + PAX_TYPE_NETS
+
+
+def _dec_or_none(value: Any) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
 
 
 def _clean(text: str | None) -> str | None:
@@ -156,6 +173,7 @@ def normalise(rows: list[dict[str, Any]]) -> list[Row]:
             net_amount=raw.get("net_amount"),
             net_currency=raw.get("net_currency"),
             computed=bool(raw.get("computed")),
+            pax_prices=tuple((k, _dec_or_none(raw.get(k))) for k in PAX_TYPE_FIELDS),
         )
         if row.valid_to < row.valid_from:
             raise Invalid("invalid_validity", f"row {n}: valid_to is before valid_from", row=n)
@@ -302,6 +320,7 @@ def _comparable(row: dict[str, Any]) -> tuple[Any, ...]:
         bool(row["overridden"]),
         bool(row.get("computed")),
         dec(row.get("rrp_amount")),
+        *(dec(row.get(k)) for k in PAX_TYPE_FIELDS),
     )
 
 
@@ -354,6 +373,8 @@ async def replace_prices(
                 "overridden": row.net_amount is not None and row.amount is not None,
                 "computed": row.computed,
                 "rrp_amount": rrp_for(row.channel, amount, row.currency, markup),
+                # A net only rides along on a row priced from a net (the table CHECK); sell amounts are as entered.
+                **{k: (v if k in PAX_TYPE_AMOUNTS or row.net_amount is not None else None) for k, v in row.pax_prices},
             }
         )
     if below and not reason:
@@ -401,8 +422,10 @@ def rrp_for(channel: str, amount: Decimal, currency: str, markup: Decimal | None
 INSERT_SQL = """
 INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, season, peak, valid_from, valid_to, pax_min,
     pax_max, currency, amount, net_amount, net_currency, effective_margin, priced_on, overridden, computed, rrp_amount,
-    created_by)
-VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    child_amount, infant_amount, single_supplement_amount, child_net_amount, infant_net_amount,
+    single_supplement_net_amount, created_by)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+        $24, $25)
 """
 INSERT_FIELDS = (
     "position",
@@ -422,6 +445,7 @@ INSERT_FIELDS = (
     "overridden",
     "computed",
     "rrp_amount",
+    *PAX_TYPE_FIELDS,
 )
 
 
@@ -447,7 +471,15 @@ async def store(
     await conn.execute("DELETE FROM booking.trip_plan_prices WHERE trip_plan_id = $1::uuid", plan_id)
     # A row kept from the set before keeps its author (the cost sheet keeps staff rows); new rows take created_by.
     await conn.executemany(
-        INSERT_SQL, [(plan_id, *(r[f] for f in INSERT_FIELDS), r.get("created_by", created_by)) for r in final]
+        INSERT_SQL,
+        [
+            (
+                plan_id,
+                *(_dec_or_none(r.get(f)) if f in PAX_TYPE_FIELDS else r[f] for f in INSERT_FIELDS),
+                r.get("created_by", created_by),
+            )
+            for r in final
+        ],  # fmt: skip
     )
     # The plan's updated_at moves with any commercial change (the products feed reads it, AA-972).
     await conn.execute("UPDATE booking.trip_plans SET updated_at = now() WHERE id = $1::uuid", plan_id)

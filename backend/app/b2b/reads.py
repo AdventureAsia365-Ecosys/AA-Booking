@@ -10,6 +10,10 @@
   ``updated_at`` = the retirement time; a paused tour is a temporary absence and is not listed. A tour that comes
   back is listed again (its catalog ``updated_at`` moves). Without CIS 274 the feed degrades to the AA-972 behaviour
   (a removal shows only in a periodic full resync).
+  Since 1.7 (AA-1075, bk-15) a live product carries ``age_bands``: the oldest age at the child price and at the
+  infant price (the plan's ``child_age_max`` / ``infant_age_max``, else the settings ``b2b_child_age_max`` /
+  ``b2b_infant_age_max``), so the CRM splits its travellers into adults, children and infants the way AA prices
+  them; a withdrawn row has none.
 - **FX rates**: the approved ``booking.fx_rates`` row in force on the asked date for every currency (plain rate, no
   buffer): the R17 "Booking's approved rates" source.
 - **Price parity** (ADR 0005a decision 1, warn never block): the plan's public "from" price per person. Since AA-1029
@@ -25,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -60,7 +65,7 @@ SELECT p.id::text AS trip_plan_id, p.source_system, p.source_id, p.sellable,
            LEFT JOIN booking.hotels h ON h.id = rt.hotel_id
            LEFT JOIN booking.services s ON s.id = c.service_id
            WHERE c.trip_plan_id = p.id)) AS updated_at,
-       false AS withdrawn, NULL::text AS withdrawn_reason
+       false AS withdrawn, NULL::text AS withdrawn_reason, p.child_age_max, p.infant_age_max
 FROM booking.trip_plans p
 JOIN LATERAL (SELECT t.updated_at FROM catalog.v_tour t
               WHERE t.source_system = p.source_system AND t.source_id = p.source_id LIMIT 1) t ON true
@@ -74,7 +79,8 @@ WHERE (p.sellable OR $2::timestamptz IS NOT NULL) AND p.source_system = 'cis'
 # (built for sale); a plan never offered is not told to partners, so its key and existence stay internal.
 WITHDRAWN_PRODUCTS_SQL = """
 SELECT p.id::text AS trip_plan_id, p.source_system, p.source_id, false AS sellable, false AS has_fixed_departures,
-       r.changed_at AS updated_at, true AS withdrawn, r.reason AS withdrawn_reason
+       r.changed_at AS updated_at, true AS withdrawn, r.reason AS withdrawn_reason,
+       NULL::smallint AS child_age_max, NULL::smallint AS infant_age_max
 FROM booking.trip_plans p
 JOIN LATERAL (SELECT r.state, r.reason, r.changed_at FROM catalog.v_tour_retired r
               WHERE r.source_system = p.source_system AND r.source_id = p.source_id
@@ -115,6 +121,35 @@ WHERE p.source_system = $1 AND p.source_id = $2 AND p.sellable
 """  # noqa: S608 — constant fragments
 
 
+# AA-1075 (bk-15): the default age bands (bk-047 settings) and their fallbacks when a setting is missing or bad.
+CHILD_AGE_SETTING, INFANT_AGE_SETTING = "b2b_child_age_max", "b2b_infant_age_max"
+DEFAULT_CHILD_AGE_MAX, DEFAULT_INFANT_AGE_MAX = 11, 1
+AGE_SETTING_SQL = "SELECT value FROM booking.settings WHERE key = $1"
+
+
+def _age(raw: Any, low: int, high: int) -> int | None:
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high else None
+
+
+async def default_age_bands(conn: asyncpg.Connection) -> tuple[int, int]:
+    """``(child age max, infant age max)`` from the settings, each falling back to 11 / 1 when unset or bad."""
+    child = _age(await conn.fetchval(AGE_SETTING_SQL, CHILD_AGE_SETTING), 2, 17) or DEFAULT_CHILD_AGE_MAX
+    infant = _age(await conn.fetchval(AGE_SETTING_SQL, INFANT_AGE_SETTING), 0, 4)
+    return child, DEFAULT_INFANT_AGE_MAX if infant is None else infant
+
+
+def age_bands(child_age_max: int | None, infant_age_max: int | None, defaults: tuple[int, int]) -> dict[str, int]:
+    """The contract ``AgeBands`` of one plan: its own ages, else the defaults; the infant band always ends below the
+    child band (a plan that sets only one of them can meet a default on the other side)."""
+    child = child_age_max if child_age_max is not None else defaults[0]
+    infant = infant_age_max if infant_age_max is not None else defaults[1]
+    return {"child_age_max": child, "infant_age_max": max(0, min(infant, child - 1))}
+
+
 def _encode_cursor(source_id: str) -> str:
     return base64.urlsafe_b64encode(source_id.encode("utf-8")).decode("ascii").rstrip("=")
 
@@ -141,6 +176,7 @@ async def list_products(
         except CATALOG_ERRORS:
             raise B2BError("unavailable", "the catalog is not readable right now", retry_after_s=60) from None
         parts = await components_by_plan(conn, [r["trip_plan_id"] for r in rows if r["sellable"]])
+        defaults = await default_age_bands(conn)
     items = [
         {
             "tour": {"source_system": r["source_system"], "source_id": r["source_id"]},
@@ -151,6 +187,9 @@ async def list_products(
             "updated_at": r["updated_at"].isoformat(),
             "withdrawn": bool(r.get("withdrawn")),
             "withdrawn_reason": r.get("withdrawn_reason"),
+            "age_bands": None
+            if r.get("withdrawn")
+            else age_bands(r.get("child_age_max"), r.get("infant_age_max"), defaults),
         }
         for r in rows
     ]

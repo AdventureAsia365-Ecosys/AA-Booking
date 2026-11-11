@@ -464,7 +464,12 @@ async def test_partner_terms_answer() -> None:
     conn.on("WHERE status = 'approved'", [{"code": "price_error", "title": "Price errors", "body": "B",
                                            "free_cancel_days": 2, "version": 3, "approved_at": NOW}])  # fmt: skip
     out = await terms.partner_terms(conn, tenant_id=TENANT, today=date(2026, 11, 5))
-    assert out["payment"] == {"deposit_pct": "25.00", "balance_days_before_departure": 21, "settlement_due_days": 10}
+    assert out["payment"] == {
+        "deposit_pct": "25.00",
+        "balance_days_before_departure": 21,
+        "settlement_due_days": 10,
+        "scope": "default",
+    }
     assert out["credit"]["status"] == "ok" and out["cancellation_policy"]["policy_id"] == POLICY
     assert [c["code"] for c in out["clauses"]] == ["price_error"]
     from app.routers.b2b import PartnerTerms

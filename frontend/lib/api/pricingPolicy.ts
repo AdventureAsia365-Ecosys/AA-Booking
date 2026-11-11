@@ -46,6 +46,10 @@ export interface PricingRuleRow extends PolicyRowBase {
   note: string | null;
   /** b2b rules only (AA-1029): the suggested retail price markup on the agency net price ("0.2500" = net + 25 %). */
   rrp_markup_pct?: DecimalString | null;
+  /** AA-1075 (bk-15): a child pays this fraction of the adult price of a tour ("0.5000"); null = like an adult. */
+  child_pct?: DecimalString | null;
+  /** AA-1075 (bk-15): net cost per infant per trip in USD, priced by the rule; null = infants free. */
+  infant_flat_usd?: DecimalString | null;
 }
 
 export interface FxRateRow extends PolicyRowBase {
@@ -72,6 +76,8 @@ export interface NewRuleBody {
   valid_from: IsoDate;
   note?: string;
   rrp_markup_pct?: string;
+  child_pct?: string;
+  infant_flat_usd?: string;
 }
 
 export interface NewFxRateBody {
