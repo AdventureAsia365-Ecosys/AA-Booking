@@ -210,9 +210,13 @@ async def test_watch_and_release(
                      headers=maker), 201
     )  # fmt: skip
     quote = await _ok(await _quote(c, m2m, "PRO-W", [_plan_line("tour", plan["plan"], dep_a["id"], adult=2)]), 201)
-    hold = await _ok(await c.post("/b2b/v1/holds", json=_hold_body(quote, "PRO-W"), headers=_m2m(m2m, "key-1073-w1")), 201)
+    hold = await _ok(
+        await c.post("/b2b/v1/holds", json=_hold_body(quote, "PRO-W"), headers=_m2m(m2m, "key-1073-w1")), 201
+    )
     confirm = {"price_hash": quote["price_hash"], "deposit_ref": "pay_1073"}
-    await _ok(await c.post(f"/b2b/v1/holds/{hold['hold_id']}/confirm", json=confirm, headers=_m2m(m2m, "conf-1073-w1")), 201)
+    await _ok(
+        await c.post(f"/b2b/v1/holds/{hold['hold_id']}/confirm", json=confirm, headers=_m2m(m2m, "conf-1073-w1")), 201
+    )
 
     # An allotment on A for another agency, released 5 days before.
     other = await _insert(
