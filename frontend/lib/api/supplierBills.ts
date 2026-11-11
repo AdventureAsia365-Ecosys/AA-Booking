@@ -155,6 +155,15 @@ export interface CaseCostLine {
   variance: DecimalString | null;
   currency_mismatch: boolean;
   unbilled: boolean;
+  /** AA-1074 (bk-045): USD at the snapshot rates; billed = approved / paid bills only; cost = billed, else planned. */
+  usd?: {
+    planned: DecimalString | null;
+    billed: DecimalString | null;
+    variance: DecimalString | null;
+    fx_difference: DecimalString | null;
+    cost: DecimalString | null;
+    fx_missing: boolean;
+  };
 }
 
 export interface CaseCosts {
@@ -162,6 +171,25 @@ export interface CaseCosts {
   lines: CaseCostLine[];
   /** variance = the sum of the line variances in that currency (billed bookings only); null when none compares. */
   totals: { currency: string; net: DecimalString; billed: DecimalString; variance: DecimalString | null }[];
+  /** AA-1074: the case in USD, its share of departure costs included in `cost`. */
+  usd?: {
+    planned: DecimalString;
+    billed: DecimalString;
+    variance: DecimalString;
+    fx_difference: DecimalString;
+    cost: DecimalString;
+    shared: DecimalString;
+    fx_missing: boolean;
+  };
+  shared_costs?: {
+    departure_cost_id: string;
+    item_description: string;
+    seats: number;
+    departure_seats: number;
+    currency: string;
+    share_net: DecimalString;
+    share_cost_usd: DecimalString;
+  }[];
 }
 
 export interface BillLineIn {

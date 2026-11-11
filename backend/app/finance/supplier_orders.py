@@ -251,15 +251,18 @@ async def create_orders(
     departures: list[str] | None = None,
 ) -> dict[str, Any]:
     """Group the pending bookings of these trip cases (codes or ids) and departures (ids) that are on no live order
-    into draft orders, one per supplier + currency + service month (joining the supplier's draft of that group)."""
+    into draft orders, one per supplier + currency + service month (joining the supplier's draft of that group). A b2c
+    case is kept history (AA-1046): its bookings are never ordered."""
     _need_pricing(staff)
-    cases = [c.strip().upper() for c in (trip_cases or []) if c and c.strip()]
+    picked = [c.strip() for c in (trip_cases or []) if c and c.strip()]
+    # A code is matched upper case (TC-000123), an id lower case: both spellings go into the array.
+    cases = sorted({v for c in picked for v in (c.upper(), c.lower())})
     deps = [_uuid(d) for d in (departures or []) if d]
     if None in deps:
         raise Invalid("invalid_departure", "departures are departure ids")
-    if not cases and not deps:
+    if not picked and not deps:
         raise Invalid("scope_required", "pick at least one trip case or departure")
-    if len(cases) + len(deps) > MAX_SCOPE:
+    if len(picked) + len(deps) > MAX_SCOPE:
         raise Invalid("scope_too_large", f"at most {MAX_SCOPE} trip cases and departures at once")
     rows = await conn.fetch(
         "SELECT b.id::text AS id, b.code, b.supplier_id::text AS supplier_id, b.net_amount,"
@@ -268,7 +271,8 @@ async def create_orders(
         " LEFT JOIN booking.trip_cases tc ON tc.id = b.trip_case_id"
         " LEFT JOIN booking.supplier_orders o ON o.id = b.supplier_order_id"
         " WHERE b.status = 'pending' AND (b.supplier_order_id IS NULL OR o.status = 'cancelled')"
-        " AND ((tc.deleted_at IS NULL AND (tc.code = ANY($1::text[]) OR tc.id::text = ANY($1::text[])))"
+        " AND ((tc.deleted_at IS NULL AND tc.channel = 'b2b'"
+        "       AND (tc.code = ANY($1::text[]) OR tc.id::text = ANY($1::text[])))"
         "      OR b.departure_id = ANY($2::uuid[]))"
         " ORDER BY b.supplier_id, b.service_date, b.code FOR UPDATE OF b",
         cases,

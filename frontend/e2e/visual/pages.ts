@@ -59,6 +59,15 @@ export const PAGES: VisualPage[] = [
   { slug: "audit-log", route: "/audit-log", path: "/audit-log", auth: "staff" },
   { slug: "b2b-desk", route: "/b2b-desk", path: "/b2b-desk", auth: "staff" },
   { slug: "billing", route: "/billing", path: "/billing", auth: "staff" },
+  // AA-1074: Costs & profit, its three tabs, a departure's costs drawer and a purchase order drawer.
+  { slug: "finance", route: "/finance", path: "/finance", auth: "staff" },
+  { slug: "finance-profit-departures", route: "/finance", path: "/finance?tab=profit&view=departures", auth: "staff" },
+  { slug: "finance-profit-agencies", route: "/finance", path: "/finance?tab=profit&view=agencies", auth: "staff" },
+  {
+    slug: "finance-departure", route: "/finance",
+    path: "/finance?tab=departures&departure=d0000000-0000-4000-8000-000000000001", auth: "staff",
+  },
+  { slug: "finance-order", route: "/finance", path: "/finance?tab=orders&order=PO-000031", auth: "staff" },
   { slug: "cases", route: "/cases", path: "/cases", auth: "staff" },
   { slug: "case", route: "/cases/[code]", path: "/cases/TC-000001", auth: "staff" },
   { slug: "countries", route: "/catalog/countries", path: "/catalog/countries", auth: "staff" },

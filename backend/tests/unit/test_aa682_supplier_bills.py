@@ -43,7 +43,9 @@ KEY = "key-123456"
 
 BILL_ROW = "FROM booking.supplier_bills b JOIN booking.suppliers s"
 LOCK = "SELECT 1 FROM booking.supplier_bills WHERE id = $1::uuid FOR UPDATE"
-LINES = "FROM booking.supplier_bill_items it JOIN booking.supplier_bookings sb ON sb.id = it.supplier_booking_id LEFT JOIN"
+LINES = (
+    "FROM booking.supplier_bill_items it JOIN booking.supplier_bookings sb ON sb.id = it.supplier_booking_id LEFT JOIN"
+)
 PAYOUTS = "FROM booking.supplier_payouts o LEFT JOIN"
 FILES = "FROM booking.ops_files f"
 STORED_BILL = "request_sha256 FROM booking.supplier_bills WHERE idempotency_key"

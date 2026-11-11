@@ -86,6 +86,21 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
       return <span className={`text-[13px] ${tone(l.variance)}`}>{l.variance === null ? "—" : formatMoney(l.variance, l.net_currency)}</span>;
     },
   },
+  {
+    // AA-1074 (bk-045): the booking in USD at its snapshot rates; the realised FX difference once billed.
+    id: "usd",
+    header: "USD",
+    cell: ({ row }) => {
+      const u = row.original.usd;
+      if (!u) return <span className="text-muted">—</span>;
+      return (
+        <span className="flex flex-col text-[13px]">
+          <span>{u.cost === null ? "—" : formatMoney(u.cost, "USD")}</span>
+          {u.fx_difference !== null && u.fx_difference !== "0.00" && <span className="text-xs text-muted">FX {formatMoney(u.fx_difference, "USD")}</span>}
+        </span>
+      );
+    },
+  },
 ];
 
 export function CostVsBilled({ c }: { c: TripCaseDetail }) {
@@ -129,6 +144,36 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
             getRowId={(l) => l.supplier_booking.id}
             tableMinWidth={680}
           />
+          {data.usd && (
+            <div className="flex flex-wrap gap-4 text-[13px]" data-testid="case-costs-usd">
+              <span>
+                <span className="text-muted">USD:</span> planned {formatMoney(data.usd.planned, "USD")} · billed{" "}
+                {formatMoney(data.usd.billed, "USD")} ·{" "}
+                <span className={tone(data.usd.variance === "0" || data.usd.variance === "0.00" ? null : data.usd.variance)}>
+                  variance {formatMoney(data.usd.variance, "USD")}
+                </span>{" "}
+                · FX difference {formatMoney(data.usd.fx_difference, "USD")}
+              </span>
+              <span>
+                <span className="text-muted">Best cost:</span> <strong>{formatMoney(data.usd.cost, "USD")}</strong>
+                {Number(data.usd.shared) > 0 && ` (departure share ${formatMoney(data.usd.shared, "USD")})`}
+              </span>
+              {data.usd.fx_missing && (
+                <Pill tone="warning" dot={false}>
+                  A currency has no approved FX rate
+                </Pill>
+              )}
+            </div>
+          )}
+          {data.shared_costs && data.shared_costs.length > 0 && (
+            <ul className="flex flex-col gap-1 text-[13px] text-body">
+              {data.shared_costs.map((s) => (
+                <li key={s.departure_cost_id}>
+                  Shared: {s.item_description} · {s.seats} of {s.departure_seats} seats · {formatMoney(s.share_net, s.currency)}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="flex flex-wrap gap-4 text-[13px]">
             {data.totals.map((t) => (
               <span key={t.currency}>

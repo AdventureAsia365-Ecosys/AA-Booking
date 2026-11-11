@@ -92,3 +92,4 @@ export { SkeletonBar as Skeleton } from "./core/primitives";
 // per-entity map of UI spec §1.3; the kit one stays reachable as KitStatusBadge.
 export { StatusBadge } from "./booking/StatusBadge";
 export { StatusBadge as KitStatusBadge } from "./core/primitives";
+export * from "./booking/financePeriod";

@@ -25,6 +25,7 @@
     "customer.write",
     "ops.read",
     "pricing.read",
+    "profit.read",
     "pricing.write",
     "retention.admin",
     "staff.admin",
