@@ -56,6 +56,7 @@ import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
+import type { AgencyProfitMonth, CaseProfit, DepartureCosts, DepartureProfit, FinanceDeparture, OrderLine, SupplierOrder } from "../../lib/api/finance";
 import type {
   AgencyInvoice,
   AgencyInvoiceDetail,
@@ -1450,6 +1451,101 @@ const ok = (body: unknown): FixtureAnswer => ({ status: 200, body });
  * The answer for one BFF request (`path` = the part after `/api/booking/`, without the query string), or null when
  * no fixture covers it — the spec then fails the test, so a page that starts calling a new endpoint is noticed.
  */
+// ── AA-1074: Costs & profit (invented agencies, suppliers and tours) ───────────────────────────────────────────
+const FIN_AGENCIES = ["Harbourlight Tours", "Fernhill Holidays", "Mapleway Tours", "Quietcove Agency"];
+const FIN_DAY = (i: number) => `2026-12-${pad((i % 27) + 1, 2)}`;
+
+function caseProfit(i: number): CaseProfit {
+  const revenue = 900 + (i % 7) * 150;
+  const cost = 520 + (i % 5) * 90;
+  return {
+    trip_case_id: `c0000000-0000-4000-8000-${pad(i, 12)}`, code: `TC-${pad(4100 + i)}`, status: "confirmed",
+    start_date: FIN_DAY(i), agency_name: FIN_AGENCIES[i % 4]!, departure_id: null, trip_plan_source_id: `tour-${i % 9}`,
+    currency: i % 3 === 0 ? "EUR" : "USD", cancelled: i % 11 === 5, revenue: `${revenue * (i % 3 === 0 ? 0.8 : 1)}.00`,
+    revenue_usd: `${revenue}.00`, quoted_cost_usd: `${cost}.00`, planned_cost_usd: `${cost}.00`,
+    actual_cost_usd: i % 2 ? `${cost + 14}.00` : "0.00", shared_cost_usd: "60.00", cost_basis: i % 4 === 3 ? "quote" : "bookings",
+    cost_usd: `${cost + 60}.00`, profit_usd: `${revenue - cost - 60}.00`, planned_profit_usd: `${revenue - cost - 60}.00`,
+    profit: `${revenue - cost - 60}.00`, margin: ((revenue - cost - 60) / revenue).toFixed(4), unbilled_bookings: i % 3,
+    fx_missing: false,
+  };
+}
+
+function departureProfit(i: number): DepartureProfit {
+  return {
+    departure_id: `d0000000-0000-4000-8000-${pad(i, 12)}`, trip_plan_source_id: `tour-${i % 9}`, start_date: FIN_DAY(i),
+    status: i % 6 === 2 ? "guaranteed" : "scheduled", capacity: 16, sold_seats: 4 + (i % 9), cases: 2 + (i % 3),
+    revenue_usd: "4200.00", case_cost_usd: "1900.00", shared_cost_usd: "960.00", cost_usd: "2860.00", profit_usd: "1340.00",
+    profit_per_seat_usd: "167.50", margin: "0.3190", fx_missing: false,
+  };
+}
+
+function financeDeparture(i: number): FinanceDeparture {
+  const p = departureProfit(i);
+  return { id: p.departure_id, start_date: p.start_date, status: p.status, capacity: p.capacity, trip_plan_source_id: p.trip_plan_source_id,
+    sold_seats: p.sold_seats, cases: p.cases, shared_cost_lines: 1 + (i % 3), revenue_usd: p.revenue_usd, cost_usd: p.cost_usd,
+    profit_usd: p.profit_usd, profit_per_seat_usd: p.profit_per_seat_usd, margin: p.margin, fx_missing: false };  // prettier-ignore
+}
+
+function departureCosts(id: string): DepartureCosts {
+  return {
+    departure: { id, trip_plan_source_id: "tour-3", start_date: "2026-12-14", capacity: 16, status: "scheduled", sold_seats: 10 },
+    shared_costs: [0, 1].map((i) => ({
+      id: `e0000000-0000-4000-8000-${pad(i, 12)}`, departure_id: id, supplier: { id: "s-1", code: "SUP-000041", name: "Kestrel Coaches" },
+      service: { id: "sv-1", code: "SVC-000210", title: "Coach day, 29 seats" }, supplier_rate_id: i ? null : "r-1",
+      item_description: i ? "Temple entrance for the group" : "Coach day, 29 seats", service_date: "2026-12-14",
+      basis: i ? "person" : "group", quantity: i ? 1 : 2, pricing: i ? "manual" : "rate", unit_amount: i ? "12.50" : "480.00",
+      net_amount: i ? "125.00" : "960.00", currency: "USD", priced_for_pax: 10, priced_at: "2026-11-10T08:00:00+00:00",
+      frozen_at: i ? null : "2026-11-10T09:00:00+00:00",
+      supplier_booking: i ? null : { id: "b-1", code: "SB-000812", status: "requested", order_code: "PO-000031" },
+      status: "active", cancel_reason: null, notes: null, planned_usd: i ? "125.00" : "960.00", billed: false, billed_usd: null,
+      cost_usd: i ? "125.00" : "960.00", actions: { edit: !!i, order: !!i, remove: !!i },
+    })),
+    cases: [0, 1, 2].map((i) => ({
+      trip_case_id: `c-${i}`, code: `TC-${pad(4200 + i)}`, status: "confirmed", agency_name: FIN_AGENCIES[i]!, currency: "USD",
+      revenue: "1400.00", revenue_usd: "1400.00", planned_cost_usd: "780.00", actual_cost_usd: "0.00", shared_cost_usd: "325.50",
+      cost_usd: "945.50", profit_usd: "454.50", margin: "0.3246", unbilled_bookings: 1, fx_missing: false, cancelled: false, seats: 3 + i,
+    })),
+    bills: [{ id: "bl-1", code: "BIL-000077", status: "received", currency: "USD", amount: "960.00", bill_number: "KC-2026-118", supplier_name: "Kestrel Coaches" }],
+    totals_usd: { shared_planned: "1085.00", shared_billed: "0", shared_cost: "1085.00", revenue: "4200.00", case_cost: "1900.00",
+      cost: "2985.00", profit: "1215.00", profit_per_seat: "121.50", margin: "0.2893", fx_missing: false },
+  };
+}
+
+function supplierOrder(i: number): SupplierOrder {
+  const states = ["draft", "sent", "partly_confirmed", "confirmed", "cancelled"] as const;
+  const state = states[i % 5]!;
+  return {
+    id: `f0000000-0000-4000-8000-${pad(i, 12)}`, code: `PO-${pad(30 + i)}`,
+    supplier: { id: "s-2", code: "SUP-000052", name: i % 2 ? "Orchid Stays" : "Kestrel Coaches", email: "reservations@example.test" },
+    currency: "USD", service_month: "2026-12-01", status: state === "partly_confirmed" || state === "confirmed" ? "sent" : state, state,
+    total_net: state === "draft" ? null : "1240.00", live_net: "1240.00", sent_to: state === "draft" ? null : "reservations@example.test",
+    redirected: true, sent_at: state === "draft" ? null : "2026-11-10T09:00:00+00:00", send_error: null, note: null, cancel_reason: null,
+    created_at: "2026-11-09T09:00:00+00:00", lines: 2 + (i % 4), line_counts: { pending: 2 },
+    actions: { send: state === "draft", cancel: state !== "cancelled", remove_lines: state === "draft" },
+  };
+}
+
+function orderLines(): OrderLine[] {
+  return [0, 1, 2].map((i) => ({
+    id: `b-${i}`, code: `SB-${pad(900 + i)}`, status: i ? "requested" : "confirmed", item_description: i === 2 ? "Coach day, 29 seats" : "Riverside lodge, two nights",
+    service_date: FIN_DAY(i), nights: i === 2 ? null : 2, pax: 2 + i, net_amount: `${300 + i * 20}.00`, net_currency: "USD",
+    confirmation_ref: i ? null : "RL-4471", trip_case_code: i === 2 ? null : `TC-${pad(4200 + i)}`, departure_start_date: i === 2 ? "2026-12-14" : null,
+  }));
+}
+
+function financeAnswer(p: string, seg: string[]): FixtureAnswer | null {
+  const totals = { revenue_usd: "48200.00", cost_usd: "31060.00", profit_usd: "17140.00", margin: "0.3556", fx_missing: false };
+  if (p === "finance/profit/cases") return ok({ items: range(ROWS).map(caseProfit), total: 41, limit: 200, offset: 0, totals: { ...totals, planned_cost_usd: "30100.00", actual_cost_usd: "12880.00" } });
+  if (p === "finance/profit/departures") return ok({ items: range(12).map(departureProfit), total: 12, limit: 200, offset: 0, totals });
+  if (p === "finance/profit/agencies")
+    return ok({ items: range(8).map((i): AgencyProfitMonth => ({ partner_id: `p-${i % 4}`, agency_name: FIN_AGENCIES[i % 4]!, travel_month: i < 4 ? "2026-12-01" : "2027-01-01", cases: 3 + i, cancelled_cases: i % 3 === 1 ? 1 : 0, revenue_usd: "6200.00", cost_usd: "4100.00", profit_usd: "2100.00", margin: "0.3387", fx_missing: false })), total: 8, totals });  // prettier-ignore
+  if (p === "finance/departures") return ok({ items: range(12).map(financeDeparture), total: 12, limit: 100, offset: 0 });
+  if (seg[0] === "departures" && seg[2] === "costs" && seg.length === 3) return ok(departureCosts(seg[1]!));
+  if (p === "supplier-orders") return ok({ items: range(10).map(supplierOrder), total: 10, limit: 100, offset: 0 });
+  if (seg[0] === "supplier-orders" && seg.length === 2) return ok({ ...supplierOrder(1), lines: orderLines() });
+  return null;
+}
+
 export function answer(method: string, path: string, query: URLSearchParams): FixtureAnswer | null {
   if (method !== "GET") return null;
   const seg = path.split("/").filter(Boolean);
@@ -1531,6 +1627,8 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
   if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));
+  const finance = financeAnswer(p, seg);
+  if (finance) return finance;
 
   // AA-1037: Agency billing (the four tabs) and an agency invoice; `tenant_id` filters like the API (the CIS deep link).
   if (p === "agency-invoices/summary") return ok(AB_SUMMARY);

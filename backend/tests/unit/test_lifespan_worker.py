@@ -86,6 +86,8 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "bk_saas_invoice_draft",  # AA-1037 R4: the agency software fee drafts
         "bk_settlement_draft",  # AA-1037 R4: the agency tour settlement drafts
         "bk_agency_invoice_reminders",  # AA-1037 G4: overdue agency invoice reminders
+        "bk_departure_cost_recompute",  # AA-1074: departure shared costs re-priced by sold seats
+        "bk_supplier_order_send",  # AA-1074: purchase orders e-mailed to suppliers
     }
     assert list(worker.recurring) == []  # AA-1046: the recurring inquiry pull is retired
     # AA-825 daily retention runs; AA-973 B2B hold expiry when a hold is due; AA-986 L5 the CIS lifecycle outbox pull
@@ -100,6 +102,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "RecomputeSchedule",  # AA-1029 R4: the cost sheet, one run per watermark of its inputs
         "DraftSchedule",  # AA-1037 R4: the agency invoice drafts, once a day
         "ReminderSchedule",  # AA-1037 G4: the overdue agency invoice reminders, once a day
+        "RecomputeSchedule",  # AA-1074: departure shared costs, one run per sold-seats watermark
         "OpsDailySchedule",
         "OutboxSequencer",
     ]

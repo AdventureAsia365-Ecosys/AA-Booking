@@ -69,6 +69,10 @@ EXPECTED_SECONDS: dict[str, int] = {
     "bk_settlement_draft": 300,
     # AA-1037 G4: the overdue agency invoice reminders (at most 500 invoices, one SES call each); not exempt (seconds).
     "bk_agency_invoice_reminders": 300,
+    # AA-1074 (bk-045): re-price the unfrozen rate-priced departure costs when sold seats move (one transaction per
+    # departure, tens of rows), and e-mail one purchase order (one SES call); not exempt (seconds).
+    "bk_departure_cost_recompute": 300,
+    "bk_supplier_order_send": 120,
     # AA-993 G4 proof (test-only, JOB_TEST_KINDS): sleeps up to 3600 s.
     "bk_noop_sleep": 3660,
 }

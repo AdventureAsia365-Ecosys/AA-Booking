@@ -87,6 +87,9 @@ const GATED_ELSEWHERE = {
   "app/(staff)/proposals/page.tsx": /isFrozenCase\(row\.trip_case_channel, B2C_INTAKE_OPEN\)[\s\S]*isFrozenCase\(c\.channel, B2C_INTAKE_OPEN\)/,
   "app/(staff)/trip-checks/_parts/CheckDrawer.tsx": /useCan\("ops\.write"\) && writable && !frozen/,
   "app/(staff)/catalog/trip-plans/_parts/TripPlanDetailView.tsx": /UseForTripCaseModal/,
+  // AA-1074: departure-level costs and purchase orders; the API never orders a b2c case's bookings.
+  "app/(staff)/finance/_parts/DeparturesTab.tsx": /B2C history gate: ops\.write here writes departure-level costs/,
+  "app/(staff)/finance/_parts/OrdersTab.tsx": /B2C history gate: the API orders the bookings of B2B cases/,
 };
 
 function filesUnder(rel) {

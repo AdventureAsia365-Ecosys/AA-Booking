@@ -149,6 +149,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # AA-1037 extras G6 (bk-044): a partner terms clause (e.g. price errors) reaches agencies only once approved; the
     # business owner approves (admin), never the clause's last editor (403 maker_checker + a CHECK).
     "terms_clause.approve": frozenset({"admin"}),
+    # AA-1074 (bk-045, root S275 study bk-08): profit per trip case, departure and agency (revenue, net costs, margin).
+    # Finance reads it, admin backs up; sales and contracting see margins at price time (pricing.read) but not the
+    # realised profit (proposed default, to confirm with the business owner). Not in preview sessions.
+    "profit.read": frozenset({"admin", "finance"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin

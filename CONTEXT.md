@@ -441,11 +441,12 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
 (an old value in the task definition is ignored). B2B cases come only from the B2B confirm path
 (`POST /booking/b2b/v1/holds/{id}/confirm`).
 
-- **The tables go next**: Booking bk-045 (`-- migrate: destructive`, DRY RUN + tech-lead approval, root
+- **The tables go next**: the B2C drop file (planned as bk-045; bk-045 went to the finance file first, so the drop takes
+  the next free bk- number) (`-- migrate: destructive`, DRY RUN + tech-lead approval, root
   `docs/audits/2026-11-05-S270-aa1037-b2c-drop-dryrun/`) drops the customer and customer money tables, archives the
   money rows whole into the owner-only `booking.retired_b2c_record` (10 years, DM-7.1 accounting exception), drops
   `trip_cases.customer_id`, and lets a new trip case in only as b2b. This build reads none of the dropped objects, so
-  it runs on either side of bk-045.
+  it runs on either side of the drop.
 - **b2c trip cases are kept history, read-only**: every staff write on a `channel = 'b2c'` case answers 410
   `{"detail": "b2b_only", ...}` before any write (`app.b2c.refuse_b2c_case_write` and its siblings read only the
   case's channel; each route lists the 410 in `docs/api/openapi.json`): `PATCH /trip-cases/{ref}`, `POST .../status`,
@@ -463,7 +464,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `"b2c": "frozen"`). Retention keeps running on every row: the DM-7 clearing of trip-check emergency contacts,
   `bk_retention_inbox_redact` on the kept inquiry inbox rows (DM-6.6), and the DM-6.7 traveller erasure, a reviewed DB
   Migrate `run-script` (root `docs/legal/dsar-erasure-runbook.md`).
-- **DB backstop**: bk-045 swaps `trip_cases_channel_chk` for "b2b, or b2c created before the drop" (the kept rows stay
+- **DB backstop**: the drop file swaps `trip_cases_channel_chk` for "b2b, or b2c created before the drop" (the kept rows stay
   valid and redactable). A strict `CHECK (channel = 'b2b')` would refuse every UPDATE of a kept b2c row, the erasure
   redaction included (even `NOT VALID`), so it is not added while b2c rows exist.
 - **Staff admin**: `lib/config.ts` `B2C_INTAKE_OPEN` is `false` for good; `ui/booking/b2cFrozen.ts` takes the
@@ -907,10 +908,10 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
 
 The customer proforma invoices, their schedule and the manual payments (with maker-checker) were the money of the B2C
 half. Their routes, services (`app/ops/invoices.py`, `app/ops/payments.py`), reminders and staff pages are gone; agency
-money is agency billing (bk-041..044, below). Booking bk-045 archives their rows whole into `booking.retired_b2c_record`
+money is agency billing (bk-041..044, below). The B2C drop file archives their rows whole into `booking.retired_b2c_record`
 and drops the tables. The pure money helpers (`app/ops/money.py`: minor units, line amounts, the request hash, the
 card-number refusal) stay for supplier bills and agency billing. The case money track is gone too: no case takes
-`invoice_sent` / `payment_pending` / `paid` any more (bk-045 makes the guard refuse them), and a kept b2c case left in
+`invoice_sent` / `payment_pending` / `paid` any more (the drop file makes the guard refuse them), and a kept b2c case left in
 one never moves (`app.ops.track.next_status`).
 
 ## Supplier bills and payouts (AA-682 S4, bk-030; S252 design §3.4, §4, §5, critic B4, B6)
@@ -939,6 +940,40 @@ one never moves (`app.ops.track.next_status`).
 - `bk_ops_reminders` writes `supplier_bill.due` (to approve / to pay, due within `supplier_bill_due_soon_days`, then
   once more when overdue) to the shared staff queue. Staff UI: `/billing?tab=supplier-bills`, the supplier Bills tab,
   the bill drawer and payout modal, the case Suppliers tab's cost vs billed panel.
+
+## Finance: FX-normalised costs, departure shared costs, purchase orders, profit (AA-1074, bk-045)
+
+S275 study items bk-05 / bk-06 / bk-07 / bk-08 / bk-10 (root `docs/research/2026-11-10-odoo-tour-travel-plugin-comparison.md`;
+our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the case Suppliers tab's cost panel.
+
+- **FX** (`app/pricing/fx.py`, SQL twin `booking.fx_plain_rate`): every native amount converted to USD at the plain
+  APPROVED rate in force (no buffer; USD 1), **per line, half up to the cent**; totals are sums of cents. Snapshots:
+  a supplier booking takes the rate of its net currency when **confirmed** (cleared by a re-request), a supplier bill
+  when **approved** (set once). No approved rate: the snapshot stays empty and the views flag `fx_missing`.
+  `fx_difference_usd` = the billed native amount at the bill's rate minus at the booking's rate.
+- **Departure shared costs** (`app/finance/departure_costs.py`, `booking.departure_costs`): a coach / guide / group
+  entrance of the whole departure; `rate` = the supplier rate band for the departure's **sold seats** (confirmed holds,
+  line not declined / cancelled), basis = the rate unit (group / vehicle / day / person; person x seats), or `manual`.
+  `bk_departure_cost_recompute` re-prices the unfrozen rate costs when the sold seats or a rate move (worker hook, a
+  watermark like `bk_price_recompute`; it carries each departure's newest hold change, so seats that go back to an
+  earlier count still re-price). *Order* makes one **departure-level supplier booking** (`departure_id`, no trip
+  case; it moves no case status); the cost **freezes** when that booking is requested. Split to cases by seats
+  (`v_departure_cost_share`, the remainder stays with the departure). A bill can name a departure (`departure_id`).
+- **Purchase orders** (`app/finance/supplier_orders.py`, `PO-000123`): *Create orders* puts the pending bookings of
+  the named B2B cases / departures on one draft per supplier + currency + service month; *Send* fixes the snapshot,
+  total and the supplier's `contact_email`, then `bk_supplier_order_send` e-mails it (outside prod to
+  `STAFF_NOTIFY_EMAIL`, `redirected`) and requests its pending lines (cases advance as for a hand request); a refused
+  e-mail puts it back to draft with `send_error`. Confirmed / partly confirmed come from the lines' answers. The order
+  names services, dates, pax, nets and AA references only (DM-6.8). Printable: `GET /supplier-orders/{ref}/document`.
+- **Planned vs actual** (`v_cost_variance`): per booking, planned (net at the snapshot) against billed (approved / paid
+  bill lines), variance only once billed. `GET /departures/{id}/costs`: shared costs, the sold cases with their share,
+  the departure's bills, profit (revenue, profit and margin there and in `GET /finance/departures` are `null` without
+  `profit.read`: sales and contracting see the costs only). The case cost panel adds USD per line, totals and the departure share.
+- **Profit** (`v_case_profit`, `v_departure_profit`, `v_agency_profit_month`; `GET /finance/profit/cases | departures |
+  agencies`, permission **`profit.read`** = admin, finance; proposed default): revenue = the confirmed quote total (or
+  the cancellation fee), costs = billed, else planned, else the quote while nothing is booked; margin = profit /
+  revenue. Never in `booking.b2b.v1`.
+- Permissions: costs read `bill.read`, orders read `ops.read`, writes `ops.write`; both also need `pricing.read`.
 
 ## My Payments: customer routes (AA-682 S5, contract `booking.customer.v1`): retired (AA-1046)
 
@@ -1011,6 +1046,8 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_saas_invoice_draft` | AA-1037 R4 (root ADR 0019 d9): the software-fee drafts of a month (payload `period` YYYY-MM, optional `tenant_id`): every live subscription (active, past_due) of `catalog.v_tenant_billing_v1` (CIS 377; `skipped` without it) gives `subscription` / `extra_seats` lines on the agency's draft (one live invoice per agency, kind, period start and currency); a plan without a price gives a zero line (`price_missing`); a re-run replaces the job lines of a draft and leaves an issued invoice alone. Queued daily by `DraftSchedule` for the current month (key per month) and by staff (`POST /booking/agency-billing/runs`). One transaction per agency; a failing agency is counted and the run raises at the end. Not deploy-gate exempt (seconds). |
 | `bk_agency_invoice_reminders` | AA-1037 extras G4: once a day (`ReminderSchedule`, key per day; payload `day`), the overdue issued agency invoices with a balance (at most 500): per invoice the highest step reached (`agency_reminder_steps_days` + the credit stop at `suspend_after_days`) not yet in `booking.agency_invoice_reminder` is e-mailed (outside prod to the staff inbox) and recorded, or recorded `skipped` without a billing e-mail. No `SES_FROM_ADDRESS` (or no staff inbox outside prod): `skipped`, nothing written. A failed send is counted, the others are kept and the run raises (retried); a sending pause fails it. Not deploy-gate exempt (seconds). |
 | `bk_settlement_draft` | AA-1037 R4: the tour settlement drafts of a month (default: the closed month): per confirmed B2B hold, `deposit` (deposit % of the B2B total) or `full` (booked inside the balance window), then `balance` once the balance date (departure - `balance_days_before_departure`) is before the period end, or one `cancellation_fee` line (the fee less what was billed; a credit when negative) for a cancelled booking; terms from `billing_terms` (agency override, else default); one live line per (hold, role), so nothing is billed twice and an unbilled earlier event lands on the next run. Queued daily by `DraftSchedule` for the previous month and by staff. Not deploy-gate exempt. |
+| `bk_departure_cost_recompute` | AA-1074 (bk-045): queued by a maintenance hook whenever the watermark (per departure with an unfrozen rate-priced shared cost: sold seats and newest hold / hold line change; the newest rate change) moves; key = its hash. One transaction per departure: each active, unfrozen `rate` cost re-reads the band for the sold seats; a pending booking behind it follows (net, pax, day). Audit `departure_cost.repriced`. Payload `{departure_id?}`. Not deploy-gate exempt (seconds). |
+| `bk_supplier_order_send` | AA-1074 (bk-045): one per Send of a purchase order (key per order and press). E-mails the order's snapshot through SES (outside prod to the staff inbox), then marks it `sent` and requests its pending lines; a permanent SES refusal (or no sender / staff inbox) puts the order back to `draft` with `send_error`; throttling retries. At least once (a worker dying after SES accepted re-sends). Not deploy-gate exempt. |
 | `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
 | `bk_b2b_hold_expire` | AA-973: queued by a worker maintenance hook only while a B2B hold is due (idempotency key per UTC minute, no row otherwise); moves due `active` holds to `expired` in batches of 500 (`FOR UPDATE SKIP LOCKED`, at most 20 batches). Idempotent; reads never wait for it. Not deploy-gate exempt (a run takes seconds). Each status write emits `hold.expired` (bk-022 trigger). |
 | `bk_notify_email` | One per new inquiry notification (idempotency key `bk_notify_email:<notification_id>`): reads the notification, trip case, lead customer, legs and (live, soft) the CIS `catalog.v_tour` titles/countries, sends one e-mail to `STAFF_NOTIFY_EMAIL` through SES; result `{outcome: sent, message_id, ...}`. Not configured → `skipped` with the reason; an SES refusal that cannot change (rejected, sender not allowed, paused) fails at once, throttling / network errors retry with backoff. At least once: a worker that dies after SES accepted the message re-sends it. |

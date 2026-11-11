@@ -615,8 +615,10 @@ async def test_confirm_with_a_voucher_on_a_b2c_case() -> None:
     conn = write_conn(booking_row(status="requested"), asked=1, case_status="supplier_confirming")
     await sb.confirm(conn, SALES, SB_ID, confirmation_ref=" R-1 ", voucher_file_id=VOUCHER)
     (sql, args) = next(c for c in conn.calls if c[0].startswith(SET_STATUS))
-    assert "confirmation_ref = $4, confirmed_at = $5, confirmed_by = $6, voucher_file_id = $7" in sql
-    assert args[:4] == (SB_ID, "confirmed", "u-1", "R-1") and args[5:] == ("u-1", VOUCHER)
+    # AA-1074: the FX snapshot of the net currency is taken with the confirmation (USD: 1).
+    assert "confirmed_by = $6, fx_rate_per_usd = $7, fx_as_of = $8, voucher_file_id = $9" in sql
+    assert args[:4] == (SB_ID, "confirmed", "u-1", "R-1") and args[5] == "u-1" and args[6] == 1
+    assert args[8] == VOUCHER
     assert actions(conn) == ["supplier_booking.confirmed"]  # already supplier_confirming: no case move
     (row,) = audits(conn)
     assert row["after"] == {"status": "confirmed", "confirmation_ref": "R-1", "voucher_file_id": VOUCHER}
@@ -727,7 +729,8 @@ async def test_rerequest_clears_the_confirmation_and_keeps_the_old_ref_in_the_au
     conn = write_conn(booking_row(status="confirmed", confirmation_ref="R-1"))
     await sb.rerequest(conn, SALES, SB_ID, reason=" one more night ")
     (args,) = conn.sql(SET_STATUS)
-    assert args[:3] == (SB_ID, "requested", "u-1") and args[4:] == ("u-1", None, None, None)
+    # AA-1074: a re-request clears the FX snapshot too (taken again at the next confirm).
+    assert args[:3] == (SB_ID, "requested", "u-1") and args[4:] == ("u-1", None, None, None, None, None)
     (row,) = audits(conn)
     assert row["action"] == "supplier_booking.rerequested"
     assert row["before"] == {"status": "confirmed", "confirmation_ref": "R-1"}
