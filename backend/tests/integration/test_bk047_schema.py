@@ -1,8 +1,8 @@
 """bk-047 (AA-1075) on a real PostgreSQL: staff-entered bookings (entered_via, b2b_desk_bookings maker-checker and the
 booking.created_by_aa event), voucher and supplier cancel fee columns, the cancellation fee override (guard, approval,
-booking.fee_changed), partial cancellations (append-only, booking.line_reduced), child / infant / single prices, per-tour
-terms and the two replaced views. A contract file. Every test runs in one transaction logged in as role booking and is
-rolled back. Names are invented. No import of app code (the migration PR stands alone)."""
+booking.fee_changed), partial cancellations (append-only, booking.line_reduced), child / infant / single prices,
+per-tour terms and the two replaced views. A contract file. Every test runs in one transaction logged in as role
+booking and is rolled back. Names are invented. No import of app code (the migration PR stands alone)."""
 
 from __future__ import annotations
 
@@ -181,9 +181,7 @@ async def test_desk_booking_maker_checker_and_created_by_aa_event(conn: asyncpg.
             )
     with pytest.raises(asyncpg.CheckViolationError):
         async with conn.transaction():
-            await conn.execute(
-                "UPDATE booking.b2b_desk_bookings SET status = 'booked' WHERE id = $1::uuid", desk
-            )
+            await conn.execute("UPDATE booking.b2b_desk_bookings SET status = 'booked' WHERE id = $1::uuid", desk)
     # Facts never change.
     with pytest.raises(asyncpg.InsufficientPrivilegeError):
         async with conn.transaction():
@@ -280,9 +278,7 @@ async def test_supplier_booking_voucher_fields_and_cancel_fee(conn: asyncpg.Conn
         " WHERE id = $1::uuid",
         sb,
     )
-    cost = await conn.fetchval(
-        "SELECT cost_usd FROM booking.v_cost_variance WHERE supplier_booking_id = $1::uuid", sb
-    )
+    cost = await conn.fetchval("SELECT cost_usd FROM booking.v_cost_variance WHERE supplier_booking_id = $1::uuid", sb)
     assert cost == Decimal("20.00")
 
 
@@ -391,8 +387,8 @@ async def test_child_infant_single_columns_and_age_bands(conn: asyncpg.Connectio
         f"it-1075-{uuid.uuid4().hex[:8]}",
     )
     await conn.execute(
-        "INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, valid_from, valid_to, pax_min, currency,"
-        " amount, net_amount, net_currency, priced_on, child_amount, infant_amount, single_supplement_amount,"
+        "INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, valid_from, valid_to, pax_min,"
+        " currency, amount, net_amount, net_currency, priced_on, child_amount, infant_amount, single_supplement_amount,"
         " child_net_amount, infant_net_amount, single_supplement_net_amount)"
         " VALUES ($1, 1, 'b2b', current_date, current_date + 30, 2, 'USD', 500, 400, 'USD', current_date, 375, 20, 90,"
         " 300, 15, 70)",
@@ -408,7 +404,9 @@ async def test_child_infant_single_columns_and_age_bands(conn: asyncpg.Connectio
             )
     with pytest.raises(asyncpg.CheckViolationError):  # infant band below the child band
         async with conn.transaction():
-            await conn.execute("UPDATE booking.trip_plans SET infant_age_max = 3, child_age_max = 3 WHERE id = $1", plan)
+            await conn.execute(
+                "UPDATE booking.trip_plans SET infant_age_max = 3, child_age_max = 3 WHERE id = $1", plan
+            )
     with pytest.raises(asyncpg.CheckViolationError):
         async with conn.transaction():
             await conn.execute(
