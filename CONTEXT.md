@@ -547,6 +547,12 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `billing_config.write` = admin, finance; approving or rejecting a payment is never its recorder's (403 `maker_checker`,
   CHECK in the database). None of them is in the preview cap. `terms_clause.approve` = admin (AA-1037 G6, bk-044): a
   partner terms clause reaches agencies once approved, never by its last editor (403 `maker_checker`, CHECK).
+  Agency booking operations (AA-1075, bk-047): entering a booking for an agency, cancelling or reducing one for it
+  and asking for a lower cancellation fee `b2b_desk.book` = admin, sales; a price below the floor margin and a lower
+  cancellation fee are approved with `b2b_desk.approve` = admin, contracting, never by the person who asked (403
+  `maker_checker` + CHECKs). The departure manifest is `ops.read`; a tour's deposit terms are read with
+  `agency_billing.read` and written with `billing_config.write`; a supplier's cancellation fee needs `ops.write` +
+  `pricing.read`; the age bands of a plan `trip_plan.write`. None of the writes is in the preview cap.
   Catalog geo state (AA-996, bk-029): the Booking status, reason, area and notes of a CIS country or place
   `catalog.admin` = admin only (UI spec §3 "A edit status"); reading Countries / Destinations is `catalog.read`.
   Notifications,
@@ -1001,6 +1007,62 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
   the cancellation fee), costs = billed, else planned, else the quote while nothing is booked; margin = profit /
   revenue. Never in `booking.b2b.v1`.
 - Permissions: costs read `bill.read`, orders read `ops.read`, writes `ops.write`; both also need `pricing.read`.
+
+## Agency booking operations (AA-1075, bk-047; S275 study items bk-11..bk-15, bk-18)
+
+- **Staff-entered bookings** (`app.b2b.desk_bookings`, staff `/booking/b2b-desk/entries`, page B2B desk → "Agency
+  bookings"): an agency booking that arrives by e-mail or chat is keyed in for the agency (`b2b_partners`). One
+  transaction runs the agency API's own quote → hold → confirm (`quotes.quote_in`, `holds.place_in`,
+  `holds.confirm_in`) with the partner's M2M client on the rows, so every rule applies (served tours, seats and
+  allotments, credit stop, re-hold limit, the policy locked at confirm). The trip case says `entered_via = 'staff'`
+  and `entered_by`; the bk-047 hold trigger emits `booking.created_by_aa` before the `line.confirmed` events so the
+  agency's CRM imports it. The agency reference is the proposal ref (next free version). **Price override**: staff
+  may set the total with a reason; the quote lines are scaled to it before hashing (`quotes.scale_prices`). At or above
+  the floor (the rule's floor margin, `quotes.floor_price`; never above the rule price when the agency discount is
+  lower) it books at once; below it the row waits `awaiting_approval` (the hold keeps the seats for
+  `b2b_hold_hours`) until a second person approves (confirm → `booked`) or rejects (hold released); a hold that
+  expires first reads `lapsed`. Rows: `booking.b2b_desk_bookings` (facts fixed, status moves once). Same
+  `Idempotency-Key` = same row.
+- **Vouchers** (`app.b2b.vouchers`; agency `GET /booking/b2b/v1/bookings/{id}/vouchers`, contract 1.7; staff `GET
+  /booking/b2b-desk/bookings/{ref}/vouchers`, case header "Vouchers"): one generated voucher per confirmed supplier
+  booking (service, date, local time, pick-up, drop-off, voucher note, supplier name, confirmation ref, travellers of
+  the line by age band, AA's ops desk line from the setting `b2b_ops_contact`). No traveller names, no prices and no
+  contact field (the contract field policy keeps phones and e-mails out); the CRM prints its lead traveller on its
+  copy. Staff fill the voucher fields on the Suppliers tab ("Voucher details", live bookings only).
+- **Manifest, step 1** (`app.b2b.manifest`, `GET /booking/b2b-desk/departures/{id}/manifest`, page
+  `/b2b-desk/manifest/{id}` from the desk's Departures tab, `format=html` prints): confirmed bookings on a departure
+  (agency, its ref, case, travellers by age band less partial cancellations, rooms, line status) and the supplier
+  bookings of those cases and of the departure. Counts only. Step 2 (a rooming list with names pushed by the CRM)
+  needs the DM-6.8 / ADR 0019 amendment first; nothing stores names today.
+- **Cancellation** (`app.b2b.amendments`): staff cancel for the agency (`POST /booking/b2b-desk/bookings/{ref}/cancel`,
+  dry run, `entered_via = 'staff'` on `b2b_cancellations`), optionally asking a lower fee % or a waiver with a reason;
+  `…/cancellation/override` asks later, `…/approve` (a second person) lowers `fee_amount` / `refundable_amount` (the
+  only update the bk-047 guard lets through) and emits `booking.fee_changed`; `…/reject` clears the request. On any
+  case cancel, pending and requested supplier bookings are cancelled (a request is withdrawn: staff tell the
+  supplier) and confirmed ones raise "cancel with supplier"; the supplier's fee is recorded on the cancelled booking
+  (`supplier_cancel_fee` + currency, `POST /booking/supplier-bookings/{id}/cancel-fee` or with the cancel) and is the
+  booking's cost in `v_cost_variance` / `v_case_profit` until a bill of it is approved.
+- **Partial cancellation** (`amendments.reduce_line`; agency `POST /booking/b2b/v1/bookings/{id}/lines/{ref}/reduce`,
+  contract 1.7; staff `POST /booking/b2b-desk/bookings/{ref}/lines/{line_ref}/reduce`, case "Fewer travellers"): fewer
+  travellers on one per-person line (tour, activity, entrance, meal; rooms, transfers and guides are re-quoted), at
+  least one adult stays. Removed share = current line price x removed seats / current seats (infants hold no seat);
+  fee = that share x the policy % of today (the locked policy; none on a departure AA cancelled). The hold line's
+  seats go back on sale, the case pax follows the biggest line, staff are told to update live supplier bookings, the
+  agency gets `booking.line_reduced`. Rows: `booking.b2b_line_reductions` (append-only, the amendment record: the
+  approved version stays as sold because bk-003 locks it). A later cancel charges its fee on the rest; the settlement
+  draft takes the refundable part off the total and bills the fees; `v_case_profit` revenue follows.
+- **Child, infant and single prices**: the b2b rule may carry `child_pct` (a child pays that share of the adult price
+  of a tour line) and `infant_flat_usd` (net per infant, priced by the rule): the quote engine applies them to `tp:`
+  lines (`quotes.pax_sell_usd`; component lines and the tariff price as before). The cost sheet fills
+  `child_amount`, `infant_amount` and `single_supplement_amount` (+ nets) on computed matrix rows (single supplement
+  per night = single rate - half the double rate); hand rows may carry them. Plans carry `child_age_max` /
+  `infant_age_max` (`PUT …/trip-plans/{source_id}/age-bands`; defaults in settings `b2b_child_age_max` 11,
+  `b2b_infant_age_max` 1).
+- **Per-tour terms** (`booking.trip_plan_billing_terms`, staff `/booking/tour-terms/{source_id}`, trip plan page →
+  "Agency terms"): a tour's deposit % and balance days for every agency or one. Most specific wins: agency + tour >
+  tour > agency > default (`config.plan_terms`), on the settlement draft (the tour of the hold's first `tp:` line) and
+  on the agency's `GET /terms?source_id=` (`PaymentTerms.scope`). A separate table so `v_tenant_billing_status` (read
+  by CIS) and the reminder job keep reading `billing_terms` per agency.
 
 ## My Payments: customer routes (AA-682 S5, contract `booking.customer.v1`): retired (AA-1046)
 
@@ -1688,6 +1750,22 @@ on `status, at_risk_at`). New table `booking.departure_allotments` (departure, p
 approve / release / end columns only, no DELETE), maker-checker CHECK, one in force and one pending per departure and
 agency (partial unique indexes), guard trigger (starts pending on a departure not cancelled, approved / released / ended
 once) and the release outbox trigger. DM-7.1 row in the root data standards. `cis_app` reads none of it.
+
+### `bk-047` (AA-1075 booking ops: staff agency bookings, vouchers, cancellation override, partial cancellation, child prices, tour terms — needs `bk-021`, `bk-022`, `bk-026`, `bk-041`, `bk-045`, `bk-046`)
+
+A **contract** file (MIG-4). `trip_cases` gains `entered_via` (`api|staff`, default `api`) and `entered_by`;
+`supplier_bookings` gains `service_time`, `pickup_point`, `dropoff_point`, `voucher_note` (`pii:free_text`) and
+`supplier_cancel_fee` + currency (cancelled bookings only); `b2b_cancellations` gains `entered_via` / `entered_by` and
+the override columns (`fee_override_pct` below `fee_pct`, `waive_reason`, requested / approved by + at; CHECK
+approver <> requester; column UPDATE grants; guard trigger: facts fixed, amounts change once to a lower fee in the
+approving update; `booking.fee_changed` trigger); `trip_plan_prices` gains child / infant / single supplement amounts
+and nets; `trip_plans` gains `child_age_max` / `infant_age_max`; `pricing_rules` gains `child_pct` /
+`infant_flat_usd`. New tables `b2b_desk_bookings` (maker-checker CHECKs, guard), `b2b_line_reductions` (append-only,
+`booking.line_reduced` trigger) and `trip_plan_billing_terms`. Outbox: event types `booking.created_by_aa`,
+`booking.line_reduced`, `booking.fee_changed` (hold / booking / line CHECKs widened); `b2b_holds_outbox` also emits
+`booking.created_by_aa` when a staff-entered case's hold is confirmed. `v_cost_variance` / `v_case_profit` replaced
+with the same columns (recorded supplier cancel fees, partial cancellations). Settings `b2b_ops_contact` (empty),
+`b2b_child_age_max`, `b2b_infant_age_max`. DM-7.1 rows in the root data standards. `cis_app` reads none of it.
 
 Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Booking state of CIS countries and
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679
