@@ -15,6 +15,7 @@ import {
   type DepartureProfit,
   type ProfitTotals,
 } from "@/lib/api/finance";
+import { tourLabel } from "@/ui/booking/financeLabels";
 import Link from "next/link";
 import { DataTable, DateText, FilterBar, KpiTile, Money, PERIOD_OPTIONS, Pill, Section, periodWindow, useUrlFilters } from "@/ui";
 
@@ -98,7 +99,15 @@ const CASE_COLUMNS: ColumnDef<CaseProfit, unknown>[] = [
 
 const DEPARTURE_COLUMNS: ColumnDef<DepartureProfit, unknown>[] = [
   { id: "start", header: "Departure", cell: ({ row }) => <DateText value={row.original.start_date} className="font-semibold" /> },
-  { id: "tour", header: "Tour", cell: ({ row }) => <span className="block max-w-[200px] truncate text-[13px]">{row.original.trip_plan_source_id}</span> },
+  {
+    id: "tour",
+    header: "Tour",
+    cell: ({ row }) => (
+      <span className="block max-w-[200px] truncate text-[13px]" title={row.original.tour_title ?? row.original.trip_plan_source_id}>
+        {tourLabel(row.original.tour_title, row.original.trip_plan_source_id)}
+      </span>
+    ),
+  },
   { id: "seats", header: "Sold seats", cell: ({ row }) => `${row.original.sold_seats} / ${row.original.capacity}` },
   { id: "revenue", header: "Revenue", cell: ({ row }) => <Money amount={row.original.revenue_usd} currency="USD" className="text-[13px]" /> },
   { id: "shared", header: "Shared cost", cell: ({ row }) => <Money amount={row.original.shared_cost_usd} currency="USD" className="text-[13px]" /> },

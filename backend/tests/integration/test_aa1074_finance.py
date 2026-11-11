@@ -429,3 +429,36 @@ async def test_profit_reads(conn: asyncpg.Connection) -> None:
     assert any(d["departure_id"] == dep for d in deps["items"])
     months = await profit.agencies(conn, start=START, end=START)
     assert any(m["agency_name"] == "Copperleaf Voyages" for m in months["items"])
+
+
+async def test_departure_reads_name_the_tour_from_the_catalog(
+    conn: asyncpg.Connection, migrated_admin_dsn: str
+) -> None:
+    """S277 UAT fix: the finance departure list, the departure view and the profit per departure carry the CIS
+    catalog title of the departure's trip plan (``tour_title``), not only the raw catalog key."""
+    dep = await _departure(conn)
+    key = await conn.fetchval(
+        "SELECT tp.source_id FROM booking.departures d JOIN booking.trip_plans tp ON tp.id = d.trip_plan_id"
+        " WHERE d.id = $1::uuid",
+        dep,
+    )
+    untitled = await _departure(conn)
+    await _sold_case(conn, dep, seats=2, total="900.00", agency="Saltmarsh Journeys")
+    admin = await asyncpg.connect(migrated_admin_dsn)  # role booking only reads the catalog stub
+    try:
+        await admin.execute(
+            "INSERT INTO catalog.v_tour (source_id, title, country, duration_days) VALUES ($1, $2, 'Elsewhere', 3)",
+            key,
+            "Lantern Coast Loop",
+        )
+        listing = await departure_costs.list_departures(conn, OPS, start=START, end=START, limit=100)
+        titles = {d["id"]: d["tour_title"] for d in listing["items"]}
+        assert titles[dep] == "Lantern Coast Loop" and titles[untitled] is None
+        view = await departure_costs.departure_costs(conn, OPS, dep)
+        assert view["departure"]["tour_title"] == "Lantern Coast Loop"
+        assert view["departure"]["trip_plan_source_id"] == key
+        deps = await profit.departures(conn, start=START, end=START, limit=200)
+        assert next(d for d in deps["items"] if d["departure_id"] == dep)["tour_title"] == "Lantern Coast Loop"
+    finally:
+        await admin.execute("DELETE FROM catalog.v_tour WHERE source_id = $1", key)
+        await admin.close()

@@ -5,6 +5,8 @@
 // and the variance, totals per currency. Net amounts are commercial: shown only with pricing.read (and bill.read).
 // No FX conversion: a bill in another currency than the net is flagged, not converted. "Supplier bills" opens the bill
 // list filtered to this case (?case=); "Enter bill" (bill.write) opens the bill form with this case filled in.
+// AA-1074 (S277 UAT): with the USD summary (planned / billed / variance / FX difference, best cost) the per-currency
+// line is kept only for currencies other than USD, so a USD-only case shows one summary, not two.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -16,6 +18,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { supplierBillsApi, type CaseCostLine } from "@/lib/api/supplierBills";
 import type { TripCaseDetail } from "@/lib/api/types";
 import { Button, DataTable, Money, Pill, Section, formatMoney, useCan } from "@/ui";
+import { nativeTotals } from "@/ui/booking/financeLabels";
 
 function tone(variance: string | null): string {
   if (variance === null) return "text-muted";
@@ -113,6 +116,8 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
   const q = useQuery({ queryKey: ["supplier-costs", c.code], queryFn: () => supplierBillsApi.caseCosts(c.code), enabled: canSee });
   if (!canSee) return null;
   const data = q.data;
+  // With the USD summary shown, a USD per-currency line only repeats it: keep the native totals of other currencies.
+  const totals = data ? nativeTotals(data.totals, !!data.usd) : [];
   const billsHref = `/billing?tab=supplier-bills&case=${encodeURIComponent(c.code)}`;
   return (
     <Section
@@ -174,14 +179,16 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
               ))}
             </ul>
           )}
-          <div className="flex flex-wrap gap-4 text-[13px]">
-            {data.totals.map((t) => (
-              <span key={t.currency}>
-                <span className="text-muted">{t.currency}:</span> net {formatMoney(t.net, t.currency)} · billed {formatMoney(t.billed, t.currency)} ·{" "}
-                <span className={tone(t.variance)}>variance {t.variance === null ? "—" : formatMoney(t.variance, t.currency)}</span>
-              </span>
-            ))}
-          </div>
+          {totals.length > 0 && (
+            <div className="flex flex-wrap gap-4 text-[13px]" data-testid="case-costs-native">
+              {totals.map((t) => (
+                <span key={t.currency}>
+                  <span className="text-muted">{t.currency}:</span> net {formatMoney(t.net, t.currency)} · billed {formatMoney(t.billed, t.currency)} ·{" "}
+                  <span className={tone(t.variance)}>variance {t.variance === null ? "—" : formatMoney(t.variance, t.currency)}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {entering && (

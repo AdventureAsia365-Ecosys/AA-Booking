@@ -1555,7 +1555,8 @@ function caseProfit(i: number): CaseProfit {
 
 function departureProfit(i: number): DepartureProfit {
   return {
-    departure_id: `d0000000-0000-4000-8000-${pad(i, 12)}`, trip_plan_source_id: `tour-${i % 9}`, start_date: FIN_DAY(i),
+    departure_id: `d0000000-0000-4000-8000-${pad(i, 12)}`, trip_plan_source_id: `tour-${i % 9}`,
+    tour_title: i % 7 === 3 ? null : `Invented Highlands and Hidden Lagoons Discovery Journey ${(i % 9) + 1}`, start_date: FIN_DAY(i),
     status: i % 6 === 2 ? "guaranteed" : "scheduled", capacity: 16, sold_seats: 4 + (i % 9), cases: 2 + (i % 3),
     revenue_usd: "4200.00", case_cost_usd: "1900.00", shared_cost_usd: "960.00", cost_usd: "2860.00", profit_usd: "1340.00",
     profit_per_seat_usd: "167.50", margin: "0.3190", fx_missing: false,
@@ -1565,13 +1566,13 @@ function departureProfit(i: number): DepartureProfit {
 function financeDeparture(i: number): FinanceDeparture {
   const p = departureProfit(i);
   return { id: p.departure_id, start_date: p.start_date, status: p.status, capacity: p.capacity, trip_plan_source_id: p.trip_plan_source_id,
-    sold_seats: p.sold_seats, cases: p.cases, shared_cost_lines: 1 + (i % 3), revenue_usd: p.revenue_usd, cost_usd: p.cost_usd,
+    tour_title: p.tour_title, sold_seats: p.sold_seats, cases: p.cases, shared_cost_lines: 1 + (i % 3), revenue_usd: p.revenue_usd, cost_usd: p.cost_usd,
     profit_usd: p.profit_usd, profit_per_seat_usd: p.profit_per_seat_usd, margin: p.margin, fx_missing: false };  // prettier-ignore
 }
 
 function departureCosts(id: string): DepartureCosts {
   return {
-    departure: { id, trip_plan_source_id: "tour-3", start_date: "2026-12-14", capacity: 16, status: "scheduled", sold_seats: 10 },
+    departure: { id, trip_plan_source_id: "tour-3", tour_title: "Invented Highlands and Hidden Lagoons Discovery Journey 4", start_date: "2026-12-14", capacity: 16, status: "scheduled", sold_seats: 10 },
     shared_costs: [0, 1].map((i) => ({
       id: `e0000000-0000-4000-8000-${pad(i, 12)}`, departure_id: id, supplier: { id: "s-1", code: "SUP-000041", name: "Kestrel Coaches" },
       service: { id: "sv-1", code: "SVC-000210", title: "Coach day, 29 seats" }, supplier_rate_id: i ? null : "r-1",

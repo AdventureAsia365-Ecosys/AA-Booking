@@ -14,3 +14,6 @@ next-env.d.ts
 
 # AA-1008 visual run output (screenshots, report)
 /e2e/visual/results/
+
+# AA-1073 / AA-1074 signed-in smoke output (screenshots, report, and .auth/: a live session, never commit)
+/e2e/results/

@@ -9,7 +9,7 @@ Reads of the bk-045 views (owner ``bk_owner``, ``conf:commercial``, staff only, 
   supplier cancellation fees included, + share), and the best estimate ``cost_usd`` (billed, else planned while live,
   else the quote while no booking exists yet). Profit, planned profit and margin (fraction of revenue).
 - ``v_departure_profit``: per departure: sold seats, revenue and own costs of its cases, the full shared cost, profit,
-  profit per sold seat, margin.
+  profit per sold seat, margin. Each row also carries ``tour_title`` (CIS catalog, by ``trip_plan_source_id``).
 - ``v_agency_profit_month``: per agency (B2B partner) and travel month (trip start).
 
 Every USD figure is a sum of per-line cents (:mod:`app.pricing.fx`). ``fx_missing`` flags a row whose currency had no
@@ -25,6 +25,7 @@ from typing import Any
 import asyncpg
 
 from app.errors import Invalid
+from app.finance.departure_costs import with_tour_titles
 from app.ops.supplier_bills import jsonable
 
 MAX_PAGE = 200
@@ -113,7 +114,7 @@ async def departures(
     rows = [dict(r) for r in await conn.fetch(DEPARTURES_SQL + " ORDER BY p.start_date, p.departure_id", start, end)]
     return jsonable(
         {
-            "items": rows[offset : offset + limit],
+            "items": await with_tour_titles(conn, rows[offset : offset + limit]),
             "total": len(rows),
             "limit": limit,
             "offset": offset,
