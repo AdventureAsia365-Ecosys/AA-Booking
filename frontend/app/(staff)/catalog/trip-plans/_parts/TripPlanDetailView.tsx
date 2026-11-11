@@ -318,10 +318,11 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                 )}
               </Section>
             )}
+            {/* S277 UAT: the panel belongs to the Overview column, not under every tab outside the padded grid. */}
+            {tab === "overview" && p.has_commercial_row && <AgencyTermsPanel plan={p} />}
           </div>
         </div>
       )}
-      {p.has_commercial_row && <AgencyTermsPanel plan={p} />}
       {editing && <CommercialDrawer plan={p} onClose={() => setEditing(false)} />}
       {using && <UseForTripCaseModal plan={p} onClose={() => setUsing(false)} />}
       {sellableToggle.dialogs}

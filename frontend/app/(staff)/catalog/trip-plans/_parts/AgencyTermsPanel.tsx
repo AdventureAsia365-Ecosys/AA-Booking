@@ -31,7 +31,6 @@ export function AgencyTermsPanel({ plan }: { plan: TripPlanDetail }) {
     <Section
       title="Agency terms"
       description="Child and infant ages of this tour, and its own deposit and balance terms for agencies."
-      style={{ marginTop: 20 }}
     >
       <div className="flex flex-col gap-6">
         <AgeBands plan={plan} canEdit={canAges} />
