@@ -62,6 +62,9 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("UPDATE booking.supplier_bookings SET voucher_file_id = NULL")
         await conn.execute("DELETE FROM booking.ops_files")
         await conn.execute("DELETE FROM booking.supplier_bookings")
+        # AA-1075 (bk-047): staff bookings and partial cancellations reference holds, quotes and cases.
+        await conn.execute("DELETE FROM booking.b2b_desk_bookings")
+        await conn.execute("DELETE FROM booking.b2b_line_reductions")
         await conn.execute("DELETE FROM booking.b2b_cancellations")  # AA-974 (bk-021), references holds and cases
         await conn.execute("DELETE FROM booking.b2b_hold_lines")
         await conn.execute("DELETE FROM booking.b2b_holds")
@@ -85,6 +88,7 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("DELETE FROM booking.departures")
         await conn.execute("DELETE FROM booking.b2b_partners")
     await conn.execute("DELETE FROM booking.trip_plan_components")
+    await conn.execute("DELETE FROM booking.trip_plan_billing_terms")  # AA-1075 (bk-047), references trip plans
     await conn.execute("DELETE FROM booking.trip_plans WHERE source_id = $1", SOURCE_ID)
     await conn.execute("DELETE FROM catalog.stub_parsed_day WHERE source_id = $1", SOURCE_ID)
     await conn.execute("DELETE FROM catalog.v_tour WHERE source_id = $1", SOURCE_ID)

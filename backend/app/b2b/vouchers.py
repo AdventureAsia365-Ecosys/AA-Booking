@@ -5,9 +5,11 @@ supplier on the day. Generated from the stored data, never uploaded (B2B cases t
 
 - the service (the supplier booking's description), the date and local time, the pick-up and drop-off points and the
   voucher note (``supplier_bookings`` bk-047 columns, kept on the Suppliers tab of the case);
-- the supplier's name and booking phone (``suppliers.contact_phone``, a business line) and its confirmation ref;
+- the supplier's name and its confirmation ref (no contact field crosses the B2B API: the contract field policy keeps
+  phones and e-mails out, so the agency calls AA, which calls the supplier);
 - the travellers of the agency line it covers by age band (what was sold less partial cancellations), else the case;
-- the AA operations contact (setting ``b2b_ops_contact``; no line when it is empty).
+- AA's 24-hour operations desk (setting ``b2b_ops_contact`` ``{"label": …}``, a company line AA publishes; no line
+  when it is empty).
 
 **No traveller names and no prices.** The agency's CRM prints its lead traveller's name on its own copy (CRM-side
 merge). A cancelled booking has no valid voucher (the list is empty). JSON (the contract ``BookingVouchers``) or
@@ -32,7 +34,7 @@ SETTING = "b2b_ops_contact"
 VOUCHERS_SQL = """
 SELECT sb.code, coalesce(sb.b2b_line_ref, ql.line_ref) AS line_ref, sb.item_description, sb.service_date,
        sb.service_time, sb.pickup_point, sb.dropoff_point, sb.voucher_note, sb.confirmation_ref, sb.pax,
-       s.company_name AS supplier_name, s.contact_phone AS supplier_phone
+       s.company_name AS supplier_name
 FROM booking.supplier_bookings sb
 JOIN booking.suppliers s ON s.id = sb.supplier_id
 LEFT JOIN booking.trip_case_version_itinerary it ON it.id = sb.version_item_id
@@ -43,7 +45,7 @@ ORDER BY sb.service_date NULLS LAST, sb.service_time NULLS LAST, sb.code
 
 
 async def ops_contact(conn: asyncpg.Connection) -> dict[str, str] | None:
-    """The ``b2b_ops_contact`` setting as ``{label, phone, email}`` (only the filled keys); None when empty."""
+    """The ``b2b_ops_contact`` setting as ``{label}``; None when it is empty."""
     raw = await conn.fetchval("SELECT value FROM booking.settings WHERE key = $1", SETTING)
     try:
         data = json.loads(raw) if isinstance(raw, str) else raw
@@ -51,8 +53,8 @@ async def ops_contact(conn: asyncpg.Connection) -> dict[str, str] | None:
         return None
     if not isinstance(data, dict):
         return None
-    out = {k: str(data[k]).strip()[:200] for k in ("label", "phone", "email") if str(data.get(k) or "").strip()}
-    return out or None
+    label = " ".join(str(data.get("label") or "").split())[:200]
+    return {"label": label} if label else None
 
 
 async def load(conn: asyncpg.Connection, ref: str, *, partner_id: str | None, now: datetime) -> dict[str, Any] | None:
@@ -76,7 +78,7 @@ async def load(conn: asyncpg.Connection, ref: str, *, partner_id: str | None, no
                     "service_time": r["service_time"].strftime("%H:%M") if r["service_time"] else None,
                     "pickup_point": r["pickup_point"],
                     "dropoff_point": r["dropoff_point"],
-                    "supplier": {"name": r["supplier_name"], "phone": r["supplier_phone"]},
+                    "supplier": {"name": r["supplier_name"]},
                     "confirmation_ref": r["confirmation_ref"],
                     "travellers": dict(pax_by_line.get(r["line_ref"]) or doc["travellers"]),
                     "note": r["voucher_note"],
@@ -114,11 +116,7 @@ def render_html(doc: dict[str, Any]) -> str:
     """One page per voucher (inline CSS, no script). Every value is escaped."""
     e = html.escape
     contact = doc["ops_contact"]
-    contact_text = (
-        " · ".join(v for v in (contact.get("label"), contact.get("phone"), contact.get("email")) if v)
-        if contact
-        else ""
-    )
+    contact_text = contact["label"] if contact else ""
     pages = []
     for v in doc["vouchers"]:
         facts = [
@@ -129,7 +127,6 @@ def render_html(doc: dict[str, Any]) -> str:
             ("Drop-off", v["dropoff_point"] or "-"),
             ("Travellers", confirmation._travellers(v["travellers"])),
             ("Supplier", v["supplier"]["name"]),
-            ("Supplier booking phone", v["supplier"]["phone"] or "-"),
             ("Supplier confirmation", v["confirmation_ref"] or "-"),
             ("Booking reference", doc["trip_case_code"]),
             ("Agency reference", doc["proposal_ref"]),

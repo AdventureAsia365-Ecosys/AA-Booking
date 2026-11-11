@@ -6171,43 +6171,15 @@
       "OpsContact": {
         "additionalProperties": false,
         "properties": {
-          "email": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
           "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
           }
         },
+        "required": [
+          "label"
+        ],
         "title": "OpsContact",
         "type": "object"
       },
@@ -9727,18 +9699,6 @@
             "maxLength": 200,
             "title": "Name",
             "type": "string"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
           }
         },
         "required": [

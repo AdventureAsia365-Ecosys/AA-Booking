@@ -417,14 +417,12 @@ class LineReduction(Strict):
 
 
 class OpsContact(Strict):
-    label: str | None = Field(default=None, max_length=200)
-    phone: str | None = Field(default=None, max_length=200)
-    email: str | None = Field(default=None, max_length=200)
+    # AA's 24-hour operations desk (a company line); no contact field crosses the API (contract field policy).
+    label: str = Field(max_length=200)
 
 
 class VoucherSupplier(Strict):
     name: str = Field(max_length=200)
-    phone: str | None = Field(default=None, max_length=200)
 
 
 class Voucher(Strict):
