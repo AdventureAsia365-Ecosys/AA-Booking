@@ -205,3 +205,22 @@ def test_smoke_spec_checks_status_render_errors_and_headers() -> None:
     # Signed out only: no credential of any kind in the public smoke.
     for word in ("password", "fill(", "storageState", "bk_access", "Bearer"):
         assert word not in spec
+
+
+def test_no_file_in_the_admin_image_imports_from_e2e() -> None:
+    """S277: e2e/ is outside the image (.dockerignore), and next build type-checks every .ts file left in the context.
+    A file kept in the image that imports from e2e/ breaks Deploy Admin Dev (playwright.config.ts did, PR #222)."""
+    ignored = {
+        line.strip()
+        for line in (FRONTEND / ".dockerignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    assert "e2e" in ignored
+    offenders = []
+    for path in FRONTEND.rglob("*.ts*"):
+        rel = path.relative_to(FRONTEND)
+        if rel.parts[0] in ignored or rel.parts[0] in {"node_modules", ".next"} or str(rel) in ignored:
+            continue
+        if re.search(r"""from\s+["'](\./)?e2e/""", path.read_text(errors="ignore")):
+            offenders.append(str(rel))
+    assert offenders == [], f"files in the admin image import from e2e/: {offenders}"
