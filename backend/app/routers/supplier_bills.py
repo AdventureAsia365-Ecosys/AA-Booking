@@ -13,7 +13,9 @@ payout need an ``Idempotency-Key`` header (8-200 characters): the same key with 
   ``GET /supplier-bills/billable?supplier_id=&case=&q=`` (confirmed bookings a bill can name).
 - ``POST /supplier-bills`` · ``GET|PATCH /supplier-bills/{id}`` · ``POST /supplier-bills/{id}/approve | cancel``.
 - ``POST /supplier-bills/{id}/payouts`` · ``POST /supplier-payouts/{id}/void``.
-- ``GET /trip-cases/{ref}/supplier-costs``: the case's cost vs billed panel (``bill.read`` + ``pricing.read``).
+- ``GET /trip-cases/{ref}/supplier-costs``: the case's cost vs billed panel (``bill.read`` + ``pricing.read``); since
+  AA-1074 (bk-045) also USD per line and in total at the snapshot rates, and the case's share of departure costs.
+- AA-1074: ``departure`` on ``POST /supplier-bills`` (a bill of one departure's shared costs) and on ``billable``.
 
 Documents: ``POST /ops-files`` with ``kind = supplier_bill`` (entity the bill) or ``payout_evidence`` (entity the
 payout) (``routers.supplier_bookings``).
@@ -63,6 +65,9 @@ class NewBill(BaseModel):
 
     supplier_id: UUID
     trip_case: str | None = Field(default=None, max_length=64, description="trip case code or UUID, when one")
+    departure: UUID | None = Field(
+        default=None, description="AA-1074: the departure whose shared costs the bill covers (never with trip_case)"
+    )
     bill_number: str = Field(min_length=1, max_length=100, description="the supplier's own bill number")
     currency: Currency
     amount: Amount
@@ -105,6 +110,8 @@ def _body(model: BaseModel, **kw: Any) -> dict[str, Any]:
     data = model.model_dump(**kw)
     if "supplier_id" in data and data["supplier_id"] is not None:
         data["supplier_id"] = str(data["supplier_id"])
+    if data.get("departure") is not None:
+        data["departure"] = str(data["departure"])
     if data.get("lines") is not None:
         data["lines"] = [{**x, "supplier_booking_id": str(x["supplier_booking_id"])} for x in data["lines"]]
     return data
@@ -153,9 +160,12 @@ async def billable(
     supplier_id: Annotated[UUID, Query()],
     case: Annotated[str | None, Query(max_length=64)] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
+    departure: Annotated[UUID | None, Query(description="AA-1074: shared-cost bookings of one departure")] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await bills.billable(conn, staff, supplier=str(supplier_id), case=case, q=q)
+        return await bills.billable(
+            conn, staff, supplier=str(supplier_id), case=case, q=q, departure=str(departure) if departure else None
+        )
 
 
 @router.post("/supplier-bills", status_code=201)

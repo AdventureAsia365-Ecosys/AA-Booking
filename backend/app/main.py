@@ -48,6 +48,8 @@ from app.catalog import cost_sheet, trip_plan_sync
 from app.catalog import lifecycle as tour_lifecycle
 from app.db import Database
 from app.errors import ServiceError, service_error_handler
+from app.finance import departure_costs as finance_costs
+from app.finance import supplier_orders as finance_orders
 from app.jobs import noop_sleep
 from app.jobs.metrics import JobMetricsSampler
 from app.jobs.worker import Worker
@@ -65,6 +67,7 @@ from app.routers import (
     b2b_partners,
     catalog,
     docs,
+    finance,
     health,
     notifications,
     ops,
@@ -129,6 +132,9 @@ def create_app(
                 **agency_drafts.HANDLERS,
                 # AA-1037 G4: overdue agency invoice reminders (once per invoice per step, bk-044).
                 agency_reminders.KIND: agency_reminders.build_handler(settings),
+                # AA-1074 (bk-045): departure shared costs re-priced by sold seats; purchase orders e-mailed.
+                **finance_costs.HANDLERS,
+                finance_orders.KIND: finance_orders.build_handler(settings),
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }
@@ -146,6 +152,8 @@ def create_app(
                     agency_drafts.DraftSchedule(),
                     # AA-1037 G4: daily, the overdue agency invoice reminders.
                     agency_reminders.ReminderSchedule(),
+                    # AA-1074: re-price departure costs when the sold seats (or a rate) move.
+                    finance_costs.RecomputeSchedule(),
                     # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
                     ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.
@@ -216,6 +224,7 @@ def create_app(
     app.include_router(trip_checks.router)
     app.include_router(supplier_bills.router)
     app.include_router(agency_billing.router)
+    app.include_router(finance.router)  # AA-1074: departure costs, purchase orders, profit (bk-045)
     return app
 
 

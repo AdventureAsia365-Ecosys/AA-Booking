@@ -43,7 +43,7 @@ KEY = "key-123456"
 
 BILL_ROW = "FROM booking.supplier_bills b JOIN booking.suppliers s"
 LOCK = "SELECT 1 FROM booking.supplier_bills WHERE id = $1::uuid FOR UPDATE"
-LINES = "FROM booking.supplier_bill_items it JOIN booking.supplier_bookings sb ON sb.id = it.supplier_booking_id JOIN"
+LINES = "FROM booking.supplier_bill_items it JOIN booking.supplier_bookings sb ON sb.id = it.supplier_booking_id LEFT JOIN"
 PAYOUTS = "FROM booking.supplier_payouts o LEFT JOIN"
 FILES = "FROM booking.ops_files f"
 STORED_BILL = "request_sha256 FROM booking.supplier_bills WHERE idempotency_key"
@@ -386,15 +386,24 @@ async def test_billable_bookings() -> None:
         "net_currency": "USD",
         "billed": '[{"currency": "USD", "amount": "100.00"}]',
     }
-    conn = ScriptedConn([("FROM booking.supplier_bookings sb JOIN booking.trip_cases tc", [row])])
+    conn = ScriptedConn([("FROM booking.supplier_bookings sb LEFT JOIN booking.trip_cases tc", [row])])
     out = await bills.billable(conn, CONTRACTING, supplier=SUP_ID, case="tc-000001", q="room")
     assert out["items"][0]["billed"] == [{"currency": "USD", "amount": "100.00"}]
     assert conn.calls[0][1] == (SUP_ID, "TC-000001", "%room%")
-    conn = ScriptedConn([("FROM booking.supplier_bookings sb JOIN booking.trip_cases tc", [dict(row)])])
+    conn = ScriptedConn([("FROM booking.supplier_bookings sb LEFT JOIN booking.trip_cases tc", [dict(row)])])
     out = await bills.billable(conn, CONTENT, supplier=SUP_ID, case=CASE_ID)
     assert out["items"][0]["net_amount"] is None and "tc.id = $2::uuid" in conn.calls[0][0]
     with pytest.raises(Invalid):
         await bills.billable(ScriptedConn(), CONTRACTING, supplier="Delta")
+
+
+def usd(*, planned: str | None = None, billed: str | None = None, variance: str | None = None, fx: str | None = None,
+        cost: str = "0", billed_approved: bool = True) -> dict[str, Any]:  # fmt: skip
+    """The bk-045 v_cost_variance columns of a case cost row (AA-1074)."""
+    dec = lambda v: None if v is None else Decimal(v)  # noqa: E731
+    return {"planned_usd": dec(planned), "billed_usd": dec(billed), "variance_usd": dec(variance),
+            "fx_difference_usd": dec(fx), "cost_usd": Decimal(cost), "fx_missing": False,
+            "billed_approved": billed_approved and billed is not None, "live": True}  # fmt: skip
 
 
 @pytest.mark.asyncio
@@ -411,6 +420,7 @@ async def test_case_costs_variance() -> None:
             "supplier_id": SUP_ID,
             "supplier_name": "Delta",
             "billed": json.dumps([{"currency": "USD", "amount": "320.00", "bills": ["BIL-1"]}]),
+            **usd(planned="300.00", billed="320.00", variance="20.00", fx="0.00", cost="320.00"),
         },
         {  # billed in another currency
             "id": SB2_ID,
@@ -423,6 +433,7 @@ async def test_case_costs_variance() -> None:
             "supplier_id": SUP_ID,
             "supplier_name": "Delta",
             "billed": [{"currency": "VND", "amount": "2000000", "bills": ["BIL-2"]}],
+            **usd(planned="80.00", billed="80.00", variance="0.00", cost="80.00"),
         },
         {  # confirmed with a net but not billed yet: no variance, its net stays out of the total variance (review S4)
             "id": "sb-4",
@@ -435,6 +446,7 @@ async def test_case_costs_variance() -> None:
             "supplier_id": SUP_ID,
             "supplier_name": "Delta",
             "billed": "[]",
+            **usd(planned="150.00", cost="150.00", billed_approved=False),
         },
         {  # not billed yet
             "id": "sb-3",
@@ -447,6 +459,7 @@ async def test_case_costs_variance() -> None:
             "supplier_id": SUP_ID,
             "supplier_name": "Delta",
             "billed": "[]",
+            **usd(billed_approved=False),
         },
     ]
     conn = ScriptedConn(
@@ -466,6 +479,12 @@ async def test_case_costs_variance() -> None:
         {"currency": "USD", "net": "530.00", "billed": "320.00", "variance": "20.00"},
         {"currency": "VND", "net": "0", "billed": "2000000", "variance": None},
     ]
+    # AA-1074: USD per line and in total (planned of live bookings, billed of approved bills, the best cost).
+    assert first["usd"] == {"planned": "300.00", "billed": "320.00", "variance": "20.00", "fx_difference": "0.00",
+                            "cost": "320.00", "fx_missing": False}  # fmt: skip
+    assert unbilled_net["usd"]["billed"] is None
+    assert out["usd"]["planned"] == "530.00" and out["usd"]["billed"] == "400.00"
+    assert out["usd"]["cost"] == "550.00" and out["usd"]["shared"] == "0" and out["shared_costs"] == []
     with pytest.raises(Forbidden):
         await bills.case_costs(ScriptedConn(), CONTENT, "TC-1")
     with pytest.raises(NotFound):
@@ -612,7 +631,8 @@ async def test_approve_maker_checker_and_lines() -> None:
     conn = conn_for()
     out = await bills.approve(conn, CHECKER, BILL_ID)
     assert out["code"] == "BIL-000001" and audits(conn) == ["supplier_bill.approved"]
-    assert conn.sql("SET status = 'approved'")[0] == (BILL_ID, CHECKER.cis_user_id)
+    # AA-1074: the FX snapshot of the bill currency is taken with the approval (USD: 1, as of the day).
+    assert conn.sql("SET status = 'approved'")[0][:3] == (BILL_ID, CHECKER.cis_user_id, Decimal(1))
     assert conn.sql(NOTIFY_STAFF)  # payers are told
     with pytest.raises(Forbidden) as exc:
         await bills.approve(conn_for(), CONTRACTING, BILL_ID)

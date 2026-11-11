@@ -53,6 +53,7 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import files as ops_files
 from app.ops import track
+from app.pricing import fx
 from app.supply import rates as supply_rates
 
 log = logging.getLogger(__name__)
@@ -87,11 +88,16 @@ BOOKING_COLUMNS = """
     sb.requested_at, sb.requested_by, rq.name AS requested_by_name, sb.confirmed_at, sb.confirmed_by,
     cf.name AS confirmed_by_name, sb.confirmation_ref, sb.declined_at, sb.decline_code, sb.cancelled_at,
     sb.cancel_reason, sb.voucher_file_id::text AS voucher_file_id, sb.b2b_hold_id::text AS b2b_hold_id,
-    sb.b2b_line_ref, l.status AS b2b_line_status, sb.notes, sb.created_by, sb.created_at, sb.updated_at
+    sb.b2b_line_ref, l.status AS b2b_line_status, sb.notes, sb.created_by, sb.created_at, sb.updated_at,
+    sb.departure_id::text AS departure_id, dp.start_date AS departure_start_date,
+    sb.supplier_order_id::text AS supplier_order_id, so.code AS supplier_order_code, so.status AS supplier_order_status,
+    sb.fx_rate_per_usd, sb.fx_as_of
 """
 BOOKING_FROM = """
 FROM booking.supplier_bookings sb
-JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
+LEFT JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
+LEFT JOIN booking.departures dp ON dp.id = sb.departure_id
+LEFT JOIN booking.supplier_orders so ON so.id = sb.supplier_order_id
 JOIN booking.suppliers s ON s.id = sb.supplier_id
 LEFT JOIN booking.trip_case_version_itinerary i ON i.id = sb.version_item_id
 LEFT JOIN booking.b2b_hold_lines l ON l.hold_id = sb.b2b_hold_id AND l.line_ref = sb.b2b_line_ref
@@ -183,11 +189,19 @@ def booking_out(row: Any, staff: Staff, files: list[dict] | None = None) -> dict
     if not staff.can("pricing.read"):
         out["net_amount"] = None
         out["net_currency"] = None
-    out["trip_case"] = {
-        "id": out.pop("trip_case_id"),
-        "code": out.pop("trip_case_code"),
-        "status": out.pop("trip_case_status"),
-    }
+        out["fx_rate_per_usd"] = None
+        out["fx_as_of"] = None
+    case_id, case_code, case_status = out.pop("trip_case_id"), out.pop("trip_case_code"), out.pop("trip_case_status")
+    out["trip_case"] = {"id": case_id, "code": case_code, "status": case_status} if case_id else None
+    departure_id, departure_start = out.pop("departure_id", None), out.pop("departure_start_date", None)
+    # AA-1074 (bk-045): a departure-level booking orders a shared cost of the whole departure (no trip case).
+    out["departure"] = {"id": departure_id, "start_date": departure_start} if departure_id else None
+    order_id, order_code, order_status = (
+        out.pop("supplier_order_id", None),
+        out.pop("supplier_order_code", None),
+        out.pop("supplier_order_status", None),
+    )
+    out["supplier_order"] = {"id": order_id, "code": order_code, "status": order_status} if order_id else None
     out["supplier"] = {"id": out.pop("supplier_id"), "code": out.pop("supplier_code"), "name": out.pop("supplier_name")}
     out["requested_by"] = (
         {"id": out["requested_by"], "name": out.pop("requested_by_name")}
@@ -241,8 +255,8 @@ async def supply_state(conn: asyncpg.Connection, case_id: str) -> dict[str, Any]
     return dict(row)
 
 
-def _label(case_code: str, code: str) -> str:
-    return f"{case_code} {code}"
+def _label(case_code: str | None, code: str) -> str:
+    return f"{case_code} {code}" if case_code else f"Departure {code}"
 
 
 async def _audit(
@@ -598,13 +612,29 @@ async def create(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[st
 
 
 async def _lock_for_write(conn: asyncpg.Connection, booking_id: str) -> tuple[Any, Any]:
-    """Lock order: the B2B hold (if linked), the case, the booking. Returns (case, booking)."""
+    """Lock order: the B2B hold (if linked), the case, the booking. Returns (case, booking). A departure-level booking
+    (AA-1074, bk-045) has no case: its departure row is locked instead and the case is None."""
     first = await _get(conn, booking_id)
     if first["b2b_hold_id"]:
         await conn.execute("SELECT 1 FROM booking.b2b_holds WHERE id = $1::uuid FOR UPDATE", first["b2b_hold_id"])
-    case = await lock_case(conn, first["trip_case_id"])
+    if first["trip_case_id"] is None:
+        await conn.execute("SELECT 1 FROM booking.departures WHERE id = $1::uuid FOR UPDATE", first["departure_id"])
+        case = None
+    else:
+        case = await lock_case(conn, first["trip_case_id"])
     row = await _get(conn, first["id"], lock=True)
     return case, row
+
+
+def _ensure_open_or_departure(case: Any) -> None:
+    if case is not None:
+        _ensure_open(case)
+
+
+async def _advance(conn: asyncpg.Connection, case: Any, *, cause: str) -> None:
+    """The case auto-advance; a departure-level booking moves no case."""
+    if case is not None:
+        await advance_case(conn, case, cause=cause)
 
 
 async def _set_status(conn: asyncpg.Connection, staff: Staff, row: Any, target: str, extra: dict[str, Any]) -> None:
@@ -687,7 +717,7 @@ async def request(conn: asyncpg.Connection, staff: Staff, booking_id: str) -> di
     case, row = await _lock_for_write(conn, booking_id)
     if row["status"] == "requested":
         return await _one_out(conn, staff, row["id"])  # the same request again
-    _ensure_open(case)
+    _ensure_open_or_departure(case)
     await _set_status(conn, staff, row, "requested", {"requested_at": _now(), "requested_by": staff.cis_user_id})
     await _audit(
         conn,
@@ -698,7 +728,7 @@ async def request(conn: asyncpg.Connection, staff: Staff, booking_id: str) -> di
         before={"status": row["status"]},
         after={"status": "requested"},
     )
-    await advance_case(conn, case, cause=f"supplier booking {row['code']} requested")
+    await _advance(conn, case, cause=f"supplier booking {row['code']} requested")
     return await _one_out(conn, staff, row["id"])
 
 
@@ -725,7 +755,7 @@ async def confirm(
     if _b2b_linked(row):
         _need(staff, "b2b_desk.write")
     if voucher_file_id is not None:
-        if case["channel"] == "b2b":
+        if case is None or case["channel"] == "b2b":
             raise Invalid("document_not_allowed_b2b", "a B2B trip keeps the confirmation ref only, no voucher")
         if _uuid(voucher_file_id) is None:
             raise Invalid("invalid_voucher", "voucher_file_id is not a file id")
@@ -735,7 +765,10 @@ async def confirm(
             f"{row['code']} is {row['status']}; only a requested booking is confirmed",
             status=row["status"],
         )
-    extra: dict[str, Any] = {"confirmation_ref": ref, "confirmed_at": _now(), "confirmed_by": staff.cis_user_id}
+    now = _now()
+    extra: dict[str, Any] = {"confirmation_ref": ref, "confirmed_at": now, "confirmed_by": staff.cis_user_id}
+    # AA-1074 (bk-045, bk-10): the plain approved FX rate of the net currency on the confirm day (None without one).
+    extra.update(await fx.snapshot(conn, row["net_currency"], now.date()))
     if voucher_file_id is not None:
         extra["voucher_file_id"] = voucher_file_id
     await _set_status(conn, staff, row, "confirmed", extra)
@@ -753,7 +786,7 @@ async def confirm(
         before={"status": row["status"]},
         after={"status": "confirmed", "confirmation_ref": ref, "voucher_file_id": voucher_file_id},
     )
-    await advance_case(conn, case, cause=f"supplier booking {row['code']} confirmed")
+    await _advance(conn, case, cause=f"supplier booking {row['code']} confirmed")
     return await _one_out(conn, staff, row["id"])
 
 
@@ -794,7 +827,7 @@ async def decline(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, de
         before={"status": row["status"]},
         after={"status": "declined", "decline_code": decline_code},
     )
-    await advance_case(conn, case, cause=f"supplier booking {row['code']} declined")
+    await _advance(conn, case, cause=f"supplier booking {row['code']} declined")
     return await _one_out(conn, staff, row["id"])
 
 
@@ -821,7 +854,7 @@ async def cancel(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, rea
         before={"status": row["status"]},
         after={"status": "cancelled", "reason": reason[:500]},
     )
-    await advance_case(conn, case, cause=f"supplier booking {row['code']} cancelled")
+    await _advance(conn, case, cause=f"supplier booking {row['code']} cancelled")
     return await _one_out(conn, staff, row["id"])
 
 
@@ -834,7 +867,7 @@ async def rerequest(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, 
     case, row = await _lock_for_write(conn, booking_id)
     if _b2b_linked(row):
         raise Conflict("b2b_line_answered", "a B2B line is answered once; it cannot be re-requested")
-    _ensure_open(case)
+    _ensure_open_or_departure(case)
     if row["status"] != "confirmed":
         raise Conflict(
             "illegal_transition",
@@ -852,6 +885,9 @@ async def rerequest(conn: asyncpg.Connection, staff: Staff, booking_id: str, *, 
             "confirmation_ref": None,
             "confirmed_at": None,
             "confirmed_by": None,
+            # AA-1074: the FX snapshot is taken again at the next confirm.
+            "fx_rate_per_usd": None,
+            "fx_as_of": None,
         },
     )
     await _audit(

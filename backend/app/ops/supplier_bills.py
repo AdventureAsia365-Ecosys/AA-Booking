@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -49,6 +49,7 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import files as ops_files
 from app.ops import lifecycle, money
+from app.pricing import fx
 
 log = logging.getLogger(__name__)
 
@@ -68,13 +69,15 @@ BILL_COLUMNS = """
     ap.name AS approved_by_name, b.approved_at, b.paid_at, b.cancelled_by, ca.name AS cancelled_by_name,
     b.cancelled_at, b.cancel_reason, b.created_at, b.updated_at, bal.paid_amount::text AS paid_amount,
     bal.balance::text AS balance, bal.live_payouts, bal.line_count, bal.lines_amount::text AS lines_amount,
-    bal.overdue
+    bal.overdue, b.departure_id::text AS departure_id, dpt.start_date AS departure_start_date, b.fx_rate_per_usd,
+    b.fx_as_of
 """
 BILL_FROM = """
 FROM booking.supplier_bills b
 JOIN booking.suppliers s ON s.id = b.supplier_id
 JOIN booking.v_supplier_bill_balance bal ON bal.bill_id = b.id
 LEFT JOIN booking.trip_cases tc ON tc.id = b.trip_case_id
+LEFT JOIN booking.departures dpt ON dpt.id = b.departure_id
 LEFT JOIN booking.staff_users cr ON cr.cis_user_id = b.created_by
 LEFT JOIN booking.staff_users fe ON fe.cis_user_id = b.facts_edited_by
 LEFT JOIN booking.staff_users ap ON ap.cis_user_id = b.approved_by
@@ -84,10 +87,10 @@ LINES_SQL = """
 SELECT it.supplier_booking_id::text AS supplier_booking_id, it.amount::text AS amount, it.created_at,
        sb.code, sb.status, sb.item_description, sb.service_date, sb.nights, sb.pax,
        sb.net_amount::text AS net_amount, sb.net_currency, tc.id::text AS trip_case_id, tc.code AS trip_case_code,
-       tc.channel AS trip_case_channel
+       tc.channel AS trip_case_channel, sb.departure_id::text AS departure_id
   FROM booking.supplier_bill_items it
   JOIN booking.supplier_bookings sb ON sb.id = it.supplier_booking_id
-  JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
+  LEFT JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id
  WHERE it.bill_id = $1::uuid
  ORDER BY sb.service_date NULLS LAST, sb.code
 """
@@ -171,6 +174,9 @@ def bill_out(row: Any, staff: Staff) -> dict[str, Any]:
     out["supplier"] = {"id": out.pop("supplier_id"), "name": out.pop("supplier_name")}
     case_id, case_code, channel = out.pop("trip_case_id"), out.pop("trip_case_code"), out.pop("trip_case_channel")
     out["trip_case"] = {"id": case_id, "code": case_code, "channel": channel} if case_id else None
+    departure_id, departure_start = out.pop("departure_id", None), out.pop("departure_start_date", None)
+    # AA-1074 (bk-045): a bill of the shared costs of one departure.
+    out["departure"] = {"id": departure_id, "start_date": departure_start} if departure_id else None
     status = out["status"]
     blockers = approve_blockers({**dict(row), "created_by": creator, "facts_edited_by": editor}, staff)
     out["approve_blockers"] = blockers
@@ -384,15 +390,27 @@ async def summary(conn: asyncpg.Connection) -> dict[str, Any]:
 
 
 async def billable(
-    conn: asyncpg.Connection, staff: Staff, *, supplier: str, case: str | None = None, q: str | None = None
+    conn: asyncpg.Connection,
+    staff: Staff,
+    *,
+    supplier: str,
+    case: str | None = None,
+    q: str | None = None,
+    departure: str | None = None,
 ) -> dict[str, Any]:
-    """Confirmed bookings of a supplier (optionally of one case) a bill can name, with what bills not cancelled
-    already claim for each (a booking may be billed in parts)."""
+    """Confirmed bookings of a supplier (optionally of one case, or of one departure's shared costs, AA-1074) a bill
+    can name, with what bills not cancelled already claim for each (a booking may be billed in parts)."""
     ident = _uuid(supplier)
     if ident is None:
         raise Invalid("invalid_filter", "supplier is a supplier id")
     args: list[Any] = [ident]
-    where = ["sb.supplier_id = $1::uuid", "sb.status = 'confirmed'", "tc.deleted_at IS NULL"]
+    where = ["sb.supplier_id = $1::uuid", "sb.status = 'confirmed'", "(tc.id IS NULL OR tc.deleted_at IS NULL)"]
+    if departure:
+        dep = _uuid(departure)
+        if dep is None:
+            raise Invalid("invalid_filter", "departure is a departure id")
+        args.append(dep)
+        where.append(f"sb.departure_id = ${len(args)}::uuid")
     if case:
         cid = _uuid(case)
         args.append(cid or case.strip().upper())
@@ -405,14 +423,14 @@ async def billable(
     rows = await conn.fetch(
         "SELECT sb.id::text AS id, sb.code, sb.item_description, sb.service_date, sb.nights, sb.pax,"  # noqa: S608 — fixed fragments, bound values
         " sb.net_amount::text AS net_amount, sb.net_currency, sb.confirmation_ref, tc.id::text AS trip_case_id,"
-        " tc.code AS trip_case_code, tc.channel AS trip_case_channel,"
+        " tc.code AS trip_case_code, tc.channel AS trip_case_channel, sb.departure_id::text AS departure_id,"
         " (SELECT coalesce(json_agg(json_build_object('currency', x.currency, 'amount', x.amount::text)"
         "                           ORDER BY x.currency), '[]'::json)"
         "    FROM (SELECT b.currency, sum(it.amount) AS amount FROM booking.supplier_bill_items it"
         "            JOIN booking.supplier_bills b ON b.id = it.bill_id"
         "           WHERE it.supplier_booking_id = sb.id AND b.status <> 'cancelled' GROUP BY b.currency) x"
         " ) AS billed"
-        " FROM booking.supplier_bookings sb JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id"
+        " FROM booking.supplier_bookings sb LEFT JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id"
         f" WHERE {' AND '.join(where)} ORDER BY sb.service_date NULLS LAST, sb.code LIMIT 200",  # noqa: S608
         *args,
     )
@@ -460,9 +478,12 @@ async def case_costs(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[s
                   FROM (SELECT b.currency, sum(it.amount) AS amount, array_agg(b.code ORDER BY b.code) AS bills
                           FROM booking.supplier_bill_items it JOIN booking.supplier_bills b ON b.id = it.bill_id
                          WHERE it.supplier_booking_id = sb.id AND b.status <> 'cancelled'
-                         GROUP BY b.currency) x) AS billed
+                         GROUP BY b.currency) x) AS billed,
+               cv.planned_usd, cv.billed_usd, cv.variance_usd, cv.fx_difference_usd, cv.cost_usd, cv.fx_missing,
+               cv.billed AS billed_approved, cv.live
           FROM booking.supplier_bookings sb
           JOIN booking.suppliers s ON s.id = sb.supplier_id
+          JOIN booking.v_cost_variance cv ON cv.supplier_booking_id = sb.id
          WHERE sb.trip_case_id = $1::uuid
            AND (sb.status IN ('pending', 'requested', 'confirmed')
                 OR EXISTS (SELECT 1 FROM booking.supplier_bill_items it WHERE it.supplier_booking_id = sb.id))
@@ -471,6 +492,14 @@ async def case_costs(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[s
         case["id"],
     )
     totals: dict[str, dict[str, Decimal]] = {}
+    usd_total: dict[str, Any] = {
+        "planned": Decimal(0),
+        "billed": Decimal(0),
+        "variance": Decimal(0),
+        "fx_difference": Decimal(0),
+        "cost": Decimal(0),
+        "fx_missing": False,
+    }
     lines = []
     for r in rows:
         billed = [
@@ -503,15 +532,43 @@ async def case_costs(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[s
                 "variance": variance,
                 "currency_mismatch": bool(billed) and net_cur is not None and variance is None,
                 "unbilled": not billed and r["status"] == "confirmed",
+                # AA-1074 (bk-045, bk-07 / bk-10): USD at the snapshot rates; billed = approved / paid bills only.
+                "usd": {
+                    "planned": r["planned_usd"],
+                    "billed": r["billed_usd"] if r["billed_approved"] else None,
+                    "variance": r["variance_usd"],
+                    "fx_difference": r["fx_difference_usd"],
+                    "cost": r["cost_usd"],
+                    "fx_missing": bool(r["fx_missing"]),
+                },
             }
         )
+        usd_total["planned"] += (r["planned_usd"] or 0) if r["live"] else 0
+        usd_total["billed"] += (r["billed_usd"] or 0) if r["billed_approved"] else 0
+        usd_total["variance"] += r["variance_usd"] or 0
+        usd_total["fx_difference"] += r["fx_difference_usd"] or 0
+        usd_total["cost"] += r["cost_usd"] or 0
+        counted = r["live"] or r["billed_approved"]
+        usd_total["fx_missing"] = usd_total["fx_missing"] or bool(r["fx_missing"] and counted)
     # Variance per currency: the sum of the line variances (bookings billed in their net currency); unbilled nets stay
     # in ``net`` but out of the variance, and a currency with no comparable line has none (null).
     by_currency = [
         {"currency": c, "net": t["net"], "billed": t["billed"], "variance": t["variance"]}
         for c, t in sorted(totals.items())
     ]
-    return jsonable({"trip_case": dict(case), "lines": lines, "totals": by_currency})
+    shares = await conn.fetch(
+        "SELECT sh.departure_cost_id::text AS departure_cost_id, dc.item_description, sh.seats, sh.departure_seats,"
+        " sh.currency, sh.net_amount, sh.share_net, sh.share_planned_usd, sh.share_cost_usd"
+        " FROM booking.v_departure_cost_share sh JOIN booking.departure_costs dc ON dc.id = sh.departure_cost_id"
+        " WHERE sh.trip_case_id = $1::uuid ORDER BY dc.service_date, dc.created_at",
+        case["id"],
+    )
+    shared = [dict(x) for x in shares]
+    usd_total["shared"] = sum((x["share_cost_usd"] or Decimal(0) for x in shared), Decimal(0))
+    usd_total["cost"] += usd_total["shared"]
+    return jsonable(
+        {"trip_case": dict(case), "lines": lines, "totals": by_currency, "usd": usd_total, "shared_costs": shared}
+    )
 
 
 # ── Writes: bills ────────────────────────────────────────────────────────────
@@ -557,6 +614,8 @@ async def _insert_lines(conn: asyncpg.Connection, staff: Staff, bill_id: str, li
 def _body_for_hash(body: dict[str, Any]) -> dict[str, Any]:
     keys = ("supplier_id", "trip_case", "bill_number", "currency", "amount", "issue_date", "due_date", "notes")
     out = {k: body.get(k) for k in keys}
+    if body.get("departure"):  # AA-1074: only when set, so the hash of a bill without it is unchanged
+        out["departure"] = body.get("departure")
     out["lines"] = sorted(
         ({"b": str(x.get("supplier_booking_id")), "a": x.get("amount")} for x in body.get("lines") or []),
         key=lambda x: x["b"],
@@ -587,6 +646,17 @@ async def _case_id(conn: asyncpg.Connection, ref: str | None) -> str | None:
     if case_id is None:
         raise NotFound("trip_case_not_found", f"trip case {ref} not found")
     return case_id
+
+
+async def _departure_id(conn: asyncpg.Connection, ref: str | None) -> str | None:
+    """AA-1074 (bk-045): the departure a bill of shared costs names (by id)."""
+    if not ref:
+        return None
+    ident = _uuid(ref)
+    found = await conn.fetchval("SELECT id::text FROM booking.departures WHERE id = $1::uuid", ident) if ident else None
+    if found is None:
+        raise NotFound("departure_not_found", f"departure {ref} not found")
+    return found
 
 
 async def create(
@@ -627,6 +697,9 @@ async def create(
         await lifecycle.ops_today(conn, await lifecycle.ops_timezone(conn)),
     )
     case_id = await _case_id(conn, body.get("trip_case"))
+    departure_id = await _departure_id(conn, body.get("departure"))
+    if case_id and departure_id:
+        raise Invalid("one_bill_scope", "a bill names a trip case or a departure, not both")
     notes = _note(body.get("notes"))
     lines = _lines(body.get("lines"), currency)
     try:
@@ -634,8 +707,8 @@ async def create(
             row = await conn.fetchrow(
                 "INSERT INTO booking.supplier_bills (supplier_id, trip_case_id, bill_number, currency, amount,"
                 " issue_date, due_date, notes, idempotency_key, request_sha256, created_by, facts_edited_by,"
-                " updated_by) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11)"
-                " RETURNING id::text, code",
+                " updated_by, departure_id) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11,"
+                " $11, $12::uuid) RETURNING id::text, code",
                 supplier["id"],
                 case_id,
                 number,
@@ -647,6 +720,7 @@ async def create(
                 idem,
                 sha,
                 staff.cis_user_id,
+                departure_id,
             )
     except asyncpg.UniqueViolationError as exc:
         if "idempotency" in (exc.constraint_name or ""):
@@ -670,6 +744,7 @@ async def create(
             "issue_date": issue,
             "due_date": due,
             "trip_case_id": case_id,
+            "departure_id": departure_id,
             "lines": len(lines),
             "notes": "(set)" if notes else None,
         },
@@ -774,12 +849,16 @@ async def approve(conn: asyncpg.Connection, staff: Staff, ident: str) -> dict[st
             f"the lines add up to {row['lines_amount']} {row['currency']} but the bill is {row['amount']}"
             f" {row['currency']}",
         )
+    # AA-1074 (bk-045, bk-10): the plain approved FX rate of the bill currency on the approval day (None without one).
+    snap = await fx.snapshot(conn, row["currency"], datetime.now(UTC).date())
     try:
         await conn.execute(
             "UPDATE booking.supplier_bills SET status = 'approved', approved_by = $2, approved_at = now(),"
-            " updated_by = $2 WHERE id = $1::uuid",
+            " updated_by = $2, fx_rate_per_usd = $3, fx_as_of = $4 WHERE id = $1::uuid",
             row["id"],
             staff.cis_user_id,
+            snap["fx_rate_per_usd"],
+            snap["fx_as_of"],
         )
     except asyncpg.CheckViolationError as exc:
         raise Conflict("bill_not_ready", str(exc).split("\n")[0]) from exc
