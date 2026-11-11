@@ -63,7 +63,8 @@ function tourName(d: BoardDeparture): string {
 
 function priceText(d: BoardDeparture): string {
   const parts: string[] = [];
-  if (d.price.hint) parts.push(`from ${d.price.hint.amount} ${d.price.hint.currency}`);
+  // The trip plan's own "from" price, not what an agency is quoted (its tariff): labelled as a hint (S277 check).
+  if (d.price.hint) parts.push(`plan hint from ${d.price.hint.amount} ${d.price.hint.currency}`);
   if (d.price.adjustment) parts.push(adjustmentLabel(d.price.adjustment));
   if (d.price.early_booking) parts.push(`early −${Math.round(Number(d.price.early_booking.pts) * 10000) / 100} pts`);
   return parts.join(" · ") || "—";
@@ -238,7 +239,7 @@ function Calendar({
   return (
     <>
       {/* Phone: the days that have departures, as a list (a 7-column grid does not fit 390 px). */}
-      <ul className="flex flex-col gap-3 sm:hidden" data-testid="board-day-list">
+      <ul className="flex flex-col gap-3 sm:hidden" data-testid="board-day-list" aria-busy={loading}>
         {loading ? (
           <li className="text-[13px] text-muted">Loading…</li>
         ) : days.length === 0 ? (
@@ -256,7 +257,9 @@ function Calendar({
           ))
         )}
       </ul>
-      <div className="hidden sm:block" data-testid="board-calendar">
+      <div className="hidden sm:block" data-testid="board-calendar" aria-busy={loading}>
+        {/* S277: a slow board must not look like an empty month. */}
+        {loading && <p className="pb-2 text-[13px] text-muted">Loading the departures of this month…</p>}
         <div className="grid grid-cols-7 gap-1 pb-1">
           {WEEKDAYS.map((w) => (
             <span key={w} className="px-1 text-[11.5px] font-semibold uppercase tracking-[0.04em] text-muted">
