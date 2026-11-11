@@ -24,9 +24,10 @@
 --      for an e-mailed request), fee_override_pct, waive_reason, override_by / _at, override_approved_by / _at
 --      (maker-checker). The fee and refundable amounts change only when a second staff member approves a lower fee
 --      (guard trigger); the change emits booking.fee_changed.
---   4. Partial cancellation (bk-14). New booking.b2b_line_reductions: fewer seats on one line of a confirmed booking,
---      the fee by the booking's policy on the removed seats, the new approved version. Append-only; emits
---      booking.line_reduced.
+--   4. Partial cancellation (bk-14). New booking.b2b_line_reductions: fewer travellers on one line of a confirmed
+--      booking, the fee by the booking's policy on the removed seats. Append-only; emits booking.line_reduced. The
+--      reduction row is the amendment record: the approved version stays as sold (bk-003 locks an approved version and
+--      allows one per case), and the case total reads as the version total less the refundable amounts.
 --   5. Child, infant and single-supplement prices (bk-15). booking.trip_plan_prices gains child_amount,
 --      infant_amount, single_supplement_amount and their nets (per person, in the row's currencies);
 --      booking.trip_plans gains child_age_max and infant_age_max; booking.pricing_rules gains child_pct (a child pays
@@ -39,6 +40,7 @@
 --   7. Views (CREATE OR REPLACE, same columns): v_cost_variance counts a recorded supplier cancel fee as the cost of a
 --      cancelled, unbilled supplier booking; v_case_profit takes partial cancellations into the revenue (removed
 --      seats leave it, their fee stays) and the recorded cancel fees into supplier_cancel_fee_usd.
+--   8. Settings b2b_ops_contact (empty), b2b_child_age_max (11) and b2b_infant_age_max (1).
 --
 -- Class: contract (root ADR 0017 d3): ALTER TABLE on trip_cases, supplier_bookings, b2b_cancellations,
 -- trip_plan_prices, trip_plans, pricing_rules; outbox CHECKs and b2b_holds_outbox replaced; views replaced; next to
@@ -388,7 +390,6 @@ CREATE TABLE IF NOT EXISTS booking.b2b_line_reductions (
     idempotency_key        TEXT NOT NULL,
     entered_via            TEXT NOT NULL,
     entered_by             TEXT,
-    version_id             UUID REFERENCES booking.trip_case_versions (id),
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT b2b_line_reductions_key_uq UNIQUE (hold_id, idempotency_key),
     CONSTRAINT b2b_line_reductions_ref_chk CHECK (length(line_ref) BETWEEN 1 AND 64),
@@ -413,11 +414,9 @@ CREATE INDEX IF NOT EXISTS b2b_line_reductions_hold_idx ON booking.b2b_line_redu
 CREATE INDEX IF NOT EXISTS b2b_line_reductions_case_idx ON booking.b2b_line_reductions (trip_case_id);
 CREATE INDEX IF NOT EXISTS b2b_line_reductions_partner_idx ON booking.b2b_line_reductions (partner_id);
 CREATE INDEX IF NOT EXISTS b2b_line_reductions_policy_idx ON booking.b2b_line_reductions (policy_id);
-CREATE INDEX IF NOT EXISTS b2b_line_reductions_version_idx
-    ON booking.b2b_line_reductions (version_id) WHERE version_id IS NOT NULL;
 
 COMMENT ON TABLE booking.b2b_line_reductions IS
-    'bk-047 (AA-1075, bk-14): a partial cancellation of a confirmed B2B booking: fewer travellers on one line (counts by age band), the fee by the booking''s locked policy on the removed seats'' share of the line price, the refundable rest, and the new approved version. Append-only; emits booking.line_reduced. No personal data.';
+    'bk-047 (AA-1075, bk-14): a partial cancellation of a confirmed B2B booking: fewer travellers on one line (counts by age band), the fee by the booking''s locked policy on the removed seats'' share of the line price and the refundable rest (the amendment record; the approved version stays as sold). Append-only; emits booking.line_reduced. No personal data.';
 COMMENT ON COLUMN booking.b2b_line_reductions.removed_amount IS
     'conf:commercial; bk-047: the line price share of the removed travellers (in the quote currency).';
 
@@ -657,6 +656,16 @@ SELECT trip_case_id, code, status, start_date, end_date, pax, partner_id, hold_i
 COMMENT ON VIEW booking.v_case_profit IS
     'bk-045 (AA-1074, bk-08), bk-047 (AA-1075, bk-14): conf:commercial, staff only (profit.read), never in booking.b2b.v1. Per B2B trip case with a confirmed hold: revenue (quote total less the removed seats of partial cancellations plus their fees, or the cancellation fee plus those fees once cancelled) in the quote currency and USD at the quote''s plain rate; costs in USD: quoted (quote lines), planned (live supplier bookings + departure share), actual (approved bills incl. supplier cancellation fees + share), supplier_cancel_fee_usd (billed or recorded cancel fees), best (cost_usd: billed, else planned, else recorded cancel fees, else the quote while no booking exists); profit_usd, profit (quote currency), margin (fraction of revenue).';
 
+-- ── 9. Settings ──────────────────────────────────────────────────────────────
+
+-- The AA operations desk an agency voucher prints (bk-12). Seeded empty: the voucher then prints no line; the business
+-- owner's company line is set later with a DB Migrate run-script (never a personal mobile).
+INSERT INTO booking.settings (key, value, description) VALUES
+    ('b2b_ops_contact', '{}'::jsonb, 'AA 24-hour operations desk printed on agency vouchers (AA-1075 bk-12): {"label": "..."}, the company line AA publishes, never a person; empty = no line printed.'),
+    ('b2b_child_age_max', '11'::jsonb, 'Default oldest age at the child price when a trip plan sets none (AA-1075 bk-15; policy data, proposed for the business owner).'),
+    ('b2b_infant_age_max', '1'::jsonb, 'Default oldest age at the infant price when a trip plan sets none (AA-1075 bk-15; policy data, proposed for the business owner).')
+ON CONFLICT (key) DO NOTHING;
+
 -- ── Grants (per object) ──────────────────────────────────────────────────────
 
 REVOKE ALL ON booking.b2b_desk_bookings FROM booking;
@@ -675,7 +684,10 @@ GRANT UPDATE (fee_override_pct, waive_reason, override_by, override_at, override
               fee_amount, refundable_amount) ON booking.b2b_cancellations TO booking;
 
 -- trip_cases, supplier_bookings, trip_plan_prices, trip_plans, pricing_rules: the table grants of their bk- files
--- cover the new columns. Views: SELECT to booking stays (CREATE OR REPLACE keeps the grants).
+-- cover the new columns. Views: SELECT to booking stays (CREATE OR REPLACE keeps the grants); read-only repeated.
+REVOKE INSERT, UPDATE, DELETE ON booking.v_cost_variance FROM booking;
+REVOKE INSERT, UPDATE, DELETE ON booking.v_case_profit FROM booking;
+GRANT SELECT ON booking.v_cost_variance, booking.v_case_profit TO booking;
 
 GRANT EXECUTE ON FUNCTION booking.b2b_desk_bookings_guard() TO booking;
 GRANT EXECUTE ON FUNCTION booking.b2b_holds_outbox() TO booking;
@@ -701,7 +713,7 @@ BEGIN
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-047', now(), 'AA-1075: trip_cases entered_via / entered_by, b2b_desk_bookings (staff-entered agency bookings, override maker-checker), outbox booking.created_by_aa / booking.line_reduced / booking.fee_changed (b2b_holds_outbox replaced), supplier_bookings voucher fields + supplier_cancel_fee, b2b_cancellations staff cancel + fee override (guard, fee outbox), b2b_line_reductions, trip_plan_prices child / infant / single supplement (+ nets), trip_plans age bands, pricing_rules child_pct / infant_flat_usd, trip_plan_billing_terms, v_cost_variance / v_case_profit bodies')
+VALUES ('bk-047', now(), 'AA-1075: trip_cases entered_via / entered_by, b2b_desk_bookings (staff-entered agency bookings, override maker-checker), outbox booking.created_by_aa / booking.line_reduced / booking.fee_changed (b2b_holds_outbox replaced), supplier_bookings voucher fields + supplier_cancel_fee, b2b_cancellations staff cancel + fee override (guard, fee outbox), b2b_line_reductions, trip_plan_prices child / infant / single supplement (+ nets), trip_plans age bands, pricing_rules child_pct / infant_flat_usd, trip_plan_billing_terms, v_cost_variance / v_case_profit bodies, settings b2b_ops_contact / b2b_child_age_max / b2b_infant_age_max')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
