@@ -3,6 +3,8 @@ node_modules
 out
 coverage
 e2e
+# playwright.config.ts imports e2e/ (excluded above); next build would type-check it and fail (S277)
+playwright.config.ts
 *.tsbuildinfo
 .env*
 .vercel
