@@ -12,6 +12,8 @@
 // AA-1073: the Departures tab shows the minimum to operate and an "At risk" badge (the daily watch found the departure
 // short of its minimum on its decision date; decide on the trip plan's Departures tab: run anyway or cancel), and "Run
 // checks now" queues the watch and the allotment release at once.
+// AA-1073 rest (bk-048): an at-risk departure gets "Charge fee" (a minimum-shortfall fee to an agency, approved by a
+// second person) and the departure date links to the departure board drawer.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,6 +52,7 @@ import {
   type BookingTone,
 } from "@/ui";
 import { SavedTabs } from "../../_parts/SavedTabs";
+import { ChargeFeeModal } from "../../departures/_parts/ChargeFeeModal";
 import { AgencyBookingsTab } from "./AgencyBookingsTab";
 import { formatDay } from "@/ui/booking/dates";
 
@@ -406,6 +409,7 @@ function DeparturesTab() {
   const toast = useToast();
   const list = useQuery({ queryKey: ["b2b-desk", "departures"], queryFn: () => b2bDeskApi.departures({}) });
   const [flagging, setFlagging] = useState<DeskDeparture | null>(null);
+  const [charging, setCharging] = useState<DeskDeparture | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["b2b-desk"] });
   const clear = useMutation({
     mutationFn: (incidentId: string) => b2bDeskApi.clear(incidentId),
@@ -423,9 +427,13 @@ function DeparturesTab() {
       accessorFn: (r) => r.start_date,
       cell: ({ row }) => (
         <span className="flex flex-col">
-          <span className="text-[13.5px] font-medium text-ink">
+          <a
+            className="text-[13.5px] font-medium text-ink hover:underline"
+            href={`/departures?month=${row.original.start_date.slice(0, 7)}&departure=${encodeURIComponent(row.original.id)}`}
+            title="Open on the departure board"
+          >
             <DateText value={row.original.start_date} />
-          </span>
+          </a>
           <span className="max-w-[300px] truncate text-xs text-muted" title={row.original.tour_title ?? row.original.source_id}>
             {row.original.tour_title ?? `Tour ${row.original.source_id.slice(0, 8)}`}
           </span>
@@ -499,7 +507,12 @@ function DeparturesTab() {
               const d = row.original;
               if (d.status === "cancelled") return null;
               return (
-                <span className="flex justify-end">
+                <span className="flex flex-wrap justify-end gap-2">
+                  {d.at_risk && (
+                    <Button size="sm" onClick={() => setCharging(d)} ariaLabel={`Charge a fee on departure ${formatDay(d.start_date)}`}>
+                      Charge fee
+                    </Button>
+                  )}
                   {d.open_incident ? (
                     <Button size="sm" disabled={clear.isPending} onClick={() => clear.mutate(d.open_incident!.id)}>
                       Clear incident
@@ -539,6 +552,15 @@ function DeparturesTab() {
         incident carries only its type: no names, no free text.
       </p>
       <FlagModal departure={flagging} onClose={() => setFlagging(null)} onDone={refresh} />
+      {charging && (
+        <ChargeFeeModal
+          departureId={charging.id}
+          title={`Departure ${formatDay(charging.start_date)}${charging.tour_title ? `, ${charging.tour_title}` : ""} is at risk (${charging.sold} of ${charging.min_to_operate} sold)`}
+          reason="min_shortfall"
+          seats={Math.max(charging.min_to_operate - charging.sold, 1)}
+          onClose={() => setCharging(null)}
+        />
+      )}
     </>
   );
 }

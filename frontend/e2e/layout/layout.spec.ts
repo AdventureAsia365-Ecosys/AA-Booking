@@ -65,6 +65,22 @@ const PAGES: PageCase[] = [
     ready: '[data-testid="allotments"]',
     noTable: true,
   },
+  // AA-1073 rest (bk-048): the departure board (month calendar, table) and one departure's drawer.
+  {
+    name: "departure-board",
+    path: "/departures",
+    ready: '[data-testid="board-calendar"] [data-testid="board-chip"]',
+    phoneReady: '[data-testid="board-day-list"] [data-testid="board-chip"]',
+    noTable: true,
+  },
+  { name: "departure-board-table", path: "/departures?view=table" },
+  {
+    name: "departure-board-drawer",
+    path: "/departures?departure=cccc-0000-4000-8000-000000000001",
+    within: '[role="dialog"]',
+    ready: '[data-testid="departure-board-drawer"]',
+    noTable: true,
+  },
   { name: "destinations", path: "/catalog/destinations" },
   { name: "destination-drawer", path: "/catalog/destinations?place=dddd-0000-4000-8000-000000000005", ready: '[role="dialog"]', noTable: true },
   { name: "countries", path: "/catalog/countries", ready: "text=Area: Indochina", noTable: true },

@@ -34,6 +34,13 @@
   confirm today would lock (``app.b2b.cancellation``: the plan of the first ``tp:`` line, else the B2B default), so
   the agency sees the fees before it books. Not hashed: the policy is locked at confirm, not at the quote; null when
   no approved policy is in force.
+- **Departure price adjustment and early booking** (AA-1073 rest, bk-048, :mod:`app.b2b.price_adjustments`): on a
+  ``tp:`` line on a departure, a quote made on or before ``start - early_days`` of the b2b rule prices at the rule's
+  margin less ``early_discount_pts``; then, after the agency discount, the departure's adjustment in force adds its
+  fraction of the line price or its amount per traveller (adults + children; converted at the plain rate when its
+  currency is not the quote's). A line that then sells under the floor margin is still sold (``below_floor`` in its
+  ``price_note``, a warning log). Each line stores what applied in ``price_note`` (NULL when nothing); a line with an
+  adjustment or an early discount hashes it (``price_note``), any other line hashes exactly as before.
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -50,7 +57,7 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import agency_pricing, cancellation, departures, served
+from app.b2b import agency_pricing, cancellation, departures, price_adjustments, served
 from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, repository
@@ -175,6 +182,7 @@ def price_hash(
                 "departure_id": line["departure_id"],
                 "b2b_price": format(line["b2b_price"], "f"),
                 **_discount_hash(line),
+                **_note_hash(line),
             }
             for line in lines
         ],
@@ -190,6 +198,14 @@ def _discount_hash(line: dict[str, Any]) -> dict[str, Any]:
     if discount == engine.ZERO:
         return {}
     return {"agency_discount": decimal_text(discount), "rate_card_id": line.get("rate_card_id")}
+
+
+def _note_hash(line: dict[str, Any]) -> dict[str, Any]:
+    """AA-1073 (bk-17): the departure adjustment and the early-booking discount of a line, hashed only when one applied
+    (any other line hashes as before)."""
+    note = line.get("price_note") or {}
+    priced = {k: note[k] for k in ("adjustment", "early_booking") if k in note}
+    return {"price_note": priced} if priced else {}
 
 
 def _line_plan(component_id: str) -> str | None:
@@ -262,6 +278,7 @@ class LinePrice:
     discount: Decimal
     rate_card_id: str | None
     b2b_price: Decimal
+    note: dict[str, Any] | None = None  # AA-1073 (bk-17): what the departure adjustment / early booking did
 
 
 async def price_basis(
@@ -308,23 +325,64 @@ def pax_sell_usd(
     return sell_usd, extra_net
 
 
+def early_applies(basis: PriceBasis, start: date | None) -> bool:
+    """AA-1073 (bk-17): the b2b rule's early-booking discount applies to a departure starting ``start`` when the quote
+    day is on or before ``start - early_days``."""
+    rule = basis.rule
+    if start is None or rule.early_days is None or not rule.early_discount_pts:
+        return False
+    return basis.on <= start - timedelta(days=int(rule.early_days))
+
+
+def adjustment_in(adj: price_adjustments.Adjustment, basis: PriceBasis, price: Decimal, travellers: int) -> Decimal:
+    """The change an adjustment makes to a line price in the quote currency: its fraction of the price, or its amount
+    per traveller converted at the plain rate (no buffer) when its currency is not the quote's."""
+    if adj.pct is not None:
+        return price * adj.pct
+    amount = (adj.amount or engine.ZERO) * travellers
+    if adj.currency == basis.currency:
+        return amount
+    usd = engine.to_usd(amount, adj.currency or engine.BASE_CURRENCY, basis.rates)
+    return engine.from_usd(usd, basis.rates.get(basis.currency), buffer=False)
+
+
 def price_line(
-    basis: PriceBasis, cost: LineCost, plan_id: str | None, *, pax: tuple[int, int, int] | None = None
+    basis: PriceBasis,
+    cost: LineCost,
+    plan_id: str | None,
+    *,
+    pax: tuple[int, int, int] | None = None,
+    start: date | None = None,
+    adjustment: price_adjustments.Adjustment | None = None,
 ) -> LinePrice:
     """The ``b2b_price`` of one line: its nets to USD, the rule's price (``net / (1 - margin - card fee)``) in the quote
     currency, less the partner's discount for the line's plan, rounded up (:func:`round_line`). A trip plan line with
-    ``pax`` (adults, children, infants) takes the rule's child and infant prices (:func:`pax_sell_usd`). Raises
-    ``engine.PricingError`` (a missing FX rate, a bad rule)."""
+    ``pax`` (adults, children, infants) takes the rule's child and infant prices (:func:`pax_sell_usd`). AA-1073
+    (bk-17): a trip plan line on a departure starting ``start`` takes the early-booking discount (margin points) when
+    the quote is early enough, then the departure's ``adjustment`` after the agency discount; ``note`` says what
+    applied. Raises ``engine.PricingError`` (a missing FX rate, a bad rule)."""
+    note: dict[str, Any] = {}
+    margin = basis.margin
+    if plan_id and early_applies(basis, start):
+        pts = basis.rule.early_discount_pts or engine.ZERO
+        margin = max(margin - pts, engine.ZERO)
+        note["early_booking"] = {"days": int(basis.rule.early_days or 0), "pts": decimal_text(pts)}
     net_usd = sum((engine.to_usd(amount, cur, basis.rates) for amount, cur in cost.costs), start=engine.ZERO)
-    sell_usd = engine.sell_price_usd(net_usd, basis.margin, basis.rule.rule.card_fee_pct)
-    sell_usd, extra_net = pax_sell_usd(sell_usd, basis.rule, basis.margin, pax if plan_id else None)
+    sell_usd = engine.sell_price_usd(net_usd, margin, basis.rule.rule.card_fee_pct)
+    sell_usd, extra_net = pax_sell_usd(sell_usd, basis.rule, margin, pax if plan_id else None)
     sell = engine.from_usd(sell_usd, basis.rates.get(basis.currency))
     discount, card_id = basis.terms.discount_for(plan_id)
+    price = agency_pricing.apply_discount(sell, discount)
+    if plan_id and adjustment is not None:
+        travellers = (pax[0] + pax[1]) if pax else 1
+        price = max(price + adjustment_in(adjustment, basis, price, travellers), engine.ZERO)
+        note["adjustment"] = adjustment.note()
     return LinePrice(
         net_usd=net_usd + extra_net,
         discount=discount,
         rate_card_id=card_id,
-        b2b_price=round_line(agency_pricing.apply_discount(sell, discount), basis.currency),
+        b2b_price=round_line(price, basis.currency),
+        note=note or None,
     )
 
 
@@ -435,11 +493,14 @@ async def quote_in(
         exclude_hold=own_hold,
         partner_id=partner_id,
     )
+    # AA-1073 (bk-17): the price adjustment in force on each departure of a tp: line (its currency needs a rate).
+    adjust_by_dep = await price_adjustments.in_force(conn, sorted({d for _, d, _ in seats if d is not None}))
     basis = await price_basis(
         conn,
         partner_id=partner_id,
         currency=currency,
-        cost_currencies={cur for lc in costs for _, cur in lc.costs},
+        cost_currencies={cur for lc in costs for _, cur in lc.costs}
+        | {a.currency for a in adjust_by_dep.values() if a.currency},
         on=on,
     )
     fx, rule, margin, terms = basis.fx, basis.rule, basis.margin, basis.terms
@@ -450,11 +511,27 @@ async def quote_in(
         ask = line.ask
         plan = _line_plan(ask.component_id)
         pax = (ask.adult, ask.child, ask.infant)
+        on_departure = plan is not None and departure_id is not None
         try:
-            price = price_line(basis, lc, plan, pax=pax)
-            floor_total += floor_price(basis, lc, plan, pax=pax)
+            price = price_line(
+                basis,
+                lc,
+                plan,
+                pax=pax,
+                start=ask.service_date if on_departure else None,
+                adjustment=adjust_by_dep.get(departure_id) if on_departure and departure_id else None,
+            )
+            floor = floor_price(basis, lc, plan, pax=pax)
+            floor_total += floor
         except engine.PricingError as exc:
             raise B2BError("unavailable", f"line {ask.line_ref}: {exc}") from None
+        note = dict(price.note or {})
+        if note and price.b2b_price < floor:
+            # Still sold at the adjusted price; the note and the log tell pricing staff (AA-1073, bk-17).
+            note["below_floor"] = True
+            log.warning(
+                "b2b_quote_line_below_floor partner=%s line=%s departure=%s", partner_id, ask.line_ref, departure_id
+            )
         priced.append(
             {
                 "line_no": no,
@@ -475,6 +552,7 @@ async def quote_in(
                 "supplier_rate_ids": lc.rate_ids,
                 "agency_discount_pct": price.discount,
                 "rate_card_id": price.rate_card_id,
+                "price_note": note or None,
             }
         )
     quoted_total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
@@ -529,9 +607,9 @@ async def quote_in(
             INSERT INTO booking.b2b_quote_lines
                 (quote_id, line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult,
                  pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids,
-                 departure_id, agency_discount_pct, rate_card_id)
+                 departure_id, agency_discount_pct, rate_card_id, price_note)
             VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[],
-                    $17::uuid, $18, $19::uuid)
+                    $17::uuid, $18, $19::uuid, $20::jsonb)
             """,
             [
                 (
@@ -554,6 +632,7 @@ async def quote_in(
                     p["departure_id"],
                     p["agency_discount_pct"],
                     p["rate_card_id"],
+                    json.dumps(p["price_note"], sort_keys=True) if p["price_note"] else None,
                 )
                 for p in priced
             ],

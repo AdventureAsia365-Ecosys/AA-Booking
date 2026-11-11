@@ -26,6 +26,7 @@
     "customer.read",
     "customer.write",
     "ops.read",
+    "ops.write",
     "pricing.read",
     "profit.read",
     "pricing.write",

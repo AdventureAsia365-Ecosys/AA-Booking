@@ -6,6 +6,8 @@
 // (dry run) before it saves. A row opens the departure drawer (?departure=<id>): its rules (capacity, minimum, cutoff,
 // decision days, auto-confirm, status) and its agency allotments (propose, approve by another person, reject or
 // withdraw). Writes: trip_plan.write (admin, contracting) for departures, b2b_desk.write for allotments.
+// AA-1073 rest (bk-048): an allotment in force or released offers "Charge fee" (allotted seats not released, approved
+// by a second person); the drawer links to the departure board.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -44,6 +46,7 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
+import { ChargeFeeModal } from "../../../departures/_parts/ChargeFeeModal";
 
 const STATUS: Record<DepartureStatus, { label: string; tone: "neutral" | "success" | "danger" }> = {
   scheduled: { label: "Scheduled", tone: "neutral" },
@@ -504,6 +507,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
   const toast = useToast();
   const list = useQuery({ queryKey: ["allotments", departure.id], queryFn: () => departuresApi.allotments(departure.id) });
   const [partner, setPartner] = useState("");
+  const [charging, setCharging] = useState<Allotment | null>(null);
   const [seats, setSeats] = useState(4);
   const [release, setRelease] = useState(14);
   const refresh = () => {
@@ -553,6 +557,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
               isMaker={a.created_by?.id === me.cis_user_id}
               busy={act.isPending}
               onAct={(action) => act.mutate({ id: a.id, action })}
+              onCharge={canWrite ? () => setCharging(a) : undefined}
             />
           ))}
         </ul>
@@ -583,6 +588,16 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
           </div>
         </div>
       )}
+      {charging && (
+        <ChargeFeeModal
+          departureId={departure.id}
+          title={`Departure ${formatDay(departure.start_date)}: allotment of ${charging.seats} seats for ${charging.partner.agency_name}`}
+          reason="allotment_unreleased"
+          partnerId={charging.partner.id}
+          seats={charging.unused ?? undefined}
+          onClose={() => setCharging(null)}
+        />
+      )}
     </section>
   );
 }
@@ -593,12 +608,15 @@ function AllotmentRow({
   isMaker,
   busy,
   onAct,
+  onCharge,
 }: {
   a: Allotment;
   canWrite: boolean;
   isMaker: boolean;
   busy: boolean;
   onAct: (action: "approve" | "end") => void;
+  /** AA-1073 rest: propose a fee for allotted seats not released (in force or released allotments). */
+  onCharge?: () => void;
 }) {
   const tone = a.state === "in_force" ? "success" : a.state === "pending" ? "warning" : "neutral";
   return (
@@ -624,6 +642,11 @@ function AllotmentRow({
         {canWrite && (a.state === "pending" || a.state === "in_force") && (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("end")}>
             {a.state === "pending" ? "Reject" : "Withdraw"}
+          </Button>
+        )}
+        {onCharge && (a.state === "in_force" || a.state === "released") && (
+          <Button size="sm" variant="ghost" onClick={onCharge}>
+            Charge fee
           </Button>
         )}
       </span>

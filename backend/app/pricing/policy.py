@@ -37,6 +37,8 @@ RULE_FIELDS = (
     "rrp_markup_pct",
     "child_pct",
     "infant_flat_usd",
+    "early_days",
+    "early_discount_pts",
 )
 FX_FIELDS = ("currency", "rate_per_usd", "buffer_pct", "as_of", "source")
 
@@ -58,7 +60,8 @@ WITH in_force AS (
     ORDER BY r.channel, r.valid_from DESC
 )
 SELECT p.id::text AS id, p.channel, p.target_margin, p.floor_margin, p.peak_uplift_pts, p.card_fee_pct,
-       p.valid_from, p.note, p.rrp_markup_pct, p.child_pct, p.infant_flat_usd, p.created_at, p.created_by,
+       p.valid_from, p.note, p.rrp_markup_pct, p.child_pct, p.infant_flat_usd, p.early_days, p.early_discount_pts,
+       p.created_at, p.created_by,
        cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
        {_STATUS.format(day="valid_from")} AS status
@@ -149,6 +152,8 @@ def _rule(row: Any, staff: Staff) -> dict[str, Any]:
         "rrp_markup_pct": row.get("rrp_markup_pct"),
         "child_pct": row.get("child_pct"),
         "infant_flat_usd": row.get("infant_flat_usd"),
+        "early_days": row.get("early_days"),
+        "early_discount_pts": row.get("early_discount_pts"),
     }
 
 
@@ -215,13 +220,25 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
         # bk-039 (AA-1029, root ADR 0019 b15): the RRP is the agency net price + the markup, so only the b2b rule
         # carries it (the table CHECK says the same).
         raise Invalid("rrp_markup_b2b_only", "the RRP markup belongs to the b2b rule")
+    early_days, early_pts = data.get("early_days"), data.get("early_discount_pts")
+    if (early_days is None) != (early_pts is None):
+        raise Invalid("invalid_early_booking", "early_days and early_discount_pts go together")
+    if early_days is not None:
+        # bk-048 (AA-1073, bk-17): an early-booking discount takes margin points off a fixed-departure price, so only
+        # the b2b and fixed_departure rules carry it, and never more points than the target margin (table CHECK).
+        if channel not in (engine.Channel.B2B, engine.Channel.FIXED_DEPARTURE):
+            raise Invalid(
+                "early_booking_channel", "the early-booking discount belongs to the b2b and fixed_departure rules"
+            )
+        if early_pts > data["target_margin"]:
+            raise Invalid("invalid_early_booking", "early_discount_pts is at most the target margin")
     try:
         rule_id = await conn.fetchval(
             """
             INSERT INTO booking.pricing_rules
                 (channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct, valid_from, note, created_by,
-                 rrp_markup_pct, child_pct, infant_flat_usd)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 rrp_markup_pct, child_pct, infant_flat_usd, early_days, early_discount_pts)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING id::text
             """,
             channel.value,
@@ -235,6 +252,8 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
             markup,
             data.get("child_pct"),
             data.get("infant_flat_usd"),
+            early_days,
+            early_pts,
         )
     except asyncpg.UniqueViolationError:
         raise Conflict(

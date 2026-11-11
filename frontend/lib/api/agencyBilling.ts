@@ -24,6 +24,7 @@ export const LINE_ROLE_LABEL: Record<string, string> = {
   balance: "Balance",
   full: "Full payment",
   cancellation_fee: "Cancellation fee",
+  departure_fee: "Departure fee", // AA-1073 rest (bk-048)
 };
 export const AGENCY_PAYMENT_METHOD_LABEL: Record<AgencyPaymentMethod, string> = {
   bank_transfer: "Bank transfer",

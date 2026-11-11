@@ -2938,6 +2938,30 @@
             ],
             "title": "Last Sale Date"
           },
+          "meeting_point": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Point"
+          },
+          "meeting_time": {
+            "anyOf": [
+              {
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Time"
+          },
           "min_to_operate": {
             "anyOf": [
               {
@@ -3042,6 +3066,34 @@
           }
         },
         "title": "DepartureChecksIn",
+        "type": "object"
+      },
+      "DepartureFeeCharge": {
+        "additionalProperties": false,
+        "description": "1.8 (AA-1073 rest). A departure fee AA charged the calling agency (minimum shortfall, unreleased allotment).",
+        "properties": {
+          "amount": {
+            "pattern": "^-?\\d+(\\.\\d{1,2})?$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "fee_id": {
+            "maxLength": 64,
+            "title": "Fee Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fee_id",
+          "amount",
+          "currency"
+        ],
+        "title": "DepartureFeeCharge",
         "type": "object"
       },
       "DepartureGenerateIn": {
@@ -3525,6 +3577,16 @@
             "title": "Event Id",
             "type": "string"
           },
+          "fee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DepartureFeeCharge"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "hold_id": {
             "anyOf": [
               {
@@ -3601,7 +3663,9 @@
               "allotment.released",
               "booking.created_by_aa",
               "booking.line_reduced",
-              "booking.fee_changed"
+              "booking.fee_changed",
+              "departure.updated",
+              "departure.fee_charged"
             ],
             "title": "Type",
             "type": "string"
@@ -3681,6 +3745,70 @@
           "fee_pct"
         ],
         "title": "FeeBasis",
+        "type": "object"
+      },
+      "FeeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "partner_id": {
+            "format": "uuid",
+            "title": "Partner Id",
+            "type": "string"
+          },
+          "price_per_seat": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Price Per Seat"
+          },
+          "reason": {
+            "enum": [
+              "min_shortfall",
+              "allotment_unreleased",
+              "other"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "seats": {
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Seats",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "partner_id",
+          "reason",
+          "seats",
+          "price_per_seat",
+          "currency"
+        ],
+        "title": "FeeIn",
         "type": "object"
       },
       "FxLock": {
@@ -6207,6 +6335,49 @@
         "title": "OpsContact",
         "type": "object"
       },
+      "OpsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "meeting_point": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Point"
+          },
+          "meeting_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meeting Time"
+          },
+          "ops_note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ops Note"
+          }
+        },
+        "title": "OpsIn",
+        "type": "object"
+      },
       "OrderScope": {
         "additionalProperties": false,
         "properties": {
@@ -6647,6 +6818,66 @@
           }
         },
         "title": "Preferences",
+        "type": "object"
+      },
+      "PriceAdjustmentIn": {
+        "additionalProperties": false,
+        "properties": {
+          "adjust_pct": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": -0.5,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,1}|(?=[\\d.]{1,6}0*$)\\d{0,1}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjust Pct"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "PriceAdjustmentIn",
         "type": "object"
       },
       "PriceBody": {
@@ -8107,6 +8338,36 @@
             ],
             "title": "Child Pct"
           },
+          "early_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Early Days"
+          },
+          "early_discount_pts": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,1}|(?=[\\d.]{1,6}0*$)\\d{0,1}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Early Discount Pts"
+          },
           "floor_margin": {
             "anyOf": [
               {
@@ -8512,6 +8773,50 @@
           "reason_code"
         ],
         "title": "StaffCancelIn",
+        "type": "object"
+      },
+      "StaffIn": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "guide",
+              "tour_leader",
+              "driver"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "staff_user_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staff User Id"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "StaffIn",
         "type": "object"
       },
       "StaffPatch": {
@@ -11716,6 +12021,218 @@
         ]
       }
     },
+    "/booking/b2b-desk/departure-board": {
+      "get": {
+        "operationId": "get_departure_board_booking_b2b_desk_departure_board_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Country"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "scheduled",
+                    "guaranteed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "At Risk",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Departure Board Booking B2B Desk Departure Board Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Departure Board",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departure-board/{departure_id}": {
+      "get": {
+        "operationId": "get_departure_detail_booking_b2b_desk_departure_board__departure_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Departure Detail Booking B2B Desk Departure Board  Departure Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Departure Detail",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
     "/booking/b2b-desk/departure-checks/runs": {
       "get": {
         "operationId": "get_departure_checks_booking_b2b_desk_departure_checks_runs_get",
@@ -11815,6 +12332,274 @@
         ]
       }
     },
+    "/booking/b2b-desk/departure-fees": {
+      "get": {
+        "operationId": "get_departure_fees_booking_b2b_desk_departure_fees_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "departure_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Departure Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "partner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Partner Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Departure Fees Booking B2B Desk Departure Fees Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Departure Fees",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departure-fees/{fee_id}/approve": {
+      "post": {
+        "operationId": "approve_departure_fee_booking_b2b_desk_departure_fees__fee_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fee_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Fee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Departure Fee Booking B2B Desk Departure Fees  Fee Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Departure Fee",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departure-fees/{fee_id}/reject": {
+      "post": {
+        "operationId": "reject_departure_fee_booking_b2b_desk_departure_fees__fee_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fee_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Fee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Departure Fee Booking B2B Desk Departure Fees  Fee Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Departure Fee",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departure-staff/{assignment_id}": {
+      "delete": {
+        "operationId": "delete_departure_staff_booking_b2b_desk_departure_staff__assignment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Departure Staff Booking B2B Desk Departure Staff  Assignment Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Departure Staff",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
     "/booking/b2b-desk/departures": {
       "get": {
         "operationId": "get_departures_booking_b2b_desk_departures_get",
@@ -11884,6 +12669,67 @@
           }
         ],
         "summary": "Get Departures",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departures/{departure_id}/fees": {
+      "post": {
+        "description": "The maker step: a pending fee; another person with b2b_desk.approve approves or rejects it.",
+        "operationId": "post_departure_fee_booking_b2b_desk_departures__departure_id__fees_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Departure Fee Booking B2B Desk Departures  Departure Id  Fees Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Departure Fee",
         "tags": [
           "b2b"
         ]
@@ -12059,6 +12905,188 @@
           }
         ],
         "summary": "Get Manifest",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departures/{departure_id}/ops": {
+      "patch": {
+        "description": "Only the fields sent change; an empty text or null clears one.",
+        "operationId": "patch_departure_ops_booking_b2b_desk_departures__departure_id__ops_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Departure Ops Booking B2B Desk Departures  Departure Id  Ops Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Departure Ops",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departures/{departure_id}/price-adjustments": {
+      "post": {
+        "description": "The maker step: a pending adjustment (a fraction or an amount per traveller); another person approves it.",
+        "operationId": "post_price_adjustment_booking_b2b_desk_departures__departure_id__price_adjustments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceAdjustmentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Price Adjustment Booking B2B Desk Departures  Departure Id  Price Adjustments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Price Adjustment",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/departures/{departure_id}/staff": {
+      "post": {
+        "operationId": "post_departure_staff_booking_b2b_desk_departures__departure_id__staff_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "departure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Departure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Departure Staff Booking B2B Desk Departures  Departure Id  Staff Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Departure Staff",
         "tags": [
           "b2b"
         ]
@@ -12613,6 +13641,107 @@
           }
         ],
         "summary": "Decline Line",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/price-adjustments/{adjustment_id}/approve": {
+      "post": {
+        "operationId": "approve_price_adjustment_booking_b2b_desk_price_adjustments__adjustment_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "adjustment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Adjustment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Price Adjustment Booking B2B Desk Price Adjustments  Adjustment Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Price Adjustment",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b-desk/price-adjustments/{adjustment_id}/end": {
+      "post": {
+        "description": "A pending adjustment is rejected, one in force withdrawn.",
+        "operationId": "end_price_adjustment_booking_b2b_desk_price_adjustments__adjustment_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "adjustment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Adjustment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response End Price Adjustment Booking B2B Desk Price Adjustments  Adjustment Id  End Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End Price Adjustment",
         "tags": [
           "b2b"
         ]

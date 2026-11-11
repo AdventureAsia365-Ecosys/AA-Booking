@@ -58,6 +58,9 @@ export const PAGES: VisualPage[] = [
   { slug: "agency-settlement", route: "/agency-billing/invoices/[ref]", path: "/agency-billing/invoices/AAT-2026-000001", auth: "staff" },
   { slug: "audit-log", route: "/audit-log", path: "/audit-log", auth: "staff" },
   { slug: "b2b-desk", route: "/b2b-desk", path: "/b2b-desk", auth: "staff" },
+  // AA-1073 rest (bk-048): the departure board (calendar) and one departure's drawer.
+  { slug: "departures", route: "/departures", path: "/departures", auth: "staff" },
+  { slug: "departures-drawer", route: "/departures", path: "/departures?departure=cccc-0000-4000-8000-000000000001", auth: "staff" },
   // AA-1075: the departure manifest (counts only).
   { slug: "b2b-desk-manifest", route: "/b2b-desk/manifest/[id]", path: "/b2b-desk/manifest/00000000-0000-4000-8000-000000000b01", auth: "staff" },
   { slug: "billing", route: "/billing", path: "/billing", auth: "staff" },

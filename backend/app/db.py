@@ -64,6 +64,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-045",  # AA-1074: FX snapshots, departure_costs, supplier_orders, departure bills, profit views; MIG-4
     "bk-046",  # AA-1073: departure minimum / cutoff / decision / at-risk, outbox types, departure_allotments; MIG-4
     "bk-047",  # AA-1075: staff agency bookings, vouchers, cancel override / partial cancel, child prices, tour terms
+    "bk-048",  # AA-1073 rest: departure board view, ops sheet, departure fees, price adjustments, early booking
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

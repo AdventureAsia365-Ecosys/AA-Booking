@@ -20,6 +20,8 @@ shown, a field allow-list without staff notes, reasons, staff names, bank refere
 AA-1075 (contract 1.7): the service vouchers ``GET /bookings/{booking_id}/vouchers`` (``app.b2b.vouchers``), the
 partial cancellation ``POST /bookings/{booking_id}/lines/{line_ref}/reduce`` (``app.b2b.amendments``), the tour's terms
 ``GET /terms?source_id=`` and the events ``booking.created_by_aa``, ``booking.line_reduced``, ``booking.fee_changed``.
+AA-1073 rest (contract 1.8): ``Departure.meeting_point`` / ``meeting_time``, the events ``departure.updated`` (the
+meeting point or time changed) and ``departure.fee_charged`` (``Event.fee``: id, amount, currency).
 
 The response models mirror the contract with ``extra="forbid"``; the agency-facing price is ``b2b_price`` and nothing
 named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tests/unit/test_b2b_api.py``).
@@ -253,6 +255,10 @@ class Departure(Strict):
     seats_to_guarantee: int | None = Field(default=None, ge=0)
     last_sale_date: date | None = None
     allotment: DepartureAllotment | None = None
+    # 1.8 (AA-1073 rest, bk-048): where and when the group meets (local time on the start date); a change emits
+    # departure.updated. Never a traveller's address; no guide or staff name.
+    meeting_point: str | None = Field(default=None, max_length=300)
+    meeting_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class DeparturePage(Strict):
@@ -327,9 +333,21 @@ EventType = Literal[
     "booking.created_by_aa",
     "booking.line_reduced",
     "booking.fee_changed",
+    # 1.8 (AA-1073 rest): the meeting point or time changed (re-read GET /departures); AA charged the caller a
+    # departure fee (``fee``: id, amount, currency; billed on the next settlement invoice).
+    "departure.updated",
+    "departure.fee_charged",
 ]
 IncidentCode = Literal["weather", "road", "health", "political", "supplier", "other"]
 DeclineCode = Literal["sold_out", "supplier_unavailable", "minimum_not_met", "other"]
+
+
+class DepartureFeeCharge(Strict):
+    """1.8 (AA-1073 rest). A departure fee AA charged the calling agency (minimum shortfall, unreleased allotment)."""
+
+    fee_id: str = Field(max_length=64)
+    amount: str = Field(pattern=r"^-?\d+(\.\d{1,2})?$")
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
 
 
 class Event(Strict):
@@ -344,6 +362,8 @@ class Event(Strict):
     incident_code: IncidentCode | None = None
     decline_code: DeclineCode | None = None
     new_start_time: datetime | None = None
+    # 1.8 (AA-1073 rest): the fee of departure.fee_charged; null on every other event.
+    fee: DepartureFeeCharge | None = None
 
 
 class EventPage(Strict):

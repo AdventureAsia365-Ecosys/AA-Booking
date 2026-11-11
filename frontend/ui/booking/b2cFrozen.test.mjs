@@ -90,6 +90,8 @@ const GATED_ELSEWHERE = {
   // AA-1074: departure-level costs and purchase orders; the API never orders a b2c case's bookings.
   "app/(staff)/finance/_parts/DeparturesTab.tsx": /B2C history gate: ops\.write here writes departure-level costs/,
   "app/(staff)/finance/_parts/OrdersTab.tsx": /B2C history gate: the API orders the bookings of B2B cases/,
+  // AA-1073 rest: the ops sheet of a fixed departure (B2B only; it writes no case or version).
+  "app/(staff)/departures/_parts/DepartureBoardDrawer.tsx": /B2C history gate: ops\.write here writes a departure ops sheet/,
 };
 
 function filesUnder(rel) {

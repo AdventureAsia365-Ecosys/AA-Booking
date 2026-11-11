@@ -25,12 +25,24 @@ AA-1075 (bk-047):
   /bookings/{ref}/reductions`` (``app.b2b.amendments``).
 - ``GET /bookings/{ref}/vouchers`` (HTML by default, ``format=json``; ``app.b2b.vouchers``).
 - ``GET /departures/{id}/manifest`` (``ops.read``; JSON or ``format=html``; ``app.b2b.manifest``).
+
+AA-1073 rest (bk-048):
+
+- ``GET /departure-board`` (``from``, ``to``, ``country``, ``source_id``, ``status``, ``at_risk``, paged) and ``GET
+  /departure-board/{id}`` (seats by agency with their cases, ops sheet, fees, price adjustments;
+  ``app.b2b.departure_board``), ``b2b_desk.read``.
+- Ops sheet (``app.b2b.departure_ops``): ``PATCH /departures/{id}/ops`` (meeting point, time, note) and ``POST
+  /departures/{id}/staff`` / ``DELETE /departure-staff/{id}``, ``ops.write``.
+- Departure fees (``app.b2b.departure_fees``): ``GET /departure-fees``, ``POST /departures/{id}/fees``
+  (``b2b_desk.write``), ``POST /departure-fees/{id}/approve`` / ``…/reject`` (``b2b_desk.approve``, never the maker).
+- Price adjustments (``app.b2b.price_adjustments``): ``POST /departures/{id}/price-adjustments``, ``POST
+  /price-adjustments/{id}/approve`` (never the maker) and ``…/end``, ``pricing.write``.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -39,7 +51,20 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.staff import Staff, current_staff, get_pool, require
-from app.b2b import amendments, confirmation, departure_watch, desk, desk_bookings, manifest, quotes, vouchers
+from app.b2b import (
+    amendments,
+    confirmation,
+    departure_board,
+    departure_fees,
+    departure_ops,
+    departure_watch,
+    desk,
+    desk_bookings,
+    manifest,
+    price_adjustments,
+    quotes,
+    vouchers,
+)
 from app.b2b.components import LineAsk, RoomAsk
 from app.errors import NotFound
 from app.routers.b2b import QuoteLineRequest
@@ -52,6 +77,8 @@ CanWrite = Annotated[Staff, Depends(require("b2b_desk.write"))]
 CanBook = Annotated[Staff, Depends(require("b2b_desk.book"))]
 CanApprove = Annotated[Staff, Depends(require("b2b_desk.approve"))]
 CanOps = Annotated[Staff, Depends(require("ops.read"))]
+CanOpsWrite = Annotated[Staff, Depends(require("ops.write"))]
+CanPrice = Annotated[Staff, Depends(require("pricing.write"))]
 BookingRef = Annotated[str, Path(min_length=1, max_length=64, description="trip case id or code")]
 IdemKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
 LineRef = Annotated[str, Path(min_length=1, max_length=64)]
@@ -413,3 +440,175 @@ async def get_manifest(
     if format == "html":
         return manifest.html_response(doc)
     return doc
+
+
+# ── AA-1073 rest (bk-048): departure board, ops sheet, departure fees, price adjustments ──
+
+
+@router.get("/departure-board")
+async def get_departure_board(
+    _: CanRead,
+    pool: Pool,
+    start: Annotated[date | None, Query(alias="from")] = None,
+    end: Annotated[date | None, Query(alias="to")] = None,
+    country: Annotated[str | None, Query(max_length=100)] = None,
+    source_id: Annotated[str | None, Query(max_length=128)] = None,
+    status: Literal["scheduled", "guaranteed", "cancelled"] | None = None,
+    at_risk: bool = False,
+    limit: Annotated[int, Query(ge=1, le=departure_board.MAX_PAGE)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await departure_board.board(
+            conn,
+            start=start,
+            end=end,
+            country=country,
+            source_id=source_id,
+            status=status,
+            at_risk=at_risk,
+            limit=limit,
+            offset=offset,
+        )
+
+
+@router.get("/departure-board/{departure_id}")
+async def get_departure_detail(departure_id: Annotated[uuid.UUID, Path()], staff: CanRead, pool: Pool) -> dict:
+    async with pool.acquire() as conn:
+        return await departure_board.detail(conn, staff, str(departure_id))
+
+
+class OpsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    meeting_point: str | None = Field(default=None, max_length=departure_ops.MAX_POINT)
+    meeting_time: time | None = None
+    ops_note: str | None = Field(default=None, max_length=departure_ops.MAX_NOTE)
+
+
+@router.patch("/departures/{departure_id}/ops")
+async def patch_departure_ops(
+    body: OpsIn, departure_id: Annotated[uuid.UUID, Path()], staff: CanOpsWrite, pool: Pool
+) -> dict[str, Any]:
+    """Only the fields sent change; an empty text or null clears one."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_ops.update_ops(conn, staff, str(departure_id), body.model_dump(exclude_unset=True))
+
+
+class StaffIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["guide", "tour_leader", "driver"]
+    staff_user_id: str | None = Field(default=None, min_length=1, max_length=128)
+    supplier_id: uuid.UUID | None = None
+
+
+@router.post("/departures/{departure_id}/staff", status_code=201)
+async def post_departure_staff(
+    body: StaffIn, departure_id: Annotated[uuid.UUID, Path()], staff: CanOpsWrite, pool: Pool
+) -> dict[str, Any]:
+    data = body.model_dump()
+    data["supplier_id"] = str(body.supplier_id) if body.supplier_id else None
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_ops.assign(conn, staff, str(departure_id), data)
+
+
+@router.delete("/departure-staff/{assignment_id}")
+async def delete_departure_staff(
+    assignment_id: Annotated[uuid.UUID, Path()], staff: CanOpsWrite, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_ops.unassign(conn, staff, str(assignment_id))
+
+
+@router.get("/departure-fees")
+async def get_departure_fees(
+    staff: CanRead,
+    pool: Pool,
+    departure_id: uuid.UUID | None = None,
+    partner_id: uuid.UUID | None = None,
+    status: Literal["pending", "approved", "rejected"] | None = None,
+    limit: Annotated[int, Query(ge=1, le=departure_fees.MAX_PAGE)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await departure_fees.list_fees(
+            conn,
+            staff,
+            departure_id=str(departure_id) if departure_id else None,
+            partner_id=str(partner_id) if partner_id else None,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+
+class FeeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    partner_id: uuid.UUID
+    reason: Literal["min_shortfall", "allotment_unreleased", "other"]
+    seats: int = Field(ge=1, le=departure_fees.MAX_SEATS)
+    price_per_seat: Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=2, allow_inf_nan=False)]
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    note: str | None = Field(default=None, max_length=departure_fees.MAX_NOTE)
+
+
+@router.post("/departures/{departure_id}/fees", status_code=201)
+async def post_departure_fee(
+    body: FeeIn, departure_id: Annotated[uuid.UUID, Path()], staff: CanWrite, pool: Pool
+) -> dict[str, Any]:
+    """The maker step: a pending fee; another person with b2b_desk.approve approves or rejects it."""
+    data = body.model_dump()
+    data["partner_id"] = str(body.partner_id)
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_fees.create(conn, staff, str(departure_id), data)
+
+
+@router.post("/departure-fees/{fee_id}/approve")
+async def approve_departure_fee(fee_id: Annotated[uuid.UUID, Path()], staff: CanApprove, pool: Pool) -> dict:
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_fees.decide(conn, staff, str(fee_id), approve=True)
+
+
+@router.post("/departure-fees/{fee_id}/reject")
+async def reject_departure_fee(fee_id: Annotated[uuid.UUID, Path()], staff: CanApprove, pool: Pool) -> dict:
+    async with pool.acquire() as conn, conn.transaction():
+        return await departure_fees.decide(conn, staff, str(fee_id), approve=False)
+
+
+class PriceAdjustmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    adjust_pct: (
+        Annotated[Decimal, Field(ge=Decimal("-0.5"), le=1, max_digits=5, decimal_places=4, allow_inf_nan=False)] | None
+    ) = None
+    amount: Annotated[Decimal, Field(max_digits=14, decimal_places=2, allow_inf_nan=False)] | None = None
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    reason: str = Field(min_length=1, max_length=price_adjustments.MAX_REASON)
+
+
+@router.post("/departures/{departure_id}/price-adjustments", status_code=201)
+async def post_price_adjustment(
+    body: PriceAdjustmentIn, departure_id: Annotated[uuid.UUID, Path()], staff: CanPrice, pool: Pool
+) -> dict[str, Any]:
+    """The maker step: a pending adjustment (a fraction or an amount per traveller); another person approves it."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await price_adjustments.create(conn, staff, str(departure_id), body.model_dump())
+
+
+@router.post("/price-adjustments/{adjustment_id}/approve")
+async def approve_price_adjustment(
+    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanPrice, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await price_adjustments.approve(conn, staff, str(adjustment_id))
+
+
+@router.post("/price-adjustments/{adjustment_id}/end")
+async def end_price_adjustment(
+    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanPrice, pool: Pool
+) -> dict[str, Any]:
+    """A pending adjustment is rejected, one in force withdrawn."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await price_adjustments.end(conn, staff, str(adjustment_id))

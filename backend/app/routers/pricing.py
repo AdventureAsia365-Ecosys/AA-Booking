@@ -185,6 +185,12 @@ class RuleCreate(BaseModel):
     infant_flat_usd: (
         Annotated[Decimal, Field(ge=0, lt=10000, max_digits=10, decimal_places=2, allow_inf_nan=False)] | None
     ) = None
+    # bk-048 (AA-1073, bk-17): b2b and fixed_departure only; a quote made on or before start - early_days of the
+    # departure takes early_discount_pts off the margin (both or neither).
+    early_days: Annotated[int, Field(ge=1, le=365)] | None = None
+    early_discount_pts: (
+        Annotated[Decimal, Field(gt=0, lt=1, max_digits=5, decimal_places=4, allow_inf_nan=False)] | None
+    ) = None
 
 
 class FxRateCreate(BaseModel):

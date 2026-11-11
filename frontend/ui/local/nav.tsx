@@ -16,6 +16,7 @@ import {
   Building2,
   Calculator,
   CalendarDays,
+  CalendarRange,
   ClipboardList,
   Coins,
   CreditCard,
@@ -104,6 +105,8 @@ export function navGroups(): NavGroup[] {
         SUPPLIER_BILLS,
         // AA-1074 (bk-045): departure shared costs, purchase orders, profit per case / departure / agency.
         { href: "/finance", label: "Costs & profit", icon: <Coins size={ICON} />, wave: 3, shipped: true },
+        // AA-1073 rest (bk-048): the departure board (month calendar + table across trip plans).
+        { href: "/departures", label: "Departures", icon: <CalendarRange size={ICON} />, wave: 3, shipped: true },
         { href: "/trip-checks", label: "Trip Checks", icon: <SquareCheck size={ICON} />, wave: 3, shipped: true },
       ],
     },
