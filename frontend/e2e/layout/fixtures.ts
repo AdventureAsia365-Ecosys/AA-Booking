@@ -51,7 +51,7 @@ import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow,
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
 import type { ParamVersion, PolicyListing, PolicyParam } from "../../lib/api/policyParams";
 import type { ComponentSuggestions, NextStep, PlanComponents, SuggestionCandidate, Workbench, WorkbenchItem } from "../../lib/api/priceWorkbench";
-import type { HolidayEvent, PriceVersion, SeasonCalendar, SeasonCode, VersionList } from "../../lib/api/priceVersions";
+import type { HolidayEvent, Person, PlanCalendar, PriceVersion, SeasonCalendar, SeasonCode, VersionList } from "../../lib/api/priceVersions";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { Allotment, AllotmentList, Departure, DepartureList } from "../../lib/api/departures";
@@ -949,7 +949,7 @@ const WORKBENCH: Workbench = {
 };
 
 // AA-1091 (bk-052 / bk-053): a tour's price versions, the season calendars and the holiday events (invented data).
-function priceVersion(no: number, status: PriceVersion["status"], from: string, to: string, by = "it-maker"): PriceVersion {
+function priceVersion(no: number, status: PriceVersion["status"], from: string, to: string, by: Person = person("u-002", 1)): PriceVersion {
   return {
     id: `pv-${no}`,
     trip_plan_id: "tp-1",
@@ -968,7 +968,7 @@ function priceVersion(no: number, status: PriceVersion["status"], from: string, 
     created_by: by,
     created_at: "2026-11-02T08:00:00Z",
     submitted_at: status === "draft" ? null : "2026-11-02T09:00:00Z",
-    approved_by: status === "published" || status === "superseded" ? "it-checker" : null,
+    approved_by: status === "published" || status === "superseded" ? person("u-003", 2) : null,
     approved_at: status === "published" || status === "superseded" ? "2026-11-03T09:00:00Z" : null,
     rejected_by: null,
     reject_reason: null,
@@ -983,10 +983,22 @@ const PRICE_VERSIONS: VersionList = {
   items: [
     priceVersion(3, "pending", "2027-04-01", "2027-10-31"),
     priceVersion(2, "published", "2026-11-01", "2027-10-31"),
-    priceVersion(1, "superseded", "2026-01-01", "2026-10-31"),
+    priceVersion(1, "superseded", "2026-01-01", "2026-10-31", { id: "migration:bk-052", name: null }),
   ],
   in_force: [{ version_id: "pv-2", version_no: 2, from: "2026-11-01", to: "2027-10-31" }],
   calendar: { id: "cal-1", name: "Invented bay", default_season: "low" },
+};
+const PLAN_CALENDAR: PlanCalendar = {
+  source_id: "tour-1",
+  season_calendar_id: "cal-1",
+  season_calendar_name: "Invented bay",
+  request: {
+    season_calendar_id: "cal-2",
+    season_calendar_name: "Invented place 2",
+    requested_by: person("u-002", 1),
+    requested_at: NOW,
+    reason: "The tour spends most nights in the second place, so its seasons fit better",
+  },
 };
 function seasonCalendar(i: number): SeasonCalendar {
   return {
@@ -997,8 +1009,9 @@ function seasonCalendar(i: number): SeasonCalendar {
     name: i % 4 === 3 ? `Contract ${i} with a rather long supplier name for the wrap check` : `Invented place ${i}`,
     default_season: "low",
     pending_default_season: i === 2 ? "high" : null,
-    default_requested_by: i === 2 ? "it-maker" : null,
-    created_by: "system:bk_trip_plan_sync",
+    default_requested_by: i === 2 ? person("u-002", 1) : null,
+    default_request_reason: i === 2 ? "Most of the year is busy here since the new airport opened" : null,
+    created_by: { id: "system:bk_trip_plan_sync", name: null },
     ranges: i % 3,
     waiting: i % 2,
     plans: i * 3,
@@ -1017,10 +1030,14 @@ function holidayEvent(i: number): HolidayEvent {
     date_to: "2027-02-1" + (i % 8),
     status: state === "ending" ? "approved" : state,
     state,
-    created_by: "it-maker",
-    decided_by: state === "pending" ? null : "it-checker",
+    reason: "Dates from the invented national holiday calendar published for the year",
+    created_by: person("u-002", 1),
+    decided_by: state === "pending" ? null : person("u-003", 2),
     reject_reason: state === "rejected" ? "Wrong year" : null,
-    end_requested_by: state === "ending" ? "it-maker" : null,
+    withdraw_reason: null,
+    end_requested_by: state === "ending" ? person("u-004", 3) : null,
+    end_reason: state === "ending" ? "Entered twice for the same year" : null,
+    ended_by: null,
     calendars: i % 3,
   };
 }
@@ -2022,6 +2039,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "pricing/season-calendars") return ok(SEASON_CALENDARS);
   if (p === "pricing/holiday-events") return ok(HOLIDAY_EVENTS);
   if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "price-versions") return ok(PRICE_VERSIONS);
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "season-calendar") return ok(PLAN_CALENDAR);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {

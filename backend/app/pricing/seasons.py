@@ -20,7 +20,13 @@ stop-sale date goes ``on_request``, :mod:`app.b2b.quotes`).
 ``peak = false`` of the B2B quote: the cost sheet (each start-date window), the B2B quote and tariff (the line's
 service date) and the price list versions (each matrix row piece) all ask :meth:`Calendar.season_on` of the trip
 plan's calendar (``trip_plans.season_calendar_id``), so the agency price and the RRP follow one season logic.
-A plan with no calendar yet prices every date in the default ``low`` season (no uplift), exactly as before bk-053.
+
+**Until staff enter seasons** (:attr:`Calendar.configured` is false: no calendar, or one with no approved season
+range and the default ``low``), nothing prices differently from before bk-053: the B2B quote and the tariff price
+every date ``low`` (their old ``peak = false``), and the matrix keeps the old peak flags (:data:`LEGACY_PEAK`): the cost
+sheet's computed rows take the peak uplift when a 2-traveller rate's season label says "peak" (the old rule), and a
+hand row keeps the peak flag it was written with. The first approved range (or default season) of the plan's calendar
+switches the plan to the calendar.
 
 Dates are half-open ``[start, end)`` inside (d10); the API shows inclusive end dates.
 """
@@ -83,6 +89,12 @@ class Calendar:
     stop_sales: tuple[Span, ...] = ()
     name: str | None = None
 
+    @property
+    def configured(self) -> bool:
+        """True once the calendar says something about seasons: an approved season range that resolves to dates, or
+        a default season other than ``low``. Until then the old peak flags stay (see the module doc)."""
+        return bool(self.fixed or self.festive) or self.default != DEFAULT_SEASON
+
     def season_on(self, day: date) -> SeasonDay:
         """THE season function: the season code of ``day`` and whether it is a stop-sale date."""
         code = self.default
@@ -116,6 +128,15 @@ class Calendar:
 
 
 EMPTY = Calendar()
+
+
+def legacy_code(peak: bool) -> str:
+    """The season code a row of a plan whose calendar is not :attr:`~Calendar.configured` carries: its old peak flag
+    as ``peak``, else the default season."""
+    return "peak" if peak else DEFAULT_SEASON
+
+
+LEGACY_PEAK = "peak"  # the substring of a supplier rate's season label that made a computed row peak before bk-053
 
 
 @dataclass

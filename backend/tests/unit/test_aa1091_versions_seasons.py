@@ -48,6 +48,15 @@ def test_the_season_function() -> None:
     assert seasons.Calendar(default="high").season_on(_d(5, 1)).code == "high"
 
 
+def test_a_calendar_counts_once_it_says_something_about_seasons() -> None:
+    # Until then the old peak flags stay (no price moves on deploy): legacy_code keeps a row's flag as its season.
+    assert not seasons.EMPTY.configured
+    assert not seasons.Calendar(id="c-2", stop_sales=(seasons.Span(_d(7, 10), _d(7, 12)),)).configured
+    assert seasons.Calendar(id="c-3", default="high").configured
+    assert CAL.configured
+    assert (seasons.legacy_code(True), seasons.legacy_code(False)) == ("peak", "low")
+
+
 def test_segments_cuts_and_overlap() -> None:
     segs = CAL.segments(_d(1, 20), _d(3, 1))
     assert [(s.start, s.end, s.code) for s in segs] == [

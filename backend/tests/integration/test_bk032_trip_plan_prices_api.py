@@ -366,8 +366,9 @@ async def test_rows_priced_from_net_cost(client: tuple[httpx.AsyncClient, LocalC
     assert first["effective_margin"] == "0.3000" and first["priced_on"] == date.today().isoformat()
     assert first["net_amount"] == "670.00" and first["net_currency"] == "USD"
     assert second["amount"] == "1495.00"  # 25,000,000 VND = 1,000 USD; / 0.67 = 1492.54 -> 1495
-    # AA-1091 (bk-053): "peak" no longer comes from the form; the plan has no season calendar, so low season.
-    assert third["amount"] == "1000.00" and third["peak"] is False and third["season_code"] == "low"
+    # AA-1091 (bk-053): the plan has no configured season calendar, so the row keeps the peak flag it was written with
+    # (no price moves before staff enter seasons): peak: 670 / 0.64 = 1046.88 -> 1050.
+    assert third["amount"] == "1050.00" and third["peak"] is True and third["season_code"] == "peak"
 
     # A sales override above the floor is kept as the price; below the floor it needs a reason.
     above = await _publish(c, cis, {"items": [_row(**{**net, "amount": "950"})]})

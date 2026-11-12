@@ -1,11 +1,14 @@
 // lib/api/priceVersions.ts — AA-1091 (bk-052 / bk-053, root ADR 0005b d1, d2, d4, d9): price list versions of a trip
 // plan, season calendars and holiday events (backend app/routers/price_versions.py). A hand price is never overwritten:
 // a maker drafts a version, submits it with a reason (the diff and impact are frozen), a second person approves it with
-// the SHA-256 of the diff they saw. Seasons and holiday events have the same maker-checker. Dates are inclusive here.
+// the SHA-256 of the diff they saw. Seasons, holiday events and a plan's calendar have the same maker-checker, with a
+// reason on every proposal, withdrawal, removal request and rejection. Makers and checkers are people ({id, name}).
+// Dates are inclusive here.
 //
 //   GET  /booking/catalog/trip-plans/{source_id}/price-versions        versions, which prices which dates, calendar
 //   POST /booking/catalog/trip-plans/{source_id}/price-versions        new draft {copy_from, window, label...}
-//   PUT  /booking/catalog/trip-plans/{source_id}/season-calendar       the plan's sell-side calendar (trip_plan.write)
+//   GET|PUT /booking/catalog/trip-plans/{source_id}/season-calendar    the plan's calendar / ask for a change (reason)
+//   POST /booking/catalog/trip-plans/{source_id}/season-calendar/approve|reject|withdraw   a second person decides
 //   GET  /booking/catalog/price-versions?status=pending                every version waiting for approval
 //   GET|PUT /booking/catalog/price-versions/{id}                       one version / the maker saves a draft
 //   POST /booking/catalog/price-versions/{id}/submit|approve|reject|withdraw, GET …/withdraw-preview
@@ -19,6 +22,9 @@ import type { PriceRow } from "./tripPlans";
 import type { DecimalString, IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
+
+import type { Person } from "@/ui/booking/priceVersions";
+export type { Person };
 
 export const VERSION_STATUSES = ["draft", "pending", "published", "superseded", "rejected", "withdrawn"] as const;
 export type VersionStatus = (typeof VERSION_STATUSES)[number];
@@ -42,14 +48,14 @@ export interface PriceVersion {
   source: VersionSource;
   reason: string | null;
   replaces_id: string | null;
-  created_by: string;
+  created_by: Person;
   created_at: IsoDateTime;
   submitted_at: IsoDateTime | null;
-  approved_by: string | null;
+  approved_by: Person | null;
   approved_at: IsoDateTime | null;
-  rejected_by: string | null;
+  rejected_by: Person | null;
   reject_reason: string | null;
-  withdrawn_by: string | null;
+  withdrawn_by: Person | null;
   withdraw_reason: string | null;
   diff_sha256: string | null;
   row_count: number;
@@ -137,12 +143,31 @@ export const priceVersionsApi = {
   withdraw: (id: string, reason: string) =>
     bkSend<VersionDetail>(`catalog/price-versions/${enc(id)}/withdraw`, { body: { reason } }),
   withdrawPreview: (id: string) => bkGet<WithdrawPreview>(`catalog/price-versions/${enc(id)}/withdraw-preview`),
-  setCalendar: (sourceId: string, calendarId: string | null) =>
-    bkSend<{ season_calendar_id: string | null }>(`catalog/trip-plans/${enc(sourceId)}/season-calendar`, {
+  planCalendar: (sourceId: string) => bkGet<PlanCalendar>(`catalog/trip-plans/${enc(sourceId)}/season-calendar`),
+  requestCalendar: (sourceId: string, calendarId: string | null, reason: string) =>
+    bkSend<PlanCalendar>(`catalog/trip-plans/${enc(sourceId)}/season-calendar`, {
       method: "PUT",
-      body: { season_calendar_id: calendarId },
+      body: { season_calendar_id: calendarId, reason },
+    }),
+  decideCalendar: (sourceId: string, action: "approve" | "reject" | "withdraw", reason?: string) =>
+    bkSend<PlanCalendar>(`catalog/trip-plans/${enc(sourceId)}/season-calendar/${action}`, {
+      body: { reason: reason ?? null },
     }),
 };
+
+/** A plan's sell-side calendar and the change a second person still has to approve. */
+export interface PlanCalendar {
+  source_id: string;
+  season_calendar_id: string | null;
+  season_calendar_name: string | null;
+  request: {
+    season_calendar_id: string | null;
+    season_calendar_name: string | null;
+    requested_by: Person;
+    requested_at: IsoDateTime;
+    reason: string;
+  } | null;
+}
 
 // ── Seasons and holiday events ──────────────────────────────────────────────
 
@@ -157,8 +182,9 @@ export interface SeasonCalendar {
   name: string;
   default_season: SeasonCode;
   pending_default_season: SeasonCode | null;
-  default_requested_by: string | null;
-  created_by: string;
+  default_requested_by: Person | null;
+  default_request_reason: string | null;
+  created_by: Person;
   ranges: number;
   waiting: number;
   plans: number;
@@ -175,13 +201,17 @@ export interface SeasonRange {
   holiday_code: string | null;
   days_before: number;
   days_after: number;
-  note: string | null;
+  /** The maker's reason for the range (required). */
+  note: string;
   status: "pending" | "approved" | "rejected" | "withdrawn";
   state: ChangeState;
-  created_by: string;
-  decided_by: string | null;
+  created_by: Person;
+  decided_by: Person | null;
   reject_reason: string | null;
-  end_requested_by: string | null;
+  withdraw_reason: string | null;
+  end_requested_by: Person | null;
+  end_reason: string | null;
+  ended_by: Person | null;
 }
 
 export interface CalendarDetail extends SeasonCalendar {
@@ -199,12 +229,17 @@ export interface HolidayEvent {
   year: number;
   date_from: IsoDate;
   date_to: IsoDate;
+  /** The maker's reason for the event row (required). */
+  reason: string;
   status: "pending" | "approved" | "rejected" | "withdrawn";
   state: ChangeState;
-  created_by: string;
-  decided_by: string | null;
+  created_by: Person;
+  decided_by: Person | null;
   reject_reason: string | null;
-  end_requested_by: string | null;
+  withdraw_reason: string | null;
+  end_requested_by: Person | null;
+  end_reason: string | null;
+  ended_by: Person | null;
   calendars: number;
 }
 
@@ -217,7 +252,7 @@ export interface RangeBody {
   holiday_code?: string | null;
   days_before?: number;
   days_after?: number;
-  note?: string | null;
+  note: string;
 }
 
 export const seasonsApi = {
@@ -228,15 +263,15 @@ export const seasonsApi = {
   calendar: (id: string, year?: number) =>
     bkGet<CalendarDetail & { ranges: SeasonRange[] }>(`pricing/season-calendars/${enc(id)}`, { year }),
   proposeRange: (id: string, body: RangeBody) => bkSend<SeasonRange>(`pricing/season-calendars/${enc(id)}/ranges`, { body }),
-  proposeDefault: (id: string, code: SeasonCode) =>
-    bkSend<CalendarDetail>(`pricing/season-calendars/${enc(id)}/default`, { body: { default_season: code } }),
-  decideDefault: (id: string, decision: "approve" | "reject") =>
-    bkSend<CalendarDetail>(`pricing/season-calendars/${enc(id)}/default/${decision}`, { body: {} }),
+  proposeDefault: (id: string, code: SeasonCode, reason: string) =>
+    bkSend<CalendarDetail>(`pricing/season-calendars/${enc(id)}/default`, { body: { default_season: code, reason } }),
+  decideDefault: (id: string, decision: "approve" | "reject", reason?: string) =>
+    bkSend<CalendarDetail>(`pricing/season-calendars/${enc(id)}/default/${decision}`, { body: { reason: reason ?? null } }),
   decideRange: (id: string, action: ChangeAction, reason?: string) =>
     bkSend<SeasonRange>(`pricing/season-ranges/${enc(id)}/${action}`, { body: { reason: reason ?? null } }),
   events: (country?: string, year?: number) =>
     bkGet<{ items: HolidayEvent[]; countries: { iso2: string; name: string }[] }>("pricing/holiday-events", { country, year }),
-  proposeEvent: (body: { country_iso2: string; code: string; name: string; date_from: IsoDate; date_to: IsoDate }) =>
+  proposeEvent: (body: { country_iso2: string; code: string; name: string; date_from: IsoDate; date_to: IsoDate; reason: string }) =>
     bkSend<HolidayEvent>("pricing/holiday-events", { body }),
   decideEvent: (id: string, action: ChangeAction, reason?: string) =>
     bkSend<HolidayEvent>(`pricing/holiday-events/${enc(id)}/${action}`, { body: { reason: reason ?? null } }),

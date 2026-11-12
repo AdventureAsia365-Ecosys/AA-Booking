@@ -44,6 +44,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
+from app.auth import people
 from app.auth.staff import Staff
 from app.catalog import cost_sheet, trip_plan_prices, version_matrix
 from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
@@ -66,7 +67,8 @@ SELECT v.id::text AS id, v.trip_plan_id::text AS trip_plan_id, p.source_id, v.ve
 FROM booking.price_list_versions v JOIN booking.trip_plans p ON p.id = v.trip_plan_id
 """
 ROWS_SQL = """
-SELECT r.position, r.channel, r.season, r.travel_from, r.travel_to, r.pax_min, r.pax_max, r.currency::text AS currency,
+SELECT r.position, r.channel, r.season, r.peak, r.travel_from, r.travel_to, r.pax_min, r.pax_max,
+       r.currency::text AS currency,
        r.amount::text AS amount, r.rrp_amount::text AS rrp_amount, r.net_amount::text AS net_amount,
        r.net_currency::text AS net_currency, r.effective_margin::text AS effective_margin, r.priced_on, r.overridden,
        r.computed, r.child_amount::text AS child_amount, r.infant_amount::text AS infant_amount,
@@ -79,8 +81,9 @@ INSERT_ROW_SQL = """
 INSERT INTO booking.price_list_version_rows (version_id, position, channel, season, travel_from, travel_to, pax_min,
     pax_max, currency, amount, rrp_amount, net_amount, net_currency, effective_margin, priced_on, overridden,
     child_amount, infant_amount, single_supplement_amount, child_net_amount, infant_net_amount,
-    single_supplement_net_amount)
-VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+    single_supplement_net_amount, peak)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+        $23)
 """
 PAX_FIELDS = trip_plan_prices.PAX_TYPE_FIELDS
 
@@ -221,6 +224,16 @@ def _inclusive(end: date | None) -> date | None:
     return None if end is None else end - ONE_DAY
 
 
+PEOPLE = ("created_by", "approved_by", "rejected_by", "withdrawn_by")
+
+
+async def versions_out(conn: asyncpg.Connection, rows: Sequence[Any]) -> list[dict[str, Any]]:
+    """The API shape of versions, makers and checkers as people (:mod:`app.auth.people`)."""
+    out = [version_out(r) for r in rows]
+    await people.resolve(conn, out, PEOPLE)
+    return out
+
+
 def version_out(row: Any) -> dict[str, Any]:
     """The API shape of a version (inclusive end dates)."""
     out = {k: row[k] for k in row.keys() if k not in ("rows",)}
@@ -236,9 +249,10 @@ def row_out(row: Any) -> dict[str, Any]:
     out["valid_to"] = out.pop("travel_to") - ONE_DAY
     out["currency"] = out["currency"].strip()
     out["net_currency"] = (out["net_currency"] or "").strip() or None
-    # The matrix row fields the staff editor reads (the season and its peak come from the calendar, not the row).
+    # The matrix row fields the staff editor reads. The peak flag is the one the row was written with (the calendar's
+    # on its first day once the plan's calendar is configured, else the old flag kept, app.pricing.seasons).
     out["priced"] = out["net_amount"] is not None
-    out["peak"] = False
+    out["peak"] = bool(out.get("peak"))
     return out
 
 
@@ -298,7 +312,7 @@ async def list_versions(conn: asyncpg.Connection, staff: Staff, source_id: str) 
     cal = await seasons.for_plan(conn, plan["id"])
     return {
         "source_id": source_id,
-        "items": [version_out(r) for r in rows],
+        "items": await versions_out(conn, rows),
         "in_force": await in_force(conn, plan["id"], today()),
         "calendar": {"id": cal.id, "name": cal.name, "default_season": cal.default} if cal.id else None,
     }
@@ -310,7 +324,7 @@ async def get_version(conn: asyncpg.Connection, staff: Staff, version_id: str) -
     row = await _version(conn, version_id)
     extra = await conn.fetchrow("SELECT diff, impact FROM booking.price_list_versions WHERE id = $1::uuid", version_id)
     return {
-        **version_out(row),
+        **(await versions_out(conn, [row]))[0],
         "items": [row_out(r) for r in await conn.fetch(ROWS_SQL, version_id)],
         "diff": _json(extra["diff"]),
         "impact": _json(extra["impact"]),
@@ -325,7 +339,7 @@ async def pending(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
     """Every pending version (the checker's queue), oldest first."""
     _can_read(staff)
     rows = await conn.fetch(VERSION_SQL + " WHERE v.status = 'pending' ORDER BY v.submitted_at")
-    return {"items": [version_out(r) for r in rows]}
+    return {"items": await versions_out(conn, rows)}
 
 
 # ── Draft ────────────────────────────────────────────────────────────────────
@@ -389,6 +403,7 @@ def _as_input(row: dict[str, Any]) -> dict[str, Any]:
         k: row.get(k)
         for k in ("channel", "season", "valid_from", "valid_to", "pax_min", "pax_max", "currency", "amount")
     }
+    out["peak"] = bool(row.get("peak"))
     for k in PAX_FIELDS:
         if k in trip_plan_prices.PAX_TYPE_AMOUNTS:
             out[k] = _dec(row.get(k))
@@ -482,10 +497,14 @@ async def _write_rows(
     below_floor_reason: str | None,
     day: date,
 ) -> list[dict[str, Any]]:
-    """Price and store a draft's rows (replacing them): the calendar's peak on each row's first day, the same
+    """Price and store a draft's rows (replacing them): the calendar's peak on each row's first day (the row's own
+    flag while the plan's calendar is not configured, :attr:`app.pricing.seasons.Calendar.configured`), the same
     validation and pricing as the matrix form (:func:`app.catalog.trip_plan_prices.price_rows`)."""
     cal = await seasons.for_plan(conn, plan_id)
-    rows = [{**r, "computed": False, "peak": cal.season_on(r["valid_from"]).peak} for r in items]
+    rows = [
+        {**r, "computed": False, "peak": cal.season_on(r["valid_from"]).peak if cal.configured else bool(r.get("peak"))}
+        for r in items
+    ]
     final = await trip_plan_prices.price_rows(conn, rows, below_floor_reason=below_floor_reason, on=day)
     await conn.execute("DELETE FROM booking.price_list_version_rows WHERE version_id = $1::uuid", version_id)
     await conn.executemany(
@@ -509,6 +528,7 @@ async def _write_rows(
                 r["priced_on"],
                 r["overridden"],
                 *(_dec(r.get(k)) for k in PAX_FIELDS),
+                bool(r["peak"]),
             )
             for r in final
         ],

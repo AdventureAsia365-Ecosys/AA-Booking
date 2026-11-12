@@ -12,7 +12,8 @@ a version it had superseded prices its uncovered dates again.
 **The effective matrix** (``booking.trip_plan_prices``, read by the tariff, the RRP, the from price and the readiness
 report) holds the hand rows of the published versions, each row cut to the dates its version wins today and cut again
 where the plan's season calendar changes season (:mod:`app.pricing.seasons`: ``season_code`` and the ``peak`` flag of
-each piece), plus the cost sheet's computed rows around them (:mod:`app.catalog.cost_sheet`). Pure functions here; the
+each piece; while the calendar is not configured, the row's own peak flag as before bk-053), plus the cost sheet's
+computed rows around them (:mod:`app.catalog.cost_sheet`). Pure functions here; the
 one database read is :func:`hand_rows`.
 """
 
@@ -139,10 +140,11 @@ WHERE v.trip_plan_id = $1::uuid AND v.status IN ('published', 'superseded')
 # The hand rows of versions (a version migrated from the history may hold the cost sheet's computed rows as a
 # snapshot: those stay with the cost sheet). created_by only when it is a staff member (the matrix column's FK).
 VERSION_ROWS_SQL = """
-SELECT r.version_id::text AS version_id, r.position, r.channel, r.season, r.travel_from, r.travel_to, r.pax_min,
+SELECT r.version_id::text AS version_id, r.position, r.channel, r.season, r.peak, r.travel_from, r.travel_to, r.pax_min,
        r.pax_max, r.currency::text AS currency, r.amount, r.rrp_amount, r.net_amount,
        r.net_currency::text AS net_currency,
-       r.effective_margin, r.priced_on, r.overridden, r.child_amount, r.infant_amount, r.single_supplement_amount,
+       r.effective_margin, r.priced_on, r.overridden, r.computed, r.child_amount, r.infant_amount,
+       r.single_supplement_amount,
        r.child_net_amount, r.infant_net_amount, r.single_supplement_net_amount,
        CASE WHEN EXISTS (SELECT 1 FROM booking.staff_users s WHERE s.cis_user_id = v.created_by)
             THEN v.created_by END AS created_by
@@ -198,7 +200,9 @@ def matrix_row(row: Any, start: date, end: date, code: str) -> dict[str, Any]:
         "effective_margin": row["effective_margin"],
         "priced_on": row["priced_on"],
         "overridden": bool(row["overridden"]),
-        "computed": False,
+        # A row the cost sheet computed and staff overrode before versions (migrated by bk-052) stays computed and
+        # overridden, as the matrix held it; every row a staff draft writes is a plain hand row.
+        "computed": bool(row["computed"]),
         "created_by": row["created_by"],
         "version_id": row["version_id"],
         **{k: row[k] for k in PAX_FIELDS},
@@ -223,5 +227,5 @@ async def hand_rows(
     out: list[dict[str, Any]] = []
     for row in await conn.fetch(VERSION_ROWS_SQL, live) if live else []:
         for start, end, code in pieces((row["travel_from"], row["travel_to"]), wins[row["version_id"]], cal):
-            out.append(matrix_row(row, start, end, code))
+            out.append(matrix_row(row, start, end, code if cal.configured else seasons.legacy_code(row["peak"])))
     return out

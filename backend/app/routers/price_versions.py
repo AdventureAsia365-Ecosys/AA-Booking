@@ -4,10 +4,12 @@
 Versions of a plan (reads ``pricing.read``; drafts ``price_version.write``; decisions ``price_version.approve``):
 ``GET|POST /booking/catalog/trip-plans/{source_id}/price-versions``, ``GET /booking/catalog/price-versions?status=
 pending`` (the checker's queue), ``GET|PUT /booking/catalog/price-versions/{id}``, ``POST …/{id}/submit|approve|
-reject|withdraw``, ``GET …/{id}/withdraw-preview``; ``PUT /booking/catalog/trip-plans/{source_id}/season-calendar``
-(``trip_plan.write``).
+reject|withdraw``, ``GET …/{id}/withdraw-preview``. The plan's season calendar: ``GET /booking/catalog/trip-plans/
+{source_id}/season-calendar`` (``pricing.read``), ``PUT`` asks for a change with a reason (``season.write``),
+``POST …/season-calendar/approve|reject|withdraw`` (a second person with ``season.approve``; the requester withdraws).
 
-Seasons (reads ``pricing.read``; proposals ``season.write``; decisions ``season.approve``):
+Seasons (reads ``pricing.read``; proposals ``season.write``; decisions ``season.approve``; a reason on every
+proposal, withdrawal, removal request and rejection):
 ``GET|POST /booking/pricing/season-calendars``, ``GET …/{id}?year=``, ``POST …/{id}/ranges``, ``POST …/{id}/default``
 and ``…/{id}/default/approve|reject``; ``POST /booking/pricing/season-ranges/{id}/{action}``;
 ``GET|POST /booking/pricing/holiday-events``, ``POST /booking/pricing/holiday-events/{id}/{action}``. Inclusive end
@@ -35,7 +37,6 @@ Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 CanReadPrices = Annotated[Staff, Depends(require("pricing.read"))]
 CanWriteVersions = Annotated[Staff, Depends(require("price_version.write"))]
 CanApproveVersions = Annotated[Staff, Depends(require("price_version.approve"))]
-CanWritePlans = Annotated[Staff, Depends(require("trip_plan.write"))]
 CanWriteSeasons = Annotated[Staff, Depends(require("season.write"))]
 CanApproveSeasons = Annotated[Staff, Depends(require("season.approve"))]
 VersionId = Annotated[uuid.UUID, Path(description="price list version id")]
@@ -88,6 +89,15 @@ class SubmitBody(BaseModel):
     reason: str | None = Field(default=None, max_length=price_versions.REASON_MAX)
 
 
+class DecisionBody(BaseModel):
+    """A decision's reason: required to reject, withdraw, ask for a removal or reject one (checked in the service);
+    optional to approve."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=seasons_admin.REASON_MAX)
+
+
 class ApproveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -95,9 +105,12 @@ class ApproveBody(BaseModel):
 
 
 class PlanCalendarBody(BaseModel):
+    """Ask for another calendar of the plan (None = no calendar), with the reason a second person reads."""
+
     model_config = ConfigDict(extra="forbid")
 
     season_calendar_id: uuid.UUID | None
+    reason: Reason
 
 
 # ── Versions ─────────────────────────────────────────────────────────────────
@@ -115,13 +128,34 @@ async def create_version(body: DraftIn, source_id: SourceId, staff: CanWriteVers
         return await price_versions.create_draft(conn, staff, source_id, body.model_dump())
 
 
+@router.get("/booking/catalog/trip-plans/{source_id}/season-calendar")
+async def get_plan_calendar(source_id: SourceId, staff: CanReadPrices, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await seasons_admin.plan_calendar(conn, source_id)
+
+
 @router.put("/booking/catalog/trip-plans/{source_id}/season-calendar")
-async def set_plan_calendar(
-    body: PlanCalendarBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
+async def request_plan_calendar(
+    body: PlanCalendarBody, source_id: SourceId, staff: CanWriteSeasons, pool: Pool
 ) -> dict[str, Any]:
+    """Ask for another season calendar of the plan; it applies once a second person approves it."""
     cal = str(body.season_calendar_id) if body.season_calendar_id else None
     async with pool.acquire() as conn, conn.transaction():
-        return await seasons_admin.set_plan_calendar(conn, staff, source_id, cal)
+        return await seasons_admin.request_plan_calendar(conn, staff, source_id, cal, body.reason)
+
+
+@router.post("/booking/catalog/trip-plans/{source_id}/season-calendar/{action}")
+async def decide_plan_calendar(
+    source_id: SourceId,
+    action: Literal["approve", "reject", "withdraw"],
+    body: DecisionBody,
+    staff: CanReadPrices,
+    pool: Pool,
+) -> dict[str, Any]:
+    """Permissions by action in the service: approve / reject season.approve (never the requester), withdraw the
+    requester (season.write). A reason is required to reject or withdraw."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await seasons_admin.decide_plan_calendar(conn, staff, source_id, action, body.reason)
 
 
 @router.get("/booking/catalog/price-versions")
@@ -208,19 +242,14 @@ class RangeIn(BaseModel):
     holiday_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{1,39}$")
     days_before: int = Field(default=0, ge=0, le=60)
     days_after: int = Field(default=0, ge=0, le=60)
-    note: str | None = Field(default=None, max_length=seasons_admin.REASON_MAX)
+    note: str = Field(min_length=1, max_length=seasons_admin.REASON_MAX, description="why the range (required)")
 
 
 class DefaultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     default_season: Season
-
-
-class DecisionBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    reason: str | None = Field(default=None, max_length=seasons_admin.REASON_MAX)
+    reason: Reason
 
 
 Action = Literal["approve", "reject", "withdraw", "end", "end_approve", "end_reject"]
@@ -260,15 +289,22 @@ async def propose_range(calendar_id: Ident, body: RangeIn, staff: CanWriteSeason
 @router.post("/booking/pricing/season-calendars/{calendar_id}/default")
 async def propose_default(calendar_id: Ident, body: DefaultIn, staff: CanWriteSeasons, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        return await seasons_admin.propose_default(conn, staff, str(calendar_id), body.default_season)
+        return await seasons_admin.propose_default(conn, staff, str(calendar_id), body.default_season, body.reason)
 
 
 @router.post("/booking/pricing/season-calendars/{calendar_id}/default/{decision}")
 async def decide_default(
-    calendar_id: Ident, decision: Literal["approve", "reject"], staff: CanApproveSeasons, pool: Pool
+    calendar_id: Ident,
+    decision: Literal["approve", "reject"],
+    body: DecisionBody,
+    staff: CanApproveSeasons,
+    pool: Pool,
 ) -> dict[str, Any]:
+    """A reject needs a reason."""
     async with pool.acquire() as conn, conn.transaction():
-        return await seasons_admin.decide_default(conn, staff, str(calendar_id), approve=decision == "approve")
+        return await seasons_admin.decide_default(
+            conn, staff, str(calendar_id), approve=decision == "approve", reason=body.reason
+        )
 
 
 @router.post("/booking/pricing/season-ranges/{range_id}/{action}")
@@ -291,6 +327,7 @@ class EventIn(BaseModel):
     name: str = Field(min_length=1, max_length=seasons_admin.NAME_MAX)
     date_from: date
     date_to: date
+    reason: Reason
 
 
 @router.get("/booking/pricing/holiday-events")

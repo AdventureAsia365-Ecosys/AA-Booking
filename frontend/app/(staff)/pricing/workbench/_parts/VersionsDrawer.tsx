@@ -6,13 +6,22 @@
 // above the policy threshold, below-floor flagged) and the impact, then approves (the diff's SHA-256 goes with it) or
 // rejects with a reason; a published version is withdrawn by a second person after the dialog shows which version then
 // prices each date. Buttons follow ui/booking/priceVersions.ts; the API decides (403 maker_checker, 409 diff_changed /
-// pending_exists). Text in versions.messages.ts (the page's language).
+// pending_exists). The tour's season calendar changes through a request with a reason that a second person approves.
+// People show by name (ui/booking/priceVersions.ts personText). Text in versions.messages.ts (the page's language).
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
-import { priceVersionsApi, seasonsApi, type DiffRow, type PriceVersion, type VersionDetail } from "@/lib/api/priceVersions";
+import {
+  priceVersionsApi,
+  seasonsApi,
+  type DiffRow,
+  type Person,
+  type PlanCalendar,
+  type PriceVersion,
+  type VersionDetail,
+} from "@/lib/api/priceVersions";
 import {
   Button,
   ConfirmDialog,
@@ -35,7 +44,7 @@ import {
   useToast,
 } from "@/ui";
 import { draftsFrom, draftsToBody, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
-import { VERSION_TONE, changeText, versionActions } from "@/ui/booking/priceVersions";
+import { VERSION_TONE, changeText, personText, versionActions } from "@/ui/booking/priceVersions";
 import { PriceMatrixEditor } from "../../../catalog/trip-plans/_parts/PriceMatrixEditor";
 import { V, type VersionMessage } from "./versions.messages";
 
@@ -62,8 +71,21 @@ export function PlanTabs({ active, onTab }: { active: Tab; onTab: (tab: Tab) => 
   );
 }
 
+/** Who made or decided a change: the name, a label for the migration or the catalog sync, the id as a fallback. */
+function useWho(): (p: Person | null | undefined) => string {
+  const t = useT(V);
+  return (p) =>
+    personText(p, {
+      migration: t("byMigration") as string,
+      system: t("bySync") as string,
+      seed: t("bySeed") as string,
+      nobody: "—",
+    });
+}
+
 function VersionCard({ v, onOpen }: { v: PriceVersion; onOpen: () => void }) {
   const t = useT(V);
+  const who = useWho();
   return (
     <Pressable onClick={onOpen} testId="version-card">
       <span className="flex w-full min-w-0 flex-col gap-1 rounded-md border border-line bg-card px-3 py-2.5 text-left hover:border-accent-border">
@@ -74,7 +96,7 @@ function VersionCard({ v, onOpen }: { v: PriceVersion; onOpen: () => void }) {
         {v.source === "import" && <Pill tone="info">{t("source_import")}</Pill>}
       </span>
       <span className="text-xs text-muted">
-        {t("window", formatDay(v.travel_from), formatDay(v.travel_to))} · {t("rows", v.row_count)} · {t("by", v.created_by)}
+        {t("window", formatDay(v.travel_from), formatDay(v.travel_to))} · {t("rows", v.row_count)} · {t("by", who(v.created_by))}
       </span>
       {v.reason && <span className="break-words text-xs text-body">{v.reason}</span>}
       </span>
@@ -322,7 +344,7 @@ function Decisions({ detail, onDone }: { detail: VersionDetail; onDone: () => vo
     onError: (err) => toast.error(errorText(err, t("failed"))),
   });
   if (!actions.length) {
-    return detail.status === "pending" && detail.created_by === me ? <p className="text-xs text-muted">{t("ownVersion")}</p> : null;
+    return detail.status === "pending" && detail.created_by.id === me ? <p className="text-xs text-muted">{t("ownVersion")}</p> : null;
   }
   const withdrawBody = (
     <span className="flex flex-col gap-1.5">
@@ -397,6 +419,7 @@ function Decisions({ detail, onDone }: { detail: VersionDetail; onDone: () => vo
 
 function VersionPanel({ id, onBack }: { id: string; onBack: () => void }) {
   const t = useT(V);
+  const who = useWho();
   const me = useStaff().cis_user_id;
   const canWrite = useCan("price_version.write");
   const q = useQuery({ queryKey: ["price-versions", "one", id], queryFn: () => priceVersionsApi.get(id) });
@@ -422,14 +445,14 @@ function VersionPanel({ id, onBack }: { id: string; onBack: () => void }) {
               {d.sale_from || d.sale_to ? ` · ${t("sale", formatDay(d.sale_from), formatDay(d.sale_to))}` : ""}
             </span>
             <span className="text-xs text-muted">
-              {t("madeBy", d.created_by)}
-              {d.approved_by ? ` · ${t("approvedBy", d.approved_by)}` : ""}
+              {t("madeBy", who(d.created_by))}
+              {d.approved_by ? ` · ${t("approvedBy", who(d.approved_by))}` : ""}
             </span>
             {d.reason && <span className="break-words text-[13px] text-body">{d.reason}</span>}
-            {d.rejected_by && <span className="text-xs text-danger">{t("rejectedBy", d.rejected_by, d.reject_reason ?? "")}</span>}
-            {d.withdrawn_by && <span className="text-xs text-muted">{t("withdrawnBy", d.withdrawn_by, d.withdraw_reason ?? "")}</span>}
+            {d.rejected_by && <span className="text-xs text-danger">{t("rejectedBy", who(d.rejected_by), d.reject_reason ?? "")}</span>}
+            {d.withdrawn_by && <span className="text-xs text-muted">{t("withdrawnBy", who(d.withdrawn_by), d.withdraw_reason ?? "")}</span>}
           </div>
-          {d.status === "draft" && d.created_by === me && canWrite ? (
+          {d.status === "draft" && d.created_by.id === me && canWrite ? (
             <DraftEditor key={d.id + d.row_count} detail={d} onDone={onBack} />
           ) : (
             <>
@@ -441,6 +464,126 @@ function VersionPanel({ id, onBack }: { id: string; onBack: () => void }) {
         </>
       )}
     </div>
+  );
+}
+
+/** The tour's season calendar: a change is a request with a reason; a second person (season.approve) approves or
+ *  rejects it, the requester may withdraw it. */
+function PlanCalendarField({ sourceId }: { sourceId: string }) {
+  const t = useT(V);
+  const toast = useToast();
+  const qc = useQueryClient();
+  const who = useWho();
+  const me = useStaff().cis_user_id;
+  const canAsk = useCan("season.write");
+  const canApprove = useCan("season.approve");
+  const [target, setTarget] = useState<string | null | undefined>(undefined);
+  const [open, setOpen] = useState<"approve" | "reject" | "withdraw" | null>(null);
+  const plan = useQuery({ queryKey: ["price-versions", "calendar", sourceId], queryFn: () => priceVersionsApi.planCalendar(sourceId) });
+  const calendars = useQuery({
+    queryKey: ["season-calendars", "destination"],
+    queryFn: () => seasonsApi.calendars("destination"),
+    staleTime: 60_000,
+  });
+  const done = (msg: string) => (out: PlanCalendar) => {
+    qc.setQueryData(["price-versions", "calendar", sourceId], out);
+    qc.invalidateQueries({ queryKey: ["price-versions", "plan", sourceId] });
+    toast.success(msg);
+    setTarget(undefined);
+    setOpen(null);
+  };
+  const ask = useMutation({
+    mutationFn: ({ id, reason }: { id: string | null; reason: string }) => priceVersionsApi.requestCalendar(sourceId, id, reason),
+    onSuccess: done(t("calendarAsked") as string),
+    onError: (err) => toast.error(errorText(err, t("failed"))),
+  });
+  const decide = useMutation({
+    mutationFn: ({ action, reason }: { action: "approve" | "reject" | "withdraw"; reason?: string }) =>
+      priceVersionsApi.decideCalendar(sourceId, action, reason),
+    onSuccess: (out, { action }) => done(t(action === "approve" ? "approved" : action === "reject" ? "rejected" : "withdrawn") as string)(out),
+    onError: (err) => toast.error(errorText(err, t("failed"))),
+  });
+  const data = plan.data;
+  const request = data?.request ?? null;
+  const nameOf = (id: string | null | undefined, name?: string | null) =>
+    id ? (name ?? calendars.data?.items.find((c) => c.id === id)?.name ?? id) : (t("calendarNone") as string);
+  const mine = request?.requested_by.id === me;
+  return (
+    <Field label={t("calendar")} hint={t("calendarHint")}>
+      <div className="flex min-w-0 flex-col gap-2" data-testid="plan-calendar">
+        <Select
+          value={data?.season_calendar_id ?? ""}
+          disabled={!canAsk || !data || !!request || ask.isPending}
+          onChange={(e) => setTarget(e.target.value || null)}
+        >
+          <option value="">{t("calendarNone")}</option>
+          {(calendars.data?.items ?? []).map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
+        {request && (
+          <div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-line bg-card px-3 py-2" data-testid="plan-calendar-request">
+            <span className="flex flex-wrap items-center gap-2 text-[13px] text-body">
+              <Pill tone="warning">{t("status_pending")}</Pill>
+              <span className="min-w-0 break-words">
+                {t("calendarPending", nameOf(request.season_calendar_id, request.season_calendar_name), who(request.requested_by))}
+              </span>
+            </span>
+            <span className="break-words text-xs text-body">{request.reason}</span>
+            <div className="flex flex-wrap gap-2">
+              {canApprove && !mine && (
+                <>
+                  <Button size="sm" variant="primary" onClick={() => setOpen("approve")}>
+                    {t("calendarApprove")}
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setOpen("reject")}>
+                    {t("calendarReject")}
+                  </Button>
+                </>
+              )}
+              {canAsk && mine && (
+                <Button size="sm" variant="ghost" onClick={() => setOpen("withdraw")}>
+                  {t("calendarWithdraw")}
+                </Button>
+              )}
+            </div>
+            {mine && <span className="text-xs text-muted">{t("calendarOwn")}</span>}
+          </div>
+        )}
+      </div>
+      <ConfirmDialog
+        open={target !== undefined}
+        onClose={() => setTarget(undefined)}
+        onConfirm={(reason) => ask.mutate({ id: target ?? null, reason })}
+        title={t("calendarAskTitle")}
+        body={t("calendarAskBody", nameOf(target))}
+        confirmLabel={t("calendarAsk")}
+        reason={{ label: t("reasonLabel"), required: true, maxLength: 300 }}
+        busy={ask.isPending}
+      />
+      <ConfirmDialog
+        open={open === "approve"}
+        onClose={() => setOpen(null)}
+        onConfirm={() => decide.mutate({ action: "approve" })}
+        title={t("calendarApprove")}
+        body={t("calendarApproveBody", nameOf(request?.season_calendar_id, request?.season_calendar_name))}
+        confirmLabel={t("approve")}
+        busy={decide.isPending}
+      />
+      <ConfirmDialog
+        open={open === "reject" || open === "withdraw"}
+        onClose={() => setOpen(null)}
+        onConfirm={(reason) => decide.mutate({ action: open === "withdraw" ? "withdraw" : "reject", reason })}
+        title={t(open === "withdraw" ? "calendarWithdraw" : "calendarReject")}
+        body={request?.reason ?? ""}
+        confirmLabel={t(open === "withdraw" ? "withdraw" : "reject")}
+        reason={{ label: t("reasonLabel"), required: true, maxLength: 300 }}
+        busy={decide.isPending}
+        danger
+      />
+    </Field>
   );
 }
 
@@ -459,25 +602,14 @@ export function VersionsDrawer({
   const toast = useToast();
   const qc = useQueryClient();
   const canWrite = useCan("price_version.write");
-  const canPlan = useCan("trip_plan.write");
   const [selected, setSelected] = useState<string | null>(null);
   const list = useQuery({ queryKey: ["price-versions", "plan", sourceId], queryFn: () => priceVersionsApi.list(sourceId) });
-  const calendars = useQuery({
-    queryKey: ["season-calendars", "destination"],
-    queryFn: () => seasonsApi.calendars("destination"),
-    staleTime: 60_000,
-  });
   const create = useMutation({
     mutationFn: () => priceVersionsApi.create(sourceId, { copy_from: "in_force" }),
     onSuccess: (v) => {
       qc.invalidateQueries({ queryKey: ["price-versions"] });
       setSelected(v.id);
     },
-    onError: (err) => toast.error(errorText(err, t("failed"))),
-  });
-  const setCalendar = useMutation({
-    mutationFn: (id: string | null) => priceVersionsApi.setCalendar(sourceId, id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["price-versions", "plan", sourceId] }),
     onError: (err) => toast.error(errorText(err, t("failed"))),
   });
   const data = list.data;
@@ -506,20 +638,7 @@ export function VersionsDrawer({
                     <span className="text-[13px] text-muted">{t("inForceNone")}</span>
                   )}
                 </section>
-                <Field label={t("calendar")} hint={t("calendarHint")}>
-                  <Select
-                    value={data.calendar?.id ?? ""}
-                    disabled={!canPlan || setCalendar.isPending}
-                    onChange={(e) => setCalendar.mutate(e.target.value || null)}
-                  >
-                    <option value="">{t("calendarNone")}</option>
-                    {(calendars.data?.items ?? []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                <PlanCalendarField sourceId={sourceId} />
                 <section className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-[13px] font-semibold text-ink">{t("versions")}</h3>

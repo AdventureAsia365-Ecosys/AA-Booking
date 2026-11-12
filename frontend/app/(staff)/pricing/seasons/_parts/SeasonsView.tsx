@@ -4,8 +4,9 @@
 // what waits for approval and how many tours use it. A calendar opens in a drawer: the seasons of a year as the price
 // code sees them (festive ranges from holiday events resolved, stop-sale shown apart), its ranges with their state, the
 // season of the other dates, and a form to propose a range (fixed dates, or a festive range that follows a holiday
-// event with days before and after). Every change waits for a second person (buttons from ui/booking/priceVersions.ts;
-// the API decides: 403 maker_checker, 409 range_overlaps). Own language switch (English default; messages.ts).
+// event with days before and after). Every change waits for a second person and carries a reason (buttons from
+// ui/booking/priceVersions.ts; the API decides: 403 maker_checker, 409 range_overlaps); people show by name. Own
+// language switch (English default; messages.ts).
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ import {
   SEASON_CODES,
   seasonsApi,
   type ChangeAction,
+  type Person,
   type RangeBody,
   type SeasonCalendar,
   type SeasonCode,
@@ -45,11 +47,18 @@ import {
   useToast,
   type ColumnDef,
 } from "@/ui";
-import { CHANGE_TONE, SEASON_TONE, changeActions } from "@/ui/booking/priceVersions";
+import { CHANGE_TONE, SEASON_TONE, changeActions, needsReason, personText } from "@/ui/booking/priceVersions";
 import { S, type SeasonMessage } from "./messages";
 
 function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/** Who made or decided a change: the name, a label for the catalog sync or migrated data, the id as a fallback. */
+export function useWho(): (p: Person | null | undefined) => string {
+  const t = useT(S);
+  return (p) =>
+    personText(p, { migration: t("byMigration") as string, system: t("bySync") as string, seed: t("bySeed") as string, nobody: "—" });
 }
 
 function SeasonPill({ code }: { code: string }) {
@@ -57,20 +66,20 @@ function SeasonPill({ code }: { code: string }) {
   return <Pill tone={SEASON_TONE[code] ?? "neutral"}>{t(`season_${code}` as SeasonMessage) as string}</Pill>;
 }
 
-/** The buttons of one range or holiday event in its state, with a reason dialog for a rejection. */
+/** The buttons of one range or holiday event in its state; every action but an approval asks for its reason. */
 export function ChangeButtons({
   item,
   onAct,
   busy,
 }: {
-  item: { state: SeasonRange["state"]; created_by: string; end_requested_by: string | null };
+  item: { state: SeasonRange["state"]; created_by: Person; end_requested_by: Person | null };
   onAct: (action: ChangeAction, reason?: string) => void;
   busy: boolean;
 }) {
   const t = useT(S);
   const me = useStaff().cis_user_id;
   const actions = changeActions(item, me, useCan("season.write"), useCan("season.approve"));
-  const [rejecting, setRejecting] = useState(false);
+  const [asking, setAsking] = useState<ChangeAction | null>(null);
   if (!actions.length) return null;
   return (
     <span className="flex flex-wrap gap-1.5">
@@ -80,22 +89,24 @@ export function ChangeButtons({
           size="sm"
           variant={a === "approve" || a === "end_approve" ? "primary" : "secondary"}
           disabled={busy}
-          onClick={() => (a === "reject" ? setRejecting(true) : onAct(a))}
+          onClick={() => (needsReason(a) ? setAsking(a) : onAct(a))}
         >
           {t(`act_${a}` as SeasonMessage) as string}
         </Button>
       ))}
       <ConfirmDialog
-        open={rejecting}
-        onClose={() => setRejecting(false)}
+        open={asking !== null}
+        onClose={() => setAsking(null)}
         onConfirm={(reason) => {
-          setRejecting(false);
-          onAct("reject", reason);
+          const action = asking;
+          setAsking(null);
+          if (action) onAct(action, reason);
         }}
-        title={t("rejectTitle")}
-        confirmLabel={t("act_reject")}
+        title={asking === "reject" ? t("rejectTitle") : (t(`act_${asking ?? "reject"}` as SeasonMessage) as string)}
+        body={t("reasonBody")}
+        confirmLabel={t(`act_${asking ?? "reject"}` as SeasonMessage) as string}
         reason={{ label: t("reasonLabel"), required: true, maxLength: 300 }}
-        danger
+        danger={asking === "reject" || asking === "end_reject"}
       />
     </span>
   );
@@ -127,9 +138,9 @@ function RangeForm({ calendarId, onDone }: { calendarId: string; onDone: () => v
             holiday_code: event,
             days_before: Number(before) || 0,
             days_after: Number(after) || 0,
-            note: note.trim() || null,
+            note: note.trim(),
           }
-        : { kind, season_code: kind === "season" ? code : null, date_from: first, date_to: last, note: note.trim() || null };
+        : { kind, season_code: kind === "season" ? code : null, date_from: first, date_to: last, note: note.trim() };
       return seasonsApi.proposeRange(calendarId, body);
     },
     onSuccess: () => {
@@ -204,13 +215,13 @@ function RangeForm({ calendarId, onDone }: { calendarId: string; onDone: () => v
           </Field>
         </div>
       )}
-      <Field label={t("note")}>
+      <Field label={t("note")} hint={t("noteHint")} required>
         <Input maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
       <Button
         className="self-start"
         variant="primary"
-        disabled={propose.isPending || (followEvent ? !country || !event : !first || !last)}
+        disabled={propose.isPending || !note.trim() || (followEvent ? !country || !event : !first || !last)}
         onClick={() => propose.mutate()}
       >
         {t("propose")}
@@ -229,6 +240,8 @@ function CalendarDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [adding, setAdding] = useState(false);
   const [code, setCode] = useState<SeasonCode>("low");
+  const [asking, setAsking] = useState<"propose" | "reject" | null>(null);
+  const who = useWho();
   const q = useQuery({ queryKey: ["season-calendars", "one", id, year], queryFn: () => seasonsApi.calendar(id, year) });
   const refresh = () => qc.invalidateQueries({ queryKey: ["season-calendars"] });
   const act = useMutation({
@@ -241,10 +254,11 @@ function CalendarDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     onError: (err) => toast.error(errorText(err, t("failed"))),
   });
   const def = useMutation({
-    mutationFn: (what: "propose" | "approve" | "reject") =>
-      what === "propose" ? seasonsApi.proposeDefault(id, code) : seasonsApi.decideDefault(id, what),
+    mutationFn: ({ what, reason }: { what: "propose" | "approve" | "reject"; reason?: string }) =>
+      what === "propose" ? seasonsApi.proposeDefault(id, code, reason ?? "") : seasonsApi.decideDefault(id, what, reason),
     onSuccess: () => {
       toast.success(t("done"));
+      setAsking(null);
       refresh();
     },
     onError: (err) => toast.error(errorText(err, t("failed"))),
@@ -288,19 +302,22 @@ function CalendarDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               <span className="flex flex-wrap items-center gap-2">
                 <SeasonPill code={d.default_season} />
                 {d.pending_default_season && (
-                  <span className="text-xs text-muted">
-                    {t("defaultPending", t(`season_${d.pending_default_season}` as SeasonMessage) as string, d.default_requested_by ?? "")}
+                  <span className="flex min-w-0 flex-col text-xs text-muted">
+                    <span>
+                      {t("defaultPending", t(`season_${d.pending_default_season}` as SeasonMessage) as string, who(d.default_requested_by))}
+                    </span>
+                    {d.default_request_reason && <span className="break-words text-body">{t("whyLine", d.default_request_reason)}</span>}
                   </span>
                 )}
               </span>
               {d.pending_default_season
                 ? canApprove &&
-                  d.default_requested_by !== me && (
+                  d.default_requested_by?.id !== me && (
                     <span className="flex flex-wrap gap-1.5">
-                      <Button size="sm" variant="primary" disabled={def.isPending} onClick={() => def.mutate("approve")}>
+                      <Button size="sm" variant="primary" disabled={def.isPending} onClick={() => def.mutate({ what: "approve" })}>
                         {t("approveDefault")}
                       </Button>
-                      <Button size="sm" variant="secondary" disabled={def.isPending} onClick={() => def.mutate("reject")}>
+                      <Button size="sm" variant="secondary" disabled={def.isPending} onClick={() => setAsking("reject")}>
                         {t("rejectDefault")}
                       </Button>
                     </span>
@@ -314,11 +331,24 @@ function CalendarDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                           </option>
                         ))}
                       </Select>
-                      <Button size="sm" variant="secondary" disabled={def.isPending || code === d.default_season} onClick={() => def.mutate("propose")}>
+                      <Button size="sm" variant="secondary" disabled={def.isPending || code === d.default_season} onClick={() => setAsking("propose")}>
                         {t("proposeDefault")}
                       </Button>
                     </span>
                   )}
+              <ConfirmDialog
+                open={asking !== null}
+                onClose={() => setAsking(null)}
+                onConfirm={(reason) => asking && def.mutate({ what: asking, reason })}
+                title={
+                  asking === "reject" ? t("rejectTitle") : t("defaultAskTitle", t(`season_${code}` as SeasonMessage) as string)
+                }
+                body={t("reasonBody")}
+                confirmLabel={asking === "reject" ? t("rejectDefault") : t("proposeDefault")}
+                reason={{ label: t("reasonLabel"), required: true, maxLength: 300 }}
+                busy={def.isPending}
+                danger={asking === "reject"}
+              />
             </section>
             <section className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -343,11 +373,14 @@ function CalendarDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                       </span>
                       <Pill tone={CHANGE_TONE[r.state] ?? "neutral"}>{t(`state_${r.state}` as SeasonMessage) as string}</Pill>
                     </span>
-                    <span className="text-xs text-muted">
-                      {t("byWho", r.created_by)}
-                      {r.note ? ` · ${r.note}` : ""}
+                    <span className="break-words text-xs text-muted">
+                      {t("byWho", who(r.created_by))} · {r.note}
                       {r.reject_reason ? ` · ${r.reject_reason}` : ""}
+                      {r.withdraw_reason ? ` · ${t("withdrawnLine", r.withdraw_reason)}` : ""}
                     </span>
+                    {r.end_requested_by && r.end_reason && (
+                      <span className="break-words text-xs text-muted">{t("endLine", who(r.end_requested_by), r.end_reason)}</span>
+                    )}
                     <ChangeButtons item={r} busy={act.isPending} onAct={(action, reason) => act.mutate({ rangeId: r.id, action, reason })} />
                   </li>
                 ))}

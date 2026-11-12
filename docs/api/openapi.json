@@ -2901,6 +2901,7 @@
       },
       "DecisionBody": {
         "additionalProperties": false,
+        "description": "A decision's reason: required to reject, withdraw, ask for a removal or reject one (checked in the service);\noptional to approve.",
         "properties": {
           "reason": {
             "anyOf": [
@@ -2950,10 +2951,17 @@
             ],
             "title": "Default Season",
             "type": "string"
+          },
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
           }
         },
         "required": [
-          "default_season"
+          "default_season",
+          "reason"
         ],
         "title": "DefaultIn",
         "type": "object"
@@ -3981,6 +3989,12 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -3988,7 +4002,8 @@
           "code",
           "name",
           "date_from",
-          "date_to"
+          "date_to",
+          "reason"
         ],
         "title": "EventIn",
         "type": "object"
@@ -7040,7 +7055,14 @@
       },
       "PlanCalendarBody": {
         "additionalProperties": false,
+        "description": "Ask for another calendar of the plan (None = no calendar), with the reason a second person reads.",
         "properties": {
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
           "season_calendar_id": {
             "anyOf": [
               {
@@ -7055,7 +7077,8 @@
           }
         },
         "required": [
-          "season_calendar_id"
+          "season_calendar_id",
+          "reason"
         ],
         "title": "PlanCalendarBody",
         "type": "object"
@@ -8253,16 +8276,11 @@
             "type": "string"
           },
           "note": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
+            "description": "why the range (required)",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
           },
           "season_code": {
             "anyOf": [
@@ -8282,6 +8300,9 @@
             "title": "Season Code"
           }
         },
+        "required": [
+          "note"
+        ],
         "title": "RangeIn",
         "type": "object"
       },
@@ -19605,8 +19626,59 @@
       }
     },
     "/booking/catalog/trip-plans/{source_id}/season-calendar": {
+      "get": {
+        "operationId": "get_plan_calendar_booking_catalog_trip_plans__source_id__season_calendar_get",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plan Calendar Booking Catalog Trip Plans  Source Id  Season Calendar Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Plan Calendar",
+        "tags": [
+          "price-versions"
+        ]
+      },
       "put": {
-        "operationId": "set_plan_calendar_booking_catalog_trip_plans__source_id__season_calendar_put",
+        "description": "Ask for another season calendar of the plan; it applies once a second person approves it.",
+        "operationId": "request_plan_calendar_booking_catalog_trip_plans__source_id__season_calendar_put",
         "parameters": [
           {
             "description": "CIS catalog source_id (catalog.tour.v1)",
@@ -19637,7 +19709,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Set Plan Calendar Booking Catalog Trip Plans  Source Id  Season Calendar Put",
+                  "title": "Response Request Plan Calendar Booking Catalog Trip Plans  Source Id  Season Calendar Put",
                   "type": "object"
                 }
               }
@@ -19660,7 +19732,84 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Set Plan Calendar",
+        "summary": "Request Plan Calendar",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/season-calendar/{action}": {
+      "post": {
+        "description": "Permissions by action in the service: approve / reject season.approve (never the requester), withdraw the\nrequester (season.write). A reason is required to reject or withdraw.",
+        "operationId": "decide_plan_calendar_booking_catalog_trip_plans__source_id__season_calendar__action__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "enum": [
+                "approve",
+                "reject",
+                "withdraw"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          },
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Plan Calendar Booking Catalog Trip Plans  Source Id  Season Calendar  Action  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Plan Calendar",
         "tags": [
           "price-versions"
         ]
@@ -23919,6 +24068,7 @@
     },
     "/booking/pricing/season-calendars/{calendar_id}/default/{decision}": {
       "post": {
+        "description": "A reject needs a reason.",
         "operationId": "decide_default_booking_pricing_season_calendars__calendar_id__default__decision__post",
         "parameters": [
           {
@@ -23947,6 +24097,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

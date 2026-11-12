@@ -956,9 +956,13 @@ forms' services.
   the hand rows of the winning versions cut to the dates they win and where the plan's calendar changes season
   (`version_id`, `season_code`, `peak`), then the cost sheet's computed rows around them (`version_id` NULL; step 5
   turns them into `cost_sheet` versions with the auto-publish rule). A plan with no published version keeps unversioned
-  hand rows written before the code (transition only).
+  hand rows written before the code (transition only). A version row keeps its own `peak` flag and, when migrated
+  from a computed row a person overrode, its `computed` flag.
 - bk-052 migrated each plan's price history into withdrawn past versions and the rows in force into its latest
-  version, published (the matrix unchanged; `test_aa1091_price_versions` proves the prices before and after).
+  version, published (the matrix unchanged; `test_aa1091_price_versions` proves every price column, the from price and
+  a B2B quote line before and after the migration and the first rebuild).
+- Makers and checkers come back from the API as people (`{id, name}` from the staff directory, `app/auth/people.py`;
+  a `migration:` / `system:` / `seed:` marker has no name and the admin shows a label for it).
 - The workbook import writes its Prices sheet as a **draft** version per tour (idempotent: rows equal to the prices
   in force, or a file already imported, write nothing; rows priced from a net cost stay in the draft unless a file row
   covers them); the maker submits it from the tour's Versions tab.
@@ -972,18 +976,28 @@ function), `app/pricing/seasons_admin.py`, pages Pricing → **Seasons** and Pri
 
 - A calendar belongs to a destination (the sell-side seasons a plan uses: `trip_plans.season_calendar_id`, defaulted
   by `bk_trip_plan_sync` to the calendar of its first day's destination, `catalog.v_tour_place.destination_id`, a batch
-  of 50 plans per run, the empty calendar made when missing; staff change it on the Versions tab) or to a supplier
+  of 50 plans per run, the empty calendar made when missing; staff ask for another one on the Versions tab with a
+  reason, `PUT …/trip-plans/{source_id}/season-calendar`, and it applies once a second person with `season.approve`
+  approves it, `POST …/season-calendar/approve|reject|withdraw`: the calendar moves the plan's peak uplift, festive
+  quote validity and stop-sale) or to a supplier
   contract (stored; the cost sheet reads contract seasons in a later step). Ranges: `low` / `high` / `peak` /
   `festive` with fixed dates (never overlapping inside a calendar, 409 `range_overlaps` at proposal and approval) or a
   festive range that names a holiday event (country + code, days before / after) and takes its dates from each
   year's approved event row, lying over the fixed ranges on its days; stop-sale ranges are an overlay (availability
   only). A date no range covers takes `default_season`. Every range, event, removal and default change is proposed and
-  approved by a second person; nothing is deleted. No holiday date is in code.
+  approved by a second person; nothing is deleted. A reason (<= 300) is required on every proposal (`note` of a range,
+  `reason` of an event, `default_request_reason`), withdrawal (`withdraw_reason`), removal request (`end_reason`) and
+  rejection (`reject_reason`; a rejected removal or default change keeps its reason in the audit row). No holiday
+  date is in code.
 - `Calendar.season_on(day)` is used by the cost sheet (windows cut where the season changes, peak = `peak` or
-  `festive`; the old "label contains peak" guess is gone), the B2B quote and the tariff (a `tp:` line's service date:
-  the rule's peak uplift, `price_note.season`; a stop-sale date makes an available line `on_request`; a festive date
-  shortens the quote to `quote_validity_festive_days`) and the price version matrix. A plan with no calendar is low
-  season everywhere (no change from before bk-053).
+  `festive`), the B2B quote and the tariff (a `tp:` line's service date: the rule's peak uplift, `price_note.season`;
+  a stop-sale date makes an available line `on_request`; a festive date shortens the quote to
+  `quote_validity_festive_days`) and the price version matrix.
+- **Until a plan's calendar is configured** (`Calendar.configured`: an approved season range that resolves to dates,
+  or a default season other than `low`) no price moves: quotes and the tariff price every date low (their old
+  `peak = false`), the cost sheet keeps the old rule (a computed row is peak when a 2-traveller rate's season label
+  says "peak"; `season_code` `peak` / `low`), and a hand row keeps the peak flag it was written with. The first
+  approved range of the plan's calendar switches the plan to the calendar.
 
 ## Agency price tiers (AA-1030, bk-043; root ADR 0019 b15)
 
@@ -1998,15 +2012,19 @@ handlers is a later step that this policy already supports.
 ### `bk-052` (AA-1091 price list versions — needs `bk-032`, `bk-039`, `bk-047`, `bk-050`)
 
 A **contract** file (MIG-4 with bk-053; the code PR raises readiness to bk-052 and bk-053). New
-`price_list_versions` (guard trigger: draft-only facts, d2 state moves, approved once, erasure of a reason alone) and
-`price_list_version_rows` (written only while the version is a draft); `trip_plan_prices.version_id` /
+`price_list_versions` (guard trigger: draft-only facts, d2 state moves, approved once, erasure of the label or a
+reason alone) and `price_list_version_rows` (written only while the version is a draft; each row keeps its `peak`
+flag); `trip_plan_prices.version_id` /
 `season_code` and the matrix position cap 200 -> 1000; the data step migrates history and rows in force into versions
 (plans with no version only, so a replay writes nothing).
 
 ### `bk-053` (AA-1091 season calendars and holiday events — needs `bk-005`, `bk-008`, `bk-009`)
 
-A **contract** file (an FK column on `trip_plans`). New `season_calendars`, `season_ranges`, `holiday_events` (column
-grants: role `booking` updates only the decision and removal columns; no DELETE), `trip_plans.season_calendar_id`.
+A **contract** file (FK columns and a CHECK on `trip_plans`). New `season_calendars`, `season_ranges`, `holiday_events`
+(column grants: role `booking` updates only the decision, reason and removal columns; no DELETE; a reason column on
+every proposal, withdrawal, removal request and rejection), `trip_plans.season_calendar_id` and the second-person
+request of a change (`pending_season_calendar_id`, `season_calendar_requested_by` / `_at`,
+`season_calendar_request_reason`).
 No row is seeded: calendars are made by the catalog sync (empty) or by staff.
 
 ## Out of scope today

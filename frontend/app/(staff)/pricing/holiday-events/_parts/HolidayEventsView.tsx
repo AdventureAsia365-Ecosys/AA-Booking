@@ -33,7 +33,7 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { CHANGE_TONE, eventCode } from "@/ui/booking/priceVersions";
-import { ChangeButtons } from "../../seasons/_parts/SeasonsView";
+import { ChangeButtons, useWho } from "../../seasons/_parts/SeasonsView";
 import { S, type SeasonMessage } from "../../seasons/_parts/messages";
 
 function errorText(err: unknown, fallback: string): string {
@@ -49,9 +49,17 @@ function NewEventDrawer({ countries, onClose }: { countries: { iso2: string; nam
   const [code, setCode] = useState("");
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
+  const [reason, setReason] = useState("");
   const propose = useMutation({
     mutationFn: () =>
-      seasonsApi.proposeEvent({ country_iso2: country, code: code || eventCode(name), name: name.trim(), date_from: first, date_to: last }),
+      seasonsApi.proposeEvent({
+        country_iso2: country,
+        code: code || eventCode(name),
+        name: name.trim(),
+        date_from: first,
+        date_to: last,
+        reason: reason.trim(),
+      }),
     onSuccess: () => {
       toast.success(t("proposed"));
       qc.invalidateQueries({ queryKey: ["holiday-events"] });
@@ -90,6 +98,9 @@ function NewEventDrawer({ countries, onClose }: { countries: { iso2: string; nam
       <Field label={t("lastDay")} required>
         <DateField value={last} min={first || undefined} onChange={setLast} aria-label={t("lastDay")} />
       </Field>
+      <Field label={t("reasonLabel")} hint={t("reasonBody")} required>
+        <Input maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </Field>
     </FormDrawer>
   );
 }
@@ -99,6 +110,7 @@ function HolidayEvents() {
   const toast = useToast();
   const qc = useQueryClient();
   const canWrite = useCan("season.write");
+  const who = useWho();
   const { get } = useUrlFilters();
   const country = get("country") ?? undefined;
   const year = get("year") ? Number(get("year")) : undefined;
@@ -146,6 +158,24 @@ function HolidayEvents() {
             busy={act.isPending}
             onAct={(action, reason) => act.mutate({ id: row.original.id, action, reason })}
           />
+        </span>
+      ),
+    },
+    {
+      id: "by",
+      header: t("colBy"),
+      accessorFn: (r) => who(r.created_by),
+      cell: ({ row }) => (
+        <span className="flex min-w-0 flex-col gap-0.5 text-xs">
+          <span className="text-ink">{who(row.original.created_by)}</span>
+          <span className="break-words text-muted">{row.original.reason}</span>
+          {row.original.reject_reason && <span className="break-words text-danger">{row.original.reject_reason}</span>}
+          {row.original.withdraw_reason && (
+            <span className="break-words text-muted">{t("withdrawnLine", row.original.withdraw_reason)}</span>
+          )}
+          {row.original.end_requested_by && row.original.end_reason && (
+            <span className="break-words text-muted">{t("endLine", who(row.original.end_requested_by), row.original.end_reason)}</span>
+          )}
         </span>
       ),
     },
@@ -198,7 +228,7 @@ function HolidayEvents() {
           onRetry={() => list.refetch()}
           emptyTitle={t("eventsEmpty")}
           emptyDescription={t("eventsEmptyHint")}
-          tableMinWidth={720}
+          tableMinWidth={880}
         />
       </Section>
       {creating && <NewEventDrawer countries={list.data?.countries ?? []} onClose={() => setCreating(false)} />}

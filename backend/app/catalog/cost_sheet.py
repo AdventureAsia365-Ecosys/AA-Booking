@@ -26,7 +26,9 @@ rule or FX rate changes or a window ends. A window or band with a component with
 (never a guessed or zero net). The season label = the labels of the rates
 used for 2 travellers (for staff); the season itself is the plan's season calendar on the window's start dates
 (AA-1091, bk-053, :mod:`app.pricing.seasons`: windows are also cut where it changes, ``season_code`` on each row),
-and ``peak`` = a peak or festive season (the rule's peak uplift then applies). No label is read for "peak" any more.
+and ``peak`` = a peak or festive season (the rule's peak uplift then applies). While the plan's calendar is not
+configured (no approved range yet), the old rule stays so no price moves before staff enter seasons: ``peak`` when a
+2-traveller rate label says "peak" (``season_code`` ``peak``, else ``low``).
 
 **Channels.** ``b2b`` and ``fixed_departure`` (root ADR 0019: the B2C channels are retired; the approved AA-1029
 re-scope and the R4 milestone keep these two, fixed departures being sold to agencies too), each only while an
@@ -386,6 +388,11 @@ def season_label(cell: Cell) -> str | None:
     return " / ".join(sorted(cell.seasons))[:SEASON_MAX] or None
 
 
+def label_peak(cell: Cell) -> bool:
+    """The old rule (before bk-053), kept while the plan's calendar is not configured: a rate label says "peak"."""
+    return any(seasons.LEGACY_PEAK in s.lower() for s in cell.seasons)
+
+
 def net_rows(
     wins: Sequence[Window],
     grid: Sequence[Sequence[Cell]],
@@ -396,7 +403,8 @@ def net_rows(
     """Merge the windows whose nets, season and single supplement match; returns the rows and the count of unpriced
     cells. ``singles`` (AA-1075): the single supplement of each window (:func:`single_supplement`). ``codes``
     (AA-1091, bk-053): the calendar season of each window's start dates (:mod:`app.pricing.seasons`); ``peak`` =
-    a peak or festive season (the rule's peak uplift). Without codes every window is low season."""
+    a peak or festive season (the rule's peak uplift). Without codes (the plan's calendar is not configured) the old
+    rule: a window is ``peak`` when a 2-traveller rate's season label says "peak", else ``low``."""
     unpriced = 0
     keyed: list[tuple[Window, tuple[Any, ...], str | None, str, Any]] = []
     two = next(i for i, (low, _) in enumerate(PAX_BANDS) if low == 2)
@@ -406,7 +414,7 @@ def net_rows(
             value = per_person(cell, low, fx)
             unpriced += value is None
             nets.append(value)
-        code = codes[i] if codes else seasons.DEFAULT_SEASON
+        code = codes[i] if codes else seasons.legacy_code(label_peak(row[two]))
         keyed.append((win, tuple(nets), season_label(row[two]), code, singles[i] if singles else None))
     merged: list[tuple[Window, tuple[Any, ...], str | None, str, Any]] = []
     for win, nets, season, code, single in keyed:
@@ -648,7 +656,7 @@ async def compute(
     wanted = asks(wins, parts)
     found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
     singles = [single_supplement(w, parts, found, pricing.fx) for w in wins]
-    codes = [cal.season_on(w.start).code for w in wins]
+    codes = [cal.season_on(w.start).code for w in wins] if cal.configured else None
     nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx, singles, codes)
     rows, info["refused"] = priced_rows(nets, pricing)
     if not rows:
