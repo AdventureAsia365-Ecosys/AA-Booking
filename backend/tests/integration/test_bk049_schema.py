@@ -21,6 +21,8 @@ import pytest_asyncio
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "049_b2b_partners_rls.sql"
+# bk-053 (AA-1092) widens b2b_partners_tenant to bk_owner after it; a replay of bk-049 is a replay of the chain.
+AMENDED_BY = Path(__file__).resolve().parents[3] / "migrations" / "053_b2b_partners_tenant_read_owner.sql"
 
 
 @pytest_asyncio.fixture
@@ -73,6 +75,7 @@ async def test_registered_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> Non
     )
     await admin.execute("SET ROLE bk_owner")
     await admin.execute(MIGRATION.read_text(encoding="utf-8"))
+    await admin.execute(AMENDED_BY.read_text(encoding="utf-8"))
     await admin.execute("RESET ROLE")
     after = await admin.fetch(
         "SELECT polname, polcmd, polroles::regrole[]::text[] AS roles FROM pg_policy"
@@ -101,7 +104,12 @@ async def test_rls_is_enabled_and_forced_with_the_two_policies(admin: asyncpg.Co
         "ALL",
         ["bk_owner", "booking"],
     )
-    assert (tenant["permissive"], tenant["cmd"], tenant["roles"]) == ("PERMISSIVE", "SELECT", ["booking"])
+    # bk-053: bk_owner too, so a view it owns (v_tenant_billing_status) reads the bound tenant's row.
+    assert (tenant["permissive"], tenant["cmd"], sorted(tenant["roles"])) == (
+        "PERMISSIVE",
+        "SELECT",
+        ["bk_owner", "booking"],
+    )
     assert tenant["with_check"] is None
     for text in (office["qual"], office["with_check"], tenant["qual"]):
         assert "NULLIF(current_setting('app.tenant_id'::text, true), ''::text)" in text
