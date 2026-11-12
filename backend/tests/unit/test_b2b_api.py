@@ -179,7 +179,8 @@ def test_quote_prices_lines_and_stores_append_only() -> None:
         for line in body["lines"]
     )
     valid_until = datetime.fromisoformat(body["valid_until"])
-    assert timedelta(hours=47) < valid_until - datetime.now(UTC) <= timedelta(hours=48)
+    # AA-1091: valid for quote_validity_days of the pricing policy (the bk-050 seed: 14 days), not a code constant.
+    assert timedelta(days=13, hours=23) < valid_until - datetime.now(UTC) <= timedelta(days=14)
     # Two room nights looked up separately (season change safe), one double room (default mix for 2), in ONE query.
     room_asks = [a for a in _rate_asks(conn) if a[0]]
     assert [a[2] for a in room_asks] == [date(2027, 3, 1), date(2027, 3, 2)] and {a[3] for a in room_asks} == {2}

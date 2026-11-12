@@ -28,6 +28,7 @@ import {
   Map as MapIcon,
   MapPin,
   Percent,
+  Scale,
   Settings,
   Shield,
   SquareCheck,
@@ -123,6 +124,8 @@ export function navGroups(): NavGroup[] {
         { href: "/pricing/readiness", label: "Price readiness", icon: <Gauge size={ICON} />, wave: 2, shipped: true },
         // AA-1091: the price setup workbench (checks and next step per tour, suggested components, bulk workbook).
         { href: "/pricing/workbench", label: "Price setup", icon: <Wrench size={ICON} />, wave: 2, shipped: true },
+        // AA-1091 (bk-050): the pricing policy parameters (quote validity, surcharges, deposits ...), maker-checker.
+        { href: "/pricing/policy", label: "Pricing policy", icon: <Scale size={ICON} />, wave: 2, shipped: true },
       ],
     },
     {

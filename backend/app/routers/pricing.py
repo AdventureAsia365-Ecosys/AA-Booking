@@ -10,6 +10,10 @@ manage the policy rows themselves with maker-checker (``app.pricing.policy``, bk
 writes and approvals ``pricing.write`` (admin, contracting), and the creator of a row cannot approve it (403).
 ``/booking/pricing/cancellation-policies`` (AA-974, bk-021) does the same for the B2B cancellation-fee schedules
 (``app.b2b.cancellation``): a row per trip plan (``source_id``) or the B2B default, in force once approved.
+``/booking/pricing/policy`` (AA-1091, bk-050, root ADR 0005b d15): the pricing policy parameters (GET every parameter
+with the value in force, scheduled and open changes and history; POST a change as a draft or pending; POST
+``/{id}/submit``, ``/withdraw`` by its maker, ``/approve`` and ``/reject`` by a second person of the parameter's
+approver group; ``app.pricing.policy_admin``).
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.staff import Staff, get_pool, require
 from app.b2b import cancellation
-from app.pricing import engine, policy, service
+from app.pricing import engine, policy, policy_admin, service
 
 log = logging.getLogger(__name__)
 
@@ -302,3 +306,77 @@ async def create_cancellation_policy(
 async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await cancellation.approve_policy(conn, staff, str(policy_id), today=_today())
+
+
+# ── Pricing policy parameters (AA-1091, bk-050, root ADR 0005b d15) ─────────
+
+CanReadPolicy = Annotated[Staff, Depends(require("pricing_policy.read"))]
+CanWritePolicy = Annotated[Staff, Depends(require("pricing_policy.write"))]
+# Approve / reject: the per-parameter approver group (pricing lead or finance) is checked in app.pricing.policy_admin.
+CanDecidePolicy = Annotated[Staff, Depends(require("pricing_policy.read"))]
+PolicyKey = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")]
+
+
+class PolicyProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: PolicyKey
+    # The typed value (app.pricing.policy_params: a number, a decimal string, a boolean, "MM-DD", a list or a map).
+    value: int | str | bool | list[str] | dict[str, str]
+    effective_from: date
+    reason: str = Field(min_length=1, max_length=policy_admin.MAX_REASON)
+    # true = submit for approval at once (pending); false = save a draft the maker submits later.
+    submit: bool = True
+
+
+class PolicyDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=policy_admin.MAX_REASON)
+
+
+@router.get("/policy")
+async def list_policy(staff: CanReadPolicy, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn:
+        return await policy_admin.list_params(conn, staff, today=_today())
+
+
+@router.post("/policy", status_code=201)
+async def propose_policy(body: PolicyProposal, staff: CanWritePolicy, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy_admin.propose(
+            conn,
+            staff,
+            key=body.key,
+            value=body.value,
+            effective_from=body.effective_from,
+            reason=body.reason,
+            submit=body.submit,
+            today=_today(),
+        )
+
+
+@router.post("/policy/{version_id}/submit")
+async def submit_policy(version_id: uuid.UUID, staff: CanWritePolicy, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy_admin.submit(conn, staff, str(version_id), today=_today())
+
+
+@router.post("/policy/{version_id}/withdraw")
+async def withdraw_policy(version_id: uuid.UUID, staff: CanWritePolicy, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy_admin.withdraw(conn, staff, str(version_id), today=_today())
+
+
+@router.post("/policy/{version_id}/approve")
+async def approve_policy(version_id: uuid.UUID, staff: CanDecidePolicy, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy_admin.approve(conn, staff, str(version_id), today=_today())
+
+
+@router.post("/policy/{version_id}/reject")
+async def reject_policy(
+    version_id: uuid.UUID, body: PolicyDecision, staff: CanDecidePolicy, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy_admin.reject(conn, staff, str(version_id), reason=body.reason, today=_today())

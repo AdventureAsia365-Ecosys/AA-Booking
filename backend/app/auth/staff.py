@@ -164,6 +164,14 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # Finance reads it, admin backs up; sales and contracting see margins at price time (pricing.read) but not the
     # realised profit (proposed default, to confirm with the business owner). Not in preview sessions.
     "profit.read": frozenset({"admin", "finance"}),
+    # AA-1091 (bk-050, root ADR 0005b d6 / d15, Q5): the pricing policy parameters (quote validity, surcharge rules,
+    # auto-publish threshold, deposits, ...). Everyone who prices or bills reads them; contracting and finance propose
+    # a change; the product / pricing lead (contracting, admin) approves the price parameters and finance (admin
+    # backs up) the FX, tax, surcharge and payment ones, never the change's maker (403 own_row + a table CHECK).
+    "pricing_policy.read": frozenset({"admin", "sales", "contracting", "finance"}),
+    "pricing_policy.write": frozenset({"admin", "contracting", "finance"}),
+    "pricing_policy.approve": frozenset({"admin", "contracting"}),
+    "pricing_policy.approve_finance": frozenset({"admin", "finance"}),
 }
 
 # AA-911 D-1: the most a Preview-client session may do, intersected with its role's permissions. Reads only; the admin
@@ -174,6 +182,7 @@ PREVIEW_PERMISSIONS: frozenset[str] = frozenset(
         "customer.read",
         "staff.directory",
         "pricing.read",
+        "pricing_policy.read",
         "supply.read",
         "catalog.read",
         "b2b_desk.read",

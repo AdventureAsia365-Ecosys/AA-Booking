@@ -108,6 +108,7 @@ const PAGES: PageCase[] = [
   { name: "agency-tariff", path: "/pricing/agency-tiers/tariff?partner=pt-1" },
   { name: "price-readiness", path: "/pricing/readiness" },
   { name: "price-workbench", path: "/pricing/workbench" },
+  { name: "pricing-policy", path: "/pricing/policy" },
   // AA-1091: a trip plan's hotels and services, with the drawer of suggestions from the itinerary open.
   {
     name: "plan-components-drawer",
