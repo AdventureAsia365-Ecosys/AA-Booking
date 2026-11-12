@@ -35,6 +35,11 @@ AA-1037). It comes ONLY from the WORKFORCE group ``booking-finance`` (granted on
 ``shared.staff_app_grant`` role ``finance``); the CIS -> Booking bridge never yields it (:data:`ROLE_FROM_CIS` has no
 finance entry and CIS mints no bridge token for its new roles).
 
+**Dev-only E2E write identities (AA-1087, root ADR 0006a A10e).** Three more WORKFORCE E2E users may write, each only
+its own allow-listed routes, only on Dev and only on a synthetic agency's record (:mod:`app.auth.e2e_staff`): a staff
+user (``booking-sales``: send and confirm a supplier booking) and a finance maker / checker pair (``booking-finance``:
+record an agency payment; approve or reject it). Checked here, before the route runs.
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -53,7 +58,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit
-from app.auth import identity_config
+from app.auth import e2e_staff, identity_config
 from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
@@ -484,10 +489,18 @@ async def current_staff(
             # AA-910: the E2E admin's codes are readable by CI roles; it may read every page but never write.
             log.info("booking_e2e_write_refused method=%s path=%s", request.method, request.url.path)
             raise HTTPException(status_code=403, detail="e2e_read_only")
+        writer = e2e_staff.writer_for(principal.email)
+        route = getattr(request.scope.get("route"), "path", None)
+        if writer is not None:
+            # AA-1087 (ADR 0006a A10e): Dev only, exact groups, its own allow-listed writes; before any DB access.
+            e2e_staff.check_session(writer, principal.groups, request.method, route, request.url.path)
         role = booking_role(principal.groups)
         if role is None:
             raise HTTPException(status_code=403, detail="no_booking_role")
         pool = await get_pool(request)
+        if writer is not None:
+            # AA-1087: an allowed write only on a synthetic agency's record, before the staff row sync or the route.
+            await e2e_staff.check_synthetic(pool, writer, request.method, route, request.path_params)
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
         if preview:

@@ -118,6 +118,17 @@ export default defineConfig({
       use: { ...VISUAL_USE, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
     },
     {
+      // AA-1087 (root ADR 0006a A10e): the Dev-only E2E write identities, one write each on a synthetic agency's record
+      // (e2e/e2e-writers/writes.spec.ts). Agent-only, never CI (codes in the MFA-admin-only mailbox prefix); every test
+      // skips unless BOOKING_E2E_WRITERS=1; BOOKING_E2E_WRITERS_DRY_RUN=1 signs in and reads only.
+      name: "e2e-writers",
+      testMatch: /e2e-writers\/.*\.spec\.ts$/,
+      outputDir: "./e2e/results/test-output",
+      retries: 0, // a retry would ask for new codes and could repeat a write
+      timeout: 240_000,
+      use: { ...SIGNED_IN_USE, screenshot: "off" },
+    },
+    {
       name: "signed-in-setup",
       testMatch: /signed-in\/auth\.setup\.ts$/,
       outputDir: "./e2e/results/test-output",
