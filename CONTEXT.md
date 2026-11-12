@@ -1826,6 +1826,17 @@ Waiting for decisions: `trip_case_countries` / `areas` (O7, ISO mapping; the Boo
 places shipped as `country_profiles` / `destination_profiles`, bk-029) and catalog-backed version item types (AA-679
 follow-up). `v_from_prices` shipped with bk-039 (AA-1029). Operations S5 (My Payments) shipped: see "My Payments: customer routes".
 
+### `bk-049` (AA-1092 pre-PII hardening: row level security on `b2b_partners` — needs `bk-019`)
+
+A **contract** file (migration-only PR, no readiness raise: no code needs it). `booking.b2b_partners` gets ENABLE +
+FORCE row level security and two permissive policies reading `app.tenant_id` (through NULLIF): `b2b_partners_back_office`
+(ALL TO `booking`, `bk_owner`: every row while no tenant is bound — the staff admin, the jobs and the B2B partner lookup
+of `app/b2b/access.py`, none of which binds one, so nothing changes for them) and `b2b_partners_tenant` (SELECT TO
+`booking`: a transaction that runs `set_config('app.tenant_id', <uuid>, true)` reads that tenant's row only and writes
+none). It closes the RLS catalogue guard's rule a finding on the table. Partner isolation on the B2B API stays enforced
+in code (the M2M client bound to the partner, `partner_id` on every query); binding the caller's tenant in the B2B
+handlers is a later step that this policy already supports.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
