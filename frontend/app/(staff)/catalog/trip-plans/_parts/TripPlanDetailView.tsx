@@ -8,6 +8,8 @@
 // per-person prices (pricing.read; bk-032).
 // AA-1073: a "Departures" tab (supply.read) lists the plan's fixed departures with their minimum, cutoff and agency
 // allotments, and adds or generates departures (trip_plan.write).
+// AA-1091: a "Hotels & services" tab (supply.read) lists the plan's components and opens the suggestions from the CIS
+// itinerary (the Price setup components drawer).
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -20,6 +22,7 @@ import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "../../../_parts/DetailHeader";
 import { AgencyTermsPanel } from "./AgencyTermsPanel";
 import { CommercialDrawer } from "./CommercialDrawer";
+import { ComponentsPanel } from "./ComponentsPanel";
 import { DeparturesPanel } from "./DeparturesPanel";
 import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
 import { UseForTripCaseModal } from "./UseForTripCaseModal";
@@ -60,6 +63,8 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
     { key: "days", label: "Day by day", count: p?.days.length },
     { key: "photos", label: "Photos", count: p?.photos.length },
     ...(canDepartures ? [{ key: "departures", label: "Departures" }] : []),
+    // AA-1091: the plan's hotels and services, with suggestions from the CIS itinerary (supply.read).
+    ...(canDepartures ? [{ key: "components", label: "Hotels & services" }] : []),
   ];
   const [tab, setTab] = useDetailTab(tabs);
 
@@ -104,7 +109,11 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
         activeTab={tab}
         onTab={setTab}
       />
-      {tab === "departures" && canDepartures ? (
+      {tab === "components" && canDepartures ? (
+        <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-8">
+          <ComponentsPanel sourceId={sourceId} title={p.title} />
+        </div>
+      ) : tab === "departures" && canDepartures ? (
         // AA-1073: the departures board takes the full width (a wide table and its drawer).
         <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-8">
           <DeparturesPanel sourceId={sourceId} />

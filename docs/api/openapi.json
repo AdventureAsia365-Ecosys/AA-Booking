@@ -6971,6 +6971,35 @@
         "title": "PriceHint",
         "type": "object"
       },
+      "PriceImportUpload": {
+        "additionalProperties": false,
+        "description": "The filled workbook as base64 (the staff BFF forwards JSON bodies only, like rate sheets).",
+        "properties": {
+          "data_base64": {
+            "maxLength": 2796206,
+            "minLength": 4,
+            "title": "Data Base64",
+            "type": "string"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          }
+        },
+        "required": [
+          "data_base64"
+        ],
+        "title": "PriceImportUpload",
+        "type": "object"
+      },
       "PriceParity": {
         "additionalProperties": false,
         "properties": {
@@ -10126,6 +10155,39 @@
           "weekdays"
         ],
         "title": "WeeklyPattern",
+        "type": "object"
+      },
+      "WorkbenchActionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "make_sellable",
+              "make_not_sellable",
+              "apply_provisional",
+              "clear_provisional",
+              "recompute"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "tour_keys": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Tour Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "tour_keys"
+        ],
+        "title": "WorkbenchActionBody",
         "type": "object"
       }
     },
@@ -16793,6 +16855,231 @@
         ]
       }
     },
+    "/booking/catalog/price-import": {
+      "post": {
+        "description": "AA-1091: import a filled price setup workbook (422 ``price_import_invalid`` lists every problem).",
+        "operationId": "post_price_import_booking_catalog_price_import_post",
+        "parameters": [
+          {
+            "description": "check and preview only; nothing is written",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "check and preview only; nothing is written",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceImportUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Price Import Booking Catalog Price Import Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post Price Import",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/price-import/template": {
+      "get": {
+        "description": "AA-1091: the price setup workbook, prefilled with the plans the workbench filters select (``blank`` = empty).",
+        "operationId": "price_import_template_booking_catalog_price_import_template_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "priced",
+                    "hand_priced",
+                    "missing_rates",
+                    "missing_fx",
+                    "no_rule",
+                    "no_components",
+                    "inactive_component"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "country name as the catalog gives it",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "country name as the catalog gives it",
+              "title": "Country"
+            }
+          },
+          {
+            "description": "part of the title or the tour key",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "part of the title or the tour key",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "missing",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "components",
+                    "rates",
+                    "fx",
+                    "rule",
+                    "price",
+                    "sellable",
+                    "departures"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Missing"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next_step",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "add_components",
+                    "fix_inactive",
+                    "load_rates",
+                    "approve_fx",
+                    "approve_rule",
+                    "recompute",
+                    "make_sellable",
+                    "done"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Step"
+            }
+          },
+          {
+            "in": "query",
+            "name": "blank",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Blank",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Price Import Template",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
     "/booking/catalog/price-readiness": {
       "get": {
         "description": "AA-1029: which trip plans price and why the others do not (see ``app/catalog/price_readiness.py``). The\nsummary counts every plan; ``items`` are the plans that match the filters.",
@@ -16909,6 +17196,210 @@
           }
         ],
         "summary": "Price Readiness Report",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/price-workbench": {
+      "get": {
+        "description": "AA-1091: every trip plan with its checks, its next step, its reference and provisional price.",
+        "operationId": "price_workbench_report_booking_catalog_price_workbench_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "priced",
+                    "hand_priced",
+                    "missing_rates",
+                    "missing_fx",
+                    "no_rule",
+                    "no_components",
+                    "inactive_component"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "country name as the catalog gives it",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "country name as the catalog gives it",
+              "title": "Country"
+            }
+          },
+          {
+            "description": "part of the title or the tour key",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "part of the title or the tour key",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "missing",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "components",
+                    "rates",
+                    "fx",
+                    "rule",
+                    "price",
+                    "sellable",
+                    "departures"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Missing"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next_step",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "add_components",
+                    "fix_inactive",
+                    "load_rates",
+                    "approve_fx",
+                    "approve_rule",
+                    "recompute",
+                    "make_sellable",
+                    "done"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Step"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Price Workbench Report Booking Catalog Price Workbench Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Price Workbench Report",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/price-workbench/actions": {
+      "post": {
+        "description": "AA-1091: one bulk action on many plans; a plan that does not qualify is skipped with its reason.",
+        "operationId": "price_workbench_action_booking_catalog_price_workbench_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchActionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Price Workbench Action Booking Catalog Price Workbench Actions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Price Workbench Action",
         "tags": [
           "catalog"
         ]
@@ -17273,6 +17764,59 @@
           }
         ],
         "summary": "Put Trip Plan Commercial",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/component-suggestions": {
+      "get": {
+        "description": "AA-1091: hotels and services suggested per day from the CIS itinerary (read only; save with PUT components).",
+        "operationId": "get_component_suggestions_booking_catalog_trip_plans__source_id__component_suggestions_get",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Component Suggestions Booking Catalog Trip Plans  Source Id  Component Suggestions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Component Suggestions",
         "tags": [
           "catalog"
         ]

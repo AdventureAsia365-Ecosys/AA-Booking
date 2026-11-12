@@ -16,6 +16,13 @@ set) keep the plan's per-person price matrix (bk-032, AA-996; ``app/catalog/trip
 ``GET /booking/catalog/price-readiness`` (``pricing.read``, AA-1029) is the catalog-wide price readiness report: per
 plan its status (priced, hand priced, or why the cost sheet cannot price it) with ``?status=&country=&q=`` filters, as
 JSON or a staff CSV (``?format=csv``, fixed columns, never a net or a margin; ``app/catalog/price_readiness.py``).
+AA-1091 price setup workbench (``app/catalog/price_workbench.py``, ``price_import.py``, ``component_suggest.py``):
+``GET /booking/catalog/price-workbench`` (``pricing.read``: every plan with its checks and next step; filters
+``status``, ``country``, ``q``, ``missing``, ``next_step``), ``POST …/price-workbench/actions`` (``trip_plan.write``: a
+bulk action on up to 200 plans), ``GET /booking/catalog/price-import/template`` (``pricing.read``: the workbook, empty
+or prefilled with the filtered plans) and ``POST /booking/catalog/price-import`` (``trip_plan.write``, ``?dry_run=true``
+checks only), ``GET …/trip-plans/{source_id}/component-suggestions`` (``supply.read``: components suggested from the
+CIS itinerary; nothing is applied).
 ``POST …/{source_id}/trip-cases`` starts a trip case, or a new version of an existing case, from a sellable plan
 (``trip_case.write`` + ``version.write``: admin, sales).
 ``GET …/{source_id}/components`` (``supply.read``) and ``PUT …/{source_id}/components`` (``trip_plan.write``, replaces
@@ -32,6 +39,8 @@ change only the Booking state (status, reason, area, notes; soft, nothing is del
 
 from __future__ import annotations
 
+import base64
+import binascii
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -44,8 +53,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app import b2c, catalog
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import allotments, departures, plan_components
-from app.catalog import cost_sheet, geo, price_history, price_readiness, trip_plan_prices, trip_plans
-from app.errors import NotFound
+from app.catalog import (
+    component_suggest,
+    cost_sheet,
+    geo,
+    price_history,
+    price_import,
+    price_readiness,
+    price_workbench,
+    trip_plan_prices,
+    trip_plans,
+)
+from app.errors import Invalid, NotFound
 from app.pricing import engine
 from app.routers.trip_cases import Currency
 
@@ -66,6 +85,13 @@ GeoStatus = Literal["active", "inactive"]
 ReadinessStatus = Literal[
     "priced", "hand_priced", "missing_rates", "missing_fx", "no_rule", "no_components", "inactive_component"
 ]
+WorkbenchCheck = Literal["components", "rates", "fx", "rule", "price", "sellable", "departures"]
+WorkbenchStep = Literal[
+    "add_components", "fix_inactive", "load_rates", "approve_fx", "approve_rule", "recompute", "make_sellable", "done"
+]
+WorkbenchAction = Literal["make_sellable", "make_not_sellable", "apply_provisional", "clear_provisional", "recompute"]
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PRICE_IMPORT_B64_MAX = (price_import.MAX_BYTES * 4) // 3 + 4
 
 
 def _source_id(source_id: Annotated[uuid.UUID, Path(description="CIS catalog source_id (catalog.tour.v1)")]) -> str:
@@ -314,6 +340,104 @@ async def price_readiness_report(
     return report
 
 
+# ── Price setup workbench (AA-1091) ──
+
+
+class WorkbenchActionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: WorkbenchAction
+    tour_keys: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
+        min_length=1, max_length=price_workbench.MAX_ACTION_PLANS
+    )
+
+
+class PriceImportUpload(BaseModel):
+    """The filled workbook as base64 (the staff BFF forwards JSON bodies only, like rate sheets)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data_base64: str = Field(min_length=4, max_length=PRICE_IMPORT_B64_MAX)
+    filename: str | None = Field(default=None, max_length=200)
+
+
+CountryQuery = Annotated[str | None, Query(max_length=100, description="country name as the catalog gives it")]
+SearchQuery = Annotated[str | None, Query(max_length=200, description="part of the title or the tour key")]
+
+
+@router.get("/price-workbench")
+async def price_workbench_report(
+    _: CanReadPrices,
+    pool: Pool,
+    status: ReadinessStatus | None = None,
+    country: CountryQuery = None,
+    q: SearchQuery = None,
+    missing: WorkbenchCheck | None = None,
+    next_step: WorkbenchStep | None = None,
+) -> dict[str, Any]:
+    """AA-1091: every trip plan with its checks, its next step, its reference and provisional price."""
+    async with pool.acquire() as conn:
+        return await price_workbench.build(
+            conn, on=cost_sheet.today(), status=status, country=country, q=q, missing_check=missing, step=next_step
+        )
+
+
+@router.post("/price-workbench/actions")
+async def price_workbench_action(body: WorkbenchActionBody, staff: CanWritePlans, pool: Pool) -> dict[str, Any]:
+    """AA-1091: one bulk action on many plans; a plan that does not qualify is skipped with its reason."""
+    async with pool.acquire() as conn, conn.transaction():
+        return await price_workbench.apply_action(conn, staff, body.action, body.tour_keys, on=cost_sheet.today())
+
+
+@router.get("/price-import/template", responses={200: {"content": {XLSX: {}}}})
+async def price_import_template(
+    _: CanReadPrices,
+    pool: Pool,
+    status: ReadinessStatus | None = None,
+    country: CountryQuery = None,
+    q: SearchQuery = None,
+    missing: WorkbenchCheck | None = None,
+    next_step: WorkbenchStep | None = None,
+    blank: bool = False,
+) -> Response:
+    """AA-1091: the price setup workbook, prefilled with the plans the workbench filters select (``blank`` = empty)."""
+    day = cost_sheet.today()
+    if blank:
+        content = price_import.template()
+    else:
+        async with pool.acquire() as conn:
+            report = await price_workbench.build(
+                conn, on=day, status=status, country=country, q=q, missing_check=missing, step=next_step
+            )
+            content = await price_import.prefilled(conn, report["items"], today=day)
+    return Response(
+        content=content,
+        media_type=XLSX,
+        headers={
+            "Content-Disposition": f'attachment; filename="{price_import.filename(day)}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/price-import")
+async def post_price_import(
+    body: PriceImportUpload,
+    staff: CanWritePlans,
+    pool: Pool,
+    dry_run: Annotated[bool, Query(description="check and preview only; nothing is written")] = False,
+) -> dict[str, Any]:
+    """AA-1091: import a filled price setup workbook (422 ``price_import_invalid`` lists every problem)."""
+    try:
+        data = base64.b64decode(body.data_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise Invalid("rate_sheet_not_xlsx", "the upload is not valid base64") from None
+    if len(data) > price_import.MAX_BYTES:
+        raise Invalid("rate_sheet_too_large", "a workbook is at most 2 MB")
+    async with pool.acquire() as conn, conn.transaction():
+        return await price_import.import_workbook(conn, staff, data, dry_run=dry_run)
+
+
 @router.get("/trip-plans/facets")
 async def trip_plan_facets(_: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
@@ -456,6 +580,13 @@ class PlanComponentsBody(BaseModel):
 async def get_trip_plan_components(source_id: SourceId, _: CanReadSupply, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await plan_components.list_components(conn, source_id)
+
+
+@router.get("/trip-plans/{source_id}/component-suggestions")
+async def get_component_suggestions(source_id: SourceId, _: CanReadSupply, pool: Pool) -> dict[str, Any]:
+    """AA-1091: hotels and services suggested per day from the CIS itinerary (read only; save with PUT components)."""
+    async with pool.acquire() as conn:
+        return await component_suggest.build(conn, source_id)
 
 
 @router.put("/trip-plans/{source_id}/components")
