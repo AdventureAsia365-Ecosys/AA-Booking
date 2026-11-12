@@ -264,7 +264,9 @@ async def _main(apply_changes: bool, expected_hash: str | None) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Display fix of B2B cases confirmed before the tour title and whole-tour dates were stored.")
+    parser = argparse.ArgumentParser(
+        description="Display fix of B2B cases confirmed before the tour title and whole-tour dates were stored."
+    )
     parser.add_argument("--apply", action="store_true", help="write the fix (default: DRY RUN, counts only)")
     parser.add_argument("--expect-plan", default=None, help="with --apply: the DRY RUN's plan_hash (required)")
     args = parser.parse_args(argv)
