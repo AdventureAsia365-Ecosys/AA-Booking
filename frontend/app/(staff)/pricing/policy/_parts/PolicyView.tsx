@@ -258,13 +258,16 @@ function Policy() {
     return (
       <span className="flex flex-col items-start gap-1.5" onClick={(e) => e.stopPropagation()}>
         {scheduled && (
-          <span className="text-[13px] text-body">{t("scheduledChange", show(p, scheduled.value), scheduled.effective_from)}</span>
+          <span className="break-words text-[13px] text-body">
+            {t("scheduledChange", show(p, scheduled.value), scheduled.effective_from)}
+          </span>
         )}
         {open && (
           <>
-            <Pill tone={STATUS_TONE[open.status]}>
-              {t("openChange", t(`status_${open.status}` as MessageKey) as string, show(p, open.value), open.effective_from)}
-            </Pill>
+            <Pill tone={STATUS_TONE[open.status]}>{t(`status_${open.status}` as MessageKey) as string}</Pill>
+            <span className="break-words text-[13px] text-body">
+              {t("openChange", show(p, open.value), open.effective_from)}
+            </span>
             <span className="max-w-[320px] break-words text-xs text-muted">{open.reason}</span>
             <span className="flex flex-wrap gap-2">
               {open.can_approve && (
