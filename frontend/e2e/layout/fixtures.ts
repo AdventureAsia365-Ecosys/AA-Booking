@@ -49,6 +49,7 @@ import type {
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
+import type { NextStep, Workbench, WorkbenchItem } from "../../lib/api/priceWorkbench";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { Allotment, AllotmentList, Departure, DepartureList } from "../../lib/api/departures";
@@ -797,6 +798,49 @@ const READINESS: PriceReadiness = {
   },
   items: READINESS_ITEMS,
   degraded: [],
+};
+// ── Price setup workbench (AA-1091) ─────────────────────────────────────────
+// The readiness rows with every check, a provisional price, a long CIS reference text and every next step.
+const STEP_OF: Record<string, NextStep> = {
+  no_components: "add_components",
+  inactive_component: "fix_inactive",
+  missing_rates: "load_rates",
+  missing_fx: "approve_fx",
+  no_rule: "approve_rule",
+};
+function workbenchItem(r: ReadinessItem, i: number): WorkbenchItem {
+  const priced = r.status === "priced" || r.status === "hand_priced";
+  const next: NextStep = STEP_OF[r.reason ?? ""] ?? (r.sellable ? "done" : "make_sellable");
+  const provisional = !priced && i % 3 === 0;
+  const checks = {
+    components: { ok: r.components > 0, count: r.components },
+    rates: { ok: r.components > 0 && !r.components_without_rate.length, rated: r.components - r.components_without_rate.length, total: r.components },
+    fx: { ok: !r.missing_fx.length, missing: r.missing_fx },
+    rule: { ok: true },
+    price: { ok: priced, kind: r.computed_rows ? ("rates" as const) : r.hand_rows ? ("hand" as const) : provisional ? ("provisional" as const) : null },
+    sellable: { ok: r.sellable },
+    departures: { ok: i % 2 === 0, count: i % 2 === 0 ? 4 + i : 0, next: i % 2 === 0 ? "2026-12-01" : null },
+  };
+  return {
+    ...r,
+    checks,
+    missing: (Object.keys(checks) as (keyof typeof checks)[]).filter((k) => !checks[k].ok),
+    next_step: next,
+    reference: i % 4 === 1 ? { raw: "from USD 1,450 per person sharing a twin room, single supplement on request", amount: "1450.00", currency: "USD", reviewed: false } : null,
+    provisional: provisional ? { amount: `${980 + i}.00`, currency: "USD", from_reference: true } : null,
+    supplier_price: priced,
+  };
+}
+const WORKBENCH_ITEMS = READINESS_ITEMS.map(workbenchItem);
+const WORKBENCH: Workbench = {
+  ...READINESS,
+  summary: {
+    ...READINESS.summary,
+    by_next_step: { add_components: 731, fix_inactive: 4, load_rates: 96, approve_fx: 8, approve_rule: 0, recompute: 2, make_sellable: 30, done: 21 },
+    by_missing: { components: 731, rates: 827, fx: 8, rule: 0, price: 839, sellable: 860, departures: 870 },
+    provisional: 240,
+  },
+  items: WORKBENCH_ITEMS,
 };
 const RATE_CARDS: Listed<RateCardRow> = {
   today: "2026-10-23",
@@ -1782,6 +1826,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "pricing/partner-rate-cards") return ok(RATE_CARDS);
   if (p.startsWith("pricing/partner-tariffs/")) return ok(TARIFF);
   if (p === "catalog/price-readiness") return ok(READINESS);
+  if (p === "catalog/price-workbench") return ok(WORKBENCH);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {

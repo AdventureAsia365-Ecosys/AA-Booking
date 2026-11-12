@@ -67,6 +67,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/pricing/agency-tiers/tariff", roles: [A, S, C] },
   // AA-1029: price readiness of the catalog (API pricing.read).
   { pattern: "/pricing/readiness", roles: [A, S, C] },
+  // AA-1091: the price setup workbench (API pricing.read; actions and the workbook import trip_plan.write).
+  { pattern: "/pricing/workbench", roles: [A, S, C] },
   // Catalog from CIS (W2): everyone reads; admin / contracting edit commercial fields.
   { pattern: "/catalog/trip-plans/:id/commercial", roles: [A, C] },
   { pattern: "/catalog/*", roles: ALL },

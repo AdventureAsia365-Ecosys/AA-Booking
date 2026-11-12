@@ -32,7 +32,8 @@ const MAX_BODY_BYTES = 1_000_000;
 const MEDIA_MAX_BODY_BYTES = 4_400_000;
 // AA-682 S1: operations documents (POST ops-files, a voucher / confirmation as base64 JSON, at most 3 MB of file).
 // AA-1029: a supplier rate sheet (POST suppliers/<ref>/rate-sheets, the .xlsx as base64 JSON, at most 2 MB of file).
-const MEDIA_UPLOAD_PATH = /^((hotels|services)\/[^/]+\/media|ops-files|suppliers\/[^/]+\/rate-sheets)$/;
+// AA-1091: the price setup workbook (POST catalog/price-import, the .xlsx as base64 JSON, at most 2 MB of file).
+const MEDIA_UPLOAD_PATH = /^((hotels|services)\/[^/]+\/media|ops-files|suppliers\/[^/]+\/rate-sheets|catalog\/price-import)$/;
 // AA-1030 G3: content-disposition carries the server's file name of a download (the agency tariff CSV).
 const PASS_HEADERS = ["content-type", "cache-control", "retry-after", "content-disposition"];
 

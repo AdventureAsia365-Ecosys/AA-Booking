@@ -23,6 +23,11 @@ export { Providers } from "./core/Providers";
 export { AiNotice, type AiNoticeForm } from "./core/AiNotice";
 export { aiTextAttrs, showsAiBadge, type AiMark } from "./booking/aiMark";
 export { useSidebarCollapsed } from "./core/useSidebar";
+// AA-1091: the UI language (English default, Vietnamese second) for the pages that opt in (ui/local/lang.ts).
+export { defineMessages, type Lang } from "./core/i18n";
+export { I18nProvider, useT, useLang, useFormat } from "./core/useI18n";
+export { LangSwitch } from "./core/LangSwitch";
+export { langStore } from "./local/lang";
 export { useMediaQuery, useIsPhone, PHONE_QUERY } from "./core/useMediaQuery";
 // AA-994 S4a parts, upstreamed from the former ui/booking copies (same props, so pages did not change).
 export { Section } from "./core/Section";

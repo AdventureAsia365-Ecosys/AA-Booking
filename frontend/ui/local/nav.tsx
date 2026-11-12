@@ -32,6 +32,7 @@ import {
   Shield,
   SquareCheck,
   Store,
+  Wrench,
 } from "lucide-react";
 import { canSeePage } from "@/lib/rbac";
 import { hrefPath, navActive, type NavMatch } from "./navMatch";
@@ -120,6 +121,8 @@ export function navGroups(): NavGroup[] {
         { href: "/pricing/agency-tiers", label: "Agency tiers", icon: <Award size={ICON} />, wave: 2, shipped: true },
         // AA-1029: which trip plans price and why the others do not.
         { href: "/pricing/readiness", label: "Price readiness", icon: <Gauge size={ICON} />, wave: 2, shipped: true },
+        // AA-1091: the price setup workbench (checks and next step per tour, suggested components, bulk workbook).
+        { href: "/pricing/workbench", label: "Price setup", icon: <Wrench size={ICON} />, wave: 2, shipped: true },
       ],
     },
     {

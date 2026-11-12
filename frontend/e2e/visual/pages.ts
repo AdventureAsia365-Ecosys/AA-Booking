@@ -86,6 +86,7 @@ export const PAGES: VisualPage[] = [
   { slug: "agency-tiers", route: "/pricing/agency-tiers", path: "/pricing/agency-tiers", auth: "staff" },
   { slug: "agency-tariff", route: "/pricing/agency-tiers/tariff", path: "/pricing/agency-tiers/tariff?partner=pt-1", auth: "staff" },
   { slug: "price-readiness", route: "/pricing/readiness", path: "/pricing/readiness", auth: "staff" },
+  { slug: "price-workbench", route: "/pricing/workbench", path: "/pricing/workbench", auth: "staff" },
   { slug: "proposals", route: "/proposals", path: "/proposals", auth: "staff" },
   { slug: "services", route: "/services", path: "/services", auth: "staff" },
   { slug: "service", route: "/services/[id]", path: "/services/SVC-000001", auth: "staff" },

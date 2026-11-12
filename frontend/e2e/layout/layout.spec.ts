@@ -107,6 +107,7 @@ const PAGES: PageCase[] = [
   { name: "agency-tiers-cards", path: "/pricing/agency-tiers?tab=cards" },
   { name: "agency-tariff", path: "/pricing/agency-tiers/tariff?partner=pt-1" },
   { name: "price-readiness", path: "/pricing/readiness" },
+  { name: "price-workbench", path: "/pricing/workbench" },
   { name: "trip-checks", path: "/trip-checks" },
   { name: "b2b-desk-on-request", path: "/b2b-desk" },
   { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },
