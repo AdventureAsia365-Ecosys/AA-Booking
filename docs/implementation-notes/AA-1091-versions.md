@@ -251,3 +251,28 @@ Six reviewer findings, all accepted:
 - The plan-calendar PUT changed permission (`season.write`) and body (`reason` required); the route is new in this
   PR, so no published client breaks.
 
+
+## Integration test fix after the renumber (lane l1, S279)
+
+### Decisions
+
+- **The cause was the test, not the data step.** The second renumber (bk-053 / bk-054 to bk-054 / bk-055, made
+  because bk-053 shipped first on main) rewrote every `"bk-053"` string but not the bare integer in
+  `apply_migrations(admin, only=[53])`. `test_migration_of_todays_prices_keeps_every_price` therefore re-ran bk-053
+  (the b2b_partners tenant policy) instead of the bk-054 data step and found no version. With `only=[54]` the data
+  step versions today's prices exactly as the assertion demands (past sets withdrawn, the rows in force published,
+  every price column unchanged); the assertion is not touched.
+- **Same miss in `test_bk055_schema.py`** (merged on main with the migration PR): its fixture re-ran `only=[54]` (the
+  versions file, whose data step versions every plan other tests left with prices, the side effect
+  `test_bk054_schema.py` avoids on purpose) instead of its own file. Now `only=[55]`, so the bk-055 re-run is the
+  idempotency check it was meant to be.
+- **Guard:** `tests/unit/test_aa1091_apply_only_refs.py` (no database): every integer literal in an `only=[...]` of an
+  `apply_migrations` call in `tests/integration` names an existing migration file and the same test file says
+  `bk-0NN` for it. It fails on both stale literals of the PR head before this fix. The shared
+  `.github/scripts/migration_refs.py` (identical in three repos) only reads `NNN_name` tokens and was left as is.
+
+### Should know
+
+- Local reproduction needs a UTC Postgres and `TZ=UTC` (CI runs both in UTC). A cluster made by `initdb` on a UTC+7
+  laptop between 00:00 and 07:00 local time fails three date-sensitive tests (finance FX snapshot, tour terms, the
+  bk-032 price matrix) on main as well; that is the local clock, not this branch.

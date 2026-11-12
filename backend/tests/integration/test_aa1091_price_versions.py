@@ -425,7 +425,7 @@ async def test_migration_of_todays_prices_keeps_every_price(
     async with pool.acquire() as conn:
         from_before = (await trip_plan_prices.list_prices(conn, _staff(MAKER), TOUR))["from_price"]
 
-    await apply_migrations(admin, only=[53])
+    await apply_migrations(admin, only=[54])
 
     assert await _every_price(admin, plan) == before
     versions = await admin.fetch(
