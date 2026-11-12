@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from app.b2b import legacy_cases
+from tests.unit.fakes import ScriptedConn
 
 
 def test_legacy_titles_are_the_pre_aa1013_shapes() -> None:
@@ -110,3 +111,87 @@ def test_main_turns_a_missing_key_into_exit_3(
     monkeypatch.setattr(legacy_cases, "apply", refuse)
     assert legacy_cases.main(["--apply"]) == 3
     assert "bk-056" in json.loads(capsys.readouterr().out)["error"]
+
+
+# ── plan / apply against a scripted connection (PostgreSQL and the bk-056 locks: the integration test) ─────────────
+
+START = date(2027, 3, 1)
+CASE = {
+    "case_id": "c-1",
+    "code": "TC-000901",
+    "start_date": START,
+    "end_date": START,
+    "quote_id": "q-1",
+    "proposal_ref": "crm-proposal:7c1e",
+    "proposal_version": 1,
+    "version_id": "v-1",
+    "version_title": "B2B crm-proposal:7c1e v1",
+    "sent": False,
+}
+LINE = {
+    "line_no": 1,
+    "line_ref": "9a0f",
+    "component_id": "tp:5b2d0000-0000-4000-8000-000000000001",
+    "component_kind": "trip_plan",
+    "service_date": START,
+    "nights": None,
+}
+ITEM = {"id": "i-1", "position": 1, "title": "trip_plan tp:5b2d0000-0000-4000-8000-000000000001 · line 9a0f",
+        "day_from": 1, "day_to": 1}  # fmt: skip
+
+
+def _scripted(case: dict[str, Any] = CASE, item: dict[str, Any] = ITEM, key: bool = True) -> ScriptedConn:
+    conn = ScriptedConn()
+    conn.on("FROM booking.trip_cases tc JOIN booking.b2b_holds h", [case])
+    conn.on("FROM booking.b2b_quote_lines WHERE quote_id", [LINE])
+    conn.on("FROM booking.trip_case_version_itinerary WHERE trip_case_version_id", [item])
+    conn.on("FROM booking.v_schema_versions", key)
+    return conn
+
+
+@pytest.fixture
+def catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def plan_days(_c: Any, ids: list[str]) -> tuple[dict[str, int], dict[str, str]]:
+        return {i: 6 for i in ids}, {i: "src-1" for i in ids}
+
+    async def line_titles(_c: Any, lines: list[Any], _s: dict[str, str]) -> dict[int, str]:
+        return {r["line_no"]: "Harbour Lights Loop" for r in lines}
+
+    monkeypatch.setattr(legacy_cases.plan_span, "plan_days", plan_days)
+    monkeypatch.setattr(legacy_cases.holds, "line_titles", line_titles)
+
+
+@pytest.mark.asyncio
+async def test_plan_finds_the_three_fixes(catalog: None) -> None:
+    planned = await legacy_cases.plan(_scripted())
+    assert (planned["to_fix"], planned["end_dates"], planned["version_titles"]) == (1, 1, 1)
+    change = planned["changes"][0]
+    assert change["end_date"] == (START, date(2027, 3, 6))
+    assert change["version_title"] == "Harbour Lights Loop"
+    assert change["items"] == [{"id": "i-1", "position": 1, "title": "Harbour Lights Loop", "day_to": 6}]
+
+
+@pytest.mark.asyncio
+async def test_plan_leaves_fixed_extended_and_sent_cases(catalog: None) -> None:
+    fixed = {**CASE, "end_date": date(2027, 3, 9), "version_title": "Harbour Lights Loop"}
+    item = {**ITEM, "title": "Harbour Lights Loop", "day_to": 6}
+    assert (await legacy_cases.plan(_scripted(fixed, item)))["to_fix"] == 0
+    sent = await legacy_cases.plan(_scripted({**CASE, "sent": True}))
+    assert (sent["to_fix"], sent["skipped_sent"]) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_case_without_quote_lines_is_skipped(catalog: None) -> None:
+    conn = _scripted().on("FROM booking.b2b_quote_lines WHERE quote_id", [])
+    assert (await legacy_cases.plan(conn))["to_fix"] == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_writes_each_fix_with_the_setting_and_an_audit_row(catalog: None) -> None:
+    conn = _scripted()
+    await legacy_cases.apply(conn)  # type: ignore[arg-type]
+    assert conn.sql("SELECT set_config($1, $2, true)") == [("booking.legacy_display_fix", "aa1088")]
+    assert conn.sql("UPDATE booking.trip_cases SET end_date") == [("c-1", date(2027, 3, 6), START)]
+    assert conn.sql("UPDATE booking.trip_case_versions SET title") == [("v-1", "Harbour Lights Loop")]
+    assert conn.sql("UPDATE booking.trip_case_version_itinerary") == [("i-1", "Harbour Lights Loop", 6)]
+    assert len(conn.sql("INSERT INTO booking.audit_logs")) == 1
