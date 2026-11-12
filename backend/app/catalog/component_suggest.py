@@ -11,9 +11,10 @@ checks, one audit row). Rules, no LLM (root ADR 0009 decision 13: Booking makes 
 - ``catalog.v_tour_day_route`` by ``tour_id`` (CIS 253, feature-detected: without it, or when it fails, the night's
   place is the day's last place and the suggestion says so in ``degraded``): the overnight place and its CIS
   destination id;
-- Booking's own active hotels with their active room types and active services, of the tour's country
-  (``booking.countries`` by name) or at one of the tour's overnight destinations, plus services made from this tour
-  in CIS (``services.source_id``); at most :data:`MAX_CANDIDATES` rows each.
+- Booking's own active hotels with their active room types and active services of active suppliers, of the tour's
+  country (the item's country, else its supplier's; ``booking.countries`` by name) or at one of the tour's overnight
+  destinations, plus services made from this tour in CIS (``services.source_id``); at most
+  :data:`MAX_CANDIDATES` rows each.
 
 **Needs per day**: a hotel for every night (days 1 .. days - 1; a one-day tour has none); a service per type the day's
 text names (:data:`KEYWORDS`: transfer, guide, entrance, activity, and a meal for lunch or dinner; breakfast is in the
@@ -51,7 +52,21 @@ MIN_GUIDE_SCORE = 0.05
 HOTEL = "hotel"
 # The words of a day's text that ask for a service of a type (lower case, accents removed; whole words or phrases).
 KEYWORDS: dict[str, tuple[str, ...]] = {
-    "transfer": ("transfer", "transfers", "pick up", "pickup", "pick-up", "drop off", "drive", "airport", "by car"),
+    "transfer": (
+        "transfer",
+        "transfers",
+        "pick up",
+        "pickup",
+        "pick-up",
+        "drop off",
+        "drive",
+        "airport",
+        "by car",
+        "jeep",
+        "minivan",
+        "train",
+        "speedboat",
+    ),
     "guide": ("guide", "guided", "tour leader", "escorted"),
     "entrance": ("entrance", "entrance fee", "ticket", "tickets", "admission"),
     "activity": (
@@ -102,21 +117,24 @@ FROM catalog.v_tour_day_route r WHERE r.tour_id = $1::uuid ORDER BY r.day_index
 """
 COUNTRY_SQL = "SELECT iso2::text FROM booking.countries WHERE lower(name) = lower($1) LIMIT 1"
 HOTELS_SQL = """
-SELECT h.code, h.name, h.address, h.destination_id::text AS destination_id, h.country_code::text AS country_code,
+SELECT h.code, h.name, h.address, h.destination_id::text AS destination_id,
+       coalesce(h.country_code, su.country_code)::text AS country_code,
        su.code AS supplier_code, rt.id::text AS room_type_id, rt.name AS room_type
 FROM booking.hotels h
 JOIN booking.hotel_room_types rt ON rt.hotel_id = h.id AND rt.status = 'active'
 JOIN booking.suppliers su ON su.id = h.supplier_id
-WHERE h.status = 'active' AND (h.country_code = $1 OR h.destination_id = ANY($2::uuid[]))
+WHERE h.status = 'active' AND su.status = 'active'
+  AND (coalesce(h.country_code, su.country_code) = $1 OR h.destination_id = ANY($2::uuid[]))
 ORDER BY h.code, rt.name
 LIMIT $3
 """
 SERVICES_SQL = """
 SELECT s.id::text AS service_id, s.code, s.title, s.service_type, s.unit, s.destination_id::text AS destination_id,
-       s.country_code::text AS country_code, s.source_id, su.code AS supplier_code
+       coalesce(s.country_code, su.country_code)::text AS country_code, s.source_id, su.code AS supplier_code
 FROM booking.services s JOIN booking.suppliers su ON su.id = s.supplier_id
-WHERE s.status = 'active'
-  AND (s.country_code = $1 OR s.destination_id = ANY($2::uuid[]) OR (s.source_system = 'cis' AND s.source_id = $3))
+WHERE s.status = 'active' AND su.status = 'active'
+  AND (coalesce(s.country_code, su.country_code) = $1 OR s.destination_id = ANY($2::uuid[])
+       OR (s.source_system = 'cis' AND s.source_id = $3))
 ORDER BY s.code
 LIMIT $4
 """
@@ -368,7 +386,7 @@ def suggest(
                 "needs": day_needs,
             }
         )
-    return {"days": out_days, "unmatched": unmatched, **counts}
+    return {"days": out_days, "unmatched": unmatched, "counts": counts}
 
 
 # ── Database part ────────────────────────────────────────────────────────────
@@ -388,7 +406,7 @@ async def build(conn: asyncpg.Connection, source_id: str) -> dict[str, Any]:
     current = (await plan_components.list_components(conn, source_id))["items"]
     tours = await _soft(conn, TOUR_SQL, source_id)
     if tours is None:
-        return {"tour_key": source_id, "days": [], "unmatched": [], "degraded": ["catalog"], **_zero()}
+        return {"tour_key": source_id, "days": [], "unmatched": [], "counts": _zero(), "degraded": ["catalog"]}
     if not tours:
         raise NotFound("tour_not_in_catalog", "this tour is not in the CIS catalog")
     tour = tours[0]
