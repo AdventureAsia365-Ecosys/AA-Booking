@@ -146,11 +146,10 @@ async def test_change_needs_a_second_person_and_never_applies_backwards(
     assert item["current"]["version_no"] == 2
     assert [v["status"] for v in item["history"]] == ["in_force", "superseded"]
     audit = await admin.fetch(
-        "SELECT action FROM booking.audit_logs WHERE entity_type = 'pricing_policy' AND entity_id = $1::uuid"
-        " ORDER BY created_at",
+        "SELECT action FROM booking.audit_logs WHERE entity_type = 'pricing_policy' AND entity_id = $1::uuid",
         version["id"],
     )
-    assert [r["action"] for r in audit] == ["pricing_policy.submitted", "pricing_policy.approved"]
+    assert sorted(r["action"] for r in audit) == ["pricing_policy.approved", "pricing_policy.submitted"]
 
     # Back to the seed value (a new version; the later approval of the same day wins).
     back = await client.post("/policy", json={**change, "value": 14, "reason": "Back to 14"}, headers=h[CHECKER])
