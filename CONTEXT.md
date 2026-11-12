@@ -2007,6 +2007,17 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   `e2e-booking@e2e-mail.lumiguides.it.com`, group `booking-admin` only, email code read from the SES test mailbox
   (root ADR 0006a A10a); no password, no secret. Its session is read-only on every client: non-safe methods are
   403 `e2e_read_only` before any DB access (`app/auth/staff.py` `E2E_TEST_STAFF_EMAIL`), reads keep admin.
+- Dev-only E2E write identities (AA-1087, root ADR 0006a A10e; agent-run, never CI): `e2e-booking-staff@`
+  (`booking-sales`: send and confirm a supplier booking), `e2e-booking-maker@` (`booking-finance`: record an agency
+  payment) and `e2e-booking-checker@` (`booking-finance`: approve or reject it), all on `e2e-mail.lumiguides.it.com`,
+  codes in the MFA-admin-only mailbox prefix `inbound-admin/`. `app/auth/e2e_staff.py`, called from
+  `current_staff`: refused outside `ENVIRONMENT` exactly `dev` (403 `e2e_not_allowed_here`, reads too), with any
+  other group set (403 `e2e_scope`), on any write outside the identity's own allow-list (403 `e2e_read_only`, before
+  any DB access), and on an allowed write whose record does not belong to an agency CIS marks synthetic (403
+  `e2e_synthetic_only`, before the staff row sync or the route): `catalog.v_tenant_account_v1.is_synthetic` (CIS 401,
+  contract tenant.entitlements.v1 1.6), fail closed when the column is missing. Reads keep the role's permissions.
+  Smoke: `frontend/e2e/e2e-writers/` (Playwright project `e2e-writers`, `BOOKING_E2E_WRITERS=1`, dry run
+  `BOOKING_E2E_WRITERS_DRY_RUN=1`). Removed at go-live with the A10 family (AA-1054).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 
