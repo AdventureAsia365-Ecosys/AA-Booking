@@ -10,6 +10,8 @@
 // as a free "from" guide for plans without a matrix. The supplier select lists the first 100 active suppliers (the
 // API page cap); a search box above it (debounced `q`) finds the others, and the picked supplier stays listed.
 // AA-1029: the price chain panel (from price, CIS reference price, recompute from rates, history) sits above the matrix.
+// AA-1091 (bk-052): hand prices are price versions with maker-checker, never an overwrite: the matrix is shown read-only
+// here (the chain panel) with a link to the tour's Versions tab on Price setup, where a draft is made and approved.
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,13 +19,12 @@ import { ApiError } from "@/lib/api/client";
 import { CHANNELS, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import { suppliersApi } from "@/lib/api/suppliers";
 import { tripPlansApi, type PlanSupplier, type TripPlanDetail } from "@/lib/api/tripPlans";
+import Link from "next/link";
 import { Checkbox, Input, Select, Textarea, FormDrawer, useCan, useStaff, useToast } from "@/ui";
-import { draftsFrom, draftsToBody, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { CisField, CisFieldset } from "../../../_parts/CisFields";
 import { CIS_EDITOR_ROLES } from "./shared";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 import { PriceChainPanel } from "./PriceChainPanel";
-import { PriceMatrixEditor } from "./PriceMatrixEditor";
 
 const textareaCls = "min-h-[96px] w-full";
 
@@ -52,7 +53,6 @@ function initial(plan: TripPlanDetail): FormState {
 }
 
 const AMOUNT_RE = /^\d{1,10}(\.\d{1,2})?$/;
-const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onClose: () => void }) {
   const qc = useQueryClient();
@@ -63,12 +63,6 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
   const [start] = useState(() => initial(plan));
   const [form, setForm] = useState<FormState>(start);
   const [localError, setLocalError] = useState<string | null>(null);
-  // null = the matrix as loaded (untouched): only an edited matrix is sent, so a slow load can never wipe it.
-  const [drafts, setDrafts] = useState<PriceDraft[] | null>(null);
-  const [rowErrors, setRowErrors] = useState<DraftError[]>([]);
-  const [needReason, setNeedReason] = useState(false);
-  const [reason, setReason] = useState("");
-  const [today] = useState(todayIso);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierQ, setSupplierQ] = useState("");
   // The supplier shown as picked, kept as an option even when a search no longer lists it.
@@ -90,10 +84,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
     enabled: canPickSupplier,
     staleTime: 60_000,
   });
-  const loadedDrafts = draftsFrom(prices.data?.items ?? []);
-  const rows = drafts ?? loadedDrafts;
-  const pricesDirty = drafts !== null && JSON.stringify(drafts) !== JSON.stringify(loadedDrafts);
-  const dirty = JSON.stringify(form) !== JSON.stringify(start) || pricesDirty;
+  const dirty = JSON.stringify(form) !== JSON.stringify(start);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -107,25 +98,14 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         ...(canPickSupplier ? { supplier_id: form.supplier_id || null } : {}),
       });
       qc.setQueryData(["trip-plans", "detail", plan.source_id], out);
-      let matrix = null;
-      if (pricesDirty && drafts) {
-        matrix = await tripPlansApi.savePrices(plan.source_id, {
-          items: draftsToBody(drafts).items,
-          below_floor_reason: reason.trim() || null,
-        });
-        qc.setQueryData(["trip-plans", "prices", plan.source_id], matrix);
-      }
-      return { out, matrix };
+      return { out };
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["trip-plans"] });
     },
-    onSuccess: ({ out, matrix }) => {
-      toast.success(out.changed?.length || matrix ? "Commercial details saved" : "Nothing changed");
+    onSuccess: ({ out }) => {
+      toast.success(out.changed?.length ? "Commercial details saved" : "Nothing changed");
       onClose();
-    },
-    onError: (err) => {
-      if (err instanceof ApiError && err.code === "override_reason_required") setNeedReason(true);
     },
   });
 
@@ -133,18 +113,6 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
     const amount = form.hint_amount.trim();
     if (amount && (!AMOUNT_RE.test(amount) || Number(amount) <= 0)) {
       setLocalError("Enter the price hint as an amount above 0 with up to 2 decimals, for example 2450 or 2450.50.");
-      return;
-    }
-    if (pricesDirty && drafts) {
-      const { errors } = draftsToBody(drafts);
-      setRowErrors(errors);
-      if (errors.length) {
-        setLocalError(`Check the price matrix: ${errors.length === 1 ? "one row needs" : `${errors.length} fields need`} attention.`);
-        return;
-      }
-    }
-    if (needReason && !reason.trim()) {
-      setLocalError("Give a reason for the prices below the channel floor.");
       return;
     }
     setLocalError(null);
@@ -275,26 +243,18 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
           <p className="text-[13px] text-danger">The price matrix could not be loaded. Save the other fields, then reopen.</p>
         ) : (
           <>
-          {prices.data && <PriceChainPanel sourceId={plan.source_id} matrix={prices.data} dirty={pricesDirty} />}
-          <PriceMatrixEditor
-            rows={rows}
-            onChange={(next) => {
-              setDrafts(next);
-              setRowErrors([]);
-              // The API asks for the reason again if a row is still below the floor after the edit.
-              setNeedReason(false);
-            }}
-            errors={rowErrors}
-            saved={prices.data?.items ?? []}
-            today={today}
-          />
+          {prices.data && <PriceChainPanel sourceId={plan.source_id} matrix={prices.data} dirty={false} />}
+          <p className="text-[13px] text-body" data-testid="price-versions-link">
+            Prices change through price versions: a draft, a reason, and a second person approves it.{" "}
+            <Link
+              href={`/pricing/workbench?versions=${encodeURIComponent(plan.source_id)}`}
+              className="font-semibold text-accent-deep hover:underline"
+            >
+              Open the price versions
+            </Link>
+          </p>
           </>
         ))}
-      {needReason && (
-        <FormField label="Reason for prices below the floor" required hint="Kept in the audit log with the price matrix.">
-          <Input className={inputCls} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </FormField>
-      )}
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1.5 text-[13px] font-medium text-ink">Price hint</legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_96px_132px]">

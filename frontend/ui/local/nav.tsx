@@ -28,11 +28,13 @@ import {
   Map as MapIcon,
   MapPin,
   Percent,
+  PartyPopper,
   Scale,
   Settings,
   Shield,
   SquareCheck,
   Store,
+  Sun,
   Wrench,
 } from "lucide-react";
 import { canSeePage } from "@/lib/rbac";
@@ -126,6 +128,9 @@ export function navGroups(): NavGroup[] {
         { href: "/pricing/workbench", label: "Price setup", icon: <Wrench size={ICON} />, wave: 2, shipped: true },
         // AA-1091 (bk-050): the pricing policy parameters (quote validity, surcharges, deposits ...), maker-checker.
         { href: "/pricing/policy", label: "Pricing policy", icon: <Scale size={ICON} />, wave: 2, shipped: true },
+        // AA-1091 (bk-053): season calendars and holiday events as data, maker-checker.
+        { href: "/pricing/seasons", label: "Seasons", icon: <Sun size={ICON} />, wave: 2, shipped: true },
+        { href: "/pricing/holiday-events", label: "Holiday events", icon: <PartyPopper size={ICON} />, wave: 2, shipped: true },
       ],
     },
     {

@@ -236,6 +236,9 @@ def row_out(row: Any) -> dict[str, Any]:
     out["valid_to"] = out.pop("travel_to") - ONE_DAY
     out["currency"] = out["currency"].strip()
     out["net_currency"] = (out["net_currency"] or "").strip() or None
+    # The matrix row fields the staff editor reads (the season and its peak come from the calendar, not the row).
+    out["priced"] = out["net_amount"] is not None
+    out["peak"] = False
     return out
 
 

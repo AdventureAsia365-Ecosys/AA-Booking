@@ -5,7 +5,9 @@
 // and search (URL query). Each row opens the tour's hotels and services (ComponentsDrawer: suggestions from the CIS
 // itinerary) or the page of its next step; staff who edit plans select rows for the bulk actions (make sellable or
 // not, show the CIS reference as a provisional price, clear it, recompute). "Import workbook" is the bulk Excel import
-// with its dry run (ImportDrawer). The page has its own language switch (English default, Vietnamese; messages.ts).
+// with its dry run (ImportDrawer). AA-1091 (bk-052): each tour also has its price Versions tab (VersionsDrawer: drafts,
+// maker-checker approval with the diff; `?versions=<tour key>` opens it from the trip plan page). The page has its own
+// language switch (English default, Vietnamese; messages.ts).
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +43,7 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { ComponentsDrawer } from "./ComponentsDrawer";
+import { VersionsDrawer } from "./VersionsDrawer";
 import { ImportDrawer } from "./ImportDrawer";
 import { M, type MessageKey } from "./messages";
 
@@ -136,7 +139,7 @@ function Workbench() {
   const t = useT(M);
   const toast = useToast();
   const qc = useQueryClient();
-  const { get } = useUrlFilters();
+  const { get, set } = useUrlFilters();
   const canEdit = useCan("trip_plan.write");
   const filters = {
     status: get("status"),
@@ -146,7 +149,12 @@ function Workbench() {
     next_step: get("next_step"),
   };
   const [importing, setImporting] = useState(false);
-  const [components, setComponents] = useState<WorkbenchItem | null>(null);
+  // AA-1091: the tour drawer, on its Hotels & services tab or its price Versions tab (`?versions=<tour key>` opens it).
+  const versionsKey = get("versions");
+  const [components, setComponents] = useState<{ tour_key: string; title: string | null } | null>(
+    versionsKey ? { tour_key: versionsKey, title: null } : null,
+  );
+  const [tab, setTab] = useState<"components" | "versions">(get("versions") ? "versions" : "components");
   const [downloading, setDownloading] = useState(false);
 
   const report = useQuery({
@@ -217,10 +225,20 @@ function Workbench() {
               <LinkButton
                 onClick={(e) => {
                   e.stopPropagation();
+                  setTab("components");
                   setComponents(r);
                 }}
               >
                 {t("openComponents")}
+              </LinkButton>
+              <LinkButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setTab("versions");
+                  setComponents(r);
+                }}
+              >
+                {t("openVersions")}
               </LinkButton>
               {!opensDrawer && (
                 <Link
@@ -330,7 +348,10 @@ function Workbench() {
           loading={report.isLoading}
           error={report.isError ? (report.error as Error).message : null}
           onRetry={() => report.refetch()}
-          onRowClick={(r) => setComponents(r)}
+          onRowClick={(r) => {
+            setTab("components");
+            setComponents(r);
+          }}
           enableSelection={canEdit}
           bulkActions={({ selectedRows, clearSelection }) => {
             const keys = selectedRows.map((r) => r.tour_key);
@@ -369,9 +390,26 @@ function Workbench() {
         />
       </Section>
       {importing && <ImportDrawer filters={filters} onClose={() => setImporting(false)} />}
-      {components && (
-        <ComponentsDrawer sourceId={components.tour_key} title={components.title} onClose={() => setComponents(null)} />
+      {components && tab === "components" && (
+        <ComponentsDrawer
+          sourceId={components.tour_key}
+          title={components.title}
+          onClose={() => setComponents(null)}
+          onVersions={() => setTab("versions")}
+        />
       )}
+      {components && tab === "versions" && (
+        <VersionsDrawer
+          sourceId={components.tour_key}
+          title={components.title}
+          onClose={() => {
+            setComponents(null);
+            if (versionsKey) set("versions", null);
+          }}
+          onTab={setTab}
+        />
+      )}
+
     </PageFrame>
   );
 }
