@@ -1,4 +1,4 @@
-"""AA-1091 (bk-053 / bk-054, root ADR 0005b d1, d2, d4, d9, d10) units: the one season function (fixed ranges,
+"""AA-1091 (bk-054 / bk-055, root ADR 0005b d1, d2, d4, d9, d10) units: the one season function (fixed ranges,
 festive ranges from holiday event rows with days before and after, stop-sale overlay, segments and cuts), the overlap
 rule of price list versions (winning dates, derived superseded, uncovered dates, pieces cut by season), the tariff year
 from the policy start, the frozen diff, and the B2B quote's season (peak uplift, stop-sale on request). Names and dates

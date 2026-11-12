@@ -44,7 +44,7 @@ test("diff text and event codes", () => {
 test("people are shown by name, markers by a label, the id only as a fallback", () => {
   const labels = { migration: "Migrated prices", system: "Catalog sync", seed: "Initial value", nobody: "—" };
   assert.equal(personText(who("u-1", "Invented Person"), labels), "Invented Person");
-  assert.equal(personText(who("migration:bk-053"), labels), "Migrated prices");
+  assert.equal(personText(who("migration:bk-054"), labels), "Migrated prices");
   assert.equal(personText(who("system:bk_trip_plan_sync"), labels), "Catalog sync");
   assert.equal(personText(who("seed:bk-050"), labels), "Initial value");
   assert.equal(personText(who("u-9"), labels), "u-9");

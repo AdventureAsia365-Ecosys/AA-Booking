@@ -25,7 +25,7 @@ nothing (no daily history copies, no false ``updated_at`` move for the products 
 rule or FX rate changes or a window ends. A window or band with a component without a rate in force gets no row
 (never a guessed or zero net). The season label = the labels of the rates
 used for 2 travellers (for staff); the season itself is the plan's season calendar on the window's start dates
-(AA-1091, bk-054, :mod:`app.pricing.seasons`: windows are also cut where it changes, ``season_code`` on each row),
+(AA-1091, bk-055, :mod:`app.pricing.seasons`: windows are also cut where it changes, ``season_code`` on each row),
 and ``peak`` = a peak or festive season (the rule's peak uplift then applies). While the plan's calendar is not
 configured (no approved range yet), the old rule stays so no price moves before staff enter seasons: ``peak`` when a
 2-traveller rate label says "peak" (``season_code`` ``peak``, else ``low``).
@@ -36,7 +36,7 @@ approved rule of that channel is in force on the recompute day; the selling curr
 the suggested retail price (``rrp_amount``) when the b2b rule has an RRP markup (b15).
 
 **Writing** (:func:`recompute_plan`, one transaction per plan, the plan row locked): the plan's hand rows come from
-its published price list versions (AA-1091, bk-053, :mod:`app.catalog.version_matrix`: each version's rows cut to the
+its published price list versions (AA-1091, bk-054, :mod:`app.catalog.version_matrix`: each version's rows cut to the
 dates it wins today and where the season changes; their RRP refreshed), the computed rows are replaced, a computed
 row overlapping a hand row of its channel and currency is left out, and the set is stored with
 ``app.catalog.trip_plan_prices.store`` (audit ``trip_plan.prices_recomputed``, dated history ``cost_sheet``) only when
@@ -204,7 +204,7 @@ class NetRow:
     peak: bool
     # bk-047 (AA-1075, bk-15): the single supplement per person (net_currency) of the window, None without a room.
     single_net: Decimal | None = None
-    # AA-1091 (bk-054): the season of the plan's calendar on the window's start dates (``peak`` follows from it).
+    # AA-1091 (bk-055): the season of the plan's calendar on the window's start dates (``peak`` follows from it).
     season_code: str | None = None
 
 
@@ -253,7 +253,7 @@ def windows(
     """Start-date windows inside which every component prices the same rates, anchored on the rate validity (cut at
     every rate start and end shifted by the component's day offset, up to the end of the latest rate), without the
     ones over before ``today``. Nothing in them depends on ``today`` but which windows are over, so the same inputs
-    on the next day give the same windows. AA-1091 (bk-054): also cut where the plan's season calendar changes season
+    on the next day give the same windows. AA-1091 (bk-055): also cut where the plan's season calendar changes season
     (a window has one season on its start dates)."""
     end = horizon(today, spans)
     if end is None:
@@ -389,7 +389,7 @@ def season_label(cell: Cell) -> str | None:
 
 
 def label_peak(cell: Cell) -> bool:
-    """The old rule (before bk-054), kept while the plan's calendar is not configured: a rate label says "peak"."""
+    """The old rule (before bk-055), kept while the plan's calendar is not configured: a rate label says "peak"."""
     return any(seasons.LEGACY_PEAK in s.lower() for s in cell.seasons)
 
 
@@ -402,7 +402,7 @@ def net_rows(
 ) -> tuple[list[NetRow], int]:
     """Merge the windows whose nets, season and single supplement match; returns the rows and the count of unpriced
     cells. ``singles`` (AA-1075): the single supplement of each window (:func:`single_supplement`). ``codes``
-    (AA-1091, bk-054): the calendar season of each window's start dates (:mod:`app.pricing.seasons`); ``peak`` =
+    (AA-1091, bk-055): the calendar season of each window's start dates (:mod:`app.pricing.seasons`); ``peak`` =
     a peak or festive season (the rule's peak uplift). Without codes (the plan's calendar is not configured) the old
     rule: a window is ``peak`` when a 2-traveller rate's season label says "peak", else ``low``."""
     unpriced = 0

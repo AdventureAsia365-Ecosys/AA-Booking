@@ -172,7 +172,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "pricing_policy.write": frozenset({"admin", "contracting", "finance"}),
     "pricing_policy.approve": frozenset({"admin", "contracting"}),
     "pricing_policy.approve_finance": frozenset({"admin", "finance"}),
-    # AA-1091 (bk-053 / bk-054, root ADR 0005b d6): hand prices are price list versions and seasons are calendars. The
+    # AA-1091 (bk-054 / bk-055, root ADR 0005b d6): hand prices are price list versions and seasons are calendars. The
     # customer-service maker (contracting) drafts and submits; the product / pricing lead (contracting, admin) approves,
     # rejects or withdraws a published one, never their own version (403 maker_checker + table CHECKs).
     "price_version.write": frozenset({"admin", "contracting"}),

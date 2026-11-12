@@ -324,7 +324,7 @@ async def run(pool: asyncpg.Pool) -> dict[str, Any]:
 
 
 async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
-    """AA-1091 (bk-054): plans without a season calendar get the one of their first day's destination
+    """AA-1091 (bk-055): plans without a season calendar get the one of their first day's destination
     (:func:`app.pricing.seasons_admin.assign_default_calendars`), a batch per run. Fail soft: a catalog without the
     place view or its destination column leaves the plans in the default low season and says so in the result."""
     try:

@@ -492,7 +492,7 @@ async def test_import_dry_run_and_apply(monkeypatch: pytest.MonkeyPatch) -> None
         calls.append(f"components {key} {len(items)}")
 
     async def import_draft(conn: Any, staff: Any, plan_id: str, key: str, items: Any, sha: str) -> dict[str, Any]:
-        # AA-1091 (bk-053): the Prices sheet becomes a draft price version (never live), with the file's SHA-256.
+        # AA-1091 (bk-054): the Prices sheet becomes a draft price version (never live), with the file's SHA-256.
         assert len(sha) == 64 and items[0]["amount"] == D("400") and "peak" not in items[0]
         calls.append(f"price draft {key} {len(items)}")
         return {"version_id": "v-1", "rows": len(items)}

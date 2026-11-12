@@ -86,7 +86,7 @@ in code. This file covers slice **A** (the policy parameters); slices B–E are 
 
 ### Decisions
 
-- **Two migrations, contract, one migration-only PR (bk-053 + bk-054)**, then the code PR raises readiness to both.
+- **Two migrations, contract, one migration-only PR (bk-054 + bk-055)**, then the code PR raises readiness to both.
 - **Stored status, derived superseded.** `price_list_versions.status` is a column (the quote, tariff and matrix read
   it), moved only along d2 by a guard trigger; `published` <-> `superseded` is recomputed from the published set on
   every publish and withdrawal (`price_versions.refresh_states`). Unlike bk-050 (events table) because a version also
@@ -100,9 +100,9 @@ in code. This file covers slice **A** (the policy parameters); slices B–E are 
   Step 5 turns them into `source = cost_sheet` versions with the d8 auto-publish rule; a version-level overlap rule
   between a daily recompute and a hand version would otherwise make every recompute override hand prices.
 - **Migration of today's data.** Per plan with prices or history: every closed history set becomes a past version,
-  status `withdrawn` by `migration:bk-053` at the time the next set replaced it (the old PUT replaced the whole set;
+  status `withdrawn` by `migration:bk-054` at the time the next set replaced it (the old PUT replaced the whole set;
   marking them `superseded` would let the overlap rule bring their uncovered dates back to life, changing prices); the
-  rows in force become the latest version, `published`, approved by `migration:bk-053` at the time of its open history
+  rows in force become the latest version, `published`, approved by `migration:bk-054` at the time of its open history
   set, source from `change_source`. Hand rows of the matrix point at it; nothing else in the matrix changes. Versions
   migrated from a cost-sheet set keep the computed rows as a snapshot (`computed` true); the matrix rebuild ignores
   them (the cost sheet owns those).
@@ -152,14 +152,14 @@ in code. This file covers slice **A** (the policy parameters); slices B–E are 
   `season_code` in the matrix), `cost_sheet.py` (hand rows from versions, calendar cuts and peak, watermark includes
   versions and seasons, plans with published versions recomputed), `b2b/quotes.py` and `b2b/tariff.py` (season of the
   line), `price_import.py` (drafts), `trip_plan_sync.py` (default calendars), `routers/catalog.py` (PUT 409),
-  `auth/staff.py`, `db.py` (readiness bk-053, bk-054), `policy_values.py` / `policy_params.py`; openapi regenerated.
+  `auth/staff.py`, `db.py` (readiness bk-054, bk-055), `policy_values.py` / `policy_params.py`; openapi regenerated.
 - Frontend: Price setup tour tabs (Hotels & services | Versions, `VersionsDrawer.tsx`, `versions.messages.ts`), pages
   `/pricing/seasons` and `/pricing/holiday-events` (EN + VI messages), `lib/api/priceVersions.ts`,
   `ui/booking/priceVersions.ts` (+ node test), commercial drawer read-only prices, the matrix editor without Peak, nav,
   rbac, visual and layout page lists and fixtures.
 - Tests: integration `test_aa1091_price_versions.py` (state machine, overlap / superseded / withdrawal restore,
   migration keeps every price, calendar no-overlap, festive from a holiday event, matrix cut by season, default
-  calendar), `test_bk053_schema.py`, `test_bk054_schema.py`; unit `test_aa1091_versions_seasons.py`; existing price
+  calendar), `test_bk054_schema.py`, `test_bk055_schema.py`; unit `test_aa1091_versions_seasons.py`; existing price
   tests now publish hand prices through a version (`tests/integration/price_versions_helper.py`).
 
 ### Tradeoffs
@@ -174,7 +174,7 @@ in code. This file covers slice **A** (the policy parameters); slices B–E are 
 
 ### Should know
 
-- Ship order: Booking migration PR (bk-053 + bk-054) -> Infra copy + Migration Apply (contract) -> code PR. The code
+- Ship order: Booking migration PR (bk-054 + bk-055) -> Infra copy + Migration Apply (contract) -> code PR. The code
   PR does not contain the migration files.
 - Between the migration apply and the code deploy the old code can still write unversioned hand rows with `PUT
   …/prices`; the new code keeps such rows for a plan with no published version and would drop them once a version is
@@ -200,8 +200,8 @@ Six reviewer findings, all accepted:
    season), and with it the RRP and the public from price. Fix: `seasons.Calendar.configured` (an approved season
    range that resolves to dates, or a default season other than low). Until then the cost sheet keeps the old label
    rule (`season_code` `peak` / `low` from it, `seasons.legacy_code`), a hand row keeps the peak flag it was written
-   with (bk-053 adds `price_list_version_rows.peak`, copied from the matrix and the history), and a draft row keeps
-   the flag it was copied with. Quotes and the tariff already priced every date low before bk-054 (`peak = false`), so
+   with (bk-054 adds `price_list_version_rows.peak`, copied from the matrix and the history), and a draft row keeps
+   the flag it was copied with. Quotes and the tariff already priced every date low before bk-055 (`peak = false`), so
    an unconfigured calendar keeps them the same. The first approved range switches the plan to the calendar: a
    reviewed, two-person change. A Dev count of peak computed rows before deploy is therefore not needed (the old rule
    still holds for them).
@@ -209,8 +209,8 @@ Six reviewer findings, all accepted:
    with components priced from an invented "Peak" rate sheet and a rule with a 3-point peak uplift, plus a hand row
    flagged peak with child / infant / single prices, a hand row priced from a net and a computed row a person
    overrode, and a staff history set before two cost-sheet sets. It compares every price column (peak, nets, margin,
-   per-type amounts, RRP, overridden, computed) before bk-053, after it and after the first rebuild; checks the past
-   versions (withdrawn by `migration:bk-053`, source = `change_source`, row counts) and the published one; and prices
+   per-type amounts, RRP, overridden, computed) before bk-054, after it and after the first rebuild; checks the past
+   versions (withdrawn by `migration:bk-054`, source = `change_source`, row counts) and the published one; and prices
    a 2-adult `tp:` B2B line on a low and a peak date the way `quote_in` and the tariff do, before and after. Found
    on the way: the rebuild turned a migrated computed + overridden row into a plain hand row (`computed` false);
    `version_matrix.matrix_row` now keeps the row's `computed` flag.
@@ -225,7 +225,7 @@ Six reviewer findings, all accepted:
    withdraws). Approving bumps the plan's `updated_at`, which is in the cost sheet watermark, so the next recompute
    reprices the plan. The catalog sync still assigns the default calendar directly (the destination's calendar, whose
    ranges were each approved by a second person).
-5. **Erasure of the label.** The bk-053 guard now lets the label become `[redacted]` alone, like the reasons (the
+5. **Erasure of the label.** The bk-054 guard now lets the label become `[redacted]` alone, like the reasons (the
    root DM-7.1 row and the DSAR runbook list it as `pii:free_text`).
 6. **People, not ids.** `app/auth/people.py` resolves every `*_by` of versions, calendars, ranges, events and plan
    calendar requests to `{id, name}` (the Pricing > Policy shape); the admin shows the name, "Migrated prices" /
@@ -234,7 +234,7 @@ Six reviewer findings, all accepted:
 
 ### Changed (fix pass)
 
-- Migrations: bk-053 (`price_list_version_rows.peak`, label erasure), bk-054 (reason columns and CHECKs, plan
+- Migrations: bk-054 (`price_list_version_rows.peak`, label erasure), bk-055 (reason columns and CHECKs, plan
   calendar request columns and CHECK, grants). Both still one migration-only PR before the code PR.
 - Backend: `app/auth/people.py` (new), `seasons.py` (`configured`, `legacy_code`), `cost_sheet.py` (label fallback),
   `version_matrix.py` (row peak and computed), `price_versions.py` (people, row peak), `seasons_admin.py` (reasons,

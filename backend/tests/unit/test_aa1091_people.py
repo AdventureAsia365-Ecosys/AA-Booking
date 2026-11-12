@@ -24,19 +24,19 @@ class FakeConn:
 async def test_resolve_replaces_refs_by_people_in_one_query() -> None:
     conn = FakeConn([{"cis_user_id": "u-1", "name": "Invented Maker"}, {"cis_user_id": "u-2", "name": None}])
     items = [
-        {"created_by": "u-1", "approved_by": "migration:bk-053", "other": "kept"},
+        {"created_by": "u-1", "approved_by": "migration:bk-054", "other": "kept"},
         {"created_by": "u-2", "approved_by": None},
     ]
     await people.resolve(conn, items, ("created_by", "approved_by", "absent_by"))  # type: ignore[arg-type]
     assert items == [
         {
             "created_by": {"id": "u-1", "name": "Invented Maker"},
-            "approved_by": {"id": "migration:bk-053", "name": None},
+            "approved_by": {"id": "migration:bk-054", "name": None},
             "other": "kept",
         },
         {"created_by": {"id": "u-2", "name": None}, "approved_by": None},
     ]
-    assert len(conn.calls) == 1 and conn.calls[0][1] == ["migration:bk-053", "u-1", "u-2"]
+    assert len(conn.calls) == 1 and conn.calls[0][1] == ["migration:bk-054", "u-1", "u-2"]
 
 
 @pytest.mark.asyncio

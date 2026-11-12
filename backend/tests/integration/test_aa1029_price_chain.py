@@ -418,7 +418,7 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
             item["net_amount"] = Decimal(item["net_amount"])
             for key in trip_plan_prices.PAX_TYPE_FIELDS:
                 item[key] = Decimal(item[key]) if item[key] is not None else None
-        # AA-1091 (bk-053): the staff override is a price version (draft by the maker, approved by a second person).
+        # AA-1091 (bk-054): the staff override is a price version (draft by the maker, approved by a second person).
         override = [i for i in items if i["amount"] is not None]
         await publish_prices(conn, TOUR, override, maker=_staff(MAKER), checker=_staff(CHECKER, "admin"))
     before = datetime.now(UTC)

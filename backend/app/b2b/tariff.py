@@ -280,7 +280,7 @@ async def build(
     truncated = len(rows) > limit
     rows = [r for r in rows[:limit] if (state := served.get(r["source_id"])) is not None and state.served]
     cuts = await rate_cuts(conn, [r["plan_id"] for r in rows if r["components"]])
-    # AA-1091 (bk-054): a row is also cut where its plan's season calendar changes season; each piece is priced with
+    # AA-1091 (bk-055): a row is also cut where its plan's season calendar changes season; each piece is priced with
     # the season of its first day, the same season function as POST /quotes.
     calendars = await seasons.for_plans(conn, [r["plan_id"] for r in rows])
 

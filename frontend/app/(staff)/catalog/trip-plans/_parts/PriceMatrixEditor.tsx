@@ -99,7 +99,7 @@ export function PriceMatrixEditor({
                   ))}
                 </Select>
               </Field>
-              {/* AA-1091 (bk-054): the label is for people; the season and the peak uplift come from the tour's season
+              {/* AA-1091 (bk-055): the label is for people; the season and the peak uplift come from the tour's season
                   calendar on the row's dates. */}
               <Field label="Season label" error={errorOf(i, "season")} className="col-span-2">
                 <Input className={inputCls} maxLength={80} placeholder="Green season, Dry season…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />

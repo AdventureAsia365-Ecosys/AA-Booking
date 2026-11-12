@@ -1,5 +1,5 @@
 "use client";
-// app/(staff)/pricing/seasons/_parts/SeasonsView.tsx — Pricing → Seasons (AA-1091, bk-054, root ADR 0005b d4). Every
+// app/(staff)/pricing/seasons/_parts/SeasonsView.tsx — Pricing → Seasons (AA-1091, bk-055, root ADR 0005b d4). Every
 // season calendar (one per destination, the sell-side seasons a tour uses, or per supplier contract) with its ranges,
 // what waits for approval and how many tours use it. A calendar opens in a drawer: the seasons of a year as the price
 // code sees them (festive ranges from holiday events resolved, stop-sale shown apart), its ranges with their state, the

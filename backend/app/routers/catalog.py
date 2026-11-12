@@ -487,7 +487,7 @@ async def get_trip_plan_prices(source_id: SourceId, staff: CanReadPrices, pool: 
 async def put_trip_plan_prices(
     body: PricesBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
 ) -> dict[str, Any]:
-    """Retired by AA-1091 (bk-053, root ADR 0005b d1 / d2): a hand price is never overwritten. The rows go into a
+    """Retired by AA-1091 (bk-054, root ADR 0005b d1 / d2): a hand price is never overwritten. The rows go into a
     draft price list version (``POST …/price-versions``, ``PUT /booking/catalog/price-versions/{id}``) that a second
     person approves. Always 409 ``price_versions``."""
     raise Conflict(

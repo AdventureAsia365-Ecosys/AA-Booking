@@ -1,7 +1,7 @@
 """Who made or decided a change, as a person the staff admin can show (AA-1091).
 
 The maker-checker tables store the staff member's ``cis_user_id`` (``created_by``, ``approved_by`` ...), or a
-system marker (``migration:bk-053``, ``system:bk_trip_plan_sync``, ``seed:bk-050``). The API returns each as
+system marker (``migration:bk-054``, ``system:bk_trip_plan_sync``, ``seed:bk-050``). The API returns each as
 ``{"id": ..., "name": ...}`` (the shape of Pricing > Policy, :mod:`app.pricing.policy`): ``name`` from the staff
 directory (``booking.staff_users``), None for a marker or a person not in it. The admin shows the name, a label for
 a marker, and the id only as a fallback.

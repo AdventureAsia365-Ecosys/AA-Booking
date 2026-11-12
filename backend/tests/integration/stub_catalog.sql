@@ -191,7 +191,7 @@ CREATE TRIGGER stub_fill_tour_id BEFORE INSERT ON catalog.v_tour_photo
 
 -- catalog.v_tour_place (CIS 225/256): one row per tour, day and place; only the columns Booking reads. Over the
 -- parsed days like v_tour_day.places (security barrier: only a tour_id filter reaches the parse).
--- AA-1091 (bk-054): destination_id / destination_name (live columns of CIS 256) by the place name here, for the
+-- AA-1091 (bk-055): destination_id / destination_name (live columns of CIS 256) by the place name here, for the
 -- default season calendar of a plan (the destination of its first day).
 CREATE OR REPLACE VIEW catalog.v_tour_place WITH (security_barrier = true) AS
 SELECT d.source_system, d.source_id, d.tour_id, d.day_number::smallint AS day_number, u.ord AS position,

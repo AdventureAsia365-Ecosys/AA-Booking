@@ -1,4 +1,4 @@
-"""Pricing > Seasons and Pricing > Holiday events (AA-1091, bk-054; root ADR 0005b decision 4): staff data with
+"""Pricing > Seasons and Pricing > Holiday events (AA-1091, bk-055; root ADR 0005b decision 4): staff data with
 maker-checker, like the other pricing data.
 
 - **Calendars** (``booking.season_calendars``): one per destination (AA's sell-side seasons, the calendar a trip plan

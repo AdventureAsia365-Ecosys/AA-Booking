@@ -110,7 +110,7 @@ def test_mixed_currencies_are_summed_in_usd_and_a_missing_rate_leaves_the_cell_u
     assert unpriced == 2  # bands 7-10 and 11+ have no jeep rate
     two = next(r for r in rows if r.pax_min == 2)
     assert (two.net_amount, two.net_currency) == (D("75.00"), "USD")  # (100 + 50) / 2
-    # AA-1091 (bk-054): with no configured calendar (no codes) the old rule stays, so no price moves on deploy: a
+    # AA-1091 (bk-055): with no configured calendar (no codes) the old rule stays, so no price moves on deploy: a
     # label saying "Peak" makes the row peak.
     assert two.season == "Low / Peak" and two.peak is True and two.season_code == "peak"
     # Once the plan's calendar is configured, the calendar decides and the label is only shown.

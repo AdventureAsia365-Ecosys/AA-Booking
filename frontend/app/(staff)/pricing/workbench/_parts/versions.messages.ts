@@ -1,4 +1,4 @@
-// app/(staff)/pricing/workbench/_parts/versions.messages.ts — AA-1091 (bk-053): the UI text of a tour's price versions
+// app/(staff)/pricing/workbench/_parts/versions.messages.ts — AA-1091 (bk-054): the UI text of a tour's price versions
 // (the Versions tab of Price setup), English first, Vietnamese second (ui/core/i18n.ts). English is the default.
 
 import { defineMessages } from "@/ui";

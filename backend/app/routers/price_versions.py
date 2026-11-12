@@ -1,5 +1,5 @@
-"""Price list versions (AA-1091, bk-053, ``app/catalog/price_versions.py``) and season calendars and holiday events
-(bk-054, ``app/pricing/seasons_admin.py``).
+"""Price list versions (AA-1091, bk-054, ``app/catalog/price_versions.py``) and season calendars and holiday events
+(bk-055, ``app/pricing/seasons_admin.py``).
 
 Versions of a plan (reads ``pricing.read``; drafts ``price_version.write``; decisions ``price_version.approve``):
 ``GET|POST /booking/catalog/trip-plans/{source_id}/price-versions``, ``GET /booking/catalog/price-versions?status=

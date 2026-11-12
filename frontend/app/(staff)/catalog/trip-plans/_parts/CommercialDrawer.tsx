@@ -10,7 +10,7 @@
 // as a free "from" guide for plans without a matrix. The supplier select lists the first 100 active suppliers (the
 // API page cap); a search box above it (debounced `q`) finds the others, and the picked supplier stays listed.
 // AA-1029: the price chain panel (from price, CIS reference price, recompute from rates, history) sits above the matrix.
-// AA-1091 (bk-053): hand prices are price versions with maker-checker, never an overwrite: the matrix is shown read-only
+// AA-1091 (bk-054): hand prices are price versions with maker-checker, never an overwrite: the matrix is shown read-only
 // here (the chain panel) with a link to the tour's Versions tab on Price setup, where a draft is made and approved.
 
 import { useEffect, useState } from "react";
