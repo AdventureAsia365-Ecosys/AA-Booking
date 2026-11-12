@@ -19,8 +19,10 @@ agency payment recorded by one finance user and approved by another (maker-check
   the pilot). The record is resolved from the path (:data:`SYNTHETIC_SQL`), before the route runs and before the staff
   row is synced. A record of no agency (a B2C case, a departure-owned supplier booking), an unknown id, a view without
   the column (CIS 401 not applied) or any database error count as real (fail closed). A departure is synthetic only
-  when at least one agency hold has a line on it and every agency with a hold line on it is synthetic
-  (:data:`DEPARTURE_SYNTHETIC_SQL`): an empty departure, or one any real agency ever held seats on, is real.
+  when the A10e staff identity created it (the fixture seeder), at least one agency hold has a line on it, and every
+  agency with a hold line, an allotment (any state) or a departure fee on it is synthetic
+  (:data:`DEPARTURE_SYNTHETIC_SQL`): a catalogue departure staff made, an empty departure, or one any real agency has
+  anything on, is real (a cancel ends every open allotment on it).
 - **Route-scoped grant (A10e-1).** Departure cancel needs ``trip_plan.write`` (admin, contracting), which the staff
   identity's ``sales`` role lacks. Only after every check above passed (Dev, exact groups, allow-list, exact body,
   synthetic departure) does that one request carry the permission (:attr:`E2EWriter.grants`,
@@ -134,16 +136,23 @@ PAYMENT_SYNTHETIC_SQL = (
     " JOIN catalog.v_tenant_account_v1 v ON v.tenant_id = i.party_tenant_id"
     " WHERE p.id = $1::uuid"
 )
-# A departure is synthetic only when an agency held seats on it and every agency that ever held seats on it (any hold
-# status) is synthetic: no hold line (an empty departure) gives false, one real or unknown agency gives false. Shaped
-# ``SELECT v.is_synthetic`` like the others (one boolean).
+# A departure is synthetic only when (1) the A10e staff identity created it (the seeder, app.e2e_fixtures, writes as
+# that identity; $2 = its address), (2) at least one agency hold has a line on it, and (3) every agency tied to it in
+# any departure-scoped table is synthetic in CIS: hold lines (any hold status), allotments (any state: a cancel ends
+# every open one, bk-046) and departure fees (any status, bk-048). A catalogue departure staff made, an empty one, or
+# one any real or unknown agency has anything on is real. Shaped ``SELECT v.is_synthetic`` like the others.
 DEPARTURE_SYNTHETIC_SQL = (
-    "SELECT v.is_synthetic FROM (SELECT count(*) > 0 AND coalesce(bool_and(t.is_synthetic IS TRUE), false)"
-    " AS is_synthetic FROM booking.b2b_hold_lines l"
-    " JOIN booking.b2b_holds h ON h.id = l.hold_id"
-    " JOIN booking.b2b_partners p ON p.id = h.partner_id"
-    " LEFT JOIN catalog.v_tenant_account_v1 t ON t.tenant_id = p.tenant_id"
-    " WHERE l.departure_id = $1::uuid) v"
+    "SELECT v.is_synthetic FROM (SELECT EXISTS (SELECT 1 FROM booking.departures d"
+    " JOIN booking.staff_users su ON su.cis_user_id = d.created_by"
+    " WHERE d.id = $1::uuid AND lower(su.email) = $2)"
+    " AND coalesce(bool_or(x.src = 'hold'), false) AND coalesce(bool_and(t.is_synthetic IS TRUE), false)"
+    " AS is_synthetic FROM ("
+    "SELECT 'hold' AS src, h.partner_id FROM booking.b2b_hold_lines l"
+    " JOIN booking.b2b_holds h ON h.id = l.hold_id WHERE l.departure_id = $1::uuid"
+    " UNION ALL SELECT 'allotment', a.partner_id FROM booking.departure_allotments a WHERE a.departure_id = $1::uuid"
+    " UNION ALL SELECT 'fee', f.partner_id FROM booking.departure_fees f WHERE f.departure_id = $1::uuid) x"
+    " LEFT JOIN booking.b2b_partners p ON p.id = x.partner_id"
+    " LEFT JOIN catalog.v_tenant_account_v1 t ON t.tenant_id = p.tenant_id) v"
 )
 # Route template -> (path parameter, SQL). Every allow-listed write has one (a unit test keeps the two lists equal).
 SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
@@ -156,6 +165,8 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         DEPARTURE_CANCEL[1]: ("departure_id", DEPARTURE_SYNTHETIC_SQL),
     }
 )
+# Fixed arguments after the record key ($2, ...): the departure rule's creator is the A10e staff identity.
+SYNTHETIC_SQL_ARGS: Mapping[str, tuple[str, ...]] = MappingProxyType({DEPARTURE_CANCEL[1]: (E2E_BOOKING_STAFF_EMAIL,)})
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
 INVOICE_BY_NUMBER_SQL = INVOICE_SYNTHETIC_SQL.replace("WHERE i.id = $1::uuid", "WHERE i.number = $1")
 
@@ -223,7 +234,7 @@ async def is_synthetic_record(conn: asyncpg.Connection | asyncpg.Pool, route: st
     if key is None:
         return False
     try:
-        return (await conn.fetchval(sql, key)) is True
+        return (await conn.fetchval(sql, key, *SYNTHETIC_SQL_ARGS.get(route, ()))) is True
     except (asyncpg.PostgresError, OSError) as exc:
         log.warning("booking_e2e_synthetic_unknown route=%s error_class=%s", route, type(exc).__name__)
         return False

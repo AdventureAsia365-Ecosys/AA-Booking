@@ -55,10 +55,40 @@ class _NoKey:
         return False
 
 
+HASH = "0" * 64
+
+
 @pytest.mark.asyncio
 async def test_apply_refuses_before_bk056() -> None:
     with pytest.raises(RuntimeError, match="bk-056"):
-        await legacy_cases.apply(_NoKey())  # type: ignore[arg-type]
+        await legacy_cases.apply(_NoKey(), HASH)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["", "abc", "Z" * 64, "0" * 63])
+async def test_apply_needs_a_plan_hash(bad: str) -> None:
+    with pytest.raises(legacy_cases.PlanChanged, match="plan_hash"):
+        await legacy_cases.apply(_NoKey(), bad)  # type: ignore[arg-type]
+
+
+def test_the_plan_hash_is_canonical() -> None:
+    a = [{"code": "TC-1", "end_date": (date(2027, 3, 1), date(2027, 3, 6)), "case_id": "c"}]
+    b = [{"case_id": "c", "end_date": (date(2027, 3, 1), date(2027, 3, 6)), "code": "TC-1"}]
+    assert legacy_cases.plan_hash(a) == legacy_cases.plan_hash(b)
+    assert legacy_cases.HASH_RE.match(legacy_cases.plan_hash(a))
+    assert legacy_cases.plan_hash(a) != legacy_cases.plan_hash([{**a[0], "end_date": (date(2027, 3, 1), START_LATER)}])
+    assert legacy_cases.plan_hash([]) != legacy_cases.plan_hash(a)
+
+
+START_LATER = date(2027, 3, 7)
+
+
+def test_main_apply_needs_the_expected_plan(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://booking@db.invalid/booking")
+    assert legacy_cases.main(["--apply"]) == 2
+    assert "--expect-plan" in json.loads(capsys.readouterr().out)["error"]
 
 
 def test_main_needs_a_dsn(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -75,7 +105,7 @@ class _Conn:
         self.closed = True
 
 
-@pytest.mark.parametrize(("argv", "mode"), [([], "DRY RUN"), (["--apply"], "APPLY")])
+@pytest.mark.parametrize(("argv", "mode"), [([], "DRY RUN"), (["--apply", "--expect-plan", HASH], "APPLY")])
 def test_main_prints_the_report(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv: list[str], mode: str
 ) -> None:
@@ -85,7 +115,7 @@ def test_main_prints_the_report(
     async def connect(*_: Any, **__: Any) -> _Conn:
         return conn
 
-    async def result(_: Any) -> dict[str, Any]:
+    async def result(_: Any, *__: Any) -> dict[str, Any]:
         return {"b2b_cases": 0, "to_fix": 0, "changes": []}
 
     monkeypatch.setattr(legacy_cases.asyncpg, "connect", connect)
@@ -104,12 +134,12 @@ def test_main_turns_a_missing_key_into_exit_3(
     async def connect(*_: Any, **__: Any) -> _Conn:
         return _Conn()
 
-    async def refuse(_: Any) -> dict[str, Any]:
+    async def refuse(_: Any, *__: Any) -> dict[str, Any]:
         raise RuntimeError("bk-056 is not applied: the version locks refuse the fix")
 
     monkeypatch.setattr(legacy_cases.asyncpg, "connect", connect)
     monkeypatch.setattr(legacy_cases, "apply", refuse)
-    assert legacy_cases.main(["--apply"]) == 3
+    assert legacy_cases.main(["--apply", "--expect-plan", HASH]) == 3
     assert "bk-056" in json.loads(capsys.readouterr().out)["error"]
 
 
@@ -188,10 +218,25 @@ async def test_a_case_without_quote_lines_is_skipped(catalog: None) -> None:
 
 @pytest.mark.asyncio
 async def test_apply_writes_each_fix_with_the_setting_and_an_audit_row(catalog: None) -> None:
+    digest = (await legacy_cases.plan(_scripted()))["plan_hash"]
     conn = _scripted()
-    await legacy_cases.apply(conn)  # type: ignore[arg-type]
+    await legacy_cases.apply(conn, digest)  # type: ignore[arg-type]
     assert conn.sql("SELECT set_config($1, $2, true)") == [("booking.legacy_display_fix", "aa1088")]
     assert conn.sql("UPDATE booking.trip_cases SET end_date") == [("c-1", date(2027, 3, 6), START)]
     assert conn.sql("UPDATE booking.trip_case_versions SET title") == [("v-1", "Harbour Lights Loop")]
     assert conn.sql("UPDATE booking.trip_case_version_itinerary") == [("i-1", "Harbour Lights Loop", 6)]
     assert len(conn.sql("INSERT INTO booking.audit_logs")) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_writes_nothing_when_the_plan_changed_since_the_dry_run(catalog: None) -> None:
+    reviewed = (await legacy_cases.plan(_scripted()))["plan_hash"]
+    # A second case appeared (or a tour length changed) after the DRY RUN: same command, different plan.
+    conn = _scripted()
+    conn.on(
+        "FROM booking.trip_cases tc JOIN booking.b2b_holds h", [CASE, {**CASE, "case_id": "c-2", "code": "TC-000902"}]
+    )
+    with pytest.raises(legacy_cases.PlanChanged, match="plan changed"):
+        await legacy_cases.apply(conn, reviewed)  # type: ignore[arg-type]
+    assert conn.sql("SELECT set_config($1, $2, true)") == []
+    assert conn.sql("INSERT INTO booking.audit_logs") == []

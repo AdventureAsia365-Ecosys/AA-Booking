@@ -793,10 +793,11 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
     vouchers show the later of the stored end and that span, so a case stored before AA-1088 prints the whole tour.
     A B2B case has no TripPlanner legs: its `trip_title` (case detail, case list, proposals list) is its first
     version's title, the tour sold (`trip_cases/sql.py` `B2B_HEADLINE`), never "Custom trip".
-    Older cases (confirmed before AA-1013 / AA-1088) are fixed once by `python -m app.b2b.legacy_cases [--apply]`
-    (DRY RUN by default; ECS Exec on the API task, role `booking`): the same code writes the tour title over the
-    exact placeholder titles, the later end date and the longer item spans, one audit row per case
-    (`trip_case.legacy_display_fixed`). bk-056 lets exactly that write through the version locks while the
+    Older cases (confirmed before AA-1013 / AA-1088) are fixed once by `python -m app.b2b.legacy_cases` (DRY RUN:
+    counts, the changes and a `plan_hash`; ECS Exec on the API task, role `booking`), then `--apply --expect-plan
+    <plan_hash>`, which recomputes the plan and writes nothing (exit 3) unless it is still the reviewed one: the same
+    code writes the tour title over the exact placeholder titles, the later end date and the longer item spans, one
+    audit row per case (`trip_case.legacy_display_fixed`, with the plan hash). bk-056 lets exactly that write through the version locks while the
     transaction sets `booking.legacy_display_fix = 'aa1088'`.
   - **G4 credit stop**: `POST /holds` is 409 `credit_hold_overdue` while the agency's `booking.v_tenant_billing_status`
     is `past_due` (oldest overdue agency invoice past `suspend_after_days`); replays, confirms, extends and cancels of
@@ -2126,11 +2127,14 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   `e2e_synthetic_only`, before the staff row sync or the route): `catalog.v_tenant_account_v1.is_synthetic` (CIS 401,
   contract tenant.entitlements.v1 1.6), fail closed when the column is missing. Reads keep the role's permissions.
   A10e-1 (S278 l18): the staff identity may also cancel a departure (PATCH `/booking/catalog/departures/{id}` with
-  exactly `{"status": "cancelled"}`, else 403 `e2e_read_only`) when at least one agency held seats on it and every
-  such agency is synthetic; that one request holds `trip_plan.write` (`Staff.e2e_grants`), which `sales` lacks.
-  Fixtures: `python -m app.e2e_fixtures [--apply] [--run R] [--agency-tenant T]` (Dev only, DRY RUN by default, ECS
-  Exec on the API task) makes per run a departure, a synthetic agency's booking on it (desk booking), a pending
-  supplier booking on that case and an issued settlement invoice, through the services, as the staff identity.
+  exactly `{"status": "cancelled"}`, else 403 `e2e_read_only`) only when that identity created it (the seeder), at
+  least one agency hold has a line on it, and every agency with a hold line, an allotment (any state) or a departure
+  fee on it is synthetic (a cancel ends every open allotment); that one request holds `trip_plan.write`
+  (`Staff.e2e_grants`), which `sales` lacks.
+  Fixtures: `python -m app.e2e_fixtures [--apply] [--run R] [--agency-tenant T | --any-synthetic]` (Dev only, DRY RUN
+  by default, ECS Exec on the API task; default agency: the CRM's E2E agency, so its CRM opens the aa_cancel_case)
+  makes per run a departure, a synthetic agency's booking on it (desk booking), a pending supplier booking on that
+  case and an issued settlement invoice, through the services, as the staff identity.
   Smoke: `frontend/e2e/e2e-writers/` (Playwright project `e2e-writers`, `BOOKING_E2E_WRITERS=1`, dry run
   `BOOKING_E2E_WRITERS_DRY_RUN=1`, `BOOKING_E2E_FIXTURES=<seeder output>`). Removed at go-live with the A10 family
   (AA-1054).

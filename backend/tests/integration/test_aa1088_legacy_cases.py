@@ -110,17 +110,25 @@ async def test_plan_then_apply_then_nothing_left(
         assert (planned["item_titles"], planned["item_spans"]) == (1, 1)
         assert await _state(conn, case["case_id"]) == before  # DRY RUN wrote nothing
 
-        await legacy_cases.apply(conn)
+        # Only the reviewed plan is written: another hash refuses and writes nothing.
+        with pytest.raises(legacy_cases.PlanChanged):
+            await legacy_cases.apply(conn, "f" * 64)
+        assert await _state(conn, case["case_id"]) == before
+        await legacy_cases.apply(conn, planned["plan_hash"])
         after = await _state(conn, case["case_id"])
         assert after["end_date"] == case["start"] + timedelta(days=3)
         assert after["version_title"] == "Lantern Bay 4D" and after["item_title"] == "Lantern Bay 4D"
         assert after["day_to"] == after["day_from"] + 3
         audit = await admin.fetchrow(
-            "SELECT actor_type, actor_ref FROM booking.audit_logs WHERE action = 'trip_case.legacy_display_fixed'"
-            " AND entity_id = $1::uuid",
+            "SELECT actor_type, actor_ref, after->>'plan_hash' AS plan_hash FROM booking.audit_logs"
+            " WHERE action = 'trip_case.legacy_display_fixed' AND entity_id = $1::uuid",
             case["case_id"],
         )
-        assert dict(audit) == {"actor_type": "system", "actor_ref": legacy_cases.ACTOR}
+        assert dict(audit) == {
+            "actor_type": "system",
+            "actor_ref": legacy_cases.ACTOR,
+            "plan_hash": planned["plan_hash"],
+        }
         again = await legacy_cases.plan(conn)
         assert again["to_fix"] == 0
         report = legacy_cases._report(planned)
@@ -160,7 +168,7 @@ async def test_the_locks_open_only_for_the_fix(
                     async with conn.transaction():
                         await conn.execute(sql, case["case_id"])
         # A title that is no longer the placeholder stays locked even with the setting.
-        await legacy_cases.apply(conn)
+        await legacy_cases.apply(conn, (await legacy_cases.plan(conn))["plan_hash"])
         async with conn.transaction():
             await conn.execute("SELECT set_config('booking.legacy_display_fix', 'aa1088', true)")
             with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match=LOCK_ERROR):

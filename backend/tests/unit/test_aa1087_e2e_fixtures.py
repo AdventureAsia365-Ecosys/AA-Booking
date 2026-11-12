@@ -110,6 +110,40 @@ def test_dry_run_prints_the_plan_and_never_applies(
     assert pool.closed
 
 
+def test_the_crm_e2e_agency_is_the_default_target() -> None:
+    # The CRM seed's sen-vang agency (AA-Partner seed, AA-CIS-App services/tenant_account/e2e_fixtures.py, same UUIDv5).
+    assert e2e_fixtures.CRM_E2E_AGENCY_TENANT == "bab16039-a064-517f-a99f-172b729ad3c4"
+
+
+@pytest.mark.parametrize(
+    ("argv", "target"),
+    [
+        ([], "bab16039-a064-517f-a99f-172b729ad3c4"),
+        (["--agency-tenant", "t-2"], "t-2"),
+        (["--any-synthetic"], None),
+    ],
+)
+def test_the_agency_target_options(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv: list[str], target: str | None
+) -> None:
+    _wire(monkeypatch, _Pool())
+    seen: dict[str, Any] = {}
+
+    async def plan(_: Any, *, run: str, agency_tenant: str | None, today: date) -> dict[str, Any]:
+        seen["agency_tenant"] = agency_tenant
+        return {"run": run}
+
+    monkeypatch.setattr(e2e_fixtures, "plan", plan)
+    assert e2e_fixtures.main(["--run", "s278t", *argv]) == 0
+    capsys.readouterr()
+    assert seen == {"agency_tenant": target}
+
+
+def test_agency_tenant_and_any_synthetic_exclude_each_other() -> None:
+    with pytest.raises(SystemExit):
+        e2e_fixtures.main(["--any-synthetic", "--agency-tenant", "t-2"])
+
+
 def test_apply_prints_the_fixtures(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     pool = _Pool()
     _wire(monkeypatch, pool)
@@ -253,6 +287,7 @@ async def test_apply_runs_the_services_in_order(monkeypatch: pytest.MonkeyPatch)
         "trip_case_id": "c-1",
         "trip_case_code": "TC-1",
         "departure_id": "d-1",
+        "departure_start": TODAY + timedelta(days=60),
     }
     conn = _conn(period_taken=False)
     conn.on("FROM booking.b2b_desk_bookings d", lambda *_: desk_rows[-1])
@@ -298,6 +333,8 @@ async def test_apply_runs_the_services_in_order(monkeypatch: pytest.MonkeyPatch)
         "issue inv-1",
     ]
     assert made["departure_id"] == "d-1" and made["trip_case"] == {"id": "c-1", "code": "TC-1"}
+    assert made["departure_start"] == (TODAY + timedelta(days=60)).isoformat()
+    assert made["tour_component_id"].startswith("tp:")
     assert made["supplier_booking"]["status"] == "pending"
     assert made["invoice"] == {"id": "inv-1", "number": "AAT-2027-000001", "status": "issued"}
 

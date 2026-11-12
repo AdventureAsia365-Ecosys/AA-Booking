@@ -21,8 +21,11 @@ Rules:
 
 - **Dev only.** The process ``ENVIRONMENT`` must be exactly ``dev`` (:func:`app.auth.e2e_staff.dev_only_environment`),
   else exit 2 before connecting.
-- **Synthetic agencies only.** The agency must be active and synthetic in CIS (``catalog.v_tenant_account_v1
-  .is_synthetic``, CIS 401); ``--agency-tenant`` narrows the choice, a real one is refused (exit 3).
+- **Synthetic agencies only, the CRM E2E agency by default.** The agency must be active and synthetic in CIS
+  (``catalog.v_tenant_account_v1.is_synthetic``, CIS 401); a real one is refused (exit 3). The default target is the
+  CRM's E2E agency (:data:`CRM_E2E_AGENCY_TENANT`, the one the CRM E2E owner signs in to), so the departure cancel
+  reaches a CRM that can open its ``aa_cancel_case`` (crm-13; AA-Partner ``e2e/tests/aa-cancel.spec.ts`` reads it).
+  ``--agency-tenant`` picks another synthetic agency, ``--any-synthetic`` the latest booked one (no CRM check then).
 - **Actor.** Rows are written as the A10e staff identity (``e2e-booking-staff@``, its ``booking.staff_users`` row from
   its first sign-in), so the audit log names it; without that row the run stops (exit 3).
 - **Idempotent per run** (``--run``, default the UTC minute ``YYYYMMDDHHMM``): the desk booking's Idempotency-Key, the
@@ -35,7 +38,7 @@ Run in the Booking API container (``DATABASE_URL`` = role ``booking``) through E
 
     python -m app.e2e_fixtures                    # DRY RUN: the plan
     python -m app.e2e_fixtures --apply            # make (or return) this run's fixtures
-    python -m app.e2e_fixtures --apply --run s278a --agency-tenant <uuid>
+    python -m app.e2e_fixtures --apply --run s278a --agency-tenant <uuid>   # another synthetic agency
 
 Output: one JSON object (ids, codes, counts; agency name and tour key; no traveller or contact data). The Playwright
 project ``e2e-writers`` reads it through ``BOOKING_E2E_FIXTURES`` (frontend/e2e/e2e-writers/writes.spec.ts).
@@ -52,6 +55,7 @@ import logging
 import os
 import re
 import sys
+import uuid
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -76,6 +80,11 @@ CAPACITY = 12
 ADULTS = 2
 INVOICE_AMOUNT = Decimal("25.00")
 MARK = "E2E fixture (synthetic)"
+# The CRM's E2E agency (AA-Partner seed key sen-vang): its tenant id is the UUIDv5 the CRM seed and CIS's synthetic
+# registration (AA-CIS-App services/tenant_account/e2e_fixtures.py) both derive.
+CRM_SYNTHETIC_NAMESPACE = uuid.UUID("6f1d3c2e-9a7b-5c4d-8e2f-a935c0de0007")
+CRM_E2E_AGENCY_KEY = "sen-vang"
+CRM_E2E_AGENCY_TENANT = str(uuid.uuid5(CRM_SYNTHETIC_NAMESPACE, f"aa-crm-synthetic-agency:{CRM_E2E_AGENCY_KEY}"))
 
 STAFF_SQL = f"SELECT {STAFF_COLUMNS} FROM booking.staff_users WHERE lower(email) = $1"  # noqa: S608 — fixed columns
 # The template: a synthetic agency's latest confirmed booking of a trip plan line on a departure ($1 = agency tenant or
@@ -100,12 +109,14 @@ SELECT p.id::text AS partner_id, p.status, coalesce(v.is_synthetic IS TRUE, fals
 FROM booking.b2b_partners p LEFT JOIN catalog.v_tenant_account_v1 v ON v.tenant_id = p.tenant_id
 WHERE p.tenant_id = $1::uuid
 """
-# This run's desk booking (agency reference E2E-<run>), with its case and departure.
+# This run's desk booking (agency reference E2E-<run>), with its case and departure (id and start date).
 DESK_SQL = """
 SELECT d.id::text AS desk_id, d.status, d.trip_case_id::text AS trip_case_id, tc.code AS trip_case_code,
-       (SELECT l.departure_id::text FROM booking.b2b_hold_lines l WHERE l.hold_id = d.hold_id
-         AND l.departure_id IS NOT NULL ORDER BY l.line_no LIMIT 1) AS departure_id
+       dl.departure_id, dl.start_date AS departure_start
 FROM booking.b2b_desk_bookings d LEFT JOIN booking.trip_cases tc ON tc.id = d.trip_case_id
+LEFT JOIN LATERAL (SELECT l.departure_id::text AS departure_id, dep.start_date FROM booking.b2b_hold_lines l
+                   JOIN booking.departures dep ON dep.id = l.departure_id
+                   WHERE l.hold_id = d.hold_id ORDER BY l.line_no LIMIT 1) dl ON true
 WHERE d.idempotency_key = $1
 """
 # A departure of the plan this actor created that no hold ever used (a failed run's leftover), else none.
@@ -224,7 +235,12 @@ async def plan(conn: asyncpg.Connection, *, run: str, agency_tenant: str | None,
     inv = await conn.fetchrow(INVOICE_BY_KEY_SQL, k["invoice_idem"])
     return {
         "run": run,
-        "agency": {"tenant_id": tpl["tenant_id"], "partner_id": tpl["partner_id"], "name": tpl["agency_name"]},
+        "agency": {
+            "tenant_id": tpl["tenant_id"],
+            "partner_id": tpl["partner_id"],
+            "name": tpl["agency_name"],
+            "crm_e2e": tpl["tenant_id"] == CRM_E2E_AGENCY_TENANT,
+        },
         "tour": {"source_id": tpl["source_id"], "component_id": tpl["component_id"], "currency": tpl["currency"]},
         "actor": actor.cis_user_id,
         "departure": dep,
@@ -289,6 +305,9 @@ async def apply(pool: asyncpg.Pool, planned: dict[str, Any], *, today: date) -> 
     if desk is None or desk["status"] != "booked" or not desk["trip_case_id"]:
         raise Refused(f"the agency booking of run {run} did not confirm (status {desk and desk['status']})")
     out["departure_id"] = desk["departure_id"]
+    start_day = desk.get("departure_start")
+    out["departure_start"] = start_day.isoformat() if isinstance(start_day, date) else start_day
+    out["tour_component_id"] = tpl["component_id"]
     out["trip_case"] = {"id": desk["trip_case_id"], "code": desk["trip_case_code"]}
 
     # 3. The pending supplier booking on that case.
@@ -390,7 +409,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Dev-only fixtures for the Booking E2E write identities (A10e).")
     parser.add_argument("--apply", action="store_true", help="make the fixtures (default: DRY RUN, plan only)")
     parser.add_argument("--run", type=_run_arg, default=default_run(), help="run key (default: UTC YYYYMMDDHHMM)")
-    parser.add_argument("--agency-tenant", default=None, help="the synthetic agency's CIS tenant id (default: any)")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument(
+        "--agency-tenant",
+        default=CRM_E2E_AGENCY_TENANT,
+        help=f"the synthetic agency's CIS tenant id (default: the CRM E2E agency {CRM_E2E_AGENCY_KEY})",
+    )
+    target.add_argument(
+        "--any-synthetic",
+        dest="agency_tenant",
+        action="store_const",
+        const=None,
+        help="the latest booked synthetic agency instead (its CRM, if any, is not checked)",
+    )
     return asyncio.run(_main(parser.parse_args(argv)))
 
 

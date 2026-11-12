@@ -15,12 +15,17 @@ kept, as the documents do), a new version title only over the exact placeholder,
 placeholder, a ``day_to`` only when longer. Synthetic and real agencies alike: this is display data, never money.
 :func:`apply` writes it, one transaction per case, as role ``booking`` with ``booking.legacy_display_fix = 'aa1088'``
 set for that transaction: the bk-003 version locks let exactly these changes through (bk-056); one audit row per case
-(``trip_case.legacy_display_fixed``, actor ``system``). Idempotent: a fixed case plans nothing.
+(``trip_case.legacy_display_fixed``, actor ``system``, with the plan hash). Idempotent: a fixed case plans nothing.
+
+**The apply writes only the plan a person reviewed.** The DRY RUN prints ``plan_hash`` (SHA-256 of every planned
+change: case ids and codes, old and new end dates, titles, item spans). ``--apply`` requires ``--expect-plan <that
+hash>``, computes the plan again and writes nothing (exit 3) when it differs: a case confirmed or a catalogue tour
+length changed since the DRY RUN shows up as a refused apply, never as an unreviewed write.
 
 Run in the Booking API container (``DATABASE_URL`` = role ``booking``) through ECS Exec on ``aa-booking-dev-api``::
 
-    python -m app.b2b.legacy_cases            # DRY RUN: counts and the per-case changes
-    python -m app.b2b.legacy_cases --apply    # write them
+    python -m app.b2b.legacy_cases                                   # DRY RUN: counts, the changes, plan_hash
+    python -m app.b2b.legacy_cases --apply --expect-plan <plan_hash>  # write exactly that plan
 
 Output: one JSON object (counts; per case its code, old and new end date, whether the titles change). No names of
 travellers or agencies.
@@ -30,8 +35,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import re
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -61,6 +68,17 @@ SELECT id::text AS id, position, title, day_from, day_to FROM booking.trip_case_
 WHERE trip_case_version_id = $1::uuid ORDER BY position
 """
 KEY_SQL = "SELECT EXISTS (SELECT 1 FROM booking.v_schema_versions WHERE version = $1)"
+HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class PlanChanged(RuntimeError):
+    """The plan computed at apply time is not the one the DRY RUN showed (exit 3, nothing written)."""
+
+
+def plan_hash(changes: list[dict[str, Any]]) -> str:
+    """SHA-256 of the planned changes in a canonical JSON form (sorted keys, dates as ISO text)."""
+    canonical = json.dumps(changes, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def legacy_version_title(proposal_ref: str, proposal_version: int) -> str:
@@ -137,11 +155,12 @@ async def plan(conn: asyncpg.Connection) -> dict[str, Any]:
         "item_titles": sum(1 for c in changes for i in c.get("items", []) if "title" in i),
         "item_spans": sum(1 for c in changes for i in c.get("items", []) if "day_to" in i),
         "skipped_sent": sent,
+        "plan_hash": plan_hash(changes),
         "changes": changes,
     }
 
 
-async def _apply_one(conn: asyncpg.Connection, change: dict[str, Any]) -> None:
+async def _apply_one(conn: asyncpg.Connection, change: dict[str, Any], digest: str) -> None:
     async with conn.transaction():
         await conn.execute("SELECT set_config($1, $2, true)", FIX_SETTING, FIX_VALUE)
         before: dict[str, Any] = {}
@@ -172,6 +191,7 @@ async def _apply_one(conn: asyncpg.Connection, change: dict[str, Any]) -> None:
             )
         if change.get("items"):
             after["items"] = len(change["items"])
+        after["plan_hash"] = digest
         await audit.record(
             conn,
             actor_type="system",
@@ -186,13 +206,22 @@ async def _apply_one(conn: asyncpg.Connection, change: dict[str, Any]) -> None:
         )
 
 
-async def apply(conn: asyncpg.Connection) -> dict[str, Any]:
-    """Write the planned changes, one transaction per case. Refuses before bk-056 (the locks would refuse anyway)."""
+async def apply(conn: asyncpg.Connection, expected_hash: str) -> dict[str, Any]:
+    """Write the planned changes, one transaction per case, only when the plan is still the DRY RUN's
+    (``expected_hash`` = its ``plan_hash``; else :class:`PlanChanged`, nothing written). Refuses before bk-056 (the
+    locks would refuse anyway)."""
+    if not HASH_RE.match(expected_hash or ""):
+        raise PlanChanged("--expect-plan must be the DRY RUN's plan_hash (64 lower-case hex characters)")
     if not await conn.fetchval(KEY_SQL, REQUIRED_KEY):
         raise RuntimeError(f"{REQUIRED_KEY} is not applied: the version locks refuse the fix")
     planned = await plan(conn)
+    if planned["plan_hash"] != expected_hash:
+        raise PlanChanged(
+            f"the plan changed since the DRY RUN (now {planned['plan_hash']}, {planned['to_fix']} cases): "
+            "nothing written; run the DRY RUN again and review it"
+        )
     for change in planned["changes"]:
-        await _apply_one(conn, change)
+        await _apply_one(conn, change, expected_hash)
     return planned
 
 
@@ -209,7 +238,10 @@ def _report(planned: dict[str, Any]) -> dict[str, Any]:
     return {**{k: v for k, v in planned.items() if k != "changes"}, "cases": [one(c) for c in planned["changes"]]}
 
 
-async def _main(apply_changes: bool) -> int:
+async def _main(apply_changes: bool, expected_hash: str | None) -> int:
+    if apply_changes and not expected_hash:
+        print(json.dumps({"error": "--apply needs --expect-plan <plan_hash of the DRY RUN>"}))
+        return 2
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         print(json.dumps({"error": "DATABASE_URL not set"}))
@@ -221,7 +253,7 @@ async def _main(apply_changes: bool) -> int:
         server_settings={"application_name": "booking-legacy-cases"},
     )
     try:
-        result = await apply(conn) if apply_changes else await plan(conn)
+        result = await apply(conn, expected_hash or "") if apply_changes else await plan(conn)
     except RuntimeError as exc:
         print(json.dumps({"error": str(exc)}))
         return 3
@@ -234,8 +266,9 @@ async def _main(apply_changes: bool) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Display fix of B2B cases confirmed before AA-1013 / AA-1088.")
     parser.add_argument("--apply", action="store_true", help="write the fix (default: DRY RUN, counts only)")
+    parser.add_argument("--expect-plan", default=None, help="with --apply: the DRY RUN's plan_hash (required)")
     args = parser.parse_args(argv)
-    return asyncio.run(_main(args.apply))
+    return asyncio.run(_main(args.apply, args.expect_plan))
 
 
 if __name__ == "__main__":

@@ -78,7 +78,8 @@ def _row(email: str) -> dict[str, Any]:
 
 
 def _staff_sql(conn: ScriptedConn) -> list[str]:
-    return [sql for sql, _ in conn.calls if "booking.staff_users" in sql]
+    """The staff row reads / writes (the departure rule's SQL also joins booking.staff_users: not one of them)."""
+    return [sql for sql, _ in conn.calls if "booking.staff_users" in sql and SYNTHETIC_FRAGMENT not in sql]
 
 
 # ── the module ──────────────────────────────────────────────────────────────────────────────────
@@ -281,7 +282,9 @@ def test_an_allowed_write_on_a_real_agency_is_refused_before_the_staff_sync(emai
         with _client(cis, conn) as c:
             r = c.request(method, path, json=body, headers=auth(_token(cis, email)))
         assert (r.status_code, r.json()["detail"]) == (403, "e2e_synthetic_only"), path
-        assert [args for args in conn.sql(SYNTHETIC_FRAGMENT)] == [(RECORD,)]
+        # The departure rule also binds the A10e staff identity's address (the creator of a seeded departure).
+        expected = (RECORD, e2e_staff.E2E_BOOKING_STAFF_EMAIL) if "/catalog/departures/" in path else (RECORD,)
+        assert [args for args in conn.sql(SYNTHETIC_FRAGMENT)] == [expected]
         assert _staff_sql(conn) == []  # refused before the staff row is read or written
         assert len(conn.calls) == 1
 
@@ -297,7 +300,7 @@ def test_an_allowed_write_on_a_synthetic_agency_reaches_the_route(email: str) ->
         assert r.status_code != 422, r.text
         assert not isinstance(detail, str) or not detail.startswith("e2e_"), path
         flat = [sql for sql, _ in conn.calls]
-        first_staff = next(i for i, sql in enumerate(flat) if "booking.staff_users" in sql)
+        first_staff = flat.index(_staff_sql(conn)[0])
         assert flat.index(next(s for s in flat if SYNTHETIC_FRAGMENT in s)) < first_staff
         # The route ran past the staff dependency: it read its own record (a route SQL after the staff sync).
         assert len(flat) > first_staff + 1, path
@@ -393,8 +396,8 @@ def test_a_departure_cancel_on_a_real_departure_is_refused(synthetic: Any) -> No
     with _client(cis, conn) as c:
         r = c.request("PATCH", DEPARTURE, json={"status": "cancelled"}, headers=auth(_token(cis, STAFF)))
     assert (r.status_code, r.json()["detail"]) == (403, "e2e_synthetic_only")
-    assert conn.sql("booking.b2b_hold_lines") == [(RECORD,)]
-    assert not any("booking.departures" in sql for sql, _ in conn.calls)
+    assert conn.sql(SYNTHETIC_FRAGMENT) == [(RECORD, e2e_staff.E2E_BOOKING_STAFF_EMAIL)]
+    assert len(conn.calls) == 1  # the route never locked, read or changed the departure
 
 
 def test_the_cancel_grant_reaches_only_that_request() -> None:
@@ -406,7 +409,7 @@ def test_the_cancel_grant_reaches_only_that_request() -> None:
         r = c.request("PATCH", DEPARTURE, json={"status": "cancelled"}, headers=auth(_token(cis, STAFF)))
         me = c.get("/booking/staff/me", headers=auth(_token(cis, STAFF)))
     assert r.status_code == 404, r.text  # departure_not_found from the route: past the permission check
-    assert any("booking.departures" in sql for sql, _ in conn.calls)
+    assert any("booking.departures" in sql and "FOR UPDATE" in sql for sql, _ in conn.calls)
     assert "trip_plan.write" not in me.json()["permissions"]
 
 

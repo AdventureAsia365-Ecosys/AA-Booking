@@ -9,9 +9,10 @@ that partner's tenant synthetic. Covers:
 - the DRY RUN plan writes nothing; ``apply`` makes a new departure, the agency's confirmed booking on it, a pending
   supplier booking on that case and an issued settlement invoice, all named by the run; a second ``apply`` of the same
   run returns the same rows;
-- the new departure is synthetic for the cancel rule (every agency holding seats on it is synthetic); a departure with
-  no hold, or one a real agency also holds seats on, is not; the guard SQL refuses the supplier booking / invoice of a
-  real agency as before;
+- the new departure is synthetic for the cancel rule (the A10e staff identity made it, every agency on it is
+  synthetic); a catalogue departure staff made (even one only synthetic agencies booked), a departure with no hold, one
+  a real agency also holds seats on, or one a real agency has an allotment (pending) or a departure fee on, is not;
+  the guard SQL refuses the supplier booking / invoice of a real agency as before;
 - a real agency (``--agency-tenant``) and a missing staff row are refused.
 
 Dates are relative to today; names are invented.
@@ -35,6 +36,7 @@ from app.db import Database
 from tests.integration.test_aa1075_booking_ops import bk047  # noqa: F401 — fixture used by name
 from tests.integration.test_bk020_b2b import (  # noqa: F401 — fixtures admin, client, plan are used by name
     DAY1,
+    MAKER,
     SALES,
     TENANT,
     _departure,
@@ -215,11 +217,16 @@ async def test_departure_rule_empty_and_mixed_departures_are_real(
     try:
         route = e2e_staff.DEPARTURE_CANCEL[1]
         template = seeded["template_departure"]
-        assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": template}) is True
+        # Only synthetic agencies booked the template, but staff made it for the catalogue: not the seeder's, so real.
+        assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": template}) is False
+        # Even if the A10e identity had made it, an empty departure is real.
         empty = await _departure(c, cis, (date.fromisoformat(DAY1) + timedelta(days=3)).isoformat(), 10)
+        await admin.execute("UPDATE booking.departures SET created_by = $2 WHERE id = $1::uuid", empty["id"], ACTOR)
         assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": empty["id"]}) is False
         assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": str(uuid.uuid4())}) is False
-        # A real agency also holds seats on the template departure: the departure is no longer synthetic.
+        # The same for the template made by that identity: synthetic until a real agency also holds seats on it.
+        await admin.execute("UPDATE booking.departures SET created_by = $2 WHERE id = $1::uuid", template, ACTOR)
+        assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": template}) is True
         entry = {
             "partner_id": seeded["real_partner"],
             "agency_ref": "AG-L18-REAL",
@@ -235,6 +242,47 @@ async def test_departure_rule_empty_and_mixed_departures_are_real(
         assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": template}) is False
     finally:
         await conn.close()
+
+
+async def test_a_real_agencys_allotment_or_fee_makes_a_seeded_departure_real(
+    seeded: dict[str, Any], client: Client, migrated_booking_dsn: str
+) -> None:
+    """A cancel ends every open allotment on the departure (any agency, pending too) and a fee ties an agency to it:
+    a real agency's allotment or fee, with no hold of its own, makes the seeded departure real."""
+    c, cis, _, _ = client
+    route = e2e_staff.DEPARTURE_CANCEL[1]
+    pool = await asyncpg.create_pool(migrated_booking_dsn, min_size=1, max_size=3)
+    try:
+        made = []
+        for run in ("it-l18-allot", "it-l18-fee"):
+            async with pool.acquire() as conn:
+                planned = await e2e_fixtures.plan(conn, run=run, agency_tenant=None, today=TODAY)
+            made.append(await e2e_fixtures.apply(pool, planned, today=TODAY))
+        allot_dep, fee_dep = made[0]["departure_id"], made[1]["departure_id"]
+        async with pool.acquire() as conn:
+            for dep in (allot_dep, fee_dep):
+                assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": dep}) is True
+
+        # A pending allotment of the real agency (no hold line of its own).
+        allot = {"partner_id": seeded["real_partner"], "seats": 2, "release_days_before": 10}
+        await _ok(
+            await c.post(f"/catalog/departures/{allot_dep}/allotments", json=allot, headers=_staff(cis, MAKER)), 201
+        )
+        # A pending departure fee of the real agency.
+        fee = {
+            "partner_id": seeded["real_partner"],
+            "reason": "other",
+            "seats": 1,
+            "price_per_seat": "10.00",
+            "currency": "USD",
+            "note": "invented fee for the rule",
+        }
+        await _ok(await c.post(f"/b2b-desk/departures/{fee_dep}/fees", json=fee, headers=_staff(cis, SALES)), 201)
+        async with pool.acquire() as conn:
+            for dep in (allot_dep, fee_dep):
+                assert await e2e_staff.is_synthetic_record(conn, route, {"departure_id": dep}) is False, dep
+    finally:
+        await pool.close()
 
 
 async def test_a_real_agency_or_no_staff_row_is_refused(
