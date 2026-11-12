@@ -1,4 +1,4 @@
-"""AA-1092 residual (needs bk-049 + bk-058): the B2B API binds the caller's tenant on a real PostgreSQL.
+"""AA-1092 residual (needs bk-049 + bk-053): the B2B API binds the caller's tenant on a real PostgreSQL.
 
 - A connection of the B2B pool bound to tenant A reads A's ``b2b_partners`` row and not B's (refused: no row), and
   writes none.
