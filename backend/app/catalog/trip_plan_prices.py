@@ -289,8 +289,9 @@ CHANGES_SHOWN = 20
 
 
 def reference_out(row: dict[str, Any]) -> dict[str, Any] | None:
-    """The reviewed reference price of a plan, or None when CIS gave no source price text."""
-    if not row.get("reference_price_raw"):
+    """The reviewed reference price of a plan, or None when CIS gave no source price (no text and, AA-1091, no
+    structured amount)."""
+    if not row.get("reference_price_raw") and row.get("reference_amount") is None:
         return None
     return {
         "raw": row["reference_price_raw"],
@@ -512,13 +513,13 @@ def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
 async def review_reference(conn: asyncpg.Connection, staff: Staff, source_id: str) -> None:
     """Mark the plan's reference price (the CIS source price text) reviewed; audited. 404 / 409 when there is none."""
     plan = await conn.fetchrow(
-        "SELECT id::text AS id, reference_price_raw, reference_reviewed_at FROM booking.trip_plans"
+        "SELECT id::text AS id, reference_price_raw, reference_amount, reference_reviewed_at FROM booking.trip_plans"
         " WHERE source_system = 'cis' AND source_id = $1 FOR UPDATE",
         source_id,
     )
     if plan is None:
         raise NotFound("trip_plan_not_found", "this tour has no trip plan yet")
-    if not plan["reference_price_raw"]:
+    if not plan["reference_price_raw"] and plan["reference_amount"] is None:
         raise Conflict("no_reference", "CIS gave no source price for this tour")
     if plan["reference_reviewed_at"] is not None:
         return
