@@ -503,6 +503,7 @@ async def test_build_suggestions_reads_by_tour_id() -> None:
         ((D("1390"), "usd", "per_person"), (D("1390.00"), "USD")),
         ((D("1390"), "USD", None), (D("1390.00"), "USD")),
         ((D("3000"), "EUR", "per_group"), None),
+        ((D("1200"), "EUR", "from"), (D("1200.00"), "EUR")),
         ((None, "USD", "per_person"), None),
         ((D("10"), "US", "per_person"), None),
         ((D("0"), "USD", "per_person"), None),
@@ -514,14 +515,21 @@ def test_structured_reference(args: tuple[Any, ...], out: Any) -> None:
     assert sync.structured_reference(*args) == out
 
 
-def test_reference_of_prefers_the_structured_amount() -> None:
-    assert sync.reference_of("from USD 1,450", D("1390"), "USD", "per_person") == (D("1390.00"), "USD")
-    assert sync.reference_of("from USD 1,450", D("3000"), "USD", "per_group") == (D("1450.00"), "USD")
-    assert sync.reference_of("from USD 1,450") == (D("1450.00"), "USD")
+def test_reference_of_prefers_a_trusted_structured_amount() -> None:
+    text = "from USD 1,450"
+    assert sync.reference_of(text, D("1390"), "USD", "per_person", "confirmed") == (D("1390.00"), "USD")
+    assert sync.reference_of(text, D("1390"), "USD", "from", "parsed") == (D("1390.00"), "USD")
+    assert sync.reference_of(text, D("3000"), "USD", "per_group", "confirmed") is None  # no per-person amount
+    assert sync.reference_of(text, D("1390"), "USD", "per_person", "needs_review") == (D("1450.00"), "USD")
+    assert sync.reference_of(text, D("1390"), "USD", "per_person", None) == (D("1450.00"), "USD")  # v1: no status
+    assert sync.reference_of(text, None, None, None, "confirmed") == (D("1450.00"), "USD")
+    assert sync.reference_of(text, D("1390"), "US", "per_person", "confirmed") == (D("1450.00"), "USD")  # unusable
+    assert sync.reference_of(text) == (D("1450.00"), "USD")
 
 
 @pytest.mark.asyncio
 async def test_sync_reads_the_structured_reference_when_cis_has_it() -> None:
+    liveness.reset_cache()
     conn = ScriptedConn()
     conn.on(VIEW_READY_FRAGMENT, True)
     conn.on(
@@ -541,8 +549,9 @@ async def test_sync_reads_the_structured_reference_when_cis_has_it() -> None:
             },
         ],
     )
+    none = {"amount": None, "currency": None, "basis": None, "status": None}
     conn.on(
-        "amount::numeric AS amount",
+        "reference_amount::numeric AS amount",
         [
             {
                 "source_id": KEY,
@@ -550,12 +559,57 @@ async def test_sync_reads_the_structured_reference_when_cis_has_it() -> None:
                 "amount": D("1390"),
                 "currency": "USD",
                 "basis": "per_person",
+                "status": "confirmed",
             },
-            {"source_id": OTHER, "price_raw": "EUR 900", "amount": None, "currency": None, "basis": None},
-            {"source_id": "not-a-plan", "price_raw": "USD 1", "amount": None, "currency": None, "basis": None},
+            {"source_id": OTHER, "price_raw": "EUR 900", **none},
+            {"source_id": "not-a-plan", "price_raw": "USD 1", **none},
         ],
     )
     out = await sync._references(conn)  # type: ignore[arg-type]
-    assert out == {"references": "ok", "references_changed": 1}  # only the amount of KEY changed
+    assert out == {  # only the amount of KEY changed
+        "references": "ok",
+        "references_source": "structured",
+        "references_changed": 1,
+        "references_structured": 1,
+    }
+    assert any("catalog.v_tour_price_reference_v2" in q for q, _ in conn.calls)
     (args,) = conn.sql("UPDATE booking.trip_plans p SET reference_price_raw")
     assert args == ([KEY], ["from USD 1,450"], [D("1390.00")], ["USD"])
+    liveness.reset_cache()
+
+
+@pytest.mark.asyncio
+async def test_sync_parses_the_v1_text_without_the_v2_view() -> None:
+    liveness.reset_cache()
+    conn = ScriptedConn()
+    conn.on(VIEW_READY_FRAGMENT, lambda schema, name, cols: name == "v_tour_price_reference_v1")
+    conn.on(
+        "SELECT source_id, reference_price_raw, reference_amount",
+        [{"source_id": KEY, "reference_price_raw": None, "reference_amount": None, "reference_currency": None}],
+    )
+    conn.on(
+        "NULL::text AS status",
+        [
+            {
+                "source_id": KEY,
+                "price_raw": "from USD 1,450",
+                "amount": None,
+                "currency": None,
+                "basis": None,
+                "status": None,
+            }
+        ],
+    )
+    out = await sync._references(conn)  # type: ignore[arg-type]
+    assert out == {
+        "references": "ok",
+        "references_source": "text",
+        "references_changed": 1,
+        "references_structured": 0,
+    }
+    (args,) = conn.sql("UPDATE booking.trip_plans p SET reference_price_raw")
+    assert args == ([KEY], ["from USD 1,450"], [D("1450.00")], ["USD"])
+    liveness.reset_cache()
+    conn = ScriptedConn().on(VIEW_READY_FRAGMENT, False)
+    assert await sync._references(conn) == {"references": "skipped"}  # type: ignore[arg-type]
+    liveness.reset_cache()

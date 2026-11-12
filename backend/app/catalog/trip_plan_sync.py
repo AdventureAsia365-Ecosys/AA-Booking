@@ -18,12 +18,20 @@ slot while the view is readable):
 ``catalog.v_tour_price_reference_v1`` (source key + the source price text) is readable, the plan keeps that text as
 read (``reference_price_raw``, at most 500 characters) and the amount and currency :func:`parse_reference` finds in it.
 A changed text clears the review (``reference_reviewed_by`` / ``_at``), so staff look at it again. The reference is
-never a selling price and never reaches ``booking.v_from_prices``. AA-1091: when CIS gives the reference **structured**
-(the view also has ``amount``, ``currency`` and ``basis``, CIS's structured reference price edited by its staff;
-feature-detected, :data:`STRUCTURED_VIEW`), a per-person amount with its currency is taken as it is instead of the
-parse (a per-group amount is not a per-person reference: the parse of the text decides then), and a change of the
-amount or currency alone also counts as a change (the review is cleared). Without the view (CIS not applied, no grant)
-the reference part is skipped and reported, the bridge still runs.
+never a selling price and never reaches ``booking.v_from_prices``.
+
+AA-1091: when the CIS contract view ``catalog.v_tour_price_reference_v2`` (CIS 402, :data:`STRUCTURED_VIEW`,
+feature-detected) is readable it is read **instead of** v1: per live tour the same source text plus the structured
+reference price the customer-service team reviews in CIS (``reference_amount`` / ``_currency`` / ``_basis`` /
+``_status``). A value whose status is ``confirmed`` (a person confirmed it against the current text) or ``parsed`` (the
+CIS parser, no doubts) is taken as it is: basis ``per_person`` or ``from`` (the lowest per-person price) is the
+per-person reference; ``per_group`` gives no per-person amount (the plan keeps the text only, never a group total
+shown as a per-person price). Status ``needs_review`` (the CIS parser had doubts, or the text changed since the value
+was set) is not trusted: Booking's own parse of the text decides, as without CIS's value. A change of the amount or
+currency alone also counts as a change (the review is cleared). The run reports which view it read
+(``references_source`` ``structured`` | ``text``) and how many plans hold a CIS structured value
+(``references_structured``). Without either view (CIS not applied, no grant) the reference part is skipped and
+reported, the bridge still runs.
 
 Without ``catalog.v_tour`` readable the run answers ``skipped``. Idempotent: a second run with nothing new writes
 nothing (``ON CONFLICT DO NOTHING``, updates only where something differs).
@@ -58,7 +66,17 @@ AUDIT_KEYS = 50
 TOUR_VIEW = liveness.View("catalog", "v_tour", ("source_system", "source_id"))
 REFERENCE_VIEW = liveness.View("catalog", "v_tour_price_reference_v1", ("source_system", "source_id", "price_raw"))
 STRUCTURED_VIEW = liveness.View(
-    "catalog", "v_tour_price_reference_v1", ("source_system", "source_id", "price_raw", "amount", "currency", "basis")
+    "catalog",
+    "v_tour_price_reference_v2",
+    (
+        "source_system",
+        "source_id",
+        "price_raw",
+        "reference_amount",
+        "reference_currency",
+        "reference_basis",
+        "reference_status",
+    ),
 )
 
 KEYS_SQL = "SELECT DISTINCT source_id FROM catalog.v_tour WHERE source_system = 'cis' ORDER BY source_id"
@@ -74,11 +92,13 @@ WHERE source_system = 'cis' AND synced_at IS NULL AND source_id = ANY($1::text[]
 RETURNING source_id
 """
 REFERENCES_SQL = f"""
-SELECT source_id, price_raw, NULL::numeric AS amount, NULL::text AS currency, NULL::text AS basis
+SELECT source_id, price_raw, NULL::numeric AS amount, NULL::text AS currency, NULL::text AS basis,
+       NULL::text AS status
 FROM {REFERENCE_VIEW.qualified} WHERE source_system = 'cis'
 """  # noqa: S608 — constant
 STRUCTURED_REFERENCES_SQL = f"""
-SELECT source_id, price_raw, amount::numeric AS amount, currency::text AS currency, basis::text AS basis
+SELECT source_id, price_raw, reference_amount::numeric AS amount, reference_currency::text AS currency,
+       reference_basis::text AS basis, reference_status::text AS status
 FROM {STRUCTURED_VIEW.qualified} WHERE source_system = 'cis'
 """  # noqa: S608 — constant
 STORED_REFERENCES_SQL = """
@@ -168,10 +188,17 @@ def parse_reference(raw: str | None) -> tuple[Decimal, str] | None:
     return amount.quantize(Decimal("0.01")), currency
 
 
+# CIS 402 ``reference_status`` values Booking takes as they are; ``needs_review`` falls back to the text parse.
+TRUSTED_STATUSES = frozenset({"confirmed", "parsed"})
+# ``from`` = the lowest per-person price of the tour (CIS 401): still a per-person reference.
+PER_PERSON_BASES = frozenset({"per_person", "from"})
+PER_GROUP = "per_group"
+
+
 def structured_reference(amount: Any, currency: Any, basis: Any) -> tuple[Decimal, str] | None:
-    """CIS's structured reference (AA-1091) when it is a usable per-person amount, else None (the text is parsed)."""
+    """CIS's structured reference (AA-1091) when it is a usable per-person amount, else None."""
     code = str(currency or "").strip().upper()
-    if amount is None or not re.fullmatch(r"[A-Z]{3}", code) or (basis or "per_person") != "per_person":
+    if amount is None or not re.fullmatch(r"[A-Z]{3}", code) or (basis or "per_person") not in PER_PERSON_BASES:
         return None
     try:
         value = Decimal(str(amount))
@@ -182,10 +209,23 @@ def structured_reference(amount: Any, currency: Any, basis: Any) -> tuple[Decima
     return value.quantize(Decimal("0.01")), code
 
 
+def trusted(amount: Any, status: Any) -> bool:
+    """A CIS structured value Booking takes as it is (status confirmed / parsed); else the text parse decides."""
+    return amount is not None and status in TRUSTED_STATUSES
+
+
 def reference_of(
-    raw: str | None, amount: Any = None, currency: Any = None, basis: Any = None
+    raw: str | None, amount: Any = None, currency: Any = None, basis: Any = None, status: Any = None
 ) -> tuple[Decimal, str] | None:
-    return structured_reference(amount, currency, basis) or parse_reference(raw)
+    """The per-person reference of a plan: CIS's trusted structured value (a per-group one gives None: no per-person
+    amount), else the parse of the text. ``status`` None (v1, no structured value) always parses."""
+    if trusted(amount, status):
+        if (basis or "per_person") == PER_GROUP:
+            return None
+        found = structured_reference(amount, currency, basis)
+        if found is not None:
+            return found
+    return parse_reference(raw)
 
 
 def clean_raw(raw: str | None) -> str | None:
@@ -197,22 +237,27 @@ def clean_raw(raw: str | None) -> str | None:
 
 
 async def _references(conn: asyncpg.Connection) -> dict[str, Any]:
-    if not await liveness.view_ready(conn, REFERENCE_VIEW):
+    if await liveness.view_ready(conn, STRUCTURED_VIEW):
+        structured, sql = True, STRUCTURED_REFERENCES_SQL
+    elif await liveness.view_ready(conn, REFERENCE_VIEW):
+        structured, sql = False, REFERENCES_SQL
+    else:
         return {"references": "skipped"}
-    structured = await liveness.view_ready(conn, STRUCTURED_VIEW)
     stored = {r["source_id"]: r for r in await conn.fetch(STORED_REFERENCES_SQL)}
     ids: list[str] = []
     raws: list[str | None] = []
     amounts: list[Decimal | None] = []
     currencies: list[str | None] = []
-    for row in await conn.fetch(STRUCTURED_REFERENCES_SQL if structured else REFERENCES_SQL):
+    from_cis = 0
+    for row in await conn.fetch(sql):
         old = stored.get(row["source_id"])
         if old is None:
             continue
         raw = clean_raw(row["price_raw"])
-        parsed = reference_of(raw, row["amount"], row["currency"], row["basis"])
+        found = reference_of(raw, row["amount"], row["currency"], row["basis"], row["status"])
+        from_cis += trusted(row["amount"], row["status"])
         same_text = raw == old["reference_price_raw"]
-        same_value = parsed == (
+        same_value = found == (
             (old["reference_amount"], old["reference_currency"].strip())
             if old["reference_amount"] is not None
             else None
@@ -221,11 +266,16 @@ async def _references(conn: asyncpg.Connection) -> dict[str, Any]:
             continue
         ids.append(row["source_id"])
         raws.append(raw)
-        amounts.append(parsed[0] if parsed else None)
-        currencies.append(parsed[1] if parsed else None)
+        amounts.append(found[0] if found else None)
+        currencies.append(found[1] if found else None)
     if ids:
         await conn.execute(REFERENCE_UPDATE_SQL, ids, raws, amounts, currencies)
-    return {"references": "ok", "references_changed": len(ids)}
+    return {
+        "references": "ok",
+        "references_source": "structured" if structured else "text",
+        "references_changed": len(ids),
+        "references_structured": from_cis,
+    }
 
 
 async def run(pool: asyncpg.Pool) -> dict[str, Any]:

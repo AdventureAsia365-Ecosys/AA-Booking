@@ -27,7 +27,7 @@ import pytest
 import pytest_asyncio
 
 from app.b2b import plan_components
-from app.catalog import component_suggest, liveness, price_import, price_workbench, trip_plan_sync
+from app.catalog import component_suggest, liveness, price_import, price_workbench, trip_plan_prices, trip_plan_sync
 from app.db import Database
 from app.errors import Invalid
 from app.main import create_app
@@ -432,33 +432,115 @@ async def test_the_routes(
     ).status_code == 403
 
 
+async def test_import_keeps_net_cost_rows(
+    admin: asyncpg.Connection,  # noqa: F811
+    pool: asyncpg.Pool,  # noqa: F811
+    world: None,
+) -> None:
+    """A row typed with a net cost on the single price form is not in the workbook: the prefilled export lists the
+    plain hand rows only, and importing it back keeps the net cost, margin and override and writes nothing."""
+    await _setup(admin, pool)
+    base = {"channel": "b2b", "season": "All year", "peak": False, "valid_from": TODAY, "valid_to": YEAR_END}
+    hand = {**base, "pax_min": 1, "pax_max": 2, "currency": "USD", "amount": Decimal("400.00"), "net_amount": None}
+    net = {
+        **base,
+        "pax_min": 3,
+        "pax_max": None,
+        "currency": "USD",
+        "amount": Decimal("330.00"),
+        "net_amount": Decimal("250.00"),
+        "net_currency": "USD",
+    }
+    async with pool.acquire() as conn, conn.transaction():
+        await trip_plan_prices.replace_prices(conn, _staff(MAKER), STAFF_TOUR, [hand, net], on=TODAY)
+    rows_sql = (
+        "SELECT pr.pax_min, pr.amount, pr.net_amount, pr.net_currency::text AS net_currency, pr.effective_margin,"
+        " pr.priced_on, pr.overridden, pr.computed FROM booking.trip_plan_prices pr"
+        " JOIN booking.trip_plans p ON p.id = pr.trip_plan_id WHERE p.source_id = $1 ORDER BY pr.pax_min"
+    )
+    before = [dict(r) for r in await admin.fetch(rows_sql, STAFF_TOUR)]
+    assert before[1]["net_amount"] == Decimal("250.00") and before[1]["overridden"] is True
+    imported = await _audits(admin, "trip_plan.prices_imported")
+    async with pool.acquire() as conn:
+        items = [r for r in (await price_workbench.build(conn, on=TODAY))["items"] if r["tour_key"] == STAFF_TOUR]
+        data = await price_import.prefilled(conn, items, today=TODAY)
+    sheets = price_import.parse(data)
+    assert [(p["pax_min"], p["amount"]) for p in sheets.prices] == [(1, Decimal("400"))]  # the plain hand row only
+    async with pool.acquire() as conn, conn.transaction():
+        out = await price_import.import_workbook(conn, _staff(MAKER), data, dry_run=False)
+    (tour,) = out["tours"]
+    assert (tour["hand_rows_before"], tour["hand_rows_after"], tour["net_rows_replaced"]) == (1, 1, 0)
+    assert await _audits(admin, "trip_plan.prices_imported") == imported  # nothing rewritten
+    assert [dict(r) for r in await admin.fetch(rows_sql, STAFF_TOUR)] == before
+
+    # A hand row in the file over the net-cost row replaces it, and the dry run says so.
+    over = price_import.build_workbook(
+        prices=[
+            {"source_id": STAFF_TOUR, **base, "pax_min": 1, "pax_max": 2, "currency": "USD", "amount": Decimal(400)},
+            {"source_id": STAFF_TOUR, **base, "pax_min": 3, "pax_max": None, "currency": "USD", "amount": Decimal(340)},
+        ]
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        dry = await price_import.import_workbook(conn, _staff(MAKER), over, dry_run=True)
+    assert dry["tours"][0]["net_rows_replaced"] == 1 and dry["tours"][0]["computed_rows_replaced"] == 0
+    assert [dict(r) for r in await admin.fetch(rows_sql, STAFF_TOUR)] == before  # a dry run writes nothing
+
+
+V2_COLUMNS = (
+    "source_system text, source_id text, price_raw text, reference_amount numeric(12,2), reference_currency text,"
+    " reference_basis text, reference_status text, reference_origin text, reference_reviewed_at timestamptz,"
+    " reference_updated_at timestamptz"
+)
+
+
 async def test_structured_reference_from_cis(
     admin: asyncpg.Connection,  # noqa: F811
     pool: asyncpg.Pool,  # noqa: F811
 ) -> None:
-    """CIS's structured reference (amount, currency, basis) wins over the parse; an amount change alone counts."""
+    """CIS 402's v2 view (the CIS 402 column list) is read instead of v1: a confirmed per-person value wins over the
+    parse, a per-group value gives no per-person amount, a value that needs review falls back to the parse, and an
+    amount change alone counts."""
     await _tours(admin)
     await admin.execute(
-        "CREATE TABLE catalog.v_tour_price_reference_v1 (source_system text, source_id text, price_raw text,"
-        " amount numeric, currency text, basis text)"
+        "CREATE TABLE catalog.v_tour_price_reference_v1 (source_system text, source_id text, price_raw text)"
     )
-    await admin.execute("GRANT SELECT ON catalog.v_tour_price_reference_v1 TO booking")
+    await admin.execute("INSERT INTO catalog.v_tour_price_reference_v1 VALUES ('cis', $1, 'USD 999')", TOUR)
+    await admin.execute(f"CREATE TABLE catalog.v_tour_price_reference_v2 ({V2_COLUMNS})")
     await admin.execute(
-        "INSERT INTO catalog.v_tour_price_reference_v1 VALUES ('cis', $1, 'from USD 1,450 pp', 1390, 'USD',"
-        " 'per_person'), ('cis', $2, 'EUR 900 pp', 3000, 'EUR', 'per_group')",
+        "GRANT SELECT ON catalog.v_tour_price_reference_v1, catalog.v_tour_price_reference_v2 TO booking"
+    )
+    await admin.execute(
+        "INSERT INTO catalog.v_tour_price_reference_v2 (source_system, source_id, price_raw, reference_amount,"
+        " reference_currency, reference_basis, reference_status, reference_origin) VALUES"
+        " ('cis', $1, 'from USD 1,450 pp', 1390, 'USD', 'per_person', 'confirmed', 'staff'),"
+        " ('cis', $2, 'EUR 900 per group', 900, 'EUR', 'per_group', 'confirmed', 'staff')",
         TOUR,
         STAFF_TOUR,
     )
     liveness.reset_cache()
     out = await trip_plan_sync.run(pool)
-    assert out["references"] == "ok" and out["references_changed"] == 2
-    ref = "SELECT reference_amount, reference_currency::text AS c FROM booking.trip_plans WHERE source_id = $1"
-    assert tuple(await admin.fetchrow(ref, TOUR)) == (Decimal("1390.00"), "USD")
-    assert tuple(await admin.fetchrow(ref, STAFF_TOUR)) == (Decimal("900.00"), "EUR")  # per group: the text decides
+    assert out["references"] == "ok" and out["references_source"] == "structured"
+    assert out["references_changed"] == 2 and out["references_structured"] == 2
+    ref = (
+        "SELECT reference_price_raw AS raw, reference_amount, reference_currency::text AS c FROM booking.trip_plans"
+        " WHERE source_id = $1"
+    )
+    assert tuple(await admin.fetchrow(ref, TOUR)) == ("from USD 1,450 pp", Decimal("1390.00"), "USD")
+    assert tuple(await admin.fetchrow(ref, STAFF_TOUR)) == ("EUR 900 per group", None, None)  # no per-person amount
     assert (await trip_plan_sync.run(pool))["references_changed"] == 0
     async with pool.acquire() as conn, conn.transaction():
         await price_workbench.apply_action(conn, _staff(MAKER), "apply_provisional", [TOUR], on=TODAY)
-    await admin.execute("UPDATE catalog.v_tour_price_reference_v1 SET amount = 1420 WHERE source_id = $1", TOUR)
+    await admin.execute(
+        "UPDATE catalog.v_tour_price_reference_v2 SET reference_status = 'needs_review', reference_amount = 1420"
+        " WHERE source_id = $1",
+        TOUR,
+    )
+    needs = await trip_plan_sync.run(pool)
+    assert needs["references_changed"] == 1 and needs["references_structured"] == 1
+    assert (await admin.fetchrow(ref, TOUR))["reference_amount"] == Decimal("1450.00")  # the parse decides
+    await admin.execute(
+        "UPDATE catalog.v_tour_price_reference_v2 SET reference_status = 'confirmed' WHERE source_id = $1", TOUR
+    )
     assert (await trip_plan_sync.run(pool))["references_changed"] == 1
     row = await admin.fetchrow(
         "SELECT reference_amount, reference_reviewed_at, price_hint_amount FROM booking.trip_plans"

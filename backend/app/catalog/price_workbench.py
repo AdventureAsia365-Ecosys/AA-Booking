@@ -22,7 +22,7 @@ provisional price.
 (``app.b2b.components``), so a plan without them cannot be quoted whatever its matrix says.
 
 **Provisional price** (Linear scope item 4): a plan with no b2b price row still valid can show the CIS reference price
-(``trip_plans.reference_amount`` / ``_currency``, read from ``catalog.v_tour_price_reference_v1`` by the catalog sync)
+(``trip_plans.reference_amount`` / ``_currency``, read from ``catalog.v_tour_price_reference_v2`` (else v1) by the sync)
 as its **price hint** (``price_hint_*``, basis per person). The hint is only ever a display price: the public price
 parity read (``app.b2b.reads.price_parity``) falls back to it as the RRP while no b2b row exists; a quote, a hold, the
 agency tariff and ``booking.v_from_prices`` never read it. ``provisional`` in a row = the hint shown while there is

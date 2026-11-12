@@ -90,6 +90,7 @@ async def _purge(admin: asyncpg.Connection, plans_before: set[str]) -> None:
             await admin.execute(f"DELETE FROM booking.{table} WHERE {column}", SUPPLIER)  # noqa: S608
     await admin.execute("DELETE FROM catalog.v_tour WHERE source_id = ANY($1::text[])", [TOUR, STAFF_TOUR])
     await admin.execute("DROP TABLE IF EXISTS catalog.v_tour_price_reference_v1")
+    await admin.execute("DROP TABLE IF EXISTS catalog.v_tour_price_reference_v2")  # AA-1091 (CIS 402 stand-in)
     liveness.reset_cache()
 
 
