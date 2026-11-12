@@ -1,8 +1,8 @@
--- Migration bk-053: AA-1091 (S278) — price list versions for the hand prices of a trip plan (root ADR 0005b decisions
+-- Migration bk-054: AA-1091 (S278) — price list versions for the hand prices of a trip plan (root ADR 0005b decisions
 -- 1, 2, 9 and 10; delivery step 3).
 --
 -- Owner: AA-Booking (key bk-NNN). AA-CIS-Infra Migration Sync copies it byte for byte to
--- db/migrations/booking/053_price_list_versions.sql; on Dev it is applied as bk_owner (the live owner of schema
+-- db/migrations/booking/054_price_list_versions.sql; on Dev it is applied as bk_owner (the live owner of schema
 -- booking since bk-014) by Infra Migration Apply once every job table is idle (root ADR 0017a). Never run it from a
 -- laptop.
 --
@@ -26,16 +26,16 @@
 --      only while the version is a draft (guard trigger); never updated.
 --   3. booking.trip_plan_prices (the effective matrix every reader uses: tariff, RRP, from price, readiness) gains
 --      version_id (the published version a hand row comes from; NULL for the cost sheet's computed rows) and
---      season_code (the season of the plan's season calendar on the row's dates, d4; bk-054 adds the calendars). Its
+--      season_code (the season of the plan's season calendar on the row's dates, d4; bk-055 adds the calendars). Its
 --      position cap rises from 200 to 1000: a row is cut where the calendar's season changes.
 --   4. Data: every plan's history (booking.trip_plan_price_history, bk-039) becomes past versions, one per stored set
---      (source = its change_source), withdrawn by 'migration:bk-053' at the time the next set replaced it as a whole
+--      (source = its change_source), withdrawn by 'migration:bk-054' at the time the next set replaced it as a whole
 --      (the old PUT replaced the whole set, so an older set never prices again); the rows in force today
 --      (booking.trip_plan_prices) become each priced plan's latest version, published, and its hand rows point at it.
 --      Nothing is deleted and no price changes: a quote or tariff read before and after this file answers the same.
 --
 -- Class: contract (root ADR 0017 d3): ALTERs on trip_plan_prices (columns, FK, CHECK) and rows written from existing
--- data, next to two new tables. So a migration-only PR (with bk-054) first, then the code PR raises readiness (MIG-4).
+-- data, next to two new tables. So a migration-only PR (with bk-055) first, then the code PR raises readiness (MIG-4).
 -- On Dev: Infra Migration Apply once every job table is idle (root ADR 0017a). Needs bk-032 / bk-039 / bk-047 (the
 -- matrix and its history) and bk-050 (pricing_policy: the tariff year start of the migrated versions).
 -- DM-7.1: both new tables have their row in the root data standards (root PR merged before the Infra copy).
@@ -59,11 +59,11 @@ DO $$
 BEGIN
     IF to_regclass('booking.trip_plan_prices') IS NULL OR to_regclass('booking.trip_plan_price_history') IS NULL
        OR to_regclass('booking.pricing_policy') IS NULL THEN
-        RAISE EXCEPTION 'bk-053: needs bk-032, bk-039 and bk-050 first';
+        RAISE EXCEPTION 'bk-054: needs bk-032, bk-039 and bk-050 first';
     END IF;
     IF EXISTS (SELECT 1 FROM shared.schema_versions
-                WHERE version = 'bk-053' AND description NOT LIKE 'AA-1091 price list versions%') THEN
-        RAISE EXCEPTION 'bk-053: the key bk-053 is already held by another migration: renumber one';
+                WHERE version = 'bk-054' AND description NOT LIKE 'AA-1091 price list versions%') THEN
+        RAISE EXCEPTION 'bk-054: the key bk-054 is already held by another migration: renumber one';
     END IF;
 END $$;
 
@@ -147,14 +147,14 @@ CREATE INDEX IF NOT EXISTS price_list_versions_pending_idx
     ON booking.price_list_versions (submitted_at) WHERE status = 'pending';
 
 COMMENT ON TABLE booking.price_list_versions IS
-    'bk-053 (AA-1091, root ADR 0005b d1 / d2): one approved, immutable set of selling prices of one trip plan for one travel window [travel_from, travel_to). draft -> pending (diff + impact frozen) -> published by a second person -> superseded once newer published versions cover its whole window (derived, recomputed on every publish and withdrawal); rejected and withdrawn are final. Never deleted. The published versions build the hand rows of booking.trip_plan_prices (overlap rule: non-provisional first, then the latest approval, then the highest version_no).';
+    'bk-054 (AA-1091, root ADR 0005b d1 / d2): one approved, immutable set of selling prices of one trip plan for one travel window [travel_from, travel_to). draft -> pending (diff + impact frozen) -> published by a second person -> superseded once newer published versions cover its whole window (derived, recomputed on every publish and withdrawal); rejected and withdrawn are final. Never deleted. The published versions build the hand rows of booking.trip_plan_prices (overlap rule: non-provisional first, then the latest approval, then the highest version_no).';
 COMMENT ON COLUMN booking.price_list_versions.label IS
     'pii:free_text; the name staff give the version (for example "2027 v3"); staff text, never traveller data by rule.';
-COMMENT ON COLUMN booking.price_list_versions.travel_from IS 'bk-053: first departure date the version prices.';
+COMMENT ON COLUMN booking.price_list_versions.travel_from IS 'bk-054: first departure date the version prices.';
 COMMENT ON COLUMN booking.price_list_versions.travel_to IS
-    'bk-053 (d10): the day after the last departure date the version prices (half-open; the UI shows the inclusive last day).';
+    'bk-054 (d10): the day after the last departure date the version prices (half-open; the UI shows the inclusive last day).';
 COMMENT ON COLUMN booking.price_list_versions.sale_from IS
-    'bk-053: optional offer window: the first quote day the version may be used on (half-open with sale_to).';
+    'bk-054: optional offer window: the first quote day the version may be used on (half-open with sale_to).';
 COMMENT ON COLUMN booking.price_list_versions.reason IS
     'pii:free_text; why the maker made this version (required from submit on, at most 300 characters); staff text about a price, never traveller data by rule.';
 COMMENT ON COLUMN booking.price_list_versions.reject_reason IS
@@ -162,11 +162,11 @@ COMMENT ON COLUMN booking.price_list_versions.reject_reason IS
 COMMENT ON COLUMN booking.price_list_versions.withdraw_reason IS
     'pii:free_text; why the version was withdrawn; staff text, never traveller data by rule.';
 COMMENT ON COLUMN booking.price_list_versions.diff IS
-    'conf:commercial; bk-053 (d9): per row old price -> new price and the change in percent, frozen at submit.';
+    'conf:commercial; bk-054 (d9): per row old price -> new price and the change in percent, frozen at submit.';
 COMMENT ON COLUMN booking.price_list_versions.impact IS
-    'conf:commercial; bk-053 (d9): open quotes and departures in the travel window, frozen at submit.';
+    'conf:commercial; bk-054 (d9): open quotes and departures in the travel window, frozen at submit.';
 COMMENT ON COLUMN booking.price_list_versions.diff_sha256 IS
-    'bk-053 (d9): SHA-256 of the frozen diff; the approve call carries the one the checker saw (409 on a mismatch).';
+    'bk-054 (d9): SHA-256 of the frozen diff; the approve call carries the one the checker saw (409 on a mismatch).';
 
 CREATE TABLE IF NOT EXISTS booking.price_list_version_rows (
     id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS booking.price_list_version_rows (
 );
 
 COMMENT ON TABLE booking.price_list_version_rows IS
-    'bk-053 (AA-1091, root ADR 0005b d1): the per-person selling prices of one price list version (channel x dates x pax band x currency), the booking.trip_plan_prices row shape with half-open dates [travel_from, travel_to) inside the version window. Written only while the version is a draft; never updated.';
+    'bk-054 (AA-1091, root ADR 0005b d1): the per-person selling prices of one price list version (channel x dates x pax band x currency), the booking.trip_plan_prices row shape with half-open dates [travel_from, travel_to) inside the version window. Written only while the version is a draft; never updated.';
 COMMENT ON COLUMN booking.price_list_version_rows.amount IS 'conf:commercial; selling price per person.';
 COMMENT ON COLUMN booking.price_list_version_rows.rrp_amount IS 'conf:commercial; suggested retail price per person (b2b) when the version was written.';
 COMMENT ON COLUMN booking.price_list_version_rows.net_amount IS 'conf:commercial; net cost per person the row was priced from.';
@@ -228,9 +228,9 @@ COMMENT ON COLUMN booking.price_list_version_rows.child_net_amount IS 'conf:comm
 COMMENT ON COLUMN booking.price_list_version_rows.infant_net_amount IS 'conf:commercial; net behind infant_amount.';
 COMMENT ON COLUMN booking.price_list_version_rows.single_supplement_net_amount IS 'conf:commercial; net behind the single supplement.';
 COMMENT ON COLUMN booking.price_list_version_rows.peak IS
-    'bk-053: the row''s peak flag as written (migrated from the matrix or the history). Read only while the plan''s season calendar has no range: then it keeps the peak uplift and the matrix flag of before bk-054; once the calendar has ranges, the calendar decides (ADR 0005b d4).';
+    'bk-054: the row''s peak flag as written (migrated from the matrix or the history). Read only while the plan''s season calendar has no range: then it keeps the peak uplift and the matrix flag of before bk-055; once the calendar has ranges, the calendar decides (ADR 0005b d4).';
 COMMENT ON COLUMN booking.price_list_version_rows.computed IS
-    'bk-053: a row the cost sheet computed, kept in a version migrated from the price history (a snapshot); staff drafts never hold one.';
+    'bk-054: a row the cost sheet computed, kept in a version migrated from the price history (a snapshot); staff drafts never hold one.';
 
 -- The guards are created after the data step (it writes migrated versions that never were drafts).
 DROP TRIGGER IF EXISTS price_list_versions_guard ON booking.price_list_versions;
@@ -249,9 +249,9 @@ ALTER TABLE booking.trip_plan_prices ADD CONSTRAINT trip_plan_prices_position_ch
 CREATE INDEX IF NOT EXISTS trip_plan_prices_version_idx
     ON booking.trip_plan_prices (version_id) WHERE version_id IS NOT NULL;
 COMMENT ON COLUMN booking.trip_plan_prices.version_id IS
-    'bk-053 (AA-1091, root ADR 0005b d1): the published price list version a hand row comes from (cut to the dates that version wins by the overlap rule); NULL for a row the cost sheet computed.';
+    'bk-054 (AA-1091, root ADR 0005b d1): the published price list version a hand row comes from (cut to the dates that version wins by the overlap rule); NULL for a row the cost sheet computed.';
 COMMENT ON COLUMN booking.trip_plan_prices.season_code IS
-    'bk-053 (root ADR 0005b d4): the season of the plan''s season calendar on the row''s dates (low, high, peak, festive); a row is cut where the season changes. NULL = no calendar read yet (the default season applies).';
+    'bk-054 (root ADR 0005b d4): the season of the plan''s season calendar on the row''s dates (low, high, peak, festive); a row is cut where the season changes. NULL = no calendar read yet (the default season applies).';
 
 -- ── 3. Data: history -> past versions, the rows in force -> the latest version ─
 
@@ -278,7 +278,7 @@ BEGIN
      ORDER BY p.effective_from DESC, e.created_at DESC, p.version_no DESC
      LIMIT 1;
     IF start_md IS NULL OR start_md !~ '^[0-9]{2}-[0-9]{2}$' THEN
-        RAISE EXCEPTION 'bk-053: no approved tariff_year_start in booking.pricing_policy (bk-050)';
+        RAISE EXCEPTION 'bk-054: no approved tariff_year_start in booking.pricing_policy (bk-050)';
     END IF;
 
     FOR plan IN
@@ -310,12 +310,12 @@ BEGIN
                 (extract(year FROM batch.w_from)::int
                  + CASE WHEN to_char(batch.w_from, 'MM-DD') >= start_md THEN 1 ELSE 0 END)::smallint,
                 batch.w_from, batch.w_to, 'withdrawn', batch.change_source,
-                'Price set entered before price versions; migrated from the price history by bk-053.',
+                'Price set entered before price versions; migrated from the price history by bk-054.',
                 '{"rows": [], "migrated": true}'::jsonb, '{"migrated": true}'::jsonb,
                 encode(sha256('{"migrated": true, "rows": []}'::bytea), 'hex'),
-                batch.changed_by, batch.effective_from, next_at, batch.effective_from, 'migration:bk-053',
-                batch.effective_from, 'migration:bk-053', next_at,
-                'Replaced as a whole by a later price set before price versions (bk-053).')
+                batch.changed_by, batch.effective_from, next_at, batch.effective_from, 'migration:bk-054',
+                batch.effective_from, 'migration:bk-054', next_at,
+                'Replaced as a whole by a later price set before price versions (bk-054).')
             RETURNING id INTO vid;
             INSERT INTO booking.price_list_version_rows (
                 version_id, position, channel, season, peak, travel_from, travel_to, pax_min, pax_max, currency, amount,
@@ -352,10 +352,10 @@ BEGIN
                 (extract(year FROM w_from)::int
                  + CASE WHEN to_char(w_from, 'MM-DD') >= start_md THEN 1 ELSE 0 END)::smallint,
                 w_from, w_to, 'published', v_source,
-                'Prices in force before price versions; migrated by bk-053.',
+                'Prices in force before price versions; migrated by bk-054.',
                 '{"rows": [], "migrated": true}'::jsonb, '{"migrated": true}'::jsonb,
                 encode(sha256('{"migrated": true, "rows": []}'::bytea), 'hex'),
-                v_by, v_at, now(), v_at, 'migration:bk-053', v_at)
+                v_by, v_at, now(), v_at, 'migration:bk-054', v_at)
             RETURNING id INTO vid;
             INSERT INTO booking.price_list_version_rows (
                 version_id, position, channel, season, peak, travel_from, travel_to, pax_min, pax_max, currency, amount,
@@ -439,7 +439,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.price_list_versions_guard() IS
-    'bk-053 (AA-1091): a price list version starts as a draft and replaces only one of the same plan; its plan, number, maker and source never change; its facts change only while a draft; approved once; the status moves only along ADR 0005b d2 (published <-> superseded is derived); rejected and withdrawn are final; on erasure (DM-6.7) the label and the reasons may be set to [redacted], alone.';
+    'bk-054 (AA-1091): a price list version starts as a draft and replaces only one of the same plan; its plan, number, maker and source never change; its facts change only while a draft; approved once; the status moves only along ADR 0005b d2 (published <-> superseded is derived); rejected and withdrawn are final; on erasure (DM-6.7) the label and the reasons may be set to [redacted], alone.';
 
 CREATE TRIGGER price_list_versions_guard
     BEFORE INSERT OR UPDATE ON booking.price_list_versions
@@ -469,7 +469,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.price_list_version_rows_guard() IS
-    'bk-053 (AA-1091): the rows of a price list version are written and removed only while the version is a draft; a draft holds no computed row.';
+    'bk-054 (AA-1091): the rows of a price list version are written and removed only while the version is a draft; a draft holds no computed row.';
 
 CREATE TRIGGER price_list_version_rows_guard
     BEFORE INSERT OR DELETE ON booking.price_list_version_rows
@@ -497,24 +497,24 @@ BEGIN
        OR has_column_privilege('booking', 'booking.price_list_versions', 'trip_plan_id', 'UPDATE')
        OR has_table_privilege('booking', 'booking.price_list_version_rows', 'UPDATE')
        OR has_table_privilege('booking', 'booking.price_list_version_rows', 'TRUNCATE') THEN
-        RAISE EXCEPTION 'bk-053: role booking can delete a version or rewrite its maker, plan or rows';
+        RAISE EXCEPTION 'bk-054: role booking can delete a version or rewrite its maker, plan or rows';
     END IF;
     IF NOT has_column_privilege('booking', 'booking.trip_plan_prices', 'version_id', 'INSERT') THEN
-        RAISE EXCEPTION 'bk-053: role booking cannot write the version of a matrix row';
+        RAISE EXCEPTION 'bk-054: role booking cannot write the version of a matrix row';
     END IF;
     IF EXISTS (SELECT 1 FROM booking.trip_plan_prices r
                 WHERE (NOT r.computed OR r.overridden) AND r.version_id IS NULL) THEN
-        RAISE EXCEPTION 'bk-053: a hand row of the price matrix has no version';
+        RAISE EXCEPTION 'bk-054: a hand row of the price matrix has no version';
     END IF;
     IF EXISTS (SELECT 1 FROM booking.trip_plan_prices r
                 WHERE NOT EXISTS (SELECT 1 FROM booking.price_list_versions v
                                    WHERE v.trip_plan_id = r.trip_plan_id AND v.status = 'published')) THEN
-        RAISE EXCEPTION 'bk-053: a priced plan has no published version';
+        RAISE EXCEPTION 'bk-054: a priced plan has no published version';
     END IF;
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-053', now(), 'AA-1091 price list versions: price_list_versions + rows (draft / pending / published / superseded / rejected / withdrawn, maker-checker, frozen diff and impact), trip_plan_prices.version_id + season_code, history and rows in force migrated into versions')
+VALUES ('bk-054', now(), 'AA-1091 price list versions: price_list_versions + rows (draft / pending / published / superseded / rejected / withdrawn, maker-checker, frozen diff and impact), trip_plan_prices.version_id + season_code, history and rows in force migrated into versions')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

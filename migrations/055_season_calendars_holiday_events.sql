@@ -1,8 +1,8 @@
--- Migration bk-054: AA-1091 (S278) — season calendars, stop-sale ranges and holiday events (root ADR 0005b decision 4;
+-- Migration bk-055: AA-1091 (S278) — season calendars, stop-sale ranges and holiday events (root ADR 0005b decision 4;
 -- delivery step 4).
 --
 -- Owner: AA-Booking (key bk-NNN). AA-CIS-Infra Migration Sync copies it byte for byte to
--- db/migrations/booking/054_season_calendars_holiday_events.sql; on Dev it is applied as bk_owner (the live owner of
+-- db/migrations/booking/055_season_calendars_holiday_events.sql; on Dev it is applied as bk_owner (the live owner of
 -- schema booking since bk-014) by Infra Migration Apply once every job table is idle (root ADR 0017a). Never run it
 -- from a laptop.
 --
@@ -31,7 +31,7 @@
 --      person approves: the calendar drives the peak uplift, festive validity and stop-sale of the plan's prices.
 --
 -- Class: contract (root ADR 0017 d3): ADD COLUMNs with FKs and a CHECK on an existing table (trip_plans). So a migration-only
--- PR (with bk-053) first, then the code PR raises readiness (MIG-4). On Dev: Infra Migration Apply once every job
+-- PR (with bk-054) first, then the code PR raises readiness (MIG-4). On Dev: Infra Migration Apply once every job
 -- table is idle (root ADR 0017a). Needs bk-005 (countries), bk-008 (supplier_contracts), bk-009 (trip_plans).
 -- DM-7.1: the three new tables have their rows in the root data standards (root PR merged before the Infra copy).
 -- DM-6.1: no personal data; names, note and the reasons are pii:free_text (staff text, never traveller data by rule).
@@ -52,11 +52,11 @@ DO $$
 BEGIN
     IF to_regclass('booking.countries') IS NULL OR to_regclass('booking.supplier_contracts') IS NULL
        OR to_regclass('booking.trip_plans') IS NULL THEN
-        RAISE EXCEPTION 'bk-054: needs bk-005, bk-008 and bk-009 first';
+        RAISE EXCEPTION 'bk-055: needs bk-005, bk-008 and bk-009 first';
     END IF;
     IF EXISTS (SELECT 1 FROM shared.schema_versions
-                WHERE version = 'bk-054' AND description NOT LIKE 'AA-1091 season calendars%') THEN
-        RAISE EXCEPTION 'bk-054: the key bk-054 is already held by another migration: renumber one';
+                WHERE version = 'bk-055' AND description NOT LIKE 'AA-1091 season calendars%') THEN
+        RAISE EXCEPTION 'bk-055: the key bk-055 is already held by another migration: renumber one';
     END IF;
 END $$;
 
@@ -97,13 +97,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS season_calendars_contract_uq
     ON booking.season_calendars (supplier_contract_id) WHERE supplier_contract_id IS NOT NULL;
 
 COMMENT ON TABLE booking.season_calendars IS
-    'bk-054 (AA-1091, root ADR 0005b d4): the seasons of one destination (AA''s sell-side price list) or of one supplier contract. A date no approved range covers takes default_season. A change of default_season is proposed (pending_default_season) and approved by a second person.';
+    'bk-055 (AA-1091, root ADR 0005b d4): the seasons of one destination (AA''s sell-side price list) or of one supplier contract. A date no approved range covers takes default_season. A change of default_season is proposed (pending_default_season) and approved by a second person.';
 COMMENT ON COLUMN booking.season_calendars.name IS
     'pii:free_text; the calendar''s name (a destination or contract name); staff text, never traveller data by rule.';
 COMMENT ON COLUMN booking.season_calendars.default_request_reason IS
     'pii:free_text; why the default season should change (staff text, never traveller data by rule).';
 COMMENT ON COLUMN booking.season_calendars.destination_id IS
-    'bk-054: the CIS destination (catalog.v_destination.destination_id) whose sell-side seasons this is.';
+    'bk-055: the CIS destination (catalog.v_destination.destination_id) whose sell-side seasons this is.';
 
 -- ── 2. Ranges ────────────────────────────────────────────────────────────────
 
@@ -169,7 +169,7 @@ CREATE INDEX IF NOT EXISTS season_ranges_event_idx
     ON booking.season_ranges (holiday_country, holiday_code) WHERE holiday_code IS NOT NULL;
 
 COMMENT ON TABLE booking.season_ranges IS
-    'bk-054 (AA-1091, root ADR 0005b d4): a season range (low / high / peak / festive) or a stop-sale range of a calendar, half-open [date_from, date_to), or a festive range that names a holiday event (its dates come from the event row of each year, plus days_before / days_after). Counts once a second person approves it, until an approved removal (ended_at). The fixed-date season ranges of a calendar never overlap; a festive range from an event lies over them on its days; stop-sale changes availability only.';
+    'bk-055 (AA-1091, root ADR 0005b d4): a season range (low / high / peak / festive) or a stop-sale range of a calendar, half-open [date_from, date_to), or a festive range that names a holiday event (its dates come from the event row of each year, plus days_before / days_after). Counts once a second person approves it, until an approved removal (ended_at). The fixed-date season ranges of a calendar never overlap; a festive range from an event lies over them on its days; stop-sale changes availability only.';
 COMMENT ON COLUMN booking.season_ranges.note IS
     'pii:free_text; the maker''s reason: why the range exists (required; staff text, never traveller data by rule).';
 COMMENT ON COLUMN booking.season_ranges.withdraw_reason IS
@@ -234,7 +234,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS holiday_events_live_uq
     WHERE status IN ('pending', 'approved') AND ended_at IS NULL;
 
 COMMENT ON TABLE booking.holiday_events IS
-    'bk-054 (AA-1091, root ADR 0005b d4): one holiday event (Tet, Songkran, Lebaran, Christmas...) of one country and one year, half-open [date_from, date_to), entered as data each year (never a date in code). Festive season ranges reference it by country and code; it counts once a second person approves it, until an approved removal.';
+    'bk-055 (AA-1091, root ADR 0005b d4): one holiday event (Tet, Songkran, Lebaran, Christmas...) of one country and one year, half-open [date_from, date_to), entered as data each year (never a date in code). Festive season ranges reference it by country and code; it counts once a second person approves it, until an approved removal.';
 COMMENT ON COLUMN booking.holiday_events.name IS
     'pii:free_text; the event''s name (Lunar New Year, Songkran...); staff text, never traveller data by rule.';
 COMMENT ON COLUMN booking.holiday_events.reason IS
@@ -266,9 +266,9 @@ ALTER TABLE booking.trip_plans ADD CONSTRAINT trip_plans_season_calendar_request
 CREATE INDEX IF NOT EXISTS trip_plans_season_calendar_idx
     ON booking.trip_plans (season_calendar_id) WHERE season_calendar_id IS NOT NULL;
 COMMENT ON COLUMN booking.trip_plans.season_calendar_id IS
-    'bk-054 (AA-1091, root ADR 0005b d4): the sell-side season calendar of the plan; its season on the departure date picks the season of the price row and the peak uplift. Default: the calendar of the destination of day 1 (set by the app); staff may change it. NULL = no calendar yet (every date is low season). Staff change it through a request a second person approves (pending_season_calendar_id).';
+    'bk-055 (AA-1091, root ADR 0005b d4): the sell-side season calendar of the plan; its season on the departure date picks the season of the price row and the peak uplift. Default: the calendar of the destination of day 1 (set by the app); staff may change it. NULL = no calendar yet (every date is low season). Staff change it through a request a second person approves (pending_season_calendar_id).';
 COMMENT ON COLUMN booking.trip_plans.pending_season_calendar_id IS
-    'bk-054 (AA-1091): the calendar a staff request asks for (NULL inside a request = clear the calendar); applied when a second person approves it.';
+    'bk-055 (AA-1091): the calendar a staff request asks for (NULL inside a request = clear the calendar); applied when a second person approves it.';
 COMMENT ON COLUMN booking.trip_plans.season_calendar_request_reason IS
     'pii:free_text; why the plan should use another season calendar (staff text, never traveller data by rule).';
 
@@ -299,15 +299,15 @@ BEGIN
        OR has_column_privilege('booking', 'booking.season_ranges', 'date_from', 'UPDATE')
        OR has_column_privilege('booking', 'booking.holiday_events', 'date_from', 'UPDATE')
        OR has_column_privilege('booking', 'booking.season_calendars', 'destination_id', 'UPDATE') THEN
-        RAISE EXCEPTION 'bk-054: role booking can delete a calendar, a range or an event, or rewrite its dates';
+        RAISE EXCEPTION 'bk-055: role booking can delete a calendar, a range or an event, or rewrite its dates';
     END IF;
     IF NOT has_column_privilege('booking', 'booking.trip_plans', 'season_calendar_id', 'UPDATE') THEN
-        RAISE EXCEPTION 'bk-054: role booking cannot set the season calendar of a trip plan';
+        RAISE EXCEPTION 'bk-055: role booking cannot set the season calendar of a trip plan';
     END IF;
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-054', now(), 'AA-1091 season calendars: season_calendars (destination or supplier contract, default season), season_ranges (season / stop-sale, festive from a holiday event, maker-checker), holiday_events (per country and year), trip_plans.season_calendar_id with a second-person request')
+VALUES ('bk-055', now(), 'AA-1091 season calendars: season_calendars (destination or supplier contract, default season), season_ranges (season / stop-sale, festive from a holiday event, maker-checker), holiday_events (per country and year), trip_plans.season_calendar_id with a second-person request')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
