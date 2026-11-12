@@ -117,8 +117,26 @@ def booking_dsn(admin_dsn: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+# AA-1091 (bk-051): the S278 margins and cancellation scale are approved rows dated 2026-11-12 in the tables every
+# pricing test fills itself; in force on any test day after it, they would re-price every expected number (and take
+# the b2b rule's date). Each apply of bk-051 here is followed by this undo (as the file's role), so the other tests keep
+# the pre-S278 baseline; tests/integration/test_bk051_schema.py applies the file with keep_s278_seed=True and checks it.
+S278_SEED_RULES = ("00000000-0000-4000-8000-0000000b5101", "00000000-0000-4000-8000-0000000b5102")
+S278_SEED_CANCELLATION = "00000000-0000-4000-8000-0000000b5103"
+S278_SEED_UNDO = f"""
+DELETE FROM booking.policy_approvals WHERE pricing_rule_id IN ('{S278_SEED_RULES[0]}', '{S278_SEED_RULES[1]}')
+   OR cancellation_policy_id = '{S278_SEED_CANCELLATION}';
+DELETE FROM booking.pricing_rules WHERE id IN ('{S278_SEED_RULES[0]}', '{S278_SEED_RULES[1]}');
+DELETE FROM booking.cancellation_policies WHERE id = '{S278_SEED_CANCELLATION}';
+"""  # noqa: S608 — constant ids
+
+
 async def apply_migrations(
-    conn: asyncpg.Connection, *, first_pass: bool = False, only: Iterable[int] | None = None
+    conn: asyncpg.Connection,
+    *,
+    first_pass: bool = False,
+    only: Iterable[int] | None = None,
+    keep_s278_seed: bool = False,
 ) -> None:
     """Same call as AA-CIS-Infra db/run_migration.py: the whole file, simple protocol, as its migration role.
 
@@ -142,6 +160,8 @@ async def apply_migrations(
             await conn.execute(f'SET ROLE "{role}"')
         try:
             await conn.execute(path.read_text(encoding="utf-8"))
+            if path.name.startswith("051_") and not keep_s278_seed:
+                await conn.execute(S278_SEED_UNDO)
         finally:
             if role != login:
                 await conn.execute("RESET ROLE")
