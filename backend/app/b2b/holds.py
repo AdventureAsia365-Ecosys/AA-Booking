@@ -793,7 +793,7 @@ async def _recheck_under_lock(conn: asyncpg.Connection, hold: Any, held: list[An
     return rows
 
 
-async def _line_titles(conn: asyncpg.Connection, lines: list[Any], plan_source: dict[str, str]) -> dict[int, str]:
+async def line_titles(conn: asyncpg.Connection, lines: list[Any], plan_source: dict[str, str]) -> dict[int, str]:
     """{line_no: the item title}: a trip plan line = the CIS tour title (``catalog.v_tour``), a room line = "hotel ·
     room type", a service line = the service title (AA-1013). A name that cannot be read falls back to the kind and
     the catalog key (a trip plan) or the kind alone; a catalog read error never fails the confirm (it already read
@@ -865,7 +865,7 @@ async def _open_case(
         "staff" if caller.staff_ref else "api",
         caller.entered_by or caller.staff_ref,
     )
-    titles = await _line_titles(conn, lines, plan_source)
+    titles = await line_titles(conn, lines, plan_source)
     # AA-1013: the version reads as the trip sold (the first trip plan line's tour, else the first line); the agency's
     # proposal ref and version stay findable in the version notes (and the case's source_id).
     headline = next(
