@@ -67,6 +67,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-048",  # AA-1073 rest: departure board view, ops sheet, departure fees, price adjustments, early booking
     "bk-050",  # AA-1091: pricing policy parameters (read by every B2B quote and Pricing > Policy); MIG-4
     # bk-051 (AA-1091 S278 margins and cancellation scale) writes rows only; the code reads whatever is in force.
+    "bk-058",  # AA-1092: b2b_partners tenant policy covers bk_owner (the B2B API binds the caller's tenant); MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
