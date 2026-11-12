@@ -610,6 +610,13 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `unauthorized`; a validly signed token of another client, a missing scope or a client that is not the partner's
   `m2m_client_id` 403 `forbidden`; no active `b2b_partners` row for `X-AA-Tenant-Id` 403 `unknown_partner`; not
   configured, JWKS never loaded or pricing data missing 503 `unavailable`; bad input 422 `invalid`.
+- **Tenant binding (AA-1092, bk-049 + bk-058)**: every connection a B2B request takes comes from
+  `app.b2b.access.TenantBoundPool`, which sets `app.tenant_id` (session level, while the connection is held; cleared
+  before it returns to the pool, the connection terminated if that fails) to the agency's tenant: the partner lookup
+  binds `X-AA-Tenant-Id`, the handlers the tenant of the partner the token was proven to act for. Under the
+  `b2b_partners` policies such a connection reads only its own registry row (also through the `bk_owner` view
+  `v_tenant_billing_status`) and writes none, so a partner query that forgets its `partner_id` filter still cannot
+  see another agency's row. Staff routes and jobs use the plain pool and bind nothing.
 - **Routes (AA-972)**: `GET /products` (sellable trip plans still in `catalog.v_tour`, with their bookable components
   `rt:<room type>`, `sv:<service>`, and `tp:<plan>` for the whole plan), `POST /quotes`, `GET /fx-rates` (approved
   rates in force on a date, plain), `GET /price-parity` (the public "from" price per person: since AA-1029 the
@@ -1920,8 +1927,18 @@ FORCE row level security and two permissive policies reading `app.tenant_id` (th
 of `app/b2b/access.py`, none of which binds one, so nothing changes for them) and `b2b_partners_tenant` (SELECT TO
 `booking`: a transaction that runs `set_config('app.tenant_id', <uuid>, true)` reads that tenant's row only and writes
 none). It closes the RLS catalogue guard's rule a finding on the table. Partner isolation on the B2B API stays enforced
-in code (the M2M client bound to the partner, `partner_id` on every query); binding the caller's tenant in the B2B
-handlers is a later step that this policy already supports.
+in code (the M2M client bound to the partner, `partner_id` on every query); since the AA-1092 residual (bk-058 + the
+code PR) every B2B API request also binds the caller's tenant ("Tenant binding" under the B2B API).
+
+### `bk-058` (AA-1092 residual: the tenant policy of `b2b_partners` also covers `bk_owner` — needs `bk-049`)
+
+A **contract** file (migration-only PR; the AA-Booking code PR that binds the caller's tenant in every B2B API request
+raises readiness to it, MIG-4). `b2b_partners_tenant` becomes SELECT TO `booking`, `bk_owner`. A view is read with its
+owner's row level security: `booking.v_tenant_billing_status` (bk-042, owner `bk_owner`) answered no row under a bound
+session, so the B2B credit stop (`app/b2b/holds.py`), `GET /billing-status` and `GET /terms` would have read "no status"
+once the handlers bind `app.tenant_id`. With `bk_owner` in the tenant policy the view answers the bound tenant's row
+only. Unbound sessions (staff admin, jobs, migrations) are unchanged: they match `b2b_partners_back_office` and see
+every row; a bound session still writes nothing.
 
 ## Out of scope today
 
