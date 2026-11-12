@@ -730,25 +730,6 @@
         "title": "AllotmentIn",
         "type": "object"
       },
-      "ApproveBody": {
-        "additionalProperties": false,
-        "properties": {
-          "note": {
-            "anyOf": [
-              {
-                "maxLength": 2000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          }
-        },
-        "title": "ApproveBody",
-        "type": "object"
-      },
       "AssignBody": {
         "additionalProperties": false,
         "properties": {
@@ -1690,6 +1671,55 @@
           "vouchers"
         ],
         "title": "BookingVouchers",
+        "type": "object"
+      },
+      "CalendarIn": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Id"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_kind": {
+            "enum": [
+              "destination",
+              "supplier_contract"
+            ],
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "supplier_contract_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Contract Id"
+          }
+        },
+        "required": [
+          "owner_kind",
+          "name"
+        ],
+        "title": "CalendarIn",
         "type": "object"
       },
       "CancelFeeIn": {
@@ -2869,6 +2899,25 @@
         "title": "CreditStatus",
         "type": "object"
       },
+      "DecisionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "DecisionBody",
+        "type": "object"
+      },
       "DeclineIn": {
         "additionalProperties": false,
         "properties": {
@@ -2887,6 +2936,26 @@
           "decline_code"
         ],
         "title": "DeclineIn",
+        "type": "object"
+      },
+      "DefaultIn": {
+        "additionalProperties": false,
+        "properties": {
+          "default_season": {
+            "enum": [
+              "low",
+              "high",
+              "peak",
+              "festive"
+            ],
+            "title": "Default Season",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default_season"
+        ],
+        "title": "DefaultIn",
         "type": "object"
       },
       "Departure": {
@@ -3457,6 +3526,209 @@
         "title": "DestinationPatch",
         "type": "object"
       },
+      "DraftBody": {
+        "additionalProperties": false,
+        "description": "The whole draft (PUT): facts and rows.",
+        "properties": {
+          "below_floor_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Below Floor Reason"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PriceRowIn"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sale_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale From"
+          },
+          "sale_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale To"
+          },
+          "tariff_year": {
+            "anyOf": [
+              {
+                "maximum": 2100.0,
+                "minimum": 2000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tariff Year"
+          },
+          "travel_from": {
+            "format": "date",
+            "title": "Travel From",
+            "type": "string"
+          },
+          "travel_to": {
+            "format": "date",
+            "title": "Travel To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "travel_from",
+          "travel_to",
+          "items"
+        ],
+        "title": "DraftBody",
+        "type": "object"
+      },
+      "DraftIn": {
+        "additionalProperties": false,
+        "description": "A new draft: travel window (inclusive last day; default the tariff year of today), optional sale window.",
+        "properties": {
+          "copy_from": {
+            "default": "in_force",
+            "description": "in_force | none | a version id of the same plan",
+            "title": "Copy From",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sale_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale From"
+          },
+          "sale_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale To"
+          },
+          "tariff_year": {
+            "anyOf": [
+              {
+                "maximum": 2100.0,
+                "minimum": 2000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tariff Year"
+          },
+          "travel_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Travel From"
+          },
+          "travel_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Travel To"
+          }
+        },
+        "title": "DraftIn",
+        "type": "object"
+      },
       "EntryIn": {
         "additionalProperties": false,
         "properties": {
@@ -3678,6 +3950,47 @@
           "occurred_at"
         ],
         "title": "Event",
+        "type": "object"
+      },
+      "EventIn": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "the event's code, the same every year",
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "country_iso2": {
+            "pattern": "^[A-Za-z]{2}$",
+            "title": "Country Iso2",
+            "type": "string"
+          },
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "country_iso2",
+          "code",
+          "name",
+          "date_from",
+          "date_to"
+        ],
+        "title": "EventIn",
         "type": "object"
       },
       "EventPage": {
@@ -6725,6 +7038,28 @@
         "title": "PaymentTerms",
         "type": "object"
       },
+      "PlanCalendarBody": {
+        "additionalProperties": false,
+        "properties": {
+          "season_calendar_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season Calendar Id"
+          }
+        },
+        "required": [
+          "season_calendar_id"
+        ],
+        "title": "PlanCalendarBody",
+        "type": "object"
+      },
       "PlanComponentIn": {
         "additionalProperties": false,
         "properties": {
@@ -7842,6 +8177,114 @@
         "title": "QuoteRequest",
         "type": "object"
       },
+      "RangeIn": {
+        "additionalProperties": false,
+        "description": "Fixed dates (inclusive), or for a festive range a holiday event (country + code, days before and after).",
+        "properties": {
+          "date_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To"
+          },
+          "days_after": {
+            "default": 0,
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Days After",
+            "type": "integer"
+          },
+          "days_before": {
+            "default": 0,
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Days Before",
+            "type": "integer"
+          },
+          "holiday_code": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]{1,39}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holiday Code"
+          },
+          "holiday_country": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holiday Country"
+          },
+          "kind": {
+            "default": "season",
+            "enum": [
+              "season",
+              "stop_sale"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "season_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "high",
+                  "peak",
+                  "festive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season Code"
+          }
+        },
+        "title": "RangeIn",
+        "type": "object"
+      },
       "RateCardCreate": {
         "additionalProperties": false,
         "properties": {
@@ -8195,6 +8638,22 @@
           "schema_version"
         ],
         "title": "Readiness",
+        "type": "object"
+      },
+      "ReasonBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ReasonBody",
         "type": "object"
       },
       "ReasonIn": {
@@ -9014,6 +9473,25 @@
           }
         },
         "title": "StatusNote",
+        "type": "object"
+      },
+      "SubmitBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "SubmitBody",
         "type": "object"
       },
       "SupplierFields": {
@@ -10267,6 +10745,41 @@
           "tour_keys"
         ],
         "title": "WorkbenchActionBody",
+        "type": "object"
+      },
+      "app__routers__price_versions__ApproveBody": {
+        "additionalProperties": false,
+        "properties": {
+          "diff_sha256": {
+            "description": "the SHA-256 of the diff the checker saw",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Diff Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "diff_sha256"
+        ],
+        "title": "ApproveBody",
+        "type": "object"
+      },
+      "app__routers__trip_cases__ApproveBody": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ApproveBody",
         "type": "object"
       }
     },
@@ -17280,6 +17793,470 @@
         ]
       }
     },
+    "/booking/catalog/price-versions": {
+      "get": {
+        "operationId": "pending_versions_booking_catalog_price_versions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "const": "pending",
+              "default": "pending",
+              "title": "Status",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Pending Versions Booking Catalog Price Versions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Pending Versions",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/price-versions/{version_id}": {
+      "get": {
+        "operationId": "get_version_booking_catalog_price_versions__version_id__get",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Version Booking Catalog Price Versions  Version Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Version",
+        "tags": [
+          "price-versions"
+        ]
+      },
+      "put": {
+        "operationId": "save_version_booking_catalog_price_versions__version_id__put",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Save Version Booking Catalog Price Versions  Version Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Version",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/price-versions/{version_id}/approve": {
+      "post": {
+        "operationId": "approve_version_booking_catalog_price_versions__version_id__approve_post",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__price_versions__ApproveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Version Booking Catalog Price Versions  Version Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Version",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/price-versions/{version_id}/reject": {
+      "post": {
+        "operationId": "reject_version_booking_catalog_price_versions__version_id__reject_post",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Version Booking Catalog Price Versions  Version Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Version",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/price-versions/{version_id}/submit": {
+      "post": {
+        "operationId": "submit_version_booking_catalog_price_versions__version_id__submit_post",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Version Booking Catalog Price Versions  Version Id  Submit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Version",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/price-versions/{version_id}/withdraw": {
+      "post": {
+        "description": "The maker withdraws a draft or pending version (price_version.write); a second person a published one\n(price_version.approve). The permission is checked by state in the service.",
+        "operationId": "withdraw_version_booking_catalog_price_versions__version_id__withdraw_post",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Version Booking Catalog Price Versions  Version Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw Version",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/price-versions/{version_id}/withdraw-preview": {
+      "get": {
+        "operationId": "withdraw_preview_booking_catalog_price_versions__version_id__withdraw_preview_get",
+        "parameters": [
+          {
+            "description": "price list version id",
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "description": "price list version id",
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Preview Booking Catalog Price Versions  Version Id  Withdraw Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw Preview",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
     "/booking/catalog/price-workbench": {
       "get": {
         "description": "AA-1091: every trip plan with its checks, its next step, its reference and provisional price.",
@@ -18221,6 +19198,118 @@
         ]
       }
     },
+    "/booking/catalog/trip-plans/{source_id}/price-versions": {
+      "get": {
+        "operationId": "list_versions_booking_catalog_trip_plans__source_id__price_versions_get",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Versions Booking Catalog Trip Plans  Source Id  Price Versions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Versions",
+        "tags": [
+          "price-versions"
+        ]
+      },
+      "post": {
+        "operationId": "create_version_booking_catalog_trip_plans__source_id__price_versions_post",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Version Booking Catalog Trip Plans  Source Id  Price Versions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Version",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
     "/booking/catalog/trip-plans/{source_id}/prices": {
       "get": {
         "operationId": "get_trip_plan_prices_booking_catalog_trip_plans__source_id__prices_get",
@@ -18273,6 +19362,7 @@
         ]
       },
       "put": {
+        "description": "Retired by AA-1091 (bk-052, root ADR 0005b d1 / d2): a hand price is never overwritten. The rows go into a\ndraft price list version (``POST …/price-versions``, ``PUT /booking/catalog/price-versions/{id}``) that a second\nperson approves. Always 409 ``price_versions``.",
         "operationId": "put_trip_plan_prices_booking_catalog_trip_plans__source_id__prices_put",
         "parameters": [
           {
@@ -18310,6 +19400,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "description": "prices change through versions"
           },
           "422": {
             "content": {
@@ -18508,6 +19601,68 @@
         "summary": "Review Trip Plan Reference",
         "tags": [
           "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/season-calendar": {
+      "put": {
+        "operationId": "set_plan_calendar_booking_catalog_trip_plans__source_id__season_calendar_put",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanCalendarBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Plan Calendar Booking Catalog Trip Plans  Source Id  Season Calendar Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Plan Calendar",
+        "tags": [
+          "price-versions"
         ]
       }
     },
@@ -21185,6 +22340,207 @@
         ]
       }
     },
+    "/booking/pricing/holiday-events": {
+      "get": {
+        "operationId": "list_events_booking_pricing_holiday_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z]{2}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Country"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2100,
+                  "minimum": 2000,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Events Booking Pricing Holiday Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Events",
+        "tags": [
+          "price-versions"
+        ]
+      },
+      "post": {
+        "operationId": "propose_event_booking_pricing_holiday_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Propose Event Booking Pricing Holiday Events Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Propose Event",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/pricing/holiday-events/{event_id}/{action}": {
+      "post": {
+        "description": "Permissions by action in the service: proposals (withdraw, end) season.write, decisions season.approve.",
+        "operationId": "decide_event_booking_pricing_holiday_events__event_id___action__post",
+        "parameters": [
+          {
+            "description": "id",
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "description": "id",
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "enum": [
+                "approve",
+                "reject",
+                "withdraw",
+                "end",
+                "end_approve",
+                "end_reject"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Event Booking Pricing Holiday Events  Event Id   Action  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Event",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
     "/booking/pricing/partner-rate-cards": {
       "get": {
         "operationId": "list_rate_cards_booking_pricing_partner_rate_cards_get",
@@ -22320,6 +23676,451 @@
         "summary": "Approve Rule",
         "tags": [
           "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/season-calendars": {
+      "get": {
+        "operationId": "list_calendars_booking_pricing_season_calendars_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "owner_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "destination",
+                    "supplier_contract"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Calendars Booking Pricing Season Calendars Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Calendars",
+        "tags": [
+          "price-versions"
+        ]
+      },
+      "post": {
+        "operationId": "create_calendar_booking_pricing_season_calendars_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Calendar Booking Pricing Season Calendars Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Calendar",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/pricing/season-calendars/{calendar_id}": {
+      "get": {
+        "operationId": "get_calendar_booking_pricing_season_calendars__calendar_id__get",
+        "parameters": [
+          {
+            "description": "id",
+            "in": "path",
+            "name": "calendar_id",
+            "required": true,
+            "schema": {
+              "description": "id",
+              "format": "uuid",
+              "title": "Calendar Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2100,
+                  "minimum": 2000,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Calendar Booking Pricing Season Calendars  Calendar Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Calendar",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/pricing/season-calendars/{calendar_id}/default": {
+      "post": {
+        "operationId": "propose_default_booking_pricing_season_calendars__calendar_id__default_post",
+        "parameters": [
+          {
+            "description": "id",
+            "in": "path",
+            "name": "calendar_id",
+            "required": true,
+            "schema": {
+              "description": "id",
+              "format": "uuid",
+              "title": "Calendar Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefaultIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Propose Default Booking Pricing Season Calendars  Calendar Id  Default Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Propose Default",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/pricing/season-calendars/{calendar_id}/default/{decision}": {
+      "post": {
+        "operationId": "decide_default_booking_pricing_season_calendars__calendar_id__default__decision__post",
+        "parameters": [
+          {
+            "description": "id",
+            "in": "path",
+            "name": "calendar_id",
+            "required": true,
+            "schema": {
+              "description": "id",
+              "format": "uuid",
+              "title": "Calendar Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "decision",
+            "required": true,
+            "schema": {
+              "enum": [
+                "approve",
+                "reject"
+              ],
+              "title": "Decision",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Default Booking Pricing Season Calendars  Calendar Id  Default  Decision  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Default",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/pricing/season-calendars/{calendar_id}/ranges": {
+      "post": {
+        "operationId": "propose_range_booking_pricing_season_calendars__calendar_id__ranges_post",
+        "parameters": [
+          {
+            "description": "id",
+            "in": "path",
+            "name": "calendar_id",
+            "required": true,
+            "schema": {
+              "description": "id",
+              "format": "uuid",
+              "title": "Calendar Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RangeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Propose Range Booking Pricing Season Calendars  Calendar Id  Ranges Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Propose Range",
+        "tags": [
+          "price-versions"
+        ]
+      }
+    },
+    "/booking/pricing/season-ranges/{range_id}/{action}": {
+      "post": {
+        "description": "Permissions by action in the service: proposals (withdraw, end) season.write, decisions season.approve.",
+        "operationId": "decide_range_booking_pricing_season_ranges__range_id___action__post",
+        "parameters": [
+          {
+            "description": "id",
+            "in": "path",
+            "name": "range_id",
+            "required": true,
+            "schema": {
+              "description": "id",
+              "format": "uuid",
+              "title": "Range Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "enum": [
+                "approve",
+                "reject",
+                "withdraw",
+                "end",
+                "end_approve",
+                "end_reject"
+              ],
+              "title": "Action",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Range Booking Pricing Season Ranges  Range Id   Action  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Range",
+        "tags": [
+          "price-versions"
         ]
       }
     },
@@ -27590,7 +29391,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/ApproveBody"
+                    "$ref": "#/components/schemas/app__routers__trip_cases__ApproveBody"
                   },
                   {
                     "type": "null"

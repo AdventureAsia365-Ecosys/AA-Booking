@@ -14,7 +14,7 @@ from openpyxl import Workbook
 
 from app.auth.staff import Staff
 from app.b2b import departures, plan_components
-from app.catalog import cost_sheet, price_readiness, price_workbench, trip_plan_prices
+from app.catalog import cost_sheet, price_readiness, price_versions, price_workbench
 from app.catalog import price_import as pi
 from app.errors import Invalid
 from tests.unit.fakes import ScriptedConn
@@ -491,9 +491,11 @@ async def test_import_dry_run_and_apply(monkeypatch: pytest.MonkeyPatch) -> None
     async def replace_components(conn: Any, staff: Any, key: str, items: Any) -> None:
         calls.append(f"components {key} {len(items)}")
 
-    async def store(conn: Any, plan_id: str, key: str, final: Any, **kw: Any) -> bool:
-        calls.append(f"prices {key} {len(final)} {kw['action']}")
-        return True
+    async def import_draft(conn: Any, staff: Any, plan_id: str, key: str, items: Any, sha: str) -> dict[str, Any]:
+        # AA-1091 (bk-052): the Prices sheet becomes a draft price version (never live), with the file's SHA-256.
+        assert len(sha) == 64 and items[0]["amount"] == D("400") and "peak" not in items[0]
+        calls.append(f"price draft {key} {len(items)}")
+        return {"version_id": "v-1", "rows": len(items)}
 
     async def create_departure(conn: Any, staff: Any, key: str, data: dict[str, Any]) -> None:
         calls.append(f"departure {key} {data['start_date']} {data['auto_confirm']} {data['decision_days_before']}")
@@ -510,7 +512,7 @@ async def test_import_dry_run_and_apply(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(price_readiness, "load", load)
     monkeypatch.setattr(price_readiness, "resolve", resolve)
     monkeypatch.setattr(plan_components, "replace_components", replace_components)
-    monkeypatch.setattr(trip_plan_prices, "store", store)
+    monkeypatch.setattr(price_versions, "import_draft", import_draft)
     monkeypatch.setattr(departures, "create_departure", create_departure)
     monkeypatch.setattr(price_workbench, "set_sellable", set_sellable)
     start = TODAY + timedelta(days=20)
@@ -548,12 +550,13 @@ async def test_import_dry_run_and_apply(monkeypatch: pytest.MonkeyPatch) -> None
     done = await pi.import_workbook(conn, STAFF, data, dry_run=False)  # type: ignore[arg-type]
     assert calls == [
         f"components {KEY} 1",
-        f"prices {KEY} 1 trip_plan.prices_imported",
+        f"price draft {KEY} 1",
         f"departure {KEY} {start} True None",
         f"sellable {KEY} True",
         "recompute p-1",
     ]
     assert done["recomputed"] == 1
+    assert done["price_drafts"] == [{"tour_key": KEY, "version_id": "v-1", "rows": 1}]
     assert any("trip_plan.bulk_imported" in str(a) for a in conn.sql("INSERT INTO booking.audit_logs"))
 
 

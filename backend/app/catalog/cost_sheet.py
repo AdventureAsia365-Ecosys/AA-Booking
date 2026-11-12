@@ -24,16 +24,19 @@ validity, never on today, so a recompute on the next day with the same inputs co
 nothing (no daily history copies, no false ``updated_at`` move for the products feed); a row changes only when a rate,
 rule or FX rate changes or a window ends. A window or band with a component without a rate in force gets no row
 (never a guessed or zero net). The season label = the labels of the rates
-used for 2 travellers; ``peak`` when one of them says "peak" (the rule's peak uplift then applies).
+used for 2 travellers (for staff); the season itself is the plan's season calendar on the window's start dates
+(AA-1091, bk-053, :mod:`app.pricing.seasons`: windows are also cut where it changes, ``season_code`` on each row),
+and ``peak`` = a peak or festive season (the rule's peak uplift then applies). No label is read for "peak" any more.
 
 **Channels.** ``b2b`` and ``fixed_departure`` (root ADR 0019: the B2C channels are retired; the approved AA-1029
 re-scope and the R4 milestone keep these two, fixed departures being sold to agencies too), each only while an
 approved rule of that channel is in force on the recompute day; the selling currency is USD (b16). The b2b rows carry
 the suggested retail price (``rrp_amount``) when the b2b rule has an RRP markup (b15).
 
-**Writing** (:func:`recompute_plan`, one transaction per plan, the plan row locked): the plan's hand rows (not
-``computed``, or computed and ``overridden`` by staff) are kept as they are (their RRP refreshed), the computed rows
-are replaced, a computed row overlapping a hand row of its channel and currency is left out, and the set is stored with
+**Writing** (:func:`recompute_plan`, one transaction per plan, the plan row locked): the plan's hand rows come from
+its published price list versions (AA-1091, bk-052, :mod:`app.catalog.version_matrix`: each version's rows cut to the
+dates it wins today and where the season changes; their RRP refreshed), the computed rows are replaced, a computed
+row overlapping a hand row of its channel and currency is left out, and the set is stored with
 ``app.catalog.trip_plan_prices.store`` (audit ``trip_plan.prices_recomputed``, dated history ``cost_sheet``) only when
 it changed. A computed row that overlaps only a hand row already over (ended before the recompute day) starts the day
 after it instead of being left out (``trimmed``). At most ``MAX_ROWS`` rows: the latest windows are left out first
@@ -60,9 +63,10 @@ from typing import Any
 import asyncpg
 
 from app.catalog import trip_plan_prices as prices
+from app.catalog import version_matrix
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.pricing import engine, repository
+from app.pricing import engine, repository, seasons
 from app.supply.rates import RateAsk, rates_in_force_many
 
 log = logging.getLogger(__name__)
@@ -105,7 +109,9 @@ SELECT p.id::text AS id, p.source_id FROM booking.trip_plans p
 WHERE ($1::uuid IS NULL OR p.id = $1::uuid)
   AND (EXISTS (SELECT 1 FROM booking.trip_plan_components c WHERE c.trip_plan_id = p.id)
        OR EXISTS (SELECT 1 FROM booking.trip_plan_prices r
-                  WHERE r.trip_plan_id = p.id AND (r.computed OR r.channel = 'b2b')))
+                  WHERE r.trip_plan_id = p.id AND (r.computed OR r.channel = 'b2b'))
+       OR EXISTS (SELECT 1 FROM booking.price_list_versions v
+                  WHERE v.trip_plan_id = p.id AND v.status IN ('published', 'superseded')))
 ORDER BY p.source_id
 """
 LOCK_SQL = "SELECT id::text AS id, source_id FROM booking.trip_plans WHERE id = $1::uuid FOR UPDATE"
@@ -117,6 +123,10 @@ SELECT concat_ws('|',
     (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.supplier_rates),
     (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.trip_plans),
     (SELECT count(*) FROM booking.trip_plan_components),
+    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.price_list_versions),
+    (SELECT count(*) || ':' || coalesce(max(greatest(decided_at, ended_at))::text, '') FROM booking.season_ranges),
+    (SELECT count(*) || ':' || coalesce(max(greatest(decided_at, ended_at))::text, '') FROM booking.holiday_events),
+    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.season_calendars),
     (now() AT TIME ZONE 'UTC')::date::text) AS mark
 """
 
@@ -192,6 +202,8 @@ class NetRow:
     peak: bool
     # bk-047 (AA-1075, bk-15): the single supplement per person (net_currency) of the window, None without a room.
     single_net: Decimal | None = None
+    # AA-1091 (bk-053): the season of the plan's calendar on the window's start dates (``peak`` follows from it).
+    season_code: str | None = None
 
 
 @dataclass
@@ -233,15 +245,22 @@ def rate_cuts(parts: Sequence[Part], spans: Sequence[Span]) -> set[date]:
     return cuts
 
 
-def windows(today: date, parts: Sequence[Part], spans: Sequence[Span]) -> list[Window]:
+def windows(
+    today: date, parts: Sequence[Part], spans: Sequence[Span], calendar: seasons.Calendar = seasons.EMPTY
+) -> list[Window]:
     """Start-date windows inside which every component prices the same rates, anchored on the rate validity (cut at
     every rate start and end shifted by the component's day offset, up to the end of the latest rate), without the
     ones over before ``today``. Nothing in them depends on ``today`` but which windows are over, so the same inputs
-    on the next day give the same windows."""
+    on the next day give the same windows. AA-1091 (bk-053): also cut where the plan's season calendar changes season
+    (a window has one season on its start dates)."""
     end = horizon(today, spans)
     if end is None:
         return []
-    ordered = sorted(day for day in rate_cuts(parts, spans) if day <= end)
+    cuts = rate_cuts(parts, spans)
+    if cuts:
+        first = min(cuts)
+        cuts |= set(calendar.cuts(first, min(end, date.max - timedelta(days=1)) + timedelta(days=1)))
+    ordered = sorted(day for day in cuts if day <= end)
     if not ordered:
         return []
     out = [Window(day, nxt - timedelta(days=1)) for day, nxt in zip(ordered, ordered[1:], strict=False)]
@@ -362,10 +381,9 @@ def in_currency(amount: Decimal, currency: str, target: str, fx: dict[str, engin
     return out.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-def season_label(cell: Cell) -> tuple[str | None, bool]:
-    labels = sorted(cell.seasons)
-    label = " / ".join(labels)[:SEASON_MAX] or None
-    return label, any("peak" in s.lower() for s in labels)
+def season_label(cell: Cell) -> str | None:
+    """The supplier rates' season labels of a cell (a label for staff; the season itself comes from the calendar)."""
+    return " / ".join(sorted(cell.seasons))[:SEASON_MAX] or None
 
 
 def net_rows(
@@ -373,11 +391,14 @@ def net_rows(
     grid: Sequence[Sequence[Cell]],
     fx: dict[str, engine.FxRate],
     singles: Sequence[tuple[Decimal, str] | None] | None = None,
+    codes: Sequence[str] | None = None,
 ) -> tuple[list[NetRow], int]:
-    """Merge the windows whose nets, season, peak and single supplement match; returns the rows and the count of
-    unpriced cells. ``singles`` (AA-1075): the single supplement of each window (:func:`single_supplement`)."""
+    """Merge the windows whose nets, season and single supplement match; returns the rows and the count of unpriced
+    cells. ``singles`` (AA-1075): the single supplement of each window (:func:`single_supplement`). ``codes``
+    (AA-1091, bk-053): the calendar season of each window's start dates (:mod:`app.pricing.seasons`); ``peak`` =
+    a peak or festive season (the rule's peak uplift). Without codes every window is low season."""
     unpriced = 0
-    keyed: list[tuple[Window, tuple[Any, ...], str | None, bool, Any]] = []
+    keyed: list[tuple[Window, tuple[Any, ...], str | None, str, Any]] = []
     two = next(i for i, (low, _) in enumerate(PAX_BANDS) if low == 2)
     for i, (win, row) in enumerate(zip(wins, grid, strict=True)):
         nets = []
@@ -385,24 +406,29 @@ def net_rows(
             value = per_person(cell, low, fx)
             unpriced += value is None
             nets.append(value)
-        season, peak = season_label(row[two])
-        keyed.append((win, tuple(nets), season, peak, singles[i] if singles else None))
-    merged: list[tuple[Window, tuple[Any, ...], str | None, bool, Any]] = []
-    for win, nets, season, peak, single in keyed:
+        code = codes[i] if codes else seasons.DEFAULT_SEASON
+        keyed.append((win, tuple(nets), season_label(row[two]), code, singles[i] if singles else None))
+    merged: list[tuple[Window, tuple[Any, ...], str | None, str, Any]] = []
+    for win, nets, season, code, single in keyed:
         if (
             merged
-            and merged[-1][1:] == (nets, season, peak, single)
+            and merged[-1][1:] == (nets, season, code, single)
             and merged[-1][0].end + timedelta(days=1) == win.start
         ):
-            merged[-1] = (Window(merged[-1][0].start, win.end), nets, season, peak, single)
+            merged[-1] = (Window(merged[-1][0].start, win.end), nets, season, code, single)
         else:
-            merged.append((win, nets, season, peak, single))
+            merged.append((win, nets, season, code, single))
     out: list[NetRow] = []
-    for win, nets, season, peak, single in merged:
+    for win, nets, season, code, single in merged:
         for (low, high), value in zip(PAX_BANDS, nets, strict=True):
             if value is not None:
                 single_net = in_currency(single[0], single[1], value[1], fx) if single else None
-                out.append(NetRow(win.start, win.end, low, high, value[0], value[1], season, peak, single_net))
+                out.append(
+                    NetRow(
+                        win.start, win.end, low, high, value[0], value[1], season, code in seasons.PEAK_CODES,
+                        single_net, code,
+                    )
+                )  # fmt: skip
     return out, unpriced
 
 
@@ -492,6 +518,7 @@ def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str
                     "channel": channel.value,
                     "season": net.season,
                     "peak": net.peak,
+                    "season_code": net.season_code,
                     "valid_from": net.valid_from,
                     "valid_to": net.valid_to,
                     "pax_min": net.pax_min,
@@ -597,7 +624,9 @@ async def _parts(conn: asyncpg.Connection, plan_id: str) -> tuple[list[Part], bo
     return parts, active
 
 
-async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> tuple[list[dict[str, Any]], dict]:
+async def compute(
+    conn: asyncpg.Connection, plan_id: str, pricing: Pricing, calendar: seasons.Calendar | None = None
+) -> tuple[list[dict[str, Any]], dict]:
     """The computed rows of one plan and why some are missing (no DB write)."""
     info: dict[str, Any] = {"windows": 0, "unpriced_cells": 0, "refused": 0, "reason": None}
     parts, active = await _parts(conn, plan_id)
@@ -610,7 +639,8 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
         Span(r["room_type_id"] or r["service_id"], r["start"], r["stop"])
         for r in await conn.fetch(SPANS_SQL, rooms, services)
     ]
-    wins = windows(pricing.on, parts, spans)[:MAX_SEGMENTS]
+    cal = calendar if calendar is not None else await seasons.for_plan(conn, plan_id)
+    wins = windows(pricing.on, parts, spans, cal)[:MAX_SEGMENTS]
     if not wins:
         info["reason"] = NO_RATES
         return [], info
@@ -618,32 +648,46 @@ async def compute(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> t
     wanted = asks(wins, parts)
     found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
     singles = [single_supplement(w, parts, found, pricing.fx) for w in wins]
-    nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx, singles)
+    codes = [cal.season_on(w.start).code for w in wins]
+    nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx, singles, codes)
     rows, info["refused"] = priced_rows(nets, pricing)
     if not rows:
         info["reason"] = NO_RATES
     return rows, info
 
 
-async def recompute_plan(conn: asyncpg.Connection, plan_id: str, pricing: Pricing) -> dict[str, Any]:
-    """Recompute and store one plan's computed rows (call inside a transaction)."""
+async def recompute_plan(
+    conn: asyncpg.Connection,
+    plan_id: str,
+    pricing: Pricing,
+    *,
+    actor_type: str = "system",
+    actor_ref: str = ACTOR,
+    action: str = ACTION,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Recompute and store one plan's matrix (call inside a transaction): the hand rows of its published price list
+    versions as they win today (AA-1091, :mod:`app.catalog.version_matrix`), then the computed rows around them. A
+    publish or withdrawal of a version stores through here too, under its staff actor and action."""
     plan = await conn.fetchrow(LOCK_SQL, plan_id)
     if plan is None:
         return {"outcome": "not_found"}
-    computed, info = await compute(conn, plan_id, pricing)
+    cal = await seasons.for_plan(conn, plan_id)
+    computed, info = await compute(conn, plan_id, pricing, cal)
     existing = [dict(r) for r in await conn.fetch(prices.ROWS_SQL, plan_id)]
-    final, counts = assemble(existing, computed, pricing)
+    hand = await version_matrix.hand_rows(conn, plan_id, pricing.on, existing, cal)
+    final, counts = assemble(hand, computed, pricing)
     changed = await prices.store(
         conn,
         plan_id,
         plan["source_id"],
         final,
-        actor_type="system",
-        actor_ref=ACTOR,
+        actor_type=actor_type,
+        actor_ref=actor_ref,
         created_by=None,
-        action=ACTION,
-        extra={"computed_rows": counts["computed"], "reason": info["reason"]},
-        summary_suffix=" (cost sheet)",
+        action=action,
+        extra={"computed_rows": counts["computed"], "reason": info["reason"], **(extra or {})},
+        summary_suffix=" (cost sheet)" if actor_type == "system" else " (price version)",
     )
     return {"outcome": "changed" if changed else "unchanged", **counts, **info}
 

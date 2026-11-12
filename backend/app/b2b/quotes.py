@@ -5,10 +5,11 @@
   that day for the quote currency and every cost currency (``app.pricing.repository``, maker-checker rows only).
   Missing = 503 ``unavailable`` (AA-side data; the CRM shows an indicative price and allows no deposit).
 - **Formula**: the AA-810 engine's building blocks (``app.pricing.engine``): every net to USD at the plain rate, sell
-  ``= net / (1 - margin - card fee)`` with the rule's margin (``peak = false``), then to the quote currency x rate x
-  (1 + buffer). One formula for B2C and B2B (memo seam 7): no second engine. The per-line step is
-  :func:`price_line` over a :class:`PriceBasis` (:func:`price_basis`), shared with the agency tariff (AA-1030 G3,
-  ``app.b2b.tariff``), so a tariff row is exactly what a quote of that party and day charges.
+  ``= net / (1 - margin - card fee)`` with the rule's margin (plus its peak uplift on a ``tp:`` line whose service
+  date is a peak or festive date of the plan's season calendar, AA-1091 bk-053, :mod:`app.pricing.seasons`), then
+  to the quote currency x rate x (1 + buffer). One formula for B2C and B2B (memo seam 7): no second engine. The
+  per-line step is :func:`price_line` over a :class:`PriceBasis` (:func:`price_basis`), shared with the agency
+  tariff (AA-1030 G3, ``app.b2b.tariff``), so a tariff row is exactly what a quote of that party and day charges.
 - **Rounding** (:func:`round_line`): each line's ``b2b_price`` is rounded UP to the cent (never lowers the margin),
   a VND line UP to 1,000 VND (AA-974, :data:`LINE_INCREMENTS`); ``total_b2b_price`` is the exact sum of the lines.
   The B2C "total up to 5" rule does not apply: a B2B price is not customer-facing (the agency sets its own price).
@@ -42,9 +43,11 @@
   ``price_note``, a warning log). Each line stores what applied in ``price_note`` (NULL when nothing); a line with an
   adjustment or an early discount hashes it (``price_note``), any other line hashes exactly as before.
 - **Policy** (AA-1091, bk-050, root ADR 0005b d14 / d15, :mod:`app.pricing.policy_values`): ``valid_until`` = now +
-  ``quote_validity_days`` of the pricing policy in force on the quote day (staff change it on Pricing > Policy; the
-  festive validity comes with the season calendars); a ``tp:`` line of ``group_on_request_min_pax`` travellers or more
-  is ``on_request``. No policy value is a constant here (CI guard ``test_aa1091_policy_guard``).
+  ``quote_validity_days`` of the pricing policy in force on the quote day (staff change it on Pricing > Policy), or
+  ``quote_validity_festive_days`` when a ``tp:`` line's service date is festive in its plan's season calendar (d14:
+  one festive line shortens the whole quote); a ``tp:`` line of ``group_on_request_min_pax`` travellers or more
+  is ``on_request``, and so is one on a stop-sale date of its plan's calendar (bk-053: stop-sale changes
+  availability, never the price). No policy value is a constant here (CI guard ``test_aa1091_policy_guard``).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -64,7 +67,7 @@ import asyncpg
 from app.b2b import agency_pricing, cancellation, departures, price_adjustments, served
 from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
-from app.pricing import engine, policy_values, repository
+from app.pricing import engine, policy_values, repository, seasons
 
 log = logging.getLogger(__name__)
 
@@ -223,11 +226,19 @@ async def _policy(conn: asyncpg.Connection, on: date) -> policy_values.Policy:
     request. A parameter with no approved value is AA-side data missing: 503 ``unavailable``."""
     try:
         policy = await policy_values.load(conn, on)
-        policy.quote_validity_days, policy.group_on_request_min_pax  # noqa: B018 — fail here, before pricing
+        policy.quote_validity_days, policy.quote_validity_festive_days, policy.group_on_request_min_pax  # noqa: B018
     except policy_values.PolicyUnavailable as exc:
         log.warning("b2b_policy_unavailable error=%s", exc)
         raise B2BError("unavailable", "pricing policy is not available") from None
     return policy
+
+
+def season_availability(availability: str, component_id: str, day: seasons.SeasonDay | None) -> str:
+    """AA-1091 (root ADR 0005b d4): a tour line on a stop-sale date of its plan's calendar is quoted on request (no
+    sale from an allotment); a sold-out line stays sold out."""
+    if availability == departures.AVAILABLE and _line_plan(component_id) is not None and day is not None:
+        return departures.ON_REQUEST if day.stop_sale else availability
+    return availability
 
 
 def group_availability(availability: str, component_id: str, adult: int, child: int, min_pax: int) -> str:
@@ -366,15 +377,21 @@ def price_line(
     pax: tuple[int, int, int] | None = None,
     start: date | None = None,
     adjustment: price_adjustments.Adjustment | None = None,
+    season: seasons.SeasonDay | None = None,
 ) -> LinePrice:
     """The ``b2b_price`` of one line: its nets to USD, the rule's price (``net / (1 - margin - card fee)``) in the quote
     currency, less the partner's discount for the line's plan, rounded up (:func:`round_line`). A trip plan line with
     ``pax`` (adults, children, infants) takes the rule's child and infant prices (:func:`pax_sell_usd`). AA-1073
     (bk-17): a trip plan line on a departure starting ``start`` takes the early-booking discount (margin points) when
     the quote is early enough, then the departure's ``adjustment`` after the agency discount; ``note`` says what
-    applied. Raises ``engine.PricingError`` (a missing FX rate, a bad rule)."""
+    applied. AA-1091 (bk-053): a trip plan line whose service date is a peak or festive date of its plan's calendar
+    (``season``) takes the rule's peak uplift (``note.season``). Raises ``engine.PricingError`` (a missing FX rate,
+    a bad rule)."""
     note: dict[str, Any] = {}
     margin = basis.margin
+    if plan_id and season is not None and season.peak:
+        margin = basis.rule.rule.margin(peak=True)
+        note["season"] = {"code": season.code}
     if plan_id and early_applies(basis, start):
         pts = basis.rule.early_discount_pts or engine.ZERO
         margin = max(margin - pts, engine.ZERO)
@@ -517,15 +534,24 @@ async def quote_in(
         on=on,
     )
     fx, rule, margin, terms = basis.fx, basis.rule, basis.margin, basis.terms
+    # AA-1091 (bk-053): the season of each tp: line's service date in its plan's calendar (one season function).
+    calendars = await seasons.for_plans(conn, {p for line in lines if (p := _line_plan(line.ask.component_id))})
 
     priced: list[dict[str, Any]] = []
     floor_total = engine.ZERO
+    festive = False
     for no, (line, lc, (availability, departure_id, _)) in enumerate(zip(lines, costs, seats, strict=True), start=1):
         ask = line.ask
         plan = _line_plan(ask.component_id)
+        season = calendars[plan].season_on(ask.service_date) if plan in calendars else None
         availability = group_availability(
-            availability, ask.component_id, ask.adult, ask.child, pricing_policy.group_on_request_min_pax
+            season_availability(availability, ask.component_id, season),
+            ask.component_id,
+            ask.adult,
+            ask.child,
+            pricing_policy.group_on_request_min_pax,
         )
+        festive = festive or (season is not None and season.festive)
         pax = (ask.adult, ask.child, ask.infant)
         on_departure = plan is not None and departure_id is not None
         try:
@@ -536,6 +562,7 @@ async def quote_in(
                 pax=pax,
                 start=ask.service_date if on_departure else None,
                 adjustment=adjust_by_dep.get(departure_id) if on_departure and departure_id else None,
+                season=season,
             )
             floor = floor_price(basis, lc, plan, pax=pax)
             floor_total += floor
@@ -582,7 +609,8 @@ async def quote_in(
     digest = price_hash(
         currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total, rounding=rounding
     )
-    valid_until = now + timedelta(days=pricing_policy.quote_validity_days)
+    validity = pricing_policy.quote_validity_festive_days if festive else pricing_policy.quote_validity_days
+    valid_until = now + timedelta(days=validity)
     policy = await cancellation.policy_for_lines(conn, priced, on)
 
     async with conn.transaction():

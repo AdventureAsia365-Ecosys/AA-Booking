@@ -50,8 +50,10 @@ import asyncpg
 
 from app import audit
 from app.catalog import liveness
+from app.catalog.destinations import CATALOG_ERRORS
 from app.jobs import queue
 from app.jobs.queue import Job
+from app.pricing import seasons_admin
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +64,8 @@ MAX_ATTEMPTS = 3
 SLOT_SECONDS = 900
 RAW_MAX = 500
 AUDIT_KEYS = 50
+# Plans given their default season calendar per run (one catalog place read each).
+CALENDAR_BATCH = 50
 
 TOUR_VIEW = liveness.View("catalog", "v_tour", ("source_system", "source_id"))
 REFERENCE_VIEW = liveness.View("catalog", "v_tour_price_reference_v1", ("source_system", "source_id", "price_raw"))
@@ -305,10 +309,31 @@ async def run(pool: asyncpg.Pool) -> dict[str, Any]:
                 entity_label="catalog sync",
                 summary=f"Trip plans from the CIS catalog: {len(created)} created, {len(adopted)} adopted",
             )
-    result = {"outcome": "ok", "tours": len(keys), "created": len(created), "adopted": len(adopted), **refs}
+    calendars = await _calendars(pool)
+    result = {
+        "outcome": "ok",
+        "tours": len(keys),
+        "created": len(created),
+        "adopted": len(adopted),
+        **refs,
+        "calendars": calendars,
+    }
     if created or adopted:
         log.info("bk_trip_plan_sync: %s", result)
     return result
+
+
+async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
+    """AA-1091 (bk-053): plans without a season calendar get the one of their first day's destination
+    (:func:`app.pricing.seasons_admin.assign_default_calendars`), a batch per run. Fail soft: a catalog without the
+    place view or its destination column leaves the plans in the default low season and says so in the result."""
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            salt = schedule_key(datetime.now(UTC))
+            return await seasons_admin.assign_default_calendars(conn, CALENDAR_BATCH, salt)
+    except (*CATALOG_ERRORS, asyncpg.UndefinedColumnError) as exc:
+        log.warning("bk_trip_plan_sync calendars skipped: %s", type(exc).__name__)
+        return {"skipped": type(exc).__name__}
 
 
 async def handle(pool: asyncpg.Pool, job: Job) -> dict[str, Any]:

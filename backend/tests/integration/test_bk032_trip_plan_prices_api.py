@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import date
+from typing import Any
 
 import asyncpg
 import httpx
@@ -18,6 +19,7 @@ from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from tests.integration.conftest import MIGRATIONS
+from tests.integration.price_versions_helper import purge_price_versions
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import LocalCis
 
@@ -41,6 +43,10 @@ async def _clean(conn: asyncpg.Connection) -> None:
             " (SELECT id FROM booking.trip_plans WHERE source_id = ANY($1))",
             [PLAN, OTHER],
         )
+        await purge_price_versions(
+            conn, [r["id"] for r in await conn.fetch("SELECT id FROM booking.trip_plans WHERE source_id = ANY($1)",
+                                                     [PLAN, OTHER])]
+        )  # fmt: skip
         await conn.execute("DELETE FROM booking.trip_plans WHERE source_id = ANY($1)", [PLAN, OTHER])
         await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type = 'trip_plan'")
         await conn.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-996p %'")
@@ -129,6 +135,49 @@ async def client(
 
 def _auth(cis: LocalCis, sub: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {cis.token(sub=sub, cis_role='reviewer')}"}
+
+
+async def _publish(
+    c: httpx.AsyncClient, cis: LocalCis, body: dict[str, Any], maker: str = MAKER, checker: str = CHECKER
+) -> httpx.Response:
+    """AA-1091 (bk-052): hand prices go live as a price version (draft, rows, submit by the maker, approve by a second
+    person); returns the first refusal, else the plan's matrix (GET …/prices) after the approval."""
+    m, k = _auth(cis, maker), _auth(cis, checker)
+    # One travel window for every version of these tests (the whole of next year): a newer version supersedes the
+    # older ones entirely, as the old PUT replaced the set.
+    first, last = f"{NEXT_YEAR}-01-01", f"{NEXT_YEAR}-12-31"
+    made = await c.post(
+        f"/catalog/trip-plans/{PLAN}/price-versions",
+        json={"copy_from": "none", "travel_from": first, "travel_to": last},
+        headers=m,
+    )
+    if made.status_code != 201:
+        return made
+    vid = made.json()["id"]
+    saved = await c.put(
+        f"/catalog/price-versions/{vid}", json={"travel_from": first, "travel_to": last, **body}, headers=m
+    )
+    if saved.status_code != 200:
+        return saved
+    sent = await c.post(f"/catalog/price-versions/{vid}/submit", json={"reason": "Test prices"}, headers=m)
+    if sent.status_code != 200:
+        return sent
+    ok = await c.post(
+        f"/catalog/price-versions/{vid}/approve", json={"diff_sha256": sent.json()["diff_sha256"]}, headers=k
+    )
+    if ok.status_code != 200:
+        return ok
+    return await c.get(f"/catalog/trip-plans/{PLAN}/prices", headers=m)
+
+
+async def _withdraw_all(c: httpx.AsyncClient, cis: LocalCis) -> None:
+    listed = (await c.get(f"/catalog/trip-plans/{PLAN}/price-versions", headers=_auth(cis, MAKER))).json()
+    for v in listed["items"]:
+        if v["status"] in ("published", "superseded"):
+            out = await c.post(
+                f"/catalog/price-versions/{v['id']}/withdraw", json={"reason": "Clear"}, headers=_auth(cis, CHECKER)
+            )
+            assert out.status_code in (200, 409), out.text
 
 
 async def _supplier(conn: asyncpg.Connection, suffix: str, status: str = "active") -> str:
@@ -230,7 +279,7 @@ async def test_price_matrix_by_hand_and_from_price(
         )
     finally:
         await admin.execute("RESET ROLE")
-    no_plan = await c.put(url, json={"items": [_row()]}, headers=contracting)
+    no_plan = await _publish(c, cis, {"items": [_row()]})
     assert no_plan.status_code == 404 and no_plan.json()["detail"] == "trip_plan_not_found"
     assert (
         await c.put(f"/catalog/trip-plans/{PLAN}/commercial", json=COMMERCIAL, headers=contracting)
@@ -243,7 +292,7 @@ async def test_price_matrix_by_hand_and_from_price(
         _row(currency="EUR", amount="1300"),
         _row(channel="b2b", amount="1100", pax_min=1, pax_max=None),
     ]
-    put = await c.put(url, json={"items": rows}, headers=contracting)
+    put = await _publish(c, cis, {"items": rows})
     assert put.status_code == 200, put.text
     out = put.json()
     assert [r["position"] for r in out["items"]] == [1, 2, 3, 4, 5]
@@ -253,25 +302,36 @@ async def test_price_matrix_by_hand_and_from_price(
     assert out["items"][4]["rrp_amount"] == "1375.00" and out["items"][0]["rrp_amount"] is None
     assert out["from_price"] == {"amount": "1375.00", "currency": "USD", "basis": "per_person", "season": "Low"}
     assert (await c.get(url, headers=sales)).json() == out
+    # The rows point at the version that priced them; PUT …/prices is retired (a price is never overwritten).
+    assert len({r["version_id"] for r in out["items"]}) == 1 and out["items"][0]["version_id"]
+    assert (await c.put(url, json={"items": rows}, headers=contracting)).status_code == 409
 
-    # The same set again writes nothing.
-    assert (await c.put(url, json={"items": rows}, headers=contracting)).status_code == 200
-    audits = await admin.fetchval("SELECT count(*) FROM booking.audit_logs WHERE action = 'trip_plan.prices_replaced'")
-    assert audits == 1
+    # The same set again (a second version): the same prices, now pointing at the newer version; the older one is
+    # superseded (never deleted).
+    again = await _publish(c, cis, {"items": rows})
+    assert again.status_code == 200
+    strip = [{k: v for k, v in r.items() if k != "version_id"} for r in again.json()["items"]]
+    assert strip == [{k: v for k, v in r.items() if k != "version_id"} for r in out["items"]]
+    states = (await c.get(f"/catalog/trip-plans/{PLAN}/price-versions", headers=sales)).json()["items"]
+    assert [(v["version_no"], v["status"]) for v in states] == [(2, "published"), (1, "superseded")]
 
-    # Content creators never read prices; sales cannot write them.
+    # Content creators never read prices; sales cannot write them; the maker never approves their own version.
     assert (await c.get(url, headers=content)).status_code == 403
-    assert (await c.put(url, json={"items": rows}, headers=sales)).status_code == 403
+    assert (await _publish(c, cis, {"items": rows}, maker=SALES)).status_code == 403
+    own = await _publish(c, cis, {"items": rows}, checker=MAKER)
+    assert own.status_code == 403 and own.json()["detail"] == "maker_checker"
 
     # Overlap in one channel and currency is refused, with both rows named.
-    overlap = await c.put(url, json={"items": [_row(), _row(pax_min=1, pax_max=2, amount="1500")]}, headers=contracting)
+    overlap = await _publish(c, cis, {"items": [_row(), _row(pax_min=1, pax_max=2, amount="1500")]})
     assert overlap.status_code == 422 and overlap.json()["detail"] == "overlapping_prices"
     assert overlap.json()["rows"] == [1, 2]
-    bad = await c.put(url, json={"items": [_row(valid_to=f"{NEXT_YEAR - 1}-01-01")]}, headers=contracting)
+    bad = await _publish(c, cis, {"items": [_row(valid_from=f"{NEXT_YEAR}-02-01", valid_to=f"{NEXT_YEAR}-01-01")]})
     assert bad.status_code == 422 and bad.json()["detail"] == "invalid_validity"
-    missing = await c.put(url, json={"items": [_row(amount=None)]}, headers=contracting)
+    outside = await _publish(c, cis, {"items": [_row(valid_to=f"{NEXT_YEAR + 1}-01-05")]})
+    assert outside.status_code == 422 and outside.json()["detail"] == "row_outside_window"
+    missing = await _publish(c, cis, {"items": [_row(amount=None)]})
     assert missing.status_code == 422 and missing.json()["detail"] == "price_missing"
-    vnd = await c.put(url, json={"items": [_row(currency="VND")]}, headers=contracting)
+    vnd = await _publish(c, cis, {"items": [_row(currency="VND")]})
     assert vnd.status_code == 422 and vnd.json()["detail"] == "invalid_currency"
 
     # The list shows the from price; a content creator sees none.
@@ -281,11 +341,10 @@ async def test_price_matrix_by_hand_and_from_price(
         "from_price"
     ] is None
 
-    # An expired 2-pax row no longer counts; emptying the matrix is allowed.
-    past = [_row(valid_from="2020-01-01", valid_to="2020-12-31")]
-    assert (await c.put(url, json={"items": past}, headers=contracting)).json()["from_price"] is None
-    cleared = await c.put(url, json={"items": []}, headers=contracting)
-    assert cleared.status_code == 200 and cleared.json()["items"] == []
+    # Withdrawing the published versions (a second person) empties the matrix: no from price any more.
+    await _withdraw_all(c, cis)
+    cleared = await c.get(url, headers=contracting)
+    assert cleared.json()["items"] == [] and cleared.json()["from_price"] is None
 
 
 async def test_rows_priced_from_net_cost(client: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection) -> None:
@@ -300,50 +359,49 @@ async def test_rows_priced_from_net_cost(client: tuple[httpx.AsyncClient, LocalC
     net = {"amount": None, "net_amount": "670", "net_currency": "USD"}
     vnd = {"amount": None, "net_amount": "25000000", "net_currency": "VND", "pax_min": 3, "pax_max": 4}
     peak = {**net, "peak": True, "season": "Tet", "valid_from": f"{NEXT_YEAR}-05-01", "valid_to": f"{NEXT_YEAR}-05-10"}
-    put = await c.put(url, json={"items": [_row(**net), _row(**vnd), _row(**peak)]}, headers=contracting)
+    put = await _publish(c, cis, {"items": [_row(**net), _row(**vnd), _row(**peak)]})
     assert put.status_code == 200, put.text
     first, second, third = put.json()["items"]
     assert first["amount"] == "1000.00" and first["priced"] is True  # 670 / 0.67
     assert first["effective_margin"] == "0.3000" and first["priced_on"] == date.today().isoformat()
     assert first["net_amount"] == "670.00" and first["net_currency"] == "USD"
     assert second["amount"] == "1495.00"  # 25,000,000 VND = 1,000 USD; / 0.67 = 1492.54 -> 1495
-    assert third["amount"] == "1050.00" and third["peak"] is True  # peak: 670 / 0.64 = 1046.88 -> 1050
+    # AA-1091 (bk-053): "peak" no longer comes from the form; the plan has no season calendar, so low season.
+    assert third["amount"] == "1000.00" and third["peak"] is False and third["season_code"] == "low"
 
     # A sales override above the floor is kept as the price; below the floor it needs a reason.
-    above = await c.put(url, json={"items": [_row(**{**net, "amount": "950"})]}, headers=contracting)
+    above = await _publish(c, cis, {"items": [_row(**{**net, "amount": "950"})]})
     assert above.status_code == 200 and above.json()["items"][0]["amount"] == "950.00"
     assert above.json()["items"][0]["effective_margin"] == "0.2647"  # 1 - 0.03 - 670 / 950
     assert above.json()["items"][0]["overridden"] is True and first["overridden"] is False
     low = {**net, "amount": "800"}  # 1 - 0.03 - 670 / 800 = 0.1325 < 0.20
-    refused = await c.put(url, json={"items": [_row(**low)]}, headers=contracting)
+    refused = await _publish(c, cis, {"items": [_row(**low)]})
     assert refused.status_code == 422 and refused.json()["detail"] == "override_reason_required"
     assert refused.json()["rows"] == [1]
-    ok = await c.put(url, json={"items": [_row(**low)], "below_floor_reason": "Launch offer"}, headers=contracting)
+    ok = await _publish(c, cis, {"items": [_row(**low)], "below_floor_reason": "Launch offer"})
     assert ok.status_code == 200 and ok.json()["items"][0]["amount"] == "800.00"
     audit = await admin.fetchrow(
-        "SELECT summary, after->>'below_floor_reason' AS reason FROM booking.audit_logs"
-        " WHERE action = 'trip_plan.prices_replaced' ORDER BY created_at DESC, id DESC LIMIT 1"
+        "SELECT after->>'below_floor_reason' AS reason FROM booking.audit_logs"
+        " WHERE action = 'price_version.saved' ORDER BY created_at DESC, id DESC LIMIT 1"
     )
-    assert audit["reason"] == "Launch offer" and "below floor" in audit["summary"]
+    assert audit["reason"] == "Launch offer"
 
     # No approved rate for the cost currency: a clear 422, nothing saved.
-    thb = await c.put(
-        url, json={"items": [_row(amount=None, net_amount="1000", net_currency="THB")]}, headers=contracting
-    )
+    thb = await _publish(c, cis, {"items": [_row(amount=None, net_amount="1000", net_currency="THB")]})
     assert thb.status_code == 422 and thb.json()["detail"] == "fx_rate_missing"
     assert (await c.get(url, headers=contracting)).json()["items"][0]["amount"] == "800.00"
-    half = await c.put(url, json={"items": [_row(amount=None, net_amount="10")]}, headers=contracting)
+    half = await _publish(c, cis, {"items": [_row(amount=None, net_amount="10")]})
     assert half.status_code == 422 and half.json()["detail"] == "invalid_net_cost"
 
     # Rows the table cannot hold are a clear 422, never a 500: a net cost pricing to 0, a typo override.
     zero_cost = {"items": [_row(amount=None, net_amount="0", net_currency="USD")]}
-    zero = await c.put(url, json=zero_cost, headers=contracting)
+    zero = await _publish(c, cis, zero_cost)
     assert zero.status_code == 422 and zero.json()["detail"] == "price_missing"
     typo = {"items": [_row(amount="15", net_amount="2000", net_currency="USD")], "below_floor_reason": "Typo"}
-    typo_put = await c.put(url, json=typo, headers=contracting)
+    typo_put = await _publish(c, cis, typo)
     assert typo_put.status_code == 422 and typo_put.json()["detail"] == "override_too_low"
     deep = {"items": [_row(amount="1100", net_amount="2000", net_currency="USD")], "below_floor_reason": "Write-off"}
-    deep_put = await c.put(url, json=deep, headers=contracting)
+    deep_put = await _publish(c, cis, deep)
     assert deep_put.status_code == 200 and deep_put.json()["items"][0]["effective_margin"] == "-0.8482"
 
 

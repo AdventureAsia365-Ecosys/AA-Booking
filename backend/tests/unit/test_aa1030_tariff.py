@@ -16,7 +16,7 @@ from app.b2b import agency_pricing, quotes, tariff
 from app.b2b.components import MAX_RATE_LOOKUPS, PLAN_COMPONENTS_SQL, LineAsk, LineCost
 from app.b2b.errors import B2BError
 from app.catalog import cost_sheet, liveness
-from app.pricing import engine, repository
+from app.pricing import engine, repository, seasons
 
 ON = date(2026, 11, 5)
 PLAN_A = "11111111-1111-4111-8111-111111111111"
@@ -83,6 +83,8 @@ class Conn:
             return [p for p in self.parts if p["trip_plan_id"] in args[0]]
         if sql == cost_sheet.SPANS_SQL:
             return self.spans
+        if sql == seasons.PLAN_CALENDARS_SQL:  # AA-1091 (bk-053): no plan has a season calendar here (low season)
+            return [{"plan_id": p, "calendar_id": None} for p in args[0]]
         assert sql == tariff.ROWS_SQL
         self.asked.append(args)
         return self.rows[: args[2]]
