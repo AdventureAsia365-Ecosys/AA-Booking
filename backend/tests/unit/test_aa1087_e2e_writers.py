@@ -17,6 +17,7 @@ from typing import Any
 
 import asyncpg
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.auth import e2e_staff, identity_config
@@ -35,6 +36,7 @@ WRITES = {
     STAFF: [
         ("POST", f"/booking/supplier-bookings/{RECORD}/request", None),
         ("POST", f"/booking/supplier-bookings/{RECORD}/confirm", {"confirmation_ref": "RIDGE-77"}),
+        ("PATCH", f"/booking/catalog/departures/{RECORD}", {"status": "cancelled"}),
     ],
     MAKER: [
         (
@@ -85,12 +87,25 @@ def _staff_sql(conn: ScriptedConn) -> list[str]:
 def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None:
     # Guard: a new address or write is a reviewed change of this test (root ADR 0006a A10e).
     assert {email: (w.groups, w.writes) for email, w in e2e_staff.E2E_WRITERS.items()} == {
-        STAFF: (frozenset({"booking-sales"}), frozenset({e2e_staff.SUPPLIER_REQUEST, e2e_staff.SUPPLIER_CONFIRM})),
+        STAFF: (
+            frozenset({"booking-sales"}),
+            frozenset({e2e_staff.SUPPLIER_REQUEST, e2e_staff.SUPPLIER_CONFIRM, e2e_staff.DEPARTURE_CANCEL}),
+        ),
         MAKER: (frozenset({"booking-finance"}), frozenset({e2e_staff.PAYMENT_RECORD})),
         CHECKER: (frozenset({"booking-finance"}), frozenset({e2e_staff.PAYMENT_APPROVE, e2e_staff.PAYMENT_REJECT})),
     }
     # The maker and the checker never share a write (maker-checker by identity).
     assert not (e2e_staff.E2E_WRITERS[MAKER].writes & e2e_staff.E2E_WRITERS[CHECKER].writes)
+    # A10e-1: the only extra permission any identity ever holds, on exactly one write with a fixed body.
+    assert {email: dict(w.grants) for email, w in e2e_staff.E2E_WRITERS.items()} == {
+        STAFF: {e2e_staff.DEPARTURE_CANCEL: frozenset({"trip_plan.write"})},
+        MAKER: {},
+        CHECKER: {},
+    }
+    assert dict(e2e_staff.BODY_RULES) == {e2e_staff.DEPARTURE_CANCEL: {"status": "cancelled"}}
+    for writer in e2e_staff.E2E_WRITERS.values():
+        assert set(writer.grants) <= writer.writes
+        assert set(writer.grants) <= set(e2e_staff.BODY_RULES)
 
 
 def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
@@ -323,7 +338,102 @@ def test_the_writer_smoke_is_agent_only() -> None:
         assert "BOOKING_E2E_WRITERS" not in wf.read_text(encoding="utf-8"), wf.name
     spec = (root / "frontend" / "e2e" / "e2e-writers" / "writes.spec.ts").read_text(encoding="utf-8")
     assert 'process.env.BOOKING_E2E_WRITERS === "1"' in spec
-    assert spec.count("test.skip(!ON") == 3
+    assert spec.count("test.skip(!ON") == 5
     for email in (STAFF, MAKER, CHECKER):
         assert f'"{email}"' in spec
     assert 'MAILBOX_ADMIN_PREFIX = "inbound-admin/"' in spec
+
+
+# ── A10e-1 (S278 l18): departure cancel on a synthetic departure ─────────────────────────────────
+
+
+DEPARTURE = f"/booking/catalog/departures/{RECORD}"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        {},
+        {"status": "guaranteed"},
+        {"status": "cancelled", "capacity": 0},
+        {"capacity": 4},
+        {"status": "Cancelled"},
+        ["status", "cancelled"],
+    ],
+)
+def test_a_departure_patch_other_than_the_cancel_is_refused_before_any_db_access(body: Any) -> None:
+    cis, conn = LocalCis(), ScriptedConn()
+    with _client(cis, conn) as c:
+        r = c.request("PATCH", DEPARTURE, json=body, headers=auth(_token(cis, STAFF)))
+    assert (r.status_code, r.json()["detail"]) == (403, "e2e_read_only")
+    assert conn.calls == []
+
+
+def test_a_departure_cancel_that_is_not_json_is_refused() -> None:
+    """FastAPI refuses a body that is not JSON (422) before any dependency; nothing is read or written either way."""
+    cis, conn = LocalCis(), ScriptedConn()
+    with _client(cis, conn) as c:
+        r = c.request(
+            "PATCH",
+            DEPARTURE,
+            content=b"status=cancelled",
+            headers={**auth(_token(cis, STAFF)), "content-type": "application/json"},
+        )
+    assert r.status_code in (403, 422)
+    assert conn.calls == []
+
+
+@pytest.mark.parametrize("synthetic", [False, None])
+def test_a_departure_cancel_on_a_real_departure_is_refused(synthetic: Any) -> None:
+    """A departure with no agency hold, or one a real agency held seats on, answers false (or no row): refused before
+    the staff row sync and before the route reads or changes the departure."""
+    cis = LocalCis()
+    conn = ScriptedConn().on(SYNTHETIC_FRAGMENT, synthetic).on(IDENTITY_SELECT, _row(STAFF))
+    with _client(cis, conn) as c:
+        r = c.request("PATCH", DEPARTURE, json={"status": "cancelled"}, headers=auth(_token(cis, STAFF)))
+    assert (r.status_code, r.json()["detail"]) == (403, "e2e_synthetic_only")
+    assert conn.sql("booking.b2b_hold_lines") == [(RECORD,)]
+    assert not any("booking.departures" in sql for sql, _ in conn.calls)
+
+
+def test_the_cancel_grant_reaches_only_that_request() -> None:
+    """On a synthetic departure the cancel passes the route's trip_plan.write check (the route then looks up the
+    departure); the same identity's other writes and reads never hold it."""
+    cis = LocalCis()
+    conn = ScriptedConn().on(SYNTHETIC_FRAGMENT, True).on(IDENTITY_SELECT, _row(STAFF))
+    with _client(cis, conn) as c:
+        r = c.request("PATCH", DEPARTURE, json={"status": "cancelled"}, headers=auth(_token(cis, STAFF)))
+        me = c.get("/booking/staff/me", headers=auth(_token(cis, STAFF)))
+    assert r.status_code == 404, r.text  # departure_not_found from the route: past the permission check
+    assert any("booking.departures" in sql for sql, _ in conn.calls)
+    assert "trip_plan.write" not in me.json()["permissions"]
+
+
+def test_a_real_sales_member_still_cannot_patch_a_departure() -> None:
+    cis = LocalCis()
+    conn = ScriptedConn().on(IDENTITY_SELECT, {**cognito_row("sales"), "cis_role": None})
+    with _client(cis, conn) as c:
+        token = cis.workforce.token(["booking-sales"], client_id=BOOKING_STAFF_CLIENT)
+        r = c.request("PATCH", DEPARTURE, json={"status": "cancelled"}, headers=auth(token))
+    assert (r.status_code, r.json()["detail"]) == (403, "forbidden")
+    assert conn.sql(SYNTHETIC_FRAGMENT) == []
+
+
+@pytest.mark.parametrize(("body", "ok"), [({"status": "cancelled"}, True), ({"status": "cancelled", "x": 1}, False)])
+def test_check_body_rule(body: Any, ok: bool) -> None:
+    writer = e2e_staff.E2E_WRITERS[STAFF]
+    if ok:
+        e2e_staff.check_body(writer, "PATCH", e2e_staff.DEPARTURE_CANCEL[1], body)
+    else:
+        with pytest.raises(HTTPException):
+            e2e_staff.check_body(writer, "PATCH", e2e_staff.DEPARTURE_CANCEL[1], body)
+    e2e_staff.check_body(writer, "POST", e2e_staff.SUPPLIER_CONFIRM[1], {"anything": 1})  # no rule: no check
+
+
+def test_grants_for_is_exact() -> None:
+    writer = e2e_staff.E2E_WRITERS[STAFF]
+    assert writer.grants_for("patch", e2e_staff.DEPARTURE_CANCEL[1]) == frozenset({"trip_plan.write"})
+    assert writer.grants_for("POST", e2e_staff.DEPARTURE_CANCEL[1]) == frozenset()
+    assert writer.grants_for("PATCH", None) == frozenset()
+    assert e2e_staff.E2E_WRITERS[MAKER].grants_for("PATCH", e2e_staff.DEPARTURE_CANCEL[1]) == frozenset()
