@@ -1,7 +1,7 @@
-"""AA-1092 (bk-058) on a real PostgreSQL: the tenant policy of booking.b2b_partners also covers bk_owner.
+"""AA-1092 (bk-053) on a real PostgreSQL: the tenant policy of booking.b2b_partners also covers bk_owner.
 
 Registration and re-run no-op; b2b_partners_tenant is SELECT TO booking, bk_owner; under a bound tenant the bk_owner
-view booking.v_tenant_billing_status (bk-042) answers the bound tenant's row (before bk-058 it answered none, which
+view booking.v_tenant_billing_status (bk-042) answers the bound tenant's row (before bk-053 it answered none, which
 would have turned the B2B credit stop off) and never another tenant's; with no tenant bound the view still answers
 every agency; the owner still writes nothing while a tenant is bound.
 All names are invented.
@@ -19,7 +19,7 @@ import pytest_asyncio
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "058_b2b_partners_tenant_read_owner.sql"
+MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "053_b2b_partners_tenant_read_owner.sql"
 POLICIES_SQL = (
     "SELECT polname, polcmd::text AS polcmd, polroles::regrole[]::text[] AS roles FROM pg_policy"
     " WHERE polrelid = 'booking.b2b_partners'::regclass ORDER BY polname"
@@ -48,7 +48,7 @@ async def app(migrated_booking_dsn: str) -> AsyncIterator[asyncpg.Connection]:
 @pytest_asyncio.fixture
 async def two_partners(admin: asyncpg.Connection) -> AsyncIterator[tuple[uuid.UUID, uuid.UUID]]:
     a, b = uuid.uuid4(), uuid.uuid4()
-    for tid, name, client in ((a, "Quillmere Voyages", "bk058clienta"), (b, "Saltreed Expeditions", "bk058clientb")):
+    for tid, name, client in ((a, "Quillmere Voyages", "bk053clienta"), (b, "Saltreed Expeditions", "bk053clientb")):
         await admin.execute(
             "INSERT INTO booking.b2b_partners (tenant_id, agency_name, status, billing_currency, m2m_client_id)"
             " VALUES ($1, $2, 'active', 'USD', $3)",
@@ -69,7 +69,7 @@ async def _bound(conn: asyncpg.Connection, tenant: uuid.UUID) -> None:
 
 
 async def test_registered_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> None:
-    assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-058'") == 1
+    assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-053'") == 1
     before = [dict(r) for r in await admin.fetch(POLICIES_SQL)]
     await admin.execute("SET ROLE bk_owner")
     await admin.execute(MIGRATION.read_text(encoding="utf-8"))

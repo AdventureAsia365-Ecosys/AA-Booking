@@ -610,7 +610,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `unauthorized`; a validly signed token of another client, a missing scope or a client that is not the partner's
   `m2m_client_id` 403 `forbidden`; no active `b2b_partners` row for `X-AA-Tenant-Id` 403 `unknown_partner`; not
   configured, JWKS never loaded or pricing data missing 503 `unavailable`; bad input 422 `invalid`.
-- **Tenant binding (AA-1092, bk-049 + bk-058)**: every connection a B2B request takes comes from
+- **Tenant binding (AA-1092, bk-049 + bk-053)**: every connection a B2B request takes comes from
   `app.b2b.access.TenantBoundPool`, which sets `app.tenant_id` (session level, while the connection is held; cleared
   before it returns to the pool, the connection terminated if that fails) to the agency's tenant: the partner lookup
   binds `X-AA-Tenant-Id`, the handlers the tenant of the partner the token was proven to act for. Under the
@@ -1927,10 +1927,10 @@ FORCE row level security and two permissive policies reading `app.tenant_id` (th
 of `app/b2b/access.py`, none of which binds one, so nothing changes for them) and `b2b_partners_tenant` (SELECT TO
 `booking`: a transaction that runs `set_config('app.tenant_id', <uuid>, true)` reads that tenant's row only and writes
 none). It closes the RLS catalogue guard's rule a finding on the table. Partner isolation on the B2B API stays enforced
-in code (the M2M client bound to the partner, `partner_id` on every query); since the AA-1092 residual (bk-058 + the
+in code (the M2M client bound to the partner, `partner_id` on every query); since the AA-1092 residual (bk-053 + the
 code PR) every B2B API request also binds the caller's tenant ("Tenant binding" under the B2B API).
 
-### `bk-058` (AA-1092 residual: the tenant policy of `b2b_partners` also covers `bk_owner` — needs `bk-049`)
+### `bk-053` (AA-1092 residual: the tenant policy of `b2b_partners` also covers `bk_owner` — needs `bk-049`)
 
 A **contract** file (migration-only PR; the AA-Booking code PR that binds the caller's tenant in every B2B API request
 raises readiness to it, MIG-4). `b2b_partners_tenant` becomes SELECT TO `booking`, `bk_owner`. A view is read with its

@@ -21,8 +21,8 @@ import pytest_asyncio
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "049_b2b_partners_rls.sql"
-# bk-058 (AA-1092) widens b2b_partners_tenant to bk_owner after it; a replay of bk-049 is a replay of the chain.
-AMENDED_BY = Path(__file__).resolve().parents[3] / "migrations" / "058_b2b_partners_tenant_read_owner.sql"
+# bk-053 (AA-1092) widens b2b_partners_tenant to bk_owner after it; a replay of bk-049 is a replay of the chain.
+AMENDED_BY = Path(__file__).resolve().parents[3] / "migrations" / "053_b2b_partners_tenant_read_owner.sql"
 
 
 @pytest_asyncio.fixture
@@ -104,7 +104,7 @@ async def test_rls_is_enabled_and_forced_with_the_two_policies(admin: asyncpg.Co
         "ALL",
         ["bk_owner", "booking"],
     )
-    # bk-058: bk_owner too, so a view it owns (v_tenant_billing_status) reads the bound tenant's row.
+    # bk-053: bk_owner too, so a view it owns (v_tenant_billing_status) reads the bound tenant's row.
     assert (tenant["permissive"], tenant["cmd"], sorted(tenant["roles"])) == (
         "PERMISSIVE",
         "SELECT",
