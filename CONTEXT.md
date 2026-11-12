@@ -284,6 +284,15 @@ backend/
   app/catalog/cost_sheet.py  AA-1029: bk_price_recompute (components x rates in force -> computed matrix rows per
                            window x pax band, priced by the rules in force, hand rows kept) + RecomputeSchedule
   app/catalog/price_history.py  AA-1029 (bk-039): dated price history (close open rows, insert the new set; as_of)
+  app/catalog/price_versions.py  AA-1091 (bk-052): price list versions (draft / submit with frozen diff + impact /
+                           approve / reject / withdraw + preview, maker-checker; workbook import drafts)
+  app/catalog/version_matrix.py  AA-1091: the overlap rule (winning dates, superseded, uncovered) and the hand rows of the
+                           effective matrix cut by version and season
+  app/pricing/seasons.py   AA-1091 (bk-053): the one season function (calendar ranges, festive from holiday events,
+                           stop-sale overlay); seasons_admin.py: calendars, ranges, holiday events (maker-checker), the
+                           default calendar of a plan
+  app/routers/price_versions.py  /booking/catalog/trip-plans/{source_id}/price-versions, /booking/catalog/price-versions*,
+                           …/season-calendar; /booking/pricing/season-calendars*, /season-ranges/*, /holiday-events*
   app/catalog/price_readiness.py  AA-1029: catalog-wide price readiness (one status per plan: priced, hand_priced, or the
                            cost sheet's reason: missing_rates / missing_fx / no_rule / no_components /
                            inactive_component; components without a published rate in the next 365 days by code, never
@@ -555,6 +564,13 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   versions and tariffs only. The B2B quote reads `quote_validity_days` (`valid_until`) and `group_on_request_min_pax`
   (a `tp:` line of that many travellers or more is `on_request`, and its hold stays on request); the other
   parameters are stored for the price-version, season-calendar and tariff slices.
+  **Price list versions and seasons (AA-1091, bk-052 / bk-053, root ADR 0005b d6)**: hand prices are versions, never an
+  overwrite (`PUT …/prices` answers 409 `price_versions`). Read with `pricing.read`; draft, save, submit and withdraw
+  one's own draft or pending version `price_version.write` = admin, contracting (the customer-service maker);
+  approve, reject, or withdraw a published version `price_version.approve` = admin, contracting (the product / pricing
+  lead), never the version's maker (403 `maker_checker` + table CHECKs). Season calendars, ranges and holiday events:
+  propose `season.write`, approve / reject / approve a removal `season.approve` (both admin, contracting), never one's
+  own change; the calendar of a trip plan is set with `trip_plan.write`.
   Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
   contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
   needs `b2b_desk.write`; net amounts in the responses need `pricing.read`. Trip checks and the lifecycle runs (AA-682
@@ -898,11 +914,12 @@ forms' services.
   a hand row overlaps them, and the dry run counts those it replaces: `computed_rows_replaced`, `net_rows_replaced`),
   `Departures` (new dates only; an existing date is skipped). Every problem by sheet, row and column, nothing written
   while one is left; the dry run lists per tour what changes and its readiness status after. The import writes through
-  `plan_components.replace_components`, `trip_plan_prices.store` (audit `trip_plan.prices_imported`),
+  `plan_components.replace_components`, a draft price version per tour (since AA-1091, below),
   `departures.create_departure` and `price_workbench.set_sellable`, adds one `trip_plan.bulk_imported` audit row and
   recomputes the cost sheet of up to 50 touched plans in the same transaction. Idempotent: the same file again writes
-  nothing. Maker-checker: the single forms it replaces have none (supplier contracts and pricing rules do, and stay
-  in the rate sheet import and the rules page). The staff BFF allows the 2 MB upload on `catalog/price-import`.
+  nothing. Maker-checker: since AA-1091 (bk-052) the Prices sheet becomes a **draft price version** per tour
+  (`price_versions.import_draft`, audit `price_version.imported`), never live prices; components, departures and the
+  sellable switch have no maker-checker on their single forms either (supplier contracts and pricing rules do). The staff BFF allows the 2 MB upload on `catalog/price-import`.
   Formula-safe export: a prefilled text cell (CIS title or country, room type name, season) that starts like a formula
   (`tariff.FORMULA_START`) is written as a text cell with Excel's quote prefix, the value unchanged (the round trip
   still matches room types and seasons).
@@ -912,6 +929,61 @@ forms' services.
   Vietnamese on the page's own switch (cookie `bk_lang`, `ui/local/lang.ts`; its text in
   `app/(staff)/pricing/workbench/_parts/messages.ts`); other pages stay English until they get their messages, so no
   page mixes the two.
+
+**Price list versions (AA-1091, bk-052, root ADR 0005b d1 / d2 / d9 / d10)** — `app/catalog/price_versions.py`
+(service), `app/catalog/version_matrix.py` (the overlap rule, pure), `app/routers/price_versions.py`.
+
+- A version = the hand prices of one plan for one travel window `[travel_from, travel_to)` (inclusive last day in the
+  API), with a label, a tariff year (from the policy `tariff_year_start`), an optional sale window, its rows (the
+  `trip_plan_prices` row shape, half-open dates inside the window), the maker's reason (<= 300) and its source
+  (`staff`, `import` with the file's SHA-256; `cost_sheet` and `provisional` are for steps 5 and 8). States: `draft`
+  (maker edits: `POST …/trip-plans/{source_id}/price-versions` copies the prices in force, `PUT
+  /booking/catalog/price-versions/{id}` saves window + rows, priced like the old matrix form with the calendar's peak
+  on a row's first day) → `pending` (`…/submit`: the **diff** per row against the matrix in force, highlighted above
+  the policy `diff_highlight_pct`, below-floor flagged, rows that stop; the **impact**: open quotes with a `tp:` line
+  in the window, departures in the window, b2b rows changed; both frozen with `diff_sha256`; at most one pending per
+  plan and overlapping window, 409 `pending_exists`) → `published` (`…/approve` by a second person with the SHA-256
+  of the diff seen, 409 `diff_changed`) → `superseded`; `rejected` (`…/reject`, reason) and `withdrawn` (`…/withdraw`:
+  the maker for a draft or pending one, a second person for a published one, reason; `GET …/withdraw-preview` shows
+  which version prices each date after it and which dates become unquotable). A DB guard keeps facts fixed once out
+  of draft and moves states only along d2; role `booking` has no DELETE. Every step is audited (`price_version.*`).
+- **Overlap rule**: among published versions covering a date (and selling on the quote day), non-provisional wins,
+  then the latest approval, then the highest number. `superseded` = versions that beat it (without an end to their
+  sale window) cover its whole window; recomputed on every publish and withdrawal (`refresh_states`), so withdrawing
+  the newest restores an older version for the dates nothing else covers.
+- **The effective matrix** `booking.trip_plan_prices` (what the tariff, the RRP, `v_from_prices`, readiness and the
+  workbench read) is rebuilt by `cost_sheet.recompute_plan` on every publish / withdrawal and on every recompute run:
+  the hand rows of the winning versions cut to the dates they win and where the plan's calendar changes season
+  (`version_id`, `season_code`, `peak`), then the cost sheet's computed rows around them (`version_id` NULL; step 5
+  turns them into `cost_sheet` versions with the auto-publish rule). A plan with no published version keeps unversioned
+  hand rows written before the code (transition only).
+- bk-052 migrated each plan's price history into withdrawn past versions and the rows in force into its latest
+  version, published (the matrix unchanged; `test_aa1091_price_versions` proves the prices before and after).
+- The workbook import writes its Prices sheet as a **draft** version per tour (idempotent: rows equal to the prices
+  in force, or a file already imported, write nothing; rows priced from a net cost stay in the draft unless a file row
+  covers them); the maker submits it from the tour's Versions tab.
+- Staff UI: Price setup → a tour → **Versions** tab (`VersionsDrawer.tsx`; `?versions=<tour key>` opens it from the
+  trip plan's commercial drawer, which shows the matrix read-only): prices in force, the tour's season calendar,
+  versions with their state, the draft editor (the price matrix editor; the season label is for people, the calendar
+  decides peak), the diff and impact for the checker, approve / reject / withdraw dialogs.
+
+**Season calendars and holiday events (AA-1091, bk-053, root ADR 0005b d4)** — `app/pricing/seasons.py` (THE season
+function), `app/pricing/seasons_admin.py`, pages Pricing → **Seasons** and Pricing → **Holiday events**.
+
+- A calendar belongs to a destination (the sell-side seasons a plan uses: `trip_plans.season_calendar_id`, defaulted
+  by `bk_trip_plan_sync` to the calendar of its first day's destination, `catalog.v_tour_place.destination_id`, a batch
+  of 50 plans per run, the empty calendar made when missing; staff change it on the Versions tab) or to a supplier
+  contract (stored; the cost sheet reads contract seasons in a later step). Ranges: `low` / `high` / `peak` /
+  `festive` with fixed dates (never overlapping inside a calendar, 409 `range_overlaps` at proposal and approval) or a
+  festive range that names a holiday event (country + code, days before / after) and takes its dates from each
+  year's approved event row, lying over the fixed ranges on its days; stop-sale ranges are an overlay (availability
+  only). A date no range covers takes `default_season`. Every range, event, removal and default change is proposed and
+  approved by a second person; nothing is deleted. No holiday date is in code.
+- `Calendar.season_on(day)` is used by the cost sheet (windows cut where the season changes, peak = `peak` or
+  `festive`; the old "label contains peak" guess is gone), the B2B quote and the tariff (a `tp:` line's service date:
+  the rule's peak uplift, `price_note.season`; a stop-sale date makes an available line `on_request`; a festive date
+  shortens the quote to `quote_validity_festive_days`) and the price version matrix. A plan with no calendar is low
+  season everywhere (no change from before bk-053).
 
 ## Agency price tiers (AA-1030, bk-043; root ADR 0019 b15)
 
@@ -1922,6 +1994,20 @@ of `app/b2b/access.py`, none of which binds one, so nothing changes for them) an
 none). It closes the RLS catalogue guard's rule a finding on the table. Partner isolation on the B2B API stays enforced
 in code (the M2M client bound to the partner, `partner_id` on every query); binding the caller's tenant in the B2B
 handlers is a later step that this policy already supports.
+
+### `bk-052` (AA-1091 price list versions — needs `bk-032`, `bk-039`, `bk-047`, `bk-050`)
+
+A **contract** file (MIG-4 with bk-053; the code PR raises readiness to bk-052 and bk-053). New
+`price_list_versions` (guard trigger: draft-only facts, d2 state moves, approved once, erasure of a reason alone) and
+`price_list_version_rows` (written only while the version is a draft); `trip_plan_prices.version_id` /
+`season_code` and the matrix position cap 200 -> 1000; the data step migrates history and rows in force into versions
+(plans with no version only, so a replay writes nothing).
+
+### `bk-053` (AA-1091 season calendars and holiday events — needs `bk-005`, `bk-008`, `bk-009`)
+
+A **contract** file (an FK column on `trip_plans`). New `season_calendars`, `season_ranges`, `holiday_events` (column
+grants: role `booking` updates only the decision and removal columns; no DELETE), `trip_plans.season_calendar_id`.
+No row is seeded: calendars are made by the catalog sync (empty) or by staff.
 
 ## Out of scope today
 
