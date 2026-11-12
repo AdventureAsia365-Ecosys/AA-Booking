@@ -821,6 +821,64 @@ dry run (`?dry_run=true`) adds `impact`: the plans whose components use the shee
 whether every component would have a rate once the draft is published, its status after, and `would_move_to_priced`
 (the import drawer lists them under the Check result). Read only; the publish path is unchanged.
 
+**Price setup workbench (AA-1091)** — everything the customer-service team needs to make tours sellable, on one
+staff page (Pricing → Price setup, `/pricing/workbench`; admin, sales, contracting read, admin and contracting edit).
+No migration: it reads and writes the existing bk-009 / bk-019 / bk-020 / bk-032 / bk-039 tables through the single
+forms' services.
+
+- **Workbench** (`app/catalog/price_workbench.py`, `GET /booking/catalog/price-workbench`, `pricing.read`): the price
+  readiness rows (the same statuses and reasons, never a second classifier) plus per plan its upcoming departures,
+  its b2b rows still valid, the CIS reference and the price hint; seven checks (components, rates, fx, rule, price,
+  sellable, departures; departures are optional for tailor-made tours), the **next step** (`add_components`,
+  `fix_inactive`, `load_rates`, `approve_fx`, `approve_rule`, `recompute`, `make_sellable`, `done`; hand prices alone
+  are never `done`: an agency quote prices the components), counts per step and per missing check, filters `status`,
+  `country`, `q`, `missing`, `next_step`. **Bulk actions** (`POST …/price-workbench/actions`, `trip_plan.write`, at most
+  200 plans, 50 for `recompute`, one transaction, one audit row per changed plan; a plan that does not qualify is
+  `skipped` with its reason): `make_sellable` (only with components and in the catalog), `make_not_sellable`,
+  `apply_provisional`, `clear_provisional`, `recompute`.
+- **Provisional price** (item 4): `apply_provisional` copies the reviewed CIS reference (`reference_amount` /
+  `_currency`) into the **price hint** (`price_hint_*`, per person) of a plan with no b2b row still valid and no hint
+  typed by staff, and marks the reference reviewed. The hint is a display price only: the public price parity read
+  (`app.b2b.reads.price_parity`, the RRP agencies must not undercut) falls back to it while no b2b row exists; quotes,
+  holds, the agency tariff and `booking.v_from_prices` (TripPlanner "From $X") never read it. The workbench flags it
+  "Provisional: no supplier price yet". `clear_provisional` clears only a hint equal to the reference.
+- **Structured reference** (`app/catalog/trip_plan_sync.py`, `STRUCTURED_VIEW`): when the CIS contract view
+  `catalog.v_tour_price_reference_v1` also has `amount`, `currency`, `basis` (CIS's structured reference price,
+  AA-1091 CIS part; feature-detected), a per-person amount wins over the parse of `price_raw` and an amount change
+  alone clears the review. Without those columns the sync parses the text as before.
+- **Components suggested from the CIS itinerary** (`app/catalog/component_suggest.py`,
+  `GET …/trip-plans/{source_id}/component-suggestions`, `supply.read`): rules only, no LLM. Reads `catalog.v_tour` by
+  key, `catalog.v_tour_day` **by `tour_id` only** (perf guard) and `catalog.v_tour_day_route` by `tour_id`
+  (feature-detected: the night's place and CIS destination; without it the day's last place), and Booking's active
+  hotels / room types / services of the tour's country (the item's, else its supplier's) or of its overnight
+  destinations, plus services made from the tour in CIS. A hotel per night and a service per type the day's text names
+  (transfer, guide, entrance, activity; a meal for lunch or dinner, never breakfast), each with an explained score
+  (named in the text, name words, the night's CIS destination, the place in its name or address, the country; for a
+  service: made from this tour, title words, a day's destination, the country), the best as `suggestion`, up to 3
+  `alternatives`, the double / twin room type by default with every room type to change to; a need a component of
+  that day already meets is `covered`, one with no candidate `unmatched` (the UI links to create the supplier, hotel
+  or service). Nothing is applied: staff accept, change or reject each suggestion in the staff drawer, which saves the
+  whole set with `PUT …/components`.
+- **Bulk workbook** (`app/catalog/price_import.py`, `GET /booking/catalog/price-import/template` (`pricing.read`,
+  empty with `blank=true`, else prefilled with the workbench's filtered plans, at most 300) and
+  `POST /booking/catalog/price-import` (`trip_plan.write`, the .xlsx as base64 JSON like rate sheets, `?dry_run=true`
+  checks only)): sheets `Tours` (Sellable), `Components` (a listed tour gets exactly these: Hotel code + Room type, or
+  Service code, per day), `Prices` (a listed tour gets exactly these hand prices per channel, season, dates and pax
+  band, with child / infant / single supplement; computed rows are kept unless a hand row overlaps them),
+  `Departures` (new dates only; an existing date is skipped). Every problem by sheet, row and column, nothing written
+  while one is left; the dry run lists per tour what changes and its readiness status after. The import writes through
+  `plan_components.replace_components`, `trip_plan_prices.store` (audit `trip_plan.prices_imported`),
+  `departures.create_departure` and `price_workbench.set_sellable`, adds one `trip_plan.bulk_imported` audit row and
+  recomputes the cost sheet of up to 50 touched plans in the same transaction. Idempotent: the same file again writes
+  nothing. Maker-checker: the single forms it replaces have none (supplier contracts and pricing rules do, and stay
+  in the rate sheet import and the rules page). The staff BFF allows the 2 MB upload on `catalog/price-import`.
+- **Staff UI**: `/pricing/workbench` (KPIs, the checks per tour, next step links, row selection for the bulk actions,
+  the import drawer with Check then Import, the hotels & services drawer) and the trip plan's "Hotels & services" tab
+  (the same drawer). The page is the first Booking page with the kit language switch: English by default,
+  Vietnamese on the page's own switch (cookie `bk_lang`, `ui/local/lang.ts`; its text in
+  `app/(staff)/pricing/workbench/_parts/messages.ts`); other pages stay English until they get their messages, so no
+  page mixes the two.
+
 ## Agency price tiers (AA-1030, bk-043; root ADR 0019 b15)
 
 Every B2B partner has a **tier** (`b2b_partners.tier_code`, default `standard`; seeded standard / silver / gold). A
