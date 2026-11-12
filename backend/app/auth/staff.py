@@ -38,7 +38,9 @@ finance entry and CIS mints no bridge token for its new roles).
 **Dev-only E2E write identities (AA-1087, root ADR 0006a A10e).** Three more WORKFORCE E2E users may write, each only
 its own allow-listed routes, only on Dev and only on a synthetic agency's record (:mod:`app.auth.e2e_staff`): a staff
 user (``booking-sales``: send and confirm a supplier booking) and a finance maker / checker pair (``booking-finance``:
-record an agency payment; approve or reject it). Checked here, before the route runs.
+record an agency payment; approve or reject it). Checked here, before the route runs. A10e-1 (S278 l18): the staff
+user may also cancel a synthetic departure (body exactly ``{"status": "cancelled"}``); that one request then holds
+``trip_plan.write`` (``Staff.e2e_grants``), which its ``sales`` role lacks.
 
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
@@ -46,6 +48,7 @@ question 5). The matrix is provisional until the PRD role matrix is confirmed.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -241,6 +244,9 @@ class Staff:
     cognito_sub: str | None = None
     # Session flag, not a column: True when this request's token came from the Preview-only client (AA-911 D-1).
     preview: bool = False
+    # Session flag, not a column (AA-1087 A10e-1): permissions one Dev-only E2E write request holds on top of its role,
+    # set by current_staff only after every e2e_staff check passed (app.auth.e2e_staff.E2EWriter.grants).
+    e2e_grants: frozenset[str] = frozenset()
 
     @classmethod
     def from_row(cls, row: Any) -> Staff:
@@ -254,6 +260,8 @@ class Staff:
     def can(self, permission: str) -> bool:
         if self.preview and permission not in PREVIEW_PERMISSIONS:
             return False
+        if self.active and permission in self.e2e_grants:
+            return True
         return self.active and self.role in PERMISSIONS.get(permission, frozenset())
 
     @property
@@ -474,6 +482,15 @@ def is_e2e_test_principal(principal: Principal) -> bool:
     return isinstance(principal.email, str) and principal.email.strip().lower() == E2E_TEST_STAFF_EMAIL
 
 
+async def _json_body(request: Request) -> Any:
+    """The request's JSON body, or None when it is empty or not JSON (Starlette caches the bytes for the route)."""
+    try:
+        raw = await request.body()
+        return json.loads(raw) if raw else None
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
 async def get_pool(request: Request) -> asyncpg.Pool:
     db = request.app.state.db
     if not db.configured:
@@ -513,6 +530,10 @@ async def current_staff(
         role = booking_role(principal.groups)
         if role is None:
             raise HTTPException(status_code=403, detail="no_booking_role")
+        if writer is not None:
+            # AA-1087 A10e-1: a write with a fixed body (departure cancel) sends exactly it, before any DB access.
+            if (request.method.upper(), route or "") in e2e_staff.BODY_RULES:
+                e2e_staff.check_body(writer, request.method, route, await _json_body(request))
         pool = await get_pool(request)
         if writer is not None:
             # AA-1087: an allowed write only on a synthetic agency's record, before the staff row sync or the route.
@@ -521,6 +542,9 @@ async def current_staff(
             staff = await sync_cognito_staff(conn, principal, role)
         if preview:
             staff = replace(staff, preview=True)
+        if writer is not None and (grants := writer.grants_for(request.method, route)):
+            # A10e-1: the permission this one request needs (every check above passed); never stored.
+            staff = replace(staff, e2e_grants=grants)
     elif kind == identity_config.BRIDGE:
         claims = _bridge_claims(principal, token)
         role = ROLE_FROM_CIS.get(claims.cis_role)
