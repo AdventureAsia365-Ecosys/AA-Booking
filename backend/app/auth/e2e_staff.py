@@ -11,12 +11,22 @@ agency payment recorded by one finance user and approved by another (maker-check
 - **Exact groups.** The token's groups must be exactly the identity's tuple (the trigger already refuses any other
   set; checked again here): else 403 ``e2e_scope``.
 - **Its own writes only.** Any method other than GET / HEAD / OPTIONS is refused 403 ``e2e_read_only`` before any DB
-  access unless ``(method, route template)`` is in the identity's allow-list (:data:`E2E_WRITERS`).
+  access unless ``(method, route template)`` is in the identity's allow-list (:data:`E2E_WRITERS`). A write with a body
+  rule (:data:`BODY_RULES`) must send exactly that body, else 403 ``e2e_read_only`` (AA-1087 S278 l18, root ADR 0006a
+  A10e-1: the staff identity may PATCH a departure only to ``{"status": "cancelled"}``).
 - **Synthetic agencies only.** An allowed write is then refused 403 ``e2e_synthetic_only`` unless the record belongs to
   an agency that CIS marks synthetic (``catalog.v_tenant_account_v1.is_synthetic``, CIS 401: ``is_canary`` true and not
   the pilot). The record is resolved from the path (:data:`SYNTHETIC_SQL`), before the route runs and before the staff
   row is synced. A record of no agency (a B2C case, a departure-owned supplier booking), an unknown id, a view without
-  the column (CIS 401 not applied) or any database error count as real (fail closed).
+  the column (CIS 401 not applied) or any database error count as real (fail closed). A departure is synthetic only
+  when the A10e staff identity created it (the fixture seeder), at least one agency hold has a line on it, and every
+  agency with a hold line, an allotment (any state) or a departure fee on it is synthetic
+  (:data:`DEPARTURE_SYNTHETIC_SQL`): a catalogue departure staff made, an empty departure, or one any real agency has
+  anything on, is real (a cancel ends every open allotment on it).
+- **Route-scoped grant (A10e-1).** Departure cancel needs ``trip_plan.write`` (admin, contracting), which the staff
+  identity's ``sales`` role lacks. Only after every check above passed (Dev, exact groups, allow-list, exact body,
+  synthetic departure) does that one request carry the permission (:attr:`E2EWriter.grants`,
+  ``Staff.e2e_grants``); no other request of the identity, and no other identity, ever holds it.
 
 Reads keep the permissions of the identity's Booking role (``sales`` / ``finance``), like any member of that group.
 Every allowed write runs the route unchanged, so its normal audit row names the identity (``cog:<sub>``) as the actor.
@@ -30,7 +40,7 @@ import logging
 import os
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
@@ -59,6 +69,15 @@ SUPPLIER_CONFIRM = ("POST", "/booking/supplier-bookings/{booking_id}/confirm")
 PAYMENT_RECORD = ("POST", "/booking/agency-invoices/{ref}/payments")
 PAYMENT_APPROVE = ("POST", "/booking/agency-payments/{payment_id}/approve")
 PAYMENT_REJECT = ("POST", "/booking/agency-payments/{payment_id}/reject")
+# AA-1087 S278 l18 (root ADR 0006a A10e-1): AA cancels a synthetic departure, so the agency CRM opens its
+# aa_cancel_case (crm-13). Body exactly BODY_RULES[DEPARTURE_CANCEL]; trip_plan.write for that request only.
+DEPARTURE_CANCEL = ("PATCH", "/booking/catalog/departures/{departure_id}")
+
+# Allowed writes whose body is fixed: anything else in the body is 403 e2e_read_only (no capacity, rule or status
+# change other than the cancel itself).
+BODY_RULES: Mapping[tuple[str, str], Mapping[str, Any]] = MappingProxyType(
+    {DEPARTURE_CANCEL: MappingProxyType({"status": "cancelled"})}
+)
 
 
 @dataclass(frozen=True)
@@ -68,14 +87,25 @@ class E2EWriter:
     name: str
     groups: frozenset[str]
     writes: frozenset[tuple[str, str]]
+    # (method, route template) -> permissions this one request holds on top of the role (A10e-1), granted only after
+    # every check passed. Each key is also in ``writes``.
+    grants: Mapping[tuple[str, str], frozenset[str]] = field(default_factory=lambda: MappingProxyType({}))
+
+    def grants_for(self, method: str, route: str | None) -> frozenset[str]:
+        return self.grants.get((method.upper(), route or ""), frozenset())
 
 
 E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
     {
         # Supplier ops: send a supplier booking of a synthetic agency's case, then confirm it (booking-sales: ops.write
         # and b2b_desk.write, which an on-request B2B line needs).
+        # A10e-1 (S278 l18): it also cancels a synthetic departure (body exactly {"status": "cancelled"}), holding
+        # trip_plan.write for that request only.
         E2E_BOOKING_STAFF_EMAIL: E2EWriter(
-            "booking_staff", frozenset({"booking-sales"}), frozenset({SUPPLIER_REQUEST, SUPPLIER_CONFIRM})
+            "booking_staff",
+            frozenset({"booking-sales"}),
+            frozenset({SUPPLIER_REQUEST, SUPPLIER_CONFIRM, DEPARTURE_CANCEL}),
+            MappingProxyType({DEPARTURE_CANCEL: frozenset({"trip_plan.write"})}),
         ),
         # Finance maker: records a payment on a synthetic agency's invoice. Never approves (not on its list).
         E2E_FINANCE_MAKER_EMAIL: E2EWriter(
@@ -106,6 +136,24 @@ PAYMENT_SYNTHETIC_SQL = (
     " JOIN catalog.v_tenant_account_v1 v ON v.tenant_id = i.party_tenant_id"
     " WHERE p.id = $1::uuid"
 )
+# A departure is synthetic only when (1) the A10e staff identity created it (the seeder, app.e2e_fixtures, writes as
+# that identity; $2 = its address), (2) at least one agency hold has a line on it, and (3) every agency tied to it in
+# any departure-scoped table is synthetic in CIS: hold lines (any hold status), allotments (any state: a cancel ends
+# every open one, bk-046) and departure fees (any status, bk-048). A catalogue departure staff made, an empty one, or
+# one any real or unknown agency has anything on is real. Shaped ``SELECT v.is_synthetic`` like the others.
+DEPARTURE_SYNTHETIC_SQL = (
+    "SELECT v.is_synthetic FROM (SELECT EXISTS (SELECT 1 FROM booking.departures d"
+    " JOIN booking.staff_users su ON su.cis_user_id = d.created_by"
+    " WHERE d.id = $1::uuid AND lower(su.email) = $2)"
+    " AND coalesce(bool_or(x.src = 'hold'), false) AND coalesce(bool_and(t.is_synthetic IS TRUE), false)"
+    " AS is_synthetic FROM ("
+    "SELECT 'hold' AS src, h.partner_id FROM booking.b2b_hold_lines l"
+    " JOIN booking.b2b_holds h ON h.id = l.hold_id WHERE l.departure_id = $1::uuid"
+    " UNION ALL SELECT 'allotment', a.partner_id FROM booking.departure_allotments a WHERE a.departure_id = $1::uuid"
+    " UNION ALL SELECT 'fee', f.partner_id FROM booking.departure_fees f WHERE f.departure_id = $1::uuid) x"
+    " LEFT JOIN booking.b2b_partners p ON p.id = x.partner_id"
+    " LEFT JOIN catalog.v_tenant_account_v1 t ON t.tenant_id = p.tenant_id) v"
+)
 # Route template -> (path parameter, SQL). Every allow-listed write has one (a unit test keeps the two lists equal).
 SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
     {
@@ -114,8 +162,11 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         PAYMENT_RECORD[1]: ("ref", INVOICE_SYNTHETIC_SQL),
         PAYMENT_APPROVE[1]: ("payment_id", PAYMENT_SYNTHETIC_SQL),
         PAYMENT_REJECT[1]: ("payment_id", PAYMENT_SYNTHETIC_SQL),
+        DEPARTURE_CANCEL[1]: ("departure_id", DEPARTURE_SYNTHETIC_SQL),
     }
 )
+# Fixed arguments after the record key ($2, ...): the departure rule's creator is the A10e staff identity.
+SYNTHETIC_SQL_ARGS: Mapping[str, tuple[str, ...]] = MappingProxyType({DEPARTURE_CANCEL[1]: (E2E_BOOKING_STAFF_EMAIL,)})
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
 INVOICE_BY_NUMBER_SQL = INVOICE_SYNTHETIC_SQL.replace("WHERE i.id = $1::uuid", "WHERE i.number = $1")
 
@@ -151,6 +202,17 @@ def check_session(writer: E2EWriter, groups: tuple[str, ...], method: str, route
         raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
 
 
+def check_body(writer: E2EWriter, method: str, route: str | None, body: Any) -> None:
+    """For an allowed write with a body rule: 403 ``e2e_read_only`` unless the JSON body is exactly the rule. No DB
+    access. ``body`` is the parsed JSON (anything that is not exactly the rule's object is refused)."""
+    rule = BODY_RULES.get((method.upper(), route or ""))
+    if rule is None:
+        return
+    if not isinstance(body, dict) or body != dict(rule):
+        log.info("booking_e2e_writer_refused identity=%s reason=body route=%s", writer.name, route)
+        raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
+
+
 def _uuid(value: Any) -> str | None:
     try:
         return str(uuid.UUID(str(value)))
@@ -172,7 +234,7 @@ async def is_synthetic_record(conn: asyncpg.Connection | asyncpg.Pool, route: st
     if key is None:
         return False
     try:
-        return (await conn.fetchval(sql, key)) is True
+        return (await conn.fetchval(sql, key, *SYNTHETIC_SQL_ARGS.get(route, ()))) is True
     except (asyncpg.PostgresError, OSError) as exc:
         log.warning("booking_e2e_synthetic_unknown route=%s error_class=%s", route, type(exc).__name__)
         return False

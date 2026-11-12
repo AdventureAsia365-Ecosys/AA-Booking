@@ -610,6 +610,13 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `unauthorized`; a validly signed token of another client, a missing scope or a client that is not the partner's
   `m2m_client_id` 403 `forbidden`; no active `b2b_partners` row for `X-AA-Tenant-Id` 403 `unknown_partner`; not
   configured, JWKS never loaded or pricing data missing 503 `unavailable`; bad input 422 `invalid`.
+- **Tenant binding (AA-1092, bk-049 + bk-053)**: every connection a B2B request takes comes from
+  `app.b2b.access.TenantBoundPool`, which sets `app.tenant_id` (session level, while the connection is held; cleared
+  before it returns to the pool, the connection terminated if that fails) to the agency's tenant: the partner lookup
+  binds `X-AA-Tenant-Id`, the handlers the tenant of the partner the token was proven to act for. Under the
+  `b2b_partners` policies such a connection reads only its own registry row (also through the `bk_owner` view
+  `v_tenant_billing_status`) and writes none, so a partner query that forgets its `partner_id` filter still cannot
+  see another agency's row. Staff routes and jobs use the plain pool and bind nothing.
 - **Routes (AA-972)**: `GET /products` (sellable trip plans still in `catalog.v_tour`, with their bookable components
   `rt:<room type>`, `sv:<service>`, and `tp:<plan>` for the whole plan), `POST /quotes`, `GET /fx-rates` (approved
   rates in force on a date, plain), `GET /price-parity` (the public "from" price per person: since AA-1029 the
@@ -793,6 +800,12 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
     vouchers show the later of the stored end and that span, so a case stored before AA-1088 prints the whole tour.
     A B2B case has no TripPlanner legs: its `trip_title` (case detail, case list, proposals list) is its first
     version's title, the tour sold (`trip_cases/sql.py` `B2B_HEADLINE`), never "Custom trip".
+    Older cases (confirmed before AA-1013 / AA-1088) are fixed once by `python -m app.b2b.legacy_cases` (DRY RUN:
+    counts, the changes and a `plan_hash`; ECS Exec on the API task, role `booking`), then `--apply --expect-plan
+    <plan_hash>`, which recomputes the plan and writes nothing (exit 3) unless it is still the reviewed one: the same
+    code writes the tour title over the exact placeholder titles, the later end date and the longer item spans, one
+    audit row per case (`trip_case.legacy_display_fixed`, with the plan hash). bk-052 lets exactly that write through the version locks while the
+    transaction sets `booking.legacy_display_fix = 'aa1088'`.
   - **G4 credit stop**: `POST /holds` is 409 `credit_hold_overdue` while the agency's `booking.v_tenant_billing_status`
     is `past_due` (oldest overdue agency invoice past `suspend_after_days`); replays, confirms, extends and cancels of
     existing holds still work; the stop lifts once the overdue invoices are paid (payment approved).
@@ -1920,8 +1933,18 @@ FORCE row level security and two permissive policies reading `app.tenant_id` (th
 of `app/b2b/access.py`, none of which binds one, so nothing changes for them) and `b2b_partners_tenant` (SELECT TO
 `booking`: a transaction that runs `set_config('app.tenant_id', <uuid>, true)` reads that tenant's row only and writes
 none). It closes the RLS catalogue guard's rule a finding on the table. Partner isolation on the B2B API stays enforced
-in code (the M2M client bound to the partner, `partner_id` on every query); binding the caller's tenant in the B2B
-handlers is a later step that this policy already supports.
+in code (the M2M client bound to the partner, `partner_id` on every query); since the AA-1092 residual (bk-053 + the
+code PR) every B2B API request also binds the caller's tenant ("Tenant binding" under the B2B API).
+
+### `bk-053` (AA-1092 residual: the tenant policy of `b2b_partners` also covers `bk_owner` — needs `bk-049`)
+
+A **contract** file (migration-only PR; the AA-Booking code PR that binds the caller's tenant in every B2B API request
+raises readiness to it, MIG-4). `b2b_partners_tenant` becomes SELECT TO `booking`, `bk_owner`. A view is read with its
+owner's row level security: `booking.v_tenant_billing_status` (bk-042, owner `bk_owner`) answered no row under a bound
+session, so the B2B credit stop (`app/b2b/holds.py`), `GET /billing-status` and `GET /terms` would have read "no status"
+once the handlers bind `app.tenant_id`. With `bk_owner` in the tenant policy the view answers the bound tenant's row
+only. Unbound sessions (staff admin, jobs, migrations) are unchanged: they match `b2b_partners_back_office` and see
+every row; a bound session still writes nothing.
 
 ## Out of scope today
 
@@ -2120,8 +2143,18 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   any DB access), and on an allowed write whose record does not belong to an agency CIS marks synthetic (403
   `e2e_synthetic_only`, before the staff row sync or the route): `catalog.v_tenant_account_v1.is_synthetic` (CIS 401,
   contract tenant.entitlements.v1 1.6), fail closed when the column is missing. Reads keep the role's permissions.
+  A10e-1 (S278 l18): the staff identity may also cancel a departure (PATCH `/booking/catalog/departures/{id}` with
+  exactly `{"status": "cancelled"}`, else 403 `e2e_read_only`) only when that identity created it (the seeder), at
+  least one agency hold has a line on it, and every agency with a hold line, an allotment (any state) or a departure
+  fee on it is synthetic (a cancel ends every open allotment); that one request holds `trip_plan.write`
+  (`Staff.e2e_grants`), which `sales` lacks.
+  Fixtures: `python -m app.e2e_fixtures [--apply] [--run R] [--agency-tenant T | --any-synthetic]` (Dev only, DRY RUN
+  by default, ECS Exec on the API task; default agency: the CRM's E2E agency, so its CRM opens the aa_cancel_case)
+  makes per run a departure, a synthetic agency's booking on it (desk booking), a pending supplier booking on that
+  case and an issued settlement invoice, through the services, as the staff identity.
   Smoke: `frontend/e2e/e2e-writers/` (Playwright project `e2e-writers`, `BOOKING_E2E_WRITERS=1`, dry run
-  `BOOKING_E2E_WRITERS_DRY_RUN=1`). Removed at go-live with the A10 family (AA-1054).
+  `BOOKING_E2E_WRITERS_DRY_RUN=1`, `BOOKING_E2E_FIXTURES=<seeder output>`). Removed at go-live with the A10 family
+  (AA-1054).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 
