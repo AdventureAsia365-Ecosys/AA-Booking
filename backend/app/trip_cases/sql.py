@@ -79,13 +79,26 @@ def leg_fallback_title(source_tour_id: str) -> str:
     return f"AA tour {source_tour_id}"[:500]
 
 
-def trip_shape(snapshot: dict[str, Any] | None, legs: list[dict[str, Any]], start: date | None) -> dict[str, Any]:
-    """``trip_title`` (first leg, None = custom trip), ``leg_titles``, ``duration_days`` and a derived end date."""
+# AA-1088 (M13): the title of a B2B case that has no TripPlanner legs = its first version's title, which the B2B
+# confirm writes as the trip sold (the CIS tour title of the first trip plan line, AA-1013). Was: "Custom trip".
+B2B_HEADLINE = """
+    (SELECT v.title FROM booking.trip_case_versions v
+     WHERE v.trip_case_id = tc.id AND v.deleted_at IS NULL AND tc.channel = 'b2b'
+     ORDER BY v.version_number LIMIT 1) AS b2b_headline
+"""
+
+
+def trip_shape(
+    snapshot: dict[str, Any] | None, legs: list[dict[str, Any]], start: date | None, *, headline: str | None = None
+) -> dict[str, Any]:
+    """``trip_title`` (first leg; else ``headline``, the B2B case's sold trip; None = custom trip), ``leg_titles``,
+    ``duration_days`` and a derived end date."""
     ordered = sorted(legs, key=lambda leg: (leg["day_from"], leg["position"]))
     titles = [leg_title(snapshot, leg["source_tour_id"]) for leg in ordered]
     duration = max((leg["day_to"] for leg in ordered), default=None)
+    fallback = " ".join(headline.split())[:500] if isinstance(headline, str) and headline.strip() else None
     return {
-        "trip_title": titles[0] if titles else None,
+        "trip_title": titles[0] if titles else fallback,
         "leg_titles": titles,
         "leg_count": len(titles),
         "duration_days": duration,

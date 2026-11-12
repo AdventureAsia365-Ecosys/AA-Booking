@@ -356,7 +356,9 @@ function Overview({
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-line bg-card px-4 py-3 text-[13px]" data-testid="legs-empty">
             <span className="min-w-0 text-muted">
-              <span className="font-semibold text-ink">Trip legs</span> · A custom trip: no CIS tour is linked yet.
+              <span className="font-semibold text-ink">Trip legs</span> ·{" "}
+              {/* AA-1088 (M13): a B2B booking has no TripPlanner legs; its tours are the lines of its version */}
+              {c.channel === "b2b" ? "An agency booking: the tours sold are listed in its version." : "A custom trip: no CIS tour is linked yet."}
             </span>
             <FromCisTag />
           </div>

@@ -48,7 +48,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.b2b import cancellation, departures, desk, quotes, served
+from app.b2b import cancellation, departures, desk, plan_span, quotes, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
 from app.pricing import engine
@@ -666,13 +666,6 @@ async def _booking_out(conn: asyncpg.Connection, hold: Any) -> dict[str, Any]:
     }
 
 
-def _span(line: Any, plan_days: dict[str, int]) -> int:
-    prefix, ident = parse_component(line["component_id"])
-    if prefix == PREFIX_PLAN:
-        return max(plan_days.get(ident, 1), 1)
-    return max(int(line["nights"] or 1), 1)
-
-
 def _cents(value: Decimal) -> Decimal:
     return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -832,18 +825,11 @@ async def _open_case(
     plan_ids = sorted(
         {ident for prefix, ident in (parse_component(r["component_id"]) for r in lines) if prefix == PREFIX_PLAN}
     )
-    plan_days: dict[str, int] = {}
-    plan_source: dict[str, str] = {}
-    if plan_ids:
-        for row in await conn.fetch(
-            "SELECT p.id::text AS id, p.source_id, coalesce(max(c.day_no), 1) AS days FROM booking.trip_plans p"
-            " LEFT JOIN booking.trip_plan_components c ON c.trip_plan_id = p.id WHERE p.id = ANY($1::uuid[])"
-            " GROUP BY p.id, p.source_id",
-            plan_ids,
-        ):
-            plan_days[row["id"]], plan_source[row["id"]] = int(row["days"]), row["source_id"]
+    # AA-1088 (M13): a trip plan line covers the tour's catalog days (was: its highest component day only, so a 6-day
+    # tour priced on day 1 stored end_date = start_date); app/b2b/plan_span.py
+    plan_days, plan_source = await plan_span.plan_days(conn, plan_ids)
     start = min(r["service_date"] for r in lines)
-    end = max(r["service_date"] + timedelta(days=_span(r, plan_days) - 1) for r in lines)
+    end = plan_span.trip_end(lines, plan_days) or start
     biggest = max(lines, key=lambda r: (r["pax_adult"] + r["pax_child"], r["pax_adult"]))
 
     # The status history's changed_by is a staff key (FK): a machine change is a system change (empty actor); the
@@ -902,7 +888,7 @@ async def _open_case(
             line["line_no"],
             titles[line["line_no"]][:500],
             day_from,
-            day_from + _span(line, plan_days) - 1,
+            day_from + plan_span.line_span(line, plan_days) - 1,
             plan_source.get(ident) if prefix == PREFIX_PLAN else None,
             f"Agency line {line['line_ref']}"[:5000],
             ident if prefix == PREFIX_ROOM else None,

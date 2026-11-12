@@ -6,6 +6,8 @@ One document per confirmed B2B booking (a confirmed hold and its trip case), for
 
 - the booking reference (the trip case code), the agency's proposal ref and version, the status (``confirmed``, or
   ``cancelled`` once the agency or AA cancelled it), the trip dates and the most travellers of a line by age band;
+  the end date covers each tour's days (AA-1088: ``app.b2b.plan_span``, the catalog ``duration_days``), so a case
+  stored before AA-1088 with end = start still prints the whole trip;
 - every line as sold: the title staff read on the case (the CIS tour title, "hotel · room type" or the service
   title, AA-1013), the service date, nights, pax counts by age band, the room set-up, the line status and the
   supplier confirmation refs of the confirmed supplier bookings that cover it (AA-682);
@@ -32,7 +34,7 @@ from typing import Any
 import asyncpg
 from fastapi.responses import HTMLResponse
 
-from app.b2b import cancellation
+from app.b2b import cancellation, plan_span
 
 BOOKING_SQL = """
 SELECT h.id::text AS hold_id, h.quote_id::text AS quote_id, h.proposal_ref, h.proposal_version, h.confirmed_at,
@@ -47,7 +49,7 @@ BY_ID = BOOKING_SQL + " AND h.trip_case_id = $1::uuid"
 BY_CODE = BOOKING_SQL + " AND c.code = $1"
 # AA-1075 (bk-14): the travellers of a line are what was sold less its partial cancellations.
 LINES_SQL = """
-SELECT ql.line_no, ql.line_ref, ql.component_kind, ql.service_date, ql.nights,
+SELECT ql.line_no, ql.line_ref, ql.component_id, ql.component_kind, ql.service_date, ql.nights,
        ql.pax_adult - coalesce(r.adults, 0) AS pax_adult, ql.pax_child - coalesce(r.children, 0) AS pax_child,
        ql.pax_infant - coalesce(r.infants, 0) AS pax_infant, ql.rooms::text AS rooms, hl.status AS line_status,
        it.title
@@ -148,6 +150,7 @@ async def load(conn: asyncpg.Connection, ref: str, *, partner_id: str | None, no
         confirmed_at=booking["confirmed_at"],
     )
     issuer = await conn.fetchval(ISSUER_SQL)
+    end_date = await _trip_end(conn, booking, lines)
     out_lines = [
         {
             "line_ref": r["line_ref"],
@@ -179,13 +182,23 @@ async def load(conn: asyncpg.Connection, ref: str, *, partner_id: str | None, no
         "confirmed_at": booking["confirmed_at"],
         "cancelled_at": cancelled_at,
         "start_date": booking["start_date"],
-        "end_date": booking["end_date"],
+        "end_date": end_date,
         "travellers": dict(biggest),
         "lines": out_lines,
         "cancellation_policy": cancellation.policy_out(policy, basis=cancellation.BASIS_LOCKED),
         # Staff and the HTML file name the agency; the JSON contract answers the agency itself, so it leaves it out.
         "_agency_name": booking["agency_name"],
     }
+
+
+async def _trip_end(conn: asyncpg.Connection, booking: Any, lines: list[Any]) -> Any:
+    """AA-1088 (M13): the trip's last day = the later of the stored case end and every line's ``service_date + its
+    days - 1`` (a trip plan line = the tour's days). Cases confirmed before AA-1088 stored end = start for a tour
+    priced on day 1 only; a staff-extended end is kept."""
+    plan_ids = [p for p in (plan_span.plan_id_of(r.get("component_id")) for r in lines) if p is not None]
+    days, _ = await plan_span.plan_days(conn, plan_ids)
+    ends = [d for d in (booking["end_date"], plan_span.trip_end(lines, days)) if d is not None]
+    return max(ends) if ends else None
 
 
 def public(doc: dict[str, Any]) -> dict[str, Any]:
