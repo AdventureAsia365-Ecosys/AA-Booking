@@ -97,7 +97,7 @@ export function ImportDrawer({ filters, onClose }: { filters: WorkbenchFilters; 
       cell: (r) => {
         const parts = [
           r.components_changed ? `${t("check_components")}: ${r.components_before} → ${r.components_after}` : null,
-          r.hand_rows_after !== r.hand_rows_before || r.computed_rows_replaced
+          r.hand_rows_after !== r.hand_rows_before || r.computed_rows_replaced || r.net_rows_replaced
             ? `${t("check_price")}: ${r.hand_rows_before} → ${r.hand_rows_after}`
             : null,
           r.departures_new.length ? `${t("check_departures")}: +${r.departures_new.length}` : null,

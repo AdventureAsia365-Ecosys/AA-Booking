@@ -112,6 +112,8 @@ export interface ImportTour {
   hand_rows_before: number;
   hand_rows_after: number;
   computed_rows_replaced: number;
+  /** Rows typed with a net cost on the single price form that a hand row of the file replaces. */
+  net_rows_replaced: number;
   departures_new: IsoDate[];
   departures_existing: IsoDate[];
   status_before: ReadinessStatus | null;

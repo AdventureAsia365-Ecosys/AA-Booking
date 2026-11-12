@@ -10,8 +10,9 @@ importing an unchanged file changes nothing:
   exactly these components** (the plan's set is replaced, as ``PUT …/components`` does);
 - ``Prices``: Tour key, Channel (b2b or fixed_departure; empty = b2b), Season, Peak (yes / no), Valid from, Valid to,
   Pax min, Pax max, Currency (empty = USD), Price per person, Child price, Infant price, Single supplement. **A tour
-  listed here gets exactly these hand prices** (its rows typed by staff are replaced; rows computed from supplier rates
-  are kept, except one that overlaps a new hand row, which the hand row replaces as the cost sheet does);
+  listed here gets exactly these hand prices** (its plain hand rows are replaced; rows priced from a cost, computed from
+  supplier rates or typed with a net cost on the single price form, are not in the file and are kept, except one that
+  overlaps a new hand row, which the hand row replaces as the cost sheet does);
 - ``Departures``: Tour key, Start date, Capacity, Min to operate, Sales cutoff days, Decision days before, Auto confirm
   (yes / no), Status (scheduled / guaranteed). A date the tour already has is skipped (``existing``), never changed.
 
@@ -31,8 +32,13 @@ recomputed in the same transaction (at most :data:`MAX_RECOMPUTE`; the ``bk_pric
 the result shows each tour's status after.
 
 **Dry run**: the same checks, plus per tour what would change and its price readiness status after (the readiness
-rules on the new component set, the rates in force and the new hand rows). Bounded: :data:`MAX_BYTES`,
+rules on the new component set, the rates in force and the new hand rows) and how many cost-priced rows a new hand row
+replaces (``computed_rows_replaced``, ``net_rows_replaced``). Bounded: :data:`MAX_BYTES`,
 :data:`MAX_ROWS` data rows, :data:`MAX_TOURS` tours. Read with openpyxl read-only, values only (no formula, no macro).
+
+**Export safety**: a prefilled text cell from the database (a CIS title, a room type name, a season) that starts like a
+formula (:data:`app.b2b.tariff.FORMULA_START`) is written as a text cell with Excel's quote prefix, never as a formula;
+its value is unchanged, so the round trip still matches the room type and the season.
 """
 
 from __future__ import annotations
@@ -50,6 +56,7 @@ from openpyxl import Workbook
 from app import audit
 from app.auth.staff import Staff
 from app.b2b import departures, plan_components
+from app.b2b.tariff import FORMULA_START
 from app.catalog import cost_sheet, price_readiness, price_workbench, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Invalid
@@ -109,7 +116,8 @@ README_LINES = (
     "Components: one hotel room type (Hotel code + Room type) or one Service code per row. A tour listed here gets "
     "exactly these components.",
     "Prices: hand prices per person per pax band and season (dates YYYY-MM-DD). A tour listed here gets exactly these "
-    "hand prices; prices computed from supplier rates are kept unless a hand price covers the same dates and pax.",
+    "hand prices. Prices worked out from a cost (from supplier rates, or a price typed with a net cost on the tour's "
+    "price form) are not in this file and are kept, unless a hand price here covers the same dates and pax.",
     "Departures: new fixed departures; a date the tour already has is skipped.",
     "Upload it on Price setup -> Import: Check (nothing is written) first, then Import.",
 )
@@ -596,17 +604,34 @@ def hand_row(p: Mapping[str, Any], markup: Decimal | None) -> dict[str, Any]:
     }
 
 
+def cost_priced(row: Mapping[str, Any]) -> bool:
+    """A row priced from a cost: computed from supplier rates, or typed with a net cost on the single price form (its
+    net cost, margin and override live only in the matrix). Neither is in the workbook, so an import keeps them."""
+    return bool(row["computed"]) or row["net_amount"] is not None
+
+
+@dataclass(frozen=True)
+class Merged:
+    rows: list[dict[str, Any]]
+    computed_replaced: int
+    net_replaced: int
+
+
 def merge_prices(
     existing: Sequence[dict[str, Any]], hand: Sequence[dict[str, Any]], pricing: cost_sheet.Pricing
-) -> tuple[list[dict[str, Any]], int]:
-    """The new matrix: the imported hand rows, then the computed rows kept (as stored, their RRP under today's markup)
-    that no hand row overlaps; positions 1..n. Returns it and the number of computed rows left out."""
-    computed = [cost_sheet.kept_row(r, pricing) for r in existing if r["computed"]]
-    kept = [r for r in computed if not any(cost_sheet.overlaps(r, h) for h in hand)]
+) -> Merged:
+    """The new matrix: the imported hand rows, then the cost-priced rows kept (as stored, their RRP under today's
+    markup) that no hand row overlaps; positions 1..n. Plain hand rows (no net cost) are the file's and are replaced.
+    Also counts the cost-priced rows a hand row replaces (computed, and typed with a net cost)."""
+    priced = [cost_sheet.kept_row(r, pricing) for r in existing if cost_priced(r)]
+    covered = [any(cost_sheet.overlaps(r, h) for h in hand) for r in priced]
+    kept = [r for r, c in zip(priced, covered, strict=True) if not c]
+    gone = [r for r, c in zip(priced, covered, strict=True) if c]
     final = [*(dict(h) for h in hand), *kept]
     for i, row in enumerate(final, start=1):
         row["position"] = i
-    return final, len(computed) - len(kept)
+    computed = sum(1 for r in gone if r["computed"])
+    return Merged(final, computed, len(gone) - computed)
 
 
 # ── Status after (dry run) ───────────────────────────────────────────────────
@@ -685,10 +710,10 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
     tours: list[dict[str, Any]] = []
     for plan in plans.values():
         existing = [dict(r) for r in await conn.fetch(trip_plan_prices.ROWS_SQL, plan.id)]
-        hand_before = sum(1 for r in existing if not r["computed"])
-        dropped = 0
+        hand_before = sum(1 for r in existing if not cost_priced(r))
+        merged = Merged([], 0, 0)
         if plan.hand is not None:
-            _, dropped = merge_prices(existing, [hand_row(h, pricing.markup) for h in plan.hand], pricing)
+            merged = merge_prices(existing, [hand_row(h, pricing.markup) for h in plan.hand], pricing)
         now = plan.components_now
         tours.append(
             {
@@ -702,7 +727,8 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
                 "components_changed": plan.components is not None and not _same_components(now, plan.components),
                 "hand_rows_before": hand_before,
                 "hand_rows_after": len(plan.hand) if plan.hand is not None else hand_before,
-                "computed_rows_replaced": dropped,
+                "computed_rows_replaced": merged.computed_replaced,
+                "net_rows_replaced": merged.net_replaced,
                 "departures_new": [d["start_date"] for d in plan.new_departures],
                 "departures_existing": plan.existing_departures,
                 "status_before": (before.get(plan.key) or {}).get("status"),
@@ -764,17 +790,21 @@ async def _apply(
             await plan_components.replace_components(conn, staff, plan.key, plan.components)
         if plan.hand is not None:
             existing = [dict(r) for r in await conn.fetch(trip_plan_prices.ROWS_SQL, plan.id)]
-            final, dropped = merge_prices(existing, [hand_row(h, pricing.markup) for h in plan.hand], pricing)
+            merged = merge_prices(existing, [hand_row(h, pricing.markup) for h in plan.hand], pricing)
             await trip_plan_prices.store(
                 conn,
                 plan.id,
                 plan.key,
-                final,
+                merged.rows,
                 actor_type="staff",
                 actor_ref=staff.cis_user_id,
                 created_by=staff.cis_user_id,
                 action="trip_plan.prices_imported",
-                extra={"computed_rows_replaced": dropped, "via": "price_import"},
+                extra={
+                    "computed_rows_replaced": merged.computed_replaced,
+                    "net_rows_replaced": merged.net_replaced,
+                    "via": "price_import",
+                },
                 summary_suffix=" (price setup workbook)",
             )
         for d in plan.new_departures:
@@ -814,7 +844,7 @@ TEMPLATE_PRICES_SQL = """
 SELECT p.source_id, r.channel, r.season, r.peak, r.valid_from, r.valid_to, r.pax_min, r.pax_max,
        r.currency::text AS currency, r.amount, r.child_amount, r.infant_amount, r.single_supplement_amount
 FROM booking.trip_plan_prices r JOIN booking.trip_plans p ON p.id = r.trip_plan_id
-WHERE p.source_system = 'cis' AND p.source_id = ANY($1::text[]) AND NOT r.computed
+WHERE p.source_system = 'cis' AND p.source_id = ANY($1::text[]) AND NOT r.computed AND r.net_amount IS NULL
 ORDER BY p.source_id, r.position
 """
 TEMPLATE_DEPARTURES_SQL = """
@@ -832,6 +862,13 @@ def _yn(value: bool | None) -> str | None:
 
 def _num(value: Any) -> Any:
     return None if value is None else float(value) if isinstance(value, Decimal) else value
+
+
+def _as_text(cell: Any) -> None:
+    """A database text that starts like a formula stays text (openpyxl turns a str starting with "=" into a formula):
+    a string cell with Excel's quote prefix, the value unchanged (no "'" added, so the round trip still matches)."""
+    cell.data_type = "s"
+    cell.quotePrefix = True
 
 
 def build_workbook(
@@ -896,6 +933,8 @@ def build_workbook(
             for cell in col:
                 if isinstance(cell.value, date):
                     cell.number_format = "yyyy-mm-dd"
+                elif isinstance(cell.value, str) and cell.value.startswith(FORMULA_START):
+                    _as_text(cell)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

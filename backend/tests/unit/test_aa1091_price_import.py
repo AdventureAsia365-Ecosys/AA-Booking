@@ -213,10 +213,53 @@ def test_hand_row_and_merge() -> None:
     }
     later = {**computed, "valid_from": TODAY + timedelta(days=400), "valid_to": TODAY + timedelta(days=500)}
     staff_row = {**computed, "computed": False, "net_amount": None, "net_currency": None, "effective_margin": None}
+    # Typed on the single price form with a net cost (computed false, net cost kept): not in the workbook.
+    net_row = {**computed, "computed": False, "overridden": True, "valid_from": TODAY + timedelta(days=600)}
+    net_under = {**net_row, "valid_from": TODAY + timedelta(days=5), "valid_to": TODAY + timedelta(days=6)}
     pricing = cost_sheet.Pricing(TODAY, {}, {})
-    final, dropped = pi.merge_prices([computed, later, staff_row], [hand], pricing)
-    assert dropped == 1  # the computed row under the hand row; the old staff row is replaced by the file
-    assert [r["position"] for r in final] == [1, 2] and final[0]["computed"] is False and final[1]["computed"] is True
+    merged = pi.merge_prices([computed, later, staff_row, net_row, net_under], [hand], pricing)
+    # the computed row and the net-cost row under the hand row; the old plain staff row is replaced by the file
+    assert (merged.computed_replaced, merged.net_replaced) == (1, 1)
+    final = merged.rows
+    assert [r["position"] for r in final] == [1, 2, 3]
+    assert final[0]["computed"] is False and final[0]["net_amount"] is None
+    assert final[1]["computed"] is True
+    assert final[2]["computed"] is False and final[2]["net_amount"] == D("200.00") and final[2]["overridden"] is True
+    assert pi.cost_priced(net_row) and pi.cost_priced(computed) and not pi.cost_priced(staff_row)
+    assert "r.net_amount IS NULL" in pi.TEMPLATE_PRICES_SQL  # the export lists plain hand rows only
+
+
+@pytest.mark.parametrize("text", ['=HYPERLINK("http://example.invalid","Open")', "+1", "-x", "@sum", "=1+1"])
+def test_export_writes_formula_like_text_as_text(text: str) -> None:
+    from openpyxl import load_workbook
+
+    data = pi.build_workbook(
+        [{"tour_key": KEY, "title": text, "country": text, "sellable": True}],
+        [{"source_id": KEY, "day_no": 1, "hotel_code": "HTL-000101", "room_type": text, "service_code": None}],
+        [
+            {
+                "source_id": KEY,
+                "channel": "b2b",
+                "season": text,
+                "peak": False,
+                "valid_from": TODAY,
+                "valid_to": TODAY + timedelta(days=9),
+                "pax_min": 1,
+                "pax_max": 2,
+                "currency": "USD",
+                "amount": D("410.50"),
+            }
+        ],
+    )
+    wb = load_workbook(io.BytesIO(data))
+    for sheet, cells in ((pi.TOURS, ("B2", "C2")), (pi.COMPONENTS, ("D2",)), (pi.PRICES, ("C2",))):
+        for ref in cells:
+            cell = wb[sheet][ref]
+            assert (cell.value, cell.data_type, cell.quotePrefix) == (text, "s", True), (sheet, ref)
+    assert wb[pi.TOURS]["A2"].quotePrefix is False  # plain text is left alone
+    sheets = pi.parse(data)
+    assert sheets.problems == []
+    assert sheets.components[0]["room_type"] == text and sheets.prices[0]["season"] == text  # unchanged value
 
 
 def test_template_round_trip() -> None:
