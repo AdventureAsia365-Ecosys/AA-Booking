@@ -10,10 +10,10 @@ importing an unchanged file changes nothing:
   exactly these components** (the plan's set is replaced, as ``PUT …/components`` does);
 - ``Prices``: Tour key, Channel (b2b or fixed_departure; empty = b2b), Season, Peak (yes / no), Valid from, Valid to,
   Pax min, Pax max, Currency (empty = USD), Price per person, Child price, Infant price, Single supplement. AA-1091
-  (bk-052): **a tour listed here gets a draft price list version with exactly these hand prices** (``source =
+  (bk-053): **a tour listed here gets a draft price list version with exactly these hand prices** (``source =
   import`` with the file's SHA-256, :func:`app.catalog.price_versions.import_draft`); nothing prices until its maker
   submits it from the tour's Versions tab and a second person approves it (the dry run's counts say what the approved
-  version would replace). The Peak column is read but no longer decides anything: the season calendar does (bk-053);
+  version would replace). The Peak column is read but no longer decides anything: the season calendar does (bk-054);
 - ``Departures``: Tour key, Start date, Capacity, Min to operate, Sales cutoff days, Decision days before, Auto confirm
   (yes / no), Status (scheduled / guaranteed). A date the tour already has is skipped (``existing``), never changed.
 

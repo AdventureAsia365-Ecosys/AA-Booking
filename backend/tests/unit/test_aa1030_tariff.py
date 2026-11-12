@@ -83,7 +83,7 @@ class Conn:
             return [p for p in self.parts if p["trip_plan_id"] in args[0]]
         if sql == cost_sheet.SPANS_SQL:
             return self.spans
-        if sql == seasons.PLAN_CALENDARS_SQL:  # AA-1091 (bk-053): no plan has a season calendar here (low season)
+        if sql == seasons.PLAN_CALENDARS_SQL:  # AA-1091 (bk-054): no plan has a season calendar here (low season)
             return [{"plan_id": p, "calendar_id": None} for p in args[0]]
         assert sql == tariff.ROWS_SQL
         self.asked.append(args)

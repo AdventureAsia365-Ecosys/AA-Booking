@@ -5,7 +5,7 @@
 // and search (URL query). Each row opens the tour's hotels and services (ComponentsDrawer: suggestions from the CIS
 // itinerary) or the page of its next step; staff who edit plans select rows for the bulk actions (make sellable or
 // not, show the CIS reference as a provisional price, clear it, recompute). "Import workbook" is the bulk Excel import
-// with its dry run (ImportDrawer). AA-1091 (bk-052): each tour also has its price Versions tab (VersionsDrawer: drafts,
+// with its dry run (ImportDrawer). AA-1091 (bk-053): each tour also has its price Versions tab (VersionsDrawer: drafts,
 // maker-checker approval with the diff; `?versions=<tour key>` opens it from the trip plan page). The page has its own
 // language switch (English default, Vietnamese; messages.ts).
 

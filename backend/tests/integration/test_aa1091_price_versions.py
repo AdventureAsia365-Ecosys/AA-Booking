@@ -1,4 +1,4 @@
-"""AA-1091 (bk-052 / bk-053, root ADR 0005b d1, d2, d4, d9) on a real PostgreSQL, as role ``booking``:
+"""AA-1091 (bk-053 / bk-054, root ADR 0005b d1, d2, d4, d9) on a real PostgreSQL, as role ``booking``:
 
 1. The life of a price list version: draft (maker only), submit (reason, frozen diff + impact + SHA-256), approve by a
    second person with the diff they saw (403 for the maker, 409 for a stale diff), reject, one pending per plan and
@@ -8,7 +8,7 @@
    else covers (the withdraw preview says so first); the matrix rows carry their version.
 3. The migration of today's prices: the matrix (computed rows priced from "Peak"-labelled rates, hand rows with a
    peak flag, per-type prices or a net, a computed row a person overrode) and its history become versions by the
-   bk-052 data step (past sets withdrawn, the rows in force published), and every price column, the public from price
+   bk-053 data step (past sets withdrawn, the rows in force published), and every price column, the public from price
    and a B2B quote line answer exactly as before, also after the new code rebuilds the matrix.
 4. Seasons: fixed-date ranges of a calendar never overlap (409), a range counts only once a second person approves it,
    a festive range takes its dates from the holiday event row of each year (days before and after), stop-sale is an
@@ -364,7 +364,7 @@ async def test_migration_of_todays_prices_keeps_every_price(
 ) -> None:
     """Today's matrix (computed rows, some from "Peak"-labelled rates, a hand row flagged peak with per-type prices, a
     hand row priced from a net, a computed row a person overrode) and its history (a staff set, a cost-sheet set):
-    the bk-052 data step versions them, and every price column, the from price and a B2B quote line answer exactly
+    the bk-053 data step versions them, and every price column, the from price and a B2B quote line answer exactly
     as before, also after the new code rebuilds the matrix (the plan has no season range yet, so the old peak flags
     stay, :attr:`app.pricing.seasons.Calendar.configured`)."""
     plan = await _costed_plan(admin, pool)
@@ -425,7 +425,7 @@ async def test_migration_of_todays_prices_keeps_every_price(
     async with pool.acquire() as conn:
         from_before = (await trip_plan_prices.list_prices(conn, _staff(MAKER), TOUR))["from_price"]
 
-    await apply_migrations(admin, only=[52])
+    await apply_migrations(admin, only=[53])
 
     assert await _every_price(admin, plan) == before
     versions = await admin.fetch(
@@ -439,8 +439,8 @@ async def test_migration_of_todays_prices_keeps_every_price(
         ("withdrawn", "cost_sheet", sets[1]["rows"]),
         ("published", "cost_sheet", len(before)),
     ]
-    assert [v["withdrawn_by"] for v in versions[:2]] == ["migration:bk-052"] * 2
-    assert versions[2]["approved_by"] == "migration:bk-052"
+    assert [v["withdrawn_by"] for v in versions[:2]] == ["migration:bk-053"] * 2
+    assert versions[2]["approved_by"] == "migration:bk-053"
     assert (
         await admin.fetchval(
             "SELECT count(*) FROM booking.trip_plan_prices WHERE trip_plan_id = $1::uuid AND version_id IS NULL"

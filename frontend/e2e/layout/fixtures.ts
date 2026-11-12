@@ -948,7 +948,7 @@ const WORKBENCH: Workbench = {
   items: WORKBENCH_ITEMS,
 };
 
-// AA-1091 (bk-052 / bk-053): a tour's price versions, the season calendars and the holiday events (invented data).
+// AA-1091 (bk-053 / bk-054): a tour's price versions, the season calendars and the holiday events (invented data).
 function priceVersion(no: number, status: PriceVersion["status"], from: string, to: string, by: Person = person("u-002", 1)): PriceVersion {
   return {
     id: `pv-${no}`,
@@ -983,7 +983,7 @@ const PRICE_VERSIONS: VersionList = {
   items: [
     priceVersion(3, "pending", "2027-04-01", "2027-10-31"),
     priceVersion(2, "published", "2026-11-01", "2027-10-31"),
-    priceVersion(1, "superseded", "2026-01-01", "2026-10-31", { id: "migration:bk-052", name: null }),
+    priceVersion(1, "superseded", "2026-01-01", "2026-10-31", { id: "migration:bk-053", name: null }),
   ],
   in_force: [{ version_id: "pv-2", version_no: 2, from: "2026-11-01", to: "2027-10-31" }],
   calendar: { id: "cal-1", name: "Invented bay", default_season: "low" },

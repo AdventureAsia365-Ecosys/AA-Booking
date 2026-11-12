@@ -274,7 +274,7 @@ def client_as(staff: Staff, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_http_put_prices_is_retired_for_price_versions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AA-1091 (bk-052): a hand price is never overwritten; PUT …/prices answers 409 and points at the versions."""
+    """AA-1091 (bk-053): a hand price is never overwritten; PUT …/prices answers 409 and points at the versions."""
     body = {"items": [{"channel": "b2b", "valid_from": "2027-01-01", "valid_to": "2027-04-30", "amount": "1450"}]}
     url = f"/booking/catalog/trip-plans/{SOURCE_ID}/prices"
     with client_as(CONTRACTING, monkeypatch) as c:

@@ -1,5 +1,5 @@
 "use client";
-// app/(staff)/pricing/workbench/_parts/VersionsDrawer.tsx — AA-1091 (bk-052, root ADR 0005b d1 / d2 / d9): the
+// app/(staff)/pricing/workbench/_parts/VersionsDrawer.tsx — AA-1091 (bk-053, root ADR 0005b d1 / d2 / d9): the
 // Versions tab of a tour in Price setup. Which version prices which dates today, the tour's season calendar, every
 // version with its state, and one version at a time: the maker edits their draft (window, label, reason, the price rows
 // in the price matrix editor) and submits it; a second person reads the frozen diff (old -> new per row, highlighted

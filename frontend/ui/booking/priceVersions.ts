@@ -1,5 +1,5 @@
 // ui/booking/priceVersions.ts
-// AA-1091 (bk-052 / bk-053) — pure helpers of the price versions drawer, Pricing → Seasons and Pricing → Holiday
+// AA-1091 (bk-053 / bk-054) — pure helpers of the price versions drawer, Pricing → Seasons and Pricing → Holiday
 // events: which buttons a person sees on a version, a season range or a holiday event (the API decides; this only
 // hides what it would refuse: the maker never approves their own change), which of them needs a reason, the tone of
 // each state, the short text of a diff row, and who made or decided a change (a person, never a raw id).
@@ -12,7 +12,7 @@ export type VersionAction = "edit" | "submit" | "withdraw" | "approve" | "reject
 export type Tone = "neutral" | "warning" | "success" | "info" | "danger";
 
 /** A maker or checker as the API returns it: a staff member's id and directory name, or a system marker
- *  (`migration:bk-052`, `system:bk_trip_plan_sync`, `seed:…`) with no name. */
+ *  (`migration:bk-053`, `system:bk_trip_plan_sync`, `seed:…`) with no name. */
 export interface Person {
   id: string;
   name: string | null;

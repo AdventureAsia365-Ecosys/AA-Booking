@@ -1,4 +1,4 @@
-// lib/api/priceVersions.ts — AA-1091 (bk-052 / bk-053, root ADR 0005b d1, d2, d4, d9): price list versions of a trip
+// lib/api/priceVersions.ts — AA-1091 (bk-053 / bk-054, root ADR 0005b d1, d2, d4, d9): price list versions of a trip
 // plan, season calendars and holiday events (backend app/routers/price_versions.py). A hand price is never overwritten:
 // a maker drafts a version, submits it with a reason (the diff and impact are frozen), a second person approves it with
 // the SHA-256 of the diff they saw. Seasons, holiday events and a plan's calendar have the same maker-checker, with a

@@ -6,7 +6,7 @@
   Missing = 503 ``unavailable`` (AA-side data; the CRM shows an indicative price and allows no deposit).
 - **Formula**: the AA-810 engine's building blocks (``app.pricing.engine``): every net to USD at the plain rate, sell
   ``= net / (1 - margin - card fee)`` with the rule's margin (plus its peak uplift on a ``tp:`` line whose service
-  date is a peak or festive date of the plan's season calendar, AA-1091 bk-053, :mod:`app.pricing.seasons`), then
+  date is a peak or festive date of the plan's season calendar, AA-1091 bk-054, :mod:`app.pricing.seasons`), then
   to the quote currency x rate x (1 + buffer). One formula for B2C and B2B (memo seam 7): no second engine. The
   per-line step is :func:`price_line` over a :class:`PriceBasis` (:func:`price_basis`), shared with the agency
   tariff (AA-1030 G3, ``app.b2b.tariff``), so a tariff row is exactly what a quote of that party and day charges.
@@ -46,7 +46,7 @@
   ``quote_validity_days`` of the pricing policy in force on the quote day (staff change it on Pricing > Policy), or
   ``quote_validity_festive_days`` when a ``tp:`` line's service date is festive in its plan's season calendar (d14:
   one festive line shortens the whole quote); a ``tp:`` line of ``group_on_request_min_pax`` travellers or more
-  is ``on_request``, and so is one on a stop-sale date of its plan's calendar (bk-053: stop-sale changes
+  is ``on_request``, and so is one on a stop-sale date of its plan's calendar (bk-054: stop-sale changes
   availability, never the price). No policy value is a constant here (CI guard ``test_aa1091_policy_guard``).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
@@ -384,7 +384,7 @@ def price_line(
     ``pax`` (adults, children, infants) takes the rule's child and infant prices (:func:`pax_sell_usd`). AA-1073
     (bk-17): a trip plan line on a departure starting ``start`` takes the early-booking discount (margin points) when
     the quote is early enough, then the departure's ``adjustment`` after the agency discount; ``note`` says what
-    applied. AA-1091 (bk-053): a trip plan line whose service date is a peak or festive date of its plan's calendar
+    applied. AA-1091 (bk-054): a trip plan line whose service date is a peak or festive date of its plan's calendar
     (``season``) takes the rule's peak uplift (``note.season``). Raises ``engine.PricingError`` (a missing FX rate,
     a bad rule)."""
     note: dict[str, Any] = {}
@@ -534,7 +534,7 @@ async def quote_in(
         on=on,
     )
     fx, rule, margin, terms = basis.fx, basis.rule, basis.margin, basis.terms
-    # AA-1091 (bk-053): the season of each tp: line's service date in its plan's calendar (one season function).
+    # AA-1091 (bk-054): the season of each tp: line's service date in its plan's calendar (one season function).
     calendars = await seasons.for_plans(conn, {p for line in lines if (p := _line_plan(line.ask.component_id))})
 
     priced: list[dict[str, Any]] = []

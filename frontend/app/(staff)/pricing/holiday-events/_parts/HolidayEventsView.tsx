@@ -1,5 +1,5 @@
 "use client";
-// app/(staff)/pricing/holiday-events/_parts/HolidayEventsView.tsx — Pricing → Holiday events (AA-1091, bk-053, root
+// app/(staff)/pricing/holiday-events/_parts/HolidayEventsView.tsx — Pricing → Holiday events (AA-1091, bk-054, root
 // ADR 0005b d4). Holidays per country and year, entered as data each year (no holiday date is ever written in code):
 // filters by country and year, each event with its dates, its state and how many season calendars follow it, the
 // maker-checker buttons (ui/booking/priceVersions.ts; the API decides), and a drawer to propose a new one (the code is

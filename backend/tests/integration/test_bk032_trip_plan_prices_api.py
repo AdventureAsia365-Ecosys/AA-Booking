@@ -140,7 +140,7 @@ def _auth(cis: LocalCis, sub: str) -> dict[str, str]:
 async def _publish(
     c: httpx.AsyncClient, cis: LocalCis, body: dict[str, Any], maker: str = MAKER, checker: str = CHECKER
 ) -> httpx.Response:
-    """AA-1091 (bk-052): hand prices go live as a price version (draft, rows, submit by the maker, approve by a second
+    """AA-1091 (bk-053): hand prices go live as a price version (draft, rows, submit by the maker, approve by a second
     person); returns the first refusal, else the plan's matrix (GET …/prices) after the approval."""
     m, k = _auth(cis, maker), _auth(cis, checker)
     # One travel window for every version of these tests (the whole of next year): a newer version supersedes the
@@ -366,7 +366,7 @@ async def test_rows_priced_from_net_cost(client: tuple[httpx.AsyncClient, LocalC
     assert first["effective_margin"] == "0.3000" and first["priced_on"] == date.today().isoformat()
     assert first["net_amount"] == "670.00" and first["net_currency"] == "USD"
     assert second["amount"] == "1495.00"  # 25,000,000 VND = 1,000 USD; / 0.67 = 1492.54 -> 1495
-    # AA-1091 (bk-053): the plan has no configured season calendar, so the row keeps the peak flag it was written with
+    # AA-1091 (bk-054): the plan has no configured season calendar, so the row keeps the peak flag it was written with
     # (no price moves before staff enter seasons): peak: 670 / 0.64 = 1046.88 -> 1050.
     assert third["amount"] == "1050.00" and third["peak"] is True and third["season_code"] == "peak"
 

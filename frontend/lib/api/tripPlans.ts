@@ -184,9 +184,9 @@ export interface PriceRow {
   child_net_amount?: DecimalString | null;
   infant_net_amount?: DecimalString | null;
   single_supplement_net_amount?: DecimalString | null;
-  /** AA-1091 (bk-052): the published price version a hand row comes from; null on a cost sheet row. */
+  /** AA-1091 (bk-053): the published price version a hand row comes from; null on a cost sheet row. */
   version_id?: string | null;
-  /** AA-1091 (bk-053): the season of the plan's season calendar on the row's dates (it decides `peak`). */
+  /** AA-1091 (bk-054): the season of the plan's season calendar on the row's dates (it decides `peak`). */
   season_code?: "low" | "high" | "peak" | "festive" | null;
 }
 

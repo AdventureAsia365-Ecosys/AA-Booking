@@ -19383,7 +19383,7 @@
         ]
       },
       "put": {
-        "description": "Retired by AA-1091 (bk-052, root ADR 0005b d1 / d2): a hand price is never overwritten. The rows go into a\ndraft price list version (``POST …/price-versions``, ``PUT /booking/catalog/price-versions/{id}``) that a second\nperson approves. Always 409 ``price_versions``.",
+        "description": "Retired by AA-1091 (bk-053, root ADR 0005b d1 / d2): a hand price is never overwritten. The rows go into a\ndraft price list version (``POST …/price-versions``, ``PUT /booking/catalog/price-versions/{id}``) that a second\nperson approves. Always 409 ``price_versions``.",
         "operationId": "put_trip_plan_prices_booking_catalog_trip_plans__source_id__prices_put",
         "parameters": [
           {

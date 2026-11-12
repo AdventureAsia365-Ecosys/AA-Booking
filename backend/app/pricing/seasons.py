@@ -1,4 +1,4 @@
-"""The one season function (AA-1091, bk-053; root ADR 0005b decision 4).
+"""The one season function (AA-1091, bk-054; root ADR 0005b decision 4).
 
 A **season calendar** (``booking.season_calendars``) belongs to a destination (AA's sell-side seasons) or to a
 supplier contract. Its approved, not ended ranges (``booking.season_ranges``) give each date one season code:
@@ -22,7 +22,7 @@ service date) and the price list versions (each matrix row piece) all ask :meth:
 plan's calendar (``trip_plans.season_calendar_id``), so the agency price and the RRP follow one season logic.
 
 **Until staff enter seasons** (:attr:`Calendar.configured` is false: no calendar, or one with no approved season
-range and the default ``low``), nothing prices differently from before bk-053: the B2B quote and the tariff price
+range and the default ``low``), nothing prices differently from before bk-054: the B2B quote and the tariff price
 every date ``low`` (their old ``peak = false``), and the matrix keeps the old peak flags (:data:`LEGACY_PEAK`): the cost
 sheet's computed rows take the peak uplift when a 2-traveller rate's season label says "peak" (the old rule), and a
 hand row keeps the peak flag it was written with. The first approved range (or default season) of the plan's calendar
@@ -136,7 +136,7 @@ def legacy_code(peak: bool) -> str:
     return "peak" if peak else DEFAULT_SEASON
 
 
-LEGACY_PEAK = "peak"  # the substring of a supplier rate's season label that made a computed row peak before bk-053
+LEGACY_PEAK = "peak"  # the substring of a supplier rate's season label that made a computed row peak before bk-054
 
 
 @dataclass

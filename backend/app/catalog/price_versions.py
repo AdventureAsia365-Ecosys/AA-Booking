@@ -1,7 +1,7 @@
-"""Price list versions of a trip plan (AA-1091, bk-052; root ADR 0005b decisions 1, 2, 6, 9 and 10; delivery step 3).
+"""Price list versions of a trip plan (AA-1091, bk-053; root ADR 0005b decisions 1, 2, 6, 9 and 10; delivery step 3).
 
 Every hand price the team enters or changes is a **version**, never an overwrite (``PUT …/prices`` is refused since
-bk-052). A version is the per-person selling price list of one plan for one travel window:
+bk-053). A version is the per-person selling price list of one plan for one travel window:
 
 - **draft**: made by its maker (empty, or copied from the prices in force or from another version), edited only by
   them: label, tariff year, travel window, optional sale window (quote days it may be used on), rows (the price

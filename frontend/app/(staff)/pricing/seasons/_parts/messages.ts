@@ -1,4 +1,4 @@
-// app/(staff)/pricing/seasons/_parts/messages.ts — AA-1091 (bk-053): the UI text of Pricing → Seasons and Pricing →
+// app/(staff)/pricing/seasons/_parts/messages.ts — AA-1091 (bk-054): the UI text of Pricing → Seasons and Pricing →
 // Holiday events, English first, Vietnamese second (ui/core/i18n.ts). English is the default; staff switch on the page.
 
 import { defineMessages } from "@/ui";

@@ -284,11 +284,11 @@ backend/
   app/catalog/cost_sheet.py  AA-1029: bk_price_recompute (components x rates in force -> computed matrix rows per
                            window x pax band, priced by the rules in force, hand rows kept) + RecomputeSchedule
   app/catalog/price_history.py  AA-1029 (bk-039): dated price history (close open rows, insert the new set; as_of)
-  app/catalog/price_versions.py  AA-1091 (bk-052): price list versions (draft / submit with frozen diff + impact /
+  app/catalog/price_versions.py  AA-1091 (bk-053): price list versions (draft / submit with frozen diff + impact /
                            approve / reject / withdraw + preview, maker-checker; workbook import drafts)
   app/catalog/version_matrix.py  AA-1091: the overlap rule (winning dates, superseded, uncovered) and the hand rows of the
                            effective matrix cut by version and season
-  app/pricing/seasons.py   AA-1091 (bk-053): the one season function (calendar ranges, festive from holiday events,
+  app/pricing/seasons.py   AA-1091 (bk-054): the one season function (calendar ranges, festive from holiday events,
                            stop-sale overlay); seasons_admin.py: calendars, ranges, holiday events (maker-checker), the
                            default calendar of a plan
   app/routers/price_versions.py  /booking/catalog/trip-plans/{source_id}/price-versions, /booking/catalog/price-versions*,
@@ -564,7 +564,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   versions and tariffs only. The B2B quote reads `quote_validity_days` (`valid_until`) and `group_on_request_min_pax`
   (a `tp:` line of that many travellers or more is `on_request`, and its hold stays on request); the other
   parameters are stored for the price-version, season-calendar and tariff slices.
-  **Price list versions and seasons (AA-1091, bk-052 / bk-053, root ADR 0005b d6)**: hand prices are versions, never an
+  **Price list versions and seasons (AA-1091, bk-053 / bk-054, root ADR 0005b d6)**: hand prices are versions, never an
   overwrite (`PUT …/prices` answers 409 `price_versions`). Read with `pricing.read`; draft, save, submit and withdraw
   one's own draft or pending version `price_version.write` = admin, contracting (the customer-service maker);
   approve, reject, or withdraw a published version `price_version.approve` = admin, contracting (the product / pricing
@@ -917,7 +917,7 @@ forms' services.
   `plan_components.replace_components`, a draft price version per tour (since AA-1091, below),
   `departures.create_departure` and `price_workbench.set_sellable`, adds one `trip_plan.bulk_imported` audit row and
   recomputes the cost sheet of up to 50 touched plans in the same transaction. Idempotent: the same file again writes
-  nothing. Maker-checker: since AA-1091 (bk-052) the Prices sheet becomes a **draft price version** per tour
+  nothing. Maker-checker: since AA-1091 (bk-053) the Prices sheet becomes a **draft price version** per tour
   (`price_versions.import_draft`, audit `price_version.imported`), never live prices; components, departures and the
   sellable switch have no maker-checker on their single forms either (supplier contracts and pricing rules do). The staff BFF allows the 2 MB upload on `catalog/price-import`.
   Formula-safe export: a prefilled text cell (CIS title or country, room type name, season) that starts like a formula
@@ -930,7 +930,7 @@ forms' services.
   `app/(staff)/pricing/workbench/_parts/messages.ts`); other pages stay English until they get their messages, so no
   page mixes the two.
 
-**Price list versions (AA-1091, bk-052, root ADR 0005b d1 / d2 / d9 / d10)** — `app/catalog/price_versions.py`
+**Price list versions (AA-1091, bk-053, root ADR 0005b d1 / d2 / d9 / d10)** — `app/catalog/price_versions.py`
 (service), `app/catalog/version_matrix.py` (the overlap rule, pure), `app/routers/price_versions.py`.
 
 - A version = the hand prices of one plan for one travel window `[travel_from, travel_to)` (inclusive last day in the
@@ -958,7 +958,7 @@ forms' services.
   turns them into `cost_sheet` versions with the auto-publish rule). A plan with no published version keeps unversioned
   hand rows written before the code (transition only). A version row keeps its own `peak` flag and, when migrated
   from a computed row a person overrode, its `computed` flag.
-- bk-052 migrated each plan's price history into withdrawn past versions and the rows in force into its latest
+- bk-053 migrated each plan's price history into withdrawn past versions and the rows in force into its latest
   version, published (the matrix unchanged; `test_aa1091_price_versions` proves every price column, the from price and
   a B2B quote line before and after the migration and the first rebuild).
 - Makers and checkers come back from the API as people (`{id, name}` from the staff directory, `app/auth/people.py`;
@@ -971,7 +971,7 @@ forms' services.
   versions with their state, the draft editor (the price matrix editor; the season label is for people, the calendar
   decides peak), the diff and impact for the checker, approve / reject / withdraw dialogs.
 
-**Season calendars and holiday events (AA-1091, bk-053, root ADR 0005b d4)** — `app/pricing/seasons.py` (THE season
+**Season calendars and holiday events (AA-1091, bk-054, root ADR 0005b d4)** — `app/pricing/seasons.py` (THE season
 function), `app/pricing/seasons_admin.py`, pages Pricing → **Seasons** and Pricing → **Holiday events**.
 
 - A calendar belongs to a destination (the sell-side seasons a plan uses: `trip_plans.season_calendar_id`, defaulted
@@ -2009,16 +2009,16 @@ none). It closes the RLS catalogue guard's rule a finding on the table. Partner 
 in code (the M2M client bound to the partner, `partner_id` on every query); binding the caller's tenant in the B2B
 handlers is a later step that this policy already supports.
 
-### `bk-052` (AA-1091 price list versions — needs `bk-032`, `bk-039`, `bk-047`, `bk-050`)
+### `bk-053` (AA-1091 price list versions — needs `bk-032`, `bk-039`, `bk-047`, `bk-050`)
 
-A **contract** file (MIG-4 with bk-053; the code PR raises readiness to bk-052 and bk-053). New
+A **contract** file (MIG-4 with bk-054; the code PR raises readiness to bk-053 and bk-054). New
 `price_list_versions` (guard trigger: draft-only facts, d2 state moves, approved once, erasure of the label or a
 reason alone) and `price_list_version_rows` (written only while the version is a draft; each row keeps its `peak`
 flag); `trip_plan_prices.version_id` /
 `season_code` and the matrix position cap 200 -> 1000; the data step migrates history and rows in force into versions
 (plans with no version only, so a replay writes nothing).
 
-### `bk-053` (AA-1091 season calendars and holiday events — needs `bk-005`, `bk-008`, `bk-009`)
+### `bk-054` (AA-1091 season calendars and holiday events — needs `bk-005`, `bk-008`, `bk-009`)
 
 A **contract** file (FK columns and a CHECK on `trip_plans`). New `season_calendars`, `season_ranges`, `holiday_events`
 (column grants: role `booking` updates only the decision, reason and removal columns; no DELETE; a reason column on

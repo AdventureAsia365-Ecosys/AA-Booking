@@ -270,7 +270,7 @@ async def test_workbench_suggestions_import_and_actions(
     async with pool.acquire() as conn, conn.transaction():
         done = await price_import.import_workbook(conn, _staff(MAKER), _workbook(s), dry_run=False)
     assert done["dry_run"] is False and done["recomputed"] >= 1
-    # AA-1091 (bk-052): the Prices sheet made a draft price version; nothing is live until a second person approves.
+    # AA-1091 (bk-053): the Prices sheet made a draft price version; nothing is live until a second person approves.
     (draft,) = [d for d in done["price_drafts"] if d["tour_key"] == STAFF_TOUR]
     assert draft["rows"] == 2 and draft["unchanged"] is False
     assert await admin.fetchval(count + " WHERE p.source_id = $1", STAFF_TOUR) == 0
@@ -420,7 +420,7 @@ async def test_the_routes(
     assert refused.status_code == 422 and refused.json()["detail"] == "price_import_invalid"
     imported = await c.post("/catalog/price-import", json=body, headers=auth(MAKER))
     assert imported.status_code == 200
-    # AA-1091 (bk-052): the prices are a draft version until a second person approves it.
+    # AA-1091 (bk-053): the prices are a draft version until a second person approves it.
     (draft,) = [d for d in imported.json()["price_drafts"] if d["tour_key"] == STAFF_TOUR]
     sent = await c.post(
         f"/catalog/price-versions/{draft['version_id']}/submit", json={"reason": "Workbook"}, headers=auth(MAKER)

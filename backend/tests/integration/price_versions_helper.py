@@ -1,4 +1,4 @@
-"""AA-1091 (bk-052): put hand prices live the only way there is, a price list version made by one person and approved
+"""AA-1091 (bk-053): put hand prices live the only way there is, a price list version made by one person and approved
 by another (``app.catalog.price_versions``). Shared by the integration tests that need hand prices in a plan's matrix
 (they called ``PUT …/prices`` before price versions)."""
 

@@ -1,4 +1,4 @@
-"""Which published price list version prices which date, and the hand rows of the effective matrix (AA-1091, bk-052;
+"""Which published price list version prices which date, and the hand rows of the effective matrix (AA-1091, bk-053;
 root ADR 0005b decisions 2, 4 and 12).
 
 **Overlap rule (d2).** Among the published versions of a plan whose travel window covers a date (and whose sale
@@ -12,7 +12,7 @@ a version it had superseded prices its uncovered dates again.
 **The effective matrix** (``booking.trip_plan_prices``, read by the tariff, the RRP, the from price and the readiness
 report) holds the hand rows of the published versions, each row cut to the dates its version wins today and cut again
 where the plan's season calendar changes season (:mod:`app.pricing.seasons`: ``season_code`` and the ``peak`` flag of
-each piece; while the calendar is not configured, the row's own peak flag as before bk-053), plus the cost sheet's
+each piece; while the calendar is not configured, the row's own peak flag as before bk-054), plus the cost sheet's
 computed rows around them (:mod:`app.catalog.cost_sheet`). Pure functions here; the
 one database read is :func:`hand_rows`.
 """
@@ -200,7 +200,7 @@ def matrix_row(row: Any, start: date, end: date, code: str) -> dict[str, Any]:
         "effective_margin": row["effective_margin"],
         "priced_on": row["priced_on"],
         "overridden": bool(row["overridden"]),
-        # A row the cost sheet computed and staff overrode before versions (migrated by bk-052) stays computed and
+        # A row the cost sheet computed and staff overrode before versions (migrated by bk-053) stays computed and
         # overridden, as the matrix held it; every row a staff draft writes is a plain hand row.
         "computed": bool(row["computed"]),
         "created_by": row["created_by"],
