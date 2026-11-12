@@ -49,6 +49,7 @@ import type {
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
+import type { ParamVersion, PolicyListing, PolicyParam } from "../../lib/api/policyParams";
 import type { ComponentSuggestions, NextStep, PlanComponents, SuggestionCandidate, Workbench, WorkbenchItem } from "../../lib/api/priceWorkbench";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
@@ -732,6 +733,55 @@ const TARIFF: PartnerTariff = {
 };
 // ── Price readiness (AA-1029) ───────────────────────────────────────────────
 // Every status, long titles, a plan out of the catalog, a missing FX and a long list of components without a rate.
+// AA-1091 (bk-050): Pricing → Policy. A few parameters with the seed in force, one pending change a second person may
+// approve, one scheduled change, one draft of the viewer's own and one parameter stored for a later step.
+function policyVersion(key: string, no: number, value: ParamVersion["value"], over: Partial<ParamVersion> = {}): ParamVersion {
+  return {
+    id: uuid("9", no * 100 + key.length), key, version_no: no, value, unit: null, effective_from: "2026-01-01",
+    reason: "Approved policy answer for the tariff year", replaces_id: null, diff: null, status: "in_force",
+    created_by: { id: "seed:bk-050", name: null }, created_at: EARLIER, submitted_at: EARLIER,
+    approved_by: { id: "tech lead S278", name: null }, approved_at: EARLIER, rejected_by: null, rejected_at: null,
+    reject_reason: null, withdrawn_at: null, can_submit: false, can_withdraw: false, can_approve: false, ...over,
+  };
+}
+function policyParam(
+  key: string, type: PolicyParam["type"], unit: string | null, value: ParamVersion["value"], over: Partial<PolicyParam> = {},
+): PolicyParam {
+  const current = policyVersion(key, 1, value, { unit });
+  return {
+    key, type, unit, question: "Q2", approver: "pricing", label: key, help: "What this value does for new quotes and tariffs.",
+    in_use: true, minimum: type === "integer" || type === "decimal" ? "1" : null, maximum: type === "integer" || type === "decimal" ? "30" : null,
+    choices: [], current, scheduled: [], open: null, history: [current], can_approve_group: true, ...over,
+  };
+}
+const POLICY_PENDING = policyVersion("quote_validity_days", 2, 10, {
+  status: "pending", unit: "days", effective_from: "2026-10-23", reason: "Shorter quotes in the high season",
+  diff: { from: 14, to: 10 }, created_by: { id: "u-2", name: PERSON_NAMES[1] }, approved_by: null, approved_at: null, can_approve: true,
+});
+const POLICY: PolicyListing = {
+  today: "2026-10-23",
+  pending: 1,
+  items: [
+    policyParam("tariff_year_start", "month_day", "MM-DD", "11-01", { in_use: false, question: "Q1" }),
+    policyParam("quote_validity_days", "integer", "days", 14, { open: POLICY_PENDING }),
+    policyParam("quote_validity_festive_days", "integer", "days", 3, { in_use: false }),
+    policyParam("surcharge_causes", "codes", null, ["fx", "tax"], { approver: "finance", in_use: false, choices: ["fuel", "fx", "tax"], can_approve_group: false }),
+    policyParam("surcharge_fx_threshold_pct", "decimal", "%", "5", {
+      approver: "finance", in_use: false, can_approve_group: false,
+      scheduled: [policyVersion("surcharge_fx_threshold_pct", 2, "4", { status: "scheduled", effective_from: "2026-12-01", unit: "%" })],
+    }),
+    policyParam("provisional_cis_ref_quotable", "boolean", null, false, { in_use: false, question: "Q12" }),
+    policyParam("group_on_request_min_pax", "integer", "travellers", 9, {
+      open: policyVersion("group_on_request_min_pax", 2, 8, {
+        status: "draft", unit: "travellers", effective_from: "2026-11-01", submitted_at: null, approved_by: null, approved_at: null,
+        created_by: { id: STAFF_ME.cis_user_id, name: STAFF_ME.name }, can_submit: true, can_withdraw: true,
+      }),
+    }),
+    policyParam("gala_dinner_days", "month_days", "MM-DD", ["12-24", "12-31"], { in_use: false, question: "Q7" }),
+    policyParam("agency_currency_by_country", "currency_map", null, { "*": "USD", VN: "VND" }, { approver: "finance", in_use: false }),
+  ],
+};
+
 const READINESS_CYCLE: ReadinessStatus[] = [
   "no_components",
   "missing_rates",
@@ -1881,6 +1931,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p.startsWith("pricing/partner-tariffs/")) return ok(TARIFF);
   if (p === "catalog/price-readiness") return ok(READINESS);
   if (p === "catalog/price-workbench") return ok(WORKBENCH);
+  if (p === "pricing/policy") return ok(POLICY);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {

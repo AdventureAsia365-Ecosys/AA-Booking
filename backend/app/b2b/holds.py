@@ -131,7 +131,7 @@ SERVICE_TITLES_SQL = "SELECT id::text AS id, title FROM booking.services WHERE i
 KIND_LABELS = {"trip_plan": "Trip plan", "hotel_room": "Hotel room"}
 QUOTE_LINES_SQL = """
 SELECT line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult, pax_child,
-       departure_id::text AS departure_id, net_cost_usd, supplier_rate_ids::text[] AS supplier_rate_ids
+       departure_id::text AS departure_id, net_cost_usd, supplier_rate_ids::text[] AS supplier_rate_ids, availability
 FROM booking.b2b_quote_lines WHERE quote_id = $1::uuid ORDER BY line_no
 """
 
@@ -504,6 +504,14 @@ async def _create(
     for ask, (availability, _, why) in zip(asks, result, strict=True):
         if availability == departures.SOLD_OUT:
             raise B2BError("sold_out", f"line {ask.line_ref}: {why}")
+    # AA-1091 (root ADR 0005b Q9): a line the quote answered on request (e.g. a group of the policy's size) is held on
+    # request too, never auto-confirmed because its departure has seats.
+    result = [
+        (departures.ON_REQUEST, dep_id, why)
+        if availability == departures.AVAILABLE and r.get("availability") == departures.ON_REQUEST
+        else (availability, dep_id, why)
+        for r, (availability, dep_id, why) in zip(lines, result, strict=True)
+    ]
     expires_at = now + timedelta(hours=await _hold_hours(conn))
     for dep_id in {d for _, d, _ in result if d}:
         expires_at = min(expires_at, departures.start_of(locked[dep_id]["start_date"]))

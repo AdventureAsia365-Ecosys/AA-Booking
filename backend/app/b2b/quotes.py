@@ -41,6 +41,10 @@
   currency is not the quote's). A line that then sells under the floor margin is still sold (``below_floor`` in its
   ``price_note``, a warning log). Each line stores what applied in ``price_note`` (NULL when nothing); a line with an
   adjustment or an early discount hashes it (``price_note``), any other line hashes exactly as before.
+- **Policy** (AA-1091, bk-050, root ADR 0005b d14 / d15, :mod:`app.pricing.policy_values`): ``valid_until`` = now +
+  ``quote_validity_days`` of the pricing policy in force on the quote day (staff change it on Pricing > Policy; the
+  festive validity comes with the season calendars); a ``tp:`` line of ``group_on_request_min_pax`` travellers or more
+  is ``on_request``. No policy value is a constant here (CI guard ``test_aa1091_policy_guard``).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -60,7 +64,7 @@ import asyncpg
 from app.b2b import agency_pricing, cancellation, departures, price_adjustments, served
 from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
-from app.pricing import engine, repository
+from app.pricing import engine, policy_values, repository
 
 log = logging.getLogger(__name__)
 
@@ -80,9 +84,6 @@ ROUNDING = "line_ceil_0.01"
 QUOTE_CURRENCIES: frozenset[str] = engine.SELLING_CURRENCIES | {"VND"}
 LINE_INCREMENTS: dict[str, Decimal] = {"VND": Decimal("1000")}
 UNIT = "per_line"  # b2b_price is the whole line (quantity included)
-VALID_HOURS_KEY = "b2b_quote_valid_hours"  # gitleaks:allow (setting name, not a secret)
-DEFAULT_VALID_HOURS = 48
-MAX_VALID_HOURS = 720
 FX_PLACES = Decimal("0.00000001")
 USD_SOURCE = "base"
 
@@ -217,13 +218,24 @@ def _line_plan(component_id: str) -> str | None:
     return ident if prefix == PREFIX_PLAN else None
 
 
-async def _valid_hours(conn: asyncpg.Connection) -> int:
-    raw = await conn.fetchval("SELECT value FROM booking.settings WHERE key = $1", VALID_HOURS_KEY)
+async def _policy(conn: asyncpg.Connection, on: date) -> policy_values.Policy:
+    """The pricing policy in force on the quote day (AA-1091, bk-050): quote validity and the group size quoted on
+    request. A parameter with no approved value is AA-side data missing: 503 ``unavailable``."""
     try:
-        hours = int(json.loads(raw)) if isinstance(raw, str) else int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_VALID_HOURS
-    return hours if 1 <= hours <= MAX_VALID_HOURS else DEFAULT_VALID_HOURS
+        policy = await policy_values.load(conn, on)
+        policy.quote_validity_days, policy.group_on_request_min_pax  # noqa: B018 — fail here, before pricing
+    except policy_values.PolicyUnavailable as exc:
+        log.warning("b2b_policy_unavailable error=%s", exc)
+        raise B2BError("unavailable", "pricing policy is not available") from None
+    return policy
+
+
+def group_availability(availability: str, component_id: str, adult: int, child: int, min_pax: int) -> str:
+    """AA-1091 (root ADR 0005b d15 Q9): a tour line of ``min_pax`` travellers or more (adults + children) is quoted
+    on request, never auto-confirmed; a sold-out line stays sold out."""
+    if availability == departures.AVAILABLE and _line_plan(component_id) is not None and adult + child >= min_pax:
+        return departures.ON_REQUEST
+    return availability
 
 
 async def _pricing_data(
@@ -472,6 +484,7 @@ async def quote_in(
         raise B2BError("invalid", "line_ref must be unique within a quote")
     now = now or datetime.now(UTC)
     on = now.date()
+    pricing_policy = await _policy(conn, on)
 
     # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
     await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
@@ -510,6 +523,9 @@ async def quote_in(
     for no, (line, lc, (availability, departure_id, _)) in enumerate(zip(lines, costs, seats, strict=True), start=1):
         ask = line.ask
         plan = _line_plan(ask.component_id)
+        availability = group_availability(
+            availability, ask.component_id, ask.adult, ask.child, pricing_policy.group_on_request_min_pax
+        )
         pax = (ask.adult, ask.child, ask.infant)
         on_departure = plan is not None and departure_id is not None
         try:
@@ -566,7 +582,7 @@ async def quote_in(
     digest = price_hash(
         currency=currency, fx=fx, rule=rule, margin=margin, lines=priced, total=total, rounding=rounding
     )
-    valid_until = now + timedelta(hours=await _valid_hours(conn))
+    valid_until = now + timedelta(days=pricing_policy.quote_validity_days)
     policy = await cancellation.policy_for_lines(conn, priced, on)
 
     async with conn.transaction():

@@ -12,10 +12,43 @@ from typing import Any
 
 Answer = Any | Callable[..., Any]
 
+# AA-1091 (bk-050): the pricing policy in force, as app.pricing.policy_values.IN_FORCE_SQL answers it. Every scripted
+# connection answers it by default (lowest priority), so the code paths that read the policy work in every unit test;
+# a test that needs other values scripts "FROM booking.pricing_policy" itself. Values: the bk-050 seed.
+POLICY_SEED: dict[str, str] = {
+    "tariff_year_start": '"11-01"',
+    "tariff_next_publish_by": '"08-31"',
+    "quote_validity_days": "14",
+    "quote_validity_festive_days": "3",
+    "surcharge_causes": '["fx", "tax"]',
+    "surcharge_fx_threshold_pct": '"5"',
+    "surcharge_notice_days": "20",
+    "surcharge_free_cancel_pct": '"8"',
+    "recompute_auto_publish_pct": '"3"',
+    "diff_highlight_pct": '"10"',
+    "provisional_uplift_pct": '"5"',
+    "provisional_cis_ref_quotable": "false",
+    "group_on_request_min_pax": "9",
+    "foc_one_per_pax": "15",
+    "fit_full_payment_days": "30",
+    "group_deposit_pct": '"25"',
+    "group_deposit_days": "56",
+    "festive_non_refundable_days": "30",
+    "gala_dinner_days": '["12-24", "12-31"]',
+    "agency_currency_by_country": '{"*": "USD", "VN": "VND"}',
+}
+POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
+
+
+def policy_rows(**overrides: str) -> list[dict[str, Any]]:
+    """Rows of the policy in force: the seed, with ``overrides`` (key -> JSON text of the value)."""
+    values = {**POLICY_SEED, **overrides}
+    return [{"param_key": k, "value": v, "version_no": 1, "id": f"policy-{k}"} for k, v in sorted(values.items())]
+
 
 class ScriptedConn:
     def __init__(self, rules: list[tuple[str, Answer]] | None = None) -> None:
-        self.rules = list(rules or [])
+        self.rules = list(rules or []) + [(POLICY_FRAGMENT, lambda *_: policy_rows())]
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
 
     def on(self, fragment: str, answer: Answer) -> ScriptedConn:

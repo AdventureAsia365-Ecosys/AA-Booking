@@ -240,7 +240,13 @@ backend/
   app/inquiry/             leg catalog tour key resolve / back-fill (leg_keys.py, `python -m app.inquiry.leg_keys`) of
                            the kept b2c cases; the intake and its contract parser are retired (AA-1046)
   app/pricing/             ADR 0005 pricing: pure Decimal engine (engine.py) + rule/FX reads (repository.py, approved
-                           rows only) + rules/FX admin with maker-checker (policy.py, bk-007)
+                           rows only) + rules/FX admin with maker-checker (policy.py, bk-007); AA-1091 (bk-050, root
+                           ADR 0005b d15): the pricing policy parameters: policy_params.py (keys, types, units,
+                           allowed ranges, approver group: never a value), policy_values.py (THE reader every pricing,
+                           quote, deposit, cancellation and validity path uses: approved value in force on a day, no
+                           fallback), policy_admin.py (Pricing > Policy: versions, draft / pending / published /
+                           rejected / withdrawn, maker-checker by approver group); CI guard
+                           tests/unit/test_aa1091_policy_guard.py (no policy literal in the pricing modules)
   app/routers/catalog.py   GET /booking/catalog/destinations (place picker, any active staff, AA-822);
                            GET /booking/catalog/trip-plans (+ /facets, /{source_id}), PUT …/{source_id}/commercial,
                            POST …/{source_id}/trip-cases (AA-679, bk-009); GET|PUT …/{source_id}/components (AA-972);
@@ -294,7 +300,8 @@ backend/
   app/b2b/invoices.py      AA-1037 (1.5): the agency's own AA invoices + billing status (partner-scoped, field allow-list)
   app/routers/pricing.py   POST /booking/pricing/quote-preview (pricing.read); GET/POST /booking/pricing/rules,
                            /booking/pricing/fx-rates and /booking/pricing/cancellation-policies (AA-974), POST
-                           …/{id}/approve (reads pricing.read, writes pricing.write)
+                           …/{id}/approve (reads pricing.read, writes pricing.write); AA-1091: GET/POST
+                           /booking/pricing/policy, POST …/policy/{id}/submit|withdraw|approve|reject (pricing_policy.*)
   app/routers/agency_pricing.py  AA-1030: /booking/pricing/partner-tiers (GET, POST, PATCH /{code}),
                            /partner-tier-discounts and /partner-rate-cards (GET, POST, POST /{id}/approve),
                            /partner-terms (GET, PATCH /{partner_id}: the partner's tier); pricing.read / pricing.write
@@ -537,6 +544,17 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   cancellation-fee policies (AA-974) are pricing data: `pricing.read` / `pricing.write`, maker-checker like rules;
   agency price tiers, tier discounts and partner rate cards (AA-1030) the same pair and maker-checker, and moving a
   partner to another tier is `pricing.write` (audited, no second person: it changes no rate).
+  **Pricing policy parameters (AA-1091, bk-050, root ADR 0005b d6 / d15)**: every business policy value (quote
+  validity, group size quoted on request, surcharge rules, auto-publish and highlight thresholds, provisional uplift,
+  deposits, gala days, agency currency) is a versioned row of `booking.pricing_policy`, changed on Pricing > Policy,
+  never a constant in code (tech lead rule S278). Read `pricing_policy.read` = admin, sales, contracting, finance (in
+  the preview cap); propose `pricing_policy.write` = admin, contracting, finance; approve or reject the price
+  parameters `pricing_policy.approve` = admin, contracting (the product / pricing lead), the FX, tax, surcharge and
+  payment parameters `pricing_policy.approve_finance` = admin, finance; never the version's maker (403 `own_row` + a
+  table CHECK). A change takes effect on its day (today or later, never backwards) and applies to new quotes,
+  versions and tariffs only. The B2B quote reads `quote_validity_days` (`valid_until`) and `group_on_request_min_pax`
+  (a `tp:` line of that many travellers or more is `on_request`, and its hold stays on request); the other
+  parameters are stored for the price-version, season-calendar and tariff slices.
   Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
   contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
   needs `b2b_desk.write`; net amounts in the responses need `pricing.read`. Trip checks and the lifecycle runs (AA-682
@@ -1024,7 +1042,8 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   large", refused before any rate is read). Then the approved `b2b` rule in force today (seed 15 % / 10 % floor / 3 % card fee,
   policy data) and the approved FX rows in force today, through the AA-810 engine's functions (no second engine,
   `peak = false`). Each line's `b2b_price` is rounded up to the cent, the total is their exact sum. FX lock = the
-  selling rate applied (rate x (1 + buffer)); `valid_until` = now + setting `b2b_quote_valid_hours` (48).
+  selling rate applied (rate x (1 + buffer)); `valid_until` = now + the pricing policy parameter
+  `quote_validity_days` (AA-1091; the setting `b2b_quote_valid_hours` is retired).
   `price_hash` = SHA-256 of a canonical JSON of currency, FX lock, rule, rounding, lines and total (not the id, time or
   proposal ref): same request on the same data → same hash. Quote currencies = the engine's five + **VND** (AA-974, ADR
   0005a d3; B2B only, the engine's B2C `SELLING_CURRENCIES` is unchanged): the approved VND row in force on the UTC
