@@ -53,30 +53,36 @@ const STEP_TONE: Record<string, "success" | "warning" | "danger" | "info" | "neu
   fix_inactive: "danger",
 };
 
-function CheckIcon({ ok, optional }: { ok: boolean; optional?: boolean }) {
-  if (ok) return <Check size={13} className="text-success" aria-hidden="true" />;
-  return optional ? <Minus size={13} className="text-muted" aria-hidden="true" /> : <X size={13} className="text-danger" aria-hidden="true" />;
-}
-
 function Checks({ row }: { row: WorkbenchItem }) {
   const t = useT(M);
   const c = row.checks;
   const detail: Partial<Record<WorkbenchCheck, string>> = {
-    components: String(c.components.count),
     rates: c.rates.total ? t("checkRates", c.rates.rated, c.rates.total) : undefined,
     fx: c.fx.missing.length ? c.fx.missing.join(", ") : undefined,
-    departures: c.departures.count ? t("checkDepartures", c.departures.count) : t("checkOptional"),
+    departures: t("checkOptional"),
   };
+  const ok = WORKBENCH_CHECKS.filter((name) => c[name].ok);
+  const open = WORKBENCH_CHECKS.filter((name) => !c[name].ok);
   return (
-    <ul className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-0.5 text-xs sm:grid-cols-2" data-testid="workbench-checks">
-      {WORKBENCH_CHECKS.map((name) => (
-        <li key={name} className="flex min-w-0 items-center gap-1">
-          <CheckIcon ok={c[name].ok} optional={name === "departures"} />
-          <span className={c[name].ok ? "text-body" : "text-ink"}>{t(`check_${name}` as MessageKey) as string}</span>
-          {detail[name] && <span className="truncate text-muted">· {detail[name]}</span>}
-        </li>
+    <span className="flex min-w-0 flex-col gap-0.5 text-xs" data-testid="workbench-checks">
+      <span className="flex items-center gap-1 text-body">
+        <Check size={13} className="text-success" aria-hidden="true" />
+        {t("checksOk", ok.length, WORKBENCH_CHECKS.length)}
+      </span>
+      {open.map((name) => (
+        <span key={name} className="flex min-w-0 items-start gap-1">
+          {name === "departures" ? (
+            <Minus size={13} className="mt-px shrink-0 text-muted" aria-hidden="true" />
+          ) : (
+            <X size={13} className="mt-px shrink-0 text-danger" aria-hidden="true" />
+          )}
+          <span className={`min-w-0 break-words ${name === "departures" ? "text-muted" : "text-ink"}`}>
+            {t(`check_${name}` as MessageKey) as string}
+            {detail[name] ? ` · ${detail[name]}` : ""}
+          </span>
+        </span>
       ))}
-    </ul>
+    </span>
   );
 }
 
@@ -359,7 +365,7 @@ function Workbench() {
           }}
           emptyTitle={t("emptyTitle")}
           emptyDescription={filtered ? t("emptyHint") : t("emptyAll")}
-          tableMinWidth={1040}
+          tableMinWidth={960}
         />
       </Section>
       {importing && <ImportDrawer filters={filters} onClose={() => setImporting(false)} />}

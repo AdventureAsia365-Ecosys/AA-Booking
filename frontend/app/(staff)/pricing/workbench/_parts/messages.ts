@@ -69,6 +69,7 @@ export const M = defineMessages(
     checkRates: (rated: number, total: number) => `${rated} of ${total} with a rate`,
     checkDepartures: (n: number) => `${n} upcoming`,
     checkOptional: "optional",
+    checksOk: (ok: number, total: number) => `${ok} of ${total} ready`,
     // steps
     step_add_components: "Add hotels & services",
     step_fix_inactive: "Replace an inactive item",
@@ -222,6 +223,7 @@ export const M = defineMessages(
     checkRates: (rated: number, total: number) => `${rated}/${total} có giá`,
     checkDepartures: (n: number) => `${n} sắp tới`,
     checkOptional: "không bắt buộc",
+    checksOk: (ok: number, total: number) => `${ok}/${total} đã xong`,
     step_add_components: "Thêm khách sạn & dịch vụ",
     step_fix_inactive: "Thay mục đã ngừng",
     step_load_rates: "Nhập giá nhà cung cấp",

@@ -108,6 +108,14 @@ const PAGES: PageCase[] = [
   { name: "agency-tariff", path: "/pricing/agency-tiers/tariff?partner=pt-1" },
   { name: "price-readiness", path: "/pricing/readiness" },
   { name: "price-workbench", path: "/pricing/workbench" },
+  // AA-1091: a trip plan's hotels and services, with the drawer of suggestions from the itinerary open.
+  {
+    name: "plan-components-drawer",
+    path: "/catalog/trip-plans/tour-00001?tab=components",
+    ready: '[data-testid="plan-components"] li',
+    click: 'button:has-text("Suggest from the itinerary")',
+    noTable: true,
+  },
   { name: "trip-checks", path: "/trip-checks" },
   { name: "b2b-desk-on-request", path: "/b2b-desk" },
   { name: "b2b-desk-departures", path: "/b2b-desk?tab=departures" },

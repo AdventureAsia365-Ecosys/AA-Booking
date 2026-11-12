@@ -49,7 +49,7 @@ import type {
 import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
-import type { NextStep, Workbench, WorkbenchItem } from "../../lib/api/priceWorkbench";
+import type { ComponentSuggestions, NextStep, PlanComponents, SuggestionCandidate, Workbench, WorkbenchItem } from "../../lib/api/priceWorkbench";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { Allotment, AllotmentList, Departure, DepartureList } from "../../lib/api/departures";
@@ -832,6 +832,60 @@ function workbenchItem(r: ReadinessItem, i: number): WorkbenchItem {
   };
 }
 const WORKBENCH_ITEMS = READINESS_ITEMS.map(workbenchItem);
+// A tour's hotels and services and the suggestions from its itinerary: long names, every need status, alternatives.
+function planComponents(key: string): PlanComponents {
+  return {
+    trip_plan_id: uuid("p", 1),
+    source_id: key,
+    items: [
+      { component_id: `rt:${uuid("r", 1)}`, kind: "hotel_room", day_no: 1, hotel_room_type_id: uuid("r", 1), service_id: null, label: "HTL-003101 Invented Lagoon Riverside Boutique Retreat · Superior Garden View Twin", active: true },
+      { component_id: `sv:${uuid("s", 2)}`, kind: "guide", day_no: 1, hotel_room_type_id: null, service_id: uuid("s", 2), label: "SVC-004202 Invented English-speaking guide, full day", active: false },
+    ],
+  };
+}
+function candidate(i: number, kind: string, hotel: boolean): SuggestionCandidate {
+  return {
+    kind: hotel ? "hotel_room" : kind,
+    hotel_room_type_id: hotel ? uuid("r", 10 + i) : null,
+    service_id: hotel ? null : uuid("s", 10 + i),
+    code: hotel ? `HTL-00${3110 + i}` : `SVC-00${4210 + i}`,
+    label: hotel ? `HTL-00${3110 + i} Invented Hidden Lagoon Lodge ${i + 1} · Deluxe Twin` : `SVC-00${4210 + i} Invented ${kind} of the valley ${i + 1}`,
+    room_type: hotel ? "Deluxe Twin" : null,
+    room_types: hotel ? [{ id: uuid("r", 10 + i), name: "Deluxe Twin" }, { id: uuid("r", 20 + i), name: "Family room with lagoon view" }] : [],
+    supplier_code: `SUP-00${1100 + i}`,
+    score: [0.95, 0.4, 0.2][i] ?? 0.2,
+    confidence: (["high", "medium", "low"] as const)[i] ?? "low",
+    reasons: ["named in the day's text", "at the night's place in CIS (Invented Lagoon Town)", "in Invented Land"].slice(0, 3 - i),
+  };
+}
+function suggestions(key: string): ComponentSuggestions {
+  const need = (kind: string, status: "suggested" | "covered" | "unmatched") => ({
+    kind,
+    keywords: kind === "hotel" ? [] : [kind === "meal" ? "lunch" : kind],
+    place: "Invented Lagoon Town",
+    status,
+    current: status === "covered" ? [{ day_no: 1, kind, label: "SVC-004202 Invented English-speaking guide, full day" }] : [],
+    suggestion: status === "suggested" ? candidate(0, kind, kind === "hotel") : null,
+    alternatives: status === "suggested" ? [candidate(1, kind, kind === "hotel"), candidate(2, kind, kind === "hotel")] : [],
+  });
+  return {
+    tour_key: key,
+    title: "Invented Highlands and Hidden Lagoons Discovery Journey 1",
+    country: "Invented Land",
+    duration_days: 3,
+    days: [
+      { day_no: 1, title: "Arrival and the hidden lagoon by boat", places: ["Invented Lagoon Town"], overnight_place: "Invented Lagoon Town", needs: [need("hotel", "suggested"), need("guide", "covered"), need("transfer", "unmatched")] },
+      { day_no: 2, title: "Valley jeep day with lunch at a farm", places: ["Invented Valley"], overnight_place: "Invented Valley", needs: [need("hotel", "suggested"), need("meal", "suggested"), need("activity", "suggested")] },
+      { day_no: 3, title: "Departure", places: [], overnight_place: null, needs: [need("transfer", "unmatched")] },
+    ],
+    unmatched: [
+      { day_no: 1, kind: "transfer", keywords: ["transfer"], place: "Invented Lagoon Town", why: "no active transfer service matches (transfer)" },
+      { day_no: 3, kind: "transfer", keywords: ["transfer"], place: null, why: "no active transfer service matches (transfer)" },
+    ],
+    counts: { suggested: 4, covered: 1, unmatched: 2 },
+    degraded: [],
+  };
+}
 const WORKBENCH: Workbench = {
   ...READINESS,
   summary: {
@@ -1881,6 +1935,8 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "catalog/trip-plans/facets") return ok(TRIP_PLAN_FACETS);
   if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "prices") return ok({ ...PRICE_MATRIX, source_id: at(2) });
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "components") return ok(planComponents(at(2)));
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "component-suggestions") return ok(suggestions(at(2)));
   if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "departures" && seg.length === 4) return ok(planDepartures(at(2)));
   if (at(0) === "catalog" && at(1) === "departures" && at(3) === "allotments") return ok(departureAllotments(at(2)));
   if (at(0) === "catalog" && at(1) === "trip-plans" && seg.length === 3) return ok(tripPlanDetail(at(2)));
