@@ -767,6 +767,13 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
     prices. HTML = one self-contained file (inline CSS, no script, every value escaped, CSP `default-src 'none'`),
     downloaded as an attachment; Booking has no PDF renderer, so the page prints to PDF from the browser. Staff:
     "Confirmation" on a B2B trip case.
+  - **Trip length (AA-1088, S278 audit M13)**: a `tp:` line covers the tour's days = the larger of the CIS catalog
+    `duration_days` (`catalog.v_tour`) and the plan's highest component `day_no` (`app/b2b/plan_span.py`; a catalog
+    read error falls back to the components). The confirm stores the case end from it (was: the highest priced day,
+    so a 6-day tour priced on day 1 stored end = start) and the tour item's `day_to`; the confirmation and the
+    vouchers show the later of the stored end and that span, so a case stored before AA-1088 prints the whole tour.
+    A B2B case has no TripPlanner legs: its `trip_title` (case detail, case list, proposals list) is its first
+    version's title, the tour sold (`trip_cases/sql.py` `B2B_HEADLINE`), never "Custom trip".
   - **G4 credit stop**: `POST /holds` is 409 `credit_hold_overdue` while the agency's `booking.v_tenant_billing_status`
     is `past_due` (oldest overdue agency invoice past `suspend_after_days`); replays, confirms, extends and cancels of
     existing holds still work; the stop lifts once the overdue invoices are paid (payment approved).

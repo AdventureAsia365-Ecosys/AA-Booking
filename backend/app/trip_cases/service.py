@@ -188,7 +188,7 @@ async def list_cases(
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(
         f"""
-        SELECT {CASE_COLUMNS}, {OPEN_ASSIGNEES}, {sql.LEGS_JSON}, {sql.COUNTRIES_ARRAY},
+        SELECT {CASE_COLUMNS}, {OPEN_ASSIGNEES}, {sql.LEGS_JSON}, {sql.COUNTRIES_ARRAY}, {sql.B2B_HEADLINE},
                tc.inquiry_snapshot::text AS inquiry_snapshot,
                (SELECT max(v.version_number) FROM booking.trip_case_versions v
                 WHERE v.trip_case_id = tc.id AND v.deleted_at IS NULL) AS latest_version
@@ -206,7 +206,8 @@ async def list_cases(
         case = _case_dict(row)
         legs = sql.loads(case.pop("legs", None), [])
         snapshot = sql.loads(case.pop("inquiry_snapshot", None))
-        case.update(sql.trip_shape(snapshot, legs, case.get("start_date")))
+        headline = case.pop("b2b_headline", None)
+        case.update(sql.trip_shape(snapshot, legs, case.get("start_date"), headline=headline))
         items.append(case)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -305,7 +306,9 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     )
     case["legs"] = [dict(r) for r in legs]
     await _tour_flags(conn, case)
-    case.update(sql.trip_shape(case["inquiry_snapshot"], case["legs"], case.get("start_date")))
+    # AA-1088 (M13): a B2B case with no legs reads as its first version's title (the CIS tour sold), not "Custom trip"
+    headline = versions[0]["title"] if case.get("channel") == "b2b" and versions else None
+    case.update(sql.trip_shape(case["inquiry_snapshot"], case["legs"], case.get("start_date"), headline=headline))
     case["leg_countries"] = await leg_countries(conn, case["legs"], case["inquiry_snapshot"])
     case["versions"] = [sql.version_dict(r) for r in versions]
     case["status_history"] = [dict(r) for r in history]
