@@ -202,7 +202,7 @@ async def _apply_one(conn: asyncpg.Connection, change: dict[str, Any], digest: s
             before=before or None,
             after=after,
             entity_label=change["code"],
-            summary=f"Display fix of {change['code']} (AA-1088): tour title and whole-tour dates as confirmed today",
+            summary=f"Display fix of {change['code']}: tour title and whole-tour dates as confirmed today",
         )
 
 
@@ -264,7 +264,7 @@ async def _main(apply_changes: bool, expected_hash: str | None) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Display fix of B2B cases confirmed before AA-1013 / AA-1088.")
+    parser = argparse.ArgumentParser(description="Display fix of B2B cases confirmed before the tour title and whole-tour dates were stored.")
     parser.add_argument("--apply", action="store_true", help="write the fix (default: DRY RUN, counts only)")
     parser.add_argument("--expect-plan", default=None, help="with --apply: the DRY RUN's plan_hash (required)")
     args = parser.parse_args(argv)
