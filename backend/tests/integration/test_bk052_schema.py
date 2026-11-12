@@ -1,4 +1,4 @@
-"""AA-1088 (bk-056, S278 lane l18) on a real PostgreSQL: the version locks keep refusing every write to an approved
+"""AA-1088 (bk-052, S278 lane l18) on a real PostgreSQL: the version locks keep refusing every write to an approved
 version and its items, and open exactly one door for the one-off legacy B2B display fix.
 
 Registration and re-run no-op; both functions are bk_owner's and carry the exception; without the setting an approved
@@ -20,9 +20,9 @@ import pytest_asyncio
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "056_b2b_legacy_display_fix.sql"
+MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "052_b2b_legacy_display_fix.sql"
 FUNCTIONS = ("trip_case_version_lock", "trip_case_version_item_lock")
-NOTE = "it-bk056"
+NOTE = "it-bk052"
 TENANT = "00000000-0000-4000-8000-0000000b0056"
 BODIES = (
     "SELECT p.proname, p.prosrc, pg_get_userbyid(p.proowner) AS owner FROM pg_proc p"
@@ -83,7 +83,7 @@ async def approved(admin: asyncpg.Connection) -> AsyncIterator[dict[str, str]]:
 
 
 async def test_registered_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> None:
-    assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-056'") == 1
+    assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-052'") == 1
     before = [dict(r) for r in await admin.fetch(BODIES, list(FUNCTIONS))]
     await admin.execute("SET ROLE bk_owner")
     await admin.execute(MIGRATION.read_text(encoding="utf-8"))

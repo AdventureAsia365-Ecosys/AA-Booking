@@ -1,8 +1,8 @@
--- Migration bk-056: AA-1088 (S278 lane l18, M13 follow-up) — the version locks let the one-off display fix of B2B
+-- Migration bk-052: AA-1088 (S278 lane l18, M13 follow-up) — the version locks let the one-off display fix of B2B
 -- cases confirmed before AA-1013 / AA-1088 rewrite exactly their placeholder titles and their short day spans.
 --
 -- Owner: AA-Booking (key bk-NNN). AA-CIS-Infra Migration Sync copies it byte for byte to
--- db/migrations/booking/056_b2b_legacy_display_fix.sql; on Dev it is applied as bk_owner (the live owner of schema
+-- db/migrations/booking/052_b2b_legacy_display_fix.sql; on Dev it is applied as bk_owner (the live owner of schema
 -- booking since bk-014) by Infra Migration Apply once every job table is idle (root ADR 0017a), or by a person with
 -- DB Migrate apply. Never run it from a laptop.
 --
@@ -29,7 +29,7 @@
 -- lock on end_date: the app moves it directly.
 --
 -- Class: contract (root ADR 0017 d3): it replaces two existing trigger functions. MIG-4: a migration-only PR first,
--- then the code PR that raises readiness to bk-056 and ships app/b2b/legacy_cases.py. On Dev: Infra Migration Apply
+-- then the code PR that raises readiness to bk-052 and ships app/b2b/legacy_cases.py. On Dev: Infra Migration Apply
 -- once every job table is idle (root ADR 0017a).
 -- DM-6.1 / DM-7.1: no new column or table.
 -- Locks: CREATE OR REPLACE FUNCTION only (no table lock beyond the catalog row). lock_timeout 5s.
@@ -43,18 +43,18 @@ SET LOCAL lock_timeout = '5s';
 DO $$
 BEGIN
     IF current_user <> 'bk_owner' THEN
-        RAISE EXCEPTION 'bk-056: expected to run as bk_owner (live owner of schema booking), running as %', current_user;
+        RAISE EXCEPTION 'bk-052: expected to run as bk_owner (live owner of schema booking), running as %', current_user;
     END IF;
     IF to_regprocedure('booking.trip_case_version_lock()') IS NULL
        OR to_regprocedure('booking.trip_case_version_item_lock()') IS NULL THEN
-        RAISE EXCEPTION 'bk-056: needs bk-003 (the version lock functions) first';
+        RAISE EXCEPTION 'bk-052: needs bk-003 (the version lock functions) first';
     END IF;
     IF to_regclass('booking.b2b_holds') IS NULL OR to_regclass('booking.b2b_quote_lines') IS NULL THEN
-        RAISE EXCEPTION 'bk-056: needs bk-020 (B2B holds and quote lines) first';
+        RAISE EXCEPTION 'bk-052: needs bk-020 (B2B holds and quote lines) first';
     END IF;
     IF EXISTS (SELECT 1 FROM shared.schema_versions
-                WHERE version = 'bk-056' AND description NOT LIKE 'AA-1088 legacy B2B display fix:%') THEN
-        RAISE EXCEPTION 'bk-056: the key bk-056 is already held by another migration (not AA-1088): renumber one';
+                WHERE version = 'bk-052' AND description NOT LIKE 'AA-1088 legacy B2B display fix:%') THEN
+        RAISE EXCEPTION 'bk-052: the key bk-052 is already held by another migration (not AA-1088): renumber one';
     END IF;
 END $$;
 
@@ -64,7 +64,7 @@ CREATE OR REPLACE FUNCTION booking.trip_case_version_lock() RETURNS trigger
 AS $$
 BEGIN
     IF OLD.is_approved THEN
-        -- bk-056 (AA-1088): the one-off display fix may replace the pre-AA-1013 placeholder title of a B2B version.
+        -- bk-052 (AA-1088): the one-off display fix may replace the pre-AA-1013 placeholder title of a B2B version.
         IF TG_OP = 'UPDATE'
            AND current_setting('booking.legacy_display_fix', true) = 'aa1088'
            AND OLD.channel = 'b2b'
@@ -93,7 +93,7 @@ DECLARE
     v_id UUID;
 BEGIN
     v_id := CASE WHEN TG_OP = 'INSERT' THEN NEW.trip_case_version_id ELSE OLD.trip_case_version_id END;
-    -- bk-056 (AA-1088): the one-off display fix may give an item of an approved B2B version its tour title (only over
+    -- bk-052 (AA-1088): the one-off display fix may give an item of an approved B2B version its tour title (only over
     -- the pre-AA-1013 placeholder) and a longer day span (pre-AA-1088 confirms counted the priced days only).
     IF TG_OP = 'UPDATE'
        AND current_setting('booking.legacy_display_fix', true) = 'aa1088'
@@ -127,10 +127,10 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.trip_case_version_lock() IS
-    'bk-003: an approved trip case version is locked. bk-056 (AA-1088): while booking.legacy_display_fix = aa1088, an '
+    'bk-003: an approved trip case version is locked. bk-052 (AA-1088): while booking.legacy_display_fix = aa1088, an '
     'approved B2B version may change its pre-AA-1013 placeholder title only (app/b2b/legacy_cases.py).';
 COMMENT ON FUNCTION booking.trip_case_version_item_lock() IS
-    'bk-003: items of an approved version are locked. bk-056 (AA-1088): while booking.legacy_display_fix = aa1088, an '
+    'bk-003: items of an approved version are locked. bk-052 (AA-1088): while booking.legacy_display_fix = aa1088, an '
     'item of an approved B2B version may replace its placeholder title and lengthen day_to only.';
 
 -- ── Post-check ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -142,12 +142,12 @@ BEGIN
            AND p.proname IN ('trip_case_version_lock', 'trip_case_version_item_lock')
            AND p.prosrc LIKE '%legacy_display_fix%'
            AND pg_get_userbyid(p.proowner) = 'bk_owner') <> 2 THEN
-        RAISE EXCEPTION 'bk-056: the two lock functions do not carry the display fix exception (or are not bk_owner''s)';
+        RAISE EXCEPTION 'bk-052: the two lock functions do not carry the display fix exception (or are not bk_owner''s)';
     END IF;
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-056', now(), 'AA-1088 legacy B2B display fix: the version locks let the one-off fix replace placeholder '
+VALUES ('bk-052', now(), 'AA-1088 legacy B2B display fix: the version locks let the one-off fix replace placeholder '
                          'titles and lengthen item spans of B2B cases confirmed before AA-1013 / AA-1088')
 ON CONFLICT (version) DO NOTHING;
 
