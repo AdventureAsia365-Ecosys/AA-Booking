@@ -70,7 +70,17 @@ in code. This file covers slice **A** (the policy parameters); slices B–E are 
 - `quote_validity_festive_days`, `festive_non_refundable_days` and `gala_dinner_days` need the season calendars and
   holiday events (slice C) to be read; until then a festive quote gets the normal validity.
 - bk-050 / bk-051 need bk-049 (lane l15, b2b_partners RLS) merged first: the migration guard wants contiguous numbers
-  and the preflight wants main max + 1.
+  and the preflight wants main max + 1. Ship order: the l15 Booking migration PR (applies booking/049), then the
+  migrations branch rebased on the new main (disjoint files, no conflict; a trial of 049 + 050 + 051 passed the
+  preflight with the pinned Infra tools, the guard test, the pre-push and the whole integration suite), then the code
+  PR. Never apply 050 by hand before 049 is registered (049 would become out of order).
+- bk-051 review fix pass: the non-margin columns are copied from the **approved** rule in force on 2026-11-12 (the
+  same pick as `repository.RULE_SQL`), never a pending staff draft or a future-dated row (that would have put an
+  unapproved value in force under the tech lead's approval). Both seed inserts conflict on `id` only, so a staff row
+  that already holds (channel, 2026-11-12), or a b2b default cancellation schedule on that date, fails the file and
+  rolls it back instead of being skipped while bk-051 registers; a post-check also fails the file unless the two rules
+  and the schedule exist with their approvals (a channel with no approved rule to copy from). If the Dev apply fails
+  on such a clash, agree a new date with the tech lead and change it before the file is registered.
 
 ## Not done yet (this lane)
 
