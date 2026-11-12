@@ -884,7 +884,7 @@ async def list_versions(
         SELECT {sql.VERSION_COLUMNS}, tc.id::text AS trip_case_id, tc.code AS trip_case_code,
                tc.status AS trip_case_status, tc.channel AS trip_case_channel, tc.start_date,
                us.name AS updated_by_name, {sales} AS sales_id, {sql.LEGS_JSON},
-               tc.inquiry_snapshot::text AS inquiry_snapshot
+               tc.inquiry_snapshot::text AS inquiry_snapshot, {sql.B2B_HEADLINE}
         {base} LEFT JOIN booking.staff_users us ON us.cis_user_id = v.updated_by
         WHERE {clause}
         ORDER BY {order}
@@ -898,7 +898,10 @@ async def list_versions(
     for row in rows:
         out = sql.version_dict(row)
         shape = sql.trip_shape(
-            sql.loads(out.pop("inquiry_snapshot")), sql.loads(out.pop("legs"), []), row["start_date"]
+            sql.loads(out.pop("inquiry_snapshot")),
+            sql.loads(out.pop("legs"), []),
+            row["start_date"],
+            headline=out.pop("b2b_headline", None),
         )
         out["updated_by"] = {"id": row["updated_by"], "name": out.pop("updated_by_name")}
         out.update(
