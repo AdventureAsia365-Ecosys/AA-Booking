@@ -1,5 +1,5 @@
 """AA-1088 M13 follow-up (S278 lane l18): the display fix of B2B cases confirmed before #163 / #231
-(:mod:`app.b2b.legacy_cases`) and the bk-056 lock exception it relies on, as role ``booking`` on a real PostgreSQL.
+(:mod:`app.b2b.legacy_cases`) and the bk-052 lock exception it relies on, as role ``booking`` on a real PostgreSQL.
 
 A staff-entered booking of the bk-020 plan is confirmed today, then turned into what an old confirm wrote (as
 ``bk_owner`` with the row guards off for the set-up only): placeholder version and item titles, end date = start date,

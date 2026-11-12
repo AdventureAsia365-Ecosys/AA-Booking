@@ -67,7 +67,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-048",  # AA-1073 rest: departure board view, ops sheet, departure fees, price adjustments, early booking
     "bk-050",  # AA-1091: pricing policy parameters (read by every B2B quote and Pricing > Policy); MIG-4
     # bk-051 (AA-1091 S278 margins and cancellation scale) writes rows only; the code reads whatever is in force.
-    "bk-056",  # AA-1088 (S278 l18): version locks let the legacy B2B display fix through (app/b2b/legacy_cases.py)
+    "bk-052",  # AA-1088 (S278 l18): version locks let the legacy B2B display fix through (app/b2b/legacy_cases.py)
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

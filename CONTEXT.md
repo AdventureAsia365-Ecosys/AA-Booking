@@ -797,7 +797,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
     counts, the changes and a `plan_hash`; ECS Exec on the API task, role `booking`), then `--apply --expect-plan
     <plan_hash>`, which recomputes the plan and writes nothing (exit 3) unless it is still the reviewed one: the same
     code writes the tour title over the exact placeholder titles, the later end date and the longer item spans, one
-    audit row per case (`trip_case.legacy_display_fixed`, with the plan hash). bk-056 lets exactly that write through the version locks while the
+    audit row per case (`trip_case.legacy_display_fixed`, with the plan hash). bk-052 lets exactly that write through the version locks while the
     transaction sets `booking.legacy_display_fix = 'aa1088'`.
   - **G4 credit stop**: `POST /holds` is 409 `credit_hold_overdue` while the agency's `booking.v_tenant_billing_status`
     is `past_due` (oldest overdue agency invoice past `suspend_after_days`); replays, confirms, extends and cancels of

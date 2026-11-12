@@ -1,5 +1,5 @@
 """AA-1088 M13 follow-up (S278 lane l18): the shell of :mod:`app.b2b.legacy_cases` (the plan / apply logic and the
-bk-056 lock exception run on PostgreSQL in tests/integration/test_aa1088_legacy_cases.py).
+bk-052 lock exception run on PostgreSQL in tests/integration/test_aa1088_legacy_cases.py).
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ HASH = "0" * 64
 
 
 @pytest.mark.asyncio
-async def test_apply_refuses_before_bk056() -> None:
-    with pytest.raises(RuntimeError, match="bk-056"):
+async def test_apply_refuses_before_bk052() -> None:
+    with pytest.raises(RuntimeError, match="bk-052"):
         await legacy_cases.apply(_NoKey(), HASH)  # type: ignore[arg-type]
 
 
@@ -135,15 +135,15 @@ def test_main_turns_a_missing_key_into_exit_3(
         return _Conn()
 
     async def refuse(_: Any, *__: Any) -> dict[str, Any]:
-        raise RuntimeError("bk-056 is not applied: the version locks refuse the fix")
+        raise RuntimeError("bk-052 is not applied: the version locks refuse the fix")
 
     monkeypatch.setattr(legacy_cases.asyncpg, "connect", connect)
     monkeypatch.setattr(legacy_cases, "apply", refuse)
     assert legacy_cases.main(["--apply", "--expect-plan", HASH]) == 3
-    assert "bk-056" in json.loads(capsys.readouterr().out)["error"]
+    assert "bk-052" in json.loads(capsys.readouterr().out)["error"]
 
 
-# ── plan / apply against a scripted connection (PostgreSQL and the bk-056 locks: the integration test) ─────────────
+# ── plan / apply against a scripted connection (PostgreSQL and the bk-052 locks: the integration test) ─────────────
 
 START = date(2027, 3, 1)
 CASE = {

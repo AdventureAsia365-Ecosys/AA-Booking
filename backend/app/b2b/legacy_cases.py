@@ -14,7 +14,7 @@ are right (the documents compute the values at read time since #231):
 kept, as the documents do), a new version title only over the exact placeholder, an item title only over its exact
 placeholder, a ``day_to`` only when longer. Synthetic and real agencies alike: this is display data, never money.
 :func:`apply` writes it, one transaction per case, as role ``booking`` with ``booking.legacy_display_fix = 'aa1088'``
-set for that transaction: the bk-003 version locks let exactly these changes through (bk-056); one audit row per case
+set for that transaction: the bk-003 version locks let exactly these changes through (bk-052); one audit row per case
 (``trip_case.legacy_display_fixed``, actor ``system``, with the plan hash). Idempotent: a fixed case plans nothing.
 
 **The apply writes only the plan a person reviewed.** The DRY RUN prints ``plan_hash`` (SHA-256 of every planned
@@ -52,7 +52,7 @@ from app.b2b.components import PREFIX_PLAN, parse_component
 FIX_SETTING = "booking.legacy_display_fix"
 FIX_VALUE = "aa1088"
 ACTOR = "aa1088-legacy-display-fix"
-REQUIRED_KEY = "bk-056"
+REQUIRED_KEY = "bk-052"
 
 CASES_SQL = """
 SELECT tc.id::text AS case_id, tc.code, tc.start_date, tc.end_date, h.quote_id::text AS quote_id, h.proposal_ref,
@@ -208,7 +208,7 @@ async def _apply_one(conn: asyncpg.Connection, change: dict[str, Any], digest: s
 
 async def apply(conn: asyncpg.Connection, expected_hash: str) -> dict[str, Any]:
     """Write the planned changes, one transaction per case, only when the plan is still the DRY RUN's
-    (``expected_hash`` = its ``plan_hash``; else :class:`PlanChanged`, nothing written). Refuses before bk-056 (the
+    (``expected_hash`` = its ``plan_hash``; else :class:`PlanChanged`, nothing written). Refuses before bk-052 (the
     locks would refuse anyway)."""
     if not HASH_RE.match(expected_hash or ""):
         raise PlanChanged("--expect-plan must be the DRY RUN's plan_hash (64 lower-case hex characters)")
