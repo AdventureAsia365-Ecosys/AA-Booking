@@ -68,7 +68,9 @@ async def _report(
 ) -> str:
     code = extra.get("error_code", None if status == "ok" else "plan_changed")
     plan = extra.get("plan_hash", None if mode == "verify" else HASH)
-    census = extra.get("census", json.dumps({"pii_columns_checked": 3, "pii_rows_found": 0}) if mode == "verify" else None)
+    census = extra.get(
+        "census", json.dumps({"pii_columns_checked": 3, "pii_rows_found": 0}) if mode == "verify" else None
+    )
     return await conn.fetchval(
         "INSERT INTO booking.tenant_erasure_log (request_id, tenant_id, round, mode, status, error_code, plan_hash,"
         " tables, census, source) VALUES (gen_random_uuid(), $1, 1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 'cli')"
@@ -206,9 +208,10 @@ async def footprint(admin: asyncpg.Connection, clean: None) -> AsyncIterator[dic
             )
             await admin.execute(
                 "UPDATE booking.agency_invoice SET status = 'issued', number = $2, issued_on = DATE '2026-11-02',"
-                " due_date = DATE '2026-11-16', issued_at = now(), issued_by = 'staff:it', billing_entity_id = $3::uuid,"
-                " issuer = '{\"legal_entity\": \"Invented Issuer Ltd\"}'::jsonb,"
-                " bill_to = '{\"agency_name\": \"invented bill-to\"}'::jsonb WHERE id = $1::uuid",
+                " due_date = DATE '2026-11-16', issued_at = now(), issued_by = 'staff:it',"
+                " billing_entity_id = $3::uuid,"
+                ' issuer = \'{"legal_entity": "Invented Issuer Ltd"}\'::jsonb,'
+                ' bill_to = \'{"agency_name": "invented bill-to"}\'::jsonb WHERE id = $1::uuid',
                 invoice,
                 f"AAT-2026-9057{str(tenant)[-2:]}",
                 entity,
@@ -282,7 +285,9 @@ async def test_the_guards_refuse_without_a_valid_scoped_opening(
         await _refused(app, None, sql, arg, denied)  # no opening: append-only
         await _refused(app, "not-a-report", sql, arg, denied)  # any value: refused
         await _refused(app, str(uuid.uuid4()), sql, arg, denied)  # names no report
-    await _refused(app, None, REDACT_PAYMENT, mine["payment"], asyncpg.RestrictViolationError)  # bk-042: the decision is final
+    await _refused(
+        app, None, REDACT_PAYMENT, mine["payment"], asyncpg.RestrictViolationError
+    )  # bk-042: the decision is final
     failed = await _report(app, MINE, status="refused")
     planned_other = await _report(app, OTHER)
     for sql, arg in ((REDACT_AUDIT, mine["partner"]), (CLEAR_NOTE, mine["case"]), (REDACT_PAYMENT, mine["payment"])):
@@ -297,7 +302,9 @@ async def test_the_guards_refuse_without_a_valid_scoped_opening(
             await app.execute(OPEN, mine_ok)
             await app.execute(CLEAR_NOTE, mine["case"])
     with pytest.raises(asyncpg.InsufficientPrivilegeError):  # columns outside the grant
-        await app.execute("UPDATE booking.audit_logs SET action = 'tampered' WHERE entity_id = $1::uuid", mine["partner"])
+        await app.execute(
+            "UPDATE booking.audit_logs SET action = 'tampered' WHERE entity_id = $1::uuid", mine["partner"]
+        )
     async with app.transaction():
         await app.execute(OPEN, mine_ok)
         for sql in (
@@ -309,8 +316,9 @@ async def test_the_guards_refuse_without_a_valid_scoped_opening(
                     await app.execute(sql, mine["partner"])
         with pytest.raises(asyncpg.CheckViolationError):
             async with app.transaction():
-                await app.execute("UPDATE booking.trip_case_status_history SET note = 'x' WHERE trip_case_id = $1::uuid",
-                                  mine["case"])  # fmt: skip
+                await app.execute(
+                    "UPDATE booking.trip_case_status_history SET note = 'x' WHERE trip_case_id = $1::uuid", mine["case"]
+                )
         with pytest.raises(asyncpg.CheckViolationError):  # amounts stay
             async with app.transaction():
                 await app.execute("UPDATE booking.agency_payment SET amount = 1, note = NULL WHERE id = $1::uuid",
