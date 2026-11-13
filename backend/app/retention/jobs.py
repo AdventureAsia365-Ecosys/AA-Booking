@@ -47,10 +47,13 @@ import asyncpg
 import boto3
 
 from app import audit, pilot
+from app.errors import Unavailable
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
 from app.notifications.service import notify_staff
+from app.pricing import policy_values
+from app.pricing.policy_values import PolicyUnavailable
 from app.retention import runner
 from app.retention.archive import S3Archiver
 from app.retention.policy import (
@@ -61,6 +64,7 @@ from app.retention.policy import (
     SPECS,
     Spec,
     archive_bucket,
+    resolve,
     without_pilots,
 )
 
@@ -336,8 +340,12 @@ async def _run_locked(
     bucket_factory: BucketFactory,
     environ: Environ,
 ) -> dict[str, Any]:
-    windows = spec.windows()
     today = await conn.fetchval("SELECT (now() AT TIME ZONE 'UTC')::date")
+    try:  # S279 L3 (bk-056): the windows in force today (pricing policy, Pricing > Policy)
+        spec = await resolve(conn, spec, today)
+    except PolicyUnavailable as exc:
+        raise PermanentError(f"retention windows unavailable: {exc}") from None
+    windows = spec.windows()
     try:
         forced = override_cutoff(spec.kind, payload, today, environ)
     except OverrideRefused as exc:
@@ -591,7 +599,12 @@ async def status(conn: asyncpg.Connection, environ: Environ | None = None) -> di
     for r in rows:
         by_kind[r["kind"]][r["bucket"]] = job_view(r)
     out = []
-    for kind, spec in SPECS.items():
+    today = await policy_values.today_utc(conn)
+    for kind, static_spec in SPECS.items():
+        try:  # S279 L3: the windows in force today; a missing one is AA-side data missing (503)
+            spec = await resolve(conn, static_spec, today)
+        except PolicyUnavailable as exc:
+            raise Unavailable("policy_unavailable", str(exc)) from None
         live = await last_live(conn, kind)
         out.append(
             {

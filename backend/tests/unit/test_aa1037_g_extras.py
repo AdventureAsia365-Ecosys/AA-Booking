@@ -25,8 +25,9 @@ from app.jobs.kinds import EXPECTED_SECONDS
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
 from app.main import create_app
+from app.pricing import policy_values
 from app.settings import Settings
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 
 FIN = Staff("fin-1", None, "Finance One", "finance", True, None)
 ADMIN = Staff("adm-1", None, "Admin One", "admin", True, None)
@@ -134,12 +135,15 @@ async def test_credit_stop_only_when_past_due() -> None:
 # ── G4: reminders ────────────────────────────────────────────────────────────
 
 
-def test_parse_steps() -> None:
-    assert reminders.parse_steps(None) == (1, 7, 14)
-    assert reminders.parse_steps("[10, 3, 3]") == (3, 10)
-    assert reminders.parse_steps([2, 5]) == (2, 5)
-    for bad in ("[]", "[0]", "[400]", '["7"]', "[true]", "not json", "{}"):
-        assert reminders.parse_steps(bad) == (1, 7, 14)
+@pytest.mark.asyncio
+async def test_reminder_steps_are_the_policy_value() -> None:
+    """S279 L3 (bk-056): the steps are the pricing policy parameter agency_reminder_steps_days in force that day."""
+    conn = ScriptedConn().on(POLICY_FRAGMENT, policy_rows(agency_reminder_steps_days="[3, 10]"))
+    assert await reminders._steps(conn, date(2026, 12, 1)) == (3, 10)
+    assert await reminders._steps(ScriptedConn(), date(2026, 12, 1)) == (1, 7, 14)  # the bk-056 seed
+    missing = [r for r in policy_rows() if r["param_key"] != reminders.STEPS_KEY]
+    with pytest.raises(policy_values.PolicyUnavailable):
+        await reminders._steps(ScriptedConn().on(POLICY_FRAGMENT, missing), date(2026, 12, 1))
 
 
 def test_due_step_sends_only_the_highest_step_once() -> None:
@@ -209,7 +213,6 @@ def mail_settings(**over: Any) -> Settings:
 
 def reminder_conn(rows: list[dict[str, Any]]) -> ScriptedConn:
     conn = ScriptedConn()
-    conn.on("FROM booking.settings", None)
     conn.on("FROM booking.agency_invoice i", rows)
     return conn
 

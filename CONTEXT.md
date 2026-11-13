@@ -450,7 +450,7 @@ Booking sends transactional e-mail through **Amazon SES** on acc2 (identity `lum
 `accounts/aa365/ses.tf`; the task role may send only as `ses_from_address`, IAM `ses:FromAddress`). The staff "new
 inquiry" e-mail (`bk_notify_email`) is retired with the B2C intake (AA-1046). **Agency invoice reminders** (AA-1037 G4,
 `bk_agency_invoice_reminders`, daily, `app/agency_billing/reminders.py`): an overdue issued agency invoice gets one
-e-mail per step it reaches (setting `agency_reminder_steps_days`, default 1 / 7 / 14 days overdue, plus the credit-stop
+e-mail per step it reaches (pricing policy parameter `agency_reminder_steps_days`, seed 1 / 7 / 14 days overdue, plus the credit-stop
 step at the agency's `suspend_after_days`; only the highest step reached), to the bill-to billing e-mail of the
 invoice, recorded once per (invoice, step) in `booking.agency_invoice_reminder` (bk-044). Outside `prod` every
 reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). Bounce/complaint suppression in Booking
@@ -564,6 +564,19 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   versions and tariffs only. The B2B quote reads `quote_validity_days` (`valid_until`) and `group_on_request_min_pax`
   (a `tp:` line of that many travellers or more is `on_request`, and its hold stays on request); the other
   parameters are stored for the price-version, season-calendar and tariff slices.
+  **S279 thresholds (AA-1096, bk-056)**: every Booking threshold and policy value is a parameter too, grouped by
+  `section` on the page: holds (`b2b_hold_hours`, `b2b_hold_extend_hours`, `b2b_hold_max_extensions`,
+  `b2b_rehold_limit_per_day`), the on-request desk SLA, traveller ages, `departure_decision_days_default`, the ops
+  lifecycle and reminder days, `agency_reminder_steps_days`, `rounding_increment_by_currency` (the engine takes the
+  increments as an argument) and the retention windows. Readers use `app.pricing.policy_values` (value in force on the
+  UTC day, no fallback in code: a missing value is 503 / a failed job). The retention windows and
+  `emergency_contact_keep_days` are approved by `pricing_policy.approve_admin` = admin (a DM-7.5 decision). The
+  `booking.settings` rows of these values are no longer read (marked "Moved (bk-056)"); the dead B2C rows and
+  `ops_docs_max_bytes` are "Retired (bk-056)" (the document cap is the code bound tied to the BFF body cap);
+  `b2b_ops_timezone` and `b2b_ops_contact` stay settings. A parameter no code reads yet has `pending` text, shown as a
+  "Not enforced yet" badge. The page's second tab edits the B2B cancellation fee schedules. CI guard
+  `tests/unit/test_aa1096_settings_lint.py`: no new policy-named numeric constant or env number in `app/b2b`, `ops`,
+  `retention`, `pricing`, `agency_billing` without `# technical-constant: <why>`.
   **Price list versions and seasons (AA-1091, bk-054 / bk-055, root ADR 0005b d6)**: hand prices are versions, never an
   overwrite (`PUT …/prices` answers 409 `price_versions`). Read with `pricing.read`; draft, save, submit and withdraw
   one's own draft or pending version `price_version.write` = admin, contracting (the customer-service maker);
@@ -687,7 +700,8 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
 - **Minimum, cutoff, decision date, allotments (AA-1073, bk-046, contract minor 1.6)**: a departure has
   `min_to_operate` (0 = no minimum: status by hand), `sales_cutoff_days` (sales close on `start_date - cutoff`, that day
   included; a line then is `sold_out`, "sales closed on …"; 0 = the start day, the old rule) and
-  `decision_days_before` (21). The daily job `bk_departure_watch` moves a scheduled departure with sold >= minimum >= 1
+  `decision_days_before` (policy parameter `departure_decision_days_default`, 21, when staff set none). The daily
+  job `bk_departure_watch` moves a scheduled departure with sold >= minimum >= 1
   to `guaranteed` (event `departure.guaranteed`), and on the decision date stamps a scheduled one still short of it at
   risk (`at_risk_at`, event `departure.at_risk` to the agencies on it, one staff notification `departure.at_risk`);
   staff decide on the trip plan's Departures tab (run anyway = guaranteed, or cancel). Sold seats only, never held.
@@ -708,7 +722,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   proposal version: one `active` or `confirmed` set per `(partner, proposal_ref, proposal_version)` (the same quote
   again returns that hold; another quote is 422 `invalid` until it is released); the same key for another request is
   422; a hash that is not the quote's, or a quote past `valid_until`, is 409 `price_changed` (no re-pricing within
-  validity); a line that does not fit is 422 `sold_out` and nothing is held. Length = setting `b2b_hold_hours` (48),
+  validity); a line that does not fit is 422 `sold_out` and nothing is held. Length = pricing policy parameter `b2b_hold_hours` (48),
   capped by the earliest departure start. An `active` hold past `expires_at` reads `expired` at once; the job
   `bk_b2b_hold_expire` writes the status. `DELETE` releases (released / expired: no-op; confirmed: 422). Error codes
   follow the contract: `sold_out` 422, `hold_expired` 410. **Contract 1.2 (AA-952)**: every `Hold` answer (place,
@@ -734,12 +748,12 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   /bookings/{id}/cancel`, AA-974). Confirm locks the departures and judges expiry on the clock read after the locks,
   so a confirm that waited past `expires_at` is 410 and never sells seats a newer hold took.
 - **Extend once (AA-974, Fix A8)**: `POST /holds/{id}/extend` (scope `hold`, `Idempotency-Key`, reason
-  `payment_claimed | client_recheck`) moves an active hold's expiry by setting `b2b_hold_extend_hours` (72), capped by
-  the earliest departure start, at most once (`extended_count` 1, `extended_at`, `extend_reason`). A retry with the
+  `payment_claimed | client_recheck`) moves an active hold's expiry by policy parameter `b2b_hold_extend_hours` (72), capped by
+  the earliest departure start, at most `b2b_hold_max_extensions` times (1; the table CHECK allows 0 or 1) (`extended_count` 1, `extended_at`, `extend_reason`). A retry with the
   same key returns the hold; any other extend is 409 `extend_limit`, as is one that cannot move the expiry (the hold
   already runs to the departure start). Expired / released → 410 `hold_expired`; confirmed → 422. It locks the hold,
   then its departures, and judges expiry on the clock read after the locks (same race rule as confirm).
-- **Re-hold limit (AA-974, Fix A3)**: at most setting `b2b_rehold_limit_per_day` (3) re-holds per UTC day, the next
+- **Re-hold limit (AA-974, Fix A3)**: at most policy parameter `b2b_rehold_limit_per_day` (3) re-holds per UTC day, the next
   `POST /holds` is 429 `rehold_limit` with `retry_after_s` to 00:00 UTC, counted two ways. **Per proposal ref**
   (design §3.4): every hold after the ref's first one is a re-hold, any version; serialised per (partner, ref) by a
   transaction advisory lock. **Per departure** (lane brief; review round): a hold of a departure after a hold of it the
@@ -783,7 +797,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
 - **B2B desk (AA-975, staff `/booking/b2b-desk`, permissions `b2b_desk.read` / `b2b_desk.write`: admin, sales,
   contracting)**: **on request** = lines of confirmed B2B bookings held `on_request` (no departure, or a departure
   without `auto_confirm`). At confirm each gets `answer_due_at` = `booking.b2b_answer_due(now(), n, tz)` with settings
-  `b2b_on_request_answer_business_days` (1) and `b2b_ops_timezone` (Asia/Ho_Chi_Minh): Mon–Fri, a weekend start
+  policy parameter `b2b_on_request_answer_business_days` (1; due soon `b2b_on_request_due_soon_hours`, 4) and setting `b2b_ops_timezone` (Asia/Ho_Chi_Minh): Mon–Fri, a weekend start
   counts from Monday 00:00, no public holidays; one staff notification `b2b.on_request` per booking. Staff accept
   (`confirmed`) or decline with a code (`sold_out | supplier_unavailable | minimum_not_met | other`; the seats go back
   on sale); SLA badge `overdue` / `due_soon` (≤ 4 h) / `on_time`; the same answer again is a no-op, another answer 409
@@ -1063,7 +1077,7 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   `payment_verified` (B2C: the invoice is paid by verified payments, bk-028; NULL on B2B).
 - **Emergency contact = B2C only** (DM-6.8): on a B2B case the row stays `not_applicable` without contact fields (DB
   guard; the API answers 422 `contact_not_allowed_b2b`). A B2C contact check is done only with name + phone. Contact
-  fields and notes are cleared at trip end + `emergency_contact_keep_days` (90) by `bk_case_lifecycle` (`cleared_at`,
+  fields and notes are cleared at trip end + policy parameter `emergency_contact_keep_days` (90) by `bk_case_lifecycle` (`cleared_at`,
   final). Audit rows of a check name the changed fields, never the values.
 - **Case lifecycle after the sale** (job `bk_case_lifecycle`, daily): `→ pre_departure` at `start_date -
   pre_departure_days` when supply is `booked` / `none` and (B2C) the case is `paid` (its invoice paid by verified
@@ -1281,7 +1295,7 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
   lines (`quotes.pax_sell_usd`; component lines and the tariff price as before). The cost sheet fills
   `child_amount`, `infant_amount` and `single_supplement_amount` (+ nets) on computed matrix rows (single supplement
   per night = single rate - half the double rate); hand rows may carry them. Plans carry `child_age_max` /
-  `infant_age_max` (`PUT …/trip-plans/{source_id}/age-bands`; defaults in settings `b2b_child_age_max` 11,
+  `infant_age_max` (`PUT …/trip-plans/{source_id}/age-bands`; defaults the pricing policy parameters `b2b_child_age_max` 11,
   `b2b_infant_age_max` 1). The agency reads them (contract 1.7): `GET /products` `age_bands` (the plan's, else the
   defaults) and three sell-side tariff fields priced by the quote engine (`tariff._by_age_and_room`):
   `child_price_per_person`, `infant_price` (what one infant adds) and `single_supplement_per_person` (the party in
@@ -1352,7 +1366,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 |---|---|
 | `bk_inquiry_pull` | Recurring singleton (every ~60 s): reads `tripplanner.v_inquiry_outbox`, anti-joins `booking.inbox_events`, inserts new rows `ON CONFLICT DO NOTHING`, queues one process job each. `booking.inbox_cursor.safe_id` is only a scan bound, advanced behind a 600 s window (contract rule 4). |
 | `bk_inquiry_process` | Validates v1/v1.1/v1.2/v1.3/v1.4 (v1.3, AA-986 L6: each leg and day says `available` + `reason` + `reason_detail`; legs of stops whose tour AA no longer serves come last with `available: false`, parsed onto `Leg.available` / `reason` / `reason_detail` and kept in the snapshot (`days`, and per leg position under `legs`), not stored on `trip_case_legs` yet — the per-leg column + quote/hold guard are slice L5; until then the intake summary, audit row and staff notification carry `legs_unavailable` (count per reason) and the "new inquiry" e-mail marks each such tour); each leg gets the catalog tour key `(source_system, source_id)` from the v1.2 payload or by resolving `source_tour_id` against `catalog.v_tour` (null when unresolved; AA-830); creates a **lead** customer (`verified = false`, never merged into an existing customer; `needs_merge_review` + `merge_candidate_id` on an email/phone match) — except a **signed-in traveller** (v1.4, AA-908: `customer.identity` + `verified` + email, `Contact.signed_in`), who resolves to one **verified** customer: the identity's customer in `customer_identities` (bk-024), else the verified customer with that email (the identity is attached), else a new `verified = true`, `source = 'traveller_signin'` customer with name + token email only (no phone); an archived customer's identity is re-pointed; unverified `tripplanner_lead` / `manual` customers with the same email and no candidate get `needs_merge_review` + `merge_candidate_id` = that customer, never merged (summary `signed_in` = identity / email / created, `leads_flagged_for_review`, `customer_blocked`; nothing about the identity is logged; the identity must come from `COGNITO_EXTERNAL_ISSUER` over https, else the row is `failed`; one advisory lock per identity serialises concurrent sends; a blocked customer still gets the case and the notification says "Customer is blocked."), the trip case + legs, a staff `notifications` row (+ one `bk_notify_email` job for it, same transaction) and an audit row; marks the inbox row `processed`. `customer: null` or no email/phone → `parked`; invalid → `failed`. |
-| `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d; every batch of both parts archived to S3 first (`s3://aa-cis-bronze-<acc2>/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per part, batch and UTC month; a failed put deletes nothing); `queued` / `running` never. Rows referenced by a FK are never deleted. |
+| `bk_retention_job` | AA-825 TTL (data standards §7, E3): deletes finished jobs past their window — `succeeded` 30 d; `failed` / `cancelled` 90 d (policy parameters `retention_job_succeeded_days` / `retention_job_failed_days`, S279); every batch of both parts archived to S3 first (`s3://aa-cis-bronze-<acc2>/archive/booking/job/yyyy/mm/`, gzipped JSON Lines, one object per part, batch and UTC month; a failed put deletes nothing); `queued` / `running` never. Rows referenced by a FK are never deleted. |
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. AA-969 (root ADR 0019 d16): a row whose trip case belongs to the pilot tenant is left out (`app/pilot.py`, result `pilot_tenants_skipped`). |
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
 | `bk_tenant_pull` | AA-1028 R1 slice 2 (root ADR 0019 d1 / d9): queued by a maintenance hook once per 5-minute slot while `catalog.v_tenant_account_v1` (CIS 357, feature-detected) is readable; `not_configured` without `COGNITO_M2M_CRM_CLIENT_ID`. One transaction: every CIS tenant except kind `internal` gets one `booking.b2b_partners` row (name, `active` only while in service with `trade.book`, else `suspended`; `m2m_client_id` = the AA-Partner client; USD on insert); a changed row is updated; a row it projected before whose tenant left CIS is suspended (never deleted); adoption guard: a staff-registered row (`projected_at` NULL) whose tenant CIS does not hold (CRM-seeded agencies, the AA-972 synthetic partner) is left untouched and staff-editable, counted `awaiting_cis`, and adopted once CIS holds the tenant; `projected_at` (bk-037) marks every row it derived from a CIS tenant; one audit row per change (`system:bk_tenant_pull`). Not deploy-gate exempt (seconds). |

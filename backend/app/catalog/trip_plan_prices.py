@@ -341,6 +341,7 @@ async def price_rows(
     final: list[dict[str, Any]] = []
     below: list[int] = []
     markup = await _b2b_markup(conn, norm, on)
+    increments = await _increments(conn, on) if markup is not None else {}
     for row in norm:
         amount, margin, priced_on = row.amount, None, None
         if row.net_amount is not None:
@@ -368,7 +369,7 @@ async def price_rows(
                 "priced_on": priced_on,
                 "overridden": row.net_amount is not None and row.amount is not None,
                 "computed": False,
-                "rrp_amount": rrp_for(row.channel, amount, row.currency, markup),
+                "rrp_amount": rrp_for(row.channel, amount, row.currency, markup, increments),
                 # A net only rides along on a row priced from a net (the table CHECK); sell amounts are as entered.
                 **{k: (v if k in PAX_TYPE_AMOUNTS or row.net_amount is not None else None) for k, v in row.pax_prices},
             }
@@ -393,12 +394,23 @@ async def _b2b_markup(conn: asyncpg.Connection, rows: list[Row], day: date) -> D
     return dated.rrp_markup_pct if dated is not None else None
 
 
-def rrp_for(channel: str, amount: Decimal, currency: str, markup: Decimal | None) -> Decimal | None:
-    """The suggested retail price of a b2b row (root ADR 0019 b15), else None."""
+async def _increments(conn: asyncpg.Connection, day: date) -> engine.Increments:
+    """The rounding increments in force on ``day`` (the RRP is rounded like every customer-facing price)."""
+    try:
+        return await pricing.rounding_increments(conn, day)
+    except pricing.PricingDataUnavailable:
+        raise Unavailable("pricing_data_unavailable", "the pricing policy rounding could not be read") from None
+
+
+def rrp_for(
+    channel: str, amount: Decimal, currency: str, markup: Decimal | None, increments: engine.Increments
+) -> Decimal | None:
+    """The suggested retail price of a b2b row (root ADR 0019 b15), else None. ``increments``: the rounding steps in
+    force (pricing policy)."""
     if channel != FROM_CHANNEL or markup is None:
         return None
     try:
-        return engine.rrp_price(amount, markup, currency)
+        return engine.rrp_price(amount, markup, currency, increments)
     except engine.PricingError:
         return None
 

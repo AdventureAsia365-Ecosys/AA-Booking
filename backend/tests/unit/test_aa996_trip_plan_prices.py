@@ -18,7 +18,7 @@ from app.main import create_app
 from app.pricing import engine
 from app.pricing import service as pricing
 from app.settings import Settings
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import SEED_ROUNDING, ScriptedConn
 
 CONTRACTING = Staff("u-5", None, "Contracts", "contracting", True, "reviewer")
 CONTENT = Staff("u-9", None, "Writer", "content_creator", True, "content")
@@ -130,7 +130,12 @@ def fake_price(monkeypatch: pytest.MonkeyPatch, calls: list[dict[str, Any]] | No
         if calls is not None:
             calls.append(kw)
         quote = engine.price_quote(
-            kw["lines"], RULE, currency=kw["currency"], peak=kw["peak"], override_total=kw["override_total"]
+            kw["lines"],
+            RULE,
+            currency=kw["currency"],
+            peak=kw["peak"],
+            override_total=kw["override_total"],
+            increments=SEED_ROUNDING,
         )
         return pricing.PricedQuote(quote=quote, rule=None, rates={}, priced_on=kw["on"])  # type: ignore[arg-type]
 

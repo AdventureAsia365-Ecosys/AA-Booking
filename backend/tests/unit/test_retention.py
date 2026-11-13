@@ -17,23 +17,54 @@ from pydantic import ValidationError
 from app.auth.staff import PERMISSIONS
 from app.errors import Invalid
 from app.jobs.worker import PermanentError
+from app.pricing import policy_values
 from app.retention import archive, jobs, redact, runner
-from app.retention.policy import ARCHIVE_BUCKET_DISPLAY, INBOX_SPEC, JOB_SPEC, KINDS, archive_bucket, spec_for
+from app.retention.policy import (
+    ARCHIVE_BUCKET_DISPLAY,
+    INBOX_SPEC,
+    JOB_SPEC,
+    KINDS,
+    archive_bucket,
+    resolve,
+    spec_for,
+    with_windows,
+)
 from app.routers.retention import RunRequest, _check_override
 from tests import inquiry_samples as samples
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows, seed_values
 
 # ── Policy (data standards §7, E3) ───────────────────────────────────────────
 
 
+def seeded(spec: Any) -> Any:
+    return with_windows(spec, seed_values(*spec.window_keys()))
+
+
 def test_windows_match_the_approved_retention_table() -> None:
-    assert JOB_SPEC.windows() == {"succeeded": 30, "failed": 90}
+    # S279 L3 (bk-056): the windows are pricing policy parameters; the seed is the approved E3 table.
+    assert JOB_SPEC.window_keys() == ("retention_job_succeeded_days", "retention_job_failed_days")
+    assert INBOX_SPEC.window_keys() == ("retention_inbox_redact_days",)
+    assert JOB_SPEC.windows() == {"succeeded": 0, "failed": 0}  # unresolved until a run reads the policy
+    assert seeded(JOB_SPEC).windows() == {"succeeded": 30, "failed": 90}
     # AA-825 "archive each batch to S3 before delete": both delete parts archive (review S251, succeeded part too).
     assert [p.archive for p in JOB_SPEC.parts] == [True, True]
-    assert INBOX_SPEC.windows() == {"payload_pii": 90}
+    assert seeded(INBOX_SPEC).windows() == {"payload_pii": 90}
     assert INBOX_SPEC.action == "redact" and not any(p.archive for p in INBOX_SPEC.parts)
     assert KINDS == ("bk_retention_job", "bk_retention_inbox_redact")
     with pytest.raises(ValueError, match="unknown retention kind"):
         spec_for("bk_nope")
+
+
+@pytest.mark.asyncio
+async def test_windows_are_read_from_the_policy_in_force() -> None:
+    conn = ScriptedConn().on(POLICY_FRAGMENT, policy_rows(retention_job_succeeded_days="45"))
+    assert (await resolve(conn, JOB_SPEC, TODAY)).windows() == {"succeeded": 45, "failed": 90}  # type: ignore[arg-type]
+    missing = [r for r in policy_rows() if r["param_key"] != "retention_inbox_redact_days"]
+    with pytest.raises(policy_values.PolicyUnavailable):
+        await resolve(ScriptedConn().on(POLICY_FRAGMENT, missing), INBOX_SPEC, TODAY)  # type: ignore[arg-type]
+    for bad in (0, -3, True, "30", None):
+        with pytest.raises(policy_values.PolicyUnavailable):
+            with_windows(INBOX_SPEC, {"retention_inbox_redact_days": bad})
 
 
 def test_queued_and_running_jobs_are_never_candidates() -> None:

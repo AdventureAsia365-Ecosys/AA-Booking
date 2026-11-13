@@ -10,8 +10,16 @@ from decimal import Decimal as D
 
 import pytest
 
-from app.pricing import engine
-from app.pricing.engine import Channel, CostLine, FxRate, PricingRule, price_quote
+from app.pricing import engine, policy_params
+from app.pricing.engine import Channel, CostLine, FxRate, PricingRule
+from tests.unit.fakes import SEED_ROUNDING
+
+
+def price_quote(lines: list[CostLine], rule: PricingRule, **kw: object) -> engine.Quote:
+    """The engine with the seeded rounding increments (S279 L3: the increments are a pricing policy parameter)."""
+    kw.setdefault("increments", SEED_ROUNDING)
+    return engine.price_quote(lines, rule, **kw)  # type: ignore[arg-type]
+
 
 B2C = PricingRule(Channel.B2C_TAILOR_MADE, D("0.30"), D("0.20"), D("0.03"), D("0.03"))
 FIXED = PricingRule(Channel.FIXED_DEPARTURE, D("0.25"), D("0.18"), D("0.03"), D("0.03"))
@@ -82,14 +90,22 @@ def test_b2b_channel() -> None:
 
 
 def test_exact_multiple_of_five_is_not_bumped() -> None:
-    assert engine.round_price(D("1000"), "USD") == D("1000.00")
-    assert engine.round_price(D("1000.01"), "USD") == D("1005.00")
-    assert engine.round_price(D("0"), "USD") == D("0.00")
+    assert engine.round_price(D("1000"), "USD", SEED_ROUNDING) == D("1000.00")
+    assert engine.round_price(D("1000.01"), "USD", SEED_ROUNDING) == D("1005.00")
+    assert engine.round_price(D("0"), "USD", SEED_ROUNDING) == D("0.00")
 
 
 def test_round_price_rejects_non_selling_currency() -> None:
     with pytest.raises(engine.PricingError):
-        engine.round_price(D("10"), "VND")
+        engine.round_price(D("10"), "VND", {**SEED_ROUNDING, "VND": D("1000")})
+
+
+def test_round_price_uses_the_policy_increment_and_refuses_a_missing_one() -> None:
+    assert engine.round_price(D("1000.01"), "USD", {**SEED_ROUNDING, "USD": D("10")}) == D("1010.00")
+    assert engine.round_price(D("12.34"), "EUR", {**SEED_ROUNDING, "EUR": D("0.5")}) == D("12.50")
+    for bad in ({}, {"USD": D("0")}, {"USD": D("-5")}):
+        with pytest.raises(engine.PricingError, match="rounding increment"):
+            engine.round_price(D("10"), "USD", bad)
 
 
 # ── FX (decision 5) ──────────────────────────────────────────────────────────
@@ -260,7 +276,9 @@ def test_sell_price_divisor_guard() -> None:
 
 
 def test_every_selling_currency_has_an_increment() -> None:
-    assert set(engine.ROUNDING_INCREMENTS) == engine.SELLING_CURRENCIES
+    # The policy parameter requires exactly one increment per selling currency (policy_params.normalise).
+    assert set(policy_params.ROUNDING_CURRENCIES) == engine.SELLING_CURRENCIES
+    assert set(SEED_ROUNDING) == engine.SELLING_CURRENCIES
 
 
 def test_total_rounded_once_not_per_line() -> None:

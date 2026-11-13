@@ -16,16 +16,24 @@ Two owner-run TTL job kinds on ``booking.job`` (ADR 0003a decision 5, DM-7.2):
     ``received`` (not processed yet) are never redacted: they are counted as ``skipped_unprocessed`` instead. Nothing
     is deleted, so nothing is archived (DM-7.3 "archive after redaction" applies when a delete window is set).
 
-Changing a window is a DM-7.5 decision (Nghiệp approves) and makes the next scheduled run a DRY RUN again (the job
-compares the windows with the last live run).
+Changing a window is a DM-7.5 decision and makes the next scheduled run a DRY RUN again (the job compares the windows
+with the last live run). S279 L3 (bk-056): the windows are pricing policy parameters (Pricing > Policy, approver group
+``admin``, maker-checker, versioned): ``retention_job_succeeded_days`` (30), ``retention_job_failed_days`` (90) and
+``retention_inbox_redact_days`` (90). A :class:`Part` names its key; :func:`resolve` reads the values in force on the
+run's UTC day (no fallback in code: a run without them fails, the status page answers 503).
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import Any
 
+import asyncpg
+
 from app.pilot import uuid_array_literal
+from app.pricing import policy_values
 
 JOB_KIND = "bk_retention_job"
 INBOX_KIND = "bk_retention_inbox_redact"
@@ -53,12 +61,14 @@ def archive_bucket(account_id: str) -> str:
 
 @dataclass(frozen=True)
 class Part:
-    """Rows of the spec's table whose retention column is older than ``window_days`` and that match ``where``."""
+    """Rows of the spec's table whose retention column is older than ``window_days`` and that match ``where``.
+    ``window_days`` is the pricing policy parameter ``window_key`` in force (0 until :func:`resolve` sets it)."""
 
     name: str
-    window_days: int
+    window_key: str  # pricing policy parameter (app.pricing.policy_params, section "retention")
     where: str  # predicate on alias ``t``, no bind parameters
     archive: bool = False
+    window_days: int = 0
 
 
 @dataclass(frozen=True)
@@ -77,6 +87,9 @@ class Spec:
     def windows(self) -> dict[str, int]:
         return {p.name: p.window_days for p in self.parts}
 
+    def window_keys(self) -> tuple[str, ...]:
+        return tuple(p.window_key for p in self.parts)
+
 
 JOB_SPEC = Spec(
     kind=JOB_KIND,
@@ -85,8 +98,8 @@ JOB_SPEC = Spec(
     ts_col="finished_at",
     action="delete",
     parts=(
-        Part("succeeded", 30, "t.status = 'succeeded'", archive=True),
-        Part("failed", 90, "t.status IN ('failed', 'cancelled')", archive=True),
+        Part("succeeded", "retention_job_succeeded_days", "t.status = 'succeeded'", archive=True),
+        Part("failed", "retention_job_failed_days", "t.status IN ('failed', 'cancelled')", archive=True),
     ),
 )
 
@@ -96,7 +109,7 @@ INBOX_SPEC = Spec(
     archive_name="inbox_events",
     ts_col="received_at",
     action="redact",
-    parts=(Part("payload_pii", 90, "t.redacted_at IS NULL AND t.status <> 'received'"),),
+    parts=(Part("payload_pii", "retention_inbox_redact_days", "t.redacted_at IS NULL AND t.status <> 'received'"),),
     pilot_where=(
         "NOT EXISTS (SELECT 1 FROM booking.trip_cases pc"
         " WHERE pc.inbox_event_id = t.id AND pc.party_tenant_id = ANY({pilots}))"
@@ -105,6 +118,23 @@ INBOX_SPEC = Spec(
 
 SPECS: dict[str, Spec] = {s.kind: s for s in (JOB_SPEC, INBOX_SPEC)}
 KINDS: tuple[str, ...] = tuple(SPECS)
+
+
+def with_windows(spec: Spec, values: Mapping[str, Any]) -> Spec:
+    """``spec`` with each part's ``window_days`` from ``values`` (policy key -> whole days, at least 1)."""
+    parts = []
+    for part in spec.parts:
+        days = values.get(part.window_key)
+        if isinstance(days, bool) or not isinstance(days, int) or days < 1:
+            raise policy_values.PolicyUnavailable(f"{part.window_key}: no valid retention window ({days!r})")
+        parts.append(replace(part, window_days=days))
+    return replace(spec, parts=tuple(parts))
+
+
+async def resolve(conn: asyncpg.Connection, spec: Spec, on: date) -> Spec:
+    """``spec`` with the retention windows in force on ``on`` (pricing policy; PolicyUnavailable without one)."""
+    policy = await policy_values.require(conn, on, *spec.window_keys())
+    return with_windows(spec, {key: policy.integer(key) for key in spec.window_keys()})
 
 
 def without_pilots(spec: Spec, pilots: list[Any]) -> Spec:

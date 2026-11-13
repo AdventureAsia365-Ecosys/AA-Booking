@@ -20,9 +20,10 @@ from app.b2b import desk, events
 from app.b2b.errors import B2BError
 from app.errors import Conflict, Invalid, NotFound
 from app.main import create_app
+from app.pricing import policy_values
 from app.settings import Settings
 from tests.staff_tokens import OTHER_M2M_CLIENT, LocalM2M
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 from tests.unit.test_b2b_api import PARTNER_ID, _client, _conn, _headers
 
 NOW = datetime(2027, 2, 1, 9, 0, tzinfo=UTC)
@@ -126,22 +127,31 @@ def run(coro: Any) -> Any:
     ],
 )
 def test_sla_state(status: str, due: datetime | None, state: str) -> None:
-    assert desk.sla_state(status, due, NOW) == state
+    assert desk.sla_state(status, due, NOW, 4) == state
 
 
-def test_answer_policy_reads_settings_and_falls_back() -> None:
-    conn = ScriptedConn().on("key = $1", lambda key: {desk.DAYS_SETTING: "2", desk.TZ_SETTING: '"Asia/Bangkok"'}[key])
+def test_due_soon_window_is_the_policy_value() -> None:
+    assert desk.sla_state("on_request", NOW + timedelta(hours=6), NOW, 4) == "on_time"
+    assert desk.sla_state("on_request", NOW + timedelta(hours=6), NOW, 8) == "due_soon"
+
+
+def test_answer_policy_reads_the_policy_days_and_the_time_zone_setting() -> None:
+    days = policy_rows(b2b_on_request_answer_business_days="2")
+    conn = ScriptedConn().on(POLICY_FRAGMENT, days).on("key = $1", lambda key: {desk.TZ_SETTING: '"Asia/Bangkok"'}[key])
     assert run(desk.answer_policy(conn)) == (2, "Asia/Bangkok")
-    bad = ScriptedConn().on("key = $1", lambda key: {desk.DAYS_SETTING: "99", desk.TZ_SETTING: "7"}[key])
-    assert run(desk.answer_policy(bad)) == (desk.DEFAULT_DAYS, desk.DEFAULT_TZ)
+    bad = ScriptedConn().on("key = $1", lambda key: {desk.TZ_SETTING: "7"}[key])
+    assert run(desk.answer_policy(bad)) == (1, desk.DEFAULT_TZ)
     unknown = (
         ScriptedConn()
-        .on("key = $1", lambda key: {desk.DAYS_SETTING: "true", desk.TZ_SETTING: '"Mars/Base"'}[key])
-        .on("AT TIME ZONE", asyncpg.InvalidParameterValueError("time zone not recognized"))
+        .on("key = $1", lambda key: {desk.TZ_SETTING: '"Mars/Base"'}[key])
+        .on("SELECT now() AT TIME ZONE $1", asyncpg.InvalidParameterValueError("time zone not recognized"))
     )
-    assert run(desk.answer_policy(unknown)) == (desk.DEFAULT_DAYS, desk.DEFAULT_TZ)
+    assert run(desk.answer_policy(unknown)) == (1, desk.DEFAULT_TZ)
     broken = ScriptedConn().on("key = $1", "{not json")
-    assert run(desk.answer_policy(broken)) == (desk.DEFAULT_DAYS, desk.DEFAULT_TZ)
+    assert run(desk.answer_policy(broken)) == (1, desk.DEFAULT_TZ)
+    missing = [r for r in policy_rows() if r["param_key"] != desk.DAYS_KEY]
+    with pytest.raises(policy_values.PolicyUnavailable):
+        run(desk.answer_policy(ScriptedConn().on(POLICY_FRAGMENT, missing)))
 
 
 def test_open_requests_sets_deadlines_and_notifies_once() -> None:
@@ -155,7 +165,7 @@ def test_open_requests_sets_deadlines_and_notifies_once() -> None:
     )
     assert run(desk.open_requests(conn, hold_id=HOLD, case_id=CASE, case_code="TC-1")) == 2
     [(days_args)] = conn.sql("SET answer_due_at")
-    assert days_args == (HOLD, desk.DEFAULT_DAYS, desk.DEFAULT_TZ)
+    assert days_args == (HOLD, 1, desk.DEFAULT_TZ)
     [note] = conn.sql("INSERT INTO booking.notifications")
     assert note[1] == desk.NOTIFICATION_TYPE and note[5] == CASE and "2 line(s)" in note[3]
     assert '"line_refs": ["a", "b"]' in note[6]
@@ -306,10 +316,10 @@ def test_summary_counts() -> None:
         "on_request": {"open": 3, "overdue": 1, "due_soon": 1},
         "open_incidents": 2,
         "departures_at_risk": 1,
-        "due_soon_hours": desk.DUE_SOON_HOURS,
+        "due_soon_hours": 4,
     }
     [args] = conn.sql("FILTER")
-    assert args == (NOW, NOW + timedelta(hours=desk.DUE_SOON_HOURS))
+    assert args == (NOW, NOW + timedelta(hours=4))
     assert (
         run(desk.summary(ScriptedConn().on("FILTER", {"open": 0, "overdue": 0, "due_soon": 0})))["open_incidents"] == 0
     )

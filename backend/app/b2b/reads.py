@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-import json
+import logging
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -41,7 +41,9 @@ from app.b2b.errors import B2BError
 from app.b2b.quotes import ceil_cents, money
 from app.catalog import liveness, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
-from app.pricing import engine, repository
+from app.pricing import engine, policy_values, repository
+
+log = logging.getLogger(__name__)
 
 SOURCE_SYSTEM = "cis"
 PAGE = 100
@@ -121,25 +123,19 @@ WHERE p.source_system = $1 AND p.source_id = $2 AND p.sellable
 """  # noqa: S608 — constant fragments
 
 
-# AA-1075 (bk-15): the default age bands (bk-047 settings) and their fallbacks when a setting is missing or bad.
-CHILD_AGE_SETTING, INFANT_AGE_SETTING = "b2b_child_age_max", "b2b_infant_age_max"
-DEFAULT_CHILD_AGE_MAX, DEFAULT_INFANT_AGE_MAX = 11, 1
-AGE_SETTING_SQL = "SELECT value FROM booking.settings WHERE key = $1"
-
-
-def _age(raw: Any, low: int, high: int) -> int | None:
-    try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return None
-    return value if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high else None
+# AA-1075 (bk-15): the default age bands. S279 L3 (bk-056): pricing policy parameters ``b2b_child_age_max`` and
+# ``b2b_infant_age_max`` (Pricing > Policy; the page keeps the infant age below the child age), no fallback in code.
+AGE_KEYS = ("b2b_child_age_max", "b2b_infant_age_max")
 
 
 async def default_age_bands(conn: asyncpg.Connection) -> tuple[int, int]:
-    """``(child age max, infant age max)`` from the settings, each falling back to 11 / 1 when unset or bad."""
-    child = _age(await conn.fetchval(AGE_SETTING_SQL, CHILD_AGE_SETTING), 2, 17) or DEFAULT_CHILD_AGE_MAX
-    infant = _age(await conn.fetchval(AGE_SETTING_SQL, INFANT_AGE_SETTING), 0, 4)
-    return child, DEFAULT_INFANT_AGE_MAX if infant is None else infant
+    """``(child age max, infant age max)`` in force today; 503 ``unavailable`` when one has no approved value."""
+    try:
+        policy = await policy_values.require(conn, await policy_values.today_utc(conn), *AGE_KEYS)
+    except policy_values.PolicyUnavailable as exc:
+        log.warning("b2b_age_policy_unavailable error=%s", exc)
+        raise B2BError("unavailable", "age band policy is not available") from None
+    return policy.age_bands
 
 
 def age_bands(child_age_max: int | None, infant_age_max: int | None, defaults: tuple[int, int]) -> dict[str, int]:

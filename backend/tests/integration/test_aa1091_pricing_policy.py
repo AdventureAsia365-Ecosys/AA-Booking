@@ -89,6 +89,14 @@ async def test_seed_is_in_force_and_readable(api: tuple[httpx.AsyncClient, dict]
     assert _item(body, "surcharge_causes")["current"]["value"] == ["fx", "tax"]
     assert _item(body, "agency_currency_by_country")["current"]["value"] == {"*": "USD", "VN": "VND"}
     assert all(i["current"] is not None for i in body["items"])
+    # AA-1096 (bk-056): the S279 thresholds, seeded with the value in force before the move, grouped by section.
+    hold = _item(body, "b2b_hold_hours")
+    assert hold["current"]["value"] == 48 and hold["current"]["created_by"]["id"] == "seed:bk-056"
+    assert hold["section"] == "holds" and hold["in_use"] is True and hold["not_enforced_reason"] is None
+    assert _item(body, "agency_reminder_steps_days")["current"]["value"] == [1, 7, 14]
+    assert _item(body, "rounding_increment_by_currency")["current"]["value"]["USD"] == "5"
+    assert _item(body, "retention_job_failed_days")["approver"] == "admin"
+    assert _item(body, "gala_dinner_days")["not_enforced_reason"]
     # Every seeded value is valid for its parameter (the registry and the migration agree).
     policy = await policy_values.load(admin, datetime.now(UTC).date())
     for key, value in policy.values.items():

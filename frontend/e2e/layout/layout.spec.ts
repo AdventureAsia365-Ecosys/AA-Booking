@@ -109,6 +109,7 @@ const PAGES: PageCase[] = [
   { name: "price-readiness", path: "/pricing/readiness" },
   { name: "price-workbench", path: "/pricing/workbench" },
   { name: "pricing-policy", path: "/pricing/policy" },
+  { name: "pricing-policy-cancellation", path: "/pricing/policy?tab=cancellation" },
   { name: "pricing-seasons", path: "/pricing/seasons" },
   { name: "holiday-events", path: "/pricing/holiday-events" },
   { name: "price-versions", path: "/pricing/workbench?versions=tour-1" },

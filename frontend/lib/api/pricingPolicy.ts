@@ -9,6 +9,9 @@
 //   GET  /booking/pricing/fx-rates?currency=        FX rows, newest first, with status     (pricing.read)
 //   POST /booking/pricing/fx-rates                  new pending FX row                     (pricing.write)
 //   POST /booking/pricing/fx-rates/{id}/approve     approve (403 own_row for the creator)  (pricing.write)
+//   GET  /booking/pricing/cancellation-policies     B2B cancellation fee schedules (AA-974) (pricing.read)
+//   POST /booking/pricing/cancellation-policies     new pending schedule                   (pricing.write)
+//   POST /booking/pricing/cancellation-policies/{id}/approve   approve (403 own_row)       (pricing.write)
 
 import { bkGet, bkSend } from "./client";
 import type { Channel } from "./proposals";
@@ -71,6 +74,34 @@ export interface PolicyList<T> {
   today: IsoDate;
 }
 
+/** One step of a cancellation fee schedule: cancelling `min_days` or more days before the start costs `fee_pct` %
+ *  of the booking (the step with the largest min_days at or below the days left applies). */
+export interface CancellationTier {
+  min_days: number;
+  fee_pct: DecimalString;
+}
+
+/** A B2B cancellation fee schedule (AA-974, bk-021): the B2B default (no source_id) or one tour's own. */
+export interface CancellationPolicyRow extends PolicyRowBase {
+  channel: string;
+  trip_plan_id: string | null;
+  source_id: string | null;
+  valid_from: IsoDate;
+  title: string;
+  /** min_days descending. */
+  tiers: CancellationTier[];
+  note: string | null;
+}
+
+export interface NewCancellationPolicyBody {
+  title: string;
+  /** Omit for the B2B default schedule. */
+  source_id?: string;
+  valid_from: IsoDate;
+  tiers: { min_days: number; fee_pct: string }[];
+  note?: string;
+}
+
 /** Ratios are fractions as strings: "0.30" = 30%. */
 export interface NewRuleBody {
   channel: Channel;
@@ -103,4 +134,10 @@ export const pricingPolicyApi = {
   fxRates: (currency?: string) => bkGet<PolicyList<FxRateRow>>("pricing/fx-rates", { currency }),
   createFxRate: (body: NewFxRateBody) => bkSend<FxRateRow>("pricing/fx-rates", { body }),
   approveFxRate: (id: string) => bkSend<FxRateRow>(`pricing/fx-rates/${enc(id)}/approve`),
+  cancellationPolicies: (sourceId?: string) =>
+    bkGet<PolicyList<CancellationPolicyRow>>("pricing/cancellation-policies", { source_id: sourceId }),
+  createCancellationPolicy: (body: NewCancellationPolicyBody) =>
+    bkSend<CancellationPolicyRow>("pricing/cancellation-policies", { body }),
+  approveCancellationPolicy: (id: string) =>
+    bkSend<CancellationPolicyRow>(`pricing/cancellation-policies/${enc(id)}/approve`),
 };

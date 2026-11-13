@@ -7,13 +7,17 @@
   released). A hash that is not the quote's, or a quote past ``valid_until``, is 409 ``price_changed`` (re-quote; the
   quote is honoured as quoted within its validity, no re-pricing). The departures of the lines are locked
   (``app.b2b.departures.lock_departures``) and counted; a line that does not fit is 422 ``sold_out`` and nothing is
-  held. Length: setting ``b2b_hold_hours`` (48), capped by the earliest departure start.
-- **Re-hold limit** (AA-974, Fix A3): at most ``b2b_rehold_limit_per_day`` (3) re-holds per UTC day, the next is 429
+  held. Length: policy parameter ``b2b_hold_hours`` (Pricing > Policy, bk-056), capped by the earliest departure
+  start.
+- **Re-hold limit** (AA-974, Fix A3): at most ``b2b_rehold_limit_per_day`` re-holds per UTC day, the next is 429
   ``rehold_limit``, counted two ways: per proposal ref (each hold after its first one, any version) and per departure
   (each hold of a departure after a hold of it placed the same day was let go, whatever the proposal ref, so a fresh
   ref per hold does not get around the limit).
-- **Extend** (AA-974, Fix A8, ``POST /holds/{id}/extend``): once per hold, + ``b2b_hold_extend_hours`` (72) capped by
-  the departure start; a second extend is 409 ``extend_limit`` (a retry with the same key returns the hold).
+- **Extend** (AA-974, Fix A8, ``POST /holds/{id}/extend``): at most ``b2b_hold_max_extensions`` times per hold (the
+  table allows 0 or 1; 0 = never), + ``b2b_hold_extend_hours`` capped by the departure start; one more is 409
+  ``extend_limit`` (a retry with the same key returns the hold).
+- **Policy values** (S279 L3, bk-056): the four hold values above are pricing policy parameters
+  (:mod:`app.pricing.policy_values`, the value in force on the UTC day); a missing one is 503 ``unavailable``.
 - **Read / release** (``GET``, ``DELETE /holds/{id}``): another partner's hold is 404. An ``active`` hold past
   ``expires_at`` reads as ``expired`` (the expiry job writes it later, ``app.b2b.expiry``). Release: active →
   ``released``; released / expired → no-op; confirmed → 422 (cancel the booking instead, ``app.b2b.cancellation``).
@@ -37,11 +41,10 @@ No personal data anywhere: seats and pax are counts, the proposal ref and deposi
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -51,20 +54,10 @@ from app import audit
 from app.b2b import cancellation, departures, desk, plan_span, quotes, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
-from app.pricing import engine
+from app.pricing import engine, policy_values
 
 log = logging.getLogger(__name__)
 
-HOLD_HOURS_KEY = "b2b_hold_hours"
-DEFAULT_HOLD_HOURS = 48
-MAX_HOLD_HOURS = 720
-# AA-974 (bk-021): one extension per hold, and a daily re-hold limit per proposal ref and per departure (policy data
-# in settings).
-EXTEND_HOURS_SETTING = "b2b_hold_extend_hours"
-DEFAULT_EXTEND_HOURS = 72
-REHOLD_LIMIT_SETTING = "b2b_rehold_limit_per_day"
-DEFAULT_REHOLD_LIMIT = 3
-MAX_REHOLD_LIMIT = 100
 EXTEND_REASONS = ("payment_claimed", "client_recheck")
 REHOLD_SQL = """
 SELECT count(*) FILTER (WHERE created_at >= $3)::int AS today, min(created_at) AS first
@@ -168,25 +161,22 @@ def _id(value: str) -> str | None:
         return None
 
 
-async def _setting_int(conn: asyncpg.Connection, name: str, default: int, low: int, high: int) -> int:
-    raw = await conn.fetchval("SELECT value FROM booking.settings WHERE key = $1", name)
+async def hold_policy(conn: asyncpg.Connection, on: date) -> policy_values.Policy:
+    """The pricing policy in force on ``on`` with the four hold values present (S279 L3, bk-056): ``b2b_hold_hours``,
+    ``b2b_hold_extend_hours``, ``b2b_hold_max_extensions``, ``b2b_rehold_limit_per_day``. A missing one is AA-side
+    data missing: 503 ``unavailable`` (like a missing pricing rule); there is no fallback value in code."""
     try:
-        value = int(json.loads(raw)) if isinstance(raw, str) else int(raw)
-    except (TypeError, ValueError):
-        return default
-    return value if low <= value <= high else default
+        policy = await policy_values.load(conn, on)
+        policy.b2b_hold_hours, policy.b2b_hold_extend_hours  # noqa: B018
+        policy.b2b_hold_max_extensions, policy.b2b_rehold_limit_per_day  # noqa: B018
+    except policy_values.PolicyUnavailable as exc:
+        log.warning("b2b_hold_policy_unavailable error=%s", exc)
+        raise B2BError("unavailable", "hold policy is not available") from None
+    return policy
 
 
-async def _hold_hours(conn: asyncpg.Connection) -> int:
-    return await _setting_int(conn, HOLD_HOURS_KEY, DEFAULT_HOLD_HOURS, 1, MAX_HOLD_HOURS)
-
-
-async def _extend_hours(conn: asyncpg.Connection) -> int:
-    return await _setting_int(conn, EXTEND_HOURS_SETTING, DEFAULT_EXTEND_HOURS, 1, MAX_HOLD_HOURS)
-
-
-async def _rehold_limit(conn: asyncpg.Connection) -> int:
-    return await _setting_int(conn, REHOLD_LIMIT_SETTING, DEFAULT_REHOLD_LIMIT, 0, MAX_REHOLD_LIMIT)
+async def _rehold_limit(conn: asyncpg.Connection, now: datetime) -> int:
+    return (await hold_policy(conn, now.astimezone(UTC).date())).b2b_rehold_limit_per_day
 
 
 def day_start(now: datetime) -> datetime:
@@ -211,7 +201,7 @@ async def _check_rehold_limit(conn: asyncpg.Connection, caller: Caller, proposal
     if counts is None or counts["first"] is None:
         return  # the proposal's first hold is not a re-hold
     reholds_today = int(counts["today"]) - (1 if counts["first"] >= start else 0)
-    limit = await _rehold_limit(conn)
+    limit = await _rehold_limit(conn, now)
     if reholds_today >= limit:
         log.info("b2b_rehold_limit partner=%s reholds_today=%s limit=%s", caller.partner_id, reholds_today, limit)
         raise _rehold_refused(
@@ -237,7 +227,7 @@ async def _check_departure_rehold_limit(
     worst = await conn.fetchrow(DEPARTURE_REHOLD_SQL, caller.partner_id, sorted(departure_ids), start, now)
     if worst is None:
         return
-    limit = await _rehold_limit(conn)
+    limit = await _rehold_limit(conn, now)
     if int(worst["dropped"]) > limit:
         log.info(
             "b2b_rehold_limit partner=%s departure=%s dropped_today=%s limit=%s",
@@ -512,7 +502,7 @@ async def _create(
         else (availability, dep_id, why)
         for r, (availability, dep_id, why) in zip(lines, result, strict=True)
     ]
-    expires_at = now + timedelta(hours=await _hold_hours(conn))
+    expires_at = now + timedelta(hours=(await hold_policy(conn, now.astimezone(UTC).date())).b2b_hold_hours)
     for dep_id in {d for _, d, _ in result if d}:
         expires_at = min(expires_at, departures.start_of(locked[dep_id]["start_date"]))
 
@@ -610,10 +600,11 @@ async def extend_hold(
     reason: str,
     idempotency_key: str,
 ) -> dict[str, Any]:
-    """``POST /holds/{id}/extend`` (scope ``hold``): an active hold gains ``b2b_hold_extend_hours`` (72) on its expiry,
-    capped by the earliest departure start, **once**. A retry with the same ``Idempotency-Key`` returns the hold; any
-    other extend of an extended hold is 409 ``extend_limit``, as is an extend that would not move the expiry (the
-    hold already runs until its departure starts). Expired / released → 410 ``hold_expired``; confirmed → 422.
+    """``POST /holds/{id}/extend`` (scope ``hold``): an active hold gains ``b2b_hold_extend_hours`` on its expiry,
+    capped by the earliest departure start, at most ``b2b_hold_max_extensions`` times (0 or 1). A retry with the same
+    ``Idempotency-Key`` returns the hold; any other extend past the limit is 409 ``extend_limit``, as is an extend that
+    would not move the expiry (the hold already runs until its departure starts). Expired / released → 410
+    ``hold_expired``; confirmed → 422.
 
     Like confirm, it locks the hold, then its departures, and judges expiry on the clock read after the locks: a hold
     that expired while the extend waited is 410, so a place that already counted those seats as free keeps them."""
@@ -621,22 +612,27 @@ async def extend_hold(
         raise B2BError("invalid", f"reason must be one of {', '.join(EXTEND_REASONS)}")
     async with pool.acquire() as conn, conn.transaction():
         hold = await _find(conn, caller, hold_id, lock=True)
-        if int(hold["extended_count"]) >= 1:
-            if hold.get("extend_idempotency_key") == idempotency_key:
-                return await _hold_out(conn, hold)
-            raise B2BError("extend_limit", "this hold was already extended; a hold is extended at most once")
+        extended = int(hold["extended_count"])
+        if extended >= 1 and hold.get("extend_idempotency_key") == idempotency_key:
+            return await _hold_out(conn, hold)
+        policy = await hold_policy(conn, await policy_values.today_utc(conn))
+        if extended >= policy.b2b_hold_max_extensions:
+            if extended:
+                raise B2BError("extend_limit", "this hold was already extended; a hold is extended at most once")
+            raise B2BError("extend_limit", "holds cannot be extended (pricing policy)")
         if hold["stored_status"] == "confirmed":
             raise B2BError("invalid", "the hold is confirmed; there is nothing to extend")
         if hold["status"] != "active":
             raise B2BError("hold_expired", f"the hold is {hold['status']}; place a new hold")
         rows = await _recheck_under_lock(conn, hold, await conn.fetch(LINES_SQL, hold["id"]))
-        new_expiry = hold["expires_at"] + timedelta(hours=await _extend_hours(conn))
+        new_expiry = hold["expires_at"] + timedelta(hours=policy.b2b_hold_extend_hours)
         for row in rows.values():
             new_expiry = min(new_expiry, departures.start_of(row["start_date"]))
         if new_expiry <= hold["expires_at"]:
             raise B2BError("extend_limit", "the hold already runs until its departure starts; it cannot be extended")
         await conn.execute(
-            "UPDATE booking.b2b_holds SET expires_at = $2, extended_count = 1, extended_at = now(), extend_reason = $3,"
+            "UPDATE booking.b2b_holds SET expires_at = $2, extended_count = extended_count + 1, extended_at = now(),"
+            " extend_reason = $3,"
             " extend_idempotency_key = $4 WHERE id = $1::uuid",
             hold["id"],
             new_expiry,
@@ -650,8 +646,8 @@ async def extend_hold(
             action="b2b_hold.extended",
             entity_type="b2b_hold",
             entity_id=hold["id"],
-            before={"expires_at": hold["expires_at"], "extended_count": 0},
-            after={"expires_at": new_expiry, "extended_count": 1, "reason": reason},
+            before={"expires_at": hold["expires_at"], "extended_count": extended},
+            after={"expires_at": new_expiry, "extended_count": extended + 1, "reason": reason},
             entity_label=f"hold {hold['id'][:8]}",
             summary=f"B2B hold extended ({reason}) until {new_expiry.isoformat(timespec='minutes')}",
         )
@@ -738,7 +734,11 @@ async def confirm_in(
         hold["id"],
     )
     # AA-975: on-request lines go to the desk with their answer deadline (1 business day, ops time zone).
-    await desk.open_requests(conn, hold_id=hold["id"], case_id=case_id, case_code=code)
+    try:
+        await desk.open_requests(conn, hold_id=hold["id"], case_id=case_id, case_code=code)
+    except policy_values.PolicyUnavailable as exc:  # the on-request SLA (S279 L3): AA-side data missing
+        log.warning("b2b_desk_policy_unavailable error=%s", exc)
+        raise B2BError("unavailable", "on-request policy is not available") from None
     await audit.record(
         conn,
         actor_type=caller.actor_type,

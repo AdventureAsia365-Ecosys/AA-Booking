@@ -13,10 +13,10 @@ list of steps (``booking.pricing_policy_events``, append-only):
 
 At most one open (draft or pending) version per parameter. The approver must hold the permission of the parameter's
 group (:data:`app.pricing.policy_params.APPROVE_PERMISSION`: the pricing lead for prices, finance for FX, tax,
-surcharges and payment terms) and never be its maker (403 ``own_row``, and the table CHECK). A version takes effect on
-or after the day it is proposed and approved: approving one whose ``effective_from`` has passed is 409
-``effective_date_passed`` (the maker proposes it again), so a change never applies backwards. Every write is audited
-(``booking.audit_logs``, entity ``pricing_policy``).
+surcharges and payment terms, the administrator for data retention windows, S279) and never be its maker (403
+``own_row``, and the table CHECK). A version takes effect on or after the day it is proposed and approved: approving one
+whose ``effective_from`` has passed is 409 ``effective_date_passed`` (the maker proposes it again), so a change never
+applies backwards. Every write is audited (``booking.audit_logs``, entity ``pricing_policy``).
 """
 
 from __future__ import annotations
@@ -348,7 +348,9 @@ def _checker(staff: Staff, v: dict[str, Any]) -> policy_params.Param:
     if param is None:
         raise Conflict("unknown_param", f"{v['key']} is no longer a known parameter")
     if not staff.can(policy_params.APPROVE_PERMISSION[param.group]):
-        who = "finance" if param.group == policy_params.FINANCE else "the pricing lead"
+        who = {policy_params.FINANCE: "finance", policy_params.ADMIN: "the administrator"}.get(
+            param.group, "the pricing lead"
+        )
         raise Forbidden("approver_group", f"a change of {param.label} is approved by {who}")
     if (v["created_by"] or {}).get("id") == staff.cis_user_id:
         raise Forbidden("own_row", "maker-checker: a second person must decide a version you made")

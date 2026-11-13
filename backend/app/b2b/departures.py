@@ -37,6 +37,7 @@ from app.b2b.components import PREFIX_PLAN, parse_component
 from app.b2b.errors import B2BError
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound
+from app.pricing import policy_values
 
 AVAILABLE, ON_REQUEST, SOLD_OUT = "available", "on_request", "sold_out"
 STATUSES = ("scheduled", "guaranteed", "cancelled")
@@ -56,7 +57,9 @@ RETURNING id::text AS id, trip_plan_id::text AS trip_plan_id, start_date, capaci
 """
 MAX_CUTOFF_DAYS = 90
 MAX_DECISION_DAYS = 365
-DEFAULT_DECISION_DAYS = 21
+# S279 L3 (bk-056): the decision day of a new departure, when staff set none, is the pricing policy parameter
+# departure_decision_days_default (Pricing > Policy).
+DECISION_DEFAULT_KEY = "departure_decision_days_default"
 
 # Seats per departure: held (live holds) and sold (confirmed holds, line not declined / cancelled). ``$2`` is the
 # instant "live" is judged at (NULL = the transaction's now(), which only ever counts a hold MORE than the wall clock
@@ -459,6 +462,8 @@ async def list_departures(
         "trip_plan_id": plan_id,
         "source_id": source_id,
         "items": [staff_out(r, *used.get(r["id"], (0, 0)), allots.get(r["id"])) for r in rows],
+        # S279 L3: what a new departure gets when the form leaves a rule empty (the form shows it, never a copy).
+        "defaults": {"decision_days_before": await default_decision_days(conn)},
     }
 
 
@@ -478,12 +483,19 @@ def _check_rules(capacity: int, minimum: int, cutoff: int, decision: int) -> Non
         raise Invalid("invalid_decision_days", f"decision_days_before is between 0 and {MAX_DECISION_DAYS}")
 
 
-def _rules_of(data: dict[str, Any]) -> tuple[int, int, int, int]:
+async def default_decision_days(conn: asyncpg.Connection) -> int:
+    """The decision day of a new departure when staff set none (policy in force today; 503 when it has none)."""
+    policy = await policy_values.require_staff(conn, await policy_values.today_utc(conn), DECISION_DEFAULT_KEY)
+    return policy.departure_decision_days_default
+
+
+async def _rules_of(conn: asyncpg.Connection, data: dict[str, Any]) -> tuple[int, int, int, int]:
+    decision = data.get("decision_days_before")
     return (
         int(data["capacity"]),
         int(data.get("min_to_operate") or 0),
         int(data.get("sales_cutoff_days") or 0),
-        int(data["decision_days_before"] if data.get("decision_days_before") is not None else DEFAULT_DECISION_DAYS),
+        int(decision) if decision is not None else await default_decision_days(conn),
     )
 
 
@@ -494,9 +506,9 @@ async def create_departure(
     conn: asyncpg.Connection, staff: Staff, source_id: str, data: dict[str, Any]
 ) -> dict[str, Any]:
     """``data``: ``start_date``, ``capacity``, ``auto_confirm`` (default true), ``status`` (scheduled | guaranteed),
-    ``min_to_operate`` (0), ``sales_cutoff_days`` (0), ``decision_days_before`` (21)."""
+    ``min_to_operate`` (0), ``sales_cutoff_days`` (0), ``decision_days_before`` (None = the policy default)."""
     plan_id = await _plan_id(conn, source_id)
-    capacity, minimum, cutoff, decision = _rules_of(data)
+    capacity, minimum, cutoff, decision = await _rules_of(conn, data)
     _check_rules(capacity, minimum, cutoff, decision)
     if data["start_date"] <= datetime.now(UTC).date():
         raise Invalid("invalid_start_date", "a new departure starts after today (UTC); a started one is never sold")
@@ -673,7 +685,7 @@ async def generate_departures(
     today = today or datetime.now(UTC).date()
     plan_id = await _plan_id(conn, source_id)
     pattern = data["pattern"]
-    capacity, minimum, cutoff, decision = _rules_of(data)
+    capacity, minimum, cutoff, decision = await _rules_of(conn, data)
     _check_rules(capacity, minimum, cutoff, decision)
     if data["date_from"] <= today:
         raise Invalid("invalid_window", "date_from is after today (UTC): a started departure is never sold")

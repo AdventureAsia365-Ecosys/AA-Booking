@@ -175,6 +175,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "pricing_policy.write": frozenset({"admin", "contracting", "finance"}),
     "pricing_policy.approve": frozenset({"admin", "contracting"}),
     "pricing_policy.approve_finance": frozenset({"admin", "finance"}),
+    # AA-1096 (bk-056, S279 thresholds program): the data retention windows on Pricing > Policy are a DM-7.5 decision;
+    # only the administrator approves them (a finance or contracting maker proposes; never the maker, as above).
+    "pricing_policy.approve_admin": frozenset({"admin"}),
     # AA-1091 (bk-054 / bk-055, root ADR 0005b d6): hand prices are price list versions and seasons are calendars. The
     # customer-service maker (contracting) drafts and submits; the product / pricing lead (contracting, admin) approves,
     # rejects or withdraws a published one, never their own version (403 maker_checker + table CHECKs).

@@ -22,7 +22,7 @@ from app.errors import Conflict, Invalid, NotFound
 from app.main import create_app
 from app.settings import Settings
 from tests.staff_tokens import CRM_CLIENT, LocalM2M
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 from tests.unit.test_b2b_api import PARTNER_ID, TENANT, _client, _conn, _headers
 
 PLAN = "8e000000-0000-4000-8000-000000000a01"
@@ -311,13 +311,24 @@ async def test_place_second_unique_violation_is_raised() -> None:
     assert len(conn.sql("INSERT INTO booking.b2b_holds")) == 2
 
 
-@pytest.mark.parametrize(
-    ("stored", "hours"),
-    [("72", 72), (12, 12), ("abc", 48), (None, 48), ("0", 48), ("721", 48), ('"24"', 24)],
-)
+@pytest.mark.parametrize("hours", [12, 48, 72])
 @pytest.mark.asyncio
-async def test_hold_hours_setting(stored: Any, hours: int) -> None:
-    assert await holds._hold_hours(ScriptedConn().on("FROM booking.settings", stored)) == hours
+async def test_hold_length_is_the_policy_value(hours: int) -> None:
+    """S279 L3 (bk-056): the hold length is the pricing policy parameter b2b_hold_hours in force on the UTC day."""
+    conn = place_conn().on(POLICY_FRAGMENT, lambda *_: policy_rows(b2b_hold_hours=str(hours)))
+    await place(conn)
+    [insert] = conn.sql("INSERT INTO booking.b2b_holds")
+    assert any(isinstance(a, datetime) and a - NOW == timedelta(hours=hours) for a in insert)
+
+
+@pytest.mark.asyncio
+async def test_hold_without_a_hold_policy_is_unavailable() -> None:
+    rows = [r for r in policy_rows() if r["param_key"] != "b2b_hold_hours"]
+    conn = place_conn().on(POLICY_FRAGMENT, lambda *_: rows)
+    with pytest.raises(B2BError) as exc:
+        await place(conn)
+    assert exc.value.error == "unavailable"
+    assert not conn.sql("INSERT INTO booking.b2b_holds")
 
 
 # ── Read / release ───────────────────────────────────────────────────────────
@@ -695,6 +706,7 @@ async def test_staff_list_shows_seats() -> None:
     assert out["trip_plan_id"] == PLAN and out["source_id"] == "BT-7D"
     assert {k: out["items"][0][k] for k in ("held", "sold", "available")} == {"held": 4, "sold": 1, "available": 5}
     assert conn.sql("FROM booking.departures d WHERE d.trip_plan_id") == [(PLAN, START, None)]
+    assert out["defaults"] == {"decision_days_before": 21}  # S279 L3: the policy value the form starts from
 
 
 def new_departure(**kw: Any) -> dict[str, Any]:
@@ -958,9 +970,9 @@ def test_staff_departure_routes(monkeypatch: pytest.MonkeyPatch) -> None:
         "capacity": 12,
         "auto_confirm": True,
         "status": "scheduled",
-        "min_to_operate": 0,  # AA-1073 defaults: no minimum, no cutoff, decision 21 days before
+        "min_to_operate": 0,  # AA-1073 defaults: no minimum, no cutoff; S279: decision day = the policy default
         "sales_cutoff_days": 0,
-        "decision_days_before": 21,
+        "decision_days_before": None,
     }
 
     patch = f"/booking/catalog/departures/{DEP}"

@@ -43,6 +43,9 @@ CONSUMERS = (
     "catalog/cost_sheet.py",
     "catalog/price_workbench.py",
     "agency_billing/config.py",
+    # AA-1096 (S279 L3, bk-056): the holds, desk, departures, ages, ops lifecycle and reminder readers. The wider
+    # name-based scan of every governed package is test_aa1096_settings_lint.
+    "agency_billing/reminders.py",
 )
 TECH = "technical bound (size, precision or arithmetic constant), not a business policy"
 # Business values that predate the S278 rule; each is a follow-up of AA-1091 (implementation notes, "Should know").
@@ -57,11 +60,6 @@ KNOWN: dict[tuple[str, str], str] = {
     ("b2b/cancellation.py", "MAX_DAYS"): TECH,
     ("b2b/cancellation.py", "HUNDRED"): TECH,
     ("b2b/cancellation.py", "PCT_PLACES"): TECH,
-    ("b2b/holds.py", "DEFAULT_HOLD_HOURS"): GAP + " (hold length; today a read-only booking.settings row)",
-    ("b2b/holds.py", "MAX_HOLD_HOURS"): TECH,
-    ("b2b/holds.py", "DEFAULT_EXTEND_HOURS"): GAP + " (hold extension; today a read-only booking.settings row)",
-    ("b2b/holds.py", "DEFAULT_REHOLD_LIMIT"): GAP + " (re-hold limit; today a read-only booking.settings row)",
-    ("b2b/holds.py", "MAX_REHOLD_LIMIT"): TECH,
     ("b2b/price_adjustments.py", "MAX_AMOUNT"): TECH,
     ("b2b/price_adjustments.py", "MAX_REASON"): TECH,
     ("b2b/agency_pricing.py", "MAX_ROWS"): TECH,
@@ -71,7 +69,6 @@ KNOWN: dict[tuple[str, str], str] = {
     ("b2b/terms.py", "PCT"): TECH,
     ("b2b/desk_bookings.py", "MAX_PAGE"): TECH,
     ("b2b/desk_bookings.py", "_STAFF_ERRORS"): TECH + " (HTTP status codes)",
-    ("pricing/engine.py", "ROUNDING_INCREMENTS"): GAP + " (B2C total rounding per currency)",
     ("pricing/engine.py", "CENT"): TECH,
     ("pricing/engine.py", "RATIO"): TECH,
     ("pricing/engine.py", "ZERO"): TECH,
@@ -89,6 +86,9 @@ KNOWN: dict[tuple[str, str], str] = {
     ("catalog/cost_sheet.py", "CENT"): TECH,
     ("catalog/price_workbench.py", "MAX_ACTION_PLANS"): TECH,
     ("catalog/price_workbench.py", "MAX_RECOMPUTE"): TECH,
+    ("agency_billing/reminders.py", "MAX_ATTEMPTS"): TECH + " (job runner attempts)",
+    ("agency_billing/reminders.py", "MAX_STEP_DAYS"): TECH + " (input bound of a step, billing_terms CHECK)",
+    ("agency_billing/reminders.py", "MAX_INVOICES"): TECH + " (batch size of one run)",
 }
 KNOWN_INLINE: frozenset[tuple[str, str]] = frozenset(
     {

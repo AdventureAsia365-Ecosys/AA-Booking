@@ -8,6 +8,10 @@
 // approver_group, 409 effective_date_passed / open_version). "History" lists every version with who made, approved or
 // rejected it. The other policy answers that already are staff data (margins, FX, cancellation fees, agency tiers,
 // deposit terms) are linked under the table. Own language switch (English default, Vietnamese; messages.ts).
+// AA-1096 (S279, bk-056): every Booking threshold and policy value is a parameter here (holds, the on-request desk,
+// traveller ages, departures, operations reminders, agency invoice reminders, rounding, retention windows), grouped in
+// sections; a parameter no code reads yet carries a "Not enforced yet" badge with what is missing. A second tab edits
+// the B2B cancellation fee schedules (same maker-checker, CancellationFees.tsx).
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +24,7 @@ import {
   textToValue,
   valueToText,
   type ParamVersion,
+  SECTIONS,
   type PolicyParam,
   type VersionStatus,
 } from "@/lib/api/policyParams";
@@ -46,9 +51,12 @@ import {
   useCan,
   useT,
   useToast,
+  useUrlFilters,
   type BookingTone,
   type ColumnDef,
 } from "@/ui";
+import { SavedTabs } from "../../../_parts/SavedTabs";
+import { CancellationFees } from "./CancellationFees";
 import { M, type MessageKey } from "./messages";
 
 const STATUS_TONE: Record<VersionStatus, BookingTone> = {
@@ -64,10 +72,12 @@ const STATUS_TONE: Record<VersionStatus, BookingTone> = {
 const RELATED: { key: MessageKey; href: string }[] = [
   { key: "relMargins", href: "/pricing/rules" },
   { key: "relFx", href: "/pricing/rules?tab=fx" },
-  { key: "relCancellation", href: "/pricing/rules" },
+  { key: "relCancellation", href: "/pricing/policy?tab=cancellation" },
   { key: "relTiers", href: "/pricing/agency-tiers" },
   { key: "relTerms", href: "/agency-billing" },
 ];
+
+const LIST_TYPES: ReadonlySet<PolicyParam["type"]> = new Set(["month_days", "codes", "currency_map", "integers", "amount_map"]);
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -143,7 +153,9 @@ function ChangeDrawer({ param, onClose }: { param: PolicyParam; onClose: () => v
     },
     onError: (err) => setError(errorText(t, err)),
   });
-  const hint = param.type === "currency_map" ? t("fieldValueMap") : param.type === "month_days" || param.type === "codes"
+  const hint = param.type === "currency_map" ? t("fieldValueMap") : param.type === "amount_map"
+    ? `${t("fieldValueAmounts", param.choices.join(", "))} ${rangeText({ ...param, choices: [] }) ? t("fieldValueHint", rangeText({ ...param, choices: [] })) : ""}`
+    : param.type === "month_days" || param.type === "codes" || param.type === "integers"
     ? `${t("fieldValueList")} ${rangeText(param) ? t("fieldValueHint", rangeText(param)) : ""}`
     : rangeText(param) ? t("fieldValueHint", rangeText(param)) : undefined;
   return (
@@ -222,6 +234,8 @@ type Deciding = { kind: "approve" | "reject"; param: PolicyParam; version: Param
 
 function Policy() {
   const t = useT(M);
+  const { get } = useUrlFilters();
+  const tab = get("tab") === "cancellation" ? "cancellation" : "parameters";
   const show = useShow();
   const labelOf = useLabel();
   const qc = useQueryClient();
@@ -303,7 +317,8 @@ function Policy() {
   }
 
   function approverLabel(p: PolicyParam): string {
-    return (p.approver === "finance" ? t("approverFinance") : t("approverPricing")) as string;
+    const key = p.approver === "finance" ? "approverFinance" : p.approver === "admin" ? "approverAdmin" : "approverPricing";
+    return t(key) as string;
   }
 
   const columns: ColumnDef<PolicyParam, unknown>[] = [
@@ -318,11 +333,16 @@ function Policy() {
             <span className="font-medium text-ink">{labelOf(p)}</span>
             <span className="max-w-[360px] break-words text-xs text-muted">{p.help}</span>
             <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-              <code>{p.key}</code>
-              <Pill tone={p.in_use ? "success" : "neutral"} dot={false}>
-                {p.in_use ? t("inUse") : t("stored")}
-              </Pill>
+              <code className="break-all">{p.key}</code>
+              <span data-testid={`policy-enforced-${p.key}`}>
+                <Pill tone={p.in_use ? "success" : "warning"} dot={false} title={p.not_enforced_reason ?? undefined}>
+                  {p.in_use ? t("inUse") : t("notEnforced")}
+                </Pill>
+              </span>
             </span>
+            {!p.in_use && p.not_enforced_reason && (
+              <span className="max-w-[360px] break-words text-xs text-muted">{t("notEnforcedWhy", p.not_enforced_reason)}</span>
+            )}
           </span>
         );
       },
@@ -336,7 +356,10 @@ function Policy() {
         if (!p.current) return <span className="text-[13px] text-danger">{t("noValue")}</span>;
         return (
           <span className="flex flex-col whitespace-nowrap" data-testid={`policy-value-${p.key}`}>
-            <span className="font-semibold text-ink">{show(p, p.current.value)}</span>
+            {/* A list or a map wraps (a phone card is narrower than "AUD 5, EUR 5, GBP 5, SGD 5, USD 5"). */}
+            <span className={`font-semibold text-ink ${LIST_TYPES.has(p.type) ? "whitespace-normal break-words" : ""}`}>
+              {show(p, p.current.value)}
+            </span>
             <span className="text-xs text-muted">
               {t("version", p.current.version_no)} · {t("since", p.current.effective_from)}
             </span>
@@ -372,46 +395,80 @@ function Policy() {
   const pending = items.filter((p) => p.open?.status === "pending").length;
   const scheduled = items.reduce((n, p) => n + p.scheduled.length, 0);
   const inUse = items.filter((p) => p.in_use).length;
+  const sections = SECTIONS.map((s) => ({ section: s, params: items.filter((p) => p.section === s) })).filter(
+    (g) => g.params.length > 0,
+  );
   const d = deciding;
   return (
     <PageFrame title={t("title")} description={t("description")} actions={<LangSwitch ariaLabel={t("language")} />}>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label={t("kpiParams")} value={listing.data ? items.length : undefined} />
-        <KpiTile
-          label={t("kpiPending")}
-          value={listing.data ? pending : undefined}
-          hint={pending ? t("kpiPendingHint") : undefined}
-          hintTone="warning"
-        />
-        <KpiTile label={t("kpiScheduled")} value={listing.data ? scheduled : undefined} />
-        <KpiTile label={t("kpiInUse")} value={listing.data ? inUse : undefined} />
-      </div>
-      <Section title={t("sectionParams")}>
-        <DataTable<PolicyParam>
-          tableId="pricing-policy"
-          data={items}
-          columns={columns}
-          getRowId={(p) => p.key}
-          loading={listing.isLoading}
-          error={listing.isError ? (listing.error as Error).message : null}
-          onRetry={() => listing.refetch()}
-          emptyTitle={t("emptyTitle")}
-          emptyDescription={t("emptyHint")}
-          tableMinWidth={960}
-        />
-      </Section>
-      <Section title={t("sectionRelated")} description={t("relatedHint")}>
-        <ul className="flex flex-col gap-2 text-[13px]" data-testid="policy-related">
-          {RELATED.map((r) => (
-            <li key={r.key} className="flex flex-wrap items-center gap-2">
-              <span className="text-body">{t(r.key) as string}</span>
-              <Link href={r.href} className="font-semibold text-accent-deep hover:underline">
-                {t("open")}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Section>
+      <SavedTabs
+        ariaLabel={t("tabsLabel") as string}
+        tabs={[
+          { key: "parameters", label: t("tabParameters") as string },
+          { key: "cancellation", label: t("tabCancellation") as string },
+        ]}
+      />
+      {tab === "cancellation" ? (
+        <CancellationFees />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiTile label={t("kpiParams")} value={listing.data ? items.length : undefined} />
+            <KpiTile
+              label={t("kpiPending")}
+              value={listing.data ? pending : undefined}
+              hint={pending ? t("kpiPendingHint") : undefined}
+              hintTone="warning"
+            />
+            <KpiTile label={t("kpiScheduled")} value={listing.data ? scheduled : undefined} />
+            <KpiTile label={t("kpiInUse")} value={listing.data ? inUse : undefined} />
+          </div>
+          {listing.isLoading || listing.isError || sections.length === 0 ? (
+            <Section title={t("sectionParams")}>
+              <DataTable<PolicyParam>
+                tableId="pricing-policy"
+                data={[]}
+                columns={columns}
+                getRowId={(p) => p.key}
+                loading={listing.isLoading}
+                error={listing.isError ? (listing.error as Error).message : null}
+                onRetry={() => listing.refetch()}
+                emptyTitle={t("emptyTitle")}
+                emptyDescription={t("emptyHint")}
+                tableMinWidth={960}
+              />
+            </Section>
+          ) : (
+            sections.map((g) => (
+              <Section key={g.section} title={t(`section_${g.section}` as MessageKey) as string} description={t(`sectionHint_${g.section}` as MessageKey) as string}>
+                <div data-testid={`policy-section-${g.section}`}>
+                  <DataTable<PolicyParam>
+                    tableId={`pricing-policy-${g.section}`}
+                    data={g.params}
+                    columns={columns}
+                    getRowId={(p) => p.key}
+                    emptyTitle={t("emptyTitle")}
+                    emptyDescription={t("emptyHint")}
+                    tableMinWidth={960}
+                  />
+                </div>
+              </Section>
+            ))
+          )}
+          <Section title={t("sectionRelated")} description={t("relatedHint")}>
+            <ul className="flex flex-col gap-2 text-[13px]" data-testid="policy-related">
+              {RELATED.map((r) => (
+                <li key={r.key} className="flex flex-wrap items-center gap-2">
+                  <span className="text-body">{t(r.key) as string}</span>
+                  <Link href={r.href} className="font-semibold text-accent-deep hover:underline">
+                    {t("open")}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        </>
+      )}
       {changing && <ChangeDrawer param={changing} onClose={() => setChanging(null)} />}
       {history && <HistoryDrawer param={history} onClose={() => setHistory(null)} />}
       <ConfirmDialog

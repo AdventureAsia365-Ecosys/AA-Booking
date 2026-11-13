@@ -55,7 +55,7 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import files as ops_files
 from app.ops import track
-from app.pricing import fx
+from app.pricing import fx, policy_values
 from app.supply import rates as supply_rates
 
 log = logging.getLogger(__name__)
@@ -401,18 +401,15 @@ async def list_bookings(
 async def summary(conn: asyncpg.Connection) -> dict[str, Any]:
     """Dashboard tile "Supplier answers pending": requested bookings, those waiting longer than
     ``supplier_answer_days``, and pending ones not yet requested."""
-    days = await conn.fetchval("SELECT value FROM booking.settings WHERE key = 'supplier_answer_days'")
-    try:
-        days = int(days) if days is not None else 2
-    except (TypeError, ValueError):
-        days = 2
+    on = await policy_values.today_utc(conn)
+    days = (await policy_values.require_staff(conn, on, "supplier_answer_days")).integer("supplier_answer_days")
     row = await conn.fetchrow(
         "SELECT count(*) FILTER (WHERE sb.status = 'requested')::int AS requested,"
         " count(*) FILTER (WHERE sb.status = 'requested' AND sb.requested_at < now() - make_interval(days => $1))::int"
         " AS overdue, count(*) FILTER (WHERE sb.status = 'pending')::int AS pending"
         " FROM booking.supplier_bookings sb JOIN booking.trip_cases tc ON tc.id = sb.trip_case_id"
         " WHERE tc.status NOT IN ('cancelled', 'completed') AND tc.deleted_at IS NULL",
-        max(1, min(days, 60)),
+        days,
     )
     return {**dict(row), "answer_days": days}
 

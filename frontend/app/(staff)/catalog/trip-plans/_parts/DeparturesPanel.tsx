@@ -22,6 +22,7 @@ import {
   minimumLabel,
   type Allotment,
   type Departure,
+  type DepartureDefaults,
   type DepartureRules,
   type DepartureStatus,
   type GenerateRequest,
@@ -54,13 +55,18 @@ const STATUS: Record<DepartureStatus, { label: string; tone: "neutral" | "succes
   cancelled: { label: "Cancelled", tone: "danger" },
 };
 
-const DEFAULT_RULES: DepartureRules = {
+// The form's starting values. The decision day comes from the pricing policy (Pricing > Policy,
+// departure_decision_days_default), read with the departure list, never a copy here.
+const BASE_RULES: Omit<DepartureRules, "decision_days_before"> = {
   capacity: 16,
   min_to_operate: 0,
   sales_cutoff_days: 0,
-  decision_days_before: 21,
   auto_confirm: true,
 };
+
+function newRules(defaults: DepartureDefaults): DepartureRules {
+  return { ...BASE_RULES, decision_days_before: defaults.decision_days_before };
+}
 
 function errorText(e: unknown, fallback = "Something went wrong"): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -185,8 +191,12 @@ export function DeparturesPanel({ sourceId }: { sourceId: string }) {
         emptyDescription={canWrite ? "Add one, or generate a weekly or monthly series." : "Contracting adds the departures of a plan."}
         tableMinWidth={820}
       />
-      {adding && <NewDepartureDrawer sourceId={sourceId} onClose={() => setAdding(false)} />}
-      {generating && <GenerateDrawer sourceId={sourceId} onClose={() => setGenerating(false)} />}
+      {adding && list.data && (
+        <NewDepartureDrawer sourceId={sourceId} defaults={list.data.defaults} onClose={() => setAdding(false)} />
+      )}
+      {generating && list.data && (
+        <GenerateDrawer sourceId={sourceId} defaults={list.data.defaults} onClose={() => setGenerating(false)} />
+      )}
       {current && <DepartureDrawer departure={current} sourceId={sourceId} onClose={() => setMany({ departure: null })} />}
     </Section>
   );
@@ -254,11 +264,19 @@ function RulesFields({
   );
 }
 
-function NewDepartureDrawer({ sourceId, onClose }: { sourceId: string; onClose: () => void }) {
+function NewDepartureDrawer({
+  sourceId,
+  defaults,
+  onClose,
+}: {
+  sourceId: string;
+  defaults: DepartureDefaults;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
   const [start, setStart] = useState(dayFromToday(30));
-  const [rules, setRules] = useState<DepartureRules>(DEFAULT_RULES);
+  const [rules, setRules] = useState<DepartureRules>(() => newRules(defaults));
   const save = useMutation({
     mutationFn: () => departuresApi.create(sourceId, { start_date: start, ...rules }),
     onSuccess: (d) => {
@@ -286,7 +304,15 @@ function NewDepartureDrawer({ sourceId, onClose }: { sourceId: string; onClose: 
   );
 }
 
-function GenerateDrawer({ sourceId, onClose }: { sourceId: string; onClose: () => void }) {
+function GenerateDrawer({
+  sourceId,
+  defaults,
+  onClose,
+}: {
+  sourceId: string;
+  defaults: DepartureDefaults;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
   const [from, setFrom] = useState(dayFromToday(30));
@@ -294,7 +320,7 @@ function GenerateDrawer({ sourceId, onClose }: { sourceId: string; onClose: () =
   const [kind, setKind] = useState<"weekly" | "monthly">("weekly");
   const [weekdays, setWeekdays] = useState<number[]>([6]);
   const [monthDay, setMonthDay] = useState(1);
-  const [rules, setRules] = useState<DepartureRules>(DEFAULT_RULES);
+  const [rules, setRules] = useState<DepartureRules>(() => newRules(defaults));
   const [preview, setPreview] = useState<GenerateResult | null>(null);
   const body = (dryRun: boolean): GenerateRequest => ({
     date_from: from,

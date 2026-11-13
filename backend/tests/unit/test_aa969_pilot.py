@@ -32,7 +32,11 @@ def test_without_pilots_adds_the_guard_to_tenant_tables_only() -> None:
     assert policy.without_pilots(policy.JOB_SPEC, [PILOT]) is policy.JOB_SPEC  # booking.job holds no tenant data
     spec = policy.without_pilots(policy.INBOX_SPEC, [PILOT])
     (part,) = spec.parts
-    assert part.window_days == 90 and spec.windows() == policy.INBOX_SPEC.windows()  # windows unchanged (DM-7.5)
+    assert part.window_days == 0 and spec.windows() == policy.INBOX_SPEC.windows()  # windows unchanged (DM-7.5)
+    resolved = policy.without_pilots(
+        policy.with_windows(policy.INBOX_SPEC, {"retention_inbox_redact_days": 90}), [PILOT]
+    )
+    assert resolved.windows() == {"payload_pii": 90}
     assert part.where.startswith("(t.redacted_at IS NULL AND t.status <> 'received') AND NOT EXISTS")
     assert f"pc.party_tenant_id = ANY('{{{PILOT}}}'::uuid[])" in part.where
     assert "pc.inbox_event_id = t.id" in runner.count_sql(spec, part, [])
@@ -88,7 +92,7 @@ async def test_a_retention_run_of_a_tenant_table_stays_dry_when_the_pilot_is_unk
         return runner.PartResult(part.name, part.window_days, part.archive, cut.isoformat(), candidates=3)
 
     async def prev_live(conn: Any, kind: str) -> dict[str, Any]:
-        return {"windows": policy.INBOX_SPEC.windows(), "affected_total": 10}
+        return {"windows": {"payload_pii": 90}, "affected_total": 10}  # the bk-056 seed window
 
     async def no_process(*_: Any, **__: Any) -> None:
         raise AssertionError("nothing may be written while the pilot is unknown")

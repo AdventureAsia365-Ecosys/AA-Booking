@@ -46,7 +46,7 @@ import type {
   SupplyContent,
   SupplyMedia,
 } from "../../lib/api/supply";
-import type { FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
+import type { CancellationPolicyRow, FxRateRow, PolicyList, PricingRuleRow } from "../../lib/api/pricingPolicy";
 import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow, TierList } from "../../lib/api/agencyPricing";
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
 import type { ParamVersion, PolicyListing, PolicyParam } from "../../lib/api/policyParams";
@@ -587,6 +587,38 @@ const FX: PolicyList<FxRateRow> = {
     source: "Vietcombank published sell rate, 08:30 ICT, checked against the State Bank of Vietnam reference rate",
   })),
 };
+const CANCELLATION_POLICIES: PolicyList<CancellationPolicyRow> = {
+  today: "2026-10-23",
+  items: (
+    [
+      ["pending", null, "2026-12-01"],
+      ["in_force", null, "2026-01-01"],
+      ["in_force", "invented-tour-0042", "2026-03-01"],
+    ] as const
+  ).map(([status, sourceId, validFrom], i) => ({
+    id: `cx-${i}`,
+    status,
+    created_by: person("u-002", 1),
+    created_at: NOW,
+    approved_by: status === "pending" ? null : person("u-003", 2),
+    approved_at: status === "pending" ? null : NOW,
+    can_approve: status === "pending",
+    channel: "b2b",
+    trip_plan_id: sourceId ? uuid("6", 3) : null,
+    source_id: sourceId,
+    valid_from: validFrom,
+    title: sourceId ? "Invented river cruise terms" : "B2B FIT cancellation scale",
+    tiers: [
+      { min_days: 31, fee_pct: "0" },
+      { min_days: 22, fee_pct: "10" },
+      { min_days: 15, fee_pct: "25" },
+      { min_days: 8, fee_pct: "50" },
+      { min_days: 2, fee_pct: "75" },
+      { min_days: 0, fee_pct: "100" },
+    ],
+    note: null,
+  })),
+};
 const RULES: PolicyList<PricingRuleRow> = {
   today: "2026-10-23",
   items: (
@@ -751,7 +783,7 @@ function policyParam(
   const current = policyVersion(key, 1, value, { unit });
   return {
     key, type, unit, question: "Q2", approver: "pricing", label: key, help: "What this value does for new quotes and tariffs.",
-    in_use: true, minimum: type === "integer" || type === "decimal" ? "1" : null, maximum: type === "integer" || type === "decimal" ? "30" : null,
+    in_use: true, section: "quotes", not_enforced_reason: null, minimum: type === "integer" || type === "decimal" ? "1" : null, maximum: type === "integer" || type === "decimal" ? "30" : null,
     choices: [], current, scheduled: [], open: null, history: [current], can_approve_group: true, ...over,
   };
 }
@@ -763,23 +795,34 @@ const POLICY: PolicyListing = {
   today: "2026-10-23",
   pending: 1,
   items: [
-    policyParam("tariff_year_start", "month_day", "MM-DD", "11-01", { in_use: false, question: "Q1" }),
+    policyParam("tariff_year_start", "month_day", "MM-DD", "11-01", { in_use: false, question: "Q1", not_enforced_reason: "The feature that reads this value is not built yet." }),
     policyParam("quote_validity_days", "integer", "days", 14, { open: POLICY_PENDING }),
-    policyParam("quote_validity_festive_days", "integer", "days", 3, { in_use: false }),
-    policyParam("surcharge_causes", "codes", null, ["fx", "tax"], { approver: "finance", in_use: false, choices: ["fuel", "fx", "tax"], can_approve_group: false }),
+    policyParam("quote_validity_festive_days", "integer", "days", 3, { in_use: false, not_enforced_reason: "The feature that reads this value is not built yet." }),
+    policyParam("surcharge_causes", "codes", null, ["fx", "tax"], { approver: "finance", in_use: false, section: "surcharges", not_enforced_reason: "The feature that reads this value is not built yet.", choices: ["fuel", "fx", "tax"], can_approve_group: false }),
     policyParam("surcharge_fx_threshold_pct", "decimal", "%", "5", {
-      approver: "finance", in_use: false, can_approve_group: false,
+      approver: "finance", in_use: false, section: "surcharges", not_enforced_reason: "The feature that reads this value is not built yet.", can_approve_group: false,
       scheduled: [policyVersion("surcharge_fx_threshold_pct", 2, "4", { status: "scheduled", effective_from: "2026-12-01", unit: "%" })],
     }),
-    policyParam("provisional_cis_ref_quotable", "boolean", null, false, { in_use: false, question: "Q12" }),
+    policyParam("provisional_cis_ref_quotable", "boolean", null, false, { in_use: false, section: "prices", question: "Q12", not_enforced_reason: "The feature that reads this value is not built yet." }),
     policyParam("group_on_request_min_pax", "integer", "travellers", 9, {
       open: policyVersion("group_on_request_min_pax", 2, 8, {
         status: "draft", unit: "travellers", effective_from: "2026-11-01", submitted_at: null, approved_by: null, approved_at: null,
         created_by: { id: STAFF_ME.cis_user_id, name: STAFF_ME.name }, can_submit: true, can_withdraw: true,
       }),
     }),
-    policyParam("gala_dinner_days", "month_days", "MM-DD", ["12-24", "12-31"], { in_use: false, question: "Q7" }),
-    policyParam("agency_currency_by_country", "currency_map", null, { "*": "USD", VN: "VND" }, { approver: "finance", in_use: false }),
+    policyParam("gala_dinner_days", "month_days", "MM-DD", ["12-24", "12-31"], { in_use: false, section: "prices", question: "Q7", not_enforced_reason: "The feature that reads this value is not built yet." }),
+    policyParam("agency_currency_by_country", "currency_map", null, { "*": "USD", VN: "VND" }, { approver: "finance", in_use: false, section: "payments", not_enforced_reason: "The feature that reads this value is not built yet." }),
+    policyParam("b2b_hold_hours", "integer", "hours", 48, { section: "holds" }),
+    policyParam("b2b_rehold_limit_per_day", "integer", "holds", 3, { section: "holds" }),
+    policyParam("b2b_on_request_answer_business_days", "integer", "business days", 1, { section: "desk" }),
+    policyParam("b2b_child_age_max", "integer", "years", 11, { section: "travellers" }),
+    policyParam("departure_decision_days_default", "integer", "days", 21, { section: "departures" }),
+    policyParam("pre_departure_days", "integer", "days", 14, { section: "operations" }),
+    policyParam("agency_reminder_steps_days", "integers", "days", [1, 7, 14], { approver: "finance", section: "agency_billing" }),
+    policyParam("rounding_increment_by_currency", "amount_map", null, { AUD: "5", EUR: "5", GBP: "5", SGD: "5", USD: "5" }, {
+      section: "rounding", choices: ["AUD", "EUR", "GBP", "SGD", "USD"],
+    }),
+    policyParam("retention_job_failed_days", "integer", "days", 90, { approver: "admin", section: "retention", can_approve_group: false }),
   ],
 };
 
@@ -1303,7 +1346,9 @@ function planDeparture(i: number): Departure {
 }
 
 function planDepartures(sourceId: string): DepartureList {
-  return { trip_plan_id: uuid("6", 2), source_id: sourceId, items: range(12).map(planDeparture) };
+  return {
+    trip_plan_id: uuid("6", 2), source_id: sourceId, items: range(12).map(planDeparture), defaults: { decision_days_before: 21 },
+  };
 }
 
 function allotment(i: number, departureId: string): Allotment {
@@ -2028,6 +2073,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "pricing/rules") return ok(RULES);
   if (p === "pricing/fx-rates") return ok(FX);
+  if (p === "pricing/cancellation-policies") return ok(CANCELLATION_POLICIES);
   if (p === "pricing/partner-tiers") return ok(AGENCY_TIERS);
   if (p === "pricing/partner-tier-discounts") return ok(TIER_DISCOUNTS);
   if (p === "pricing/partner-terms") return ok({ today: "2026-10-23", items: range(ROWS).map(partnerTerms) });

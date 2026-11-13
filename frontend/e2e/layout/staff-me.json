@@ -32,6 +32,7 @@
     "pricing.read",
     "pricing.write",
     "pricing_policy.approve",
+    "pricing_policy.approve_admin",
     "pricing_policy.approve_finance",
     "pricing_policy.read",
     "pricing_policy.write",

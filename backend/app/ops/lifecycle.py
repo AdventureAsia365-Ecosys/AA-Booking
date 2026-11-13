@@ -21,10 +21,11 @@ date is a fact); their count travels in the notice and the result. **Dates are r
 (``b2b_ops_timezone``, default Asia/Ho_Chi_Minh): "today" is that zone's date and every write transaction sets the
 session ``TimeZone`` to it, so the guard's ``current_date`` is the same day whatever the server or pool zone.
 
-It also clears, once the trip ended ``emergency_contact_keep_days`` (90) ago, the emergency contact and the notes of the
-case's trip checks (data standards DM-7 row of ``trip_case_checks``) and stamps ``cleared_at``. AA-969 (root ADR 0019
-d16): never for a case of the pilot tenant (``party_tenant_id``, :mod:`app.pilot`); its checks wait until the pilot
-marker is cleared. When the pilot cannot be read the clearing is skipped for that run (``clear_skipped_pilot_unknown``).
+It also clears, once the trip ended ``emergency_contact_keep_days`` ago (a pricing policy parameter, S279), the
+emergency contact and the notes of the case's trip checks (data standards DM-7 row of ``trip_case_checks``) and stamps
+``cleared_at``. AA-969 (root ADR 0019 d16): never for a case of the pilot tenant (``party_tenant_id``,
+:mod:`app.pilot`); its checks wait until the pilot marker is cleared. When the pilot cannot be read the clearing is
+skipped for that run (``clear_skipped_pilot_unknown``).
 
 Modes (DM-7.2 style): a manual run is a **DRY RUN** unless its payload says ``"dry_run": false``; a scheduled run is a
 DRY RUN until one live run over every case (no ``case_ids``) has succeeded. A DRY RUN writes nothing but its job result:
@@ -74,6 +75,7 @@ from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import Handler, PermanentError
 from app.notifications import service as notifications
+from app.pricing import policy_values
 
 log = logging.getLogger(__name__)
 
@@ -94,20 +96,16 @@ CHECK_DUE_TYPE = "trip_check.due"
 BILL_DUE_TYPE = "supplier_bill.due"
 DEFAULT_TZ = "Asia/Ho_Chi_Minh"
 TZ_SETTING = "b2b_ops_timezone"
-DEFAULTS = {
-    "pre_departure_days": 14,
-    "emergency_contact_keep_days": 90,
-    "supplier_answer_days": 2,
-    "trip_check_reminder_days": 3,
-    "supplier_bill_due_soon_days": 3,
-}
-LIMITS = {
-    "pre_departure_days": (0, 120),
-    "emergency_contact_keep_days": (0, 3650),
-    "supplier_answer_days": (1, 60),
-    "trip_check_reminder_days": (0, 60),
-    "supplier_bill_due_soon_days": (0, 60),
-}
+# S279 L3 (bk-056): the lifecycle and reminder days are pricing policy parameters (Pricing > Policy, maker-checker;
+# keys, ranges: app.pricing.policy_params), read in force on the UTC day of the run. No fallback in code: a missing
+# value fails the run (PolicyUnavailable), which the runner retries.
+POLICY_KEYS = (
+    "pre_departure_days",
+    "emergency_contact_keep_days",
+    "supplier_answer_days",
+    "trip_check_reminder_days",
+    "supplier_bill_due_soon_days",
+)
 # Statuses a case leaves for pre_departure (bk-026 edges: B2B from confirmed / supplier_confirming, B2C from paid
 # once bk-028 adds that edge); the money statuses are listed so a B2C case waiting for its money shows as blocked.
 PRE_SOURCES = ("confirmed", "supplier_confirming", "invoice_sent", "payment_pending", "paid")
@@ -127,21 +125,10 @@ REASON_LABEL = {
 # ── Settings ─────────────────────────────────────────────────────────────────
 
 
-def _int_setting(raw: Any, key: str) -> int:
-    try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        value = None
-    low, high = LIMITS[key]
-    if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
-        return value
-    return DEFAULTS[key]
-
-
 async def policy(conn: asyncpg.Connection | asyncpg.Pool) -> dict[str, int]:
-    rows = await conn.fetch("SELECT key, value FROM booking.settings WHERE key = ANY($1::text[])", list(DEFAULTS))
-    raw = {r["key"]: r["value"] for r in rows}
-    return {key: _int_setting(raw.get(key), key) for key in DEFAULTS}
+    """The lifecycle and reminder days in force today (UTC), by key (:data:`POLICY_KEYS`)."""
+    values = await policy_values.require(conn, await policy_values.today_utc(conn), *POLICY_KEYS)
+    return {key: values.integer(key) for key in POLICY_KEYS}
 
 
 async def ops_timezone(conn: asyncpg.Connection) -> str:
