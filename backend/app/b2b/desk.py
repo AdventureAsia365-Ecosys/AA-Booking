@@ -8,13 +8,14 @@ who check with the supplier and then:
 - **decline** with a ``decline_code`` → ``declined`` (event ``line.declined``; its seats are free again, since sold
   seats leave out declined lines).
 
-The deadline ``answer_due_at`` is set when the booking is confirmed: ``b2b_on_request_answer_business_days`` (1)
-business days, Mon-Fri, in ``b2b_ops_timezone`` (Asia/Ho_Chi_Minh), by the SQL function ``booking.b2b_answer_due``
-(the database has the time-zone rules; the image does not ship tzdata). The **SLA badge** of an open line is
-``overdue`` (past the deadline), ``due_soon`` (at most :data:`DUE_SOON_HOURS` left) or ``on_time``. Answering is
-idempotent (the same answer again returns the line); another answer on an answered line is 409. A cancelled booking's
-lines are ``cancelled`` (AA-974) and leave the desk. Pre-confirm holds are not on the desk: the agency has not paid
-its deposit, so ops do no supplier work yet (the hold length stays ``b2b_hold_hours``).
+The deadline ``answer_due_at`` is set when the booking is confirmed: ``b2b_on_request_answer_business_days`` business
+days, Mon-Fri, in ``b2b_ops_timezone`` (Asia/Ho_Chi_Minh), by the SQL function ``booking.b2b_answer_due`` (the database
+has the time-zone rules; the image does not ship tzdata). The **SLA badge** of an open line is ``overdue`` (past the
+deadline), ``due_soon`` (at most ``b2b_on_request_due_soon_hours`` left) or ``on_time``. Both values are pricing policy
+parameters (S279 L3, bk-056; Pricing > Policy); the time zone stays a settings row. Answering is idempotent (the same
+answer again returns the line); another answer on an answered line is 409. A cancelled booking's lines are ``cancelled``
+(AA-974) and leave the desk. Pre-confirm holds are not on the desk: the agency has not paid its deposit, so ops do no
+supplier work yet (the hold length stays ``b2b_hold_hours``).
 
 **Incident flag** (design Fix B3: the button lives here, CRM S-02 links to it). Staff flag an incident on a departure
 with a code from the contract list (weather, road, health, political, supplier, other) and clear it later; at most one
@@ -42,17 +43,16 @@ from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_c
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Conflict, Invalid, NotFound
 from app.notifications import service as notifications
+from app.pricing import policy_values
 
 log = logging.getLogger(__name__)
 
 INCIDENT_CODES = ("weather", "road", "health", "political", "supplier", "other")
 DECLINE_CODES = ("sold_out", "supplier_unavailable", "minimum_not_met", "other")
 STATES = ("open", "answered", "all")
-DUE_SOON_HOURS = 4
-DAYS_SETTING = "b2b_on_request_answer_business_days"
+DAYS_KEY = "b2b_on_request_answer_business_days"
+DUE_SOON_KEY = "b2b_on_request_due_soon_hours"
 TZ_SETTING = "b2b_ops_timezone"
-DEFAULT_DAYS = 1
-MAX_DAYS = 10
 DEFAULT_TZ = "Asia/Ho_Chi_Minh"
 NOTIFICATION_TYPE = "b2b.on_request"
 MAX_PAGE = 100
@@ -76,10 +76,16 @@ async def _setting(conn: asyncpg.Connection, key: str) -> Any:
         return None
 
 
+async def _due_soon_hours(conn: asyncpg.Connection, now: datetime) -> int:
+    policy = await policy_values.require_staff(conn, now.astimezone(UTC).date(), DUE_SOON_KEY)
+    return policy.b2b_on_request_due_soon_hours
+
+
 async def answer_policy(conn: asyncpg.Connection) -> tuple[int, str]:
-    """(business days, time zone) of the on-request SLA, falling back to the defaults on a bad settings value."""
-    days, tz = await _setting(conn, DAYS_SETTING), await _setting(conn, TZ_SETTING)
-    days = days if isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= MAX_DAYS else DEFAULT_DAYS
+    """(business days, time zone) of the on-request SLA: the policy parameter in force today (PolicyUnavailable when
+    it has none) and the ops time zone setting, which falls back to Asia/Ho_Chi_Minh on a bad value."""
+    days = (await policy_values.require(conn, await policy_values.today_utc(conn), DAYS_KEY)).integer(DAYS_KEY)
+    tz = await _setting(conn, TZ_SETTING)
     if not isinstance(tz, str) or not tz or len(tz) > 64:
         return days, DEFAULT_TZ
     try:
@@ -91,7 +97,7 @@ async def answer_policy(conn: asyncpg.Connection) -> tuple[int, str]:
     return days, tz
 
 
-def sla_state(status: str, due: datetime | None, now: datetime) -> str:
+def sla_state(status: str, due: datetime | None, now: datetime, due_soon_hours: int) -> str:
     """``answered`` / ``closed`` once the line left ``on_request``; else ``overdue`` / ``due_soon`` / ``on_time``."""
     if status in ("confirmed", "declined"):
         return "answered"
@@ -101,7 +107,7 @@ def sla_state(status: str, due: datetime | None, now: datetime) -> str:
         return "on_time"
     if now >= due:
         return "overdue"
-    return "due_soon" if due - now <= timedelta(hours=DUE_SOON_HOURS) else "on_time"
+    return "due_soon" if due - now <= timedelta(hours=due_soon_hours) else "on_time"
 
 
 # ── Opening requests (called by confirm, app.b2b.holds) ──────────────────────
@@ -225,13 +231,13 @@ async def tour_titles(conn: asyncpg.Connection, source_ids: list[str]) -> dict[s
     return {r["source_id"]: r["title"] for r in rows}
 
 
-def line_out(row: Any, labels: dict[str, dict[str, Any]], now: datetime) -> dict[str, Any]:
+def line_out(row: Any, labels: dict[str, dict[str, Any]], now: datetime, due_soon_hours: int) -> dict[str, Any]:
     label = labels.get(row["component_id"]) or {}
     return {
         "hold_id": row["hold_id"],
         "line_ref": row["line_ref"],
         "status": row["status"],
-        "sla": sla_state(row["status"], row["answer_due_at"], now),
+        "sla": sla_state(row["status"], row["answer_due_at"], now, due_soon_hours),
         "answer_due_at": row["answer_due_at"],
         "requested_at": row["confirmed_at"],
         "answered_at": row["answered_at"],
@@ -276,8 +282,9 @@ async def list_on_request(
         offset,
     )
     labels = await _labels(conn, [r["component_id"] for r in rows])
+    soon = await _due_soon_hours(conn, now)
     return {
-        "items": [line_out(r, labels, now) for r in rows],
+        "items": [line_out(r, labels, now, soon) for r in rows],
         "total": int(total or 0),
         "limit": limit,
         "offset": offset,
@@ -293,7 +300,7 @@ async def _line(conn: asyncpg.Connection, hold_id: str, line_ref: str, now: date
     )
     if row is None:
         raise NotFound("line_not_found", "no on-request line of a confirmed B2B booking with this hold and line_ref")
-    return line_out(row, await _labels(conn, [row["component_id"]]), now)
+    return line_out(row, await _labels(conn, [row["component_id"]]), now, await _due_soon_hours(conn, now))
 
 
 async def answer_line(
@@ -401,14 +408,15 @@ WHERE d.status = 'scheduled' AND d.at_risk_at IS NOT NULL AND d.min_to_operate >
 
 async def summary(conn: asyncpg.Connection, *, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(UTC)
-    row = await conn.fetchrow(SUMMARY_SQL, now, now + timedelta(hours=DUE_SOON_HOURS))
+    soon = await _due_soon_hours(conn, now)
+    row = await conn.fetchrow(SUMMARY_SQL, now, now + timedelta(hours=soon))
     incidents = await conn.fetchval("SELECT count(*)::int FROM booking.departure_incidents WHERE cleared_at IS NULL")
     at_risk = await conn.fetchval(AT_RISK_SQL)
     return {
         "on_request": {"open": row["open"], "overdue": row["overdue"], "due_soon": row["due_soon"]},
         "open_incidents": int(incidents or 0),
         "departures_at_risk": int(at_risk or 0),
-        "due_soon_hours": DUE_SOON_HOURS,
+        "due_soon_hours": soon,
     }
 
 

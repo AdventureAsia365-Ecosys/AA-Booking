@@ -1019,7 +1019,7 @@ async def test_bill_reminders_write_once_to_the_shared_queue() -> None:
     out = await lifecycle._bill_reminders(conn, TODAY, 3, 100)
     assert out == {"bills_due": 2, "bills_notified": 1}
     assert conn.calls[0][1] == (TODAY + timedelta(days=3), 100)
-    assert lifecycle.DEFAULTS["supplier_bill_due_soon_days"] == 3
+    assert "supplier_bill_due_soon_days" in lifecycle.POLICY_KEYS
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────

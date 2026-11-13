@@ -15,11 +15,12 @@ from fastapi.testclient import TestClient
 
 from app.b2b import components, quotes, reads
 from app.b2b.components import LineAsk, RoomAsk
+from app.b2b.errors import B2BError
 from app.main import create_app
 from app.pricing import repository
 from app.pricing.engine import Channel, PricingRule
 from tests.staff_tokens import CRM_CLIENT, OTHER_M2M_CLIENT, LocalCis, LocalM2M
-from tests.unit.fakes import ScriptedConn, served_plan
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows, served_plan
 from tests.unit.test_pricing_api import ScriptedDatabase
 
 TENANT = "5b7d6f00-0000-4000-8000-0000000000aa"
@@ -404,11 +405,14 @@ def test_age_bands_fall_back_to_the_defaults(
 
 
 @pytest.mark.asyncio
-async def test_default_age_bands_read_the_settings_and_ignore_bad_values() -> None:
-    conn = ScriptedConn().on("WHERE key = $1", "12")
-    assert await reads.default_age_bands(conn) == (12, 1)  # 12 is no infant age (0..4): the built-in 1
-    assert await reads.default_age_bands(ScriptedConn().on("WHERE key = $1", "true")) == (11, 1)
-    assert await reads.default_age_bands(ScriptedConn()) == (11, 1)
+async def test_default_age_bands_are_the_policy_values() -> None:
+    conn = ScriptedConn().on(POLICY_FRAGMENT, policy_rows(b2b_child_age_max="12", b2b_infant_age_max="2"))
+    assert await reads.default_age_bands(conn) == (12, 2)
+    assert await reads.default_age_bands(ScriptedConn()) == (11, 1)  # the bk-056 seed
+    missing = [r for r in policy_rows() if r["param_key"] != "b2b_infant_age_max"]
+    with pytest.raises(B2BError) as exc:
+        await reads.default_age_bands(ScriptedConn().on(POLICY_FRAGMENT, missing))
+    assert exc.value.error == "unavailable"
 
 
 def test_products_delta_lists_plans_that_stopped_being_sellable() -> None:

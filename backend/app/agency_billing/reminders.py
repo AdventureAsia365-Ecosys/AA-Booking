@@ -1,11 +1,11 @@
 """Overdue agency invoice reminders (AA-1037 R4 extras G4): ``bk_agency_invoice_reminders``, once a day.
 
 **Steps** (:func:`due_step`): an overdue issued invoice (balance left, due date past) gets one e-mail per step it
-reaches: the ``reminder`` steps of the setting ``agency_reminder_steps_days`` (``booking.settings``, a JSON list of
-days overdue; default ``[1, 7, 14]``) and the ``credit_stop`` step at the agency's ``suspend_after_days`` (its
-billing terms, else the default row), the day its billing status turns ``past_due`` and new B2B holds are refused
-(409 ``credit_hold_overdue``, ``app.b2b.holds.check_credit``). Only the highest step reached is sent: an invoice found
-20 days overdue gets the 14-day reminder, not three e-mails at once.
+reaches: the ``reminder`` steps of the pricing policy parameter ``agency_reminder_steps_days`` (Pricing > Policy, S279
+L3 / bk-056: a list of days overdue, approved by finance; the run fails without one) and the ``credit_stop`` step at the
+agency's ``suspend_after_days`` (its billing terms, else the default row), the day its billing status turns ``past_due``
+and new B2B holds are refused (409 ``credit_hold_overdue``, ``app.b2b.holds.check_credit``). Only the highest step
+reached is sent: an invoice found 20 days overdue gets the 14-day reminder, not three e-mails at once.
 
 **Once per invoice per step**: every handled step is a row of ``booking.agency_invoice_reminder`` (bk-044, primary key
 ``(invoice_id, step_days)``), written after the send (``sent``: the address and the SES message id, ``delivery_ref``)
@@ -40,6 +40,7 @@ from app import mailer
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.jobs.worker import Handler, PermanentError
+from app.pricing import policy_values
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -47,9 +48,8 @@ log = logging.getLogger(__name__)
 KIND = "bk_agency_invoice_reminders"
 SCHEDULER = "system:agency_billing"
 MAX_ATTEMPTS = 3
-STEPS_SETTING = "agency_reminder_steps_days"
-DEFAULT_STEPS: tuple[int, ...] = (1, 7, 14)
-MAX_STEP_DAYS = 365
+STEPS_KEY = "agency_reminder_steps_days"
+MAX_STEP_DAYS = 365  # technical-constant: the bound of a step and of suspend_after_days (billing_terms CHECK)
 MAX_INVOICES = 500
 REMINDER = "reminder"
 CREDIT_STOP = "credit_stop"
@@ -90,22 +90,6 @@ class ReminderFailed(RuntimeError):
 
 
 # ── Pure rules ───────────────────────────────────────────────────────────────
-
-
-def parse_steps(raw: Any) -> tuple[int, ...]:
-    """The reminder steps from the setting (a JSON list of whole days 1..365); the default when unset or invalid."""
-    try:
-        value = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return DEFAULT_STEPS
-    if not isinstance(value, list) or not value:
-        return DEFAULT_STEPS
-    steps = set()
-    for item in value:
-        if isinstance(item, bool) or not isinstance(item, int) or not 1 <= item <= MAX_STEP_DAYS:
-            return DEFAULT_STEPS
-        steps.add(item)
-    return tuple(sorted(steps))
 
 
 def due_step(
@@ -222,8 +206,9 @@ def render(
 # ── Job ──────────────────────────────────────────────────────────────────────
 
 
-async def _steps(conn: asyncpg.Connection) -> tuple[int, ...]:
-    return parse_steps(await conn.fetchval("SELECT value FROM booking.settings WHERE key = $1", STEPS_SETTING))
+async def _steps(conn: asyncpg.Connection, today: date) -> tuple[int, ...]:
+    """The reminder steps in force on ``today`` (PolicyUnavailable without one: the runner retries the job)."""
+    return (await policy_values.require(conn, today, STEPS_KEY)).agency_reminder_steps_days
 
 
 async def run(
@@ -241,7 +226,7 @@ async def run(
     if not prod and not settings.staff_notify_email:
         return {"outcome": "skipped", "reason": "STAFF_NOTIFY_EMAIL not set (reminders go to staff outside prod)"}
     async with pool.acquire() as conn:
-        steps = await _steps(conn)
+        steps = await _steps(conn, today)
         rows = await conn.fetch(OVERDUE_SQL, today, MAX_INVOICES)
     counts = {"overdue": len(rows), "sent": 0, "skipped": 0, "failed": 0, "not_due": 0}
     for row in rows:

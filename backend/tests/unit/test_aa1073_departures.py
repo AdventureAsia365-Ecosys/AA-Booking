@@ -17,11 +17,11 @@ from fastapi.testclient import TestClient
 from app.auth.staff import Staff, current_staff, get_pool
 from app.b2b import allotments, departure_watch, departures
 from app.b2b.departures import AVAILABLE, ON_REQUEST, SOLD_OUT, Allotment, SeatAsk, evaluate
-from app.errors import Conflict, Forbidden, Invalid, NotFound
+from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from app.jobs.queue import Job
 from app.main import create_app
 from app.settings import Settings
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 
 PLAN = "8e000000-0000-4000-8000-000000001073"
 DEP = "9f000000-0000-4000-8000-000000001073"
@@ -667,9 +667,19 @@ def test_generate_route(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (data["min_to_operate"], data["sales_cutoff_days"], data["decision_days_before"], data["dry_run"]) == (
         0,
         0,
-        21,
+        None,  # S279 L3: no value from the form = the policy default, read by app.b2b.departures
         False,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_departure_without_a_decision_day_gets_the_policy_default() -> None:
+    conn = ScriptedConn().on(POLICY_FRAGMENT, policy_rows(departure_decision_days_default="30"))
+    assert await departures._rules_of(conn, {"capacity": 10}) == (10, 0, 0, 30)
+    assert await departures._rules_of(conn, {"capacity": 10, "decision_days_before": 7}) == (10, 0, 0, 7)
+    missing = [r for r in policy_rows() if r["param_key"] != "departure_decision_days_default"]
+    with pytest.raises(Unavailable):
+        await departures._rules_of(ScriptedConn().on(POLICY_FRAGMENT, missing), {"capacity": 10})
 
 
 def test_allotment_routes(monkeypatch: pytest.MonkeyPatch) -> None:

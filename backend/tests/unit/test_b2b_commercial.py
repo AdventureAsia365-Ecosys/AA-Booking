@@ -19,7 +19,7 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.pricing import repository
 from app.pricing.engine import Channel, PricingRule
 from tests.staff_tokens import LocalM2M
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 from tests.unit.test_b2b_api import PARTNER_ID, _client, _conn, _headers, _problem, _quote_body
 from tests.unit.test_b2b_hold_flow import (
     CALLER,
@@ -365,7 +365,7 @@ async def test_extend_adds_the_setting_hours_once_and_audits() -> None:
     conn = extend_conn()
     out = await extend(conn)
     assert out["extended_count"] == 1 and out["expires_at"] == (NOW + timedelta(hours=120)).isoformat()
-    [update] = conn.sql("SET expires_at = $2, extended_count = 1")
+    [update] = conn.sql("SET expires_at = $2, extended_count = extended_count + 1")
     assert update == (HOLD, NOW + timedelta(hours=48 + 72), "payment_claimed", "extend-0001")
     [audit] = conn.sql("INSERT INTO booking.audit_logs")
     assert audit[3] == "b2b_hold.extended"
@@ -382,7 +382,7 @@ async def test_extend_is_capped_by_the_departure_start() -> None:
     soon = (NOW + timedelta(days=3)).date()
     conn = extend_conn(dep=dep_row(start_date=soon))
     await extend(conn)
-    [update] = conn.sql("SET expires_at = $2, extended_count = 1")
+    [update] = conn.sql("SET expires_at = $2, extended_count = extended_count + 1")
     assert update[1] == datetime(soon.year, soon.month, soon.day, tzinfo=UTC)
 
 
@@ -428,18 +428,37 @@ async def test_extend_refusals(hold: dict[str, Any], kw: dict[str, Any], clock: 
     assert not conn.sql("SET expires_at")
 
 
-@pytest.mark.parametrize(
-    ("stored", "hours"), [("96", 96), (None, 72), ("abc", 72), ("0", 72), ("721", 72), ('"24"', 24)]
-)
+@pytest.mark.parametrize("hours", [24, 72, 96])
 @pytest.mark.asyncio
-async def test_extend_hours_setting(stored: Any, hours: int) -> None:
-    assert await holds._extend_hours(ScriptedConn().on("FROM booking.settings", stored)) == hours
+async def test_extend_adds_the_policy_hours(hours: int) -> None:
+    """S279 L3 (bk-056): the extension is the pricing policy parameter b2b_hold_extend_hours."""
+    conn = extend_conn().on(POLICY_FRAGMENT, lambda *_: policy_rows(b2b_hold_extend_hours=str(hours)))
+    await extend(conn)
+    [update] = conn.sql("SET expires_at = $2")
+    assert update[1] == hold_row()["expires_at"] + timedelta(hours=hours)
 
 
-@pytest.mark.parametrize(("stored", "limit"), [("5", 5), (None, 3), ("abc", 3), ("0", 0), ("101", 3), ("-1", 3)])
 @pytest.mark.asyncio
-async def test_rehold_limit_setting(stored: Any, limit: int) -> None:
-    assert await holds._rehold_limit(ScriptedConn().on("FROM booking.settings", stored)) == limit
+async def test_extend_refused_when_the_policy_allows_no_extension() -> None:
+    conn = extend_conn().on(POLICY_FRAGMENT, lambda *_: policy_rows(b2b_hold_max_extensions="0"))
+    with pytest.raises(B2BError) as exc:
+        await extend(conn)
+    assert exc.value.error == "extend_limit" and "cannot be extended" in exc.value.message
+    assert not conn.sql("SET expires_at")
+
+
+@pytest.mark.parametrize(("limit", "allowed"), [("2", False), ("3", True)])
+@pytest.mark.asyncio
+async def test_rehold_limit_is_the_policy_value(limit: str, allowed: bool) -> None:
+    """First hold today + 2 re-holds: this one is the 3rd re-hold, refused under a limit of 2, allowed under 3."""
+    conn = place_conn().on(POLICY_FRAGMENT, lambda *_: policy_rows(b2b_rehold_limit_per_day=limit))
+    conn.on(REHOLD, _counts(3, NOW - timedelta(hours=1)))
+    if allowed:
+        assert (await place(conn))["hold_id"] == HOLD
+    else:
+        with pytest.raises(B2BError) as exc:
+            await place(conn)
+        assert exc.value.error == "rehold_limit" and f"(limit {limit} a day)" in exc.value.message
 
 
 # ── Re-hold limit ────────────────────────────────────────────────────────────
@@ -466,7 +485,6 @@ def _counts(today: int, first: datetime | None) -> dict[str, Any]:
 async def test_rehold_limit(counts: dict[str, Any], allowed: bool) -> None:
     conn = place_conn()
     conn.on(REHOLD, counts)
-    conn.on("FROM booking.settings WHERE key", lambda name: "3" if name == holds.REHOLD_LIMIT_SETTING else "48")
     if allowed:
         assert (await place(conn))["hold_id"] == HOLD
         assert conn.sql("INSERT INTO booking.b2b_holds")
@@ -506,7 +524,6 @@ async def test_departure_rehold_limit(dropped: int | None, allowed: bool) -> Non
     conn = place_conn()
     conn.on(REHOLD, _counts(0, None))
     conn.on(DEP_REHOLD, None if dropped is None else {"departure_id": DEP, "dropped": dropped})
-    conn.on("FROM booking.settings WHERE key", lambda name: "3" if name == holds.REHOLD_LIMIT_SETTING else "48")
     if allowed:
         assert (await place(conn))["hold_id"] == HOLD
     else:

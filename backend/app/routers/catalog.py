@@ -623,7 +623,7 @@ class DepartureIn(BaseModel):
     # AA-1073 (bk-046): 0 = no minimum; sales close on start - cutoff; the go / cancel decision on start - decision.
     min_to_operate: MinToOperate = 0
     sales_cutoff_days: CutoffDays = 0
-    decision_days_before: DecisionDays = departures.DEFAULT_DECISION_DAYS
+    decision_days_before: DecisionDays | None = None  # None = the policy default (S279 L3)
 
 
 class DeparturePatch(BaseModel):
@@ -662,7 +662,7 @@ class DepartureGenerateIn(BaseModel):
     capacity: int = Field(ge=0, le=departures.MAX_CAPACITY)
     min_to_operate: MinToOperate = 0
     sales_cutoff_days: CutoffDays = 0
-    decision_days_before: DecisionDays = departures.DEFAULT_DECISION_DAYS
+    decision_days_before: DecisionDays | None = None  # None = the policy default (S279 L3)
     auto_confirm: bool = True
     dry_run: bool = False
 

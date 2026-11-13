@@ -21,6 +21,7 @@ from typing import Any
 
 import asyncpg
 
+from app.errors import Unavailable
 from app.pricing import policy_params
 
 IN_FORCE_SQL = """
@@ -35,6 +36,11 @@ ORDER BY p.param_key, p.effective_from DESC, a.created_at DESC, p.version_no DES
 
 class PolicyUnavailable(LookupError):
     """A policy parameter has no approved version in force on the day asked."""
+
+
+async def today_utc(conn: asyncpg.Connection) -> date:
+    """The database's UTC date (the pricing day of a value that is not tied to a quote day)."""
+    return await conn.fetchval("SELECT (now() AT TIME ZONE 'UTC')::date")
 
 
 def decode(raw: Any) -> Any:
@@ -91,6 +97,56 @@ class Policy:
     def tariff_year_start(self) -> str:
         return str(self.get("tariff_year_start"))
 
+    # S279 L3 (bk-056): the values that were booking.settings rows or code constants.
+
+    def integers(self, key: str) -> tuple[int, ...]:
+        return tuple(int(v) for v in self.get(key))
+
+    def amounts(self, key: str) -> dict[str, Decimal]:
+        return {code: Decimal(str(v)) for code, v in self.get(key).items()}
+
+    @property
+    def b2b_hold_hours(self) -> int:
+        return self.integer("b2b_hold_hours")
+
+    @property
+    def b2b_hold_extend_hours(self) -> int:
+        return self.integer("b2b_hold_extend_hours")
+
+    @property
+    def b2b_hold_max_extensions(self) -> int:
+        return self.integer("b2b_hold_max_extensions")
+
+    @property
+    def b2b_rehold_limit_per_day(self) -> int:
+        return self.integer("b2b_rehold_limit_per_day")
+
+    @property
+    def b2b_on_request_answer_business_days(self) -> int:
+        return self.integer("b2b_on_request_answer_business_days")
+
+    @property
+    def b2b_on_request_due_soon_hours(self) -> int:
+        return self.integer("b2b_on_request_due_soon_hours")
+
+    @property
+    def age_bands(self) -> tuple[int, int]:
+        """``(b2b_child_age_max, b2b_infant_age_max)``."""
+        return self.integer("b2b_child_age_max"), self.integer("b2b_infant_age_max")
+
+    @property
+    def departure_decision_days_default(self) -> int:
+        return self.integer("departure_decision_days_default")
+
+    @property
+    def agency_reminder_steps_days(self) -> tuple[int, ...]:
+        return self.integers("agency_reminder_steps_days")
+
+    @property
+    def rounding_increments(self) -> dict[str, Decimal]:
+        """``rounding_increment_by_currency``: the rounding step of each selling currency."""
+        return self.amounts("rounding_increment_by_currency")
+
 
 def from_rows(on: date, rows: list[Any]) -> Policy:
     values: dict[str, Any] = {}
@@ -104,6 +160,28 @@ def from_rows(on: date, rows: list[Any]) -> Policy:
     return Policy(on=on, values=values, versions=versions)
 
 
-async def load(conn: asyncpg.Connection, on: date) -> Policy:
+async def load(conn: asyncpg.Connection | asyncpg.Pool, on: date) -> Policy:
     """The values in force on ``on`` (one query)."""
     return from_rows(on, list(await conn.fetch(IN_FORCE_SQL, on)))
+
+
+async def load_today(conn: asyncpg.Connection) -> Policy:
+    """The values in force on the database's UTC date."""
+    return await load(conn, await today_utc(conn))
+
+
+async def require(conn: asyncpg.Connection | asyncpg.Pool, on: date, *keys: str) -> Policy:
+    """The values in force on ``on``, or :class:`PolicyUnavailable` when one of ``keys`` has none (no fallback value
+    in code: a caller answers it as 503 or fails its job)."""
+    policy = await load(conn, on)
+    for key in keys:
+        policy.get(key)
+    return policy
+
+
+async def require_staff(conn: asyncpg.Connection | asyncpg.Pool, on: date, *keys: str) -> Policy:
+    """:func:`require` for a staff API path: a missing value is 503 ``policy_unavailable``."""
+    try:
+        return await require(conn, on, *keys)
+    except PolicyUnavailable as exc:
+        raise Unavailable("policy_unavailable", str(exc)) from None

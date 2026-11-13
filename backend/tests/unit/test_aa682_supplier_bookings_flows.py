@@ -14,9 +14,9 @@ import asyncpg
 import pytest
 
 from app.auth.staff import Staff
-from app.errors import Conflict, Forbidden, Invalid, NotFound
+from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from app.ops import supplier_bookings as sb
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 from tests.unit.test_aa682_supplier_bookings import _item
 
 SALES = Staff("u-1", None, "Sales One", "sales", True, "reviewer")
@@ -353,12 +353,19 @@ async def test_list_bookings_resolves_the_supplier_and_filters() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("setting", "days", "arg"), [(None, 2, 2), ("x", 2, 2), ("5", 5, 5), ("90", 90, 60)])
-async def test_summary_reads_the_answer_days_setting(setting: Any, days: int, arg: int) -> None:
+@pytest.mark.parametrize("days", [2, 5, 60])
+async def test_summary_reads_the_answer_days_policy(days: int) -> None:
     counts = {"requested": 3, "overdue": 1, "pending": 2}
-    conn = ScriptedConn([("key = 'supplier_answer_days'", setting), ("AS overdue", counts)])
+    conn = ScriptedConn([("AS overdue", counts)]).on(POLICY_FRAGMENT, policy_rows(supplier_answer_days=str(days)))
     assert await sb.summary(conn) == {**counts, "answer_days": days}
-    assert conn.sql("AS overdue") == [(arg,)]  # the interval is clamped to 1..60 days
+    assert conn.sql("AS overdue") == [(days,)]
+
+
+@pytest.mark.asyncio
+async def test_summary_without_the_answer_days_policy_is_503() -> None:
+    missing = [r for r in policy_rows() if r["param_key"] != "supplier_answer_days"]
+    with pytest.raises(Unavailable):
+        await sb.summary(ScriptedConn().on(POLICY_FRAGMENT, missing))
 
 
 # ── Generate and add ─────────────────────────────────────────────────────────

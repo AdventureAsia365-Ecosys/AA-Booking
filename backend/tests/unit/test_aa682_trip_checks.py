@@ -17,9 +17,10 @@ from app.jobs import kinds
 from app.jobs.worker import PermanentError
 from app.ops import lifecycle as lc
 from app.ops import trip_checks as tc
+from app.pricing import policy_values
 from app.routers.trip_checks import CheckChanges
 from tests.staff_tokens import BOOKING_STAFF_PREVIEW_CLIENT, LocalCis
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows
 from tests.unit.test_aa910_e2e_read_only import e2e_token
 from tests.unit.test_aa911_preview_cap import auth, client
 
@@ -135,11 +136,20 @@ def test_case_ids_are_validated_uuids() -> None:
             lc._case_ids({"case_ids": bad})
 
 
-def test_setting_values_fall_back_to_defaults() -> None:
-    assert lc._int_setting("21", "pre_departure_days") == 21
-    assert lc._int_setting(30, "pre_departure_days") == 30
-    for bad in ("-1", "1000", "true", "x", None, '"14"'):
-        assert lc._int_setting(bad, "pre_departure_days") == 14
+@pytest.mark.asyncio
+async def test_lifecycle_days_are_the_policy_values() -> None:
+    conn = ScriptedConn().on(POLICY_FRAGMENT, policy_rows(pre_departure_days="21", emergency_contact_keep_days="30"))
+    rules = await lc.policy(conn)
+    assert rules == {
+        "pre_departure_days": 21,
+        "emergency_contact_keep_days": 30,
+        "supplier_answer_days": 2,
+        "trip_check_reminder_days": 3,
+        "supplier_bill_due_soon_days": 3,
+    }
+    missing = [r for r in policy_rows() if r["param_key"] != "pre_departure_days"]
+    with pytest.raises(policy_values.PolicyUnavailable):
+        await lc.policy(ScriptedConn().on(POLICY_FRAGMENT, missing))
 
 
 class FakePool:

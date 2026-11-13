@@ -14,7 +14,7 @@ Answer = Any | Callable[..., Any]
 
 # AA-1091 (bk-050): the pricing policy in force, as app.pricing.policy_values.IN_FORCE_SQL answers it. Every scripted
 # connection answers it by default (lowest priority), so the code paths that read the policy work in every unit test;
-# a test that needs other values scripts "FROM booking.pricing_policy" itself. Values: the bk-050 seed.
+# a test that needs other values scripts "FROM booking.pricing_policy" itself. Values: the bk-050 and bk-056 seeds.
 POLICY_SEED: dict[str, str] = {
     "tariff_year_start": '"11-01"',
     "tariff_next_publish_by": '"08-31"',
@@ -36,6 +36,26 @@ POLICY_SEED: dict[str, str] = {
     "festive_non_refundable_days": "30",
     "gala_dinner_days": '["12-24", "12-31"]',
     "agency_currency_by_country": '{"*": "USD", "VN": "VND"}',
+    # S279 L3 (bk-056)
+    "b2b_hold_hours": "48",
+    "b2b_hold_extend_hours": "72",
+    "b2b_hold_max_extensions": "1",
+    "b2b_rehold_limit_per_day": "3",
+    "b2b_on_request_answer_business_days": "1",
+    "b2b_on_request_due_soon_hours": "4",
+    "b2b_child_age_max": "11",
+    "b2b_infant_age_max": "1",
+    "departure_decision_days_default": "21",
+    "pre_departure_days": "14",
+    "supplier_answer_days": "2",
+    "trip_check_reminder_days": "3",
+    "supplier_bill_due_soon_days": "3",
+    "emergency_contact_keep_days": "90",
+    "agency_reminder_steps_days": "[1, 7, 14]",
+    "rounding_increment_by_currency": '{"AUD": "5", "EUR": "5", "GBP": "5", "SGD": "5", "USD": "5"}',
+    "retention_job_succeeded_days": "30",
+    "retention_job_failed_days": "90",
+    "retention_inbox_redact_days": "90",
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
 
