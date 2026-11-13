@@ -51,6 +51,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app import b2c, catalog
+from app.auth import e2e_staff
 from app.auth.staff import Staff, current_staff, get_pool, require
 from app.b2b import allotments, departures, plan_components
 from app.catalog import (
@@ -435,6 +436,10 @@ async def post_price_import(
     if len(data) > price_import.MAX_BYTES:
         raise Invalid("rate_sheet_too_large", "a workbook is at most 2 MB")
     async with pool.acquire() as conn, conn.transaction():
+        if staff.e2e_writer is not None:
+            # AA-1091 A10e-2 (root ADR 0006a): a Dev-only E2E session imports synthetic plans only and no departure;
+            # every tour key of the file is checked before anything is previewed or written.
+            await e2e_staff.check_import(conn, staff.e2e_writer, price_import.parse(data))
         return await price_import.import_workbook(conn, staff, data, dry_run=dry_run)
 
 

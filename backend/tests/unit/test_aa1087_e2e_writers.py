@@ -29,6 +29,8 @@ from tests.unit.test_aa911_preview_cap import DSN, IDENTITY_SELECT, FakeDatabase
 STAFF = "e2e-booking-staff@e2e-mail.lumiguides.it.com"
 MAKER = "e2e-booking-maker@e2e-mail.lumiguides.it.com"
 CHECKER = "e2e-booking-checker@e2e-mail.lumiguides.it.com"
+PRICING_MAKER = "e2e-cis-cs@e2e-mail.lumiguides.it.com"
+PRICING_CHECKER = "e2e-booking-pricing-checker@e2e-mail.lumiguides.it.com"
 GROUPS = {STAFF: ["booking-sales"], MAKER: ["booking-finance"], CHECKER: ["booking-finance"]}
 ROLE = {STAFF: "sales", MAKER: "finance", CHECKER: "finance"}
 RECORD = "6f1d2c3b-4a59-4e8d-9c7b-0a1b2c3d4e5f"
@@ -94,6 +96,28 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
         ),
         MAKER: (frozenset({"booking-finance"}), frozenset({e2e_staff.PAYMENT_RECORD})),
         CHECKER: (frozenset({"booking-finance"}), frozenset({e2e_staff.PAYMENT_APPROVE, e2e_staff.PAYMENT_REJECT})),
+        # A10e-2 (AA-1091 S279): the pricing pair; tests/unit/test_aa1091_e2e_pricing_pair.py covers it.
+        PRICING_MAKER: (
+            frozenset({"cis-customer_success", "booking-contracting"}),
+            frozenset(
+                {
+                    e2e_staff.PLAN_COMPONENTS,
+                    e2e_staff.PRICE_IMPORT,
+                    e2e_staff.PRICE_WORKBENCH_ACTION,
+                    e2e_staff.PRICE_VERSION_SAVE,
+                    e2e_staff.PRICE_VERSION_SUBMIT,
+                    e2e_staff.PRICE_VERSION_WITHDRAW,
+                    e2e_staff.PRICE_VERSION_APPROVE,
+                    e2e_staff.PRICE_VERSION_REJECT,
+                }
+            ),
+        ),
+        PRICING_CHECKER: (
+            frozenset({"booking-contracting"}),
+            frozenset(
+                {e2e_staff.PRICE_VERSION_APPROVE, e2e_staff.PRICE_VERSION_REJECT, e2e_staff.PRICE_VERSION_WITHDRAW}
+            ),
+        ),
     }
     # The maker and the checker never share a write (maker-checker by identity).
     assert not (e2e_staff.E2E_WRITERS[MAKER].writes & e2e_staff.E2E_WRITERS[CHECKER].writes)
@@ -102,8 +126,11 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
         STAFF: {e2e_staff.DEPARTURE_CANCEL: frozenset({"trip_plan.write"})},
         MAKER: {},
         CHECKER: {},
+        PRICING_MAKER: {},
+        PRICING_CHECKER: {},
     }
     assert dict(e2e_staff.BODY_RULES) == {e2e_staff.DEPARTURE_CANCEL: {"status": "cancelled"}}
+    assert set(e2e_staff.BODY_CHECKS) == {e2e_staff.PRICE_WORKBENCH_ACTION}
     for writer in e2e_staff.E2E_WRITERS.values():
         assert set(writer.grants) <= writer.writes
         assert set(writer.grants) <= set(e2e_staff.BODY_RULES)
@@ -115,9 +142,13 @@ def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
     allowed = {w for writer in e2e_staff.E2E_WRITERS.values() for w in writer.writes}
     for method, route in allowed:
         assert method.lower() in paths.get(route, {}), route
-        param, sql = e2e_staff.SYNTHETIC_SQL[route]
-        assert "{" + param + "}" in route and "is_synthetic" in sql and "$1" in sql
-    assert set(e2e_staff.SYNTHETIC_SQL) == {route for _, route in allowed}
+        if route in e2e_staff.SYNTHETIC_SQL:
+            param, sql = e2e_staff.SYNTHETIC_SQL[route]
+            assert "{" + param + "}" in route and "is_synthetic" in sql and "$1" in sql
+    # Every allowed write is checked exactly one way: by its path record, by the plans its body names, or in the route.
+    by_path, by_body, in_route = set(e2e_staff.SYNTHETIC_SQL), set(e2e_staff.BODY_SYNTHETIC), e2e_staff.CHECKED_IN_ROUTE
+    assert by_path | by_body | in_route == {route for _, route in allowed}
+    assert not (by_path & by_body) and not (by_path & in_route) and not (by_body & in_route)
 
 
 @pytest.mark.parametrize("email", [STAFF, STAFF.upper(), f"  {MAKER} ", CHECKER])

@@ -2369,6 +2369,17 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   Smoke: `frontend/e2e/e2e-writers/` (Playwright project `e2e-writers`, `BOOKING_E2E_WRITERS=1`, dry run
   `BOOKING_E2E_WRITERS_DRY_RUN=1`, `BOOKING_E2E_FIXTURES=<seeder output>`). Removed at go-live with the A10 family
   (AA-1054).
+  A10e-2 (AA-1091 S279, the pricing pair for the AA-1091 live check with SYNTHETIC prices): the maker is the CIS
+  A10d address `e2e-cis-cs@` once the owner gave it the CIS Staff page "Pricing team" preset (groups exactly
+  `cis-customer_success` + `booking-contracting`); the checker is `e2e-booking-pricing-checker@`
+  (`booking-contracting`). Maker writes: PUT plan components, POST price-import (DRY RUN and import), POST
+  price-workbench actions (body exactly `{"action": "make_sellable" | "make_not_sellable", "tour_keys": [...]}`), PUT a
+  price version, POST its submit / withdraw, and approve / reject (which the service refuses, 403 `maker_checker`).
+  Checker writes: approve / reject / withdraw. "Synthetic" is per plan: no agency CIS does not mark synthetic has a
+  quote line (`tp:<plan id>`), a hold line, an allotment or a departure fee on it (`PLAN_SYNTHETIC_EXPR`); a price
+  version also needs the E2E maker as its creator (`VERSION_SYNTHETIC_SQL`), so the checker decides only the maker's
+  versions. The workbook import checks every tour key of the parsed file inside the route (`e2e_staff.check_import`,
+  `Staff.e2e_writer`) and refuses a file with a Departures row (403 `e2e_read_only`).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 
