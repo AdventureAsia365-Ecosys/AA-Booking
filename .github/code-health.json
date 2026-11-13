@@ -1,0 +1,41 @@
+{
+ "about": "AA-1097 code-health ratchets (.github/scripts/code_health.py). Limits only go down; the baseline .github/code-health-baseline.json only shrinks. Globs: fnmatch, '*' also crosses '/'.",
+ "python": {
+  "max_complexity": 10,
+  "measured": "ruff C901 on 13/11/2026: 2,249 functions, p90=6 p95=8 p97=9 p99=13 max=33; limit 10 (above p97, the mccabe default)",
+  "ruff_version": "0.16.9",
+  "target_version": "py312",
+  "include": ["*.py"],
+  "exclude": [
+   {"glob": "backend/tests/*", "reason": "tests: complexity ratchet covers product code; tests still count for file size"},
+   {"glob": "backend/app/auth/identity_verifier.py", "reason": "vendored byte copy of AA-CIS-App (Vendored CIS copies); CIS ratchets the original"}
+  ]
+ },
+ "typescript": {
+  "max_complexity": 10,
+  "measured": "ESLint complexity (classic) on 13/11/2026: 4,181 functions, p90=5 p95=8 p97=12 p99=23 max=101; limit 10 (between p95 and p97, same number as Python)",
+  "dirs": ["frontend"],
+  "include": ["frontend/*.ts", "frontend/*.tsx", "frontend/*.js", "frontend/*.jsx", "frontend/*.mjs", "frontend/*.cjs"],
+  "exclude": [
+   {"glob": "*.d.ts", "reason": "type declarations, no code"},
+   {"glob": "*.test.*", "reason": "tests"},
+   {"glob": "*.spec.*", "reason": "tests"},
+   {"glob": "frontend/e2e/*", "reason": "Playwright tests and their fixtures"},
+   {"glob": "frontend/ui/core/*", "reason": "vendored UI kit core (byte copy of AA-CIS-App, kit.lock.json); CIS ratchets the original"}
+  ]
+ },
+ "files": {
+  "max_lines": 800,
+  "include": ["*.py", "*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"],
+  "exempt": [
+   {"glob": "*.d.ts", "reason": "type declarations"},
+   {"glob": "frontend/e2e/layout/fixtures.ts", "reason": "test fixture: invented worst-case API answers for the layout check"},
+   {"glob": "*/fixtures/*", "reason": "test fixtures (recorded data)"},
+   {"glob": "frontend/ui/core/*", "reason": "vendored UI kit core (byte copy of AA-CIS-App); CIS ratchets the original"},
+   {"glob": "backend/app/auth/identity_verifier.py", "reason": "vendored byte copy of AA-CIS-App"},
+   {"glob": "backend/tests/job_template/*", "reason": "vendored byte copy of AA-CIS-App"},
+   {"glob": ".claude/*", "reason": "vendored agent skills and hooks"},
+   {"glob": ".agents/*", "reason": "vendored agent skills"}
+  ]
+ }
+}
