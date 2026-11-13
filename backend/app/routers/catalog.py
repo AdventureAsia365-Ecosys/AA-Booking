@@ -42,7 +42,6 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
-from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
@@ -437,16 +436,11 @@ async def post_price_import(
     if len(data) > price_import.MAX_BYTES:
         raise Invalid("rate_sheet_too_large", "a workbook is at most 2 MB")
     async with pool.acquire() as conn, conn.transaction():
-        guard = None
         if staff.e2e_writer is not None:
-            # AA-1091 A10e-2 (root ADR 0006a): a Dev-only E2E session imports synthetic plans only, no new departure;
-            # checked on every matched tour before anything is previewed or written.
-            writer_name = staff.e2e_writer
-
-            async def guard(plans: Mapping[str, Any]) -> None:
-                await e2e_staff.check_import(conn, writer_name, plans)
-
-        return await price_import.import_workbook(conn, staff, data, dry_run=dry_run, plan_guard=guard)
+            # AA-1091 A10e-2 (root ADR 0006a): a Dev-only E2E session imports synthetic plans only and no departure;
+            # every tour key of the file is checked before anything is previewed or written.
+            await e2e_staff.check_import(conn, staff.e2e_writer, price_import.parse(data))
+        return await price_import.import_workbook(conn, staff, data, dry_run=dry_run)
 
 
 @router.get("/trip-plans/facets")

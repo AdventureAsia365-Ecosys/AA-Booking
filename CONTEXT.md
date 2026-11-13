@@ -2378,9 +2378,8 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   Checker writes: approve / reject / withdraw. "Synthetic" is per plan: no agency CIS does not mark synthetic has a
   quote line (`tp:<plan id>`), a hold line, an allotment or a departure fee on it (`PLAN_SYNTHETIC_EXPR`); a price
   version also needs the E2E maker as its creator (`VERSION_SYNTHETIC_SQL`), so the checker decides only the maker's
-  versions. The workbook import checks every parsed tour inside the route (`e2e_staff.check_import` via
-  `price_import.import_workbook(plan_guard=...)`, `Staff.e2e_writer`) and refuses a new departure (403
-  `e2e_read_only`).
+  versions. The workbook import checks every tour key of the parsed file inside the route (`e2e_staff.check_import`,
+  `Staff.e2e_writer`) and refuses a file with a Departures row (403 `e2e_read_only`).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

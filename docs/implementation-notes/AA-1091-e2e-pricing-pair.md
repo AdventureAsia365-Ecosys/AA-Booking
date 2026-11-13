@@ -22,10 +22,11 @@ on Dev with E2E identities (S279, option G1 of the AA-1091 runbook "identity gat
   provisional price, no recompute), every tour key a synthetic plan (one query, distinct keys counted, so an unknown
   key also refuses). The guard reads the JSON body (like the A10e-1 departure cancel).
 - **Workbook import: checked in the route.** The guard cannot parse a workbook, so `CHECKED_IN_ROUTE` lets it pass the
-  guard and `post_price_import` hands `price_import.import_workbook` a `plan_guard` for an E2E session
-  (`Staff.e2e_writer`, a new session flag set by `current_staff`). It runs right after the tour keys are matched,
-  before the DRY RUN preview or any write: every matched tour must be synthetic, and a workbook that would create a
-  departure is 403 `e2e_read_only` (departures are not a pricing step).
+  guard, and `post_price_import`, for an E2E session (`Staff.e2e_writer`, a new session flag set by `current_staff`),
+  parses the file and calls `e2e_staff.check_import` before the DRY RUN preview or any write: every tour key of every
+  sheet must be a known synthetic plan (an unknown or malformed key refuses too), and a file with a Departures row is
+  403 `e2e_read_only` (departures are not a pricing step; the runbook's workbook leaves that sheet empty). The file is
+  parsed twice for that session only; `price_import` itself is unchanged (it is at its code-health size baseline).
 - **No new grant.** Contracting already holds `trip_plan.write`, `price_version.write` / `.approve`; the allow-list is
   what limits them.
 
@@ -35,7 +36,7 @@ on Dev with E2E identities (S279, option G1 of the AA-1091 runbook "identity gat
   `CHECKED_IN_ROUTE`, `plans_synthetic`, `check_import`; `check_body` handles body checks; `check_synthetic` takes the
   body.
 - `app/auth/staff.py`: reads the body when `e2e_staff.reads_body`; `Staff.e2e_writer`.
-- `app/routers/catalog.py` + `app/catalog/price_import.py`: the `plan_guard` hook.
+- `app/routers/catalog.py`: the import route parses and checks the file for an E2E session.
 - Tests: `tests/unit/test_aa1091_e2e_pricing_pair.py`, `tests/integration/test_aa1091_e2e_pricing_pair.py`; the
   AA-1087 guard tests list the new writers and check every allowed write is checked exactly one way.
 
@@ -50,5 +51,5 @@ on Dev with E2E identities (S279, option G1 of the AA-1091 runbook "identity gat
 ## Should know
 
 - Removed with the A10 family (AA-1054): drop the two writers, the SQL, `BODY_CHECKS` / `BODY_SYNTHETIC` /
-  `CHECKED_IN_ROUTE`, `Staff.e2e_writer` and the `plan_guard` hook.
+  `CHECKED_IN_ROUTE`, `Staff.e2e_writer` and the check in the import route.
 - No threshold, limit or cap was added (the workbench key count stays bounded by the route model).

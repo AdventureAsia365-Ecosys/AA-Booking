@@ -161,16 +161,21 @@ async def test_a_database_error_counts_as_real() -> None:
 
 
 @dataclass
-class _Plan:
-    key: str
-    new_departures: list[dict[str, Any]] = field(default_factory=list)
+class _Sheets:
+    """Stands in for ``app.catalog.price_import.Sheets``: the tour keys of every sheet and the Departures rows."""
+
+    tour_keys: list[str]
+    departures: list[dict[str, Any]] = field(default_factory=list)
+
+    def keys(self) -> list[str]:
+        return list(self.tour_keys)
 
 
 @pytest.mark.asyncio
-async def test_check_import_refuses_a_new_departure_before_any_query() -> None:
+async def test_check_import_refuses_a_departures_row_before_any_query() -> None:
     conn = ScriptedConn().on(PLANS_MANY, True)
     with pytest.raises(HTTPException) as err:
-        await e2e_staff.check_import(conn, "pricing_maker", {TOUR: _Plan(TOUR, [{"start_date": "2027-03-01"}])})
+        await e2e_staff.check_import(conn, "pricing_maker", _Sheets([TOUR], [{"tour_key": TOUR}]))
     assert (err.value.status_code, err.value.detail) == (403, "e2e_read_only")
     assert conn.calls == []
 
@@ -180,16 +185,24 @@ async def test_check_import_refuses_a_new_departure_before_any_query() -> None:
 async def test_check_import_refuses_a_real_plan(answer: Any) -> None:
     conn = ScriptedConn().on(PLANS_MANY, answer)
     with pytest.raises(HTTPException) as err:
-        await e2e_staff.check_import(conn, "pricing_maker", {TOUR: _Plan(TOUR), TOUR_2: _Plan(TOUR_2)})
+        await e2e_staff.check_import(conn, "pricing_maker", _Sheets([TOUR, TOUR_2]))
     assert (err.value.status_code, err.value.detail) == (403, "e2e_synthetic_only")
     assert conn.sql(PLANS_MANY) == [(sorted([TOUR, TOUR_2]), 2)]
 
 
 @pytest.mark.asyncio
+async def test_check_import_refuses_a_malformed_key_without_a_query() -> None:
+    conn = ScriptedConn().on(PLANS_MANY, True)
+    with pytest.raises(HTTPException) as err:
+        await e2e_staff.check_import(conn, "pricing_maker", _Sheets([TOUR, "Hollow Ridge"]))
+    assert err.value.detail == "e2e_synthetic_only" and conn.calls == []
+
+
+@pytest.mark.asyncio
 async def test_check_import_passes_synthetic_plans() -> None:
     conn = ScriptedConn().on(PLANS_MANY, True)
-    await e2e_staff.check_import(conn, "pricing_maker", {TOUR: _Plan(TOUR)})
-    await e2e_staff.check_import(conn, "pricing_maker", {})  # nothing matched: nothing to write, no query
+    await e2e_staff.check_import(conn, "pricing_maker", _Sheets([TOUR]))
+    await e2e_staff.check_import(conn, "pricing_maker", _Sheets([]))  # no tour in the file: nothing to write, no query
     assert conn.sql(PLANS_MANY) == [([TOUR], 1)]
 
 
@@ -349,31 +362,28 @@ def test_allowed_writes_on_synthetic_records_reach_the_route(email: str) -> None
 # ── the workbook import: checked inside the route ─────────────────────────────────────────────────
 
 
-def _fake_import(seen: dict[str, Any], plans: dict[str, Any]) -> Any:
-    async def fake(conn: Any, staff: Any, data: bytes, *, dry_run: bool, plan_guard: Any = None) -> dict[str, Any]:
-        seen["guard"] = plan_guard
-        seen["writer"] = staff.e2e_writer
-        if plan_guard is not None:
-            await plan_guard(plans)
-        seen["applied"] = True
+def _fake_import(seen: dict[str, Any]) -> Any:
+    async def fake(conn: Any, staff: Any, data: bytes, *, dry_run: bool) -> dict[str, Any]:
+        seen["applied"] = staff.e2e_writer
         return {"dry_run": dry_run, "tours": [], "totals": {}}
 
     return fake
 
 
 @pytest.mark.parametrize(
-    ("synthetic", "plans", "expected"),
+    ("synthetic", "sheets", "expected"),
     [
-        (True, {TOUR: _Plan(TOUR)}, 200),
-        (False, {TOUR: _Plan(TOUR)}, "e2e_synthetic_only"),
-        (True, {TOUR: _Plan(TOUR, [{"start_date": "2027-03-01"}])}, "e2e_read_only"),
+        (True, _Sheets([TOUR]), 200),
+        (False, _Sheets([TOUR]), "e2e_synthetic_only"),
+        (True, _Sheets([TOUR], [{"tour_key": TOUR}]), "e2e_read_only"),
     ],
 )
 def test_the_import_route_checks_every_tour_for_the_e2e_maker(
-    monkeypatch: pytest.MonkeyPatch, synthetic: bool, plans: dict[str, Any], expected: Any
+    monkeypatch: pytest.MonkeyPatch, synthetic: bool, sheets: _Sheets, expected: Any
 ) -> None:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(price_import, "import_workbook", _fake_import(seen, plans))
+    monkeypatch.setattr(price_import, "parse", lambda data: sheets)
+    monkeypatch.setattr(price_import, "import_workbook", _fake_import(seen))
     cis = LocalCis()
     conn = ScriptedConn().on(PLANS_MANY, synthetic).on(IDENTITY_SELECT, _row(MAKER))
     with _client(cis, conn) as c:
@@ -382,26 +392,30 @@ def test_the_import_route_checks_every_tour_for_the_e2e_maker(
             json={"data_base64": "UEsDBA=="},
             headers=auth(_token(cis, MAKER)),
         )
-    assert seen["guard"] is not None and seen["writer"] == "pricing_maker"
     if expected == 200:
         assert r.status_code == 200, r.text
-        assert seen.get("applied") is True
+        assert seen["applied"] == "pricing_maker"
     else:
         assert (r.status_code, r.json()["detail"]) == (403, expected)
-        assert "applied" not in seen
+        assert "applied" not in seen  # refused before the preview or any write
 
 
 def test_a_real_contracting_member_is_unaffected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Control: a company contracting user imports and saves components without any E2E check."""
+    """Control: a company contracting user imports without any E2E check (the file is parsed once, by the import)."""
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(price_import, "import_workbook", _fake_import(seen, {TOUR: _Plan(TOUR)}))
+
+    def no_parse(data: bytes) -> Any:
+        raise AssertionError("the route parsed the file for a non-E2E session")
+
+    monkeypatch.setattr(price_import, "parse", no_parse)
+    monkeypatch.setattr(price_import, "import_workbook", _fake_import(seen))
     cis = LocalCis()
     conn = ScriptedConn().on(IDENTITY_SELECT, {**cognito_row("contracting"), "cis_role": None})
     token = cis.workforce.token(["booking-contracting"], client_id=BOOKING_STAFF_CLIENT)
     with _client(cis, conn) as c:
         r = c.post("/booking/catalog/price-import", json={"data_base64": "UEsDBA=="}, headers=auth(token))
-        method, path, body = WORKBENCH
+        method, path, _ = WORKBENCH
         c.request(method, path, json={"action": "recompute", "tour_keys": [TOUR]}, headers=auth(token))
     assert r.status_code == 200, r.text
-    assert seen["guard"] is None and seen["writer"] is None
+    assert seen["applied"] is None
     assert _guard_calls(conn) == []

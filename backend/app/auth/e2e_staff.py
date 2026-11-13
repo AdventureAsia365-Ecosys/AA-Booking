@@ -36,8 +36,8 @@ agency payment recorded by one finance user and approved by another (maker-check
   Price versions are reachable only when the E2E maker created them (:data:`VERSION_SYNTHETIC_SQL`): the maker's own
   approve or reject is then refused by the service (403 ``maker_checker``), and the checker never decides a real
   person's version. The workbench action body must be ``make_sellable`` / ``make_not_sellable`` on tour keys
-  (:data:`BODY_CHECKS`, every key checked); the workbook import is checked inside the route, on every tour of the
-  parsed file, with no new departure (:func:`check_import`, the guard cannot parse a workbook).
+  (:data:`BODY_CHECKS`, every key checked); the workbook import is checked inside the route, on every tour key of the
+  parsed file, with no Departures row (:func:`check_import`, the guard cannot parse a workbook).
 
 Reads keep the permissions of the identity's Booking role (``sales`` / ``finance`` / ``contracting``), like any member
 of that group.
@@ -312,7 +312,7 @@ SYNTHETIC_SQL_ARGS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 # Writes checked by the plans their JSON body names (every tour key synthetic, one query): route -> body field.
 BODY_SYNTHETIC: Mapping[str, str] = MappingProxyType({PRICE_WORKBENCH_ACTION[1]: BODY_TOUR_KEYS})
-# Writes whose plans only the route knows (a workbook): the route calls check_import on every parsed tour before it
+# Writes whose plans only the route knows (a workbook): the route calls check_import on the parsed file before it
 # writes or previews anything (app.routers.catalog.post_price_import).
 CHECKED_IN_ROUTE: frozenset[str] = frozenset({PRICE_IMPORT[1]})
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
@@ -440,17 +440,18 @@ async def check_synthetic(
     log.info("booking_e2e_write_allowed identity=%s route=%s", writer.name, route)
 
 
-async def check_import(conn: asyncpg.Connection, writer_name: str, plans: Mapping[str, Any]) -> None:
-    """A10e-2, called by the workbook import route for an E2E session, after the tour keys are matched and before
-    anything is previewed or written (DRY RUN included). ``plans`` = tour key -> ``app.catalog.price_import.Plan``.
-    403 ``e2e_read_only`` when the workbook would create a departure (not a pricing step); 403 ``e2e_synthetic_only``
-    unless every tour of the workbook is a synthetic plan (:func:`plans_synthetic`)."""
-    if any(getattr(p, "new_departures", None) for p in plans.values()):
+async def check_import(conn: asyncpg.Connection, writer_name: str, sheets: Any) -> None:
+    """A10e-2, called by the workbook import route for an E2E session before anything is previewed or written (DRY RUN
+    included). ``sheets`` = ``app.catalog.price_import.parse`` of the upload. 403 ``e2e_read_only`` when the workbook
+    has a Departures row (not a pricing step); 403 ``e2e_synthetic_only`` unless every tour key of every sheet is a
+    synthetic trip plan (:func:`plans_synthetic`: an unknown or malformed key refuses too)."""
+    if getattr(sheets, "departures", None):
         log.info("booking_e2e_writer_refused identity=%s reason=departures route=%s", writer_name, PRICE_IMPORT[1])
         raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
-    if plans and not await plans_synthetic(conn, list(plans)):
+    keys = sheets.keys()
+    if keys and not await plans_synthetic(conn, keys):
         log.warning(
             "booking_e2e_writer_refused identity=%s reason=not_synthetic route=%s", writer_name, PRICE_IMPORT[1]
         )
         raise HTTPException(status_code=403, detail=E2E_SYNTHETIC_ONLY)
-    log.info("booking_e2e_write_allowed identity=%s route=%s tours=%d", writer_name, PRICE_IMPORT[1], len(plans))
+    log.info("booking_e2e_write_allowed identity=%s route=%s tours=%d", writer_name, PRICE_IMPORT[1], len(keys))

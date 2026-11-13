@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -696,23 +696,13 @@ def _same_components(before: Sequence[Mapping[str, Any]], after: Sequence[Mappin
     return sorted(map(key, before)) == sorted(map(key, after))
 
 
-async def import_workbook(
-    conn: asyncpg.Connection,
-    staff: Staff,
-    data: bytes,
-    *,
-    dry_run: bool,
-    plan_guard: Callable[[Mapping[str, Plan]], Awaitable[None]] | None = None,
-) -> dict[str, Any]:
+async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *, dry_run: bool) -> dict[str, Any]:
     """Check the workbook and, unless ``dry_run``, apply it (call inside a transaction: any refusal rolls every row
-    back). 422 ``price_import_invalid`` lists every problem by sheet, row and column. ``plan_guard`` (the route's
-    Dev-only E2E check, AA-1091 A10e-2) sees every matched tour before anything is previewed or written."""
+    back). 422 ``price_import_invalid`` lists every problem by sheet, row and column."""
     today = cost_sheet.today()
     sheets = parse(data)
     check_shapes(sheets, today)
     plans = await match(conn, sheets)
-    if plan_guard is not None:
-        await plan_guard(plans)
     if sheets.problems:
         _raise(sheets)
     pricing = await cost_sheet.load_pricing(conn, today)
