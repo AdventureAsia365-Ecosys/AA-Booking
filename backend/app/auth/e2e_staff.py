@@ -28,7 +28,19 @@ agency payment recorded by one finance user and approved by another (maker-check
   synthetic departure) does that one request carry the permission (:attr:`E2EWriter.grants`,
   ``Staff.e2e_grants``); no other request of the identity, and no other identity, ever holds it.
 
-Reads keep the permissions of the identity's Booking role (``sales`` / ``finance``), like any member of that group.
+- **The pricing pair (A10e-2, AA-1091 S279).** A maker and a checker run the AA-1091 live check with SYNTHETIC prices:
+  the maker is the CIS A10d customer-service address after the owner gave it the Staff page "Pricing team" preset
+  (groups exactly ``cis-customer_success`` + ``booking-contracting``), the checker a Dev-only ``booking-contracting``
+  address. Their writes touch trip plans, not agencies, so "synthetic" is per plan (:data:`PLAN_SYNTHETIC_EXPR`): no
+  agency that CIS does not mark synthetic has a quote line, a hold line, an allotment or a departure fee on the plan.
+  Price versions are reachable only when the E2E maker created them (:data:`VERSION_SYNTHETIC_SQL`): the maker's own
+  approve or reject is then refused by the service (403 ``maker_checker``), and the checker never decides a real
+  person's version. The workbench action body must be ``make_sellable`` / ``make_not_sellable`` on tour keys
+  (:data:`BODY_CHECKS`, every key checked); the workbook import is checked inside the route, on every tour of the
+  parsed file, with no new departure (:func:`check_import`, the guard cannot parse a workbook).
+
+Reads keep the permissions of the identity's Booking role (``sales`` / ``finance`` / ``contracting``), like any member
+of that group.
 Every allowed write runs the route unchanged, so its normal audit row names the identity (``cog:<sub>``) as the actor.
 
 TEMPORARY: removed with the A10 family at go-live (AA-1054): drop this module and its call in ``app.auth.staff``.
@@ -39,13 +51,16 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import asyncpg
 from fastapi import HTTPException
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +69,12 @@ log = logging.getLogger(__name__)
 E2E_BOOKING_STAFF_EMAIL = "e2e-booking-staff@e2e-mail.lumiguides.it.com"
 E2E_FINANCE_MAKER_EMAIL = "e2e-booking-maker@e2e-mail.lumiguides.it.com"
 E2E_FINANCE_CHECKER_EMAIL = "e2e-booking-checker@e2e-mail.lumiguides.it.com"
+
+# A10e-2 (AA-1091, S279): the pricing pair. The maker is the CIS A10d address (AA-CIS-App
+# api/core/e2e_staff.E2E_CIS_CS_TEST_STAFF_EMAIL) holding the "Pricing team" preset; the checker is Dev-only too. Same
+# constants as AA-CIS-Infra workforce.E2E_DEV_ONLY_TEST_STAFF / E2E_DEV_ONLY_EXTRA_GROUP_SETS.
+E2E_PRICING_MAKER_EMAIL = "e2e-cis-cs@e2e-mail.lumiguides.it.com"
+E2E_PRICING_CHECKER_EMAIL = "e2e-booking-pricing-checker@e2e-mail.lumiguides.it.com"
 
 DEV_ONLY_ENVIRONMENT = "dev"
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -73,10 +94,46 @@ PAYMENT_REJECT = ("POST", "/booking/agency-payments/{payment_id}/reject")
 # aa_cancel_case (crm-13). Body exactly BODY_RULES[DEPARTURE_CANCEL]; trip_plan.write for that request only.
 DEPARTURE_CANCEL = ("PATCH", "/booking/catalog/departures/{departure_id}")
 
+# A10e-2 (AA-1091 S279): the AA-1091 pricing steps on synthetic trip plans (root ADR 0006a A10e-2).
+PLAN_COMPONENTS = ("PUT", "/booking/catalog/trip-plans/{source_id}/components")
+PRICE_IMPORT = ("POST", "/booking/catalog/price-import")
+PRICE_WORKBENCH_ACTION = ("POST", "/booking/catalog/price-workbench/actions")
+_VERSION = "/booking/catalog/price-versions/{version_id}"
+PRICE_VERSION_SAVE = ("PUT", _VERSION)
+PRICE_VERSION_SUBMIT = ("POST", f"{_VERSION}/submit")
+PRICE_VERSION_APPROVE = ("POST", f"{_VERSION}/approve")
+PRICE_VERSION_REJECT = ("POST", f"{_VERSION}/reject")
+PRICE_VERSION_WITHDRAW = ("POST", f"{_VERSION}/withdraw")
+
 # Allowed writes whose body is fixed: anything else in the body is 403 e2e_read_only (no capacity, rule or status
 # change other than the cancel itself).
 BODY_RULES: Mapping[tuple[str, str], Mapping[str, Any]] = MappingProxyType(
     {DEPARTURE_CANCEL: MappingProxyType({"status": "cancelled"})}
+)
+# A10e-2: the only workbench actions the pricing maker sends (switch sellable on and back off; never a provisional
+# price or a recompute).
+PRICING_WORKBENCH_ACTIONS = frozenset({"make_sellable", "make_not_sellable"})
+# The body field of a body-checked write that names the trip plans it touches (each one is checked synthetic).
+BODY_TOUR_KEYS = "tour_keys"
+
+
+def _workbench_body_ok(body: Any) -> bool:
+    """Exactly ``{"action": <a PRICING_WORKBENCH_ACTIONS value>, "tour_keys": [<tour key>, ...]}``, at least one key,
+    every key a string (the route's own model bounds the count; each key is then checked synthetic)."""
+    if not isinstance(body, dict) or set(body) != {"action", BODY_TOUR_KEYS}:
+        return False
+    keys = body[BODY_TOUR_KEYS]
+    return (
+        body["action"] in PRICING_WORKBENCH_ACTIONS
+        and isinstance(keys, list)
+        and len(keys) > 0
+        and all(isinstance(k, str) for k in keys)
+    )
+
+
+# Allowed writes whose body must pass a check (anything else is 403 e2e_read_only before any DB access).
+BODY_CHECKS: Mapping[tuple[str, str], Callable[[Any], bool]] = MappingProxyType(
+    {PRICE_WORKBENCH_ACTION: _workbench_body_ok}
 )
 
 
@@ -114,6 +171,33 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
         # Finance checker: approves or rejects that payment (the DB CHECK and the route refuse its own recordings).
         E2E_FINANCE_CHECKER_EMAIL: E2EWriter(
             "finance_checker", frozenset({"booking-finance"}), frozenset({PAYMENT_APPROVE, PAYMENT_REJECT})
+        ),
+        # A10e-2 pricing maker (the CIS A10d address with the Pricing team preset): accepts components, imports the
+        # synthetic workbook (draft versions + sellable), relabels / submits / withdraws its drafts, switches sellable
+        # back off at cleanup. Approve / reject are listed only so the live probe reaches the service, which refuses
+        # them 403 maker_checker: VERSION_SYNTHETIC_SQL limits them to versions this maker created.
+        E2E_PRICING_MAKER_EMAIL: E2EWriter(
+            "pricing_maker",
+            frozenset({"cis-customer_success", "booking-contracting"}),
+            frozenset(
+                {
+                    PLAN_COMPONENTS,
+                    PRICE_IMPORT,
+                    PRICE_WORKBENCH_ACTION,
+                    PRICE_VERSION_SAVE,
+                    PRICE_VERSION_SUBMIT,
+                    PRICE_VERSION_WITHDRAW,
+                    PRICE_VERSION_APPROVE,
+                    PRICE_VERSION_REJECT,
+                }
+            ),
+        ),
+        # A10e-2 pricing checker: approves, rejects or withdraws (published: restores the superseded one) a version
+        # the pricing maker made on a synthetic plan.
+        E2E_PRICING_CHECKER_EMAIL: E2EWriter(
+            "pricing_checker",
+            frozenset({"booking-contracting"}),
+            frozenset({PRICE_VERSION_APPROVE, PRICE_VERSION_REJECT, PRICE_VERSION_WITHDRAW}),
         ),
     }
 )
@@ -154,7 +238,50 @@ DEPARTURE_SYNTHETIC_SQL = (
     " LEFT JOIN booking.b2b_partners p ON p.id = x.partner_id"
     " LEFT JOIN catalog.v_tenant_account_v1 t ON t.tenant_id = p.tenant_id) v"
 )
-# Route template -> (path parameter, SQL). Every allow-listed write has one (a unit test keeps the two lists equal).
+# A10e-2: a trip plan is synthetic when no agency that CIS does not mark synthetic is tied to it: a quote line on the
+# plan (component ``tp:<plan id>``, app.b2b.components), or a hold line, an allotment or a departure fee on one of its
+# departures. A plan no agency has used is synthetic (prices are catalogue-wide: the live check withdraws them after).
+# A missing view column or a DB error fails closed (the caller answers False). ``{plan}`` = the plan id expression.
+_PLAN_AGENCIES = (
+    "SELECT q.partner_id FROM booking.b2b_quote_lines ql JOIN booking.b2b_quotes q ON q.id = ql.quote_id"
+    " WHERE lower(ql.component_id) = 'tp:' || {plan}::text"
+    " UNION ALL SELECT h.partner_id FROM booking.b2b_hold_lines l JOIN booking.b2b_holds h ON h.id = l.hold_id"
+    " JOIN booking.departures d ON d.id = l.departure_id WHERE d.trip_plan_id = {plan}"
+    " UNION ALL SELECT a.partner_id FROM booking.departure_allotments a"
+    " JOIN booking.departures d ON d.id = a.departure_id WHERE d.trip_plan_id = {plan}"
+    " UNION ALL SELECT f.partner_id FROM booking.departure_fees f"
+    " JOIN booking.departures d ON d.id = f.departure_id WHERE d.trip_plan_id = {plan}"
+)
+PLAN_SYNTHETIC_EXPR = (
+    "NOT EXISTS (SELECT 1 FROM (" + _PLAN_AGENCIES + ") x"  # noqa: S608 — constant fragments
+    " LEFT JOIN booking.b2b_partners p ON p.id = x.partner_id"
+    " LEFT JOIN catalog.v_tenant_account_v1 t ON t.tenant_id = p.tenant_id"
+    " WHERE t.is_synthetic IS NOT TRUE)"
+)
+# One plan by its tour key (the path's source_id, a UUID); no row for an unknown key.
+PLAN_SYNTHETIC_SQL = (
+    "SELECT " + PLAN_SYNTHETIC_EXPR.format(plan="tp.id") + " AS is_synthetic FROM booking.trip_plans tp"  # noqa: S608 — constant fragments
+    " WHERE tp.source_system = 'cis' AND tp.source_id = $1"
+)
+# Many plans by tour key ($1 text[], $2 = the number of distinct keys): True only when every key is a known plan and
+# every plan is synthetic.
+PLANS_SYNTHETIC_SQL = (
+    "SELECT count(*) = $2::int AND coalesce(bool_and(s.ok), false) AS is_synthetic FROM ("  # noqa: S608 — constant fragments
+    "SELECT " + PLAN_SYNTHETIC_EXPR.format(plan="tp.id") + " AS ok FROM booking.trip_plans tp"
+    " WHERE tp.source_system = 'cis' AND tp.source_id = ANY($1::text[])) s"
+)
+# A price list version: the A10e-2 maker created it ($2 = its address; the creator's staff row) and its plan is
+# synthetic. So the checker decides only the E2E maker's versions, and the maker's approve / reject reaches only its own
+# version, which the service refuses (403 maker_checker).
+VERSION_SYNTHETIC_SQL = (
+    "SELECT lower(su.email) = $2 AND "  # noqa: S608 — constant fragments
+    + PLAN_SYNTHETIC_EXPR.format(plan="v.trip_plan_id")
+    + " AS is_synthetic"
+    " FROM booking.price_list_versions v LEFT JOIN booking.staff_users su ON su.cis_user_id = v.created_by"
+    " WHERE v.id = $1::uuid"
+)
+# Route template -> (path parameter, SQL) for the writes checked by a path record. Every allow-listed write is in
+# exactly one of SYNTHETIC_SQL, BODY_SYNTHETIC and CHECKED_IN_ROUTE (a unit test keeps the lists equal).
 SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
     {
         SUPPLIER_REQUEST[1]: ("booking_id", SUPPLIER_BOOKING_SYNTHETIC_SQL),
@@ -163,10 +290,31 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         PAYMENT_APPROVE[1]: ("payment_id", PAYMENT_SYNTHETIC_SQL),
         PAYMENT_REJECT[1]: ("payment_id", PAYMENT_SYNTHETIC_SQL),
         DEPARTURE_CANCEL[1]: ("departure_id", DEPARTURE_SYNTHETIC_SQL),
+        PLAN_COMPONENTS[1]: ("source_id", PLAN_SYNTHETIC_SQL),
+        PRICE_VERSION_SAVE[1]: ("version_id", VERSION_SYNTHETIC_SQL),
+        PRICE_VERSION_SUBMIT[1]: ("version_id", VERSION_SYNTHETIC_SQL),
+        PRICE_VERSION_APPROVE[1]: ("version_id", VERSION_SYNTHETIC_SQL),
+        PRICE_VERSION_REJECT[1]: ("version_id", VERSION_SYNTHETIC_SQL),
+        PRICE_VERSION_WITHDRAW[1]: ("version_id", VERSION_SYNTHETIC_SQL),
     }
 )
-# Fixed arguments after the record key ($2, ...): the departure rule's creator is the A10e staff identity.
-SYNTHETIC_SQL_ARGS: Mapping[str, tuple[str, ...]] = MappingProxyType({DEPARTURE_CANCEL[1]: (E2E_BOOKING_STAFF_EMAIL,)})
+# Fixed arguments after the record key ($2, ...): the departure rule's creator is the A10e staff identity; a price
+# version's creator is the A10e-2 pricing maker.
+SYNTHETIC_SQL_ARGS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        DEPARTURE_CANCEL[1]: (E2E_BOOKING_STAFF_EMAIL,),
+        **{
+            route: (E2E_PRICING_MAKER_EMAIL,)
+            for route, (_, sql) in SYNTHETIC_SQL.items()
+            if sql is VERSION_SYNTHETIC_SQL
+        },
+    }
+)
+# Writes checked by the plans their JSON body names (every tour key synthetic, one query): route -> body field.
+BODY_SYNTHETIC: Mapping[str, str] = MappingProxyType({PRICE_WORKBENCH_ACTION[1]: BODY_TOUR_KEYS})
+# Writes whose plans only the route knows (a workbook): the route calls check_import on every parsed tour before it
+# writes or previews anything (app.routers.catalog.post_price_import).
+CHECKED_IN_ROUTE: frozenset[str] = frozenset({PRICE_IMPORT[1]})
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
 INVOICE_BY_NUMBER_SQL = INVOICE_SYNTHETIC_SQL.replace("WHERE i.id = $1::uuid", "WHERE i.number = $1")
 
@@ -202,13 +350,22 @@ def check_session(writer: E2EWriter, groups: tuple[str, ...], method: str, route
         raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
 
 
+def reads_body(method: str, route: str | None) -> bool:
+    """True when the guard must read this write's JSON body (a body rule, a body check or plans named in the body)."""
+    key = (method.upper(), route or "")
+    return key in BODY_RULES or key in BODY_CHECKS or (method.upper() not in READ_METHODS and key[1] in BODY_SYNTHETIC)
+
+
 def check_body(writer: E2EWriter, method: str, route: str | None, body: Any) -> None:
-    """For an allowed write with a body rule: 403 ``e2e_read_only`` unless the JSON body is exactly the rule. No DB
-    access. ``body`` is the parsed JSON (anything that is not exactly the rule's object is refused)."""
-    rule = BODY_RULES.get((method.upper(), route or ""))
-    if rule is None:
+    """For an allowed write with a body rule or check: 403 ``e2e_read_only`` unless the JSON body is exactly the rule
+    (:data:`BODY_RULES`) or passes the check (:data:`BODY_CHECKS`). No DB access. ``body`` is the parsed JSON."""
+    key = (method.upper(), route or "")
+    rule = BODY_RULES.get(key)
+    check = BODY_CHECKS.get(key)
+    if rule is None and check is None:
         return
-    if not isinstance(body, dict) or body != dict(rule):
+    ok = (rule is None or (isinstance(body, dict) and body == dict(rule))) and (check is None or check(body))
+    if not ok:
         log.info("booking_e2e_writer_refused identity=%s reason=body route=%s", writer.name, route)
         raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
 
@@ -220,9 +377,31 @@ def _uuid(value: Any) -> str | None:
         return None
 
 
-async def is_synthetic_record(conn: asyncpg.Connection | asyncpg.Pool, route: str, params: Mapping[str, Any]) -> bool:
-    """True only when the record named by the path belongs to an agency CIS marks synthetic. Fail closed: an unknown
-    route, id or record, a record of no agency, a missing view column or any database error answer False."""
+async def plans_synthetic(conn: asyncpg.Connection | asyncpg.Pool, keys: Iterable[Any]) -> bool:
+    """A10e-2: True only when every tour key is a UUID of a known trip plan and every plan is synthetic
+    (:data:`PLANS_SYNTHETIC_SQL`, one query). Fail closed: no key, a key that is not a UUID, an unknown plan, a missing
+    view column or any database error answer False."""
+    normal = [_uuid(k) if isinstance(k, str) else None for k in keys]
+    if not normal or any(k is None for k in normal):
+        return False
+    distinct = sorted({k for k in normal if k is not None})
+    try:
+        return (await conn.fetchval(PLANS_SYNTHETIC_SQL, distinct, len(distinct))) is True
+    except (asyncpg.PostgresError, OSError) as exc:
+        log.warning("booking_e2e_synthetic_unknown route=plans error_class=%s", type(exc).__name__)
+        return False
+
+
+async def is_synthetic_record(
+    conn: asyncpg.Connection | asyncpg.Pool, route: str, params: Mapping[str, Any], body: Any = None
+) -> bool:
+    """True only when the record named by the path (or, for :data:`BODY_SYNTHETIC`, every trip plan the body names)
+    belongs to an agency CIS marks synthetic, or is a synthetic plan / an E2E maker's version of one. Fail closed: an
+    unknown route, id or record, a record of no agency, a missing view column or any database error answer False."""
+    field_name = BODY_SYNTHETIC.get(route)
+    if field_name is not None:
+        keys = body.get(field_name) if isinstance(body, dict) else None
+        return isinstance(keys, list) and await plans_synthetic(conn, keys)
     spec = SYNTHETIC_SQL.get(route)
     if spec is None:
         return False
@@ -246,11 +425,32 @@ async def check_synthetic(
     method: str,
     route: str | None,
     params: Mapping[str, Any],
+    body: Any = None,
 ) -> None:
-    """For an allowed write: 403 ``e2e_synthetic_only`` unless the record's agency is synthetic. No-op for reads."""
+    """For an allowed write: 403 ``e2e_synthetic_only`` unless the record's agency (or every plan) is synthetic. No-op
+    for reads. A :data:`CHECKED_IN_ROUTE` write passes here: its route calls :func:`check_import` before any write."""
     if method.upper() in READ_METHODS:
         return
-    if route is None or not await is_synthetic_record(conn, route, params):
+    if route in CHECKED_IN_ROUTE:
+        log.info("booking_e2e_write_checked_in_route identity=%s route=%s", writer.name, route)
+        return
+    if route is None or not await is_synthetic_record(conn, route, params, body):
         log.warning("booking_e2e_writer_refused identity=%s reason=not_synthetic route=%s", writer.name, route)
         raise HTTPException(status_code=403, detail=E2E_SYNTHETIC_ONLY)
     log.info("booking_e2e_write_allowed identity=%s route=%s", writer.name, route)
+
+
+async def check_import(conn: asyncpg.Connection, writer_name: str, plans: Mapping[str, Any]) -> None:
+    """A10e-2, called by the workbook import route for an E2E session, after the tour keys are matched and before
+    anything is previewed or written (DRY RUN included). ``plans`` = tour key -> ``app.catalog.price_import.Plan``.
+    403 ``e2e_read_only`` when the workbook would create a departure (not a pricing step); 403 ``e2e_synthetic_only``
+    unless every tour of the workbook is a synthetic plan (:func:`plans_synthetic`)."""
+    if any(getattr(p, "new_departures", None) for p in plans.values()):
+        log.info("booking_e2e_writer_refused identity=%s reason=departures route=%s", writer_name, PRICE_IMPORT[1])
+        raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
+    if plans and not await plans_synthetic(conn, list(plans)):
+        log.warning(
+            "booking_e2e_writer_refused identity=%s reason=not_synthetic route=%s", writer_name, PRICE_IMPORT[1]
+        )
+        raise HTTPException(status_code=403, detail=E2E_SYNTHETIC_ONLY)
+    log.info("booking_e2e_write_allowed identity=%s route=%s tours=%d", writer_name, PRICE_IMPORT[1], len(plans))

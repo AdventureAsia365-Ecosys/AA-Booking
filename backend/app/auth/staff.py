@@ -40,7 +40,10 @@ its own allow-listed routes, only on Dev and only on a synthetic agency's record
 user (``booking-sales``: send and confirm a supplier booking) and a finance maker / checker pair (``booking-finance``:
 record an agency payment; approve or reject it). Checked here, before the route runs. A10e-1 (S278 l18): the staff
 user may also cancel a synthetic departure (body exactly ``{"status": "cancelled"}``); that one request then holds
-``trip_plan.write`` (``Staff.e2e_grants``), which its ``sales`` role lacks.
+``trip_plan.write`` (``Staff.e2e_grants``), which its ``sales`` role lacks. A10e-2 (AA-1091 S279): a pricing maker
+(the CIS A10d address with the "Pricing team" preset, ``cis-customer_success`` + ``booking-contracting``) and a pricing
+checker (``booking-contracting``) run the price steps on synthetic trip plans only; the workbook import checks its
+tours inside the route (``Staff.e2e_writer``).
 
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
@@ -250,6 +253,9 @@ class Staff:
     # Session flag, not a column (AA-1087 A10e-1): permissions one Dev-only E2E write request holds on top of its role,
     # set by current_staff only after every e2e_staff check passed (app.auth.e2e_staff.E2EWriter.grants).
     e2e_grants: frozenset[str] = frozenset()
+    # Session flag, not a column (AA-1091 A10e-2): the Dev-only E2E writer's name (app.auth.e2e_staff.E2EWriter.name)
+    # when this request comes from one, so a route that checks its own records (the workbook import) knows it.
+    e2e_writer: str | None = None
 
     @classmethod
     def from_row(cls, row: Any) -> Staff:
@@ -533,14 +539,17 @@ async def current_staff(
         role = booking_role(principal.groups)
         if role is None:
             raise HTTPException(status_code=403, detail="no_booking_role")
-        if writer is not None:
-            # AA-1087 A10e-1: a write with a fixed body (departure cancel) sends exactly it, before any DB access.
-            if (request.method.upper(), route or "") in e2e_staff.BODY_RULES:
-                e2e_staff.check_body(writer, request.method, route, await _json_body(request))
+        body: Any = None
+        if writer is not None and e2e_staff.reads_body(request.method, route):
+            # AA-1087 A10e-1 / AA-1091 A10e-2: a write with a body rule (departure cancel: exactly it) or a body check
+            # (workbench action: make_sellable / make_not_sellable on tour keys), before any DB access.
+            body = await _json_body(request)
+            e2e_staff.check_body(writer, request.method, route, body)
         pool = await get_pool(request)
         if writer is not None:
-            # AA-1087: an allowed write only on a synthetic agency's record, before the staff row sync or the route.
-            await e2e_staff.check_synthetic(pool, writer, request.method, route, request.path_params)
+            # AA-1087: an allowed write only on a synthetic agency's record (A10e-2: a synthetic plan, an E2E maker's
+            # version of one), before the staff row sync or the route.
+            await e2e_staff.check_synthetic(pool, writer, request.method, route, request.path_params, body)
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
         if preview:
@@ -548,6 +557,8 @@ async def current_staff(
         if writer is not None and (grants := writer.grants_for(request.method, route)):
             # A10e-1: the permission this one request needs (every check above passed); never stored.
             staff = replace(staff, e2e_grants=grants)
+        if writer is not None:
+            staff = replace(staff, e2e_writer=writer.name)
     elif kind == identity_config.BRIDGE:
         claims = _bridge_claims(principal, token)
         role = ROLE_FROM_CIS.get(claims.cis_role)
