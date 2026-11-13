@@ -14,8 +14,9 @@ packages (:data:`GOVERNED`: B2B, operations, retention, pricing, agency billing)
 4. a pricing policy parameter that no code reads and that does not say why on the page (``used_by="stored"`` needs
    ``pending``, shown as the "not enforced yet" badge), or a reading module that does not name its key (the other
    direction is ``test_aa1091_policy_guard.test_parameters_in_use_are_read_by_their_module``);
-5. a parameter with no seed: every key of ``policy_params.PARAMS`` is seeded by a migration (bk-050, bk-056, ...) and
-   by the unit-test policy (``tests/unit/fakes.POLICY_SEED``), so a key added in code alone fails here.
+5. a parameter with no seed in the unit-test policy (``tests/unit/fakes.POLICY_SEED``). The migration seed of every
+   key is checked on PostgreSQL (``tests/integration/test_aa1091_pricing_policy.py``: every parameter has a value in
+   force after the migrations), not here: under MIG-4 the code PR is pushed before its migration is on main.
 
 The scanner is self-tested on planted values.
 """
@@ -32,7 +33,6 @@ from app.pricing import policy_params
 from tests.unit.fakes import POLICY_SEED
 
 APP = Path(__file__).resolve().parents[2] / "app"
-MIGRATIONS = Path(__file__).resolve().parents[3] / "migrations"
 GOVERNED = ("b2b", "ops", "retention", "pricing", "agency_billing")
 POLICY_NAME = re.compile(
     r"(^|_)(MAX|MIN|CAP|LIMIT|THRESHOLD|PCT|USD|ATTEMPTS|RETRIES|DAYS|HOURS|MINUTES|SECONDS|TTL|WINDOW|DEFAULT"
@@ -199,11 +199,8 @@ def test_a_stored_parameter_says_why_it_is_not_enforced() -> None:
             assert policy_params.describe(param)["not_enforced_reason"] is None
 
 
-def test_every_parameter_is_seeded() -> None:
+def test_every_parameter_is_seeded_in_the_unit_policy() -> None:
     assert set(POLICY_SEED) == set(policy_params.PARAMS), "tests/unit/fakes.POLICY_SEED must seed every parameter"
-    seeded = "\n".join(p.read_text(encoding="utf-8") for p in sorted(MIGRATIONS.glob("*.sql")))
-    missing = [key for key in policy_params.PARAMS if f"'{key}'" not in seeded]
-    assert missing == [], f"no migration seeds a version 1 of {missing}"
 
 
 @pytest.mark.parametrize(
