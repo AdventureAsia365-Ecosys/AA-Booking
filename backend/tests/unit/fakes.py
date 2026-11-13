@@ -67,6 +67,11 @@ SEED_ROUNDING: dict[str, Decimal] = {
 }
 
 
+def seed_values(*keys: str) -> dict[str, Any]:
+    """The seeded policy values of ``keys``, decoded (key -> value)."""
+    return {key: json.loads(POLICY_SEED[key]) for key in keys}
+
+
 def policy_rows(**overrides: str) -> list[dict[str, Any]]:
     """Rows of the policy in force: the seed, with ``overrides`` (key -> JSON text of the value)."""
     values = {**POLICY_SEED, **overrides}
