@@ -64,7 +64,7 @@ from app.catalog import (
     trip_plan_prices,
     trip_plans,
 )
-from app.errors import Invalid, NotFound
+from app.errors import Conflict, Invalid, NotFound
 from app.pricing import engine
 from app.routers.trip_cases import Currency
 
@@ -483,18 +483,18 @@ async def get_trip_plan_prices(source_id: SourceId, staff: CanReadPrices, pool: 
         return await trip_plan_prices.list_prices(conn, staff, source_id)
 
 
-@router.put("/trip-plans/{source_id}/prices")
+@router.put("/trip-plans/{source_id}/prices", responses={409: {"description": "prices change through versions"}})
 async def put_trip_plan_prices(
     body: PricesBody, source_id: SourceId, staff: CanWritePlans, pool: Pool
 ) -> dict[str, Any]:
-    async with pool.acquire() as conn, conn.transaction():
-        return await trip_plan_prices.replace_prices(
-            conn,
-            staff,
-            source_id,
-            [r.model_dump() for r in body.items],
-            below_floor_reason=body.below_floor_reason,
-        )
+    """Retired by AA-1091 (bk-054, root ADR 0005b d1 / d2): a hand price is never overwritten. The rows go into a
+    draft price list version (``POST …/price-versions``, ``PUT /booking/catalog/price-versions/{id}``) that a second
+    person approves. Always 409 ``price_versions``."""
+    raise Conflict(
+        "price_versions",
+        "prices change through price versions: make a draft, submit it, a second person approves it",
+        versions_url=f"/booking/catalog/trip-plans/{source_id}/price-versions",
+    )
 
 
 @router.post("/trip-plans/{source_id}/prices/recompute")

@@ -5,13 +5,15 @@
 // currency and the price per person. A row may instead carry the net cost per person: the API prices it on save with
 // the channel's rule, the approved FX rate and the rounding of quote-preview (a price typed next to a net cost is a
 // sales override). Rows of one channel and currency may not overlap (checked here and in the API).
+// AA-1091: used by the draft of a price version (Price setup → Versions); the season and its peak uplift come from the
+// tour's season calendar, so a row has a season label only.
 // AA-1029: rows the cost sheet wrote from the plan's components and the supplier rates carry a "Cost sheet" badge (a
 // price typed on one makes it an override the next recompute keeps); b2b rows show their suggested retail price.
 
 import { Plus, Trash2 } from "lucide-react";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import type { PriceRow } from "@/lib/api/tripPlans";
-import { Badge, Checkbox, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
+import { Badge, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
 
@@ -97,16 +99,11 @@ export function PriceMatrixEditor({
                   ))}
                 </Select>
               </Field>
-              <div className="col-span-2 flex min-w-0 items-start gap-3">
-                <Field label="Season" error={errorOf(i, "season")} className="flex-1">
-                  <Input className={inputCls} maxLength={80} placeholder="Low, High, Peak…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
-                </Field>
-                {/* Its own label (not inside the Season label, which names only its first control). */}
-                <label className="mt-[22px] flex h-10 shrink-0 cursor-pointer items-center gap-1.5 text-[12.5px] text-body">
-                  <Checkbox checked={r.peak} onChange={(e) => set(i, { peak: e.target.checked })} />
-                  Peak
-                </label>
-              </div>
+              {/* AA-1091 (bk-055): the label is for people; the season and the peak uplift come from the tour's season
+                  calendar on the row's dates. */}
+              <Field label="Season label" error={errorOf(i, "season")} className="col-span-2">
+                <Input className={inputCls} maxLength={80} placeholder="Green season, Dry season…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
+              </Field>
               <Field label="Valid from" error={errorOf(i, "valid_from")} className="col-span-2 sm:col-span-2">
                 <DateField className={inputCls} value={r.valid_from} onChange={(v) => set(i, { valid_from: v })} aria-label={`Row ${i + 1} valid from`} />
               </Field>

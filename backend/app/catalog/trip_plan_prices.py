@@ -69,6 +69,8 @@ KEY_FIELDS = (
     "overridden",
     "computed",
     "rrp_amount",
+    "version_id",
+    "season_code",
 )
 
 ROWS_SQL = """
@@ -79,7 +81,8 @@ SELECT pr.position, pr.channel, pr.season, pr.peak, pr.valid_from, pr.valid_to, 
        pr.child_amount::text AS child_amount, pr.infant_amount::text AS infant_amount,
        pr.single_supplement_amount::text AS single_supplement_amount, pr.child_net_amount::text AS child_net_amount,
        pr.infant_net_amount::text AS infant_net_amount,
-       pr.single_supplement_net_amount::text AS single_supplement_net_amount
+       pr.single_supplement_net_amount::text AS single_supplement_net_amount,
+       pr.version_id::text AS version_id, pr.season_code
 FROM booking.trip_plan_prices pr
 WHERE pr.trip_plan_id = $1::uuid
 ORDER BY pr.position
@@ -322,35 +325,27 @@ def _comparable(row: dict[str, Any]) -> tuple[Any, ...]:
         bool(row.get("computed")),
         dec(row.get("rrp_amount")),
         *(dec(row.get(k)) for k in PAX_TYPE_FIELDS),
+        row.get("version_id"),
+        row.get("season_code"),
     )
 
 
-async def replace_prices(
-    conn: asyncpg.Connection,
-    staff: Staff,
-    source_id: str,
-    rows: list[dict[str, Any]],
-    *,
-    below_floor_reason: str | None = None,
-    on: date | None = None,
-) -> dict[str, Any]:
-    """Replace the plan's matrix (PUT semantics). Rows with a net cost are priced on ``on`` (default today, UTC)."""
+async def price_rows(
+    conn: asyncpg.Connection, rows: list[dict[str, Any]], *, below_floor_reason: str | None = None, on: date
+) -> list[dict[str, Any]]:
+    """Validate and price request rows (a draft price list version, AA-1091): rows with a net cost are priced on
+    ``on`` with the channel rule, FX and rounding (an amount sent with one is an override; below the floor it needs
+    ``below_floor_reason``). Returns the rows in the matrix shape, positions 1..n."""
     norm = normalise(rows)
-    plan = await _plan(conn, source_id, lock=True)
-    if plan is None:
-        raise NotFound("trip_plan_not_found", "save the commercial details of this tour first")
-    plan_id = plan["id"]
     reason = _clean(below_floor_reason)
-    day = on or today()
-
     final: list[dict[str, Any]] = []
     below: list[int] = []
-    markup = await _b2b_markup(conn, norm, day)
+    markup = await _b2b_markup(conn, norm, on)
     for row in norm:
         amount, margin, priced_on = row.amount, None, None
         if row.net_amount is not None:
-            quote = (await _price(conn, row, day)).quote
-            amount, margin, priced_on = quote.final_total, quote.effective_margin, day
+            quote = (await _price(conn, row, on)).quote
+            amount, margin, priced_on = quote.final_total, quote.effective_margin, on
             _check_priced(row, amount, margin)
             if quote.below_floor:
                 below.append(row.position)
@@ -372,7 +367,7 @@ async def replace_prices(
                 "effective_margin": margin,
                 "priced_on": priced_on,
                 "overridden": row.net_amount is not None and row.amount is not None,
-                "computed": row.computed,
+                "computed": False,
                 "rrp_amount": rrp_for(row.channel, amount, row.currency, markup),
                 # A net only rides along on a row priced from a net (the table CHECK); sell amounts are as entered.
                 **{k: (v if k in PAX_TYPE_AMOUNTS or row.net_amount is not None else None) for k, v in row.pax_prices},
@@ -384,19 +379,7 @@ async def replace_prices(
             f"row(s) {', '.join(map(str, below))} are below the channel floor; give a reason",
             rows=below,
         )
-    await store(
-        conn,
-        plan_id,
-        source_id,
-        final,
-        actor_type="staff",
-        actor_ref=staff.cis_user_id,
-        created_by=staff.cis_user_id,
-        action="trip_plan.prices_replaced",
-        extra={"below_floor_rows": below, "below_floor_reason": reason if below else None},
-        summary_suffix=f" (below floor: {reason})" if below else "",
-    )
-    return await list_prices(conn, staff, source_id)
+    return final
 
 
 async def _b2b_markup(conn: asyncpg.Connection, rows: list[Row], day: date) -> Decimal | None:
@@ -424,9 +407,9 @@ INSERT_SQL = """
 INSERT INTO booking.trip_plan_prices (trip_plan_id, position, channel, season, peak, valid_from, valid_to, pax_min,
     pax_max, currency, amount, net_amount, net_currency, effective_margin, priced_on, overridden, computed, rrp_amount,
     child_amount, infant_amount, single_supplement_amount, child_net_amount, infant_net_amount,
-    single_supplement_net_amount, created_by)
+    single_supplement_net_amount, version_id, season_code, created_by)
 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
-        $24, $25)
+        $24, $25::uuid, $26, $27)
 """
 INSERT_FIELDS = (
     "position",
@@ -447,6 +430,8 @@ INSERT_FIELDS = (
     "computed",
     "rrp_amount",
     *PAX_TYPE_FIELDS,
+    "version_id",
+    "season_code",
 )
 
 
@@ -476,7 +461,7 @@ async def store(
         [
             (
                 plan_id,
-                *(_dec_or_none(r.get(f)) if f in PAX_TYPE_FIELDS else r[f] for f in INSERT_FIELDS),
+                *(_dec_or_none(r.get(f)) if f in PAX_TYPE_FIELDS else r.get(f) for f in INSERT_FIELDS),
                 r.get("created_by", created_by),
             )
             for r in final

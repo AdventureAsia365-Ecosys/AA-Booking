@@ -32,6 +32,7 @@ from app.pricing import policy
 from app.suppliers import service as suppliers
 from app.supply import rate_sheet
 from tests.integration import ops
+from tests.integration.price_versions_helper import publish_prices, purge_price_versions
 from tests.integration.supply import purge_supply
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -62,6 +63,7 @@ async def _purge(admin: asyncpg.Connection, plans_before: set[str]) -> None:
         ]
         for table in ("trip_plan_price_history", "trip_plan_prices", "trip_plan_components"):
             await admin.execute(f"DELETE FROM booking.{table} WHERE trip_plan_id = ANY($1::uuid[])", ours)  # noqa: S608
+        await purge_price_versions(admin, ours)
         await admin.execute("DELETE FROM booking.trip_plans WHERE id = ANY($1::uuid[])", ours)
         await admin.execute("UPDATE booking.trip_plans SET synced_at = NULL WHERE synced_at IS NOT NULL")
         await admin.execute(
@@ -416,7 +418,9 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
             item["net_amount"] = Decimal(item["net_amount"])
             for key in trip_plan_prices.PAX_TYPE_FIELDS:
                 item[key] = Decimal(item[key]) if item[key] is not None else None
-        await trip_plan_prices.replace_prices(conn, _staff(MAKER), TOUR, items)
+        # AA-1091 (bk-054): the staff override is a price version (draft by the maker, approved by a second person).
+        override = [i for i in items if i["amount"] is not None]
+        await publish_prices(conn, TOUR, override, maker=_staff(MAKER), checker=_staff(CHECKER, "admin"))
     before = datetime.now(UTC)
     await cost_sheet.run(pool)
     kept = await admin.fetchrow(
@@ -429,7 +433,7 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
         "amount": Decimal("190.00"),
         "rrp_amount": Decimal("240.00"),
         "overridden": True,
-        "computed": True,
+        "computed": False,  # AA-1091: a version row; the cost sheet's row under it is left out
     }
     async with pool.acquire() as conn:
         changes = await price_history.changes(conn, plan_id)
@@ -467,7 +471,7 @@ async def test_a_plan_priced_by_hand_gets_its_rrp_and_follows_a_new_markup(
         "net_currency": None,
     }
     async with pool.acquire() as conn, conn.transaction():
-        await trip_plan_prices.replace_prices(conn, _staff(MAKER), STAFF_TOUR, [hand])
+        await publish_prices(conn, STAFF_TOUR, [hand], maker=_staff(MAKER), checker=_staff(CHECKER, "admin"))
     plan_id = await admin.fetchval("SELECT id::text FROM booking.trip_plans WHERE source_id = $1", STAFF_TOUR)
     async with admin.transaction():  # a row written before bk-039 has no RRP
         await admin.execute("SET LOCAL ROLE bk_owner")

@@ -71,6 +71,10 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/pricing/workbench", roles: [A, S, C] },
   // AA-1091: the pricing policy parameters (API pricing_policy.read; changes pricing_policy.write, approvals by group).
   { pattern: "/pricing/policy", roles: [A, S, C, F] },
+  // AA-1091 (bk-055): season calendars and holiday events (API pricing.read; changes season.write, approvals
+  // season.approve).
+  { pattern: "/pricing/seasons", roles: [A, S, C] },
+  { pattern: "/pricing/holiday-events", roles: [A, S, C] },
   // Catalog from CIS (W2): everyone reads; admin / contracting edit commercial fields.
   { pattern: "/catalog/trip-plans/:id/commercial", roles: [A, C] },
   { pattern: "/catalog/*", roles: ALL },

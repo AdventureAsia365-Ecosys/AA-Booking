@@ -36,7 +36,9 @@ async def refused(c: asyncpg.Connection, exc: type[Exception], match: str | None
 async def app(migrated_admin_dsn: str, migrated_booking_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     admin = await asyncpg.connect(migrated_admin_dsn)
     try:
-        await apply_migrations(admin, only=[54])
+        # bk-055 itself (the re-run must be a no-op); never bk-054, whose data step would version every plan other
+        # tests left with prices.
+        await apply_migrations(admin, only=[55])
     finally:
         await admin.close()
     c = await asyncpg.connect(migrated_booking_dsn)

@@ -27,7 +27,7 @@ import pytest
 import pytest_asyncio
 
 from app.b2b import plan_components
-from app.catalog import component_suggest, liveness, price_import, price_workbench, trip_plan_prices, trip_plan_sync
+from app.catalog import component_suggest, liveness, price_import, price_versions, price_workbench, trip_plan_sync
 from app.db import Database
 from app.errors import Invalid
 from app.main import create_app
@@ -35,6 +35,7 @@ from app.settings import Settings
 from app.suppliers import service as suppliers
 from app.supply import rate_sheet
 from tests.integration import ops
+from tests.integration.price_versions_helper import publish_prices
 from tests.integration.test_aa1029_price_chain import (  # noqa: F401 — fixtures used by name
     CHECKER,
     MAKER,
@@ -269,7 +270,17 @@ async def test_workbench_suggestions_import_and_actions(
     async with pool.acquire() as conn, conn.transaction():
         done = await price_import.import_workbook(conn, _staff(MAKER), _workbook(s), dry_run=False)
     assert done["dry_run"] is False and done["recomputed"] >= 1
-    assert {t["tour_key"]: t["status_after"] for t in done["tours"]}[STAFF_TOUR] == "hand_priced"
+    # AA-1091 (bk-054): the Prices sheet made a draft price version; nothing is live until a second person approves.
+    (draft,) = [d for d in done["price_drafts"] if d["tour_key"] == STAFF_TOUR]
+    assert draft["rows"] == 2 and draft["unchanged"] is False
+    assert await admin.fetchval(count + " WHERE p.source_id = $1", STAFF_TOUR) == 0
+    async with pool.acquire() as conn, conn.transaction():
+        submitted = await price_versions.submit(conn, _staff(MAKER), draft["version_id"], "Workbook prices")
+        await price_versions.approve(conn, _staff(CHECKER, "admin"), draft["version_id"], submitted["diff_sha256"])
+    assert (
+        await admin.fetchval("SELECT source FROM booking.price_list_versions WHERE id = $1::uuid", draft["version_id"])
+        == "import"
+    )
     hand = await admin.fetch(
         "SELECT r.amount, r.rrp_amount, r.child_amount, r.computed FROM booking.trip_plan_prices r"
         " JOIN booking.trip_plans p ON p.id = r.trip_plan_id WHERE p.source_id = $1 ORDER BY r.pax_min",
@@ -289,7 +300,7 @@ async def test_workbench_suggestions_import_and_actions(
     assert [(d["capacity"], d["min_to_operate"]) for d in deps] == [(12, 2), (12, 0)]
 
     # The same file again changes nothing.
-    marks = {a: await _audits(admin, a) for a in ("trip_plan.prices_imported", "trip_plan.components_replaced")}
+    marks = {a: await _audits(admin, a) for a in ("price_version.imported", "trip_plan.components_replaced")}
     async with pool.acquire() as conn, conn.transaction():
         second = await price_import.import_workbook(conn, _staff(MAKER), _workbook(s), dry_run=False)
     assert second["totals"]["departures_new"] == 0 and second["totals"]["departures_existing"] == 2
@@ -407,7 +418,16 @@ async def test_the_routes(
     bad = {"data_base64": base64.b64encode(_bad_workbook(s)).decode()}
     refused = await c.post("/catalog/price-import", params={"dry_run": "true"}, json=bad, headers=auth(MAKER))
     assert refused.status_code == 422 and refused.json()["detail"] == "price_import_invalid"
-    assert (await c.post("/catalog/price-import", json=body, headers=auth(MAKER))).status_code == 200
+    imported = await c.post("/catalog/price-import", json=body, headers=auth(MAKER))
+    assert imported.status_code == 200
+    # AA-1091 (bk-054): the prices are a draft version until a second person approves it.
+    (draft,) = [d for d in imported.json()["price_drafts"] if d["tour_key"] == STAFF_TOUR]
+    sent = await c.post(
+        f"/catalog/price-versions/{draft['version_id']}/submit", json={"reason": "Workbook"}, headers=auth(MAKER)
+    )
+    assert sent.status_code == 200, sent.text
+    async with pool.acquire() as conn, conn.transaction():
+        await price_versions.approve(conn, _staff(CHECKER, "admin"), draft["version_id"], sent.json()["diff_sha256"])
 
     # The prefilled template holds the state just imported; checking it back changes nothing.
     tpl = await c.get("/catalog/price-import/template", params={"q": "invented lake loop"}, headers=auth(MAKER))
@@ -452,7 +472,7 @@ async def test_import_keeps_net_cost_rows(
         "net_currency": "USD",
     }
     async with pool.acquire() as conn, conn.transaction():
-        await trip_plan_prices.replace_prices(conn, _staff(MAKER), STAFF_TOUR, [hand, net], on=TODAY)
+        await publish_prices(conn, STAFF_TOUR, [hand, net], maker=_staff(MAKER), checker=_staff(CHECKER, "admin"))
     rows_sql = (
         "SELECT pr.pax_min, pr.amount, pr.net_amount, pr.net_currency::text AS net_currency, pr.effective_margin,"
         " pr.priced_on, pr.overridden, pr.computed FROM booking.trip_plan_prices pr"
@@ -460,7 +480,7 @@ async def test_import_keeps_net_cost_rows(
     )
     before = [dict(r) for r in await admin.fetch(rows_sql, STAFF_TOUR)]
     assert before[1]["net_amount"] == Decimal("250.00") and before[1]["overridden"] is True
-    imported = await _audits(admin, "trip_plan.prices_imported")
+    imported = await _audits(admin, "price_version.imported")
     async with pool.acquire() as conn:
         items = [r for r in (await price_workbench.build(conn, on=TODAY))["items"] if r["tour_key"] == STAFF_TOUR]
         data = await price_import.prefilled(conn, items, today=TODAY)
@@ -470,7 +490,7 @@ async def test_import_keeps_net_cost_rows(
         out = await price_import.import_workbook(conn, _staff(MAKER), data, dry_run=False)
     (tour,) = out["tours"]
     assert (tour["hand_rows_before"], tour["hand_rows_after"], tour["net_rows_replaced"]) == (1, 1, 0)
-    assert await _audits(admin, "trip_plan.prices_imported") == imported  # nothing rewritten
+    assert await _audits(admin, "price_version.imported") == imported  # nothing rewritten
     assert [dict(r) for r in await admin.fetch(rows_sql, STAFF_TOUR)] == before
 
     # A hand row in the file over the net-cost row replaces it, and the dry run says so.

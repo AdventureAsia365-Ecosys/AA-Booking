@@ -51,6 +51,7 @@ import type { Listed, PartnerTariff, PartnerTerms, RateCardRow, TierDiscountRow,
 import type { PriceReadiness, ReadinessItem, ReadinessStatus } from "../../lib/api/priceReadiness";
 import type { ParamVersion, PolicyListing, PolicyParam } from "../../lib/api/policyParams";
 import type { ComponentSuggestions, NextStep, PlanComponents, SuggestionCandidate, Workbench, WorkbenchItem } from "../../lib/api/priceWorkbench";
+import type { HolidayEvent, Person, PlanCalendar, PriceVersion, SeasonCalendar, SeasonCode, VersionList } from "../../lib/api/priceVersions";
 import type { OrphanedPlanItem, PriceMatrix, TripPlanDetail, TripPlanFacets, TripPlanListItem } from "../../lib/api/tripPlans";
 import type { DeskDepartures, DeskSummary, OnRequestLine, OnRequestPage } from "../../lib/api/b2bDesk";
 import type { Allotment, AllotmentList, Departure, DepartureList } from "../../lib/api/departures";
@@ -945,6 +946,109 @@ const WORKBENCH: Workbench = {
     provisional: 240,
   },
   items: WORKBENCH_ITEMS,
+};
+
+// AA-1091 (bk-054 / bk-055): a tour's price versions, the season calendars and the holiday events (invented data).
+function priceVersion(no: number, status: PriceVersion["status"], from: string, to: string, by: Person = person("u-002", 1)): PriceVersion {
+  return {
+    id: `pv-${no}`,
+    trip_plan_id: "tp-1",
+    source_id: "tour-1",
+    version_no: no,
+    label: `2027 prices v${no}`,
+    tariff_year: 2027,
+    travel_from: from,
+    travel_to: to,
+    sale_from: null,
+    sale_to: null,
+    status,
+    source: "staff",
+    reason: status === "draft" ? null : "New ground operator rates for the dry season, with a longer pax band for families",
+    replaces_id: null,
+    created_by: by,
+    created_at: "2026-11-02T08:00:00Z",
+    submitted_at: status === "draft" ? null : "2026-11-02T09:00:00Z",
+    approved_by: status === "published" || status === "superseded" ? person("u-003", 2) : null,
+    approved_at: status === "published" || status === "superseded" ? "2026-11-03T09:00:00Z" : null,
+    rejected_by: null,
+    reject_reason: null,
+    withdrawn_by: null,
+    withdraw_reason: null,
+    diff_sha256: status === "draft" ? null : "a".repeat(64),
+    row_count: 6,
+  };
+}
+const PRICE_VERSIONS: VersionList = {
+  source_id: "tour-1",
+  items: [
+    priceVersion(3, "pending", "2027-04-01", "2027-10-31"),
+    priceVersion(2, "published", "2026-11-01", "2027-10-31"),
+    priceVersion(1, "superseded", "2026-01-01", "2026-10-31", { id: "migration:bk-054", name: null }),
+  ],
+  in_force: [{ version_id: "pv-2", version_no: 2, from: "2026-11-01", to: "2027-10-31" }],
+  calendar: { id: "cal-1", name: "Invented bay", default_season: "low" },
+};
+const PLAN_CALENDAR: PlanCalendar = {
+  source_id: "tour-1",
+  season_calendar_id: "cal-1",
+  season_calendar_name: "Invented bay",
+  request: {
+    season_calendar_id: "cal-2",
+    season_calendar_name: "Invented place 2",
+    requested_by: person("u-002", 1),
+    requested_at: NOW,
+    reason: "The tour spends most nights in the second place, so its seasons fit better",
+  },
+};
+function seasonCalendar(i: number): SeasonCalendar {
+  return {
+    id: `cal-${i}`,
+    owner_kind: i % 4 === 3 ? "supplier_contract" : "destination",
+    destination_id: i % 4 === 3 ? null : `d-${i}`,
+    supplier_contract_id: i % 4 === 3 ? `k-${i}` : null,
+    name: i % 4 === 3 ? `Contract ${i} with a rather long supplier name for the wrap check` : `Invented place ${i}`,
+    default_season: "low",
+    pending_default_season: i === 2 ? "high" : null,
+    default_requested_by: i === 2 ? person("u-002", 1) : null,
+    default_request_reason: i === 2 ? "Most of the year is busy here since the new airport opened" : null,
+    created_by: { id: "system:bk_trip_plan_sync", name: null },
+    ranges: i % 3,
+    waiting: i % 2,
+    plans: i * 3,
+  };
+}
+const SEASON_CALENDARS = { items: range(ROWS).map(seasonCalendar), season_codes: ["low", "high", "peak", "festive"] as SeasonCode[] };
+function holidayEvent(i: number): HolidayEvent {
+  const state = (["approved", "pending", "ending", "rejected"] as const)[i % 4];
+  return {
+    id: `he-${i}`,
+    country_iso2: ["VN", "TH", "KH", "LA"][i % 4],
+    code: `invented_festival_${i}`,
+    name: `Invented festival of lanterns ${i}`,
+    year: 2027,
+    date_from: "2027-02-0" + ((i % 8) + 1),
+    date_to: "2027-02-1" + (i % 8),
+    status: state === "ending" ? "approved" : state,
+    state,
+    reason: "Dates from the invented national holiday calendar published for the year",
+    created_by: person("u-002", 1),
+    decided_by: state === "pending" ? null : person("u-003", 2),
+    reject_reason: state === "rejected" ? "Wrong year" : null,
+    withdraw_reason: null,
+    end_requested_by: state === "ending" ? person("u-004", 3) : null,
+    end_reason: state === "ending" ? "Entered twice for the same year" : null,
+    ended_by: null,
+    calendars: i % 3,
+  };
+}
+const HOLIDAY_EVENTS = {
+  items: range(ROWS).map(holidayEvent),
+  countries: [
+    { iso2: "KH", name: "Cambodia" },
+    { iso2: "LA", name: "Laos" },
+    { iso2: "TH", name: "Thailand" },
+    { iso2: "VN", name: "Vietnam" },
+  ],
 };
 const RATE_CARDS: Listed<RateCardRow> = {
   today: "2026-10-23",
@@ -1932,6 +2036,10 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "catalog/price-readiness") return ok(READINESS);
   if (p === "catalog/price-workbench") return ok(WORKBENCH);
   if (p === "pricing/policy") return ok(POLICY);
+  if (p === "pricing/season-calendars") return ok(SEASON_CALENDARS);
+  if (p === "pricing/holiday-events") return ok(HOLIDAY_EVENTS);
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "price-versions") return ok(PRICE_VERSIONS);
+  if (at(0) === "catalog" && at(1) === "trip-plans" && at(3) === "season-calendar") return ok(PLAN_CALENDAR);
 
   if (p === "b2b-desk/summary") return ok(DESK_SUMMARY);
   if (p === "b2b-desk/on-request") {

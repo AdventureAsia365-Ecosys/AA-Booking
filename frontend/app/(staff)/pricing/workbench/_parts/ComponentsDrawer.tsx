@@ -6,6 +6,7 @@
 // Save, which sends the plan's whole set (PUT …/components, ui/booking/priceWorkbench.ts mergeComponents). Unmatched
 // needs link to the supplier, hotel and service pages so the missing item can be created. Opened from Price setup and
 // from the trip plan's Components tab; the text follows the page's language (messages.ts; English outside a provider).
+// AA-1091: on Price setup it shows the tour's tabs (Hotels & services | Versions, VersionsDrawer.tsx).
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,6 +22,7 @@ import {
 import { mergeComponents, type ItemRef } from "@/ui/booking/priceWorkbench";
 import { Button, Drawer, Pill, Select, useCan, useT, useToast } from "@/ui";
 import { M, type MessageKey } from "./messages";
+import { PlanTabs } from "./VersionsDrawer";
 
 type Choice = { index: number; roomTypeId?: string };
 
@@ -133,7 +135,18 @@ function CandidateCard({
   );
 }
 
-export function ComponentsDrawer({ sourceId, title, onClose }: { sourceId: string; title?: string | null; onClose: () => void }) {
+export function ComponentsDrawer({
+  sourceId,
+  title,
+  onClose,
+  onVersions,
+}: {
+  sourceId: string;
+  title?: string | null;
+  onClose: () => void;
+  /** AA-1091: on Price setup, the tour's Versions tab (the tabs show only when given). */
+  onVersions?: () => void;
+}) {
   const t = useT(M);
   const toast = useToast();
   const qc = useQueryClient();
@@ -209,6 +222,7 @@ export function ComponentsDrawer({ sourceId, title, onClose }: { sourceId: strin
       }
     >
       <div className="flex min-w-0 flex-col gap-4" data-testid="components-drawer">
+        {onVersions && <PlanTabs active="components" onTab={(tab) => tab === "versions" && onVersions()} />}
         <p className="text-[13px] text-muted">{t("compIntro")}</p>
         {save.error && (
           <p className="rounded-md border border-danger-border bg-danger-soft px-3 py-2 text-[13px] text-body" role="alert">

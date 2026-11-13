@@ -25,13 +25,14 @@ import pytest
 import pytest_asyncio
 
 from app.b2b import plan_components
-from app.catalog import cost_sheet, price_readiness, trip_plan_prices, trip_plan_sync
+from app.catalog import cost_sheet, price_readiness, trip_plan_sync
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from app.suppliers import service as suppliers
 from app.supply import rate_sheet
 from tests.integration import ops
+from tests.integration.price_versions_helper import publish_prices
 from tests.integration.test_aa1029_price_chain import (  # noqa: F401 — fixtures used by name
     CHECKER,
     MAKER,
@@ -180,7 +181,7 @@ async def test_readiness_and_the_rate_sheet_impact(
         "net_currency": None,
     }
     async with pool.acquire() as conn, conn.transaction():
-        await trip_plan_prices.replace_prices(conn, _staff(MAKER), BARE_TOUR, [hand])
+        await publish_prices(conn, BARE_TOUR, [hand], maker=_staff(MAKER), checker=_staff(CHECKER, "admin"))
 
     async with pool.acquire() as conn:
         report = await price_readiness.build(conn, on=TODAY)

@@ -13,7 +13,7 @@ import pytest
 
 from app.catalog import cost_sheet as cs
 from app.catalog import trip_plan_prices as prices
-from app.pricing import engine, repository
+from app.pricing import engine, repository, seasons
 from app.supply.rates import RateAsk
 
 DAY = date(2027, 3, 1)
@@ -110,8 +110,33 @@ def test_mixed_currencies_are_summed_in_usd_and_a_missing_rate_leaves_the_cell_u
     assert unpriced == 2  # bands 7-10 and 11+ have no jeep rate
     two = next(r for r in rows if r.pax_min == 2)
     assert (two.net_amount, two.net_currency) == (D("75.00"), "USD")  # (100 + 50) / 2
-    assert two.season == "Low / Peak" and two.peak is True
+    # AA-1091 (bk-055): with no configured calendar (no codes) the old rule stays, so no price moves on deploy: a
+    # label saying "Peak" makes the row peak.
+    assert two.season == "Low / Peak" and two.peak is True and two.season_code == "peak"
+    # Once the plan's calendar is configured, the calendar decides and the label is only shown.
+    calendar_rows, _ = cs.net_rows(wins, grid, fx, codes=["low"])
+    two = next(r for r in calendar_rows if r.pax_min == 2)
+    assert two.season == "Low / Peak" and two.peak is False and two.season_code == "low"
     assert cs.net_rows(wins, grid, {})[0] == []  # no VND rate: nothing can be priced
+
+
+def test_a_peak_calendar_season_makes_the_row_peak_and_windows_cut_where_it_changes() -> None:
+    parts = [cs.Part(1, None, GUIDE)]
+    spans = [cs.Span(GUIDE, DAY, DAY + timedelta(days=29))]
+    peak = seasons.Calendar(id="c", fixed=(seasons.Span(DAY + timedelta(days=10), DAY + timedelta(days=20), "peak"),))
+    wins = cs.windows(DAY, parts, spans, peak)
+    assert [(w.start, w.end) for w in wins] == [
+        (DAY, DAY + timedelta(days=9)),
+        (DAY + timedelta(days=10), DAY + timedelta(days=19)),
+        (DAY + timedelta(days=20), DAY + timedelta(days=29)),
+    ]
+    grid = cs.cells(wins, parts, _found(parts, wins, lambda a: rate("30")))
+    codes = [peak.season_on(w.start).code for w in wins]
+    rows, _ = cs.net_rows(wins, grid, {}, codes=codes)
+    two = [r for r in rows if r.pax_min == 2]
+    assert [(r.season_code, r.peak) for r in two] == [("low", False), ("peak", True), ("low", False)]
+    # Without a calendar the same rate is one window, low season.
+    assert len(cs.windows(DAY, parts, spans)) == 1
 
 
 def test_equal_neighbour_windows_merge() -> None:

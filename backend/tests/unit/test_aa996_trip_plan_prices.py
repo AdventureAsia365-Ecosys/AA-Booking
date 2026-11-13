@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.staff import Staff, current_staff, get_pool
 from app.catalog import trip_plan_prices as prices
-from app.errors import Forbidden, Invalid, NotFound, Unavailable
+from app.errors import Forbidden, Invalid, Unavailable
 from app.main import create_app
 from app.pricing import engine
 from app.pricing import service as pricing
@@ -167,37 +167,34 @@ async def test_list_needs_pricing_read_and_is_empty_without_a_plan() -> None:
 
 
 @pytest.mark.asyncio
-async def test_replace_needs_the_commercial_row() -> None:
-    with pytest.raises(NotFound):
-        await prices.replace_prices(conn_with(plan=None), CONTRACTING, SOURCE_ID, [row()])
-
-
-@pytest.mark.asyncio
-async def test_replace_with_the_same_rows_writes_nothing() -> None:
+async def test_store_with_the_same_rows_writes_nothing() -> None:
     conn = conn_with(existing=[stored()])
-    await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [row()], on=DAY)
+    final = await prices.price_rows(conn, [row()], on=DAY)
+    changed = await prices.store(
+        conn, "p-1", SOURCE_ID, final, actor_type="staff", actor_ref="u", created_by="u", action="x"
+    )
+    assert changed is False
     assert conn.sql("DELETE FROM booking.trip_plan_prices") == [] and conn.sql("INSERT INTO booking.audit_logs") == []
 
 
 @pytest.mark.asyncio
-async def test_replace_prices_net_rows_and_audits(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_price_rows_prices_net_rows_and_store_audits(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
     fake_price(monkeypatch, calls)
     conn = conn_with(existing=[stored()])
     net = row(amount=None, net_amount=Decimal("670"), net_currency="USD", pax_min=3, pax_max=None, peak=True)
-    await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [row(), net], on=DAY)
+    final = await prices.price_rows(conn, [row(), net], on=DAY)
     assert len(calls) == 1 and calls[0]["peak"] is True and calls[0]["on"] == DAY
     assert calls[0]["channel"] is engine.Channel.B2C_TAILOR_MADE and calls[0]["override_total"] is None
+    by_position = {r["position"]: r for r in final}
+    assert by_position[2]["amount"] == Decimal("1050.00")  # 670 / 0.64 rounded up to 5
+    assert by_position[2]["effective_margin"] == Decimal("0.3319") and by_position[2]["priced_on"] == DAY
+    assert by_position[1]["amount"] == Decimal("1450") and by_position[1]["effective_margin"] is None
+    assert by_position[2]["overridden"] is False and by_position[1]["computed"] is False
+    await prices.store(conn, "p-1", SOURCE_ID, final, actor_type="staff", actor_ref="u", created_by="u", action="x.y")
     assert conn.sql("DELETE FROM booking.trip_plan_prices") == [("p-1",)]
-    by_position = {r[1]: r for r in conn.sql("INSERT INTO booking.trip_plan_prices")}
-    assert by_position[2][10] == Decimal("1050.00")  # 670 / 0.64 rounded up to 5
-    assert by_position[2][13] == Decimal(
-        "0.3319"
-    )  # 1 - 0.03 - 670 / 1050 (rounding up adds margin) and by_position[2][14] == DAY
-    assert by_position[1][10] == Decimal("1450") and by_position[1][13] is None
-    assert by_position[2][15] is False and by_position[1][15] is False  # overridden
     (audit,) = conn.sql("INSERT INTO booking.audit_logs")
-    assert "trip_plan.prices_replaced" in audit and "Price matrix: 1 -> 2 rows" in audit
+    assert "x.y" in audit and "Price matrix: 1 -> 2 rows" in audit
 
 
 @pytest.mark.asyncio
@@ -205,14 +202,10 @@ async def test_override_below_floor_needs_a_reason(monkeypatch: pytest.MonkeyPat
     fake_price(monkeypatch)
     low = row(amount=Decimal("800"), net_amount=Decimal("670"), net_currency="USD")
     with pytest.raises(Invalid) as err:
-        await prices.replace_prices(conn_with(), CONTRACTING, SOURCE_ID, [low], on=DAY)
+        await prices.price_rows(conn_with(), [low], on=DAY)
     assert err.value.code == "override_reason_required" and err.value.extra["rows"] == [1]
-    conn = conn_with()
-    await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [low], below_floor_reason=" Launch ", on=DAY)
-    (audit,) = conn.sql("INSERT INTO booking.audit_logs")
-    assert any("below floor: Launch" in str(a) for a in audit)
-    (inserted,) = conn.sql("INSERT INTO booking.trip_plan_prices")
-    assert inserted[10] == Decimal("800") and inserted[15] is True  # the override is the price, flagged
+    (priced,) = await prices.price_rows(conn_with(), [low], below_floor_reason=" Launch ", on=DAY)
+    assert priced["amount"] == Decimal("800") and priced["overridden"] is True  # the override is the price, flagged
 
 
 @pytest.mark.asyncio
@@ -232,21 +225,17 @@ async def test_priced_rows_the_table_cannot_hold_are_refused(
 ) -> None:
     fake_price(monkeypatch)
     bad = row(net_currency="USD", **over)
-    conn = conn_with()
     with pytest.raises(Invalid) as err:
-        await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [bad], below_floor_reason="Typo", on=DAY)
+        await prices.price_rows(conn_with(), [bad], below_floor_reason="Typo", on=DAY)
     assert err.value.code == code and err.value.extra["row"] == 1
-    assert conn.sql("INSERT INTO booking.trip_plan_prices") == []
 
 
 @pytest.mark.asyncio
 async def test_a_deep_but_plausible_override_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_price(monkeypatch)
     deep = row(amount=Decimal("1100"), net_amount=Decimal("2000"), net_currency="USD")  # margin -0.8483
-    conn = conn_with()
-    await prices.replace_prices(conn, CONTRACTING, SOURCE_ID, [deep], below_floor_reason="Write-off", on=DAY)
-    (inserted,) = conn.sql("INSERT INTO booking.trip_plan_prices")
-    assert inserted[10] == Decimal("1100") and inserted[13] == Decimal("-0.8482")
+    (priced,) = await prices.price_rows(conn_with(), [deep], below_floor_reason="Write-off", on=DAY)
+    assert priced["amount"] == Decimal("1100") and priced["effective_margin"] == Decimal("-0.8482")
 
 
 @pytest.mark.asyncio
@@ -266,22 +255,17 @@ async def test_pricing_errors(monkeypatch: pytest.MonkeyPatch, error: Exception,
     monkeypatch.setattr(prices.pricing, "price", price)
     net = row(amount=None, net_amount=Decimal("1000"), net_currency="THB")
     with pytest.raises(kind) as err:
-        await prices.replace_prices(conn_with(), CONTRACTING, SOURCE_ID, [net], on=DAY)
+        await prices.price_rows(conn_with(), [net], on=DAY)
     assert err.value.code == code
 
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 
-def client_as(staff: Staff, monkeypatch: pytest.MonkeyPatch, seen: dict[str, Any]) -> TestClient:
-    async def replace(conn: Any, who: Staff, source_id: str, rows: list[dict[str, Any]], **kw: Any) -> dict[str, Any]:
-        seen.update(rows=rows, **kw)
-        return {"source_id": source_id, "items": [], "from_price": None}
-
+def client_as(staff: Staff, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     async def read(conn: Any, who: Staff, source_id: str) -> dict[str, Any]:
         return {"source_id": source_id, "items": [], "from_price": None}
 
-    monkeypatch.setattr(prices, "replace_prices", replace)
     monkeypatch.setattr(prices, "list_prices", read)
     app = create_app(Settings(database_url=None, environment="test"))
     app.dependency_overrides[current_staff] = lambda: staff
@@ -289,33 +273,17 @@ def client_as(staff: Staff, monkeypatch: pytest.MonkeyPatch, seen: dict[str, Any
     return TestClient(app)
 
 
-def test_http_put_prices_shapes_rows_and_gates_roles(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-    body = {
-        "items": [
-            {"channel": "b2c_tailor_made", "valid_from": "2027-01-01", "valid_to": "2027-04-30", "amount": "1450"},
-            {
-                "channel": "b2b",
-                "valid_from": "2027-01-01",
-                "valid_to": "2027-04-30",
-                "net_amount": "670",
-                "net_currency": "VND",
-                "pax_min": 3,
-            },
-        ],
-        "below_floor_reason": "Launch",
-    }
+def test_http_put_prices_is_retired_for_price_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AA-1091 (bk-054): a hand price is never overwritten; PUT …/prices answers 409 and points at the versions."""
+    body = {"items": [{"channel": "b2b", "valid_from": "2027-01-01", "valid_to": "2027-04-30", "amount": "1450"}]}
     url = f"/booking/catalog/trip-plans/{SOURCE_ID}/prices"
-    with client_as(CONTRACTING, monkeypatch, seen) as c:
-        assert c.put(url, json=body).status_code == 200
-        assert c.put(url, json={"items": [{**body["items"][0], "amount": "0"}]}).status_code == 422
+    with client_as(CONTRACTING, monkeypatch) as c:
+        put = c.put(url, json=body)
+        assert put.status_code == 409 and put.json()["detail"] == "price_versions"
+        assert put.json()["versions_url"].endswith("/price-versions")
         assert c.put(url, json={"items": [{**body["items"][0], "pax_min": 0}]}).status_code == 422
-        assert c.put(url, json={"items": [{**body["items"][0], "channel": "retail"}]}).status_code == 422
-        assert c.put(url, json={"items": [], "extra": 1}).status_code == 422
-    assert seen["below_floor_reason"] == "Launch" and seen["rows"][0]["pax_min"] == 1
-    assert seen["rows"][1]["net_amount"] == Decimal("670") and seen["rows"][1]["amount"] is None
-    with client_as(SALES, monkeypatch, {}) as c:
+    with client_as(SALES, monkeypatch) as c:
         assert c.get(url).status_code == 200
         assert c.put(url, json=body).status_code == 403
-    with client_as(CONTENT, monkeypatch, {}) as c:
+    with client_as(CONTENT, monkeypatch) as c:
         assert c.get(url).status_code == 403

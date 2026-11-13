@@ -9,7 +9,7 @@
 //   GET  /booking/catalog/trip-plans/{source_id}                                                (catalog.read)
 //   PUT  /booking/catalog/trip-plans/{source_id}/commercial                                     (trip_plan.write)
 //   GET  /booking/catalog/trip-plans/{source_id}/prices                     (pricing.read; AA-996, bk-032)
-//   PUT  /booking/catalog/trip-plans/{source_id}/prices                     (trip_plan.write; replaces the set)
+//   PUT  /booking/catalog/trip-plans/{source_id}/prices                     retired (409): prices are versions (AA-1091)
 //   POST /booking/catalog/trip-plans/{source_id}/trip-cases                (trip_case.write + version.write)
 //
 // `source_id` is the stable CIS catalog key (contract catalog.tour.v1), never the CIS `tour_id`.
@@ -184,6 +184,10 @@ export interface PriceRow {
   child_net_amount?: DecimalString | null;
   infant_net_amount?: DecimalString | null;
   single_supplement_net_amount?: DecimalString | null;
+  /** AA-1091 (bk-054): the published price version a hand row comes from; null on a cost sheet row. */
+  version_id?: string | null;
+  /** AA-1091 (bk-055): the season of the plan's season calendar on the row's dates (it decides `peak`). */
+  season_code?: "low" | "high" | "peak" | "festive" | null;
 }
 
 /** The CIS source price text of the tour, kept as a reference only (never a selling price). */

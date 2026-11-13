@@ -76,7 +76,7 @@ from app.b2b.components import (
 from app.b2b.errors import B2BError
 from app.catalog import cost_sheet, liveness
 from app.catalog.destinations import CATALOG_ERRORS
-from app.pricing import engine, repository
+from app.pricing import engine, repository, seasons
 
 log = logging.getLogger(__name__)
 
@@ -280,6 +280,9 @@ async def build(
     truncated = len(rows) > limit
     rows = [r for r in rows[:limit] if (state := served.get(r["source_id"])) is not None and state.served]
     cuts = await rate_cuts(conn, [r["plan_id"] for r in rows if r["components"]])
+    # AA-1091 (bk-055): a row is also cut where its plan's season calendar changes season; each piece is priced with
+    # the season of its first day, the same season function as POST /quotes.
+    calendars = await seasons.for_plans(conn, [r["plan_id"] for r in rows])
 
     cells: list[Cell] = []
     unpriced: list[dict[str, Any]] = []
@@ -288,7 +291,9 @@ async def build(
         if not row["components"]:
             unpriced.append(_unpriced(row, start, row["valid_to"], "the trip plan has no bookable components"))
             continue
-        for first, last in pieces(start, row["valid_to"], cuts.get(row["plan_id"], ())):
+        cal = calendars.get(row["plan_id"], seasons.EMPTY)
+        row_cuts = {*cuts.get(row["plan_id"], ()), *cal.cuts(start, row["valid_to"] + timedelta(days=1))}
+        for first, last in pieces(start, row["valid_to"], row_cuts):
             if len(cells) == MAX_CELLS:
                 truncated = True
                 break
@@ -314,8 +319,9 @@ async def build(
             refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, cost)))
             continue
         try:
-            price = quotes.price_line(basis, cost, cell.row["plan_id"])
-            extras = _by_age_and_room(basis, cell, cost, costs[cell.no + len(cells)], price, currency)
+            season = calendars.get(cell.row["plan_id"], seasons.EMPTY).season_on(cell.on)
+            price = quotes.price_line(basis, cost, cell.row["plan_id"], season=season)
+            extras = _by_age_and_room(basis, cell, cost, costs[cell.no + len(cells)], price, currency, season)
         except engine.PricingError as exc:
             refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, str(exc))))
             continue
@@ -346,17 +352,18 @@ def _by_age_and_room(
     singles: LineCost | str,
     price: quotes.LinePrice,
     currency: str,
+    season: seasons.SeasonDay | None = None,
 ) -> dict[str, Any]:
     """AA-1075 (bk-15): the child price per person, the infant price and the single supplement per person of one
     tariff row, each priced by the quote engine (see the module doc). Raises ``engine.PricingError`` like the row."""
     plan, party = cell.row["plan_id"], cell.party
     adult_pp = per_person(price.b2b_price, party, currency)
-    children = quotes.price_line(basis, cost, plan, pax=(0, party, 0)).b2b_price
-    with_infant = quotes.price_line(basis, cost, plan, pax=(party, 0, 1)).b2b_price
+    children = quotes.price_line(basis, cost, plan, pax=(0, party, 0), season=season).b2b_price
+    with_infant = quotes.price_line(basis, cost, plan, pax=(party, 0, 1), season=season).b2b_price
     supplement: Decimal | None = None
     if isinstance(singles, LineCost):
         try:
-            single_pp = per_person(quotes.price_line(basis, singles, plan).b2b_price, party, currency)
+            single_pp = per_person(quotes.price_line(basis, singles, plan, season=season).b2b_price, party, currency)
         except engine.PricingError:  # a single room's cost currency without a rate: the row stands, no supplement
             single_pp = None
         supplement = None if single_pp is None else max(single_pp - adult_pp, engine.ZERO)

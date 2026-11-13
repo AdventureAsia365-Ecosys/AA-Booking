@@ -9,10 +9,11 @@ importing an unchanged file changes nothing:
 - ``Components``: Tour key, Day, Hotel code + Room type, or Service code (one item a row). **A tour listed here gets
   exactly these components** (the plan's set is replaced, as ``PUT …/components`` does);
 - ``Prices``: Tour key, Channel (b2b or fixed_departure; empty = b2b), Season, Peak (yes / no), Valid from, Valid to,
-  Pax min, Pax max, Currency (empty = USD), Price per person, Child price, Infant price, Single supplement. **A tour
-  listed here gets exactly these hand prices** (its plain hand rows are replaced; rows priced from a cost, computed from
-  supplier rates or typed with a net cost on the single price form, are not in the file and are kept, except one that
-  overlaps a new hand row, which the hand row replaces as the cost sheet does);
+  Pax min, Pax max, Currency (empty = USD), Price per person, Child price, Infant price, Single supplement. AA-1091
+  (bk-054): **a tour listed here gets a draft price list version with exactly these hand prices** (``source =
+  import`` with the file's SHA-256, :func:`app.catalog.price_versions.import_draft`); nothing prices until its maker
+  submits it from the tour's Versions tab and a second person approves it (the dry run's counts say what the approved
+  version would replace). The Peak column is read but no longer decides anything: the season calendar does (bk-055);
 - ``Departures``: Tour key, Start date, Capacity, Min to operate, Sales cutoff days, Decision days before, Auto confirm
   (yes / no), Status (scheduled / guaranteed). A date the tour already has is skipped (``existing``), never changed.
 
@@ -23,13 +24,12 @@ a tour; prices of one channel and currency do not overlap (dates and pax bands);
 today with the bk-046 limits; a tour made sellable has components after the import and is in the catalog.
 
 **Writing** (one transaction, through the services of the single forms, so every rule and audit row is the same):
-``plan_components.replace_components`` (no write when the set is unchanged), ``trip_plan_prices.store`` (audit
-``trip_plan.prices_imported``, dated history ``staff``; no write when unchanged), ``departures.create_departure``,
-``price_workbench.set_sellable``; one ``trip_plan.bulk_imported`` audit row for the file. The single forms have no
-maker-checker (supplier contracts and pricing rules do; their rates come through the rate sheet import and are
-published by a second person), so neither has this import. Then the cost sheet of each touched plan with components is
-recomputed in the same transaction (at most :data:`MAX_RECOMPUTE`; the ``bk_price_recompute`` job does the rest), so
-the result shows each tour's status after.
+``plan_components.replace_components`` (no write when the set is unchanged), a draft price version per tour with
+prices (audit ``price_version.imported``), ``departures.create_departure``, ``price_workbench.set_sellable``; one
+``trip_plan.bulk_imported`` audit row for the file. Prices have maker-checker (price versions, AA-1091); components,
+departures and the sellable switch have none on their single forms either. Then the cost sheet of each touched plan
+with components is recomputed in the same transaction (at most :data:`MAX_RECOMPUTE`; the ``bk_price_recompute``
+job does the rest), so the result shows each tour's status after.
 
 **Dry run**: the same checks, plus per tour what would change and its price readiness status after (the readiness
 rules on the new component set, the rates in force and the new hand rows) and how many cost-priced rows a new hand row
@@ -43,6 +43,7 @@ its value is unchanged, so the round trip still matches the room type and the se
 
 from __future__ import annotations
 
+import hashlib
 import io
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -57,9 +58,9 @@ from app import audit
 from app.auth.staff import Staff
 from app.b2b import departures, plan_components
 from app.b2b.tariff import FORMULA_START
-from app.catalog import cost_sheet, price_readiness, price_workbench, trip_plan_prices
+from app.catalog import cost_sheet, price_readiness, price_versions, price_workbench, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
-from app.errors import Invalid
+from app.errors import Forbidden, Invalid
 from app.pricing import engine
 from app.supply import rate_sheet as rs
 from app.supply.rate_sheet import Problem
@@ -115,9 +116,10 @@ README_LINES = (
     "Tours: Sellable yes / no (empty = unchanged). A sellable tour needs its components.",
     "Components: one hotel room type (Hotel code + Room type) or one Service code per row. A tour listed here gets "
     "exactly these components.",
-    "Prices: hand prices per person per pax band and season (dates YYYY-MM-DD). A tour listed here gets exactly these "
-    "hand prices. Prices worked out from a cost (from supplier rates, or a price typed with a net cost on the tour's "
-    "price form) are not in this file and are kept, unless a hand price here covers the same dates and pax.",
+    "Prices: hand prices per person per pax band and season (dates YYYY-MM-DD). A tour listed here gets a draft price "
+    "version with exactly these hand prices: submit it on the tour's Versions tab; it prices once a second person "
+    "approves it. Prices worked out from a cost (from supplier rates) are not in this file and stay, unless a hand "
+    "price covers the same dates and pax. The season and the peak uplift come from the season calendar.",
     "Departures: new fixed departures; a date the tour already has is skipped.",
     "Upload it on Price setup -> Import: Check (nothing is written) first, then Import.",
 )
@@ -753,7 +755,8 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
     }
     if dry_run:
         return out
-    await _apply(conn, staff, plans, pricing)
+    drafts = await _apply(conn, staff, plans, hashlib.sha256(data).hexdigest())
+    out["price_drafts"] = drafts
     recomputed = 0
     for plan in list(plans.values()):
         if recomputed >= MAX_RECOMPUTE:
@@ -783,30 +786,20 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
 
 
 async def _apply(
-    conn: asyncpg.Connection, staff: Staff, plans: Mapping[str, Plan], pricing: cost_sheet.Pricing
-) -> None:
+    conn: asyncpg.Connection, staff: Staff, plans: Mapping[str, Plan], file_sha256: str
+) -> list[dict[str, Any]]:
+    """Write the workbook; returns the draft price versions made (one per tour with prices, AA-1091)."""
+    drafts: list[dict[str, Any]] = []
     for plan in plans.values():
         if plan.components is not None:
             await plan_components.replace_components(conn, staff, plan.key, plan.components)
-        if plan.hand is not None:
-            existing = [dict(r) for r in await conn.fetch(trip_plan_prices.ROWS_SQL, plan.id)]
-            merged = merge_prices(existing, [hand_row(h, pricing.markup) for h in plan.hand], pricing)
-            await trip_plan_prices.store(
-                conn,
-                plan.id,
-                plan.key,
-                merged.rows,
-                actor_type="staff",
-                actor_ref=staff.cis_user_id,
-                created_by=staff.cis_user_id,
-                action="trip_plan.prices_imported",
-                extra={
-                    "computed_rows_replaced": merged.computed_replaced,
-                    "net_rows_replaced": merged.net_replaced,
-                    "via": "price_import",
-                },
-                summary_suffix=" (price setup workbook)",
+        if plan.hand:
+            if not staff.can("price_version.write"):
+                raise Forbidden("forbidden", "importing prices makes a draft price version (price_version.write)")
+            made = await price_versions.import_draft(
+                conn, staff, plan.id, plan.key, [draft_row(h) for h in plan.hand], file_sha256
             )
+            drafts.append({"tour_key": plan.key, **made})
         for d in plan.new_departures:
             await departures.create_departure(
                 conn,
@@ -826,6 +819,24 @@ async def _apply(
             await price_workbench.set_sellable(
                 conn, staff, {"id": plan.id, "source_id": plan.key, "sellable": plan.sellable}, plan.sellable_after
             )
+    return drafts
+
+
+def draft_row(p: Mapping[str, Any]) -> dict[str, Any]:
+    """One imported hand price as a draft version row (the peak comes from the season calendar)."""
+    return {
+        "channel": p["channel"],
+        "season": str(p["season"])[: cost_sheet.SEASON_MAX] if p.get("season") else None,
+        "valid_from": p["valid_from"],
+        "valid_to": p["valid_to"],
+        "pax_min": int(p["pax_min"]),
+        "pax_max": p.get("pax_max"),
+        "currency": p["currency"],
+        "amount": p["amount"],
+        "child_amount": p.get("child_amount"),
+        "infant_amount": p.get("infant_amount"),
+        "single_supplement_amount": p.get("single_supplement_amount"),
+    }
 
 
 # ── Template ─────────────────────────────────────────────────────────────────

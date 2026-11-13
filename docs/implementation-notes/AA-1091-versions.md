@@ -82,10 +82,197 @@ in code. This file covers slice **A** (the policy parameters); slices B–E are 
   and the schedule exist with their approvals (a channel with no approved rule to copy from). If the Dev apply fails
   on such a clash, agree a new date with the tech lead and change it before the file is registered.
 
-## Not done yet (this lane)
+## Slices B and C — price list versions and season calendars (lane l17, S278; ADR 0005b delivery steps 3 and 4)
 
-- **B** price list versions for hand prices (draft -> pending -> published, diff + impact, Excel import as draft).
-- **C** season calendars per destination and per contract, holiday events per year, peak flag from the calendar
-  (removing the `peak` label match), one season logic for B2B quotes and the RRP, the festive validity.
-- **D** quotes pinning `price_version_id` / `tariff_version_id`, re-quote showing old vs new.
-- **E** versioned agency tariff (current + next year, ETag / 304) and the AA-Partner reader of the new fields.
+### Decisions
+
+- **Two migrations, contract, one migration-only PR (bk-054 + bk-055)**, then the code PR raises readiness to both.
+- **Stored status, derived superseded.** `price_list_versions.status` is a column (the quote, tariff and matrix read
+  it), moved only along d2 by a guard trigger; `published` <-> `superseded` is recomputed from the published set on
+  every publish and withdrawal (`price_versions.refresh_states`). Unlike bk-050 (events table) because a version also
+  carries editable draft facts and rows, and the overlap rule reads many versions at once.
+- **The effective matrix stays.** `booking.trip_plan_prices` keeps being what every reader uses (tariff, RRP,
+  `v_from_prices`, readiness, workbench, workbook export); it is rebuilt from the winning versions (+ the cost sheet's
+  computed rows around them) by `cost_sheet.recompute_plan`, now also called with the checker as actor on approve /
+  withdraw. Each hand row carries `version_id` (the seam for step 6: a quote pins it), each row `season_code`.
+- **Hand layer vs cost-sheet layer.** The overlap rule runs among price list versions only. The cost sheet's computed
+  rows stay unversioned (`version_id` NULL) and fill around the hand rows exactly as before (hand wins on overlap).
+  Step 5 turns them into `source = cost_sheet` versions with the d8 auto-publish rule; a version-level overlap rule
+  between a daily recompute and a hand version would otherwise make every recompute override hand prices.
+- **Migration of today's data.** Per plan with prices or history: every closed history set becomes a past version,
+  status `withdrawn` by `migration:bk-054` at the time the next set replaced it (the old PUT replaced the whole set;
+  marking them `superseded` would let the overlap rule bring their uncovered dates back to life, changing prices); the
+  rows in force become the latest version, `published`, approved by `migration:bk-054` at the time of its open history
+  set, source from `change_source`. Hand rows of the matrix point at it; nothing else in the matrix changes. Versions
+  migrated from a cost-sheet set keep the computed rows as a snapshot (`computed` true); the matrix rebuild ignores
+  them (the cost sheet owns those).
+- **`PUT …/prices` is retired with 409 `price_versions`** (no breaking schema change for oasdiff; the response body
+  points at the versions URL). The commercial drawer of a trip plan shows the matrix read-only and links to the
+  tour's Versions tab (`/pricing/workbench?versions=<key>`).
+- **Rows stay dated; the season is derived.** d1 says rows carry `season_id` instead of the free-text label. A season
+  is a code inside a calendar, not a row, so the column is `season_code` (low / high / peak / festive), set on every
+  matrix piece from the plan's calendar; the free-text `season` stays as a label for people. The draft editor drops
+  the Peak checkbox; a row priced from a net cost takes the peak uplift of the calendar's season on its first day.
+  Season-coded rows without dates (a "high season" price that follows the calendar) are a later option; the matrix
+  splitting by season already gives each piece its code.
+- **Peak = `peak` or `festive`.** The pricing rule has one uplift; a festive date (Tet) is at least peak. One season
+  function (`seasons.Calendar.season_on`) for the cost sheet windows, the B2B quote line (service date), the tariff
+  rows (each piece's first day) and the version matrix. Until the plan's calendar is configured (review fix, below)
+  the old peak flags stay, so no price moves on deploy (empty calendars are created by the sync, never with ranges).
+- **Festive event ranges lie over fixed ranges** instead of being refused as an overlap: refusing would force staff
+  to cut the high season around Tet by hand every year (copying event dates, which d4 forbids). Fixed-date season
+  ranges of one calendar never overlap (409 `range_overlaps`, checked at proposal and at approval under a calendar row
+  lock).
+- **Maker-checker for seasons via status columns** (bk-048 style) and column grants (no trigger): ranges and events
+  pending -> approved / rejected (second person) / withdrawn (maker); removal = `end_requested_*` then `ended_*` by a
+  second person; a default-season change is proposed in `pending_default_season`; a plan's calendar change is a
+  request on `trip_plans` (review fix). Creating an empty calendar is a direct audited write (it changes no price).
+- **Stop-sale** makes an `available` `tp:` quote line `on_request`; it never changes the season or the price.
+- **Festive validity** (d14) is applied now that calendars exist: a `tp:` line on a festive date makes the quote valid
+  `quote_validity_festive_days` (policy). Hotel / service lines (destination calendar of the hotel) are not checked yet.
+- **Default calendar of a plan**: `bk_trip_plan_sync` assigns up to 50 plans per run the calendar of the destination of
+  day 1 (`catalog.v_tour_place.destination_id`, one tour per query: an `ANY()` filter is not pushed into the view's
+  parse), creating the empty destination calendar when missing; plans whose day 1 names no known destination stay
+  without (low season); the batch order rotates per slot so they never block the others. Fail-soft on catalog errors.
+- **Workbook import = draft version per tour** (`source = import`, the file's SHA-256), never live; idempotent (rows
+  equal to the hand prices in force, or the same file already the maker's open import draft, write nothing; a newer
+  file withdraws the older open import draft). Rows priced from a net cost stay in the draft (amount as typed) unless
+  a file row covers them, as before.
+- **Policy values through the bk-050 reader**: `tariff_year_start` (default window and tariff year of a draft, the
+  migration's tariff years) and `diff_highlight_pct` (diff highlight) are read by `app.catalog.price_versions`;
+  `quote_validity_festive_days` by `app.b2b.quotes` (`Param.used_by` updated). The 300-character reason is a schema
+  bound of ADR 0005b d1, not a policy parameter.
+- **Permissions** (d6): `price_version.write` / `.approve`, `season.write` / `.approve` = admin, contracting (the
+  customer-service maker and the pricing lead are both contracting today; the data CHECKs keep them two people).
+
+### Changed
+
+- Backend: `app/catalog/price_versions.py`, `version_matrix.py`, `app/pricing/seasons.py`, `seasons_admin.py`,
+  `app/routers/price_versions.py` (new); `trip_plan_prices.py` (`replace_prices` -> `price_rows`, `version_id` /
+  `season_code` in the matrix), `cost_sheet.py` (hand rows from versions, calendar cuts and peak, watermark includes
+  versions and seasons, plans with published versions recomputed), `b2b/quotes.py` and `b2b/tariff.py` (season of the
+  line), `price_import.py` (drafts), `trip_plan_sync.py` (default calendars), `routers/catalog.py` (PUT 409),
+  `auth/staff.py`, `db.py` (readiness bk-054, bk-055), `policy_values.py` / `policy_params.py`; openapi regenerated.
+- Frontend: Price setup tour tabs (Hotels & services | Versions, `VersionsDrawer.tsx`, `versions.messages.ts`), pages
+  `/pricing/seasons` and `/pricing/holiday-events` (EN + VI messages), `lib/api/priceVersions.ts`,
+  `ui/booking/priceVersions.ts` (+ node test), commercial drawer read-only prices, the matrix editor without Peak, nav,
+  rbac, visual and layout page lists and fixtures.
+- Tests: integration `test_aa1091_price_versions.py` (state machine, overlap / superseded / withdrawal restore,
+  migration keeps every price, calendar no-overlap, festive from a holiday event, matrix cut by season, default
+  calendar), `test_bk054_schema.py`, `test_bk055_schema.py`; unit `test_aa1091_versions_seasons.py`; existing price
+  tests now publish hand prices through a version (`tests/integration/price_versions_helper.py`).
+
+### Tradeoffs
+
+- Matrix splitting by season multiplies rows only when a calendar has ranges; the matrix cap rose to 1000 positions.
+- The draft row of a net-priced row takes the peak of its first day: a net-priced row spanning seasons is priced at
+  one season. Staff split such rows (the editor makes the next season's row easily).
+- The impact counts open quotes by `tp:` line service date in the window; it does not re-price them (step 6 pins
+  versions and re-quotes on expiry).
+- `withdraw` of a published version needs `price_version.approve` and a person other than its maker; the maker of a
+  wrong published price asks a checker.
+
+### Should know
+
+- Ship order: Booking migration PR (bk-054 + bk-055) -> Infra copy + Migration Apply (contract) -> code PR. The code
+  PR does not contain the migration files.
+- Between the migration apply and the code deploy the old code can still write unversioned hand rows with `PUT
+  …/prices`; the new code keeps such rows for a plan with no published version and would drop them once a version is
+  published for the plan (minutes of exposure; only a handful of plans are priced today).
+- The integration catalog stub (`stub_catalog.sql`) now exposes `destination_id` / `destination_name` on
+  `catalog.v_tour_place` (the live CIS 256 columns), matched by place name.
+
+## Not done yet (later lanes)
+
+- **Step 5** diff and impact before approval of contracts, rules and FX; recompute through the auto-publish rule
+  (`source = cost_sheet` versions); reject / withdraw of pending rules and FX; `supersedes_id` on contracts; contract
+  seasons (`season_calendars.owner_kind = supplier_contract`) read by the cost sheet with the stay pricing flag.
+- **Step 6** quotes pin `price_version_id` (the matrix row's `version_id`), re-quote shows old vs new.
+- **Step 7** tariff versions, ETag / 304, next-year edition. **Step 8** versioned Excel export / import, copy to next
+  year, provisional versions.
+
+## Review fix pass (lane l17, S278)
+
+Six reviewer findings, all accepted:
+
+1. **No price moves on deploy (cost sheet peak).** Dropping the "label contains peak" rule outright would have
+   lowered every computed row priced from a "Peak"-labelled rate on the first daily recompute (empty calendars are low
+   season), and with it the RRP and the public from price. Fix: `seasons.Calendar.configured` (an approved season
+   range that resolves to dates, or a default season other than low). Until then the cost sheet keeps the old label
+   rule (`season_code` `peak` / `low` from it, `seasons.legacy_code`), a hand row keeps the peak flag it was written
+   with (bk-054 adds `price_list_version_rows.peak`, copied from the matrix and the history), and a draft row keeps
+   the flag it was copied with. Quotes and the tariff already priced every date low before bk-055 (`peak = false`), so
+   an unconfigured calendar keeps them the same. The first approved range switches the plan to the calendar: a
+   reviewed, two-person change. A Dev count of peak computed rows before deploy is therefore not needed (the old rule
+   still holds for them).
+2. **The migration test covers every price.** `test_migration_of_todays_prices_keeps_every_price` now builds a plan
+   with components priced from an invented "Peak" rate sheet and a rule with a 3-point peak uplift, plus a hand row
+   flagged peak with child / infant / single prices, a hand row priced from a net and a computed row a person
+   overrode, and a staff history set before two cost-sheet sets. It compares every price column (peak, nets, margin,
+   per-type amounts, RRP, overridden, computed) before bk-054, after it and after the first rebuild; checks the past
+   versions (withdrawn by `migration:bk-054`, source = `change_source`, row counts) and the published one; and prices
+   a 2-adult `tp:` B2B line on a low and a peak date the way `quote_in` and the tariff do, before and after. Found
+   on the way: the rebuild turned a migrated computed + overridden row into a plain hand row (`computed` false);
+   `version_matrix.matrix_row` now keeps the row's `computed` flag.
+3. **A reason on every season decision** (ADR 0005b d1, bk-048 model): range `note` NOT NULL (the maker's reason),
+   holiday event `reason` NOT NULL, `withdraw_reason` and `end_reason` columns (CHECKs pair them with the state),
+   `default_request_reason`. Reject, withdraw, end and end_reject need a reason (`Invalid reason_required`); a
+   rejected removal or default change clears the request, so its reason lives in the audit row with the request's.
+4. **A plan's calendar change is maker-checker.** `PUT …/season-calendar` (now `season.write`, was
+   `trip_plan.write`) records a request with a reason on `trip_plans` (`pending_season_calendar_id`,
+   `season_calendar_requested_by/_at`, `season_calendar_request_reason`, a CHECK pairs them); `POST
+   …/season-calendar/approve|reject|withdraw` decides it (a second person with `season.approve`; the requester
+   withdraws). Approving bumps the plan's `updated_at`, which is in the cost sheet watermark, so the next recompute
+   reprices the plan. The catalog sync still assigns the default calendar directly (the destination's calendar, whose
+   ranges were each approved by a second person).
+5. **Erasure of the label.** The bk-054 guard now lets the label become `[redacted]` alone, like the reasons (the
+   root DM-7.1 row and the DSAR runbook list it as `pii:free_text`).
+6. **People, not ids.** `app/auth/people.py` resolves every `*_by` of versions, calendars, ranges, events and plan
+   calendar requests to `{id, name}` (the Pricing > Policy shape); the admin shows the name, "Migrated prices" /
+   "Catalog sync" / "Initial value" for a marker, the id only as a fallback (`ui/booking/priceVersions.ts
+   personText`).
+
+### Changed (fix pass)
+
+- Migrations: bk-054 (`price_list_version_rows.peak`, label erasure), bk-055 (reason columns and CHECKs, plan
+  calendar request columns and CHECK, grants). Both still one migration-only PR before the code PR.
+- Backend: `app/auth/people.py` (new), `seasons.py` (`configured`, `legacy_code`), `cost_sheet.py` (label fallback),
+  `version_matrix.py` (row peak and computed), `price_versions.py` (people, row peak), `seasons_admin.py` (reasons,
+  plan calendar request / decide / read, people), `routers/price_versions.py` (bodies with reasons, plan calendar
+  routes); openapi regenerated.
+- Frontend: `PlanCalendarField` in the Versions tab (request with a reason, pending request, approve / reject /
+  withdraw), reason dialogs for every season and event action, a required reason on range and event proposals and
+  default changes, people by name everywhere; fixtures follow.
+
+### Should know (fix pass)
+
+- `Calendar.configured` ignores a festive range whose holiday event has no row yet and stop-sale-only calendars:
+  neither says anything about the season of a date.
+- The plan-calendar PUT changed permission (`season.write`) and body (`reason` required); the route is new in this
+  PR, so no published client breaks.
+
+
+## Integration test fix after the renumber (lane l1, S279)
+
+### Decisions
+
+- **The cause was the test, not the data step.** The second renumber (bk-053 / bk-054 to bk-054 / bk-055, made
+  because bk-053 shipped first on main) rewrote every `"bk-053"` string but not the bare integer in
+  `apply_migrations(admin, only=[53])`. `test_migration_of_todays_prices_keeps_every_price` therefore re-ran bk-053
+  (the b2b_partners tenant policy) instead of the bk-054 data step and found no version. With `only=[54]` the data
+  step versions today's prices exactly as the assertion demands (past sets withdrawn, the rows in force published,
+  every price column unchanged); the assertion is not touched.
+- **Same miss in `test_bk055_schema.py`** (merged on main with the migration PR): its fixture re-ran `only=[54]` (the
+  versions file, whose data step versions every plan other tests left with prices, the side effect
+  `test_bk054_schema.py` avoids on purpose) instead of its own file. Now `only=[55]`, so the bk-055 re-run is the
+  idempotency check it was meant to be.
+- **Guard:** `tests/unit/test_aa1091_apply_only_refs.py` (no database): every integer literal in an `only=[...]` of an
+  `apply_migrations` call in `tests/integration` names an existing migration file and the same test file says
+  `bk-0NN` for it. It fails on both stale literals of the PR head before this fix. The shared
+  `.github/scripts/migration_refs.py` (identical in three repos) only reads `NNN_name` tokens and was left as is.
+
+### Should know
+
+- Local reproduction needs a UTC Postgres and `TZ=UTC` (CI runs both in UTC). A cluster made by `initdb` on a UTC+7
+  laptop between 00:00 and 07:00 local time fails three date-sensitive tests (finance FX snapshot, tour terms, the
+  bk-032 price matrix) on main as well; that is the local clock, not this branch.

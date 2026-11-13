@@ -109,6 +109,9 @@ const PAGES: PageCase[] = [
   { name: "price-readiness", path: "/pricing/readiness" },
   { name: "price-workbench", path: "/pricing/workbench" },
   { name: "pricing-policy", path: "/pricing/policy" },
+  { name: "pricing-seasons", path: "/pricing/seasons" },
+  { name: "holiday-events", path: "/pricing/holiday-events" },
+  { name: "price-versions", path: "/pricing/workbench?versions=tour-1" },
   // AA-1091: a trip plan's hotels and services, with the drawer of suggestions from the itinerary open.
   {
     name: "plan-components-drawer",

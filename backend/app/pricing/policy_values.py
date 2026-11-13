@@ -83,6 +83,14 @@ class Policy:
     def group_on_request_min_pax(self) -> int:
         return self.integer("group_on_request_min_pax")
 
+    @property
+    def diff_highlight_pct(self) -> Decimal:
+        return self.decimal("diff_highlight_pct")
+
+    @property
+    def tariff_year_start(self) -> str:
+        return str(self.get("tariff_year_start"))
+
 
 def from_rows(on: date, rows: list[Any]) -> Policy:
     values: dict[str, Any] = {}
