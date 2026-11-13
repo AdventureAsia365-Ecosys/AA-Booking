@@ -2057,7 +2057,9 @@ to bk-056). Version 1 of 19 new pricing policy parameters (holds, B2B desk, trav
 agency invoice reminders, rounding, retention windows), approved by the tech lead S279, each equal to the value in
 force before the move (the `settings` row when the code accepted it, else the code default). The moved `settings`
 rows say "Moved (bk-056)", the dead B2C rows and `ops_docs_max_bytes` "Retired (bk-056)"; no row is deleted.
-`b2b_ops_timezone` and `b2b_ops_contact` stay in `settings`.
+`b2b_ops_timezone` and `b2b_ops_contact` stay in `settings`. The trip check seeding trigger function
+`trip_case_seed_checks()` (bk-027) is replaced so it reads `pre_departure_days` from the pricing policy (the approved
+version in force today, UTC), the same value the lifecycle job reads.
 
 ## Out of scope today
 

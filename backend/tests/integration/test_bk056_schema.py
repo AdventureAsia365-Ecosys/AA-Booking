@@ -4,17 +4,20 @@ policy parameters.
 The seed is version 1 of 19 new parameters, approved by the tech lead (S279), each equal to the value in force before
 the move: the booking.settings row when it held a whole number inside the range the code accepted, else the code's
 default. The moved settings rows say "Moved (bk-056)", the dead B2C rows and ops_docs_max_bytes "Retired (bk-056)";
-no row is deleted. A re-run is a no-op. Names and values in the hand-made rows are invented."""
+no row is deleted. The bk-027 trip check seeding trigger reads pre_departure_days from the policy. A re-run is a no-op.
+Names and values in the hand-made rows are invented."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import timedelta
 
 import asyncpg
 import pytest
 import pytest_asyncio
 
+from tests.integration import ops
 from tests.integration.conftest import MIGRATIONS, apply_migrations, as_booking_owner
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -172,3 +175,74 @@ async def test_the_post_check_refuses_a_key_someone_else_made_first(admin: async
             await admin.execute("DELETE FROM booking.pricing_policy WHERE created_by IN ('it-056-maker')")
         await apply_migrations(admin, only=[56])
     assert {k: v[0] for k, v in (await _seed(admin)).items()} == SEED
+
+
+async def _add_version(conn: asyncpg.Connection, version_no: int, value: int, *, approve: bool) -> str:
+    """A hand-made pre_departure_days version in force from today (UTC), submitted and, when ``approve``, approved."""
+    replaces = await conn.fetchval(
+        "SELECT id::text FROM booking.pricing_policy WHERE param_key IN ('pre_departure_days') AND version_no = $1",
+        version_no - 1,
+    )
+    policy_id = await conn.fetchval(
+        "INSERT INTO booking.pricing_policy"
+        " (param_key, version_no, value, unit, effective_from, reason, replaces_id, created_by)"
+        " VALUES ('pre_departure_days', $1, to_jsonb($2::int), 'days', (now() AT TIME ZONE 'UTC')::date,"
+        " 'invented change', $3::uuid, 'it-056-maker') RETURNING id::text",
+        version_no,
+        value,
+        replaces,
+    )
+    await conn.execute(
+        "INSERT INTO booking.pricing_policy_events (policy_id, maker, event, actor)"
+        " VALUES ($1::uuid, 'it-056-maker', 'submitted', 'it-056-maker')",
+        policy_id,
+    )
+    if approve:
+        await conn.execute(
+            "INSERT INTO booking.pricing_policy_events (policy_id, maker, event, actor)"
+            " VALUES ($1::uuid, 'it-056-maker', 'approved', 'it-056-checker')",
+            policy_id,
+        )
+    return policy_id
+
+
+async def test_trip_checks_follow_the_approved_pre_departure_days(
+    admin: asyncpg.Connection, migrated_booking_dsn: str
+) -> None:
+    """The seeding trigger reads the approved pre_departure_days in force (not booking.settings, which still says 14):
+    a pending newer version does not count, and a new start date moves the open checks by the policy value."""
+    mine = "SELECT id FROM booking.pricing_policy WHERE created_by IN ('it-056-maker')"
+    await ops.purge_ops(admin)
+    async with as_booking_owner(admin):
+        await _add_version(admin, 2, 21, approve=True)
+        await _add_version(admin, 3, 30, approve=False)  # pending: never in force
+    app = await asyncpg.connect(migrated_booking_dsn)
+    try:
+        assert (
+            await admin.fetchval("SELECT value::text FROM booking.settings WHERE key IN ('pre_departure_days')") == "14"
+        )
+        case = await ops.b2b_case(app, tag="bk056")
+        due = {
+            r["code"]: r["due_date"]
+            for r in await app.fetch(
+                "SELECT code, due_date FROM booking.trip_case_checks WHERE trip_case_id = $1::uuid", case["id"]
+            )
+        }
+        assert due == {
+            "pre_trip_recheck": ops.START - timedelta(days=21),
+            "emergency_contact": None,  # B2B: not applicable
+            "insurance": ops.START - timedelta(days=21),
+        }
+        new_start = ops.START - timedelta(days=2)  # the end date stays after it
+        await app.execute("UPDATE booking.trip_cases SET start_date = $2 WHERE id = $1::uuid", case["id"], new_start)
+        moved = await app.fetchval(
+            "SELECT due_date FROM booking.trip_case_checks WHERE trip_case_id = $1::uuid AND code = 'insurance'",
+            case["id"],
+        )
+        assert moved == new_start - timedelta(days=21)
+    finally:
+        await app.close()
+        await ops.purge_ops(admin)
+        async with as_booking_owner(admin):
+            await admin.execute(f"DELETE FROM booking.pricing_policy_events WHERE policy_id IN ({mine})")  # noqa: S608
+            await admin.execute("DELETE FROM booking.pricing_policy WHERE created_by IN ('it-056-maker')")

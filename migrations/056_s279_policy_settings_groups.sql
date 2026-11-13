@@ -36,16 +36,24 @@
 --      (a DELETE needs the destructive class): the code of this lane stops reading them, a later destructive file
 --      may drop them. b2b_ops_timezone and b2b_ops_contact stay (a time zone and a printed text line, not policy
 --      values).
+--   3. booking.trip_case_seed_checks() (the bk-027 trigger function that seeds the three standard trip checks and
+--      moves their due date with the start date) reads pre_departure_days from the pricing policy instead of
+--      booking.settings: the approved version in force on today's UTC date, picked like app.pricing.policy_values
+--      (newest effective_from, then the later approval, then the higher version). Without it the lifecycle job would
+--      follow the policy and the trip check due dates the old settings row: two sources for one value. The body is
+--      otherwise the bk-027 body; the fallback 14 (the bk-026 default) stays for a database without the parameter.
 --
 -- Class: contract (root ADR 0017 d3): config rows into existing tables and UPDATEs of existing rows. Migration-only
 -- PR first (MIG-4), then the code PR raises readiness to bk-056. On Dev: Infra Migration Apply once every job table
--- is idle (root ADR 0017a). One DO block (the post-check), no function or trigger.
+-- is idle (root ADR 0017a). One DO block (the post-check) and one CREATE OR REPLACE FUNCTION of an existing trigger
+-- function (same signature, owner and grants; no trigger is created or dropped).
 -- The running code before the code PR still reads booking.settings: nothing it reads changes value here.
 -- DM-6.1: no personal data (policy values, conf:commercial). DM-7.1: no new table.
--- Locks: row locks on booking.settings (13 rows) only.
+-- Locks: row locks on booking.settings (13 rows); the function replacement takes a short lock on its pg_proc row.
 -- Re-runnable (the Integration Tests replay every file): ON CONFLICT DO NOTHING; the UPDATEs skip rows already marked.
 -- Undo (a later bk- file, after the code is reverted): a new version per key is never needed for an undo (the old
--- code reads booking.settings again); DELETE the seed:bk-056 events and versions if they must go.
+-- code reads booking.settings again); put back the bk-027 body of booking.trip_case_seed_checks(), then DELETE the
+-- seed:bk-056 events and versions if they must go.
 
 BEGIN;
 
@@ -151,7 +159,46 @@ SET description = 'Retired (bk-056): never read; the operations document cap is 
                   'app/ops/files.py (3 MB), tied to the staff BFF body cap.'
 WHERE key IN ('ops_docs_max_bytes') AND description NOT LIKE 'Retired (bk-056)%';
 
--- ── 3. Post-check: every new parameter has an approved version 1 ────────────────────────────────────────────────
+-- ── 3. The trip check seeding trigger reads pre_departure_days from the pricing policy ────────────────────────────
+
+CREATE OR REPLACE FUNCTION booking.trip_case_seed_checks() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_days  INTEGER;
+    v_b2b   BOOLEAN := NEW.channel = 'b2b';
+BEGIN
+    -- bk-056: the approved pre_departure_days in force today (UTC), as app.pricing.policy_values picks it.
+    SELECT CASE WHEN jsonb_typeof(p.value) = 'number' THEN (p.value #>> '{}')::numeric::integer END INTO v_days
+      FROM booking.pricing_policy p
+      JOIN booking.pricing_policy_events a ON a.policy_id = p.id AND a.event = 'approved'
+     WHERE p.param_key IN ('pre_departure_days') AND p.effective_from <= (now() AT TIME ZONE 'UTC')::date
+     ORDER BY p.effective_from DESC, a.created_at DESC, p.version_no DESC
+     LIMIT 1;
+    v_days := coalesce(v_days, 14);
+    IF TG_OP = 'UPDATE' AND NEW.start_date IS DISTINCT FROM OLD.start_date THEN
+        UPDATE booking.trip_case_checks
+           SET due_date = NEW.start_date - v_days
+         WHERE trip_case_id = NEW.id AND code <> 'custom' AND status = 'open'
+           AND due_date IS NOT DISTINCT FROM OLD.start_date - v_days;
+    END IF;
+    IF NEW.status = 'confirmed' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+        INSERT INTO booking.trip_case_checks (trip_case_id, code, title, status, due_date)
+        VALUES (NEW.id, 'pre_trip_recheck', 'Re-check every booking before departure', 'open', NEW.start_date - v_days),
+               (NEW.id, 'emergency_contact', 'Emergency contact',
+                CASE WHEN v_b2b THEN 'not_applicable' ELSE 'open' END,
+                CASE WHEN v_b2b THEN NULL ELSE NEW.start_date - v_days END),
+               (NEW.id, 'insurance', 'Travel insurance', 'open', NEW.start_date - v_days)
+        ON CONFLICT (trip_case_id, code) WHERE code <> 'custom' DO NOTHING;
+    END IF;
+    RETURN NULL;
+END $$;
+
+COMMENT ON FUNCTION booking.trip_case_seed_checks() IS
+    'bk-027 (AA-682 S2), bk-056: AFTER INSERT OR UPDATE OF status, start_date on trip_cases. Entering confirmed seeds the three standard checks (ON CONFLICT DO NOTHING; due = start_date - pre_departure_days, the approved pricing policy value in force today (UTC), 14 when none; B2B emergency_contact not_applicable); a new start date moves the due date of the standard checks still open on the derived date.';
+
+-- ── 4. Post-check: every new parameter has an approved version 1 ────────────────────────────────────────────────
 
 DO $$
 DECLARE
@@ -169,7 +216,7 @@ END
 $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-056', now(), 'S279 L3: 19 threshold and policy values (holds, desk, ages, departures, operations, agency reminders, rounding, retention) as pricing policy parameters, booking.settings rows moved or retired')
+VALUES ('bk-056', now(), 'S279 L3: 19 threshold and policy values (holds, desk, ages, departures, operations, agency reminders, rounding, retention) as pricing policy parameters, booking.settings rows moved or retired, trip check seeding reads pre_departure_days from the policy')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
