@@ -48,10 +48,16 @@ export interface Departure {
   updated_at: IsoDateTime;
 }
 
+/** What a new departure gets when the form leaves a rule empty (the pricing policy in force today). */
+export interface DepartureDefaults {
+  decision_days_before: number;
+}
+
 export interface DepartureList {
   trip_plan_id: string;
   source_id: string;
   items: Departure[];
+  defaults: DepartureDefaults;
 }
 
 export interface DepartureRules {

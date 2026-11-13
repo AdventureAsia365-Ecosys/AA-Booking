@@ -88,6 +88,7 @@ export const PAGES: VisualPage[] = [
   { slug: "price-readiness", route: "/pricing/readiness", path: "/pricing/readiness", auth: "staff" },
   { slug: "price-workbench", route: "/pricing/workbench", path: "/pricing/workbench", auth: "staff" },
   { slug: "pricing-policy", route: "/pricing/policy", path: "/pricing/policy", auth: "staff" },
+  { slug: "pricing-policy-cancellation", route: "/pricing/policy", path: "/pricing/policy?tab=cancellation", auth: "staff" },
   { slug: "pricing-seasons", route: "/pricing/seasons", path: "/pricing/seasons", auth: "staff" },
   { slug: "holiday-events", route: "/pricing/holiday-events", path: "/pricing/holiday-events", auth: "staff" },
   { slug: "proposals", route: "/proposals", path: "/proposals", auth: "staff" },

@@ -16,13 +16,40 @@ import type { IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
 
-export type ParamType = "integer" | "decimal" | "boolean" | "month_day" | "month_days" | "codes" | "currency_map";
-/** pricing = the product / pricing lead approves; finance = finance approves (FX, tax, surcharges, payment terms). */
-export type ApproverGroup = "pricing" | "finance";
+export type ParamType =
+  | "integer"
+  | "decimal"
+  | "boolean"
+  | "month_day"
+  | "month_days"
+  | "codes"
+  | "currency_map"
+  | "integers"
+  | "amount_map";
+/** pricing = the product / pricing lead approves; finance = finance approves (FX, tax, surcharges, payment terms);
+ *  admin = the administrator approves (data retention windows, S279). */
+export type ApproverGroup = "pricing" | "finance" | "admin";
+/** The page groups the parameters by section, in this order (backend policy_params.SECTIONS). */
+export const SECTIONS = [
+  "quotes",
+  "prices",
+  "surcharges",
+  "payments",
+  "holds",
+  "desk",
+  "travellers",
+  "departures",
+  "operations",
+  "agency_billing",
+  "rounding",
+  "retention",
+] as const;
+export type Section = (typeof SECTIONS)[number];
 /** draft / pending: not used yet; in_force: used today; scheduled: approved, from a later day; superseded: replaced. */
 export type VersionStatus = "draft" | "pending" | "in_force" | "scheduled" | "superseded" | "rejected" | "withdrawn";
-/** integer: number; decimal: "5" (a percentage); boolean; "MM-DD"; a list of those or of codes; country -> currency. */
-export type ParamValue = number | string | boolean | string[] | Record<string, string>;
+/** integer: number; decimal: "5" (a percentage); boolean; "MM-DD"; a list of those or of codes; country -> currency;
+ *  integers: a list of whole numbers ([1, 7, 14]); amount_map: currency -> amount ({"USD": "5"}). */
+export type ParamValue = number | string | boolean | string[] | number[] | Record<string, string>;
 
 export interface Person {
   id: string;
@@ -63,8 +90,11 @@ export interface PolicyParam {
   approver: ApproverGroup;
   label: string;
   help: string;
-  /** Read by a code path today; false = stored for a later step (shown as such). */
+  /** Read by a code path today; false = stored for a later step (badged "not enforced yet"). */
   in_use: boolean;
+  section: Section;
+  /** in_use false only: what is missing before the code reads it. */
+  not_enforced_reason: string | null;
   minimum: string | null;
   maximum: string | null;
   choices: string[];
@@ -119,6 +149,13 @@ export function formatValue(
     const list = value as string[];
     return list.length ? list.join(", ") : words.none;
   }
+  if (type === "integers") {
+    const list = value as number[];
+    return list.length ? `${list.join(", ")}${unit ? ` ${unit}` : ""}` : words.none;
+  }
+  if (type === "amount_map") {
+    return Object.entries(value as Record<string, string>).map(([k, v]) => `${k} ${v}`).join(", ");
+  }
   if (type === "currency_map") {
     const map = value as Record<string, string>;
     const named = Object.entries(map).filter(([k]) => k !== "*").map(([k, v]) => `${k}: ${v}`);
@@ -131,8 +168,8 @@ export function formatValue(
 /** The editor text of a value (lists and maps one item per comma) and back; null when the text is not valid. */
 export function valueToText(value: ParamValue | null | undefined, type: ParamType): string {
   if (value === null || value === undefined) return "";
-  if (type === "month_days" || type === "codes") return (value as string[]).join(", ");
-  if (type === "currency_map") return Object.entries(value as Record<string, string>).map(([k, v]) => `${k}=${v}`).join(", ");
+  if (type === "month_days" || type === "codes" || type === "integers") return (value as (string | number)[]).join(", ");
+  if (type === "currency_map" || type === "amount_map") return Object.entries(value as Record<string, string>).map(([k, v]) => `${k}=${v}`).join(", ");
   return String(value);
 }
 
@@ -145,6 +182,16 @@ export function textToValue(text: string, type: ParamType): ParamValue | null {
   const parts = t ? t.split(",").map((p) => p.trim()).filter(Boolean) : [];
   if (type === "month_days") return parts.every((p) => /^\d{2}-\d{2}$/.test(p)) ? parts : null;
   if (type === "codes") return parts;
+  if (type === "integers") return parts.length && parts.every((p) => /^\d+$/.test(p)) ? parts.map(Number) : null;
+  if (type === "amount_map") {
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      const [k, v] = p.split("=").map((x) => x.trim());
+      if (!k || !v || !/^\d+(\.\d{1,2})?$/.test(v)) return null;
+      map[k.toUpperCase()] = v;
+    }
+    return map;
+  }
   if (type === "currency_map") {
     const map: Record<string, string> = {};
     for (const p of parts) {
