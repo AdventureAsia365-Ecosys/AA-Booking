@@ -77,6 +77,8 @@ const RELATED: { key: MessageKey; href: string }[] = [
   { key: "relTerms", href: "/agency-billing" },
 ];
 
+const LIST_TYPES: ReadonlySet<PolicyParam["type"]> = new Set(["month_days", "codes", "currency_map", "integers", "amount_map"]);
+
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -331,7 +333,7 @@ function Policy() {
             <span className="font-medium text-ink">{labelOf(p)}</span>
             <span className="max-w-[360px] break-words text-xs text-muted">{p.help}</span>
             <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-              <code>{p.key}</code>
+              <code className="break-all">{p.key}</code>
               <span data-testid={`policy-enforced-${p.key}`}>
                 <Pill tone={p.in_use ? "success" : "warning"} dot={false} title={p.not_enforced_reason ?? undefined}>
                   {p.in_use ? t("inUse") : t("notEnforced")}
@@ -354,7 +356,10 @@ function Policy() {
         if (!p.current) return <span className="text-[13px] text-danger">{t("noValue")}</span>;
         return (
           <span className="flex flex-col whitespace-nowrap" data-testid={`policy-value-${p.key}`}>
-            <span className="font-semibold text-ink">{show(p, p.current.value)}</span>
+            {/* A list or a map wraps (a phone card is narrower than "AUD 5, EUR 5, GBP 5, SGD 5, USD 5"). */}
+            <span className={`font-semibold text-ink ${LIST_TYPES.has(p.type) ? "whitespace-normal break-words" : ""}`}>
+              {show(p, p.current.value)}
+            </span>
             <span className="text-xs text-muted">
               {t("version", p.current.version_no)} · {t("since", p.current.effective_from)}
             </span>
