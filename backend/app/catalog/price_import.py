@@ -577,7 +577,7 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
 # ── Price rows ───────────────────────────────────────────────────────────────
 
 
-def hand_row(p: Mapping[str, Any], markup: Decimal | None) -> dict[str, Any]:
+def hand_row(p: Mapping[str, Any], markup: Decimal | None, increments: engine.Increments) -> dict[str, Any]:
     """One imported hand price as ``trip_plan_prices.store`` writes it (no net cost: nothing is computed)."""
     amount = p["amount"]
     return {
@@ -596,7 +596,7 @@ def hand_row(p: Mapping[str, Any], markup: Decimal | None) -> dict[str, Any]:
         "priced_on": None,
         "overridden": False,
         "computed": False,
-        "rrp_amount": trip_plan_prices.rrp_for(p["channel"], amount, p["currency"], markup),
+        "rrp_amount": trip_plan_prices.rrp_for(p["channel"], amount, p["currency"], markup, increments),
         "child_amount": p.get("child_amount"),
         "infant_amount": p.get("infant_amount"),
         "single_supplement_amount": p.get("single_supplement_amount"),
@@ -715,7 +715,7 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
         hand_before = sum(1 for r in existing if not cost_priced(r))
         merged = Merged([], 0, 0)
         if plan.hand is not None:
-            merged = merge_prices(existing, [hand_row(h, pricing.markup) for h in plan.hand], pricing)
+            merged = merge_prices(existing, [hand_row(h, pricing.markup, pricing.rounding) for h in plan.hand], pricing)
         now = plan.components_now
         tours.append(
             {

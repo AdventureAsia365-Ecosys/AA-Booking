@@ -12,14 +12,15 @@ The formula, per quote:
    margin left after the fee is exactly ``margin``.
 4. Non-USD selling price: ``sell = sell_usd * rate_per_usd * (1 + buffer_pct)``.
 5. The quote total is the sum of the unrounded lines, rounded UP to the currency's increment
-   (``ROUNDING_INCREMENTS``; USD to 5 per ADR 0005). Rounding up never lowers the margin.
+   (``increments``: the pricing policy parameter ``rounding_increment_by_currency``, S279 L3 / bk-056, USD to 5 per
+   ADR 0005; the caller reads it, this module does no I/O). Rounding up never lowers the margin.
 6. Effective margin of a total (computed or overridden by sales):
    ``1 - card_fee - net_total_usd / total_usd``, where ``total_usd`` converts the total back at the
    plain rate (no buffer) — the margin AA actually earns at today's rate. ``below_floor`` is
    ``effective_margin < floor_margin``.
 
 Business numbers (margins, fee, uplift, FX buffer) are data from ``booking.pricing_rules`` and
-``booking.fx_rates``; nothing here hard-codes them. Only the rounding increments live in code.
+``booking.fx_rates``, the rounding increments a pricing policy parameter; nothing here hard-codes them.
 """
 
 from __future__ import annotations
@@ -34,15 +35,10 @@ BASE_CURRENCY = "USD"
 # Selling currencies (ADR 0005 decision 5). More per tenant market later.
 SELLING_CURRENCIES: frozenset[str] = frozenset({"USD", "EUR", "GBP", "AUD", "SGD"})
 
-# Customer-facing totals are rounded UP to these increments. USD to 5 is ADR 0005; the other four
-# reuse 5 units until Ms. Thư confirms a per-currency rule (open question on AA-810).
-ROUNDING_INCREMENTS: Mapping[str, Decimal] = {
-    "USD": Decimal("5"),
-    "EUR": Decimal("5"),
-    "GBP": Decimal("5"),
-    "AUD": Decimal("5"),
-    "SGD": Decimal("5"),
-}
+# Customer-facing totals are rounded UP to the increment of their currency: the pricing policy parameter
+# ``rounding_increment_by_currency`` (S279 L3, bk-056; Pricing > Policy, one amount per selling currency), read by
+# the caller (app.pricing.service.rounding_increments) and passed in, so this module stays pure.
+Increments = Mapping[str, Decimal]
 
 CENT = Decimal("0.01")
 RATIO = Decimal("0.0001")  # margins and percentages are shown to 4 decimals (0.3000 = 30%)
@@ -176,21 +172,23 @@ def from_usd(amount_usd: Decimal, rate: FxRate | None, *, buffer: bool = True) -
     return amount_usd * factor
 
 
-def round_price(amount: Decimal, currency: str) -> Decimal:
-    """Round a customer-facing total UP to the currency's increment (USD 1,044.78 → 1,045)."""
-    increment = ROUNDING_INCREMENTS.get(currency)
-    if increment is None:
+def round_price(amount: Decimal, currency: str, increments: Increments) -> Decimal:
+    """Round a customer-facing total UP to the currency's increment (USD 1,044.78 → 1,045 with an increment of 5)."""
+    increment = increments.get(currency)
+    if currency not in SELLING_CURRENCIES:
         raise PricingError(f"{currency} is not a selling currency")
+    if increment is None or not increment.is_finite() or increment <= ZERO:
+        raise PricingError(f"no rounding increment for {currency} in the pricing policy")
     steps = (amount / increment).to_integral_value(rounding=ROUND_CEILING)
     return (steps * increment).quantize(CENT)
 
 
-def rrp_price(amount: Decimal, markup: Decimal, currency: str) -> Decimal:
+def rrp_price(amount: Decimal, markup: Decimal, currency: str, increments: Increments) -> Decimal:
     """Suggested retail price (root ADR 0019 b15): the agency net price plus the RRP markup (a markup on that price,
     not a margin: 0.25 makes 800 -> 1,000), rounded UP to the currency's increment like every customer-facing price."""
     if not markup.is_finite() or markup < ZERO:
         raise PricingError("the RRP markup must be zero or positive")
-    return round_price(amount * (ONE + markup), currency)
+    return round_price(amount * (ONE + markup), currency, increments)
 
 
 def effective_margin(net_usd: Decimal, sell_usd: Decimal, card_fee_pct: Decimal) -> Decimal:
@@ -219,12 +217,14 @@ def price_quote(
     peak: bool = False,
     rates: Mapping[str, FxRate] | None = None,
     override_total: Decimal | None = None,
+    increments: Increments,
 ) -> Quote:
     """Price cost lines for one channel and selling currency.
 
     ``rates`` holds an ``FxRate`` for every non-USD currency used (cost currencies and the selling
     currency). ``override_total`` is a sales override of the total in the selling currency; it is
-    never rounded, only checked against the floor.
+    never rounded, only checked against the floor. ``increments``: the rounding step of each selling currency (the
+    pricing policy in force on the pricing day).
     """
     if not lines:
         raise PricingError("at least one cost line is required")
@@ -259,7 +259,7 @@ def price_quote(
             )
         )
 
-    total = round_price(subtotal, currency)
+    total = round_price(subtotal, currency, increments)
     if override_total is not None and (not override_total.is_finite() or override_total <= ZERO):
         raise PricingError("override_total must be positive")
     final_total = override_total if override_total is not None else total
@@ -280,7 +280,7 @@ def price_quote(
         lines=tuple(priced),
         net_total_usd=cents(net_total_usd),
         subtotal=cents(subtotal),
-        rounding_increment=ROUNDING_INCREMENTS[currency],
+        rounding_increment=increments[currency],
         total=total,
         override_total=override_total,
         final_total=final_total,

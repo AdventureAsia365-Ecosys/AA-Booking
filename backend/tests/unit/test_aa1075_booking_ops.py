@@ -22,7 +22,7 @@ from app.errors import Conflict, Forbidden, Gone, Invalid, NotFound, Unavailable
 from app.ops import supplier_bookings as sb
 from app.pricing import engine, repository
 from app.supply.rates import RateAsk
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import SEED_ROUNDING, ScriptedConn
 
 SALES = Staff("u-sales", None, "Sales One", "sales", True, "reviewer")
 CONTRACTING = Staff("u-con", None, "Contract One", "contracting", True, "reviewer")
@@ -445,7 +445,7 @@ def test_single_supplement_is_the_single_rate_less_half_the_double() -> None:
 
 def test_per_type_prices_follow_the_rule() -> None:
     rule = _rule(child="0.5", infant="20")
-    pricing = cost_sheet.Pricing(on=date(2026, 11, 11), rules={engine.Channel.B2B: rule}, fx={})
+    pricing = cost_sheet.Pricing(on=date(2026, 11, 11), rules={engine.Channel.B2B: rule}, fx={}, rounding=SEED_ROUNDING)
     row = NetRow(date(2026, 12, 1), date(2026, 12, 31), 2, 2, D("400"), "USD", None, False, D("40"))
     out = cost_sheet.pax_type_prices(row, rule, pricing)
     assert out["child_net_amount"] == D("200.00") and out["infant_net_amount"] == D("20")
@@ -453,7 +453,9 @@ def test_per_type_prices_follow_the_rule() -> None:
     assert (
         out["child_amount"]
         and out["child_amount"]
-        < engine.price_quote([engine.CostLine(D("400"), "USD")], rule.rule, rates={}).final_total
+        < engine.price_quote(
+            [engine.CostLine(D("400"), "USD")], rule.rule, rates={}, increments=SEED_ROUNDING
+        ).final_total
     )
     plain = cost_sheet.pax_type_prices(NetRow(*row.__dict__.values()), _rule(), pricing)
     assert plain["child_amount"] is None and plain["infant_amount"] is None

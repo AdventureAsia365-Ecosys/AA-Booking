@@ -12,11 +12,23 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from app.pricing import engine, repository
+from app.pricing import engine, policy_values, repository
+
+ROUNDING_KEY = "rounding_increment_by_currency"
 
 
 class PricingDataUnavailable(Exception):  # noqa: N818 — reads as a state, like asyncpg's errors
-    """The rule or FX rows could not be read (DB error, or a stored row the engine refuses)."""
+    """The rule or FX rows could not be read (DB error, or a stored row the engine refuses), or the pricing policy has
+    no rounding increments in force."""
+
+
+async def rounding_increments(conn: Any, on: date) -> dict[str, Decimal]:
+    """The rounding step of each selling currency in force on ``on`` (pricing policy parameter
+    ``rounding_increment_by_currency``, S279 L3 / bk-056). :class:`PricingDataUnavailable` when it has none."""
+    try:
+        return (await policy_values.require(conn, on, ROUNDING_KEY)).rounding_increments
+    except policy_values.PolicyUnavailable:
+        raise PricingDataUnavailable(ROUNDING_KEY) from None
 
 
 class NoRuleInForce(engine.PricingError):
@@ -61,6 +73,9 @@ async def price(
     try:
         dated_rule = await repository.rule_in_force(conn, channel, on)
         dated_rates = await repository.fx_rates_in_force(conn, currencies, on)
+        increments = await rounding_increments(conn, on)
+    except PricingDataUnavailable:
+        raise
     except Exception as exc:  # noqa: BLE001 — DB errors and invalid stored rows both mean "unavailable"
         raise PricingDataUnavailable(type(exc).__name__) from None
     if dated_rule is None:
@@ -75,6 +90,7 @@ async def price(
         peak=peak,
         rates={code: dated.rate for code, dated in dated_rates.items()},
         override_total=override_total,
+        increments=increments,
     )
     return PricedQuote(quote=quote, rule=dated_rule, rates=dated_rates, priced_on=on)
 

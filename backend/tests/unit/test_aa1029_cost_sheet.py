@@ -15,6 +15,7 @@ from app.catalog import cost_sheet as cs
 from app.catalog import trip_plan_prices as prices
 from app.pricing import engine, repository, seasons
 from app.supply.rates import RateAsk
+from tests.unit.fakes import SEED_ROUNDING
 
 DAY = date(2027, 3, 1)
 ROOM, GUIDE, JEEP = "r-1", "s-guide", "s-jeep"
@@ -154,7 +155,7 @@ RULE_B2B = repository.DatedRule(
 
 
 def _pricing(**rules: repository.DatedRule) -> cs.Pricing:
-    return cs.Pricing(on=DAY, rules={engine.Channel(k): v for k, v in rules.items()}, fx={})
+    return cs.Pricing(on=DAY, rules={engine.Channel(k): v for k, v in rules.items()}, fx={}, rounding=SEED_ROUNDING)
 
 
 def test_priced_rows_carry_the_rrp_on_b2b_only() -> None:
@@ -245,12 +246,12 @@ def test_assemble_caps_the_set_at_max_rows() -> None:
 
 
 def test_rrp_price_rounds_up() -> None:
-    assert engine.rrp_price(D("800"), D("0.25"), "USD") == D("1000.00")
-    assert engine.rrp_price(D("801"), D("0.25"), "USD") == D("1005.00")
+    assert engine.rrp_price(D("800"), D("0.25"), "USD", SEED_ROUNDING) == D("1000.00")
+    assert engine.rrp_price(D("801"), D("0.25"), "USD", SEED_ROUNDING) == D("1005.00")
     with pytest.raises(engine.PricingError):
-        engine.rrp_price(D("800"), D("-0.1"), "USD")
-    assert prices.rrp_for("fixed_departure", D("800"), "USD", D("0.25")) is None
-    assert prices.rrp_for("b2b", D("800"), "USD", None) is None
+        engine.rrp_price(D("800"), D("-0.1"), "USD", SEED_ROUNDING)
+    assert prices.rrp_for("fixed_departure", D("800"), "USD", D("0.25"), SEED_ROUNDING) is None
+    assert prices.rrp_for("b2b", D("800"), "USD", None, SEED_ROUNDING) is None
 
 
 class FakePool:

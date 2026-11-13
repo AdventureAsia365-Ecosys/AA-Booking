@@ -69,6 +69,7 @@ from app.catalog import version_matrix
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.pricing import engine, repository, seasons
+from app.pricing import service as pricing_service
 from app.supply.rates import RateAsk, rates_in_force_many
 
 log = logging.getLogger(__name__)
@@ -458,6 +459,9 @@ class Pricing:
     on: date
     rules: dict[engine.Channel, repository.DatedRule]
     fx: dict[str, engine.FxRate]
+    # S279 L3 (bk-056): the rounding increments in force (pricing policy); empty when the policy has none, then every
+    # row is refused like a row without a rule.
+    rounding: engine.Increments = field(default_factory=dict)
 
     @property
     def markup(self) -> Decimal | None:
@@ -473,7 +477,12 @@ async def load_pricing(conn: asyncpg.Connection, on: date) -> Pricing:
             rules[channel] = dated
     codes = await conn.fetch("SELECT DISTINCT currency::text AS c FROM booking.fx_rates")
     dated_fx = await repository.fx_rates_in_force(conn, [r["c"].strip() for r in codes], on)
-    return Pricing(on=on, rules=rules, fx={c: d.rate for c, d in dated_fx.items()})
+    try:
+        rounding = await pricing_service.rounding_increments(conn, on)
+    except pricing_service.PricingDataUnavailable:
+        log.warning("cost_sheet_rounding_unavailable on=%s", on)
+        rounding = {}
+    return Pricing(on=on, rules=rules, fx={c: d.rate for c, d in dated_fx.items()}, rounding=rounding)
 
 
 def _dec(value: Any) -> Decimal | None:
@@ -493,7 +502,7 @@ def kept_row(row: dict[str, Any], pricing: Pricing) -> dict[str, Any]:
         "overridden": bool(row["overridden"]),
     }
     assert out["amount"] is not None  # noqa: S101 — amount is NOT NULL
-    out["rrp_amount"] = prices.rrp_for(out["channel"], out["amount"], out["currency"], pricing.markup)
+    out["rrp_amount"] = prices.rrp_for(out["channel"], out["amount"], out["currency"], pricing.markup, pricing.rounding)
     return out
 
 
@@ -513,6 +522,7 @@ def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str
                     currency=SELLING_CURRENCY,
                     peak=net.peak,
                     rates=pricing.fx,
+                    increments=pricing.rounding,
                 )
             except engine.PricingError:
                 refused += 1
@@ -539,7 +549,9 @@ def priced_rows(nets: Sequence[NetRow], pricing: Pricing) -> tuple[list[dict[str
                     "priced_on": pricing.on,
                     "overridden": False,
                     "computed": True,
-                    "rrp_amount": prices.rrp_for(channel.value, quote.final_total, SELLING_CURRENCY, pricing.markup),
+                    "rrp_amount": prices.rrp_for(
+                        channel.value, quote.final_total, SELLING_CURRENCY, pricing.markup, pricing.rounding
+                    ),
                     "created_by": None,
                     **extra,
                 }
@@ -556,7 +568,7 @@ def _sell(net: Decimal | None, row: NetRow, rule: repository.DatedRule, pricing:
     try:
         quote = engine.price_quote(
             [engine.CostLine(net, row.net_currency)], rule.rule, currency=SELLING_CURRENCY, peak=row.peak,
-            rates=pricing.fx,
+            rates=pricing.fx, increments=pricing.rounding,
         )  # fmt: skip
     except engine.PricingError:
         return None

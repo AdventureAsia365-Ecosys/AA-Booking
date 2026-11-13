@@ -6,8 +6,10 @@ branches around the SQL.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from typing import Any
 
 Answer = Any | Callable[..., Any]
@@ -58,6 +60,11 @@ POLICY_SEED: dict[str, str] = {
     "retention_inbox_redact_days": "90",
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
+# The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure
+# engine calls of the unit tests.
+SEED_ROUNDING: dict[str, Decimal] = {
+    code: Decimal(amount) for code, amount in json.loads(POLICY_SEED["rounding_increment_by_currency"]).items()
+}
 
 
 def policy_rows(**overrides: str) -> list[dict[str, Any]]:

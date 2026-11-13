@@ -17,7 +17,7 @@ from app.b2b import departures, plan_components
 from app.catalog import cost_sheet, price_readiness, price_versions, price_workbench
 from app.catalog import price_import as pi
 from app.errors import Invalid
-from tests.unit.fakes import ScriptedConn
+from tests.unit.fakes import SEED_ROUNDING, ScriptedConn
 
 TODAY = date(2027, 3, 1)
 KEY = "aa109100-0000-4000-8000-000000000001"
@@ -187,11 +187,16 @@ def test_check_shapes() -> None:
 
 def test_hand_row_and_merge() -> None:
     hand = pi.hand_row(
-        _price(channel="b2b", currency="USD", pax_min=1, season="x" * 99, child_amount=D("1")), D("0.25")
+        _price(channel="b2b", currency="USD", pax_min=1, season="x" * 99, child_amount=D("1")), D("0.25"), SEED_ROUNDING
     )
     assert hand["rrp_amount"] == D("500") and hand["computed"] is False and hand["net_amount"] is None
     assert len(hand["season"]) == cost_sheet.SEASON_MAX and hand["child_amount"] == D("1")
-    assert pi.hand_row(_price(channel="fixed_departure", currency="USD", pax_min=1), D("0.25"))["rrp_amount"] is None
+    assert (
+        pi.hand_row(_price(channel="fixed_departure", currency="USD", pax_min=1), D("0.25"), SEED_ROUNDING)[
+            "rrp_amount"
+        ]
+        is None
+    )
     computed = {
         "position": 1,
         "channel": "b2b",
