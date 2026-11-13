@@ -12,6 +12,8 @@
 // traveller ages, departures, operations reminders, agency invoice reminders, rounding, retention windows), grouped in
 // sections; a parameter no code reads yet carries a "Not enforced yet" badge with what is missing. A second tab edits
 // the B2B cancellation fee schedules (same maker-checker, CancellationFees.tsx).
+// AA-1096 l23: every parameter explains itself (PolicyGuide.tsx): the short "what" under the label, an Explain toggle
+// with the whole guide (EN / VI), the same guide at the top of the change drawer; a decimal takes a comma or a point.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -58,6 +60,7 @@ import {
 import { SavedTabs } from "../../../_parts/SavedTabs";
 import { CancellationFees } from "./CancellationFees";
 import { M, type MessageKey } from "./messages";
+import { ExplainToggle, GuideDetails, GuideSummary } from "./PolicyGuide";
 
 const STATUS_TONE: Record<VersionStatus, BookingTone> = {
   draft: "neutral",
@@ -174,7 +177,7 @@ function ChangeDrawer({ param, onClose }: { param: PolicyParam; onClose: () => v
       width={520}
     >
       <div className="flex flex-col gap-4" data-testid="policy-change-drawer">
-        <p className="text-[13px] text-muted">{param.help}</p>
+        <GuideDetails param={param} testId="policy-change-guide" />
         <p className="text-[13px] text-body">{t("currentIs", show(param, param.current?.value))}</p>
         <Field label={t("fieldValue")} required hint={hint as string | undefined}>
           {param.type === "boolean" ? (
@@ -331,7 +334,7 @@ function Policy() {
         return (
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="font-medium text-ink">{labelOf(p)}</span>
-            <span className="max-w-[360px] break-words text-xs text-muted">{p.help}</span>
+            <GuideSummary param={p} />
             <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
               <code className="break-all">{p.key}</code>
               <span data-testid={`policy-enforced-${p.key}`}>
@@ -343,6 +346,7 @@ function Policy() {
             {!p.in_use && p.not_enforced_reason && (
               <span className="max-w-[360px] break-words text-xs text-muted">{t("notEnforcedWhy", p.not_enforced_reason)}</span>
             )}
+            <ExplainToggle param={p} />
           </span>
         );
       },
