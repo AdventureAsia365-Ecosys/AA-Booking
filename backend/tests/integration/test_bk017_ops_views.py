@@ -184,6 +184,8 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         ("v_from_prices", "SELECT"),
         # bk-042 (AA-1037): agency billing status for the CIS tenant_billing_tick (test_bk041_agency_billing_schema).
         ("v_tenant_billing_status", "SELECT"),
+        # bk-057 (AA-1093): the tenant.erasure.v1 report view for the CIS erasure job (test_bk057_schema.py).
+        ("v_tenant_erasure_report_v1", "SELECT"),
     }
     assert await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'USAGE')")
     assert not await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'CREATE')")
