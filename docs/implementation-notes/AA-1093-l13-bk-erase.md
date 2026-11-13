@@ -90,4 +90,10 @@ this code PR (`app/b2b/tenant_erase.py`, the pull skip, readiness bk-057).
   reader uses `to_jsonb` and `normalise_report` reads the contract keys, so it reads this view as is.
 - No apply in this lane: the live step is a DRY RUN on the synthetic tenant; the apply belongs to the end-to-end
   offboarding drill after the tech lead approves the combined fingerprint.
+- The AA-CIS-Infra registry change (owners.yaml row + isolation probe cell) edits the same `CONSUMER_GRANT_KEYS`
+  assertion as the TripPlanner erasure lane's Infra PR (tp-030 grant): the two ship as one Infra PR. The resolved key
+  tuple is `(..., "bk-042", "bk-057", "tp-015", "tp-020", "tp-022", "tp-030")`. The AA-CIS-App canonical
+  `rls_catalogue_rules.py` line merges before the Infra copy (the Infra copy check compares with CIS main).
+- Integration tests pick a queued job by its key (request id + mode), never by `created_at` (the SQL order
+  stability lint refuses a time-only ORDER BY in a DB test).
 - Not covered by the anonymisation: version / itinerary text (locked once approved or sent), operations file names.
