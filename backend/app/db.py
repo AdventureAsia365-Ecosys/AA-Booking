@@ -71,6 +71,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-053",  # AA-1092: b2b_partners tenant policy covers bk_owner (the B2B API binds the caller's tenant); MIG-4
     "bk-054",  # AA-1091: price list versions (hand prices, maker-checker, version_id on the matrix); MIG-4
     "bk-055",  # AA-1091: season calendars, ranges, holiday events, trip_plans.season_calendar_id (every quote); MIG-4
+    "bk-056",  # AA-1096: thresholds as pricing policy parameters (holds, desk, ages, ops, rounding, retention); MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 
