@@ -3199,11 +3199,17 @@
             "type": "string"
           },
           "decision_days_before": {
-            "default": 21,
-            "maximum": 365.0,
-            "minimum": 0.0,
-            "title": "Decision Days Before",
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Days Before"
           },
           "dry_run": {
             "default": false,
@@ -3267,11 +3273,17 @@
             "type": "integer"
           },
           "decision_days_before": {
-            "default": 21,
-            "maximum": 365.0,
-            "minimum": 0.0,
-            "title": "Decision Days Before",
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Days Before"
           },
           "min_to_operate": {
             "default": 0,
