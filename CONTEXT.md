@@ -2064,6 +2064,17 @@ request of a change (`pending_season_calendar_id`, `season_calendar_requested_by
 `season_calendar_request_reason`).
 No row is seeded: calendars are made by the catalog sync (empty) or by staff.
 
+### `bk-056` (S279 thresholds program, lane L3 — needs `bk-050`)
+
+A **contract** file (config rows into `pricing_policy` and UPDATEs of `settings`; MIG-4, the code PR raises readiness
+to bk-056). Version 1 of 19 new pricing policy parameters (holds, B2B desk, traveller ages, departures, operations,
+agency invoice reminders, rounding, retention windows), approved by the tech lead S279, each equal to the value in
+force before the move (the `settings` row when the code accepted it, else the code default). The moved `settings`
+rows say "Moved (bk-056)", the dead B2C rows and `ops_docs_max_bytes` "Retired (bk-056)"; no row is deleted.
+`b2b_ops_timezone` and `b2b_ops_contact` stay in `settings`. The trip check seeding trigger function
+`trip_case_seed_checks()` (bk-027) is replaced so it reads `pre_departure_days` from the pricing policy (the approved
+version in force today, UTC), the same value the lifecycle job reads.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
