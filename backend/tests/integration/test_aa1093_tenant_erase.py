@@ -298,13 +298,18 @@ async def _request(admin: asyncpg.Connection, tenant: uuid.UUID, *, pilot: bool 
     return request
 
 
-async def _run_queued(admin: asyncpg.Connection, pool: asyncpg.Pool, mode: str, *, apply_enabled: bool = True):
+async def _run_queued(
+    admin: asyncpg.Connection, pool: asyncpg.Pool, request: uuid.UUID, mode: str, *, apply_enabled: bool = True
+):
+    # One job per (request, round, mode): pick it by that key, never by time.
     row = await admin.fetchrow(
-        "SELECT id::text, payload FROM booking.job WHERE kind = $1 AND payload->>'mode' = $2 ORDER BY created_at DESC"
-        " LIMIT 1",
+        "SELECT id::text, payload FROM booking.job WHERE kind = $1 AND payload->>'request_id' = $2"
+        " AND payload->>'mode' = $3",
         tenant_erase.KIND,
+        str(request),
         mode,
     )
+    assert row is not None, f"no {mode} job queued for the request"
     payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
     handler = tenant_erase.build_handler(apply_enabled=apply_enabled, environment="dev")
     return await handler(pool, Job(id=row["id"], kind=tenant_erase.KIND, payload=payload, attempt=1, max_attempts=3))
@@ -367,7 +372,7 @@ async def test_the_saga_path_anonymises_exactly_the_agency(
         return await schedule(pool)
 
     assert len(await tick() or []) == 1
-    planned = await _run_queued(admin, pool, "dry_run")
+    planned = await _run_queued(admin, pool, request, "dry_run")
     assert (planned["outcome"], planned["error_code"]) == ("ok", None)
     assert await tick() == []  # reported: not queued again
     report = await admin.fetchrow(
@@ -384,7 +389,7 @@ async def test_the_saga_path_anonymises_exactly_the_agency(
         planned["plan_hash"],
     )
     assert len(await tick() or []) == 1
-    applied = await _run_queued(admin, pool, "apply")
+    applied = await _run_queued(admin, pool, request, "apply")
     assert (applied["outcome"], applied["plan_hash"]) == ("ok", planned["plan_hash"])
     async with pool.acquire() as conn:
         mine = await _state(conn, ERASED, agencies[ERASED])
@@ -412,7 +417,7 @@ async def test_the_saga_path_anonymises_exactly_the_agency(
         "UPDATE catalog.v_tenant_erasure_v1 SET phase = 'verify', updated_at = now() WHERE request_id = $1", request
     )
     assert len(await tick() or []) == 1
-    verified = await _run_queued(admin, pool, "verify")
+    verified = await _run_queued(admin, pool, request, "verify")
     assert (verified["outcome"], verified["error_code"], verified["blockers"]) == ("ok", None, [])
     assert verified["census"]["pii_rows_found"] == 0 and verified["census"]["pii_columns_checked"] >= 20
     modes = [r["mode"] for r in await admin.fetch(
