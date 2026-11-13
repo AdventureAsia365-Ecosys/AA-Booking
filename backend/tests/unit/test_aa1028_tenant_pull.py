@@ -98,7 +98,7 @@ async def test_run_projects_every_tenant() -> None:
     handler = tenant_pull.build_handler(CLIENT)
     out = await handler(c, Job("j", tenant_pull.KIND, {}, 1, 3))  # type: ignore[arg-type]
     assert out == {"outcome": "ok", "tenants": 5, "created": 1, "updated": 2, "suspended_gone": 1, "unchanged": 1,
-                   "internal_skipped": 1, "awaiting_cis": 2}  # fmt: skip
+                   "internal_skipped": 1, "awaiting_cis": 2, "erased_skipped": 0}  # fmt: skip
     assert c.sql("INSERT INTO booking.b2b_partners") == [(T1, "Zephyr Trails", "active", "USD", CLIENT)]
     updates = c.sql("UPDATE booking.b2b_partners")
     assert (partner(T3)["id"], "Zephyr Trails", "suspended", CLIENT) in updates
@@ -109,6 +109,20 @@ async def test_run_projects_every_tenant() -> None:
     actions = [args[3] for args in c.sql("INSERT INTO booking.audit_logs")]
     assert sorted(actions) == ["b2b_partner.created", "b2b_partner.projected", "b2b_partner.suspended",
                                "b2b_partner.suspended"]  # fmt: skip
+
+
+@pytest.mark.asyncio
+async def test_an_erased_agency_is_never_projected_again() -> None:
+    """AA-1093 L3: an agency Booking erased (an applied bk-057 log row) keeps its erased name while CIS still holds it,
+    and is not suspended again once CIS drops it."""
+    erased_name = f"Erased agency {str(T1)[:8]}"
+    rows = [partner(T1, name=erased_name, status="suspended"), partner(T2, name=f"Erased agency {str(T2)[:8]}")]
+    c = conn([account(T1, "Zephyr Trails")], rows)
+    c.on("to_regclass('booking.tenant_erasure_log')", True)
+    c.on("FROM booking.tenant_erasure_log WHERE mode = 'apply'", [{"tenant_id": T1}, {"tenant_id": T2}])
+    out = await tenant_pull.run(c, CLIENT)  # type: ignore[arg-type]
+    assert out["erased_skipped"] == 1 and out["updated"] == 0 and out["suspended_gone"] == 0
+    assert c.sql("UPDATE booking.b2b_partners") == [] and c.sql("INSERT INTO booking.b2b_partners") == []
 
 
 @pytest.mark.asyncio

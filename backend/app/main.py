@@ -41,7 +41,7 @@ from app.agency_billing import reminders as agency_reminders
 from app.auth import identity_config, m2m
 from app.auth.ci import GithubDeployVerifier
 from app.auth.identity_verifier import MultiIssuerVerifier
-from app.b2b import departure_watch, tenant_pull
+from app.b2b import departure_watch, tenant_erase, tenant_pull
 from app.b2b import expiry as b2b_expiry
 from app.b2b.errors import B2BError, b2b_error_handler, validation_error_handler
 from app.catalog import cost_sheet, trip_plan_sync
@@ -126,6 +126,10 @@ def create_app(
                 **ops_lifecycle.build_handlers(),
                 # AA-1028 R1 slice 2: booking.b2b_partners, the projection of every CIS tenant (catalog view, CIS 357).
                 tenant_pull.KIND: tenant_pull.build_handler(settings.cognito_m2m_crm_client_id),
+                # AA-1093 L3: the Booking step of the tenant offboarding erasure (apply behind a kill switch).
+                tenant_erase.KIND: tenant_erase.build_handler(
+                    apply_enabled=settings.tenant_erase_apply_enabled, environment=settings.environment
+                ),
                 # AA-1029 R4: every published CIS tour gets a trip plan; the cost sheet prices plans from the rates.
                 **trip_plan_sync.HANDLERS,
                 **cost_sheet.HANDLERS,
@@ -149,6 +153,8 @@ def create_app(
                     b2b_expiry.ExpirySchedule(),
                     tour_lifecycle.PullSchedule(),
                     tenant_pull.TenantPullSchedule(),
+                    # AA-1093 L3: the CIS erasure requests (catalog.v_tenant_erasure_v1, feature-detected).
+                    tenant_erase.EraseSchedule(),
                     trip_plan_sync.SyncSchedule(),
                     cost_sheet.RecomputeSchedule(),
                     # AA-1037 R4: daily, the SaaS draft of this month and the settlement draft of the closed month.
