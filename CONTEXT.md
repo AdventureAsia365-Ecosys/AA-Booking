@@ -252,7 +252,9 @@ backend/
                            quote, deposit, cancellation and validity path uses: approved value in force on a day, no
                            fallback), policy_admin.py (Pricing > Policy: versions, draft / pending / published /
                            rejected / withdrawn, maker-checker by approver group); CI guard
-                           tests/unit/test_aa1091_policy_guard.py (no policy literal in the pricing modules)
+                           tests/unit/test_aa1091_policy_guard.py (no policy literal in the pricing modules);
+                           policy_guides.py (AA-1096 l23: the operator's guide of every parameter, EN + VI, shown
+                           on the page; guard tests/unit/test_aa1096_policy_guides.py)
   app/routers/catalog.py   GET /booking/catalog/destinations (place picker, any active staff, AA-822);
                            GET /booking/catalog/trip-plans (+ /facets, /{source_id}), PUT …/{source_id}/commercial,
                            POST …/{source_id}/trip-cases (AA-679, bk-009); GET|PUT …/{source_id}/components (AA-972);
@@ -562,7 +564,9 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   **Pricing policy parameters (AA-1091, bk-050, root ADR 0005b d6 / d15)**: every business policy value (quote
   validity, group size quoted on request, surcharge rules, auto-publish and highlight thresholds, provisional uplift,
   deposits, gala days, agency currency) is a versioned row of `booking.pricing_policy`, changed on Pricing > Policy,
-  never a constant in code (tech lead rule S278). Read `pricing_policy.read` = admin, sales, contracting, finance (in
+  never a constant in code (tech lead rule S278). Every parameter also ships its operator's guide
+  (`app/pricing/policy_guides.py`, AA-1096 l23, the platform-wide shape `{"en"|"vi": {what, raise, lower, when,
+  example}}`): a new parameter without a complete EN + VI guide fails `tests/unit/test_aa1096_policy_guides.py`. Read `pricing_policy.read` = admin, sales, contracting, finance (in
   the preview cap); propose `pricing_policy.write` = admin, contracting, finance; approve or reject the price
   parameters `pricing_policy.approve` = admin, contracting (the product / pricing lead), the FX, tax, surcharge and
   payment parameters `pricing_policy.approve_finance` = admin, finance; never the version's maker (403 `own_row` + a

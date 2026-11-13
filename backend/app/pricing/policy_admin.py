@@ -30,7 +30,7 @@ import asyncpg
 from app import audit
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
-from app.pricing import policy_params, policy_values
+from app.pricing import policy_guides, policy_params, policy_values
 
 MAX_REASON = 300
 
@@ -159,6 +159,8 @@ async def list_params(conn: asyncpg.Connection, staff: Staff, *, today: date) ->
         items.append(
             {
                 **policy_params.describe(param),
+                # AA-1096 l23: the operator's guide (what / raise / lower / when / example, EN + VI).
+                "guide": policy_guides.guide(key),
                 "current": current,
                 "scheduled": [v for v in versions if v["status"] == "scheduled"],
                 "open": next((v for v in versions if v["status"] in ("draft", "pending")), None),

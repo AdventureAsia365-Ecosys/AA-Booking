@@ -784,9 +784,26 @@ function policyParam(
   return {
     key, type, unit, question: "Q2", approver: "pricing", label: key, help: "What this value does for new quotes and tariffs.",
     in_use: true, section: "quotes", not_enforced_reason: null, minimum: type === "integer" || type === "decimal" ? "1" : null, maximum: type === "integer" || type === "decimal" ? "30" : null,
-    choices: [], current, scheduled: [], open: null, history: [current], can_approve_group: true, ...over,
+    choices: [], current, scheduled: [], open: null, history: [current], can_approve_group: true, guide: POLICY_GUIDE, ...over,
   };
 }
+// AA-1096 l23: every parameter carries its operator's guide (invented text; the real one is backend policy_guides.py).
+const POLICY_GUIDE = {
+  en: {
+    what: "What this value controls on the quotes and tariffs staff send, and where the effect shows.",
+    raise: "The effect and the risk of a higher value, in the words of the pricing team.",
+    lower: "The effect and the risk of a lower value, in the words of the pricing team.",
+    when: "The signal that says this value should change now, for example many expired quotes.",
+    example: "Today's approved starting value, said in plain words.",
+  },
+  vi: {
+    what: "Giá trị này điều chỉnh gì trên báo giá và biểu giá, và tác dụng hiện ở đâu.",
+    raise: "Tác dụng và rủi ro khi tăng giá trị này.",
+    lower: "Tác dụng và rủi ro khi giảm giá trị này.",
+    when: "Dấu hiệu cho biết nên đổi giá trị này, ví dụ nhiều báo giá hết hạn.",
+    example: "Giá trị được duyệt ban đầu, nói bằng lời thường.",
+  },
+};
 const POLICY_PENDING = policyVersion("quote_validity_days", 2, 10, {
   status: "pending", unit: "days", effective_from: "2026-10-23", reason: "Shorter quotes in the high season",
   diff: { from: 14, to: 10 }, created_by: { id: "u-2", name: PERSON_NAMES[1] }, approved_by: null, approved_at: null, can_approve: true,

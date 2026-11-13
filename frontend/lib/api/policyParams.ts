@@ -11,6 +11,8 @@
 //   POST /booking/pricing/policy/{id}/approve    a second person approves (403 own_row / approver_group)
 //   POST /booking/pricing/policy/{id}/reject     a second person rejects, with a reason
 
+import type { PolicyGuide } from "../policyGuide";
+import { decimalText } from "../policyGuide";
 import { bkGet, bkSend } from "./client";
 import type { IsoDate, IsoDateTime } from "./types";
 
@@ -103,6 +105,8 @@ export interface PolicyParam {
   open: ParamVersion | null;
   history: ParamVersion[];
   can_approve_group: boolean;
+  /** null = no guide (the backend unit guard fails on that). */
+  guide?: PolicyGuide | null;
 }
 
 export interface PolicyListing {
@@ -177,7 +181,7 @@ export function textToValue(text: string, type: ParamType): ParamValue | null {
   const t = text.trim();
   if (type === "boolean") return t === "true" ? true : t === "false" ? false : null;
   if (type === "integer") return /^-?\d+$/.test(t) ? Number(t) : null;
-  if (type === "decimal") return /^\d+(\.\d{1,2})?$/.test(t) ? t : null;
+  if (type === "decimal") return decimalText(t);
   if (type === "month_day") return /^\d{2}-\d{2}$/.test(t) ? t : null;
   const parts = t ? t.split(",").map((p) => p.trim()).filter(Boolean) : [];
   if (type === "month_days") return parts.every((p) => /^\d{2}-\d{2}$/.test(p)) ? parts : null;
