@@ -154,7 +154,7 @@ def create_app(
                     tour_lifecycle.PullSchedule(),
                     tenant_pull.TenantPullSchedule(),
                     # AA-1093 L3: the CIS erasure requests (catalog.v_tenant_erasure_v1, feature-detected).
-                    tenant_erase.EraseSchedule(apply_enabled=settings.tenant_erase_apply_enabled),
+                    tenant_erase.EraseSchedule(),
                     trip_plan_sync.SyncSchedule(),
                     cost_sheet.RecomputeSchedule(),
                     # AA-1037 R4: daily, the SaaS draft of this month and the settlement draft of the closed month.

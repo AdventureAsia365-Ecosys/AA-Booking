@@ -121,7 +121,8 @@ class Settings:
     # CIS env of the same name, any value other than 1/true/yes/on means off (never a start-up error).
     job_test_kinds: bool = False
     # AA-1093 L3: the destructive kill switch of the tenant erasure apply (root thresholds audit section 4 item 7: stays
-    # in Terraform). Off by default: a saga request then gets its DRY RUN only; the CLI apply needs the approved hash.
+    # in Terraform). Off by default: an apply job then reports refused / apply_disabled (contract tenant.erasure.v1);
+    # DRY RUN and verify still run. The CLI apply needs the DRY RUN hash instead.
     tenant_erase_apply_enabled: bool = False
     cis_jwks_url: str = DEFAULT_CIS_JWKS_URL
     staff_jwt_issuer: str = DEFAULT_STAFF_JWT_ISSUER
