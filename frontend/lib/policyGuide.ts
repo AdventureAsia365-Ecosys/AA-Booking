@@ -25,7 +25,8 @@ export function guideFor(p: Pick<PolicyParam, "guide">, lang: string): GuideText
 }
 
 /** How the page names the two directions of a value: a number goes up or down, a yes/no is switched on or off, a
- *  day moves later or earlier, a list or map is made stricter or looser. */
+ *  day moves later or earlier, a list or map gets more (or bigger) entries or fewer (or smaller) ones. Never
+ *  "stricter / looser" for a list: whether more surcharge causes is stricter depends on whose side you are on. */
 export type DirectionWords = "number" | "switch" | "date" | "choice";
 export function directionWords(type: ParamType): DirectionWords {
   if (type === "integer" || type === "decimal") return "number";

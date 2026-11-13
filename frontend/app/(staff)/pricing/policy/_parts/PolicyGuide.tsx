@@ -4,8 +4,8 @@
 //
 // - GuideSummary: the short "what it controls" (two lines) under the label.
 // - GuideDetails: what it controls / if you raise it / if you lower it (a yes/no value: switch on / off; a day: move
-//   later / earlier; a list or map: the stricter / looser choice) / when to change it / example, then the parameter's
-//   one-line help as a collapsed "Engineering note". The change drawer shows it above the inputs.
+//   later / earlier; a list or map: add more or bigger / remove some or smaller) / when to change it / example, then
+//   the parameter's one-line help as a collapsed "Engineering note". The change drawer shows it above the inputs.
 // - ExplainToggle: the per-row Explain button that opens the guide in place (in the cell's flow, never a popover over
 //   the scrolling table).
 // The guide comes from the API in English and Vietnamese (backend app/pricing/policy_guides.py); kit only.

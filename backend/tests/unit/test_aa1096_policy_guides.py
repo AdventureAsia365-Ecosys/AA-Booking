@@ -81,3 +81,27 @@ async def test_the_staff_page_listing_carries_the_guide(monkeypatch: pytest.Monk
 )
 def test_guide_problems(guide, expected):
     assert guide_problems(guide) == expected
+
+
+CHOICE_TYPES_EXCLUDED = ("integer", "decimal", "boolean", "month_day")
+STRICT_LOOSE = re.compile(r"stricter|looser|chặt hơn|nới hơn", re.IGNORECASE)
+TODAY = re.compile(r"^\s*(Today|Hiện là|Hiện đang)\b")
+
+
+def test_list_and_map_guides_name_no_stricter_or_looser_side():
+    """The page heads a list or map's two directions "If you add more or make it bigger" / "If you remove some or make
+    it smaller" (lib/policyGuide.ts directionWords "choice"): a "stricter / looser" word in the text would contradict
+    the heading, since its sense depends on whose side you are on (review of the first pass)."""
+    choice = [k for k, p in policy_params.PARAMS.items() if p.type not in CHOICE_TYPES_EXCLUDED]
+    assert choice, "no list or map parameter left: the rule tests nothing"
+    for key in choice:
+        for lang in ("en", "vi"):
+            for part in ("raise", "lower"):
+                text = policy_guides.GUIDES[key][lang][part]
+                assert not STRICT_LOOSE.search(text), f"{key}.{lang}.{part}: {text!r}"
+
+
+def test_examples_give_the_starting_value_never_today():
+    for key, guide in policy_guides.GUIDES.items():
+        for lang in ("en", "vi"):
+            assert not TODAY.search(guide[lang]["example"]), f"{key}.{lang}: {guide[lang]['example']!r}"

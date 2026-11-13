@@ -794,7 +794,7 @@ const POLICY_GUIDE = {
     raise: "The effect and the risk of a higher value, in the words of the pricing team.",
     lower: "The effect and the risk of a lower value, in the words of the pricing team.",
     when: "The signal that says this value should change now, for example many expired quotes.",
-    example: "Today's approved starting value, said in plain words.",
+    example: "Starting value: the approved value, said in plain words.",
   },
   vi: {
     what: "Giá trị này điều chỉnh gì trên báo giá và biểu giá, và tác dụng hiện ở đâu.",
