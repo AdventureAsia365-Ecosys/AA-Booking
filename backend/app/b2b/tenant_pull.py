@@ -22,6 +22,9 @@ One run (a worker maintenance hook queues one per :data:`SLOT_SECONDS` slot whil
   yet, for example a CRM-seeded agency or the AA-972 synthetic partner) is left exactly as it is, counted
   ``awaiting_cis`` and still staff-editable; the job never stamps ``projected_at`` on a row it did not derive from a CIS
   tenant. It is adopted on the first run after CIS holds its tenant;
+- **erased agencies** (AA-1093 L3): a tenant Booking erased (an applied ``booking.tenant_erasure_log`` row, bk-057,
+  :mod:`app.b2b.tenant_erase`) is skipped entirely, counted ``erased_skipped``: its row keeps the erased name and stays
+  suspended, so the pull never writes the CIS name back while CIS still holds the tenant (CIS erases last);
 - each change writes one ``booking.audit_logs`` row (``actor_type = system``, actor ``system:bk_tenant_pull``,
   ``b2b_partner.projected`` / ``.suspended`` / ``.reactivated``).
 
@@ -39,6 +42,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
+from app.b2b import tenant_erase
 from app.catalog import liveness
 from app.jobs import queue
 from app.jobs.queue import Job
@@ -117,14 +121,18 @@ async def run(pool: asyncpg.Pool, client_id: str) -> dict[str, Any]:
         if not await liveness.view_ready(conn, VIEW):
             return {"outcome": "skipped", "reason": f"{VIEW.qualified} not readable (CIS 357)"}
     counts = {"created": 0, "updated": 0, "suspended_gone": 0, "unchanged": 0, "internal_skipped": 0,
-              "awaiting_cis": 0}  # fmt: skip
+              "awaiting_cis": 0, "erased_skipped": 0}  # fmt: skip
     async with pool.acquire() as conn, conn.transaction():
+        erased = await tenant_erase.erased_tenants(conn)
         accounts = await conn.fetch(ACCOUNTS_SQL)
         partners = {r["tenant_id"]: dict(r) for r in await conn.fetch(PARTNERS_SQL)}
         for account in accounts:
             tenant_id = account["tenant_id"]
             if account["kind"] == "internal":
                 counts["internal_skipped"] += 1
+                continue
+            if tenant_id in erased:  # AA-1093: anonymised in Booking; never projected again
+                counts["erased_skipped"] += 1
                 continue
             want = desired(account, client_id)
             row = partners.get(tenant_id)
@@ -149,7 +157,7 @@ async def run(pool: asyncpg.Pool, client_id: str) -> dict[str, Any]:
         in_cis = {a["tenant_id"] for a in accounts}
         awaiting: list[str] = []
         for tenant_id, row in partners.items():
-            if tenant_id in in_cis:  # projected above, or a row of an internal tenant (stays as it is)
+            if tenant_id in in_cis or tenant_id in erased:  # projected / skipped above, or an internal tenant's row
                 continue
             if row["projected_at"] is None:  # adoption guard: never derived from a CIS tenant, staff keep it
                 awaiting.append(str(tenant_id))

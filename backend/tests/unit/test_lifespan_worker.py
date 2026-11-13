@@ -81,6 +81,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "bk_case_lifecycle",  # AA-682 S2
         "bk_ops_reminders",
         "bk_tenant_pull",  # AA-1028 R1 slice 2
+        "bk_tenant_erase",  # AA-1093 L3: the Booking step of the tenant offboarding erasure
         "bk_trip_plan_sync",  # AA-1029 R4: every published CIS tour gets a trip plan
         "bk_price_recompute",  # AA-1029 R4: the cost sheet
         "bk_saas_invoice_draft",  # AA-1037 R4: the agency software fee drafts
@@ -100,6 +101,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "ExpirySchedule",
         "PullSchedule",
         "TenantPullSchedule",  # AA-1028 R1 slice 2: the CIS tenant account projection
+        "EraseSchedule",  # AA-1093 L3: the CIS tenant erasure requests (feature-detected view)
         "SyncSchedule",  # AA-1029 R4: the catalog bridge, one run per 15-minute slot
         "RecomputeSchedule",  # AA-1029 R4: the cost sheet, one run per watermark of its inputs
         "DraftSchedule",  # AA-1037 R4: the agency invoice drafts, once a day

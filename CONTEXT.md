@@ -126,6 +126,10 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   CIS Tenant 360 links to the staff page `/agency-billing?tab=invoices&tenant=<CIS tenant uuid>`: the Invoices tab sends
   `tenant_id` to `GET /booking/agency-invoices` and shows a removable chip with the agency's name; a value that is not
   a UUID is ignored (the unfiltered list).
+  **Tenant erasure report** (AA-1093 L3, bk-057, contract tenant.erasure.v1): `booking.v_tenant_erasure_report_v1`
+  (per erasure request and mode: plan hash, row counts per step, status, a reason code; ids, counts and hashes only),
+  SELECT to `cis_app`: the CIS `tenant_erasure_saga` collects Booking's DRY RUN hash for the combined fingerprint and
+  reads the apply result (see "Tenant erasure").
   No other `booking.*` object is granted to CIS (isolation probe: `cis_app` →
   `booking.customers` 42501).
 - **Serves** partner agencies through AA-Partner (AA-972, root ADR 0005a / 0006b, contract `booking.b2b.v1`): the B2B
@@ -1370,6 +1374,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_retention_inbox_redact` | AA-825 / DM-6.6: 90 d after `received_at`, rebuilds `inbox_events.payload` from an allowlist of the contract's non-PII keys (`customer.name` / `email` / `phone` and `itinerary.custom_days[].note` nulled, any other key dropped, non-object parts nulled, so a failed non-conforming payload keeps no PII either) and replaces a failed row's `error`; sets `redacted_at` (bk-012). Row, `idempotency_key`, `contract_version`, status kept (dedupe unchanged); rows still `received` are skipped and counted. Nothing deleted, nothing archived. AA-969 (root ADR 0019 d16): a row whose trip case belongs to the pilot tenant is left out (`app/pilot.py`, result `pilot_tenants_skipped`). |
 | `bk_tour_lifecycle_pull` | AA-986 L5 (root ADR 0015, Q4): queued by a maintenance hook only when `catalog.v_tour_lifecycle_outbox` (CIS 274, feature-detected) has a row `booking.inbox_events` lacks (idempotency key per UTC minute). One transaction per batch of 200: each new event goes into the inbox (source `cis`, contract `catalog.tour`, the producer key; `ON CONFLICT DO NOTHING`) and is applied: `retired` → one staff notification `tour.retired` (shared queue) per open trip case using the key (leg, the case's own key, or an item of a live version) and per trip plan (with its confirmed bookings on future departures, and its active B2B holds, which can no longer be confirmed: the text tells staff to contact the agency, `data.active_hold_list` names them); `restored` → `tour.reinstated` to the same, only when a retirement was notified; `paused` / `superseded` → nothing. Nothing is cancelled or changed. `inbox_cursor.safe_id` advances behind a 600 s window (contract rule 4). Not deploy-gate exempt (seconds). |
 | `bk_tenant_pull` | AA-1028 R1 slice 2 (root ADR 0019 d1 / d9): queued by a maintenance hook once per 5-minute slot while `catalog.v_tenant_account_v1` (CIS 357, feature-detected) is readable; `not_configured` without `COGNITO_M2M_CRM_CLIENT_ID`. One transaction: every CIS tenant except kind `internal` gets one `booking.b2b_partners` row (name, `active` only while in service with `trade.book`, else `suspended`; `m2m_client_id` = the AA-Partner client; USD on insert); a changed row is updated; a row it projected before whose tenant left CIS is suspended (never deleted); adoption guard: a staff-registered row (`projected_at` NULL) whose tenant CIS does not hold (CRM-seeded agencies, the AA-972 synthetic partner) is left untouched and staff-editable, counted `awaiting_cis`, and adopted once CIS holds the tenant; `projected_at` (bk-037) marks every row it derived from a CIS tenant; one audit row per change (`system:bk_tenant_pull`). Not deploy-gate exempt (seconds). |
+| `bk_tenant_erase` | AA-1093 L3 (bk-057, contract tenant.erasure.v1, tech lead decisions D3 / D8): the Booking step of the tenant offboarding erasure, `app/b2b/tenant_erase.py`. Queued by the `EraseSchedule` hook once per 5-minute slot while `catalog.v_tenant_erasure_v1` (the CIS saga's request feed, feature-detected; columns `request_id`, `tenant_id`, `phase`, `approved_plans`) is readable: a DRY RUN for a request in phase `plan` without a current plan (writes the `dry_run` log row the report view shows), an apply for a request in phase `apply` with an approved Booking hash (`approved_plans->>'booking'`) only while the kill switch `TENANT_ERASE_APPLY_ENABLED` is on (default off). Without the view: the CLI only. See "Tenant erasure". Not deploy-gate exempt (seconds). |
 | `bk_trip_plan_sync` | AA-1029 R4 (root ADR 0005 d3 / d7): queued by a maintenance hook once per 15-minute slot while `catalog.v_tour` is readable. One transaction: every catalog key without a plan gets one (`sellable = false`, `synced_at`, `created_by` NULL; `INSERT … ON CONFLICT DO NOTHING`); a staff plan of a key in the catalog gets `synced_at` once; a plan whose tour left the catalog is left alone. With `catalog.v_tour_price_reference_v1` readable (feature-detected), the CIS source price text is kept on the plan with the parsed amount / currency (reference only), a changed text clears the review; with `catalog.v_tour_price_reference_v2` (CIS 402, AA-1091) readable it is read instead, and CIS's confirmed or parsed structured reference replaces the parse (needs-review values fall back to it). One audit row per run that changed something (`system:bk_trip_plan_sync`, `trip_plan.synced`). Not deploy-gate exempt (seconds). |
 | `bk_price_recompute` | AA-1029 R4 (root ADR 0005 d3, ADR 0019 b15): queued by a maintenance hook whenever the watermark of its inputs moves (approvals, contract / rate / plan edits, component count, the UTC day; key = its hash). For every plan with a component or a computed row, one transaction each: the cost sheet (see "Tour price chain"), hand rows kept, the set stored only when it changed (audit `trip_plan.prices_recomputed`, dated history `cost_sheet`). A plan that fails is counted and the run raises at the end (retried; the others are stored). Payload `{plan_id?}`. Not deploy-gate exempt (seconds to a minute). |
 | `bk_case_lifecycle` | AA-682 S2 (bk-027): queued once per UTC day by the `OpsDailySchedule` hook (first pass at or after 01:00 UTC, key `bk_case_lifecycle:<UTC date>`). Moves open sold cases along the travel dates (`pre_departure`, `on_trip`, `completed`; see "Trip checks and the case lifecycle"), one gate notice `trip_case.gate_blocked` per blocked case / target / reasons (`notifications_reminder_uq`), and clears emergency contacts + check notes at trip end + 90 days. Batches of 200 cases, `FOR UPDATE SKIP LOCKED`, a savepoint per move. **DRY RUN first** (DM-7.2): a manual run is a DRY RUN unless `dry_run: false`; the scheduled run stays a DRY RUN until one live run over every case (no `case_ids`) has succeeded. Payload `{trigger, dry_run?, case_ids?}` (ids only, ≤ 50); result = mode, ops date + zone, move counts, moved / blocked case codes (≤ 50), cleared counts. Runs readable at `GET /booking/case-lifecycle/runs`. Not deploy-gate exempt (seconds). AA-969 (root ADR 0019 d16): the clearing never touches a case of the pilot tenant (`party_tenant_id`). |
@@ -1412,6 +1417,41 @@ environment (never `Settings.environment`, whose default is dev) and needs `ENVI
 refuses. Cutoff at least 7 days old, DRY RUN unless `dry_run: false` with `1 <= max_rows <= 1,000` (refused, not
 capped; 422 from the API, a failed job otherwise); the status says `override.enabled` for this deployment. It is never "the last live run" (scheduled runs stay DRY RUN, the 2x rule ignores it); the
 status shows it in its own `override` bucket and the audit summary starts with `override older_than <date>`.
+
+## Tenant erasure (AA-1093 L3, bk-057; root plan `docs/audits/2026-11-13-S279-session/aa1093-plan.md` Part 2)
+
+When an agency leaves, the CIS `tenant_erasure_saga` (orchestrator, root ADR 0019 d1) asks every app to erase its
+data after the exit window. **Booking anonymises, it does not delete (D3)**: one transaction per tenant, as role
+`booking`, with `booking.tenant_erase` set (the bk-057 guards let the redaction of the append-only tables through only
+then):
+
+| Step | What changes |
+|---|---|
+| `trip_cases` | `notes`, `inquiry_snapshot` of the agency's B2B cases -> NULL |
+| `trip_case_status_history` | the status notes of those cases (a cancel reason) -> NULL |
+| `supplier_bookings` | `notes`, `voucher_note` -> NULL; a `cancel_reason` -> `Erased` (the bk-026 CHECK keeps one on a cancelled row) |
+| `trip_case_checks` | emergency contact name / phone and note -> NULL, `cleared_at` stamped |
+| `notifications` | about those cases, checks and supplier bookings: `message` -> NULL, `data` -> its `reminder_key` only |
+| `b2b_partners` | `agency_name` -> `Erased agency <first 8 characters of the tenant id>`, status `suspended` |
+| `audit_logs` | of all those entities and the partner: `before` / `after` -> `{"redacted":"tenant_erased"}`, the partner rows' `entity_label` -> NULL |
+
+**Kept** under the accounting exception: quotes, holds, agency invoices with their bill-to snapshot, agency payments
+(counted under `kept`, never written). Not covered (stay as they are): trip case version and itinerary text (locked
+once approved or sent, bk-005; B2B versions hold tour titles), B2B cancellation waive reasons and desk override reasons
+(money records), operations file names. One `audit_logs` row `tenant.erased` (entity `tenant`, plan hash, counts) and
+one `booking.tenant_erasure_log` row per request and mode; an applied row makes `bk_tenant_pull` skip the agency
+(`erased_skipped`), so the CIS name is never written back while CIS still holds the tenant (CIS erases last).
+
+**Plan hash.** The DRY RUN computes per step its action, the rows it would change and
+`md5(string_agg(id || microsecond epoch of updated time))` (no row value); `plan_hash` = SHA-256 of the tenant id and
+the steps. An apply recomputes it in its transaction (advisory lock per tenant) and writes nothing but a `refused` log
+row (`plan_changed`, the DRY RUN row turns `stale`) when it differs from the approved hash. A second plan after an apply
+finds 0 rows. **Guards (D8), fail closed**, from `catalog.v_tenant_account_v1`: the pilot is always refused; outside
+`ENVIRONMENT=prod` only an `is_synthetic` tenant (CIS 401); a tenant the view does not hold or an unreadable view is
+refused. A DRY RUN is never refused (it reports `apply_allowed` / `refused`).
+
+CLI (ECS Exec on `aa-booking-dev-api`, role `booking`): `python -m app.b2b.tenant_erase --tenant <uuid>` (DRY RUN;
+`--request-id <uuid>` also records the plan for a saga request) and `... --apply --expect-plan <plan_hash>`.
 
 ## Health contract (ADR 0004 decision 9)
 
@@ -2074,6 +2114,17 @@ rows say "Moved (bk-056)", the dead B2C rows and `ops_docs_max_bytes` "Retired (
 `b2b_ops_timezone` and `b2b_ops_contact` stay in `settings`. The trip check seeding trigger function
 `trip_case_seed_checks()` (bk-027) is replaced so it reads `pre_departure_days` from the pricing policy (the approved
 version in force today, UTC), the same value the lifecycle job reads.
+
+### `bk-057` (AA-1093 L3 tenant erasure — needs `bk-001`, `bk-003`, `bk-014`, `bk-017`)
+
+A **contract** file (new triggers and column grants on existing tables, a cross-owner grant; MIG-4, the code PR raises
+readiness to bk-057). `booking.tenant_erasure_log` (UNIQUE `(request_id, mode)`; ids, counts, hashes and reason codes
+only; role `booking` SELECT / INSERT / UPDATE, no DELETE; RLS ENABLE + FORCE with the bk-049 policy pair) and the
+report view `booking.v_tenant_erasure_report_v1`, SELECT to `cis_app` (AA-CIS-Infra `db/owners.yaml`
+`booking.consumer_grants`, probe cell `consumer.contract_grants.bk-057`). `audit_logs` gets UPDATE on `before`,
+`after`, `entity_label` and `trip_case_status_history` UPDATE on `note` for role `booking`, each behind a BEFORE UPDATE
+guard that refuses any update unless `booking.tenant_erase` is set, and then lets through only the redaction (NULL or
+the marker). bk-058 is the next free key.
 
 ## Out of scope today
 
