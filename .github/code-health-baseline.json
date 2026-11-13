@@ -15,7 +15,6 @@
   "backend/app/b2b/departures.py::build_dates": 14,
   "backend/app/b2b/departures.py::evaluate": 11,
   "backend/app/b2b/legacy_cases.py::_case_plan": 11,
-  "backend/app/b2b/tenant_pull.py::run": 14,
   "backend/app/catalog/price_import.py::build_workbook": 13,
   "backend/app/catalog/price_import.py::check_shapes": 25,
   "backend/app/catalog/price_import.py::match": 33,

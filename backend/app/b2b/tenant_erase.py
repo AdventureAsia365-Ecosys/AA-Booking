@@ -574,13 +574,13 @@ def guard(req: Request, mode: str, *, prod: bool, apply_enabled: bool, now: date
     if req.not_before is not None and req.not_before > now:
         raise Refused("not_due", "the step's not_before has not passed")
     if req.is_pilot:
-        raise Refused("pilot_refused", "the pilot tenant is never erased (root ADR 0019 d16, AA-1093 D8)")
+        raise Refused("pilot_refused", "the pilot tenant is never erased (root ADR 0019 d16)")
     if mode != "apply":
         return
     if not apply_enabled:
         raise Refused("apply_disabled", "TENANT_ERASE_APPLY_ENABLED is off")
     if not prod and not req.is_synthetic:
-        raise Refused("not_synthetic", "outside prod only a synthetic tenant is erased (AA-1093 D8)")
+        raise Refused("not_synthetic", "outside prod only a synthetic tenant is erased")
     if not HASH_RE.match(req.approved_plan_hash or ""):
         raise Refused("approval_missing", "no approved Booking plan hash for this round")
     if req.source == "cis" and (req.approval_expires_at is None or req.approval_expires_at <= now):
