@@ -152,6 +152,7 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
 | API | FastAPI, Pydantic v2, uvicorn (keep-alive 105 s > ALB idle 100 s) |
 | DB access | asyncpg with plain SQL, no ORM in request paths; `ssl="require"` |
 | Lint / tests | ruff, pytest + pytest-asyncio, migration guard, integration tests on Postgres 15 |
+| Code-health ratchets | AA-1097, `.github/scripts/code_health.py` (limits + exemptions with reasons in `.github/code-health.json`): a new function over complexity 10 (Python: ruff C901 in **Lint**; TypeScript: ESLint `complexity` in **Frontend Build**) or a new source file over 800 lines (tests included; vendored kit core, fixtures exempt) fails; today's offenders sit in `.github/code-health-baseline.json`, may not get worse, and the baseline only shrinks: after an improvement run `python3 .github/scripts/code_health.py update` and commit it. `scripts/pre-push.sh` runs it too |
 | Runtime | ECS Fargate service `aa-booking-dev-api` on `aa-cis-dev-cluster` (acc2, us-west-1) |
 | Frontend | Staff admin in `frontend/` (AA-683): Next.js 16 App Router, React 19, TypeScript, Tailwind v4 on the UI kit core tokens (`frontend/ui/core`, root ADR 0016), react-query, TanStack Table. On ECS as its own service `aa-booking-dev-admin` (AA-911, `deploy-admin-dev.yml`, see Staff admin frontend; the Vercel project was retired in S272). Customer surface (O8) not started |
 

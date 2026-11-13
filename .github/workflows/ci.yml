@@ -102,6 +102,23 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
+      # AA-1097: code-health ratchets (.github/scripts/code_health.py, limits in .github/code-health.json). A new Python
+      # function over complexity 10 (ruff C901, the pin installed above) or a new source file over 800 lines fails; a
+      # function or file already in .github/code-health-baseline.json may not get worse, and the baseline only shrinks
+      # (also against the PR / queue base). Improved code: `python3 .github/scripts/code_health.py update`, commit the
+      # baseline. The TypeScript part runs in "Frontend Build" (it needs node_modules).
+      - name: Code health ratchets (Python complexity, file size)
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+        run: |
+          BASE_ARGS=()
+          case "$BASE_SHA" in
+            ""|0000000000000000000000000000000000000000) echo "::notice::No base commit: the shrink-only check against the base is skipped." ;;
+            *) git fetch --no-tags --depth=1 origin "$BASE_SHA" && BASE_ARGS=(--base "$BASE_SHA") ;;
+          esac
+          python3 .github/scripts/code_health.py check --kind python,files "${BASE_ARGS[@]}"
+
   # Unlike CIS (report-only), pip-audit FAILS here. The same job runs the AA-902 resource-ID check. This repo carries
   # the DB role / password flow, so a committed secret is the most expensive mistake it can make (AA-678 notes): the
   # gitleaks scan that ran here moved to .github/workflows/secret-scan.yml (AA-981 follow-up), check "gitleaks" on
@@ -605,6 +622,21 @@ jobs:
         run: |
           node ui/core/check-kit-copy.mjs --no-kit-disable app
           node ui/core/check-kit-copy.mjs --no-kit-disable ui/booking
+
+      # AA-1097: the TypeScript half of the code-health ratchet (ESLint's complexity rule through
+      # .github/scripts/code_health_eslint.mjs, this job's node_modules); the Python half and file size run in "Lint".
+      - name: Code health (TypeScript complexity)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+        run: |
+          BASE_ARGS=()
+          case "$BASE_SHA" in
+            ""|0000000000000000000000000000000000000000) echo "::notice::No base commit: the shrink-only check against the base is skipped." ;;
+            *) git fetch --no-tags --depth=1 origin "$BASE_SHA" && BASE_ARGS=(--base "$BASE_SHA") ;;
+          esac
+          python3 .github/scripts/code_health.py check --kind typescript "${BASE_ARGS[@]}"
 
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck

@@ -57,6 +57,10 @@ classify_file() {
   case "$f" in
     *.md | docs/*) groups+=" docs" ;;
   esac
+  # AA-1097: any source file (or the ratchet's own files) -> the code-health ratchets.
+  case "$f" in
+    *.py | *.ts | *.tsx | *.js | *.jsx | *.mjs | *.cjs | .github/code-health*) groups+=" code_health" ;;
+  esac
   echo "$groups"
 }
 
@@ -67,7 +71,7 @@ plan_checks() {
   local mode="$1"; shift
   local g all=" " f
   if [[ "$mode" != "fast" ]]; then
-    all=" hook py deps unit_full migrations fe trivyignore docs docs_tools "
+    all=" hook py code_health deps unit_full migrations fe trivyignore docs docs_tools "
   else
     for f in "$@"; do
       [[ -z "$f" ]] && continue
@@ -81,6 +85,7 @@ plan_checks() {
   [[ "$all" == *" hook "* ]] && echo "hook-self-test"
   [[ "$all" == *" trivyignore "* ]] && echo "trivyignore"
   if [[ "$all" == *" py "* ]]; then echo "ruff-check"; echo "ruff-format"; fi
+  [[ "$all" == *" code_health "* ]] && echo "code-health"
   [[ "$all" == *" deps "* ]] && echo "pip-audit"
   if [[ "$all" == *" unit_full "* ]]; then echo "unit-full"
   elif [[ "$all" == *" unit "* ]]; then echo "unit-changed"; fi
@@ -162,27 +167,28 @@ self_test() {
     if [[ "$got" == "$want" ]]; then echo "ok   $name"; else echo "FAIL $name"; echo "     want: $want"; echo "     got:  $got"; fails=$((fails + 1)); fi
   }
   local DOCS="docs-frontmatter docs-adr docs-aws-multiline docs-links"
-  local ALL="resource-ids hook-self-test trivyignore ruff-check ruff-format pip-audit unit-full docs-tools-tests $DOCS fe-lint fe-typecheck"
+  local ALL="resource-ids hook-self-test trivyignore ruff-check ruff-format code-health pip-audit unit-full docs-tools-tests $DOCS fe-lint fe-typecheck"
   expect "empty diff: resource IDs only" "resource-ids" fast
-  expect "app module" "resource-ids ruff-check ruff-format unit-changed" fast backend/app/routers/cases.py
-  expect "test file" "resource-ids ruff-check ruff-format unit-changed" fast backend/tests/unit/test_health.py
+  expect "app module" "resource-ids ruff-check ruff-format code-health unit-changed" fast backend/app/routers/cases.py
+  expect "test file" "resource-ids ruff-check ruff-format code-health unit-changed" fast backend/tests/unit/test_health.py
   expect "unit conftest -> targeted unit + warning (never the full suite in fast mode)" \
-    "resource-ids ruff-check ruff-format unit-changed" fast backend/tests/unit/conftest.py
+    "resource-ids ruff-check ruff-format code-health unit-changed" fast backend/tests/unit/conftest.py
   expect "pyproject -> targeted unit + warning" "resource-ids ruff-check ruff-format unit-changed" fast backend/pyproject.toml
   expect "requirements -> pip-audit + targeted unit + warning" "resource-ids ruff-check ruff-format pip-audit unit-changed" \
     fast backend/requirements-dev.txt
   expect "migration -> migration guard only" "resource-ids unit-changed" fast migrations/026_example.sql
-  expect "frontend -> lint + tsc, never build" "resource-ids fe-lint fe-typecheck" fast frontend/app/cases/page.tsx
+  expect "frontend -> lint + tsc, never build" "resource-ids code-health fe-lint fe-typecheck" fast frontend/app/cases/page.tsx
   expect "markdown -> docs lint" "resource-ids $DOCS" fast CONTEXT.md
   expect "markdown with a space in the name" "resource-ids $DOCS" fast "docs/a b.md"
   expect "non-ASCII markdown name" "resource-ids $DOCS" fast "docs/Tài liệu.md"
-  expect "docs tools -> their unit tests too" "resource-ids docs-tools-tests $DOCS" fast tools/docs/check_frontmatter.py
+  expect "docs tools -> their unit tests too" "resource-ids code-health docs-tools-tests $DOCS" fast tools/docs/check_frontmatter.py
   expect ".trivyignore" "resource-ids trivyignore" fast .trivyignore
+  expect "code-health baseline -> the ratchets" "resource-ids code-health" fast .github/code-health-baseline.json
   expect "workflow only -> the unit tests that read it" "resource-ids unit-changed" fast .github/workflows/ci.yml
   expect "release config -> unit tests" "resource-ids unit-changed" fast .release-please-manifest.json
   expect "hook files -> hook self-test" "resource-ids hook-self-test" fast scripts/pre-push.sh .githooks/pre-push
   expect "delete or rename -> link check" "resource-ids docs-links" fast :deleted-or-renamed
-  expect "mixed diff" "resource-ids ruff-check ruff-format unit-changed $DOCS fe-lint fe-typecheck" fast \
+  expect "mixed diff" "resource-ids ruff-check ruff-format code-health unit-changed $DOCS fe-lint fe-typecheck" fast \
     backend/app/db.py docs/implementation-notes/AA-993.md frontend/lib/config.ts migrations/026_x.sql
   expect "--full ignores the diff" "$ALL" full
   expect "--ci never skips by diff" "$ALL" ci README.md
@@ -444,6 +450,23 @@ run_check() {
       run_step "$id" "" "docs-lint.yml / Internal links (offline)" \
         "git ls-files -z '*.md' | xargs -0 -r lychee --config tools/docs/lychee.toml" -- \
         bash -c 'git ls-files -z "*.md" | xargs -0 -r lychee --config tools/docs/lychee.toml' ;;
+    code-health)
+      # AA-1097: complexity + file-size ratchets against the diff base. TypeScript complexity when frontend/ or the
+      # ratchet files changed (or --full / --ci); a missing ruff / frontend node_modules is a visible skip outside --ci.
+      local kinds="python,files" allow=(--allow-missing-tools) f
+      [[ "$MODE" == "ci" ]] && allow=()
+      [[ "$MODE" != "fast" ]] && kinds="python,files,typescript"
+      for f in "${CHANGED[@]}"; do
+        case "$f" in frontend/* | .github/code-health* | .github/scripts/code_health*) kinds="python,files,typescript" ;; esac
+      done
+      local base_args=()
+      git -C "$REPO_ROOT" rev-parse --verify -q "$BASE" >/dev/null && base_args=(--base "$BASE")
+      # The backend env's ruff (the CI pin) when ruff is not on PATH.
+      local ruff_env=()
+      [[ -n "$BACKEND_PY" ]] && ! command -v ruff >/dev/null 2>&1 && ruff_env=(env "PATH=$(dirname "$BACKEND_PY"):$PATH")
+      run_step "$id" "" "ci.yml / Lint / Code health ratchets (+ Frontend Build / Code health (TypeScript complexity))" \
+        "python3 .github/scripts/code_health.py check --kind $kinds ${base_args[*]}" -- \
+        "${ruff_env[@]}" python3 .github/scripts/code_health.py check --kind "$kinds" "${base_args[@]}" "${allow[@]}" ;;
     hook-self-test)
       run_step "$id" "" "this hook's own decision tests (not a CI step)" \
         "bash scripts/pre-push.sh --self-test" -- bash scripts/pre-push.sh --self-test ;;
