@@ -85,9 +85,30 @@ function Person({ person, at }: { person: PolicyPerson | null; at?: string | nul
 }
 
 /** Status pill; a pending row also gets its Approve button (or why it cannot be approved by this user) under it. */
-function StatusCell({ status, canApprove, canWrite, onApprove }: { status: PolicyStatus; canApprove: boolean; canWrite: boolean; onApprove: () => void }) {
+function StatusCell({
+  status,
+  canApprove,
+  canWrite,
+  dayPassed,
+  onApprove,
+}: {
+  status: PolicyStatus;
+  canApprove: boolean;
+  canWrite: boolean;
+  dayPassed: boolean;
+  onApprove: () => void;
+}) {
   const t = useT(R);
   if (status !== "pending") return <PolicyStatusBadge status={status} />;
+  // S280: a pending row past its day is never approved (409 effective_date_passed); say why instead of "Waiting".
+  if (dayPassed) {
+    return (
+      <span className="flex flex-col items-end gap-1.5 md:items-start">
+        <PolicyStatusBadge status={status} />
+        <span className="block text-xs leading-snug text-muted md:max-w-[160px]">{t("dayPassed")}</span>
+      </span>
+    );
+  }
   return (
     <span className="flex flex-col items-end gap-1.5 md:items-start">
       <PolicyStatusBadge status={status} />
@@ -147,7 +168,7 @@ function useRuleColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>
       header: t("colStatus"),
       accessorKey: "status",
       cell: ({ row }) => (
-        <StatusCell status={row.original.status} canApprove={row.original.can_approve} canWrite={canWrite} onApprove={() => onApprove({ kind: "rule", row: row.original })} />
+        <StatusCell status={row.original.status} canApprove={row.original.can_approve} canWrite={canWrite} dayPassed={row.original.day_passed} onApprove={() => onApprove({ kind: "rule", row: row.original })} />
       ),
     },
     { id: "created_by", header: t("colEnteredBy"), accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => <Person person={row.original.created_by} at={row.original.created_by ? row.original.created_at : null} /> },
@@ -179,7 +200,7 @@ function useFxColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>) 
       header: t("colStatus"),
       accessorKey: "status",
       cell: ({ row }) => (
-        <StatusCell status={row.original.status} canApprove={row.original.can_approve} canWrite={canWrite} onApprove={() => onApprove({ kind: "fx", row: row.original })} />
+        <StatusCell status={row.original.status} canApprove={row.original.can_approve} canWrite={canWrite} dayPassed={row.original.day_passed} onApprove={() => onApprove({ kind: "fx", row: row.original })} />
       ),
     },
     { id: "created_by", header: t("colEnteredBy"), accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => <Person person={row.original.created_by} at={row.original.created_by ? row.original.created_at : null} /> },

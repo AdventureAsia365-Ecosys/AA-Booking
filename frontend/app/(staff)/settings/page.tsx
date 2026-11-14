@@ -125,6 +125,9 @@ function GeneralTab() {
   const staff = useStaff();
   const { name, roleLabel } = staffDisplay(staff);
   const [theme, setTheme] = useThemeChoice();
+  // S280: the commercial values come from the pricing policy (pricing_policy.read: every role that prices or bills).
+  // A role outside it (content creators) does not see the block, rather than an access error on its own settings.
+  const canReadPolicy = useCan("pricing_policy.read");
   return (
     <div className="flex flex-col gap-8">
       <Block
@@ -168,12 +171,14 @@ function GeneralTab() {
         />
       </Block>
 
-      <Block
-        title="Commercial defaults"
-        description="The values in force today that every quote and agency invoice uses. Read-only here: they change on Pricing › Policy and Agency billing › Settings, with a second person's approval where the page asks for it."
-      >
-        <CommercialDefaults />
-      </Block>
+      {canReadPolicy && (
+        <Block
+          title="Commercial defaults"
+          description="The values in force today that every quote and agency invoice uses. Read-only here: they change on Pricing › Policy and Agency billing › Settings, with a second person's approval where the page asks for it."
+        >
+          <CommercialDefaults />
+        </Block>
+      )}
     </div>
   );
 }

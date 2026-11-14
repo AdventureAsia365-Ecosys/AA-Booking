@@ -255,6 +255,9 @@ export function CancellationFees() {
               {t("approve")}
             </Button>
           )}
+          {row.original.status === "pending" && row.original.day_passed && (
+            <span className="text-xs text-muted">{t("cxDayPassed")}</span>
+          )}
           {canWrite && (
             <LinkButton onClick={() => setCreating({ copyOf: row.original })}>{t("cxCopy")}</LinkButton>
           )}

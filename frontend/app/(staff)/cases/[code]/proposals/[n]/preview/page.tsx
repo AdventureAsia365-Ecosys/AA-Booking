@@ -57,13 +57,25 @@ function validityText(listing: PolicyListing | undefined): string {
   return typeof value === "number" ? `Valid for ${value} days once sent` : "Valid for the quote validity once sent";
 }
 
+/** The deposit follows the agency's payment terms on a b2b case and the customer invoice schedule on a b2c case. */
+function depositText(channel: string): string {
+  return channel === "b2b" ? " · deposit per the agency's payment terms" : " · deposit as set on the customer invoice";
+}
+
 export default function VersionPreviewPage({ params }: { params: Promise<{ code: string; n: string }> }) {
   const { code: rawCode, n: rawN } = use(params);
   const code = decodeURIComponent(rawCode);
   const n = Number(rawN);
   const { tripCase, version } = useVersion(code, n);
   // S280: quote validity is the pricing policy value in force (the booking.settings row is retired since bk-056).
-  const policy = useQuery({ queryKey: ["pricing", "policy"], queryFn: () => policyParamsApi.list(), staleTime: 10 * 60_000 });
+  // Every role that reads a case reads the pricing policy too; the guard keeps a narrower role on the generic line.
+  const canReadPolicy = useCan("pricing_policy.read");
+  const policy = useQuery({
+    queryKey: ["pricing", "policy"],
+    queryFn: () => policyParamsApi.list(),
+    staleTime: 10 * 60_000,
+    enabled: canReadPolicy,
+  });
   const canWrite = useCan("version.write");
   const router = useRouter();
 
@@ -325,7 +337,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                     ) : (
                       validity
                     )}
-                    {" · deposit per the agency's payment terms"}
+                    {depositText(c.channel)}
                   </p>
                 </>
               )}

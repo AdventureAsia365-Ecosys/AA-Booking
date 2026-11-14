@@ -50,6 +50,9 @@ CASE
     ELSE 'superseded'
 END
 """
+# S280: a pending row whose day has passed can no longer be approved (approve_row: 409 effective_date_passed), so the
+# list says so and offers no Approve button.
+DAY_PASSED = "(a.id IS NULL AND p.{day} < $1)"
 
 RULES_SQL = f"""
 WITH in_force AS (
@@ -64,7 +67,7 @@ SELECT p.id::text AS id, p.channel, p.target_margin, p.floor_margin, p.peak_upli
        p.created_at, p.created_by,
        cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
-       {_STATUS.format(day="valid_from")} AS status
+       {_STATUS.format(day="valid_from")} AS status, {DAY_PASSED.format(day="valid_from")} AS day_passed
 FROM booking.pricing_rules p
 LEFT JOIN booking.policy_approvals a ON a.pricing_rule_id = p.id
 LEFT JOIN booking.staff_users cs ON cs.cis_user_id = p.created_by
@@ -85,7 +88,7 @@ WITH in_force AS (
 SELECT p.id::text AS id, p.currency, p.rate_per_usd, p.buffer_pct, p.as_of, p.source, p.created_at,
        p.created_by, cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
-       {_STATUS.format(day="as_of")} AS status
+       {_STATUS.format(day="as_of")} AS status, {DAY_PASSED.format(day="as_of")} AS day_passed
 FROM booking.fx_rates p
 LEFT JOIN booking.policy_approvals a ON a.fx_rate_id = p.id
 LEFT JOIN booking.staff_users cs ON cs.cis_user_id = p.created_by
@@ -128,6 +131,8 @@ def _person(ref: str | None, name: str | None) -> dict[str, Any] | None:
 
 def _common(row: Any, staff: Staff) -> dict[str, Any]:
     pending = row["status"] == "pending"
+    # Rows read without DAY_PASSED (agency tier discounts and rate cards) have no approve-by-day rule.
+    day_passed = pending and bool(row.get("day_passed"))
     return {
         "id": row["id"],
         "status": row["status"],
@@ -136,7 +141,11 @@ def _common(row: Any, staff: Staff) -> dict[str, Any]:
         "approved_by": _person(row["approved_by"], row["approved_by_name"]),
         "approved_at": row["approved_at"],
         # Maker-checker, as the approve endpoint decides it (the UI only shows the button).
-        "can_approve": pending and staff.can("pricing.write") and row["created_by"] != staff.cis_user_id,
+        "can_approve": pending
+        and not day_passed
+        and staff.can("pricing.write")
+        and row["created_by"] != staff.cis_user_id,
+        "day_passed": day_passed,
     }
 
 

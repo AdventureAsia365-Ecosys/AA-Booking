@@ -482,7 +482,8 @@ WITH in_force AS (
 SELECT p.id::text AS id, p.channel, p.trip_plan_id::text AS trip_plan_id, tp.source_id, p.valid_from, p.title,
        p.tiers::text AS tiers, p.note, p.created_at, p.created_by, cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
-       {pricing_policy._STATUS.format(day="valid_from")} AS status
+       {pricing_policy._STATUS.format(day="valid_from")} AS status,
+       {pricing_policy.DAY_PASSED.format(day="valid_from")} AS day_passed
 FROM booking.cancellation_policies p
 LEFT JOIN booking.trip_plans tp ON tp.id = p.trip_plan_id
 LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id

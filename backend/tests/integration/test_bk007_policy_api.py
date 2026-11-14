@@ -151,3 +151,35 @@ async def test_fx_and_rule_maker_checker(admin: asyncpg.Connection, migrated_boo
         )
     ]
     assert actions == ["fx_rate.created", "fx_rate.approved", "pricing_rule.created", "pricing_rule.approved"]
+
+
+async def test_pending_row_past_its_day_is_not_offered_for_approval(
+    admin: asyncpg.Connection, migrated_booking_dsn: str
+) -> None:
+    """S280 (AA-1096): a pending row whose day has passed is listed with ``day_passed`` and no Approve button; the
+    approve call is 409 ``effective_date_passed``. The staff API refuses a backdated row (422 effective_in_past), so
+    the row (an older data state) is written directly."""
+    yesterday = datetime.now(UTC).date() - timedelta(days=1)
+    fx_id = await admin.fetchval(
+        "INSERT INTO booking.fx_rates (currency, rate_per_usd, buffer_pct, as_of, source, created_by)"
+        " VALUES ('EUR', 0.92, 0.02, $1, 'manual-dev', $2) RETURNING id::text",
+        yesterday,
+        MAKER,
+    )
+    settings = Settings(database_url=migrated_booking_dsn, db_ssl="disable", environment="test", git_sha="ci")
+    db, cis = Database(settings), LocalCis()
+    app = create_app(settings, db, cis.verifier())
+    checker = {"Authorization": f"Bearer {cis.token(sub=CHECKER, cis_role='admin')}"}
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://booking/booking/pricing") as client:
+            listed = await client.get("/fx-rates?currency=EUR", headers=checker)
+            approve = await client.post(f"/fx-rates/{fx_id}/approve", headers=checker)
+            rules = await client.get("/rules", headers=checker)
+    finally:
+        await db.close()
+    assert listed.status_code == 200, listed.text
+    (row,) = [r for r in listed.json()["items"] if r["id"] == fx_id]
+    assert row["status"] == "pending" and row["day_passed"] is True and row["can_approve"] is False
+    assert approve.status_code == 409 and approve.json()["detail"] == "effective_date_passed"
+    assert rules.status_code == 200 and all(r["day_passed"] is False for r in rules.json()["items"])

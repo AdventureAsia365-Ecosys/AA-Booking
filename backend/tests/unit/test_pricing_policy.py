@@ -232,6 +232,21 @@ async def test_created_row_vanishing_is_not_found() -> None:
 # ── Service: approve (maker-checker) ─────────────────────────────────────────
 
 
+def test_pending_row_past_its_day_offers_no_approve() -> None:
+    """S280: approve_row refuses a pending row whose day has passed (409 effective_date_passed), so the list sets
+    ``day_passed`` and never offers the button; agency rows (no ``day_passed`` column) keep the old rule."""
+    passed = {**RULE_ROW, "valid_from": TODAY - timedelta(days=1), "day_passed": True}
+    conn = ScriptedConn().on("FROM booking.pricing_rules p", [passed]).on("FROM booking.fx_rates p", [FX_ROW])
+    item = _client(ADMIN, conn).get("/booking/pricing/rules").json()["items"][0]
+    assert item["can_approve"] is False and item["day_passed"] is True
+    assert "DAY_PASSED" not in policy.RULES_SQL and "AS day_passed" in policy.RULES_SQL
+    assert "AS day_passed" in policy.FX_SQL
+    fx = _client(ADMIN, conn).get("/booking/pricing/fx-rates").json()["items"][0]
+    assert fx["can_approve"] is True and fx["day_passed"] is False
+    approved = {**_approved(RULE_ROW), "day_passed": False}
+    assert policy._common(approved, ADMIN)["day_passed"] is False
+
+
 def _approve_conn(policy_row: Any, insert: Any = "OK") -> ScriptedConn:
     return ScriptedConn().on("a.id AS approval_id", policy_row).on("INSERT INTO booking.policy_approvals", insert)
 
