@@ -19,6 +19,7 @@ from app.db import Database
 from app.main import create_app
 from app.pricing import policy_params, policy_values
 from app.settings import Settings
+from tests.integration.conftest import as_booking_owner
 from tests.staff_tokens import LocalCis
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -206,7 +207,7 @@ async def test_draft_submit_withdraw_reject_and_finance_group(api: tuple[httpx.A
 
 
 async def test_integers_value_is_accepted_and_a_stale_draft_can_be_discarded(
-    api: tuple[httpx.AsyncClient, dict],
+    api: tuple[httpx.AsyncClient, dict], admin: asyncpg.Connection
 ) -> None:
     """S280 (AA-1096 settings UI audit): the agency invoice reminder steps (an ``integers`` parameter) take JSON
     numbers (the body type used to refuse them with 422); another maker's draft is discarded by the parameter's
@@ -214,11 +215,21 @@ async def test_integers_value_is_accepted_and_a_stale_draft_can_be_discarded(
     client, h = api
     later = str(datetime.now(UTC).date() + timedelta(days=30))
     steps = {"key": "agency_reminder_steps_days", "value": [10, 3], "effective_from": later, "reason": "Earlier"}
-    proposed = await client.post("/policy", json=steps, headers=h[FINANCE])
-    assert proposed.status_code == 201, proposed.text
-    assert proposed.json()["value"] == [3, 10] and proposed.json()["status"] == "pending"
-    withdrawn = await client.post(f"/policy/{proposed.json()['id']}/withdraw", headers=h[FINANCE])
-    assert withdrawn.status_code == 200 and withdrawn.json()["status"] == "withdrawn"
+    try:
+        proposed = await client.post("/policy", json=steps, headers=h[FINANCE])
+        assert proposed.status_code == 201, proposed.text
+        assert proposed.json()["value"] == [3, 10] and proposed.json()["status"] == "pending"
+        withdrawn = await client.post(f"/policy/{proposed.json()['id']}/withdraw", headers=h[FINANCE])
+        assert withdrawn.status_code == 200 and withdrawn.json()["status"] == "withdrawn"
+    finally:
+        # agency_reminder_steps_days is a bk-056 seed key: test_bk056_schema deletes and re-runs that seed, and a
+        # version 2 left here (withdrawn, replaces_id = the seed row) would block its DELETE with a foreign key error.
+        mine = (
+            "SELECT id FROM booking.pricing_policy WHERE param_key = 'agency_reminder_steps_days' AND created_by = $1"
+        )
+        async with as_booking_owner(admin):
+            await admin.execute(f"DELETE FROM booking.pricing_policy_events WHERE policy_id IN ({mine})", FINANCE)  # noqa: S608
+            await admin.execute(f"DELETE FROM booking.pricing_policy WHERE id IN ({mine})", FINANCE)  # noqa: S608
 
     change = {"key": "surcharge_notice_days", "value": 25, "effective_from": later, "reason": "Draft", "submit": False}
     draft = (await client.post("/policy", json=change, headers=h[FINANCE])).json()
