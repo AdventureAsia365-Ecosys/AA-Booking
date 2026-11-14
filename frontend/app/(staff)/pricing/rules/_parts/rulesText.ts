@@ -8,7 +8,14 @@ import { R, type RKey } from "./messages";
 
 export type RT = ReturnType<typeof useT<typeof R.en>>;
 
-export const TONE: Record<PolicyStatus, BookingTone> = { pending: "warning", in_force: "success", scheduled: "info", superseded: "neutral" };
+export const TONE: Record<PolicyStatus, BookingTone> = {
+  pending: "warning",
+  in_force: "success",
+  scheduled: "info",
+  superseded: "neutral",
+  rejected: "danger",
+  withdrawn: "neutral",
+};
 
 export function channelLabel(t: RT, channel: string): string {
   const key = `channel_${channel}` as RKey;

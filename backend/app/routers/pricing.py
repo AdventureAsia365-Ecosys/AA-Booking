@@ -5,7 +5,8 @@ currency with the pricing rule and FX rates in force today. It writes nothing: i
 staff use while building a version. ``POST …/versions/{n}/price`` (routers/trip_cases.py) runs the same
 ``app.pricing.service.price`` on the version's stored cost lines and saves the total.
 
-``/booking/pricing/rules`` and ``/booking/pricing/fx-rates`` (GET list, POST new pending row, POST ``/{id}/approve``)
+``/booking/pricing/rules`` and ``/booking/pricing/fx-rates`` (GET list, POST new pending row, POST ``/{id}/approve``;
+S280 bk-058: ``/{id}/reject`` with a reason by a second person, ``/{id}/withdraw`` by its maker)
 manage the policy rows themselves with maker-checker (``app.pricing.policy``, bk-007): reads need ``pricing.read``,
 writes and approvals ``pricing.write`` (admin, contracting), and the creator of a row cannot approve it (403).
 ``/booking/pricing/cancellation-policies`` (AA-974, bk-021) does the same for the B2B cancellation-fee schedules
@@ -234,6 +235,26 @@ async def approve_rule(rule_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -
         return await policy.approve_rule(conn, staff, str(rule_id), today=_today())
 
 
+class RowDecision(BaseModel):
+    """S280 (bk-058): a rejection of a pending pricing rule, FX rate or cancellation policy (reason required)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=policy.MAX_REASON)
+
+
+@router.post("/rules/{rule_id}/reject")
+async def reject_rule(rule_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.close_rule(conn, staff, str(rule_id), event="rejected", reason=body.reason, today=_today())
+
+
+@router.post("/rules/{rule_id}/withdraw")
+async def withdraw_rule(rule_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.close_rule(conn, staff, str(rule_id), event="withdrawn", reason=None, today=_today())
+
+
 @router.get("/fx-rates")
 async def list_fx_rates(
     staff: CanPrice,
@@ -257,6 +278,18 @@ async def create_fx_rate(body: FxRateCreate, staff: CanWritePricing, pool: Pool)
 async def approve_fx_rate(fx_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.approve_fx_rate(conn, staff, str(fx_id), today=_today())
+
+
+@router.post("/fx-rates/{fx_id}/reject")
+async def reject_fx_rate(fx_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.close_fx_rate(conn, staff, str(fx_id), event="rejected", reason=body.reason, today=_today())
+
+
+@router.post("/fx-rates/{fx_id}/withdraw")
+async def withdraw_fx_rate(fx_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy.close_fx_rate(conn, staff, str(fx_id), event="withdrawn", reason=None, today=_today())
 
 
 # ── B2B cancellation-fee policies (AA-974, bk-021, same maker-checker) ───────
@@ -306,6 +339,24 @@ async def create_cancellation_policy(
 async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await cancellation.approve_policy(conn, staff, str(policy_id), today=_today())
+
+
+@router.post("/cancellation-policies/{policy_id}/reject")
+async def reject_cancellation_policy(
+    policy_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await cancellation.close_policy(
+            conn, staff, str(policy_id), event="rejected", reason=body.reason, today=_today()
+        )
+
+
+@router.post("/cancellation-policies/{policy_id}/withdraw")
+async def withdraw_cancellation_policy(policy_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await cancellation.close_policy(
+            conn, staff, str(policy_id), event="withdrawn", reason=None, today=_today()
+        )
 
 
 # ── Pricing policy parameters (AA-1091, bk-050, root ADR 0005b d15) ─────────

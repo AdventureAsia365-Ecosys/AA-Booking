@@ -33,6 +33,7 @@ import {
   type BookingTone,
   type ColumnDef,
 } from "@/ui";
+import { CloseRowButtons, ClosedNote } from "../../_shared/CloseRow";
 import { M, type MessageKey } from "./messages";
 import { errorText } from "./policyUi";
 
@@ -41,6 +42,8 @@ const TONE: Record<PolicyStatus, BookingTone> = {
   in_force: "success",
   scheduled: "info",
   superseded: "neutral",
+  rejected: "danger",
+  withdrawn: "neutral",
 };
 
 type TierText = { min_days: string; fee_pct: string };
@@ -242,6 +245,7 @@ export function CancellationFees() {
         <span className="text-xs text-muted">
           {t("histMadeBy", person(row.original.created_by))}
           {row.original.approved_by ? ` · ${t("histApprovedBy", person(row.original.approved_by))}` : ""}
+          <ClosedNote row={row.original} />
         </span>
       ),
     },
@@ -258,6 +262,7 @@ export function CancellationFees() {
           {row.original.status === "pending" && row.original.day_passed && (
             <span className="text-xs text-muted">{t("cxDayPassed")}</span>
           )}
+          <CloseRowButtons kind="cancellation-policies" row={row.original} what={`${row.original.title} (${row.original.valid_from})`} />
           {canWrite && (
             <LinkButton onClick={() => setCreating({ copyOf: row.original })}>{t("cxCopy")}</LinkButton>
           )}

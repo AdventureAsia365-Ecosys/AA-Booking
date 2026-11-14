@@ -9,7 +9,12 @@ Row status, on the pricing day ``today``:
 - ``pending``: not approved yet, never used for a price;
 - ``in_force``: the newest approved row of its channel / currency dated on or before ``today``;
 - ``scheduled``: approved, dated after ``today`` (it takes over on that day);
-- ``superseded``: approved, older than the row in force.
+- ``superseded``: approved, older than the row in force;
+- ``rejected`` / ``withdrawn`` (S280, bk-058 ``booking.policy_row_closures``): a pending row a second person
+  rejected (with a reason) or its maker withdrew; it never prices anything and is never approved.
+
+S280: a new row takes effect today or later (422 ``effective_in_past``), and a row whose day has passed is never
+approved (409 ``effective_date_passed``). Approve, reject and withdraw take a per-row advisory lock, so they never race.
 """
 
 from __future__ import annotations
@@ -44,6 +49,7 @@ FX_FIELDS = ("currency", "rate_per_usd", "buffer_pct", "as_of", "source")
 
 _STATUS = """
 CASE
+    WHEN c.id IS NOT NULL THEN c.event
     WHEN a.id IS NULL THEN 'pending'
     WHEN p.id IN (SELECT id FROM in_force) THEN 'in_force'
     WHEN p.{day} > $1 THEN 'scheduled'
@@ -51,8 +57,19 @@ CASE
 END
 """
 # S280: a pending row whose day has passed can no longer be approved (approve_row: 409 effective_date_passed), so the
-# list says so and offers no Approve button.
-DAY_PASSED = "(a.id IS NULL AND p.{day} < $1)"
+# list says so and offers no Approve button; it can still be rejected or withdrawn (bk-058). Needs CLOSURE_JOIN.
+DAY_PASSED = "(a.id IS NULL AND c.id IS NULL AND p.{day} < $1)"
+
+# S280 (bk-058): the closure of a row (rejected / withdrawn), joined as ``c`` with its actor's name as ``ccs``
+# (:data:`CLOSURE_JOIN`); every reader of :data:`_STATUS` joins it.
+CLOSURE_COLUMNS = (
+    "c.event AS closed_event, c.actor AS closed_by, ccs.name AS closed_by_name, c.created_at AS closed_at,"
+    " c.reason AS close_reason"
+)
+CLOSURE_JOIN = (
+    "LEFT JOIN booking.policy_row_closures c ON c.{column} = p.id"
+    " LEFT JOIN booking.staff_users ccs ON ccs.cis_user_id = c.actor"
+)
 
 RULES_SQL = f"""
 WITH in_force AS (
@@ -66,10 +83,12 @@ SELECT p.id::text AS id, p.channel, p.target_margin, p.floor_margin, p.peak_upli
        p.valid_from, p.note, p.rrp_markup_pct, p.child_pct, p.infant_flat_usd, p.early_days, p.early_discount_pts,
        p.created_at, p.created_by,
        cs.name AS created_by_name,
-       a.approved_by, aps.name AS approved_by_name, a.approved_at,
-       {_STATUS.format(day="valid_from")} AS status, {DAY_PASSED.format(day="valid_from")} AS day_passed
+       a.approved_by, aps.name AS approved_by_name, a.approved_at, {CLOSURE_COLUMNS},
+       {_STATUS.format(day="valid_from")} AS status,
+       {DAY_PASSED.format(day="valid_from")} AS day_passed
 FROM booking.pricing_rules p
 LEFT JOIN booking.policy_approvals a ON a.pricing_rule_id = p.id
+{CLOSURE_JOIN.format(column="pricing_rule_id")}
 LEFT JOIN booking.staff_users cs ON cs.cis_user_id = p.created_by
 LEFT JOIN booking.staff_users aps ON aps.cis_user_id = a.approved_by
 WHERE ($2::text IS NULL OR p.channel = $2) AND ($3::uuid IS NULL OR p.id = $3)
@@ -87,10 +106,12 @@ WITH in_force AS (
 )
 SELECT p.id::text AS id, p.currency, p.rate_per_usd, p.buffer_pct, p.as_of, p.source, p.created_at,
        p.created_by, cs.name AS created_by_name,
-       a.approved_by, aps.name AS approved_by_name, a.approved_at,
-       {_STATUS.format(day="as_of")} AS status, {DAY_PASSED.format(day="as_of")} AS day_passed
+       a.approved_by, aps.name AS approved_by_name, a.approved_at, {CLOSURE_COLUMNS},
+       {_STATUS.format(day="as_of")} AS status,
+       {DAY_PASSED.format(day="as_of")} AS day_passed
 FROM booking.fx_rates p
 LEFT JOIN booking.policy_approvals a ON a.fx_rate_id = p.id
+{CLOSURE_JOIN.format(column="fx_rate_id")}
 LEFT JOIN booking.staff_users cs ON cs.cis_user_id = p.created_by
 LEFT JOIN booking.staff_users aps ON aps.cis_user_id = a.approved_by
 WHERE ($2::text IS NULL OR p.currency = $2) AND ($3::uuid IS NULL OR p.id = $3)
@@ -99,14 +120,16 @@ LIMIT $4
 """  # noqa: S608 — constant fragments only
 
 POLICY_SQL = {
-    "pricing_rule": "SELECT p.created_by, p.valid_from AS day, a.id AS approval_id FROM booking.pricing_rules p"
-    " LEFT JOIN booking.policy_approvals a ON a.pricing_rule_id = p.id WHERE p.id = $1::uuid",
-    "fx_rate": "SELECT p.created_by, p.as_of AS day, a.id AS approval_id FROM booking.fx_rates p"
-    " LEFT JOIN booking.policy_approvals a ON a.fx_rate_id = p.id WHERE p.id = $1::uuid",
+    "pricing_rule": "SELECT p.created_by, p.valid_from AS day, a.id AS approval_id, c.id AS closure_id"
+    " FROM booking.pricing_rules p LEFT JOIN booking.policy_approvals a ON a.pricing_rule_id = p.id"
+    " LEFT JOIN booking.policy_row_closures c ON c.pricing_rule_id = p.id WHERE p.id = $1::uuid",
+    "fx_rate": "SELECT p.created_by, p.as_of AS day, a.id AS approval_id, c.id AS closure_id"
+    " FROM booking.fx_rates p LEFT JOIN booking.policy_approvals a ON a.fx_rate_id = p.id"
+    " LEFT JOIN booking.policy_row_closures c ON c.fx_rate_id = p.id WHERE p.id = $1::uuid",
     # bk-021 (AA-974): B2B cancellation-fee policies, same maker-checker (app.b2b.cancellation).
-    "cancellation_policy": "SELECT p.created_by, p.valid_from AS day, a.id AS approval_id"
-    " FROM booking.cancellation_policies p"
-    " LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id WHERE p.id = $1::uuid",
+    "cancellation_policy": "SELECT p.created_by, p.valid_from AS day, a.id AS approval_id, c.id AS closure_id"
+    " FROM booking.cancellation_policies p LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id"
+    " LEFT JOIN booking.policy_row_closures c ON c.cancellation_policy_id = p.id WHERE p.id = $1::uuid",
 }
 APPROVE_SQL = {
     "pricing_rule": "INSERT INTO booking.policy_approvals (entity_type, pricing_rule_id, approved_by)"
@@ -116,6 +139,15 @@ APPROVE_SQL = {
     "cancellation_policy": "INSERT INTO booking.policy_approvals (entity_type, cancellation_policy_id, approved_by)"
     " VALUES ('cancellation_policy', $1::uuid, $2)",
 }
+_CLOSE_INSERT = "INSERT INTO booking.policy_row_closures (entity_type, {column}, event, maker, actor, reason)"
+CLOSE_SQL = {
+    "pricing_rule": _CLOSE_INSERT.format(column="pricing_rule_id") + " VALUES ($1, $2::uuid, $3, $4, $5, $6)",
+    "fx_rate": _CLOSE_INSERT.format(column="fx_rate_id") + " VALUES ($1, $2::uuid, $3, $4, $5, $6)",
+    "cancellation_policy": _CLOSE_INSERT.format(column="cancellation_policy_id")
+    + " VALUES ($1, $2::uuid, $3, $4, $5, $6)",
+}
+LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('booking.policy_row:' || $1))"
+MAX_REASON = 300  # technical-constant: text column bound, the bk-058 CHECK (reason 1 to 300 characters)
 NOT_FOUND = {
     "pricing_rule": "rule_not_found",
     "fx_rate": "fx_rate_not_found",
@@ -149,9 +181,25 @@ def _common(row: Any, staff: Staff) -> dict[str, Any]:
     }
 
 
+def closable(row: Any, staff: Staff) -> dict[str, Any]:
+    """S280 (bk-058): the reject / withdraw fields of a pricing rule, FX rate or cancellation policy row (rows read
+    with :data:`CLOSURE_COLUMNS`). A second person rejects a pending row with a reason; its maker withdraws it."""
+    pending = row["status"] == "pending"
+    writer = staff.can("pricing.write")
+    mine = row["created_by"] == staff.cis_user_id
+    return {
+        "can_reject": pending and writer and not mine,
+        "can_withdraw": pending and writer and mine,
+        "closed_by": _person(row["closed_by"], row["closed_by_name"]),
+        "closed_at": row["closed_at"],
+        "close_reason": row["close_reason"],
+    }
+
+
 def _rule(row: Any, staff: Staff) -> dict[str, Any]:
     return {
         **_common(row, staff),
+        **closable(row, staff),
         "channel": row["channel"],
         "target_margin": row["target_margin"],
         "floor_margin": row["floor_margin"],
@@ -170,6 +218,7 @@ def _rule(row: Any, staff: Staff) -> dict[str, Any]:
 def _fx(row: Any, staff: Staff) -> dict[str, Any]:
     return {
         **_common(row, staff),
+        **closable(row, staff),
         "currency": row["currency"].strip(),
         "rate_per_usd": row["rate_per_usd"],
         "buffer_pct": row["buffer_pct"],
@@ -344,17 +393,59 @@ async def create_fx_rate(
     return row
 
 
+async def _locked_row(conn: asyncpg.Connection, entity_type: str, entity_id: str) -> Any:
+    """The row's maker, day, approval and closure, under a per-row lock (approve, reject and withdraw never race)."""
+    await conn.execute(LOCK_SQL, entity_id)
+    row = await conn.fetchrow(POLICY_SQL[entity_type], entity_id)
+    if row is None:
+        raise NotFound(NOT_FOUND[entity_type], f"no {entity_type.replace('_', ' ')} with this id")
+    return row
+
+
+def _close_reason(event: str, reason: str | None) -> str | None:
+    text = (reason or "").strip()
+    if event == "withdrawn":
+        return text or None
+    if not text or len(text) > MAX_REASON:
+        raise Invalid("reason_required", f"a reason of 1 to {MAX_REASON} characters is required")
+    return text
+
+
+async def close_row(
+    conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str, *, event: str, reason: str | None
+) -> None:
+    """S280 (bk-058): end a pending row: ``rejected`` by a second person with a reason, ``withdrawn`` by its maker.
+    404 / 409 ``already_approved`` / ``already_decided`` / 403 ``own_row`` / ``not_maker`` / 422 ``reason_required``."""
+    why = _close_reason(event, reason)
+    row = await _locked_row(conn, entity_type, entity_id)
+    if row["approval_id"] is not None:
+        raise Conflict("already_approved", "this row is already approved")
+    if row["closure_id"] is not None:
+        raise Conflict("already_decided", "this row was already rejected or withdrawn")
+    mine = row["created_by"] == staff.cis_user_id
+    if event == "rejected" and mine:
+        raise Forbidden("own_row", "maker-checker: withdraw a row you created instead of rejecting it")
+    if event == "withdrawn" and not mine:
+        raise Forbidden("not_maker", "only the maker withdraws a pending row")
+    try:
+        await conn.execute(CLOSE_SQL[entity_type], entity_type, entity_id, event, row["created_by"],
+                           staff.cis_user_id, why)  # fmt: skip
+    except asyncpg.UniqueViolationError:
+        raise Conflict("already_decided", "this row was already rejected or withdrawn") from None
+    except asyncpg.CheckViolationError:  # the bk-058 CHECKs and guard: same rules as above
+        raise Conflict("already_decided", "this row can no longer be rejected or withdrawn") from None
+
+
 async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str, *, today: date) -> None:
     """Second-person approval of one policy row (``POLICY_SQL`` entity types); 404 / 409 / 403 ``own_row``.
 
     S280: a row whose day has passed is 409 ``effective_date_passed``: approved now it would apply backwards, or be
     superseded at once by a newer row (the maker enters it again with a later day)."""
-    not_found = NOT_FOUND[entity_type]
-    row = await conn.fetchrow(POLICY_SQL[entity_type], entity_id)
-    if row is None:
-        raise NotFound(not_found, f"no {entity_type.replace('_', ' ')} with this id")
+    row = await _locked_row(conn, entity_type, entity_id)
     if row["approval_id"] is not None:
         raise Conflict("already_approved", "this row is already approved")
+    if row["closure_id"] is not None:
+        raise Conflict("already_decided", "this row was rejected or withdrawn")
     if row["created_by"] == staff.cis_user_id:
         raise Forbidden("own_row", "maker-checker: a second person must approve a row you created")
     if row["day"] < today:
@@ -405,4 +496,44 @@ async def approve_fx_rate(conn: asyncpg.Connection, staff: Staff, fx_id: str, *,
         entity_label=label,
         summary=f"Approved FX rate {label} ({row['status'].replace('_', ' ')})",
     )
+    return row
+
+
+async def record_close(
+    conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str, row: dict[str, Any], label: str
+) -> None:
+    """The audit row of a rejected / withdrawn policy row (``row`` read after :func:`close_row`)."""
+    event, noun = row["status"], entity_type.replace("_", " ")
+    why = row["close_reason"]
+    await audit.record(
+        conn,
+        actor_type="staff",
+        actor_ref=staff.cis_user_id,
+        action=f"{entity_type}.{event}",
+        entity_type=entity_type,
+        entity_id=entity_id,
+        before={"status": "pending"},
+        after={"status": event, "created_by": (row["created_by"] or {}).get("id"), "reason": why},
+        entity_label=label,
+        summary=f"{event.capitalize()} {noun} {label}" + (f": {why}" if why else ""),
+    )
+
+
+async def close_rule(
+    conn: asyncpg.Connection, staff: Staff, rule_id: str, *, event: str, reason: str | None, today: date
+) -> dict[str, Any]:
+    """S280 (bk-058): reject (a second person, with a reason) or withdraw (its maker) a pending pricing rule."""
+    await close_row(conn, staff, "pricing_rule", rule_id, event=event, reason=reason)
+    row = await _rule_by_id(conn, staff, rule_id, today)
+    await record_close(conn, staff, "pricing_rule", rule_id, row, f"{row['channel']} from {row['valid_from']}")
+    return row
+
+
+async def close_fx_rate(
+    conn: asyncpg.Connection, staff: Staff, fx_id: str, *, event: str, reason: str | None, today: date
+) -> dict[str, Any]:
+    """S280 (bk-058): reject (a second person, with a reason) or withdraw (its maker) a pending FX rate."""
+    await close_row(conn, staff, "fx_rate", fx_id, event=event, reason=reason)
+    row = await _fx_by_id(conn, staff, fx_id, today)
+    await record_close(conn, staff, "fx_rate", fx_id, row, f"{row['currency']} {row['as_of']}")
     return row

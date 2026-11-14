@@ -176,10 +176,17 @@ async def test_pending_row_past_its_day_is_not_offered_for_approval(
             listed = await client.get("/fx-rates?currency=EUR", headers=checker)
             approve = await client.post(f"/fx-rates/{fx_id}/approve", headers=checker)
             rules = await client.get("/rules", headers=checker)
+            # bk-058: the checker can still clear it with a reason; then it is no longer "day passed".
+            rejected = await client.post(f"/fx-rates/{fx_id}/reject", json={"reason": "Day passed"}, headers=checker)
+            after = await client.get("/fx-rates?currency=EUR", headers=checker)
     finally:
         await db.close()
     assert listed.status_code == 200, listed.text
     (row,) = [r for r in listed.json()["items"] if r["id"] == fx_id]
     assert row["status"] == "pending" and row["day_passed"] is True and row["can_approve"] is False
+    assert row["can_reject"] is True
     assert approve.status_code == 409 and approve.json()["detail"] == "effective_date_passed"
     assert rules.status_code == 200 and all(r["day_passed"] is False for r in rules.json()["items"])
+    assert rejected.status_code == 200, rejected.text
+    (closed,) = [r for r in after.json()["items"] if r["id"] == fx_id]
+    assert closed["status"] == "rejected" and closed["day_passed"] is False and closed["can_reject"] is False

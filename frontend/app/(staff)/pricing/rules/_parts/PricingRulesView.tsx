@@ -23,7 +23,15 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Plus } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { pct } from "@/lib/proposalDraft";
-import { pricingPolicyApi, type FxRateRow, type PolicyPerson, type PolicyStatus, type PricingRuleRow } from "@/lib/api/pricingPolicy";
+import {
+  pricingPolicyApi,
+  type ClosableKind,
+  type ClosableRow,
+  type FxRateRow,
+  type PolicyPerson,
+  type PolicyStatus,
+  type PricingRuleRow,
+} from "@/lib/api/pricingPolicy";
 import {
   Button,
   ConfirmDialog,
@@ -42,6 +50,7 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { SavedTabs } from "../../../_parts/SavedTabs";
+import { CloseRowButtons, ClosedNote } from "../../_shared/CloseRow";
 import { NewFxRateDrawer, NewRuleDrawer } from "./PolicyDrawers";
 import { R, type RKey } from "./messages";
 import { TONE, apiErrorText, channelLabel, type RT } from "./rulesText";
@@ -84,43 +93,34 @@ function Person({ person, at }: { person: PolicyPerson | null; at?: string | nul
   );
 }
 
-/** Status pill; a pending row also gets its Approve button (or why it cannot be approved by this user) under it. */
-function StatusCell({
-  status,
-  canApprove,
-  canWrite,
-  dayPassed,
-  onApprove,
-}: {
-  status: PolicyStatus;
-  canApprove: boolean;
-  canWrite: boolean;
-  dayPassed: boolean;
-  onApprove: () => void;
-}) {
+/** Status pill; a pending row also gets its Approve button (or why it cannot be approved by this user) and its Reject
+ *  / Withdraw buttons under it (S280, bk-058); a rejected or withdrawn row says who closed it and why. */
+function StatusCell({ kind, row, what, canWrite, onApprove }: { kind: ClosableKind; row: ClosableRow; what: string; canWrite: boolean; onApprove: () => void }) {
   const t = useT(R);
-  if (status !== "pending") return <PolicyStatusBadge status={status} />;
-  // S280: a pending row past its day is never approved (409 effective_date_passed); say why instead of "Waiting".
-  if (dayPassed) {
+  if (row.status !== "pending") {
     return (
-      <span className="flex flex-col items-end gap-1.5 md:items-start">
-        <PolicyStatusBadge status={status} />
-        <span className="block text-xs leading-snug text-muted md:max-w-[160px]">{t("dayPassed")}</span>
+      <span className="flex flex-col items-end gap-1 md:items-start">
+        <PolicyStatusBadge status={row.status} />
+        <ClosedNote row={row} />
       </span>
     );
   }
   return (
     <span className="flex flex-col items-end gap-1.5 md:items-start">
-      <PolicyStatusBadge status={status} />
-      {canApprove ? (
+      <PolicyStatusBadge status={row.status} />
+      {row.can_approve ? (
         <span onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="secondary" onClick={onApprove} title={t("approveTitleHint") as string}>
             {t("approve")}
           </Button>
         </span>
+      ) : row.day_passed ? (
+        // S280: a pending row past its day is never approved (409 effective_date_passed); say why instead of "Waiting".
+        <span className="block text-xs leading-snug text-muted md:max-w-[160px]">{t("dayPassed")}</span>
       ) : (
         <span className="block text-xs leading-snug text-muted md:max-w-[96px]">{canWrite ? t("needsSecond") : t("waiting")}</span>
       )}
+      <CloseRowButtons kind={kind} row={row} what={what} />
     </span>
   );
 }
@@ -168,7 +168,13 @@ function useRuleColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>
       header: t("colStatus"),
       accessorKey: "status",
       cell: ({ row }) => (
-        <StatusCell status={row.original.status} canApprove={row.original.can_approve} canWrite={canWrite} dayPassed={row.original.day_passed} onApprove={() => onApprove({ kind: "rule", row: row.original })} />
+        <StatusCell
+          kind="rules"
+          row={row.original}
+          what={`${channelLabel(t, row.original.channel)} (${row.original.valid_from})`}
+          canWrite={canWrite}
+          onApprove={() => onApprove({ kind: "rule", row: row.original })}
+        />
       ),
     },
     { id: "created_by", header: t("colEnteredBy"), accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => <Person person={row.original.created_by} at={row.original.created_by ? row.original.created_at : null} /> },
@@ -200,7 +206,13 @@ function useFxColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>) 
       header: t("colStatus"),
       accessorKey: "status",
       cell: ({ row }) => (
-        <StatusCell status={row.original.status} canApprove={row.original.can_approve} canWrite={canWrite} dayPassed={row.original.day_passed} onApprove={() => onApprove({ kind: "fx", row: row.original })} />
+        <StatusCell
+          kind="fx-rates"
+          row={row.original}
+          what={`${row.original.currency} (${row.original.as_of})`}
+          canWrite={canWrite}
+          onApprove={() => onApprove({ kind: "fx", row: row.original })}
+        />
       ),
     },
     { id: "created_by", header: t("colEnteredBy"), accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => <Person person={row.original.created_by} at={row.original.created_by ? row.original.created_at : null} /> },

@@ -8906,6 +8906,23 @@
         "title": "RoomTypePatch",
         "type": "object"
       },
+      "RowDecision": {
+        "additionalProperties": false,
+        "description": "S280 (bk-058): a rejection of a pending pricing rule, FX rate or cancellation policy (reason required).",
+        "properties": {
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RowDecision",
+        "type": "object"
+      },
       "RuleCreate": {
         "additionalProperties": false,
         "properties": {
@@ -22342,6 +22359,116 @@
         ]
       }
     },
+    "/booking/pricing/cancellation-policies/{policy_id}/reject": {
+      "post": {
+        "operationId": "reject_cancellation_policy_booking_pricing_cancellation_policies__policy_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Policy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Cancellation Policy Booking Pricing Cancellation Policies  Policy Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Cancellation Policy",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/cancellation-policies/{policy_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_cancellation_policy_booking_pricing_cancellation_policies__policy_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Policy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Cancellation Policy Booking Pricing Cancellation Policies  Policy Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw Cancellation Policy",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
     "/booking/pricing/fx-rates": {
       "get": {
         "operationId": "list_fx_rates_booking_pricing_fx_rates_get",
@@ -22502,6 +22629,116 @@
           }
         ],
         "summary": "Approve Fx Rate",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/fx-rates/{fx_id}/reject": {
+      "post": {
+        "operationId": "reject_fx_rate_booking_pricing_fx_rates__fx_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fx_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Fx Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Fx Rate Booking Pricing Fx Rates  Fx Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Fx Rate",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/fx-rates/{fx_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_fx_rate_booking_pricing_fx_rates__fx_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fx_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Fx Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Fx Rate Booking Pricing Fx Rates  Fx Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw Fx Rate",
         "tags": [
           "pricing"
         ]
@@ -23901,6 +24138,116 @@
           }
         ],
         "summary": "Approve Rule",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/rules/{rule_id}/reject": {
+      "post": {
+        "operationId": "reject_rule_booking_pricing_rules__rule_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Rule Booking Pricing Rules  Rule Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Rule",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/rules/{rule_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_rule_booking_pricing_rules__rule_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Rule Booking Pricing Rules  Rule Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Withdraw Rule",
         "tags": [
           "pricing"
         ]
