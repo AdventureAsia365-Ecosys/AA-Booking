@@ -18,12 +18,20 @@ packages (:data:`GOVERNED`: B2B, operations, retention, pricing, agency billing)
    key is checked on PostgreSQL (``tests/integration/test_aa1091_pricing_policy.py``: every parameter has a value in
    force after the migrations), not here: under MIG-4 the code PR is pushed before its migration is on main.
 
-The scanner is self-tested on planted values.
+6. **The rest of ``app/`` is a ratchet** (S280): the same scan over every module outside :data:`GOVERNED` (minus the
+   vendored CIS byte copy in :data:`EXCLUDED`) fails on a finding that is not in the JSON baseline of 14/11/2026
+   (``snapshots/aa1096_settings_lint_rest_baseline.json``: unclassified, a list that only shrinks). Fix: a pricing
+   policy parameter or ``# technical-constant: <why>``. Rewrite that baseline only to remove entries:
+   ``python -m tests.unit.test_aa1096_settings_lint`` (from ``backend/``).
+
+The scanner is self-tested on planted values. CI: the job "Settings Lint" (.github/workflows/ci.yml) runs this file as
+a check of its own (the name is the same in AA-Partner and AA-TripPlanner-Web); "Unit Tests" runs it too.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -34,6 +42,9 @@ from tests.unit.fakes import POLICY_SEED
 
 APP = Path(__file__).resolve().parents[2] / "app"
 GOVERNED = ("b2b", "ops", "retention", "pricing", "agency_billing")
+# Rule 6: the vendored AA-CIS-App byte copy (ADR 0006 §8 rule 9) is linted by its owner; a marker here breaks the copy.
+EXCLUDED = ("auth/identity_verifier.py",)
+REST_BASELINE = Path(__file__).resolve().parent / "snapshots" / "aa1096_settings_lint_rest_baseline.json"
 POLICY_NAME = re.compile(
     r"(^|_)(MAX|MIN|CAP|LIMIT|THRESHOLD|PCT|USD|ATTEMPTS|RETRIES|DAYS|HOURS|MINUTES|SECONDS|TTL|WINDOW|DEFAULT"
     r"|INCREMENTS|BANDS|QUOTA|BUDGET|FLOOR|CEILING|STEPS)(_|$)"
@@ -220,3 +231,81 @@ def test_settings_lint_catches_a_planted_value(planted: str) -> None:
 def test_settings_lint_allows_an_explained_technical_constant() -> None:
     assert lint("b2b/quotes.py", "MAX_PAGE = 100  # technical-constant: page size of a list endpoint\n") == []
     assert lint("b2b/quotes.py", "STATUSES = ('a', 'b')\nNAME = 'x'\n") == []
+
+
+# --- rule 6: the rest of app/ (ratchet) ------------------------------------------------------------------------------
+
+_FOUND = re.compile(
+    r"^(?P<rel>[^:]+):\d+: (?:constant (?P<name>\w+) = |a number read from the environment `(?P<env>.*)`$)"
+)
+
+
+def rest_modules() -> list[str]:
+    """Every module of app/ outside GOVERNED and EXCLUDED (path under app/)."""
+    out = []
+    for p in sorted(APP.rglob("*.py")):
+        rel = p.relative_to(APP).as_posix()
+        if "__pycache__" in p.parts or rel.split("/", 1)[0] in GOVERNED or rel.startswith(EXCLUDED):
+            continue
+        out.append(rel)
+    return out
+
+
+def rest_key(finding: str) -> str:
+    """A line-number-free key of one lint() finding: ``<rel>:<NAME>`` or ``<rel>:env:<expression>``."""
+    m = _FOUND.match(finding)
+    assert m, finding
+    return f"{m['rel']}:{m['name']}" if m["name"] else f"{m['rel']}:env:{m['env']}"
+
+
+def rest_findings() -> list[str]:
+    keys = set()
+    for rel in rest_modules():
+        keys |= {rest_key(f) for f in lint(rel, (APP / rel).read_text(encoding="utf-8"))}
+    return sorted(keys)
+
+
+def _rest_baseline() -> list[str]:
+    return json.loads(REST_BASELINE.read_text(encoding="utf-8"))["findings"]
+
+
+def test_no_new_policy_constant_or_env_number_in_the_rest_of_app() -> None:
+    new = sorted(set(rest_findings()) - set(_rest_baseline()))
+    assert not new, (
+        "policy-looking constants / env numbers with no setting (make each a pricing policy parameter, or mark "
+        f"'{ESCAPE} <why>'): {new}"
+    )
+
+
+def test_the_rest_baseline_only_shrinks() -> None:
+    stale = sorted(set(_rest_baseline()) - set(rest_findings()))
+    assert not stale, (
+        f"remove these from {REST_BASELINE.name} (python -m tests.unit.test_aa1096_settings_lint): {stale}"
+    )
+
+
+def test_the_rest_scope_skips_the_governed_packages_and_the_vendored_copy() -> None:
+    rest = rest_modules()
+    assert rest and not any(r.split("/", 1)[0] in GOVERNED for r in rest)
+    assert "auth/identity_verifier.py" not in rest and "settings.py" in rest
+    assert rest_key("catalog/x.py:12: constant MAX_ROWS = 5") == "catalog/x.py:MAX_ROWS"
+    assert (
+        rest_key("a.py:3: a number read from the environment `int(os.environ['X'])`") == "a.py:env:int(os.environ['X'])"
+    )
+
+
+if __name__ == "__main__":  # rewrite the rule 6 baseline to the current findings (only to remove entries)
+    current = rest_findings()
+    REST_BASELINE.write_text(
+        json.dumps(
+            {
+                "_doc": "AA-1096 settings-lint rule 6 baseline: policy-looking constants and env numbers of app/ "
+                "outside the governed packages on 14/11/2026, not classified yet. Only shrinks.",
+                "findings": current,
+            },
+            indent=1,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"wrote {REST_BASELINE.name} ({len(current)} entries)")

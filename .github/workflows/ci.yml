@@ -7,6 +7,8 @@ name: CI
 # table template, AA-751, and the multi-issuer verifier, AA-680).
 # An eighth, "Migration preflight" (AA-993 M4b), classifies a PR's new migrations and refuses the cases that would leave
 # Deploy Dev waiting on a manual apply; non-required until the ruleset adds it (pull_request and merge_group only).
+# A ninth, "Settings Lint" (AA-1096), runs the settings-lint guard (no hard-coded threshold, limit or cap in app/);
+# non-required until the ruleset adds it.
 # UI kit core (AA-994 S4b, root ADR 0016): frontend/ui/core is checked inside Frontend Build (integrity + provenance
 # against frontend/kit.lock.json, kit lint at error with a suppressions file that only shrinks), not by "Vendored CIS
 # copies".
@@ -182,6 +184,43 @@ jobs:
           ENVIRONMENT: test
           COVERAGE_CORE: sysmon
         run: pytest tests/unit -n 4 --tb=short --cov=app --cov-report=term-missing --cov-fail-under=90
+
+  # AA-1096 (S279 thresholds audit, section 5.4): "Settings Lint", the settings-lint guard as a check of its own, named
+  # the same in AA-Partner and AA-TripPlanner-Web, so branch protection can require it by name. Tech lead rule S279:
+  # every threshold, limit or cap of Booking is an admin-editable pricing policy parameter (Pricing > Policy), never a
+  # code literal or an env var alone. tests/unit/test_aa1096_settings_lint.py fails on a new policy-looking numeric
+  # constant or numeric env read in app/ (the governed packages with a classified baseline, the rest with a JSON
+  # baseline that only shrinks; mark it '# technical-constant: <why>' or make it a parameter), and on a parameter
+  # with no reader or no seed. The file also runs inside "Unit Tests"; this job only gives the rule its own check
+  # name. Gated like Unit Tests (skipped on a docs-only pull request, which counts as passed for a required check).
+  settings-lint:
+    name: Settings Lint
+    needs: lint
+    if: ${{ !cancelled() && needs.lint.outputs.tests != 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # S273 (workflow_lint WL4): restore only, like Unit Tests; cache-warm.yml saves this key on main.
+      - name: Restore pip cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-${{ hashFiles('backend/requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-${{ runner.arch }}-py3.12-
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: settings-lint (hard-coded thresholds, dead parameters)
+        env:
+          ENVIRONMENT: test
+        run: pytest tests/unit/test_aa1096_settings_lint.py -v --tb=short -p no:cacheprovider
 
   # Applies migrations/*.sql in order to a real PostgreSQL 15 (the RDS major version) logged in as
   # aa_cis_admin (the DB Migrate identity), on a stub `shared` schema, exactly as
