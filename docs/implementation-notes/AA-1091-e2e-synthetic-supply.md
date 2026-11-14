@@ -68,3 +68,10 @@ feature. Supplier rates come only from the supply routes, which the pricing pair
 - Removed with the A10 family (AA-1054), together with A10e-2.
 - No threshold, limit or cap was added. The code pattern length (6 to 12 digits) is a format check, not a policy.
 - Merge needs an auth-risk review (subagent or kiro-reviewer) and the root ADR 0006a A10e-3 amendment.
+- Merge gate: the root amendment is "Proposed" until the tech lead's yes (decision D1 of the lane runbook) is recorded
+  in it. Do not merge this branch before that yes: it widens what the E2E pair may write. Order after the yes: this
+  branch first (CI green, including the new integration test, which has never run locally: no PostgreSQL), then the
+  root amendment with its status changed to Accepted.
+- Cleanup risk the code does not stop: the maker may deactivate a synthetic hotel or service that a real (not E2E)
+  plan has accepted as a component, which would turn that plan `inactive_component`. The runbook checks
+  `plans_using_not_synthetic` read-only before any deactivation and stops when it is above 0.
