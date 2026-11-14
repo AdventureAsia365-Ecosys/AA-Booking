@@ -16,14 +16,15 @@
 // AA-1096 l23: every parameter explains itself (PolicyGuide.tsx): the short "what" under the label, an Explain toggle
 // with the whole guide (EN / VI), the same guide at the top of the change drawer; a decimal takes a comma or a point.
 // S280 (settings UI audit): one page-wide search (label in both languages, key, guide, help, approver; sections with
-// no match hide) instead of a search box per section; every scheduled change is listed in the order it takes effect;
+// no match hide; a full-width box up to 560 px with its own label and a match count, PolicySearch) instead of a
+// search box per section; every scheduled change is listed in the order it takes effect;
 // another maker's draft says who made it and since when, Change says why it is locked, and the approver group can
 // discard that draft (with a reason); the "Not enforced yet" reason and every API error are in the page's language.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { History, Pencil } from "lucide-react";
+import { History, Pencil, Search } from "lucide-react";
 import { policyParamsApi, valueToText, SECTIONS, type ParamVersion, type PolicyParam, type VersionStatus } from "@/lib/api/policyParams";
 import { matchesSearch, searchText } from "@/lib/policyEdit";
 import {
@@ -31,8 +32,8 @@ import {
   ConfirmDialog,
   DataTable,
   Drawer,
-  FilterBar,
   I18nProvider,
+  Input,
   KpiTile,
   LangSwitch,
   LinkButton,
@@ -300,6 +301,42 @@ function DecideDialog({ d, busy, onClose, onConfirm }: { d: Deciding; busy: bool
   );
 }
 
+/** The page's one search over every section: a full-width box up to 560 px (URL `q`, written 300 ms after the last
+ *  key, like the kit FilterBar) and, while searching, how many parameters match across all sections. */
+function PolicySearch({ found }: { found: number | null }) {
+  const t = useT(M);
+  const { get, set } = useUrlFilters();
+  const urlQ = get("q");
+  const [q, setQ] = useState(urlQ);
+  useEffect(() => {
+    if (q === urlQ) return;
+    const id = window.setTimeout(() => set("q", q.trim() || null), 300);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+  return (
+    <div className="flex flex-col gap-1.5" role="search" data-testid="policy-search">
+      <div className="relative w-full max-w-[560px]">
+        <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+        <Input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label={t("searchLabel") as string}
+          placeholder={t("searchPlaceholder") as string}
+          style={{ width: "100%", paddingLeft: 30 }}
+          data-testid="policy-search-input"
+        />
+      </div>
+      {found !== null && (
+        <span className="text-xs text-muted" aria-live="polite" data-testid="policy-search-count">
+          {found ? t("searchResults", found, urlQ.trim()) : t("searchNone", urlQ.trim())}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ParamSections({ items, columns, loading, error, onRetry }: {
   items: PolicyParam[];
   columns: ColumnDef<PolicyParam, unknown>[];
@@ -313,8 +350,9 @@ function ParamSections({ items, columns, loading, error, onRetry }: {
   const q = get("q");
   const shown = items.filter((p) => matchesSearch(index.get(p.key) ?? "", q));
   const sections = SECTIONS.map((s) => ({ section: s, params: shown.filter((p) => p.section === s) })).filter((g) => g.params.length > 0);
+  const search = items.length > 0 && <PolicySearch found={q.trim() ? shown.length : null} />;
+  if (search && q.trim() && sections.length === 0) return search;
   if (loading || error || sections.length === 0) {
-    const none = !loading && !error && items.length > 0;
     return (
       <Section title={t("sectionParams")}>
         <DataTable<PolicyParam>
@@ -326,8 +364,8 @@ function ParamSections({ items, columns, loading, error, onRetry }: {
           error={error}
           onRetry={onRetry}
           searchable={false}
-          emptyTitle={none ? t("searchNone") : t("emptyTitle")}
-          emptyDescription={none ? undefined : t("emptyHint")}
+          emptyTitle={t("emptyTitle")}
+          emptyDescription={t("emptyHint")}
           tableMinWidth={960}
         />
       </Section>
@@ -335,6 +373,7 @@ function ParamSections({ items, columns, loading, error, onRetry }: {
   }
   return (
     <>
+      {search}
       {sections.map((g) => (
         <Section key={g.section} title={t(`section_${g.section}` as MessageKey) as string} description={t(`sectionHint_${g.section}` as MessageKey) as string}>
           <div data-testid={`policy-section-${g.section}`}>
@@ -422,7 +461,6 @@ function Parameters() {
   return (
     <>
       <Kpis items={items} ready={!!listing.data} />
-      <FilterBar search={{ placeholder: t("searchPlaceholder") as string }} testId="policy-search" />
       <ParamSections
         items={items}
         columns={columns}

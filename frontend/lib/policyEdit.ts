@@ -2,7 +2,7 @@
 // shows before a change is sent. No imports but types, so lib/policyEdit.test.mjs runs them under node.
 //
 // - searchText / matchesSearch: one page-wide search over every parameter (label in English and Vietnamese, key,
-//   guide "what" in both languages, help, approver name), so a parameter is found by its key too.
+//   the whole guide in both languages, help, approver name), so a parameter is found by its key too.
 // - valueOn / scheduledAfter: the value a parameter has on a given day (the version in force or a scheduled one
 //   starting on or before it), and the scheduled changes after it; the API compares a proposal against that value.
 // - boundProblem / crossProblem: the allowed range and the bound against another parameter (the API's cross check),
@@ -21,7 +21,8 @@ type Searchable = Pick<PolicyParam, "key" | "label" | "help" | "guide">;
  *  approver name in both languages). */
 export function searchText(p: Searchable, extra: string[] = []): string {
   const guide = p.guide ?? {};
-  const parts = [p.key, p.key.replace(/_/g, " "), p.label, p.help, guide.en?.what ?? "", guide.vi?.what ?? "", ...extra];
+  const guides = [guide.en, guide.vi].flatMap((g) => (g ? Object.values(g) : []));
+  const parts = [p.key, p.key.replace(/_/g, " "), p.label, p.help, ...guides, ...extra];
   return fold(parts.join(" \u0001 "));
 }
 

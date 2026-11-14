@@ -25,6 +25,21 @@ test("one search finds a parameter by key, label, Vietnamese guide or approver n
   assert.equal(fold("Quản trị đ"), "quan tri d");
 });
 
+// AA-1096 (S280 UX fix round, merged into this search): every guide part matches, not only "what"; every word must match.
+test("the page search matches the key, the label, the help and every guide part in either language", () => {
+  const g = (s) => ({ what: `${s} what`, raise: "raise it", lower: "lower it", when: "when to change", example: "e.g. peak season" });
+  const params = [
+    { key: "booking.hold.hold_hours", label: "Hold length", help: "How long a hold lasts.", guide: { en: g("Hold"), vi: g("Giữ chỗ") } },
+    { key: "booking.ops.reminder_days", label: "Reminder lead time", help: "Days before a reminder.", guide: null },
+  ];
+  const find = (q) => params.filter((p) => matchesSearch(searchText(p), q)).map((p) => p.key);
+  assert.deepEqual(find("hold_hours"), ["booking.hold.hold_hours"]);
+  assert.deepEqual(find("REMINDER lead"), ["booking.ops.reminder_days"]);
+  assert.deepEqual(find("giu cho"), ["booking.hold.hold_hours"]);
+  assert.deepEqual(find("peak season"), ["booking.hold.hold_hours"]);
+  assert.deepEqual(find("hold reminder"), []);
+});
+
 test("the value on a day: the newest of the value in force and the scheduled ones starting by then", () => {
   const p = { current: v(1, 14, "2026-01-01"), scheduled: [v(3, 10, "2027-03-01"), v(2, 12, "2027-01-01")] };
   assert.equal(valueOn(p, "2026-12-31").value, 14);
