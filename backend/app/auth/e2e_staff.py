@@ -39,6 +39,16 @@ agency payment recorded by one finance user and approved by another (maker-check
   (:data:`BODY_CHECKS`, every key checked); the workbook import is checked inside the route, on every tour key of the
   parsed file, with no Departures row (:func:`check_import`, the guard cannot parse a workbook).
 
+- **Synthetic supply (A10e-3, AA-1091 S280).** Dev has no supplier rates for the tours the live check prices, so the
+  pricing maker also loads a SYNTHETIC supplier through the real supply paths: it creates the supplier (body checked:
+  the name starts with :data:`SYNTHETIC_SUPPLY_MARK`, no contact or note field), its hotels, room types and services
+  (names marked the same way), imports the rate sheet (a draft contract: the maker is its maker), and deactivates them
+  at cleanup. The checker publishes the draft (the service refuses the maker: 403 ``maker_checker``) and may expire
+  it. A supply record is synthetic only when its supplier was created by the E2E pricing maker and still carries the
+  mark (:data:`SUPPLIER_SYNTHETIC_SQL` and its hotel / service / contract forms); hotels and services being created are
+  checked by the supplier their body names (:data:`BODY_SUPPLIER`). Paths take a UUID or a code (``SUP-`` / ``HTL-`` /
+  ``SVC-`` + digits).
+
 Reads keep the permissions of the identity's Booking role (``sales`` / ``finance`` / ``contracting``), like any member
 of that group.
 Every allowed write runs the route unchanged, so its normal audit row names the identity (``cog:<sub>``) as the actor.
@@ -50,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -105,6 +116,20 @@ PRICE_VERSION_APPROVE = ("POST", f"{_VERSION}/approve")
 PRICE_VERSION_REJECT = ("POST", f"{_VERSION}/reject")
 PRICE_VERSION_WITHDRAW = ("POST", f"{_VERSION}/withdraw")
 
+# A10e-3 (AA-1091 S280): the synthetic supply the live check prices from (root ADR 0006a A10e-3).
+SUPPLIER_CREATE = ("POST", "/booking/suppliers")
+SUPPLIER_DEACTIVATE = ("POST", "/booking/suppliers/{supplier_ref}/deactivate")
+RATE_SHEET_IMPORT = ("POST", "/booking/suppliers/{supplier_ref}/rate-sheets")
+CONTRACT_STATUS = ("PATCH", "/booking/contracts/{contract_id}")
+HOTEL_CREATE = ("POST", "/booking/hotels")
+HOTEL_DEACTIVATE = ("POST", "/booking/hotels/{hotel_ref}/deactivate")
+ROOM_TYPE_CREATE = ("POST", "/booking/hotels/{hotel_ref}/room-types")
+SERVICE_CREATE = ("POST", "/booking/services")
+SERVICE_DEACTIVATE = ("POST", "/booking/services/{service_ref}/deactivate")
+# Every supplier, hotel and service name the maker creates starts with this (checked on the create body, and the
+# supplier keeps it: a renamed supplier is no longer synthetic).
+SYNTHETIC_SUPPLY_MARK = "SYNTHETIC"
+
 # Allowed writes whose body is fixed: anything else in the body is 403 e2e_read_only (no capacity, rule or status
 # change other than the cancel itself).
 BODY_RULES: Mapping[tuple[str, str], Mapping[str, Any]] = MappingProxyType(
@@ -131,9 +156,64 @@ def _workbench_body_ok(body: Any) -> bool:
     )
 
 
+def _fields_ok(body: Any, required: frozenset[str], allowed: frozenset[str], marked: str | None = None) -> bool:
+    """A JSON object holding every ``required`` key and no key outside ``allowed``; ``marked``, when given, names a
+    text field that must start with :data:`SYNTHETIC_SUPPLY_MARK`."""
+    if not isinstance(body, dict) or not required <= set(body) or not set(body) <= allowed:
+        return False
+    return marked is None or (isinstance(body[marked], str) and body[marked].strip().startswith(SYNTHETIC_SUPPLY_MARK))
+
+
+# A10e-3 create bodies: the marked name and the facts the matcher and the cost sheet read; never a contact, address,
+# note, link or photo (no personal or free-text data is written by an E2E identity).
+_SUPPLIER_FIELDS = frozenset({"company_name", "categories", "country_code", "destination_id"})
+_HOTEL_FIELDS = frozenset({"supplier_id", "name", "destination_id", "country_code", "star_rating"})
+_SERVICE_FIELDS = frozenset(
+    {"supplier_id", "service_type", "title", "unit", "destination_id", "country_code", "source_id"}
+)
+_ROOM_TYPE_FIELDS = frozenset({"name", "max_occupancy", "bed_types"})
+# A contract moves only by its status, sent alone (publish by the checker; expire at cleanup).
+CONTRACT_STATUSES = frozenset({"published", "expired"})
+
+
+def _supplier_body_ok(body: Any) -> bool:
+    return _fields_ok(body, frozenset({"company_name", "categories"}), _SUPPLIER_FIELDS, "company_name")
+
+
+def _hotel_body_ok(body: Any) -> bool:
+    return _fields_ok(body, frozenset({"supplier_id", "name"}), _HOTEL_FIELDS, "name")
+
+
+def _service_body_ok(body: Any) -> bool:
+    return _fields_ok(body, frozenset({"supplier_id", "service_type", "title"}), _SERVICE_FIELDS, "title")
+
+
+def _room_type_body_ok(body: Any) -> bool:
+    return _fields_ok(body, frozenset({"name"}), _ROOM_TYPE_FIELDS)
+
+
+def _contract_body_ok(body: Any) -> bool:
+    return isinstance(body, dict) and set(body) == {"status"} and body["status"] in CONTRACT_STATUSES
+
+
+def _no_body(body: Any) -> bool:
+    """A deactivation carries no reason text (empty body or ``{}``)."""
+    return body is None or body == {}
+
+
 # Allowed writes whose body must pass a check (anything else is 403 e2e_read_only before any DB access).
 BODY_CHECKS: Mapping[tuple[str, str], Callable[[Any], bool]] = MappingProxyType(
-    {PRICE_WORKBENCH_ACTION: _workbench_body_ok}
+    {
+        PRICE_WORKBENCH_ACTION: _workbench_body_ok,
+        SUPPLIER_CREATE: _supplier_body_ok,
+        HOTEL_CREATE: _hotel_body_ok,
+        SERVICE_CREATE: _service_body_ok,
+        ROOM_TYPE_CREATE: _room_type_body_ok,
+        CONTRACT_STATUS: _contract_body_ok,
+        SUPPLIER_DEACTIVATE: _no_body,
+        HOTEL_DEACTIVATE: _no_body,
+        SERVICE_DEACTIVATE: _no_body,
+    }
 )
 
 
@@ -189,15 +269,27 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
                     PRICE_VERSION_WITHDRAW,
                     PRICE_VERSION_APPROVE,
                     PRICE_VERSION_REJECT,
+                    # A10e-3: the synthetic supply (its own supplier only; the contract publish is refused by the
+                    # service for the maker of the draft, 403 maker_checker).
+                    SUPPLIER_CREATE,
+                    SUPPLIER_DEACTIVATE,
+                    RATE_SHEET_IMPORT,
+                    CONTRACT_STATUS,
+                    HOTEL_CREATE,
+                    HOTEL_DEACTIVATE,
+                    ROOM_TYPE_CREATE,
+                    SERVICE_CREATE,
+                    SERVICE_DEACTIVATE,
                 }
             ),
         ),
         # A10e-2 pricing checker: approves, rejects or withdraws (published: restores the superseded one) a version
-        # the pricing maker made on a synthetic plan.
+        # the pricing maker made on a synthetic plan. A10e-3: publishes or expires a contract of the maker's synthetic
+        # supplier (the second person of the contract maker-checker).
         E2E_PRICING_CHECKER_EMAIL: E2EWriter(
             "pricing_checker",
             frozenset({"booking-contracting"}),
-            frozenset({PRICE_VERSION_APPROVE, PRICE_VERSION_REJECT, PRICE_VERSION_WITHDRAW}),
+            frozenset({PRICE_VERSION_APPROVE, PRICE_VERSION_REJECT, PRICE_VERSION_WITHDRAW, CONTRACT_STATUS}),
         ),
     }
 )
@@ -280,8 +372,37 @@ VERSION_SYNTHETIC_SQL = (
     " FROM booking.price_list_versions v LEFT JOIN booking.staff_users su ON su.cis_user_id = v.created_by"
     " WHERE v.id = $1::uuid"
 )
+# A10e-3: a supplier is synthetic when the A10e-2 pricing maker created it ($2 = its address; the creator's staff row)
+# and its name still starts with the mark. Its hotels, services and contracts follow their supplier. By UUID here; the
+# ``_BY_CODE`` forms take an ``SUP-`` / ``HTL-`` / ``SVC-`` code (:data:`CODE_SQL`).
+_SUPPLIER_BY_MAKER = (
+    "SELECT lower(su.email) = $2 AND s.company_name LIKE '" + SYNTHETIC_SUPPLY_MARK + "%' AS is_synthetic"
+)
+_MAKER_JOIN = " LEFT JOIN booking.staff_users su ON su.cis_user_id = s.created_by"
+SUPPLIER_SYNTHETIC_SQL = _SUPPLIER_BY_MAKER + " FROM booking.suppliers s" + _MAKER_JOIN + " WHERE s.id = $1::uuid"
+HOTEL_SYNTHETIC_SQL = (
+    _SUPPLIER_BY_MAKER
+    + " FROM booking.hotels r JOIN booking.suppliers s ON s.id = r.supplier_id"
+    + _MAKER_JOIN
+    + " WHERE r.id = $1::uuid"
+)
+SERVICE_SYNTHETIC_SQL = HOTEL_SYNTHETIC_SQL.replace("booking.hotels r", "booking.services r")
+CONTRACT_SYNTHETIC_SQL = HOTEL_SYNTHETIC_SQL.replace("booking.hotels r", "booking.supplier_contracts r")
+SUPPLIER_BY_CODE_SQL = SUPPLIER_SYNTHETIC_SQL.replace("WHERE s.id = $1::uuid", "WHERE s.code = $1")
+HOTEL_BY_CODE_SQL = HOTEL_SYNTHETIC_SQL.replace("WHERE r.id = $1::uuid", "WHERE r.code = $1")
+SERVICE_BY_CODE_SQL = SERVICE_SYNTHETIC_SQL.replace("WHERE r.id = $1::uuid", "WHERE r.code = $1")
+# A path or body reference that is not a UUID: its code pattern and the SQL that looks it up by code.
+CODE_SQL: Mapping[str, tuple[re.Pattern[str], str]] = MappingProxyType(
+    {
+        SUPPLIER_SYNTHETIC_SQL: (re.compile(r"SUP-[0-9]{6,12}"), SUPPLIER_BY_CODE_SQL),
+        HOTEL_SYNTHETIC_SQL: (re.compile(r"HTL-[0-9]{6,12}"), HOTEL_BY_CODE_SQL),
+        SERVICE_SYNTHETIC_SQL: (re.compile(r"SVC-[0-9]{6,12}"), SERVICE_BY_CODE_SQL),
+    }
+)
+_SUPPLY_SQL = (SUPPLIER_SYNTHETIC_SQL, HOTEL_SYNTHETIC_SQL, SERVICE_SYNTHETIC_SQL, CONTRACT_SYNTHETIC_SQL)
 # Route template -> (path parameter, SQL) for the writes checked by a path record. Every allow-listed write is in
-# exactly one of SYNTHETIC_SQL, BODY_SYNTHETIC and CHECKED_IN_ROUTE (a unit test keeps the lists equal).
+# exactly one of SYNTHETIC_SQL, BODY_SYNTHETIC, BODY_SUPPLIER, CHECKED_IN_ROUTE and NEW_RECORD (a unit test keeps
+# the lists equal).
 SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
     {
         SUPPLIER_REQUEST[1]: ("booking_id", SUPPLIER_BOOKING_SYNTHETIC_SQL),
@@ -296,22 +417,37 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         PRICE_VERSION_APPROVE[1]: ("version_id", VERSION_SYNTHETIC_SQL),
         PRICE_VERSION_REJECT[1]: ("version_id", VERSION_SYNTHETIC_SQL),
         PRICE_VERSION_WITHDRAW[1]: ("version_id", VERSION_SYNTHETIC_SQL),
+        SUPPLIER_DEACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
+        RATE_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
+        CONTRACT_STATUS[1]: ("contract_id", CONTRACT_SYNTHETIC_SQL),
+        HOTEL_DEACTIVATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),
+        ROOM_TYPE_CREATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),
+        SERVICE_DEACTIVATE[1]: ("service_ref", SERVICE_SYNTHETIC_SQL),
     }
 )
 # Fixed arguments after the record key ($2, ...): the departure rule's creator is the A10e staff identity; a price
-# version's creator is the A10e-2 pricing maker.
+# version's creator, and a synthetic supplier's (A10e-3), is the A10e-2 pricing maker.
 SYNTHETIC_SQL_ARGS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         DEPARTURE_CANCEL[1]: (E2E_BOOKING_STAFF_EMAIL,),
         **{
             route: (E2E_PRICING_MAKER_EMAIL,)
             for route, (_, sql) in SYNTHETIC_SQL.items()
-            if sql is VERSION_SYNTHETIC_SQL
+            if sql is VERSION_SYNTHETIC_SQL or sql in _SUPPLY_SQL
         },
+        # A10e-3: the hotel / service creates look up the supplier their body names (BODY_SUPPLIER).
+        HOTEL_CREATE[1]: (E2E_PRICING_MAKER_EMAIL,),
+        SERVICE_CREATE[1]: (E2E_PRICING_MAKER_EMAIL,),
     }
 )
 # Writes checked by the plans their JSON body names (every tour key synthetic, one query): route -> body field.
 BODY_SYNTHETIC: Mapping[str, str] = MappingProxyType({PRICE_WORKBENCH_ACTION[1]: BODY_TOUR_KEYS})
+# A10e-3: creates checked by the supplier their JSON body names (the maker's synthetic supplier): route -> body field.
+BODY_SUPPLIER: Mapping[str, str] = MappingProxyType({HOTEL_CREATE[1]: "supplier_id", SERVICE_CREATE[1]: "supplier_id"})
+# A10e-3: a create of a record that does not exist yet and names no other record (the synthetic supplier): its body
+# check (:data:`BODY_CHECKS`: the marked name, no contact field) is its whole check; the record it makes is then
+# synthetic by its creator.
+NEW_RECORD: frozenset[str] = frozenset({SUPPLIER_CREATE[1]})
 # Writes whose plans only the route knows (a workbook): the route calls check_import on the parsed file before it
 # writes or previews anything (app.routers.catalog.post_price_import).
 CHECKED_IN_ROUTE: frozenset[str] = frozenset({PRICE_IMPORT[1]})
@@ -353,7 +489,8 @@ def check_session(writer: E2EWriter, groups: tuple[str, ...], method: str, route
 def reads_body(method: str, route: str | None) -> bool:
     """True when the guard must read this write's JSON body (a body rule, a body check or plans named in the body)."""
     key = (method.upper(), route or "")
-    return key in BODY_RULES or key in BODY_CHECKS or (method.upper() not in READ_METHODS and key[1] in BODY_SYNTHETIC)
+    body_named = key[1] in BODY_SYNTHETIC or key[1] in BODY_SUPPLIER
+    return key in BODY_RULES or key in BODY_CHECKS or (method.upper() not in READ_METHODS and body_named)
 
 
 def check_body(writer: E2EWriter, method: str, route: str | None, body: Any) -> None:
@@ -392,31 +529,52 @@ async def plans_synthetic(conn: asyncpg.Connection | asyncpg.Pool, keys: Iterabl
         return False
 
 
-async def is_synthetic_record(
-    conn: asyncpg.Connection | asyncpg.Pool, route: str, params: Mapping[str, Any], body: Any = None
-) -> bool:
-    """True only when the record named by the path (or, for :data:`BODY_SYNTHETIC`, every trip plan the body names)
-    belongs to an agency CIS marks synthetic, or is a synthetic plan / an E2E maker's version of one. Fail closed: an
-    unknown route, id or record, a record of no agency, a missing view column or any database error answer False."""
-    field_name = BODY_SYNTHETIC.get(route)
-    if field_name is not None:
-        keys = body.get(field_name) if isinstance(body, dict) else None
-        return isinstance(keys, list) and await plans_synthetic(conn, keys)
-    spec = SYNTHETIC_SQL.get(route)
-    if spec is None:
-        return False
-    param, sql = spec
-    raw = params.get(param)
+def _lookup(param: str, sql: str, raw: Any) -> tuple[str, str] | None:
+    """The SQL and bind value for a record reference: a UUID, an invoice number (``ref``), or an ``SUP-`` / ``HTL-`` /
+    ``SVC-`` code where the SQL has a by-code form (:data:`CODE_SQL`); None for anything else (counts as real)."""
     key = _uuid(raw)
-    if key is None and param == "ref" and isinstance(raw, str) and 1 <= len(raw) <= 64:
-        sql, key = INVOICE_BY_NUMBER_SQL, raw
-    if key is None:
-        return False
+    if key is not None:
+        return sql, key
+    if not isinstance(raw, str) or not 1 <= len(raw) <= 64:
+        return None
+    if param == "ref":
+        return INVOICE_BY_NUMBER_SQL, raw
+    code = CODE_SQL.get(sql)
+    if code is not None and code[0].fullmatch(raw.strip().upper()):
+        return code[1], raw.strip().upper()
+    return None
+
+
+async def _fetch_synthetic(conn: asyncpg.Connection | asyncpg.Pool, route: str, sql: str, key: str) -> bool:
     try:
         return (await conn.fetchval(sql, key, *SYNTHETIC_SQL_ARGS.get(route, ()))) is True
     except (asyncpg.PostgresError, OSError) as exc:
         log.warning("booking_e2e_synthetic_unknown route=%s error_class=%s", route, type(exc).__name__)
         return False
+
+
+async def is_synthetic_record(
+    conn: asyncpg.Connection | asyncpg.Pool, route: str, params: Mapping[str, Any], body: Any = None
+) -> bool:
+    """True only when the record named by the path (or, for :data:`BODY_SYNTHETIC`, every trip plan the body names;
+    for :data:`BODY_SUPPLIER`, the supplier the body names) belongs to an agency CIS marks synthetic, or is a synthetic
+    plan / an E2E maker's version of one / the E2E maker's synthetic supply. Fail closed: an unknown route, id or
+    record, a record of no agency, a missing view column or any database error answer False."""
+    field_name = BODY_SYNTHETIC.get(route)
+    if field_name is not None:
+        keys = body.get(field_name) if isinstance(body, dict) else None
+        return isinstance(keys, list) and await plans_synthetic(conn, keys)
+    supplier_field = BODY_SUPPLIER.get(route)
+    if supplier_field is not None:
+        found = _lookup(
+            "supplier_id", SUPPLIER_SYNTHETIC_SQL, body.get(supplier_field) if isinstance(body, dict) else None
+        )
+        return found is not None and await _fetch_synthetic(conn, route, *found)
+    spec = SYNTHETIC_SQL.get(route)
+    if spec is None:
+        return False
+    found = _lookup(spec[0], spec[1], params.get(spec[0]))
+    return found is not None and await _fetch_synthetic(conn, route, *found)
 
 
 async def check_synthetic(
@@ -427,12 +585,16 @@ async def check_synthetic(
     params: Mapping[str, Any],
     body: Any = None,
 ) -> None:
-    """For an allowed write: 403 ``e2e_synthetic_only`` unless the record's agency (or every plan) is synthetic. No-op
-    for reads. A :data:`CHECKED_IN_ROUTE` write passes here: its route calls :func:`check_import` before any write."""
+    """For an allowed write: 403 ``e2e_synthetic_only`` unless the record's agency (or every plan, or the supplier) is
+    synthetic. No-op for reads. A :data:`CHECKED_IN_ROUTE` write passes here: its route calls :func:`check_import`
+    before any write. A :data:`NEW_RECORD` write passes too: its body check already ran (:func:`check_body`)."""
     if method.upper() in READ_METHODS:
         return
     if route in CHECKED_IN_ROUTE:
         log.info("booking_e2e_write_checked_in_route identity=%s route=%s", writer.name, route)
+        return
+    if route in NEW_RECORD:  # A10e-3: the body check (marked name, no contact field) was the whole check
+        log.info("booking_e2e_write_allowed identity=%s route=%s new_record=true", writer.name, route)
         return
     if route is None or not await is_synthetic_record(conn, route, params, body):
         log.warning("booking_e2e_writer_refused identity=%s reason=not_synthetic route=%s", writer.name, route)

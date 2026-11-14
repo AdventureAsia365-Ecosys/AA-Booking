@@ -91,6 +91,7 @@ def test_the_pair_shares_only_the_decisions_and_holds_no_grant() -> None:
         e2e_staff.PRICE_VERSION_APPROVE,
         e2e_staff.PRICE_VERSION_REJECT,
         e2e_staff.PRICE_VERSION_WITHDRAW,
+        e2e_staff.CONTRACT_STATUS,  # A10e-3: the service refuses the draft's maker (403 maker_checker)
     }
     assert not maker.grants and not checker.grants
     # Every version route is held to the E2E maker's own versions (the address is bound as $2).
