@@ -14,11 +14,14 @@
 // the B2B cancellation fee schedules (same maker-checker, CancellationFees.tsx).
 // AA-1096 l23: every parameter explains itself (PolicyGuide.tsx): the short "what" under the label, an Explain toggle
 // with the whole guide (EN / VI), the same guide at the top of the change drawer; a decimal takes a comma or a point.
+// AA-1096 (S280 UX fix round): one full-width search above the sections searches every section by key, label, help
+// and guide (lib/policyGuide searchParams); the section tables have no search of their own (each used to filter only
+// its own section, by label only, in a narrow box).
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { History, Pencil } from "lucide-react";
+import { History, Pencil, Search } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import {
   formatValue,
@@ -61,6 +64,7 @@ import { SavedTabs } from "../../../_parts/SavedTabs";
 import { CancellationFees } from "./CancellationFees";
 import { M, type MessageKey } from "./messages";
 import { ExplainToggle, GuideDetails, GuideSummary } from "./PolicyGuide";
+import { searchParams } from "@/lib/policyGuide";
 
 const STATUS_TONE: Record<VersionStatus, BookingTone> = {
   draft: "neutral",
@@ -235,6 +239,87 @@ function HistoryDrawer({ param, onClose }: { param: PolicyParam; onClose: () => 
 
 type Deciding = { kind: "approve" | "reject"; param: PolicyParam; version: ParamVersion } | null;
 
+/** The page's one search over every section (full width up to 560 px), and the match count while searching. */
+function PolicySearch({ query, onQuery, found }: { query: string; onQuery: (q: string) => void; found: number | null }) {
+  const t = useT(M);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative w-full max-w-[560px]">
+        <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          aria-label={t("searchLabel") as string}
+          placeholder={t("searchPlaceholder") as string}
+          style={{ width: "100%", paddingLeft: 30 }}
+          data-testid="policy-search"
+        />
+      </div>
+      {found !== null && (
+        <span className="text-xs text-muted" aria-live="polite" data-testid="policy-search-count">
+          {found ? t("searchResults", found, query.trim()) : t("searchNone", query.trim())}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The parameter tables by section, filtered by the page search (the section tables have no search of their own). */
+function ParamSections({ listing, items, labelOf, columns }: {
+  listing: { isLoading: boolean; isError: boolean; error: unknown; refetch: () => unknown };
+  items: PolicyParam[];
+  labelOf: (p: PolicyParam) => string;
+  columns: ColumnDef<PolicyParam, unknown>[];
+}) {
+  const t = useT(M);
+  const [query, setQuery] = useState("");
+  const found = searchParams(items, query, labelOf);
+  const shown = found ?? items;
+  const sections = SECTIONS.map((s) => ({ section: s, params: shown.filter((p) => p.section === s) })).filter(
+    (g) => g.params.length > 0,
+  );
+  return (
+    <>
+          {items.length > 0 && <PolicySearch query={query} onQuery={setQuery} found={found ? found.length : null} />}
+          {found && found.length === 0 ? null : listing.isLoading || listing.isError || sections.length === 0 ? (
+            <Section title={t("sectionParams")}>
+              <DataTable<PolicyParam>
+                tableId="pricing-policy"
+                data={[]}
+                columns={columns}
+                getRowId={(p) => p.key}
+                loading={listing.isLoading}
+                error={listing.isError ? (listing.error as Error).message : null}
+                onRetry={() => listing.refetch()}
+                emptyTitle={t("emptyTitle")}
+                emptyDescription={t("emptyHint")}
+                searchable={false}
+                tableMinWidth={960}
+              />
+            </Section>
+          ) : (
+            sections.map((g) => (
+              <Section key={g.section} title={t(`section_${g.section}` as MessageKey) as string} description={t(`sectionHint_${g.section}` as MessageKey) as string}>
+                <div data-testid={`policy-section-${g.section}`}>
+                  <DataTable<PolicyParam>
+                    tableId={`pricing-policy-${g.section}`}
+                    data={g.params}
+                    columns={columns}
+                    getRowId={(p) => p.key}
+                    emptyTitle={t("emptyTitle")}
+                    emptyDescription={t("emptyHint")}
+                    searchable={false}
+                    tableMinWidth={960}
+                  />
+                </div>
+              </Section>
+            ))
+          )}
+    </>
+  );
+}
+
 function Policy() {
   const t = useT(M);
   const { get } = useUrlFilters();
@@ -399,9 +484,6 @@ function Policy() {
   const pending = items.filter((p) => p.open?.status === "pending").length;
   const scheduled = items.reduce((n, p) => n + p.scheduled.length, 0);
   const inUse = items.filter((p) => p.in_use).length;
-  const sections = SECTIONS.map((s) => ({ section: s, params: items.filter((p) => p.section === s) })).filter(
-    (g) => g.params.length > 0,
-  );
   const d = deciding;
   return (
     <PageFrame title={t("title")} description={t("description")} actions={<LangSwitch ariaLabel={t("language")} />}>
@@ -427,38 +509,7 @@ function Policy() {
             <KpiTile label={t("kpiScheduled")} value={listing.data ? scheduled : undefined} />
             <KpiTile label={t("kpiInUse")} value={listing.data ? inUse : undefined} />
           </div>
-          {listing.isLoading || listing.isError || sections.length === 0 ? (
-            <Section title={t("sectionParams")}>
-              <DataTable<PolicyParam>
-                tableId="pricing-policy"
-                data={[]}
-                columns={columns}
-                getRowId={(p) => p.key}
-                loading={listing.isLoading}
-                error={listing.isError ? (listing.error as Error).message : null}
-                onRetry={() => listing.refetch()}
-                emptyTitle={t("emptyTitle")}
-                emptyDescription={t("emptyHint")}
-                tableMinWidth={960}
-              />
-            </Section>
-          ) : (
-            sections.map((g) => (
-              <Section key={g.section} title={t(`section_${g.section}` as MessageKey) as string} description={t(`sectionHint_${g.section}` as MessageKey) as string}>
-                <div data-testid={`policy-section-${g.section}`}>
-                  <DataTable<PolicyParam>
-                    tableId={`pricing-policy-${g.section}`}
-                    data={g.params}
-                    columns={columns}
-                    getRowId={(p) => p.key}
-                    emptyTitle={t("emptyTitle")}
-                    emptyDescription={t("emptyHint")}
-                    tableMinWidth={960}
-                  />
-                </div>
-              </Section>
-            ))
-          )}
+          <ParamSections listing={listing} items={items} labelOf={labelOf} columns={columns} />
           <Section title={t("sectionRelated")} description={t("relatedHint")}>
             <ul className="flex flex-col gap-2 text-[13px]" data-testid="policy-related">
               {RELATED.map((r) => (

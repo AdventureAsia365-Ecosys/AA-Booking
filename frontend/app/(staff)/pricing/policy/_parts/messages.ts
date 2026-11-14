@@ -218,6 +218,10 @@ export const M = defineMessages(
     engineeringNote: "Engineering note",
     showNote: "Show the engineering note",
     hideNote: "Hide the engineering note",
+    searchLabel: "Search parameters",
+    searchPlaceholder: "Search every section by key, name or explanation",
+    searchResults: (n: number, q: string) => `${n} ${n === 1 ? "parameter matches" : "parameters match"} “${q}” across all sections.`,
+    searchNone: (q: string) => `No parameter matches “${q}”.`,
   },
   {
     title: "Chính sách giá",
@@ -432,6 +436,10 @@ export const M = defineMessages(
     engineeringNote: "Ghi chú kỹ thuật",
     showNote: "Xem ghi chú kỹ thuật",
     hideNote: "Ẩn ghi chú kỹ thuật",
+    searchLabel: "Tìm tham số",
+    searchPlaceholder: "Tìm trong mọi nhóm theo khoá, tên hoặc phần giải thích",
+    searchResults: (n: number, q: string) => `${n} tham số khớp “${q}” trong mọi nhóm.`,
+    searchNone: (q: string) => `Không có tham số nào khớp “${q}”.`,
   },
 );
 
