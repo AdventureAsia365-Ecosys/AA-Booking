@@ -2398,6 +2398,14 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   version also needs the E2E maker as its creator (`VERSION_SYNTHETIC_SQL`), so the checker decides only the maker's
   versions. The workbook import checks every tour key of the parsed file inside the route (`e2e_staff.check_import`,
   `Staff.e2e_writer`) and refuses a file with a Departures row (403 `e2e_read_only`).
+  A10e-3 (AA-1091 S280, the synthetic supply the live check prices from): the maker also creates a supplier (body: a
+  name starting `SYNTHETIC`, only `company_name`, `categories`, `country_code`, `destination_id`), its hotels and
+  services (`supplier_id` = that supplier, marked name, facts only: no contact, address, note or link) and room types,
+  imports its rate sheet (a draft contract) and deactivates the supplier, hotels and services (no reason body); the
+  checker publishes or expires the contract (body exactly `{"status": "published" | "expired"}`; the maker may send it
+  too, and the service refuses the draft's maker 403 `maker_checker`). A supply record is synthetic only when its
+  supplier was created by the E2E maker and still carries the mark (`SUPPLIER_SYNTHETIC_SQL`; paths by UUID or
+  `SUP-` / `HTL-` / `SVC-` code).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

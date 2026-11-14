@@ -109,13 +109,28 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                     e2e_staff.PRICE_VERSION_WITHDRAW,
                     e2e_staff.PRICE_VERSION_APPROVE,
                     e2e_staff.PRICE_VERSION_REJECT,
+                    # A10e-3 (AA-1091 S280): the synthetic supply; tests/unit/test_aa1091_e2e_synthetic_supply.py.
+                    e2e_staff.SUPPLIER_CREATE,
+                    e2e_staff.SUPPLIER_DEACTIVATE,
+                    e2e_staff.RATE_SHEET_IMPORT,
+                    e2e_staff.CONTRACT_STATUS,
+                    e2e_staff.HOTEL_CREATE,
+                    e2e_staff.HOTEL_DEACTIVATE,
+                    e2e_staff.ROOM_TYPE_CREATE,
+                    e2e_staff.SERVICE_CREATE,
+                    e2e_staff.SERVICE_DEACTIVATE,
                 }
             ),
         ),
         PRICING_CHECKER: (
             frozenset({"booking-contracting"}),
             frozenset(
-                {e2e_staff.PRICE_VERSION_APPROVE, e2e_staff.PRICE_VERSION_REJECT, e2e_staff.PRICE_VERSION_WITHDRAW}
+                {
+                    e2e_staff.PRICE_VERSION_APPROVE,
+                    e2e_staff.PRICE_VERSION_REJECT,
+                    e2e_staff.PRICE_VERSION_WITHDRAW,
+                    e2e_staff.CONTRACT_STATUS,
+                }
             ),
         ),
     }
@@ -130,7 +145,17 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
         PRICING_CHECKER: {},
     }
     assert dict(e2e_staff.BODY_RULES) == {e2e_staff.DEPARTURE_CANCEL: {"status": "cancelled"}}
-    assert set(e2e_staff.BODY_CHECKS) == {e2e_staff.PRICE_WORKBENCH_ACTION}
+    assert set(e2e_staff.BODY_CHECKS) == {
+        e2e_staff.PRICE_WORKBENCH_ACTION,
+        e2e_staff.SUPPLIER_CREATE,
+        e2e_staff.HOTEL_CREATE,
+        e2e_staff.SERVICE_CREATE,
+        e2e_staff.ROOM_TYPE_CREATE,
+        e2e_staff.CONTRACT_STATUS,
+        e2e_staff.SUPPLIER_DEACTIVATE,
+        e2e_staff.HOTEL_DEACTIVATE,
+        e2e_staff.SERVICE_DEACTIVATE,
+    }
     for writer in e2e_staff.E2E_WRITERS.values():
         assert set(writer.grants) <= writer.writes
         assert set(writer.grants) <= set(e2e_staff.BODY_RULES)
@@ -145,10 +170,19 @@ def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
         if route in e2e_staff.SYNTHETIC_SQL:
             param, sql = e2e_staff.SYNTHETIC_SQL[route]
             assert "{" + param + "}" in route and "is_synthetic" in sql and "$1" in sql
-    # Every allowed write is checked exactly one way: by its path record, by the plans its body names, or in the route.
-    by_path, by_body, in_route = set(e2e_staff.SYNTHETIC_SQL), set(e2e_staff.BODY_SYNTHETIC), e2e_staff.CHECKED_IN_ROUTE
-    assert by_path | by_body | in_route == {route for _, route in allowed}
-    assert not (by_path & by_body) and not (by_path & in_route) and not (by_body & in_route)
+    # Every allowed write is checked exactly one way: by its path record, by the plans or the supplier its body names,
+    # in the route, or (a new synthetic supplier) by its body check alone.
+    ways = [
+        set(e2e_staff.SYNTHETIC_SQL),
+        set(e2e_staff.BODY_SYNTHETIC),
+        set(e2e_staff.BODY_SUPPLIER),
+        set(e2e_staff.CHECKED_IN_ROUTE),
+        set(e2e_staff.NEW_RECORD),
+    ]
+    assert set().union(*ways) == {route for _, route in allowed}
+    assert sum(len(w) for w in ways) == len(set().union(*ways))  # disjoint
+    # A write checked by its body alone has a body check.
+    assert {(m, r) for m, r in allowed if r in e2e_staff.NEW_RECORD} <= set(e2e_staff.BODY_CHECKS)
 
 
 @pytest.mark.parametrize("email", [STAFF, STAFF.upper(), f"  {MAKER} ", CHECKER])
