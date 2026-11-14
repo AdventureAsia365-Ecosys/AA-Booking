@@ -481,12 +481,13 @@ WITH in_force AS (
 )
 SELECT p.id::text AS id, p.channel, p.trip_plan_id::text AS trip_plan_id, tp.source_id, p.valid_from, p.title,
        p.tiers::text AS tiers, p.note, p.created_at, p.created_by, cs.name AS created_by_name,
-       a.approved_by, aps.name AS approved_by_name, a.approved_at,
+       a.approved_by, aps.name AS approved_by_name, a.approved_at, {pricing_policy.CLOSURE_COLUMNS},
        {pricing_policy._STATUS.format(day="valid_from")} AS status,
        {pricing_policy.DAY_PASSED.format(day="valid_from")} AS day_passed
 FROM booking.cancellation_policies p
 LEFT JOIN booking.trip_plans tp ON tp.id = p.trip_plan_id
 LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id
+{pricing_policy.CLOSURE_JOIN.format(column="cancellation_policy_id")}
 LEFT JOIN booking.staff_users cs ON cs.cis_user_id = p.created_by
 LEFT JOIN booking.staff_users aps ON aps.cis_user_id = a.approved_by
 WHERE ($2::text IS NULL OR tp.source_id = $2) AND ($3::uuid IS NULL OR p.id = $3)
@@ -498,6 +499,7 @@ LIMIT $4
 def _row_out(row: Any, staff: Staff) -> dict[str, Any]:
     return {
         **pricing_policy._common(row, staff),
+        **pricing_policy.closable(row, staff),
         "channel": row["channel"],
         "trip_plan_id": row["trip_plan_id"],
         "source_id": row["source_id"],
@@ -593,4 +595,14 @@ async def approve_policy(conn: asyncpg.Connection, staff: Staff, policy_id: str,
         entity_label=_label(row),
         summary=f"Approved cancellation policy {_label(row)} ({row['status'].replace('_', ' ')})",
     )
+    return row
+
+
+async def close_policy(
+    conn: asyncpg.Connection, staff: Staff, policy_id: str, *, event: str, reason: str | None, today: date
+) -> dict[str, Any]:
+    """S280 (bk-058): reject (a second person, with a reason) or withdraw (its maker) a pending cancellation policy."""
+    await pricing_policy.close_row(conn, staff, "cancellation_policy", policy_id, event=event, reason=reason)
+    row = await _by_id(conn, staff, policy_id, today)
+    await pricing_policy.record_close(conn, staff, "cancellation_policy", policy_id, row, _label(row))
     return row

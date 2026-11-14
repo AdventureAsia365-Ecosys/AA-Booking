@@ -12,6 +12,10 @@
 //   GET  /booking/pricing/cancellation-policies     B2B cancellation fee schedules (AA-974) (pricing.read)
 //   POST /booking/pricing/cancellation-policies     new pending schedule                   (pricing.write)
 //   POST /booking/pricing/cancellation-policies/{id}/approve   approve (403 own_row)       (pricing.write)
+//   POST /booking/pricing/{rules|fx-rates|cancellation-policies}/{id}/reject {reason}   a second person ends a
+//        pending row (403 own_row, 409 already_approved / already_decided)          (pricing.write, S280 bk-058)
+//   POST /booking/pricing/{rules|fx-rates|cancellation-policies}/{id}/withdraw          its maker ends a pending row
+//        (403 not_maker)                                                               (pricing.write, S280 bk-058)
 
 import { bkGet, bkSend } from "./client";
 import type { Channel } from "./proposals";
@@ -20,8 +24,9 @@ import type { DecimalString, IsoDate, IsoDateTime } from "./types";
 const enc = encodeURIComponent;
 
 /** pending = waiting for a second person; in_force = used for prices today; scheduled = approved, dated later;
- *  superseded = approved, replaced by a newer approved row. */
-export type PolicyStatus = "pending" | "in_force" | "scheduled" | "superseded";
+ *  superseded = approved, replaced by a newer approved row; rejected / withdrawn (S280, bk-058) = a pending row a
+ *  second person rejected or its maker withdrew: it never prices anything (its day stays taken). */
+export type PolicyStatus = "pending" | "in_force" | "scheduled" | "superseded" | "rejected" | "withdrawn";
 
 export interface PolicyPerson {
   id: string;
@@ -42,7 +47,18 @@ interface PolicyRowBase {
   day_passed: boolean;
 }
 
-export interface PricingRuleRow extends PolicyRowBase {
+/** S280 (bk-058): the reject / withdraw answer of a pricing rule, FX rate or cancellation schedule row. */
+export interface ClosableRow extends PolicyRowBase {
+  /** Pending, pricing.write, and not the creator (a reason is required). */
+  can_reject: boolean;
+  /** Pending, pricing.write, and the creator. */
+  can_withdraw: boolean;
+  closed_by: PolicyPerson | null;
+  closed_at: IsoDateTime | null;
+  close_reason: string | null;
+}
+
+export interface PricingRuleRow extends ClosableRow {
   channel: Channel;
   target_margin: DecimalString;
   floor_margin: DecimalString;
@@ -63,7 +79,7 @@ export interface PricingRuleRow extends PolicyRowBase {
   early_discount_pts?: DecimalString | null;
 }
 
-export interface FxRateRow extends PolicyRowBase {
+export interface FxRateRow extends ClosableRow {
   currency: string;
   rate_per_usd: DecimalString;
   buffer_pct: DecimalString;
@@ -85,7 +101,7 @@ export interface CancellationTier {
 }
 
 /** A B2B cancellation fee schedule (AA-974, bk-021): the B2B default (no source_id) or one tour's own. */
-export interface CancellationPolicyRow extends PolicyRowBase {
+export interface CancellationPolicyRow extends ClosableRow {
   channel: string;
   trip_plan_id: string | null;
   source_id: string | null;
@@ -130,6 +146,9 @@ export interface NewFxRateBody {
   source: string;
 }
 
+/** The three policy row kinds that a second person rejects or their maker withdraws (S280, bk-058). */
+export type ClosableKind = "rules" | "fx-rates" | "cancellation-policies";
+
 export const pricingPolicyApi = {
   rules: (channel?: string) => bkGet<PolicyList<PricingRuleRow>>("pricing/rules", { channel }),
   createRule: (body: NewRuleBody) => bkSend<PricingRuleRow>("pricing/rules", { body }),
@@ -143,4 +162,7 @@ export const pricingPolicyApi = {
     bkSend<CancellationPolicyRow>("pricing/cancellation-policies", { body }),
   approveCancellationPolicy: (id: string) =>
     bkSend<CancellationPolicyRow>(`pricing/cancellation-policies/${enc(id)}/approve`),
+  rejectRow: (kind: ClosableKind, id: string, reason: string) =>
+    bkSend<ClosableRow>(`pricing/${kind}/${enc(id)}/reject`, { body: { reason } }),
+  withdrawRow: (kind: ClosableKind, id: string) => bkSend<ClosableRow>(`pricing/${kind}/${enc(id)}/withdraw`),
 };

@@ -41,6 +41,10 @@ RULE_ROW = {
     "approved_by": None,
     "approved_by_name": None,
     "approved_at": None,
+    "closed_by": None,
+    "closed_by_name": None,
+    "closed_at": None,
+    "close_reason": None,
     "status": "pending",
 }
 FX_ROW = {
@@ -56,6 +60,10 @@ FX_ROW = {
     "approved_by": None,
     "approved_by_name": None,
     "approved_at": None,
+    "closed_by": None,
+    "closed_by_name": None,
+    "closed_at": None,
+    "close_reason": None,
     "status": "pending",
 }
 RULE_BODY = {"channel": "b2b", "target_margin": "0.16", "floor_margin": "0.10", "valid_from": "2026-10-20"}
@@ -255,7 +263,7 @@ def _approve_conn(policy_row: Any, insert: Any = "OK") -> ScriptedConn:
 @pytest.mark.parametrize("kind", ["rule", "fx"])
 async def test_approve_by_second_person(kind: str) -> None:
     row = RULE_ROW if kind == "rule" else FX_ROW
-    conn = _approve_conn({"created_by": "u-5", "day": TODAY, "approval_id": None}).on(
+    conn = _approve_conn({"created_by": "u-5", "day": TODAY, "approval_id": None, "closure_id": None}).on(
         "WITH in_force AS", _approved(row)
     )
     approve = policy.approve_rule if kind == "rule" else policy.approve_fx_rate
@@ -274,23 +282,28 @@ async def test_approve_by_second_person(kind: str) -> None:
     ("policy_row", "insert", "error", "code"),
     [
         (None, "OK", NotFound, "fx_rate_not_found"),
-        ({"created_by": "u-5", "day": TODAY, "approval_id": uuid.uuid4()}, "OK", Conflict, "already_approved"),
-        ({"created_by": "a-1", "day": TODAY, "approval_id": None}, "OK", Forbidden, "own_row"),
         (
-            {"created_by": None, "day": TODAY, "approval_id": None},
+            {"created_by": "u-5", "day": TODAY, "approval_id": uuid.uuid4(), "closure_id": None},
+            "OK",
+            Conflict,
+            "already_approved",
+        ),
+        ({"created_by": "a-1", "day": TODAY, "approval_id": None, "closure_id": None}, "OK", Forbidden, "own_row"),
+        (
+            {"created_by": None, "day": TODAY, "approval_id": None, "closure_id": None},
             asyncpg.UniqueViolationError("race"),
             Conflict,
             "already_approved",
         ),
         (
-            {"created_by": None, "day": TODAY, "approval_id": None},
+            {"created_by": None, "day": TODAY, "approval_id": None, "closure_id": None},
             asyncpg.CheckViolationError("trigger"),
             Forbidden,
             "own_row",
         ),
         # S280: a row whose day has passed is never approved (it would apply backwards or be superseded at once).
         (
-            {"created_by": "u-5", "day": TODAY - timedelta(days=1), "approval_id": None},
+            {"created_by": "u-5", "day": TODAY - timedelta(days=1), "approval_id": None, "closure_id": None},
             "OK",
             Conflict,
             "effective_date_passed",

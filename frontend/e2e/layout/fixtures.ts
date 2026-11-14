@@ -561,6 +561,14 @@ function page<T>(items: T[], total = 137): Page<T> & OffsetPage<T> {
 
 // ── Pricing ──────────────────────────────────────────────────────────────────
 const person = (id: string, i: number) => ({ id, name: PERSON_NAMES[i % 4] });
+// S280 (bk-058): a pending row shows Reject to this viewer (not its maker); no row is closed.
+const closeFields = (status: string) => ({
+  can_reject: status === "pending",
+  can_withdraw: false,
+  closed_by: null,
+  closed_at: null,
+  close_reason: null,
+});
 const FX_ROWS: [FxRateRow["status"], string, string][] = [
   ["pending", "VND", "25432.500000"],
   ["in_force", "VND", "25410.000000"],
@@ -581,6 +589,7 @@ const FX: PolicyList<FxRateRow> = {
     approved_at: status === "pending" ? null : NOW,
     can_approve: status === "pending",
     day_passed: false,
+    ...closeFields(status),
     currency,
     rate_per_usd,
     buffer_pct: "0.0150",
@@ -605,6 +614,7 @@ const CANCELLATION_POLICIES: PolicyList<CancellationPolicyRow> = {
     approved_at: status === "pending" ? null : NOW,
     can_approve: status === "pending",
     day_passed: false,
+    ...closeFields(status),
     channel: "b2b",
     trip_plan_id: sourceId ? uuid("6", 3) : null,
     source_id: sourceId,
@@ -640,6 +650,7 @@ const RULES: PolicyList<PricingRuleRow> = {
     approved_at: status === "pending" ? null : NOW,
     can_approve: status === "pending",
     day_passed: false,
+    ...closeFields(status),
     channel,
     target_margin: "0.30",
     floor_margin: "0.18",

@@ -631,6 +631,10 @@ ROW = {
     "approved_by": None,
     "approved_by_name": None,
     "approved_at": None,
+    "closed_by": None,
+    "closed_by_name": None,
+    "closed_at": None,
+    "close_reason": None,
     "status": "pending",
 }
 BODY = {
@@ -708,7 +712,7 @@ def approve_conn(created_by: str | None = "u-5", approval: str | None = None) ->
     conn = policy_conn({**ROW, "status": "in_force", "approved_by": "a-1", "approved_at": NOW})
     conn.on(
         "FROM booking.cancellation_policies p LEFT JOIN booking.policy_approvals",
-        {"created_by": created_by, "day": date(2027, 1, 1), "approval_id": approval},
+        {"created_by": created_by, "day": date(2027, 1, 1), "approval_id": approval, "closure_id": None},
     )
     return conn
 
