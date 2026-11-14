@@ -34,6 +34,7 @@ JOBS = [
     "lint",
     "security-audit",
     "test-unit",
+    "settings-lint",
     "test-integration",
     "docker-build",
     "vendored-copies",
@@ -248,3 +249,12 @@ def test_the_vendored_copies_check_stays_a_job_of_its_own() -> None:
     job = _job("vendored-copies")
     assert "    name: Vendored CIS copies\n" in job and _if(job) is None and "\n    needs:" not in job
     assert "python3 scripts/check_vendored_copies.py" not in _job("lint")
+
+
+def test_settings_lint_is_a_job_of_its_own_gated_like_unit_tests() -> None:
+    """AA-1096: the settings-lint guard has its own check name (the same in AA-Partner and AA-TripPlanner-Web) so
+    branch protection can require it; it skips only where Unit Tests skips (a docs-only pull request)."""
+    job = _job("settings-lint")
+    assert "    name: Settings Lint\n" in job
+    assert _if(job) == _if(_job("test-unit"))
+    assert "pytest tests/unit/test_aa1096_settings_lint.py" in job
