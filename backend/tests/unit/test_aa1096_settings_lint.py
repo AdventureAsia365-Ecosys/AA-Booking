@@ -24,6 +24,12 @@ packages (:data:`GOVERNED`: B2B, operations, retention, pricing, agency billing)
    policy parameter or ``# technical-constant: <why>``. Rewrite that baseline only to remove entries:
    ``python -m tests.unit.test_aa1096_settings_lint`` (from ``backend/``).
 
+7. **No env var for a policy parameter** (AA-1096 l5, tech lead S279: env vars stay one release as an emergency
+   override, then go). Booking never had such an override (``booking.pricing_policy`` has no env column and
+   Terraform sets none), so the rule is strict from day one: no module of ``app/`` reads an env var (any type, not
+   only a number) named after a parameter (``<KEY>`` or ``BOOKING_<KEY>``, upper case), so a value that is a parameter
+   can never also come from the environment.
+
 The scanner is self-tested on planted values. CI: the job "Settings Lint" (.github/workflows/ci.yml) runs this file as
 a check of its own (the name is the same in AA-Partner and AA-TripPlanner-Web); "Unit Tests" runs it too.
 """
@@ -309,3 +315,54 @@ if __name__ == "__main__":  # rewrite the rule 6 baseline to the current finding
         encoding="utf-8",
     )
     print(f"wrote {REST_BASELINE.name} ({len(current)} entries)")
+
+
+# ── 7. no env var for a policy parameter (AA-1096 l5) ──────────────────────────────────────────────────────────────
+
+
+def _env_names_read(tree: ast.AST) -> list[tuple[int, str]]:
+    """(line, name) of each env read with a literal name: os.environ.get / os.getenv / getenv / os.environ[...]."""
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
+            f = node.func
+            name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+            if name == "getenv" or (name == "get" and "environ" in ast.unparse(f)):
+                out.append((node.lineno, str(node.args[0].value)))
+        elif isinstance(node, ast.Subscript) and "environ" in ast.unparse(node.value):
+            if isinstance(node.slice, ast.Constant):
+                out.append((node.lineno, str(node.slice.value)))
+    return out
+
+
+def _parameter_env_names() -> set[str]:
+    names = {key.upper().replace(".", "_") for key in policy_params.PARAMS}
+    return names | {f"BOOKING_{n}" for n in names}
+
+
+def env_parameter_findings(files: list[Path] | None = None) -> list[str]:
+    forbidden = _parameter_env_names()
+    out = []
+    for path in files if files is not None else sorted(APP.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        rel = path.relative_to(APP).as_posix() if path.is_relative_to(APP) else path.name
+        out += [
+            f"{rel}:{line}: env {name} is a pricing policy parameter"
+            for line, name in _env_names_read(tree)
+            if name in forbidden
+        ]
+    return out
+
+
+def test_no_module_reads_an_env_var_named_after_a_policy_parameter() -> None:
+    assert env_parameter_findings() == []
+
+
+def test_the_env_parameter_rule_catches_a_planted_read(tmp_path: Path) -> None:
+    key = sorted(policy_params.PARAMS)[0].upper().replace(".", "_")
+    src = tmp_path / "zz_planted.py"
+    src.write_text(
+        f'import os\nA = os.environ.get("{key}")\nB = os.getenv("BOOKING_{key}", "x")\nC = os.environ["ZZ_OK"]\n',
+        encoding="utf-8",
+    )
+    assert len(env_parameter_findings([src])) == 2
