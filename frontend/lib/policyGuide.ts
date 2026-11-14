@@ -33,3 +33,20 @@ export function directionWords(type: ParamType): DirectionWords {
   if (type === "boolean") return "switch";
   return type === "month_day" ? "date" : "choice";
 }
+
+/** AA-1096 (S280 UX fix round, the same defect as CIS Platform › Settings): the page's one search over every section.
+ *  Each word of the query must appear in the parameter's key, its label as shown (`label`, the page's language), its
+ *  one-line help or its guide (English and Vietnamese), in any case; "" = no search (null). Pure. */
+export function searchParams<T extends Pick<PolicyParam, "key" | "help" | "guide">>(
+  params: T[], query: string, label: (p: T) => string): T[] | null {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return null;
+  const textOf = (p: T) => {
+    const guides = [p.guide?.en, p.guide?.vi].flatMap((g) => (g ? GUIDE_PARTS.map((part) => g[part]) : []));
+    return [p.key, label(p), p.help, ...guides].join(" ").toLowerCase();
+  };
+  return params.filter((p) => {
+    const text = textOf(p);
+    return words.every((w) => text.includes(w));
+  });
+}
