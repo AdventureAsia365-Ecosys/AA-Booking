@@ -144,6 +144,24 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
 - **Never** writes another app's schema, never reads CIS pipeline tables (`acp_*`,
   `*_aa_internal`), never writes content (ADR 0002).
 
+## Run it locally
+
+The shortest path that works without AWS access. The [README](README.md#local-development) has the full commands, and
+[`frontend/README.md`](frontend/README.md) the staff admin's.
+
+| Part | Command | Needs |
+|---|---|---|
+| Python setup | `cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt` | Python 3.12 |
+| Lint | `.venv/bin/ruff check . && .venv/bin/ruff format --check .` (in `backend/`) | |
+| Unit tests | `.venv/bin/pytest tests/unit` (in `backend/`) | nothing else: no database, no AWS |
+| API | `ENVIRONMENT=local .venv/bin/uvicorn app.main:app --port 8000`, then `curl -s localhost:8000/booking/health` | nothing for liveness; `/booking/health/ready` and every data route need a database |
+| Integration tests | `.venv/bin/python -m tests.integration.bootstrap_roles <superuser-dsn> <admin-dsn>`, then `.venv/bin/pytest tests/integration` with the admin DSN set as in the README | a throwaway PostgreSQL 15 database whose name ends in `_test` or `_ci` (the setup drops the `booking`, `tripplanner` and `catalog` schemas in it) |
+| Staff admin | `cd frontend && npm ci && npm run dev` (port 3100); `npm run lint`, `npm run typecheck` | Node; it calls the Dev Booking API unless its server environment points elsewhere |
+| Pre-push checks | `scripts/install-hooks.sh` once per clone; each push then runs `scripts/pre-push.sh` | |
+
+- Never point a local run at the Dev database. Run frontend installs in a worktree, not in the main checkout of the
+  workspace.
+
 ## Stack (same as AA-CIS-App)
 
 | Part | Choice |
