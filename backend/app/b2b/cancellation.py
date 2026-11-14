@@ -482,7 +482,8 @@ WITH in_force AS (
 SELECT p.id::text AS id, p.channel, p.trip_plan_id::text AS trip_plan_id, tp.source_id, p.valid_from, p.title,
        p.tiers::text AS tiers, p.note, p.created_at, p.created_by, cs.name AS created_by_name,
        a.approved_by, aps.name AS approved_by_name, a.approved_at,
-       {pricing_policy._STATUS.format(day="valid_from")} AS status
+       {pricing_policy._STATUS.format(day="valid_from")} AS status,
+       {pricing_policy.DAY_PASSED.format(day="valid_from")} AS day_passed
 FROM booking.cancellation_policies p
 LEFT JOIN booking.trip_plans tp ON tp.id = p.trip_plan_id
 LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id
@@ -528,6 +529,7 @@ def _label(row: dict[str, Any]) -> str:
 
 async def create_policy(conn: asyncpg.Connection, staff: Staff, data: dict[str, Any], *, today: date) -> dict[str, Any]:
     """A new pending policy row. ``data``: title, source_id (None = the B2B default), valid_from, tiers, note."""
+    pricing_policy.check_effective_day(data["valid_from"], today)
     try:
         tiers = parse_tiers(data["tiers"])
     except TierError as exc:
@@ -577,7 +579,7 @@ async def create_policy(conn: asyncpg.Connection, staff: Staff, data: dict[str, 
 
 
 async def approve_policy(conn: asyncpg.Connection, staff: Staff, policy_id: str, *, today: date) -> dict[str, Any]:
-    await pricing_policy.approve_row(conn, staff, "cancellation_policy", policy_id)
+    await pricing_policy.approve_row(conn, staff, "cancellation_policy", policy_id, today=today)
     row = await _by_id(conn, staff, policy_id, today)
     await audit.record(
         conn,

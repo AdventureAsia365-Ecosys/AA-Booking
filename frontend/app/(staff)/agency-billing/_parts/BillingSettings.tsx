@@ -2,7 +2,8 @@
 // app/(staff)/agency-billing/_parts/BillingSettings.tsx — Agency billing › Settings (AA-1037 R4; root ADR 0019 b10,
 // b16, b17). Three data sets finance edits, never code: the AA legal entity that issues the invoices (one default),
 // the tax rules (rate + wording per kind and recipient country, with an effective window) and the payment terms (the
-// default set and per-agency overrides: deposit %, balance days before departure, due days, warn / suspend days).
+// default set and per-agency terms: deposit %, balance days before departure, due days, warn / suspend days; S280:
+// TermsSection.tsx, where an agency's terms are added and changed too).
 // Every change is audited in Booking. billing_config.write = admin, finance.
 // AA-1037 extras G6: the terms clauses agencies see (e.g. price errors), as data: finance edits a clause (a draft
 // again), the business owner (terms_clause.approve = admin) approves it; agencies only see approved clauses.
@@ -14,7 +15,6 @@ import {
   KIND_LABEL,
   agencyBillingApi,
   type BillingEntity,
-  type BillingTerms,
   type TaxRule,
   type TermsClause,
 } from "@/lib/api/agencyBilling";
@@ -36,6 +36,7 @@ import {
   useToast,
 } from "@/ui";
 import { errorText } from "./shared";
+import { TermsSection } from "./TermsSection";
 
 export function BillingSettings() {
   return (
@@ -274,117 +275,6 @@ function TaxRulesSection() {
           </div>
         )}
       </FormDrawer>
-    </Section>
-  );
-}
-
-// ── Terms ────────────────────────────────────────────────────────────────────
-
-const TERM_FIELDS: { key: keyof BillingTerms; label: string; hint: string }[] = [
-  { key: "balance_days_before_departure", label: "Balance due before departure (days)", hint: "Booked later than this: billed in full" },
-  { key: "saas_due_days", label: "Software fee due after issue (days)", hint: "" },
-  { key: "settlement_due_days", label: "Settlement due after issue (days)", hint: "" },
-  { key: "warn_after_days", label: "Warn after (overdue days)", hint: "The agency's bell rings and its account enters its grace state" },
-  { key: "suspend_after_days", label: "Suspend after (overdue days)", hint: "Must be more than the warning days" },
-];
-
-function TermsSection() {
-  const canEdit = useCan("billing_config.write");
-  const toast = useToast();
-  const invalidate = useInvalidate();
-  const list = useQuery({ queryKey: ["agency-billing", "terms"], queryFn: agencyBillingApi.terms });
-  const current = list.data?.items.find((t) => !t.party_tenant_id) ?? null;
-  const [draft, setDraft] = useState<BillingTerms | null>(null);
-  const shown = draft ?? current;
-  const save = useMutation({
-    mutationFn: (t: BillingTerms) =>
-      agencyBillingApi.putDefaultTerms({
-        deposit_pct: t.deposit_pct,
-        balance_days_before_departure: Number(t.balance_days_before_departure),
-        saas_due_days: Number(t.saas_due_days),
-        settlement_due_days: Number(t.settlement_due_days),
-        warn_after_days: Number(t.warn_after_days),
-        suspend_after_days: Number(t.suspend_after_days),
-        saas_currency: t.saas_currency,
-      }),
-    onSuccess: () => {
-      toast.success("Default terms saved");
-      setDraft(null);
-      invalidate();
-    },
-    onError: (e) => toast.error(errorText(e)),
-  });
-  const removeOverride = useMutation({
-    mutationFn: (tenantId: string) => agencyBillingApi.deleteAgencyTerms(tenantId),
-    onSuccess: () => {
-      toast.success("The agency follows the default terms again");
-      invalidate();
-    },
-    onError: (e) => toast.error(errorText(e)),
-  });
-  const overrides = (list.data?.items ?? []).filter((t) => t.party_tenant_id);
-  return (
-    <Section
-      title="Payment terms"
-      description="The default terms of every agency; an agency's contract terms override them as a whole."
-      actions={
-        canEdit && draft ? (
-          <span className="flex gap-2">
-            <Button variant="ghost" onClick={() => setDraft(null)}>Cancel</Button>
-            <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate(draft)}>Save terms</Button>
-          </span>
-        ) : undefined
-      }
-    >
-      {shown ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Field label="Deposit (%)" hint="Billed when an agency booking is confirmed">
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              disabled={!canEdit}
-              value={draft ? String(Number(draft.deposit_pct) * 100) : String(Number(shown.deposit_pct) * 100)}
-              onChange={(e) => setDraft({ ...shown, ...draft, deposit_pct: (Number(e.target.value || "0") / 100).toFixed(4) })}
-            />
-          </Field>
-          {TERM_FIELDS.map((tf) => (
-            <Field key={tf.key} label={tf.label} hint={tf.hint || undefined}>
-              <Input
-                type="number"
-                min={0}
-                disabled={!canEdit}
-                value={String((draft ?? shown)[tf.key] ?? "")}
-                onChange={(e) => setDraft({ ...shown, ...draft, [tf.key]: e.target.value } as BillingTerms)}
-              />
-            </Field>
-          ))}
-          <Field label="Software fee currency">
-            <Input value={shown.saas_currency} disabled />
-          </Field>
-        </div>
-      ) : (
-        <p className="text-[13px] text-muted">{list.isLoading ? "Loading…" : "No default terms row."}</p>
-      )}
-      {overrides.length > 0 && (
-        <div className="mt-4">
-          <h3 className="mb-2 text-[13px] font-semibold">Agency overrides</h3>
-          <ul className="flex flex-col gap-2">
-            {overrides.map((o) => (
-              <li key={o.party_tenant_id ?? ""} className="flex flex-wrap items-center gap-3 text-[13px]">
-                <span className="font-semibold">{o.agency_name}</span>
-                <span>{`deposit ${(Number(o.deposit_pct) * 100).toFixed(0)} %, warn ${o.warn_after_days} d, suspend ${o.suspend_after_days} d`}</span>
-                {canEdit && (
-                  <Button size="sm" variant="ghost" onClick={() => o.party_tenant_id && removeOverride.mutate(o.party_tenant_id)}>
-                    Use the default
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </Section>
   );
 }

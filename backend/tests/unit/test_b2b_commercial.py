@@ -682,7 +682,12 @@ def test_staff_create_policy_refusals() -> None:
 
 @pytest.mark.asyncio
 async def test_create_policy_service_errors() -> None:
-    data = {"title": "T", "source_id": "BT-7D", "valid_from": date(2027, 1, 1), "tiers": STANDARD, "note": " "}
+    data = {"title": "T", "source_id": "BT-7D", "valid_from": NOW.date(), "tiers": STANDARD, "note": " "}
+    with pytest.raises(Invalid) as past:  # S280: never backwards
+        await cancellation.create_policy(
+            policy_conn(), CONTRACTING, {**data, "valid_from": date(2027, 1, 1)}, today=NOW.date()
+        )
+    assert past.value.code == "effective_in_past"
     conn = policy_conn().on("SELECT id::text FROM booking.trip_plans", None)
     with pytest.raises(NotFound):
         await cancellation.create_policy(conn, CONTRACTING, data, today=NOW.date())
@@ -703,7 +708,7 @@ def approve_conn(created_by: str | None = "u-5", approval: str | None = None) ->
     conn = policy_conn({**ROW, "status": "in_force", "approved_by": "a-1", "approved_at": NOW})
     conn.on(
         "FROM booking.cancellation_policies p LEFT JOIN booking.policy_approvals",
-        {"created_by": created_by, "approval_id": approval},
+        {"created_by": created_by, "day": date(2027, 1, 1), "approval_id": approval},
     )
     return conn
 

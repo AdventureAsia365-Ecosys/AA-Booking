@@ -4,7 +4,7 @@ with a scripted connection. Real SQL, grants and the trigger: tests/integration/
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
 from typing import Any
 
@@ -184,6 +184,7 @@ async def test_create_rule_writes_pending_row_and_audit() -> None:
         (_rule_data(floor_margin=D("0.20")), ROW_ID, Invalid, "invalid_rule"),
         (_rule_data(), asyncpg.UniqueViolationError("dup"), Conflict, "rule_exists"),
         (_rule_data(), asyncpg.CheckViolationError("chk"), Invalid, "invalid_rule"),
+        (_rule_data(valid_from=TODAY - timedelta(days=1)), ROW_ID, Invalid, "effective_in_past"),  # S280
     ],
 )
 async def test_create_rule_refusals(data: dict[str, Any], answer: Any, error: type, code: str) -> None:
@@ -211,6 +212,7 @@ async def test_create_fx_rate_writes_pending_row_and_audit() -> None:
         (_fx_data(source="   "), ROW_ID, Invalid, "source_required"),
         (_fx_data(), asyncpg.UniqueViolationError("dup"), Conflict, "fx_rate_exists"),
         (_fx_data(), asyncpg.CheckViolationError("chk"), Invalid, "invalid_fx_rate"),
+        (_fx_data(as_of=TODAY - timedelta(days=1)), ROW_ID, Invalid, "effective_in_past"),  # S280
     ],
 )
 async def test_create_fx_rate_refusals(data: dict[str, Any], answer: Any, error: type, code: str) -> None:
@@ -230,19 +232,32 @@ async def test_created_row_vanishing_is_not_found() -> None:
 # ── Service: approve (maker-checker) ─────────────────────────────────────────
 
 
+def test_pending_row_past_its_day_offers_no_approve() -> None:
+    """S280: approve_row refuses a pending row whose day has passed (409 effective_date_passed), so the list sets
+    ``day_passed`` and never offers the button; agency rows (no ``day_passed`` column) keep the old rule."""
+    passed = {**RULE_ROW, "valid_from": TODAY - timedelta(days=1), "day_passed": True}
+    conn = ScriptedConn().on("FROM booking.pricing_rules p", [passed]).on("FROM booking.fx_rates p", [FX_ROW])
+    item = _client(ADMIN, conn).get("/booking/pricing/rules").json()["items"][0]
+    assert item["can_approve"] is False and item["day_passed"] is True
+    assert "DAY_PASSED" not in policy.RULES_SQL and "AS day_passed" in policy.RULES_SQL
+    assert "AS day_passed" in policy.FX_SQL
+    fx = _client(ADMIN, conn).get("/booking/pricing/fx-rates").json()["items"][0]
+    assert fx["can_approve"] is True and fx["day_passed"] is False
+    approved = {**_approved(RULE_ROW), "day_passed": False}
+    assert policy._common(approved, ADMIN)["day_passed"] is False
+
+
 def _approve_conn(policy_row: Any, insert: Any = "OK") -> ScriptedConn:
-    return (
-        ScriptedConn()
-        .on("SELECT p.created_by, a.id AS approval_id", policy_row)
-        .on("INSERT INTO booking.policy_approvals", insert)
-    )
+    return ScriptedConn().on("a.id AS approval_id", policy_row).on("INSERT INTO booking.policy_approvals", insert)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["rule", "fx"])
 async def test_approve_by_second_person(kind: str) -> None:
     row = RULE_ROW if kind == "rule" else FX_ROW
-    conn = _approve_conn({"created_by": "u-5", "approval_id": None}).on("WITH in_force AS", _approved(row))
+    conn = _approve_conn({"created_by": "u-5", "day": TODAY, "approval_id": None}).on(
+        "WITH in_force AS", _approved(row)
+    )
     approve = policy.approve_rule if kind == "rule" else policy.approve_fx_rate
     out = await approve(conn, ADMIN, ROW_ID, today=TODAY)
     assert out["status"] == "in_force" and out["approved_by"] == {"id": "a-1", "name": "Admin"}
@@ -259,10 +274,27 @@ async def test_approve_by_second_person(kind: str) -> None:
     ("policy_row", "insert", "error", "code"),
     [
         (None, "OK", NotFound, "fx_rate_not_found"),
-        ({"created_by": "u-5", "approval_id": uuid.uuid4()}, "OK", Conflict, "already_approved"),
-        ({"created_by": "a-1", "approval_id": None}, "OK", Forbidden, "own_row"),
-        ({"created_by": None, "approval_id": None}, asyncpg.UniqueViolationError("race"), Conflict, "already_approved"),
-        ({"created_by": None, "approval_id": None}, asyncpg.CheckViolationError("trigger"), Forbidden, "own_row"),
+        ({"created_by": "u-5", "day": TODAY, "approval_id": uuid.uuid4()}, "OK", Conflict, "already_approved"),
+        ({"created_by": "a-1", "day": TODAY, "approval_id": None}, "OK", Forbidden, "own_row"),
+        (
+            {"created_by": None, "day": TODAY, "approval_id": None},
+            asyncpg.UniqueViolationError("race"),
+            Conflict,
+            "already_approved",
+        ),
+        (
+            {"created_by": None, "day": TODAY, "approval_id": None},
+            asyncpg.CheckViolationError("trigger"),
+            Forbidden,
+            "own_row",
+        ),
+        # S280: a row whose day has passed is never approved (it would apply backwards or be superseded at once).
+        (
+            {"created_by": "u-5", "day": TODAY - timedelta(days=1), "approval_id": None},
+            "OK",
+            Conflict,
+            "effective_date_passed",
+        ),
     ],
 )
 async def test_approve_refusals(policy_row: Any, insert: Any, error: type, code: str) -> None:

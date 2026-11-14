@@ -13,7 +13,7 @@ writes and approvals ``pricing.write`` (admin, contracting), and the creator of 
 ``/booking/pricing/policy`` (AA-1091, bk-050, root ADR 0005b d15): the pricing policy parameters (GET every parameter
 with the value in force, scheduled and open changes and history; POST a change as a draft or pending; POST
 ``/{id}/submit``, ``/withdraw`` by its maker, ``/approve`` and ``/reject`` by a second person of the parameter's
-approver group; ``app.pricing.policy_admin``).
+approver group, ``/discard`` of another maker's draft by that group (S280); ``app.pricing.policy_admin``).
 """
 
 from __future__ import annotations
@@ -322,7 +322,9 @@ class PolicyProposal(BaseModel):
 
     key: PolicyKey
     # The typed value (app.pricing.policy_params: a number, a decimal string, a boolean, "MM-DD", a list or a map).
-    value: int | str | bool | list[str] | dict[str, str]
+    # list[int] before list[str] (S280): an ``integers`` parameter (agency_reminder_steps_days) comes as JSON numbers,
+    # which Pydantic never turns into strings, so without it every such change was a 422.
+    value: int | str | bool | list[int] | list[str] | dict[str, str]
     effective_from: date
     reason: str = Field(min_length=1, max_length=policy_admin.MAX_REASON)
     # true = submit for approval at once (pending); false = save a draft the maker submits later.
@@ -380,3 +382,11 @@ async def reject_policy(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy_admin.reject(conn, staff, str(version_id), reason=body.reason, today=_today())
+
+
+@router.post("/policy/{version_id}/discard")
+async def discard_policy(
+    version_id: uuid.UUID, body: PolicyDecision, staff: CanDecidePolicy, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await policy_admin.discard(conn, staff, str(version_id), reason=body.reason, today=_today())

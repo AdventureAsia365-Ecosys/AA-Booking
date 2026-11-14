@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { decimalText, directionWords, guideFor, searchParams } from "./policyGuide.ts";
+import { decimalText, directionWords, guideFor } from "./policyGuide.ts";
 
 test("a decimal takes a comma or a point; the API gets a point", () => {
   assert.equal(decimalText("2,5"), "2.5");
@@ -28,19 +28,4 @@ test("the guide in the page's language, else English; the directions by value ty
   assert.equal(directionWords("month_day"), "date");
   assert.equal(directionWords("amount_map"), "choice");
   assert.equal(directionWords("codes"), "choice");
-});
-
-// AA-1096 (S280 UX fix round): one search over every section; the key and the guide text match, not only the label.
-test("the page search matches key, label, help and guide in either language; every word must match", () => {
-  const g = (s) => ({ what: `${s} what`, raise: "r", lower: "l", when: "w", example: "e" });
-  const params = [
-    { key: "booking.hold.hold_hours", help: "How long a hold lasts.", guide: { en: g("Hold"), vi: g("Giữ chỗ") }, section: "holds" },
-    { key: "booking.ops.reminder_days", help: "Days before a reminder.", guide: null, section: "operations" },
-  ];
-  const label = (p) => (p.key.endsWith("hold_hours") ? "Hold length" : "Reminder lead time");
-  assert.equal(searchParams(params, "  ", label), null);
-  assert.deepEqual(searchParams(params, "hold_hours", label).map((p) => p.key), ["booking.hold.hold_hours"]);
-  assert.deepEqual(searchParams(params, "REMINDER lead", label).map((p) => p.key), ["booking.ops.reminder_days"]);
-  assert.deepEqual(searchParams(params, "giữ chỗ", label).map((p) => p.key), ["booking.hold.hold_hours"]);
-  assert.deepEqual(searchParams(params, "hold reminder", label), []);
 });

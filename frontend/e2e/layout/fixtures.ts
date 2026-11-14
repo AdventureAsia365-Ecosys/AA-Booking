@@ -580,6 +580,7 @@ const FX: PolicyList<FxRateRow> = {
     approved_by: status === "pending" ? null : person("u-003", 2),
     approved_at: status === "pending" ? null : NOW,
     can_approve: status === "pending",
+    day_passed: false,
     currency,
     rate_per_usd,
     buffer_pct: "0.0150",
@@ -603,6 +604,7 @@ const CANCELLATION_POLICIES: PolicyList<CancellationPolicyRow> = {
     approved_by: status === "pending" ? null : person("u-003", 2),
     approved_at: status === "pending" ? null : NOW,
     can_approve: status === "pending",
+    day_passed: false,
     channel: "b2b",
     trip_plan_id: sourceId ? uuid("6", 3) : null,
     source_id: sourceId,
@@ -637,6 +639,7 @@ const RULES: PolicyList<PricingRuleRow> = {
     approved_by: status === "pending" ? null : person("u-003", 2),
     approved_at: status === "pending" ? null : NOW,
     can_approve: status === "pending",
+    day_passed: false,
     channel,
     target_margin: "0.30",
     floor_margin: "0.18",
@@ -814,7 +817,15 @@ const POLICY: PolicyListing = {
   items: [
     policyParam("tariff_year_start", "month_day", "MM-DD", "11-01", { in_use: false, question: "Q1", not_enforced_reason: "The feature that reads this value is not built yet." }),
     policyParam("quote_validity_days", "integer", "days", 14, { open: POLICY_PENDING }),
-    policyParam("quote_validity_festive_days", "integer", "days", 3, { in_use: false, not_enforced_reason: "The feature that reads this value is not built yet." }),
+    // S280: another maker's draft (Discard for the approver group) and a cross-parameter bound.
+    policyParam("quote_validity_festive_days", "integer", "days", 3, {
+      in_use: false, not_enforced_reason: "The feature that reads this value is not built yet.", not_enforced_reason_vi: "Tính năng đọc giá trị này chưa được xây dựng.",
+      cross_bound: { relation: "lte", key: "quote_validity_days" },
+      open: policyVersion("quote_validity_festive_days", 2, 5, {
+        status: "draft", unit: "days", effective_from: "2026-11-20", submitted_at: null, approved_by: null, approved_at: null,
+        created_by: { id: "u-3", name: PERSON_NAMES[2] }, can_discard: true,
+      }),
+    }),
     policyParam("surcharge_causes", "codes", null, ["fx", "tax"], { approver: "finance", in_use: false, section: "surcharges", not_enforced_reason: "The feature that reads this value is not built yet.", choices: ["fuel", "fx", "tax"], can_approve_group: false }),
     policyParam("surcharge_fx_threshold_pct", "decimal", "%", "5", {
       approver: "finance", in_use: false, section: "surcharges", not_enforced_reason: "The feature that reads this value is not built yet.", can_approve_group: false,

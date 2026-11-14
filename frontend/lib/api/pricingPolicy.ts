@@ -37,6 +37,9 @@ interface PolicyRowBase {
   approved_at: IsoDateTime | null;
   /** The API's maker-checker answer for the caller: pending, pricing.write, and not the creator. */
   can_approve: boolean;
+  /** S280: pending and its day has passed: it can no longer be approved (409 effective_date_passed); enter it again
+   * with a later day. */
+  day_passed: boolean;
 }
 
 export interface PricingRuleRow extends PolicyRowBase {
