@@ -469,14 +469,25 @@ async def test_a_later_backdated_policy_never_reprices_an_unlocked_booking(
         await admin.execute(
             "UPDATE booking.b2b_holds SET cancellation_policy_id = NULL WHERE id = $1::uuid", booking["hold_id"]
         )
-    body = {
-        "title": "Backdated agency terms",
-        "source_id": SOURCE_ID,
-        "valid_from": (UTC_TODAY - timedelta(days=30)).isoformat(),
-        "tiers": [{"min_days": 0, "fee_pct": "40"}],
-    }
-    created = await _ok(await c.post("/pricing/cancellation-policies", json=body, headers=_staff(cis, MAKER)), 201)
-    await _ok(await c.post(f"/pricing/cancellation-policies/{created['id']}/approve", headers=_staff(cis, CHECKER)))
+    # S280: the staff API refuses a backdated row (422 effective_in_past) and its approval once the day passed, so the
+    # row this test needs (an older data state) is written directly, as an approved row of role booking.
+    async with admin.transaction():
+        await admin.execute(f'SET LOCAL ROLE "{owner}"')
+        policy_id = await admin.fetchval(
+            "INSERT INTO booking.cancellation_policies (channel, trip_plan_id, valid_from, title, tiers, created_by)"
+            " SELECT 'b2b', id, $2, 'Backdated agency terms', '[{\"min_days\": 0, \"fee_pct\": 40}]'::jsonb, $3"
+            " FROM booking.trip_plans WHERE source_id = $1 RETURNING id::text",
+            SOURCE_ID,
+            UTC_TODAY - timedelta(days=30),
+            MAKER,
+        )
+        await admin.execute(
+            "INSERT INTO booking.policy_approvals (entity_type, cancellation_policy_id, approved_by)"
+            " VALUES ('cancellation_policy', $1::uuid, $2)",
+            policy_id,
+            CHECKER,
+        )
+    created = {"id": policy_id}
     url = f"/b2b/v1/bookings/{booking['booking_id']}/cancel?dry_run=true"
     reason = {"reason_code": "client_cancelled"}
     preview = await _ok(await c.post(url, json=reason, headers=_m2m(m2m, "lg-dry-1")))

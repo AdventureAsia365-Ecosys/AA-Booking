@@ -96,12 +96,13 @@ LIMIT $4
 """  # noqa: S608 — constant fragments only
 
 POLICY_SQL = {
-    "pricing_rule": "SELECT p.created_by, a.id AS approval_id FROM booking.pricing_rules p"
+    "pricing_rule": "SELECT p.created_by, p.valid_from AS day, a.id AS approval_id FROM booking.pricing_rules p"
     " LEFT JOIN booking.policy_approvals a ON a.pricing_rule_id = p.id WHERE p.id = $1::uuid",
-    "fx_rate": "SELECT p.created_by, a.id AS approval_id FROM booking.fx_rates p"
+    "fx_rate": "SELECT p.created_by, p.as_of AS day, a.id AS approval_id FROM booking.fx_rates p"
     " LEFT JOIN booking.policy_approvals a ON a.fx_rate_id = p.id WHERE p.id = $1::uuid",
     # bk-021 (AA-974): B2B cancellation-fee policies, same maker-checker (app.b2b.cancellation).
-    "cancellation_policy": "SELECT p.created_by, a.id AS approval_id FROM booking.cancellation_policies p"
+    "cancellation_policy": "SELECT p.created_by, p.valid_from AS day, a.id AS approval_id"
+    " FROM booking.cancellation_policies p"
     " LEFT JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id WHERE p.id = $1::uuid",
 }
 APPROVE_SQL = {
@@ -196,6 +197,12 @@ async def _fx_by_id(conn: asyncpg.Connection, staff: Staff, fx_id: str, today: d
     return _fx(row, staff)
 
 
+def check_effective_day(day: date, today: date) -> None:
+    """S280: a new row takes effect today or later, never backwards (same rule as the pricing policy parameters)."""
+    if day < today:
+        raise Invalid("effective_in_past", "a new row takes effect today or later, never backwards")
+
+
 def _pct(value: Decimal) -> str:
     return f"{(value * 100).normalize():f}%"
 
@@ -204,6 +211,7 @@ async def create_rule(conn: asyncpg.Connection, staff: Staff, data: dict[str, An
     """A new pending rule row. ``data``: channel, target_margin, floor_margin, peak_uplift_pts, card_fee_pct,
     valid_from, note (already shape-checked by the router)."""
     channel = engine.Channel(data["channel"])
+    check_effective_day(data["valid_from"], today)
     try:  # the engine's own invariants (floor <= target, margin + uplift + fee < 1), same as the table CHECKs
         engine.PricingRule(
             channel=channel,
@@ -284,6 +292,7 @@ async def create_fx_rate(
 ) -> dict[str, Any]:
     """A new pending FX row. ``data``: currency, rate_per_usd, buffer_pct, as_of, source."""
     currency = data["currency"]
+    check_effective_day(data["as_of"], today)
     if currency == engine.BASE_CURRENCY:
         raise Invalid("usd_is_base", "USD is the base currency and has no FX rate")
     source = (data.get("source") or "").strip()
@@ -326,8 +335,11 @@ async def create_fx_rate(
     return row
 
 
-async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str) -> None:
-    """Second-person approval of one policy row (``POLICY_SQL`` entity types); 404 / 409 / 403 ``own_row``."""
+async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str, *, today: date) -> None:
+    """Second-person approval of one policy row (``POLICY_SQL`` entity types); 404 / 409 / 403 ``own_row``.
+
+    S280: a row whose day has passed is 409 ``effective_date_passed``: approved now it would apply backwards, or be
+    superseded at once by a newer row (the maker enters it again with a later day)."""
     not_found = NOT_FOUND[entity_type]
     row = await conn.fetchrow(POLICY_SQL[entity_type], entity_id)
     if row is None:
@@ -336,6 +348,11 @@ async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, 
         raise Conflict("already_approved", "this row is already approved")
     if row["created_by"] == staff.cis_user_id:
         raise Forbidden("own_row", "maker-checker: a second person must approve a row you created")
+    if row["day"] < today:
+        raise Conflict(
+            "effective_date_passed",
+            "the effective day has passed: approving now would apply it backwards; the maker enters it again",
+        )
     try:
         await conn.execute(APPROVE_SQL[entity_type], entity_id, staff.cis_user_id)
     except asyncpg.UniqueViolationError:  # approved concurrently by someone else
@@ -345,7 +362,7 @@ async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, 
 
 
 async def approve_rule(conn: asyncpg.Connection, staff: Staff, rule_id: str, *, today: date) -> dict[str, Any]:
-    await approve_row(conn, staff, "pricing_rule", rule_id)
+    await approve_row(conn, staff, "pricing_rule", rule_id, today=today)
     row = await _rule_by_id(conn, staff, rule_id, today)
     label = f"{row['channel']} from {row['valid_from']}"
     await audit.record(
@@ -364,7 +381,7 @@ async def approve_rule(conn: asyncpg.Connection, staff: Staff, rule_id: str, *, 
 
 
 async def approve_fx_rate(conn: asyncpg.Connection, staff: Staff, fx_id: str, *, today: date) -> dict[str, Any]:
-    await approve_row(conn, staff, "fx_rate", fx_id)
+    await approve_row(conn, staff, "fx_rate", fx_id, today=today)
     row = await _fx_by_id(conn, staff, fx_id, today)
     label = f"{row['currency']} {row['as_of']}"
     await audit.record(

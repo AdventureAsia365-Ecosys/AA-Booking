@@ -5,6 +5,8 @@
 // target, margin + uplift + fee < 100%, one row per channel / currency and date): its 422 / 409 show inline.
 // AA-1073 rest (bk-048, bk-17): a b2b or fixed_departure rule may carry an early-booking discount (days before start +
 // margin points off, both or neither); the 422 codes invalid_early_booking / early_booking_channel show under its inputs.
+// S280 (AA-1096 settings UI audit): the text is in the page's language (messages.ts); "Valid from" / "In force from"
+// take today or a later day (min on the date field; the API refuses a past day with 422 effective_in_past).
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -12,8 +14,10 @@ import { ApiError } from "@/lib/api/client";
 import { CHANNELS, type Channel } from "@/lib/api/proposals";
 import { pricingPolicyApi } from "@/lib/api/pricingPolicy";
 import { earlyBookingAllowed, earlyBookingBody, earlyBookingError, type EarlyField } from "@/ui/booking/earlyBooking";
-import { Input, Select, FormDrawer, useToast, DateField } from "@/ui";
+import { Input, Select, FormDrawer, useT, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
+import { R, type RKey } from "./messages";
+import { apiErrorText, channelLabel, type RT } from "./rulesText";
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -39,14 +43,18 @@ export function percentToFraction(value: string, optional = false): string | nul
   return (Number(v) / 100).toFixed(4);
 }
 
-function errorText(err: unknown): string | null {
+function errorText(t: RT, err: unknown): string | null {
   if (!err) return null;
   if (err instanceof ApiError) {
     if (err.fieldErrors.length) return null; // shown per field
     if (earlyBookingError(err.code)) return null; // shown under the early-booking inputs
-    return err.message;
   }
-  return err instanceof Error ? err.message : "Could not save.";
+  return apiErrorText(t, err);
+}
+
+/** The text of an early-booking helper message (English, ui/booking/earlyBooking.ts) in the page's language. */
+function byEnglish(t: RT, text: string): string {
+  return text in R.en ? (t(text as RKey) as string) : text;
 }
 
 export function PercentInput({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) {
@@ -66,6 +74,7 @@ export function PercentInput({ value, onChange, id }: { value: string; onChange:
 }
 
 export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
+  const t = useT(R);
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({
@@ -91,7 +100,7 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
     mutationFn: pricingPolicyApi.createRule,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pricing"] });
-      toast.success("Rule saved as Pending approval. A second person has to approve it before quotes use it.");
+      toast.success(t("ruleSaved") as string);
       onClose();
     },
   });
@@ -107,11 +116,11 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
     const child = form.child.trim() ? childFraction(form.child) : undefined;
     const infant = form.infant.trim() ? usdAmount(form.infant) : undefined;
     if (!target || !floor || !peak || !card || rrp === null || child === null || infant === null) {
-      setLocalError("Enter each percentage as a number from 0 to 99.99, for example 30 or 2.5.");
+      setLocalError(t("errPercent") as string);
       return;
     }
-    if (!form.valid_from) {
-      setLocalError("Pick the day the rule takes effect.");
+    if (!(form.valid_from >= todayUtc())) {  // empty or a past day
+      setLocalError(t("errDay") as string);
       return;
     }
     const early = earlyBookingBody(form.channel, form.early_days, form.early_pts);
@@ -140,50 +149,47 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
   const fe = create.error instanceof ApiError ? create.error.fieldErrors : [];
   const apiEarly = create.error instanceof ApiError ? earlyBookingError(create.error.code) : null;
   const shownEarly = earlyError ?? apiEarly;
-  const earlyFor = (field: EarlyField) => errorFor(fe, field) ?? (shownEarly?.field === field ? shownEarly.message : null);
+  const earlyFor = (field: EarlyField) => errorFor(fe, field) ?? (shownEarly?.field === field ? byEnglish(t, shownEarly.message) : null);
   return (
     <FormDrawer
       open
       onClose={onClose}
-      title="New pricing rule"
-      submitLabel="Save as pending"
+      title={t("ruleTitle") as string}
+      submitLabel={t("saveAsPending") as string}
       onSubmit={submit}
       busy={create.isPending}
       dirty={dirty}
-      error={localError ?? errorText(create.error)}
+      error={localError ?? errorText(t, create.error)}
       fieldErrors={fe}
     >
-      <p className="text-[13px] text-muted">
-        A rule is never edited. This adds a new row for the channel; once approved by a second person it is in force
-        from its date (the newest approved rule on or before the pricing day wins).
-      </p>
-      <FormField label="Channel" required>
+      <p className="text-[13px] text-muted">{t("ruleIntro")}</p>
+      <FormField label={t("fieldChannel") as string} required>
         <Select className={inputCls} value={form.channel} onChange={(e) => set("channel")(e.target.value)}>
           {CHANNELS.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {channelLabel(t, c.value)}
             </option>
           ))}
         </Select>
       </FormField>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Target margin" required hint="Gross margin on the selling price." error={errorFor(fe, "target_margin")}>
+        <FormField label={t("fieldTarget") as string} required hint={t("fieldTargetHint")} error={errorFor(fe, "target_margin")}>
           <PercentInput value={form.target} onChange={set("target")} />
         </FormField>
-        <FormField label="Floor margin" required hint="Below this a sales override needs a reason." error={errorFor(fe, "floor_margin")}>
+        <FormField label={t("fieldFloor") as string} required hint={t("fieldFloorHint")} error={errorFor(fe, "floor_margin")}>
           <PercentInput value={form.floor} onChange={set("floor")} />
         </FormField>
-        <FormField label="Peak uplift (points)" hint="Added to the target margin in peak season." error={errorFor(fe, "peak_uplift_pts")}>
+        <FormField label={t("fieldPeak") as string} hint={t("fieldPeakHint")} error={errorFor(fe, "peak_uplift_pts")}>
           <PercentInput value={form.peak} onChange={set("peak")} />
         </FormField>
-        <FormField label="Card fee" hint="Built into the price, not a surcharge." error={errorFor(fe, "card_fee_pct")}>
+        <FormField label={t("fieldCard") as string} hint={t("fieldCardHint")} error={errorFor(fe, "card_fee_pct")}>
           <PercentInput value={form.card} onChange={set("card")} />
         </FormField>
       </div>
       {form.channel === "b2b" && (
         <FormField
-          label="Suggested retail price markup"
-          hint="Added to the agency price to give the suggested retail price TripPlanner shows (25 = price + 25 %). Empty = no suggested price."
+          label={t("fieldRrp") as string}
+          hint={t("fieldRrpHint")}
           error={errorFor(fe, "rrp_markup_pct")}
         >
           <PercentInput value={form.rrp} onChange={set("rrp")} />
@@ -191,15 +197,15 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField
-          label="Child price"
-          hint="Share of the adult price a child pays on a tour (50 = half). Empty = like an adult."
+          label={t("fieldChild") as string}
+          hint={t("fieldChildHint")}
           error={errorFor(fe, "child_pct")}
         >
           <PercentInput value={form.child} onChange={set("child")} />
         </FormField>
         <FormField
-          label="Infant net cost (USD)"
-          hint="Per infant per trip, priced by this rule. Empty = infants free."
+          label={t("fieldInfant") as string}
+          hint={t("fieldInfantHint")}
           error={errorFor(fe, "infant_flat_usd")}
         >
           <Input className={inputCls} inputMode="decimal" value={form.infant} onChange={(e) => set("infant")(e.target.value)} />
@@ -209,8 +215,8 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
         // AA-1073 rest (bk-17): fixed-departure prices only (b2b agencies book them too); both or neither.
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="rule-early-booking">
           <FormField
-            label="Early booking: days before start"
-            hint="A quote made at least this many days before the departure starts gets the discount. Empty = none."
+            label={t("fieldEarlyDays") as string}
+            hint={t("fieldEarlyDaysHint")}
             error={earlyFor("early_days")}
           >
             <Input
@@ -222,18 +228,18 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
             />
           </FormField>
           <FormField
-            label="Early booking: margin points off"
-            hint="Taken off the target margin (5 = 30 % becomes 25 %). At most the target margin."
+            label={t("fieldEarlyPts") as string}
+            hint={t("fieldEarlyPtsHint")}
             error={earlyFor("early_discount_pts")}
           >
             <PercentInput value={form.early_pts} onChange={set("early_pts")} />
           </FormField>
         </div>
       )}
-      <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
-        <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
+      <FormField label={t("fieldValidFrom") as string} required hint={t("fieldValidFromHint")} error={errorFor(fe, "valid_from")}>
+        <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} min={todayUtc()} />
       </FormField>
-      <FormField label="Note" hint="Why the change, or who confirmed it (for example Ms. Thư, 14/10)." error={errorFor(fe, "note")}>
+      <FormField label={t("fieldNote") as string} hint={t("fieldNoteHint")} error={errorFor(fe, "note")}>
         <Input className={inputCls} maxLength={500} value={form.note} onChange={(e) => set("note")(e.target.value)} />
       </FormField>
     </FormDrawer>
@@ -241,6 +247,7 @@ export function NewRuleDrawer({ onClose }: { onClose: () => void }) {
 }
 
 export function NewFxRateDrawer({ onClose }: { onClose: () => void }) {
+  const t = useT(R);
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({ currency: "", rate: "", buffer: "2", as_of: todayUtc(), source: "" });
@@ -252,7 +259,7 @@ export function NewFxRateDrawer({ onClose }: { onClose: () => void }) {
     mutationFn: pricingPolicyApi.createFxRate,
     onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["pricing"] });
-      toast.success(`${row.currency} rate saved as Pending approval. A second person has to approve it before quotes use it.`);
+      toast.success(t("fxSaved", row.currency) as string);
       onClose();
     },
   });
@@ -262,19 +269,23 @@ export function NewFxRateDrawer({ onClose }: { onClose: () => void }) {
     const rateValue = form.rate.trim();
     const buffer = percentToFraction(form.buffer, true);
     if (!/^[A-Z]{3}$/.test(currency) || currency === "USD") {
-      setLocalError("Currency is a 3-letter ISO code other than USD (USD is the base).");
+      setLocalError(t("errCurrency") as string);
       return;
     }
     if (!/^\d{1,10}(\.\d{1,8})?$/.test(rateValue) || Number(rateValue) <= 0) {
-      setLocalError("Rate is the number of units of the currency per 1 USD, for example 0.92 for EUR or 25400 for VND.");
+      setLocalError(t("errRate") as string);
       return;
     }
     if (!buffer) {
-      setLocalError("Enter the buffer as a percentage from 0 to 99.99, for example 2.");
+      setLocalError(t("errBuffer") as string);
       return;
     }
     if (!form.source.trim()) {
-      setLocalError("Say where the rate comes from (bank, ECB, manual-dev, …).");
+      setLocalError(t("errSource") as string);
+      return;
+    }
+    if (!(form.as_of >= todayUtc())) {  // empty or a past day
+      setLocalError(t("errAsOf") as string);
       return;
     }
     setLocalError(null);
@@ -286,20 +297,17 @@ export function NewFxRateDrawer({ onClose }: { onClose: () => void }) {
     <FormDrawer
       open
       onClose={onClose}
-      title="New FX rate"
-      submitLabel="Save as pending"
+      title={t("fxTitle") as string}
+      submitLabel={t("saveAsPending") as string}
       onSubmit={submit}
       busy={create.isPending}
       dirty={dirty}
-      error={localError ?? errorText(create.error)}
+      error={localError ?? errorText(t, create.error)}
       fieldErrors={fe}
     >
-      <p className="text-[13px] text-muted">
-        Rates are dated and never edited. Supplier costs convert to USD at the plain rate; a quote sold in this currency
-        adds the buffer. A second person approves the row before any quote uses it.
-      </p>
+      <p className="text-[13px] text-muted">{t("fxIntro")}</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Currency" required hint="ISO code, e.g. EUR, GBP, VND." error={errorFor(fe, "currency")}>
+        <FormField label={t("fieldCurrency") as string} required hint={t("fieldCurrencyHint")} error={errorFor(fe, "currency")}>
           <Input
             className={`${inputCls} font-mono uppercase`}
             maxLength={3}
@@ -308,17 +316,17 @@ export function NewFxRateDrawer({ onClose }: { onClose: () => void }) {
             placeholder="EUR"
           />
         </FormField>
-        <FormField label="Units per 1 USD" required hint="EUR 0.92 · VND 25400" error={errorFor(fe, "rate_per_usd")}>
+        <FormField label={t("fieldRate") as string} required hint="EUR 0.92 · VND 25400" error={errorFor(fe, "rate_per_usd")}>
           <Input inputMode="decimal" className={`${inputCls} tabular-nums`} value={form.rate} onChange={(e) => set("rate")(e.target.value)} />
         </FormField>
-        <FormField label="Selling buffer" hint="ADR 0005: 2–3% on non-USD selling prices." error={errorFor(fe, "buffer_pct")}>
+        <FormField label={t("fieldBuffer") as string} hint={t("fieldBufferHint")} error={errorFor(fe, "buffer_pct")}>
           <PercentInput value={form.buffer} onChange={set("buffer")} />
         </FormField>
-        <FormField label="As of" required hint="The market date of the rate." error={errorFor(fe, "as_of")}>
-          <DateField className={inputCls} value={form.as_of} onChange={(v) => set("as_of")(v)} />
+        <FormField label={t("fieldAsOf") as string} required hint={t("fieldAsOfHint")} error={errorFor(fe, "as_of")}>
+          <DateField className={inputCls} value={form.as_of} onChange={(v) => set("as_of")(v)} min={todayUtc()} />
         </FormField>
       </div>
-      <FormField label="Source" required hint="Where the rate comes from: bank, ECB, or manual-dev for a Dev placeholder." error={errorFor(fe, "source")}>
+      <FormField label={t("fieldSource") as string} required hint={t("fieldSourceHint")} error={errorFor(fe, "source")}>
         <Input className={inputCls} maxLength={200} value={form.source} onChange={(e) => set("source")(e.target.value)} />
       </FormField>
     </FormDrawer>

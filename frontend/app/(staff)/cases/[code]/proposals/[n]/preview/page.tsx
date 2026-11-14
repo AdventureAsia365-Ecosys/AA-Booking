@@ -11,6 +11,8 @@
 // 390 px (it scrolled sideways by 257 px). Download PDF is W2.
 // AA-835: an item that books a hotel room or a service shows the description and highlights CIS published for it
 // (the API sends them only while published; draft / stale content never reaches a proposal).
+// S280: the validity line reads the pricing policy value in force; the deposit follows the agency's payment terms
+// (Agency billing), not the retired booking.settings rows.
 // AA-1037: on a b2c case while the B2C part is closed, the case layout (../../../layout.tsx) takes version.write out,
 // so Send is not offered.
 
@@ -19,8 +21,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CalendarDays, Eye, Lock, MapPin, Pencil, User } from "lucide-react";
-import { ApiError, api } from "@/lib/api/client";
-import { settingsFromApi } from "@/lib/bookingConfig";
+import { ApiError } from "@/lib/api/client";
+import { policyParamsApi, type PolicyListing } from "@/lib/api/policyParams";
 import {
   PageFrame,
   AiNotice,
@@ -49,12 +51,19 @@ function longDate(d: Date | null): string | null {
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(d);
 }
 
+/** "Valid for 14 days once sent": the quote validity of the pricing policy in force. */
+function validityText(listing: PolicyListing | undefined): string {
+  const value = listing?.items.find((i) => i.key === "quote_validity_days")?.current?.value;
+  return typeof value === "number" ? `Valid for ${value} days once sent` : "Valid for the quote validity once sent";
+}
+
 export default function VersionPreviewPage({ params }: { params: Promise<{ code: string; n: string }> }) {
   const { code: rawCode, n: rawN } = use(params);
   const code = decodeURIComponent(rawCode);
   const n = Number(rawN);
   const { tripCase, version } = useVersion(code, n);
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.reference.settings, staleTime: 10 * 60_000 });
+  // S280: quote validity is the pricing policy value in force (the booking.settings row is retired since bk-056).
+  const policy = useQuery({ queryKey: ["pricing", "policy"], queryFn: () => policyParamsApi.list(), staleTime: 10 * 60_000 });
   const canWrite = useCan("version.write");
   const router = useRouter();
 
@@ -74,7 +83,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   }
   const c = tripCase.data;
   const v = version.data;
-  const cfg = settingsFromApi(settings.data?.values);
+  const validity = validityText(policy.data);
   const days = itemsByDay(v.items);
   const locked = v.is_sent_to_customer || v.is_approved;
   // AA-835: supply descriptions are read live from CIS, not stored with the version (snapshot comes with e-mail / PDF).
@@ -314,9 +323,9 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                         Valid until <DateText value={v.valid_until} />
                       </>
                     ) : (
-                      `Valid for ${cfg.quoteValidityDays} days once sent`
+                      validity
                     )}
-                    {` · deposit ${cfg.depositPct}% on confirmation`}
+                    {" · deposit per the agency's payment terms"}
                   </p>
                 </>
               )}

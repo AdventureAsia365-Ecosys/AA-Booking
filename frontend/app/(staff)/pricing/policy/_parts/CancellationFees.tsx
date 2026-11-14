@@ -34,6 +34,7 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { M, type MessageKey } from "./messages";
+import { errorText } from "./policyUi";
 
 const TONE: Record<PolicyStatus, BookingTone> = {
   pending: "warning",
@@ -97,7 +98,8 @@ function NewScheduleDrawer({ copyOf, onClose }: { copyOf: CancellationPolicyRow 
       toast.success(t("cxSaved") as string);
       onClose();
     },
-    onError: (err) => setError(err instanceof ApiError || err instanceof Error ? err.message : String(err)),
+    // S280: every API error in the page's language (trip_plan_not_found, effective_in_past, ...).
+    onError: (err) => setError(errorText(t, err)),
   });
   const setRow = (i: number, patch: Partial<TierText>) =>
     setRows((all) => all.map((row, j) => (j === i ? { ...row, ...patch } : row)));
@@ -191,7 +193,10 @@ export function CancellationFees() {
       toast.success(t("approved") as string);
       setApproving(null);
     },
-    onError: (err) => toast.error(err instanceof ApiError && err.code === "own_row" ? (t("errOwnRow") as string) : (err as Error).message),
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === "already_approved") qc.invalidateQueries({ queryKey: ["pricing", "cancellation-policies"] });
+      toast.error(errorText(t, err, { step: "approve" }));
+    },
   });
   const days = t("unit_days") as string;
   const person = (p: CancellationPolicyRow["created_by"]) =>
@@ -276,7 +281,7 @@ export function CancellationFees() {
           columns={columns}
           getRowId={(r) => r.id}
           loading={list.isLoading}
-          error={list.isError ? (list.error as Error).message : null}
+          error={list.isError ? errorText(t, list.error) : null}
           onRetry={() => list.refetch()}
           emptyTitle={t("cxEmptyTitle")}
           emptyDescription={t("cxEmptyHint")}

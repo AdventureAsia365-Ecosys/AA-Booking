@@ -10,6 +10,8 @@ list of steps (``booking.pricing_policy_events``, append-only):
   ``effective_from`` it is the value in force (``in_force``), before that ``scheduled``, after a newer one takes over
   ``superseded`` (derived, never stored);
 - ``rejected``: refused by a second person, with a reason; ``withdrawn``: taken back by its maker (draft or pending).
+  S280: another maker's **draft** can be discarded by a member of the parameter's approver group, with a reason (step
+  ``rejected``, audit action ``pricing_policy.discarded``), so a forgotten draft never locks a parameter.
 
 At most one open (draft or pending) version per parameter. The approver must hold the permission of the parameter's
 group (:data:`app.pricing.policy_params.APPROVE_PERMISSION`: the pricing lead for prices, finance for FX, tax,
@@ -30,7 +32,7 @@ import asyncpg
 from app import audit
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
-from app.pricing import policy_guides, policy_params, policy_values
+from app.pricing import policy_guides, policy_hints, policy_params, policy_values
 
 MAX_REASON = 300
 
@@ -131,6 +133,8 @@ def _version(row: Any, status: str, staff: Staff) -> dict[str, Any]:
         "can_submit": status == "draft" and mine and staff.can("pricing_policy.write"),
         "can_withdraw": status in ("draft", "pending") and mine and staff.can("pricing_policy.write"),
         "can_approve": status == "pending" and param is not None and _can_approve(staff, param, row),
+        # S280: another maker's draft blocks the parameter for everyone; a member of its approver group discards it.
+        "can_discard": status == "draft" and param is not None and _can_approve(staff, param, row),
     }
 
 
@@ -159,10 +163,16 @@ async def list_params(conn: asyncpg.Connection, staff: Staff, *, today: date) ->
         items.append(
             {
                 **policy_params.describe(param),
+                # S280: the cross-parameter bound and the Vietnamese "not enforced yet" reason (policy_hints).
+                **policy_hints.hints(param),
                 # AA-1096 l23: the operator's guide (what / raise / lower / when / example, EN + VI).
                 "guide": policy_guides.guide(key),
                 "current": current,
-                "scheduled": [v for v in versions if v["status"] == "scheduled"],
+                # In the order they take effect (the history is by version number, newest first).
+                "scheduled": sorted(
+                    (v for v in versions if v["status"] == "scheduled"),
+                    key=lambda v: (v["effective_from"], v["version_no"]),
+                ),
                 "open": next((v for v in versions if v["status"] in ("draft", "pending")), None),
                 "history": versions,
                 "can_approve_group": staff.can(policy_params.APPROVE_PERMISSION[param.group]),
@@ -234,6 +244,8 @@ async def propose(
         raise Conflict(
             "open_version",
             f"{key} already has a {v['status']} change (v{v['version_no']}); approve, reject or withdraw it first",
+            open_status=v["status"],
+            open_by=(v["created_by"] or {}).get("name"),
         )
     latest = versions[0] if versions else None
     version_no = (latest["version_no"] + 1) if latest else 1
@@ -391,4 +403,27 @@ async def reject(
     return await _step(
         conn, staff, v, "rejected", reason=why, action="pricing_policy.rejected",
         summary=f"Rejected {param.label} v{v['version_no']}: {why}", today=today,
+    )  # fmt: skip
+
+
+async def discard(
+    conn: asyncpg.Connection, staff: Staff, version_id: str, *, reason: str | None, today: date
+) -> dict[str, Any]:
+    """S280: another maker's draft, discarded by a member of the parameter's approver group, with a reason (step
+    ``rejected``: the table CHECK wants a second person and a reason, which this is). A draft never expires, so without
+    this a maker who never comes back would lock the parameter for everyone (``open_version``)."""
+    why = _reason(reason)
+    v = await _version_for_step(conn, staff, version_id, today)
+    param = policy_params.PARAMS.get(v["key"])
+    if param is None:
+        raise Conflict("unknown_param", f"{v['key']} is no longer a known parameter")
+    if v["status"] != "draft":
+        raise Conflict("not_draft", f"this version is {v['status']}, not a draft")
+    if (v["created_by"] or {}).get("id") == staff.cis_user_id:
+        raise Forbidden("own_row", "withdraw your own draft instead")
+    if not staff.can(policy_params.APPROVE_PERMISSION[param.group]):
+        raise Forbidden("approver_group", f"a draft of {param.label} is discarded by its approver group")
+    return await _step(
+        conn, staff, v, "rejected", reason=why, action="pricing_policy.discarded",
+        summary=f"Discarded the draft {_label(v['key'], v['version_no'])}: {why}", today=today,
     )  # fmt: skip

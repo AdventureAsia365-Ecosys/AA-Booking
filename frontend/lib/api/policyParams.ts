@@ -10,7 +10,9 @@
 //   POST /booking/pricing/policy/{id}/withdraw   the maker withdraws a draft or pending change
 //   POST /booking/pricing/policy/{id}/approve    a second person approves (403 own_row / approver_group)
 //   POST /booking/pricing/policy/{id}/reject     a second person rejects, with a reason
+//   POST /booking/pricing/policy/{id}/discard    the approver group discards another maker's draft, with a reason (S280)
 
+import type { CrossBound } from "../policyEdit";
 import type { PolicyGuide } from "../policyGuide";
 import { decimalText } from "../policyGuide";
 import { bkGet, bkSend } from "./client";
@@ -82,6 +84,8 @@ export interface ParamVersion {
   can_submit: boolean;
   can_withdraw: boolean;
   can_approve: boolean;
+  /** S280: another maker's draft; the caller's approver group may discard it (with a reason). */
+  can_discard?: boolean;
 }
 
 export interface PolicyParam {
@@ -107,6 +111,10 @@ export interface PolicyParam {
   can_approve_group: boolean;
   /** null = no guide (the backend unit guard fails on that). */
   guide?: PolicyGuide | null;
+  /** S280: the bound against another parameter's value (backend app/pricing/policy_hints.py). */
+  cross_bound?: CrossBound | null;
+  /** S280: the Vietnamese text of not_enforced_reason. */
+  not_enforced_reason_vi?: string | null;
 }
 
 export interface PolicyListing {
@@ -130,6 +138,7 @@ export const policyParamsApi = {
   withdraw: (id: string) => bkSend<ParamVersion>(`pricing/policy/${enc(id)}/withdraw`),
   approve: (id: string) => bkSend<ParamVersion>(`pricing/policy/${enc(id)}/approve`),
   reject: (id: string, reason: string) => bkSend<ParamVersion>(`pricing/policy/${enc(id)}/reject`, { body: { reason } }),
+  discard: (id: string, reason: string) => bkSend<ParamVersion>(`pricing/policy/${enc(id)}/discard`, { body: { reason } }),
 };
 
 export interface ValueWords {

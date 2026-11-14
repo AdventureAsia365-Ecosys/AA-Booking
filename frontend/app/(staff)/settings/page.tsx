@@ -4,8 +4,9 @@
 // the section title + description, a card on the right.
 //   General       — profile read-only from the staff session (CIS owns name, e-mail and password: O1, so
 //                   there is no password form and no photo upload), appearance (theme, per browser), and the
-//                   Booking-wide commercial defaults read-only from GET /booking/settings (deposit_pct,
-//                   quote_validity_days; Nghiệp S236 decision 4).
+//                   commercial values in force, read-only (S280: quote validity from the pricing policy
+//                   GET /booking/pricing/policy, deposit from the agency payment terms; the booking.settings
+//                   rows deposit_pct and quote_validity_days are retired since bk-056).
 //   Sign-in & security (AA-996; replaces Figma SETTINGS-2 "change password" and RESET PASSWORD) — how this person
 //                   signs in (company e-mail code through the Cognito staff sign-in; Booking holds no password, O1),
 //                   the facts of the current session from GET /api/auth/session (signed in at, session end), last
@@ -19,10 +20,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, LogOut, Monitor, Moon, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ApiError, api } from "@/lib/api/client";
-import { QUOTE_VALIDITY_RANGE_DAYS } from "@/lib/bookingConfig";
+import Link from "next/link";
+import { agencyBillingApi } from "@/lib/api/agencyBilling";
+import { policyParamsApi, type PolicyParam } from "@/lib/api/policyParams";
 import { CIS_STAFF_PATH } from "@/lib/config";
 import type { SessionFacts } from "@/lib/sessionFacts";
-import type { SettingsResponse, StaffPreferences } from "@/lib/api/types";
+import type { StaffPreferences } from "@/lib/api/types";
 import {
   Button,
   EmptyState,
@@ -69,12 +72,6 @@ const TYPE_HELP: Record<string, string> = {
   "tour.retired": "A CIS tour used by an open case or a trip plan left the catalog.",
   "tour.reinstated": "A CIS tour that had left the catalog is served again.",
   "b2b.on_request": "A confirmed partner booking has lines the B2B desk must accept or decline.",
-};
-
-/** Staff-facing help of the commercial defaults (AA-996: the stored row descriptions carry internal notes). */
-const SETTING_HELP: Record<string, string> = {
-  deposit_pct: "Asked when the customer confirms; the balance follows the payment schedule.",
-  quote_validity_days: "How long a sent proposal can be approved at its price.",
 };
 
 function isForbidden(e: unknown): boolean {
@@ -173,7 +170,7 @@ function GeneralTab() {
 
       <Block
         title="Commercial defaults"
-        description="Booking-wide values every proposal and invoice uses. Read-only: the Booking team changes them, not this page."
+        description="The values in force today that every quote and agency invoice uses. Read-only here: they change on Pricing › Policy and Agency billing › Settings, with a second person's approval where the page asks for it."
       >
         <CommercialDefaults />
       </Block>
@@ -281,9 +278,11 @@ function SecurityTab() {
 }
 
 function CommercialDefaults() {
+  // S280 (AA-1096 settings UI audit): the values in force, not the retired booking.settings rows (bk-056): quote
+  // validity is the pricing policy parameter (Pricing › Policy), deposits come from the agency payment terms.
   const q = useQuery({
-    queryKey: ["settings"],
-    queryFn: api.reference.settings,
+    queryKey: ["pricing", "policy"],
+    queryFn: () => policyParamsApi.list(),
     staleTime: 10 * 60_000,
     retry: retryUnlessClientError,
   });
@@ -299,30 +298,51 @@ function CommercialDefaults() {
     return <EmptyState icon={<Lock size={24} />} title="You do not have access to these values" />;
   }
   if (q.isError) return <ErrorState message={(q.error as Error).message} onRetry={() => q.refetch()} />;
-  return <SettingsRows data={q.data!} />;
+  return <PolicyRows items={q.data!.items} />;
 }
 
-function SettingsRows({ data }: { data: SettingsResponse }) {
-  const row = (key: string) => data.items.find((i) => i.key === key);
-  const deposit = row("deposit_pct");
-  const validity = row("quote_validity_days");
-  const updated = (r: SettingsResponse["items"][number] | undefined) =>
-    r ? (
-      <>
-        {SETTING_HELP[r.key] ? `${SETTING_HELP[r.key]} · ` : ""}Updated <DateText value={r.updated_at} />
-      </>
-    ) : (
-      "Not set yet: ask the Booking team to set it."
-    );
+function PolicyRows({ items }: { items: PolicyParam[] }) {
+  const canBilling = useCan("agency_billing.read");
+  const validity = items.find((i) => i.key === "quote_validity_days");
+  const festive = items.find((i) => i.key === "quote_validity_festive_days");
+  const terms = useQuery({
+    queryKey: ["agency-billing", "terms"],
+    queryFn: agencyBillingApi.terms,
+    enabled: canBilling,
+    retry: retryUnlessClientError,
+  });
+  const defaults = terms.data?.items.find((t) => !t.party_tenant_id);
+  const days = (p: PolicyParam | undefined) => (typeof p?.current?.value === "number" ? `${p.current.value} days` : "Not set");
+  const range = validity?.minimum && validity?.maximum ? ` Allowed ${validity.minimum}–${validity.maximum} days.` : "";
   return (
     <div className="grid gap-4">
-      <ReadOnlyField label="Deposit on confirmation" help={updated(deposit)}>
-        {typeof deposit?.value === "number" ? `${deposit.value}% of the approved total` : "Not set"}
+      <ReadOnlyField
+        label="Quote validity"
+        help={
+          <>
+            How long a sent quote can be approved at its price; {days(festive)} when it touches a festive period.{range}{" "}
+            <Link href="/pricing/policy?q=quote_validity" className="font-semibold text-accent-deep hover:underline">
+              Change it on Pricing › Policy
+            </Link>
+          </>
+        }
+      >
+        {validity?.current ? `${days(validity)} after sending (since ${validity.current.effective_from})` : "No value in force"}
       </ReadOnlyField>
-      <ReadOnlyField label="Quote validity" help={updated(validity)}>
-        {typeof validity?.value === "number"
-          ? `${validity.value} days after sending (staff may pick ${QUOTE_VALIDITY_RANGE_DAYS.min}–${QUOTE_VALIDITY_RANGE_DAYS.max})`
-          : "Not set"}
+      <ReadOnlyField
+        label="Deposit on confirmation"
+        help={
+          <>
+            Each agency&apos;s payment terms, else the default terms (a tour may have its own).{" "}
+            {canBilling && (
+              <Link href="/agency-billing?tab=settings" className="font-semibold text-accent-deep hover:underline">
+                Agency billing › Settings
+              </Link>
+            )}
+          </>
+        }
+      >
+        {defaults ? `Default ${Number((Number(defaults.deposit_pct) * 100).toFixed(2))}% of the agency price` : "Set by the agency payment terms"}
       </ReadOnlyField>
     </div>
   );

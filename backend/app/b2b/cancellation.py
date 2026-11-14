@@ -528,6 +528,7 @@ def _label(row: dict[str, Any]) -> str:
 
 async def create_policy(conn: asyncpg.Connection, staff: Staff, data: dict[str, Any], *, today: date) -> dict[str, Any]:
     """A new pending policy row. ``data``: title, source_id (None = the B2B default), valid_from, tiers, note."""
+    pricing_policy.check_effective_day(data["valid_from"], today)
     try:
         tiers = parse_tiers(data["tiers"])
     except TierError as exc:
@@ -577,7 +578,7 @@ async def create_policy(conn: asyncpg.Connection, staff: Staff, data: dict[str, 
 
 
 async def approve_policy(conn: asyncpg.Connection, staff: Staff, policy_id: str, *, today: date) -> dict[str, Any]:
-    await pricing_policy.approve_row(conn, staff, "cancellation_policy", policy_id)
+    await pricing_policy.approve_row(conn, staff, "cancellation_policy", policy_id, today=today)
     row = await _by_id(conn, staff, policy_id, today)
     await audit.record(
         conn,

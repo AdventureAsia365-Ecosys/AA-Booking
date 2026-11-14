@@ -7209,6 +7209,12 @@
               },
               {
                 "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
                   "type": "string"
                 },
                 "type": "array"
@@ -23465,6 +23471,66 @@
           }
         ],
         "summary": "Approve Policy",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/booking/pricing/policy/{version_id}/discard": {
+      "post": {
+        "operationId": "discard_policy_booking_pricing_policy__version_id__discard_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Discard Policy Booking Pricing Policy  Version Id  Discard Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Discard Policy",
         "tags": [
           "pricing"
         ]

@@ -205,6 +205,44 @@ async def test_draft_submit_withdraw_reject_and_finance_group(api: tuple[httpx.A
     assert item["open"] is None and item["current"]["value"] == 20
 
 
+async def test_integers_value_is_accepted_and_a_stale_draft_can_be_discarded(
+    api: tuple[httpx.AsyncClient, dict],
+) -> None:
+    """S280 (AA-1096 settings UI audit): the agency invoice reminder steps (an ``integers`` parameter) take JSON
+    numbers (the body type used to refuse them with 422); another maker's draft is discarded by the parameter's
+    approver group with a reason, never by its maker's peers outside that group."""
+    client, h = api
+    later = str(datetime.now(UTC).date() + timedelta(days=30))
+    steps = {"key": "agency_reminder_steps_days", "value": [10, 3], "effective_from": later, "reason": "Earlier"}
+    proposed = await client.post("/policy", json=steps, headers=h[FINANCE])
+    assert proposed.status_code == 201, proposed.text
+    assert proposed.json()["value"] == [3, 10] and proposed.json()["status"] == "pending"
+    withdrawn = await client.post(f"/policy/{proposed.json()['id']}/withdraw", headers=h[FINANCE])
+    assert withdrawn.status_code == 200 and withdrawn.json()["status"] == "withdrawn"
+
+    change = {"key": "surcharge_notice_days", "value": 25, "effective_from": later, "reason": "Draft", "submit": False}
+    draft = (await client.post("/policy", json=change, headers=h[FINANCE])).json()
+    blocked = await client.post("/policy", json={**change, "submit": True}, headers=h[FINANCE2])
+    assert blocked.status_code == 409 and blocked.json()["detail"] == "open_version"
+    assert blocked.json()["open_status"] == "draft"
+    listing = (await client.get("/policy", headers=h[FINANCE2])).json()
+    open_draft = _item(listing, "surcharge_notice_days")["open"]
+    assert open_draft["can_discard"] and not open_draft["can_withdraw"]
+    assert not _item((await client.get("/policy", headers=h[FINANCE])).json(), "surcharge_notice_days")["open"][
+        "can_discard"
+    ]  # the maker withdraws instead
+    url = f"/policy/{draft['id']}/discard"
+    assert (await client.post(url, json={"reason": "Stale"}, headers=h[MAKER])).status_code == 403  # pricing group
+    assert (await client.post(url, json={"reason": "Stale"}, headers=h[FINANCE])).status_code == 403  # own draft
+    assert (await client.post(url, json={}, headers=h[FINANCE2])).status_code == 422
+    discarded = await client.post(url, json={"reason": "Stale draft"}, headers=h[FINANCE2])
+    assert discarded.status_code == 200 and discarded.json()["status"] == "rejected"
+    assert (await client.post(url, json={"reason": "Again"}, headers=h[FINANCE2])).status_code == 409
+    item = _item((await client.get("/policy", headers=h[FINANCE])).json(), "surcharge_notice_days")
+    assert item["open"] is None and item["current"]["value"] == 20
+    assert item["cross_bound"] is None and item["not_enforced_reason_vi"]
+
+
 async def test_tables_are_append_only_and_refuse_self_approval(migrated_booking_dsn: str) -> None:
     conn = await asyncpg.connect(migrated_booking_dsn)
     tx = conn.transaction()
