@@ -17,6 +17,7 @@
     "test:signed-in": "BOOKING_E2E_BASE_URL=${BOOKING_E2E_BASE_URL:-https://booking.lumiguides.it.com} playwright test --project=signed-in"
   },
   "dependencies": {
+    "@sentry/nextjs": "11.11.0",
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-table": "^8.21.3",
     "lucide-react": "^1.8.0",

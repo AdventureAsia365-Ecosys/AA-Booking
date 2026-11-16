@@ -10,9 +10,16 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 # The build never needs a secret: every server value (BOOKING_API_URL, CIS_API_URL, the Cognito client id and secret) is
-# read from the task's environment at run time (lib/config.ts, lib/cognito.ts). Nothing public is baked in either.
+# read from the task's environment at run time (lib/config.ts, lib/cognito.ts). AA-1111: public build-time values only
+# (inlined into the bundles): the Sentry DSN (public by design; empty = Sentry off, instrumentation*.ts), the
+# environment name and the release tag. No SENTRY_AUTH_TOKEN: no source-map upload.
+ARG NEXT_PUBLIC_SENTRY_DSN=""
+ARG NEXT_PUBLIC_ENV=dev
 ARG GIT_SHA=unknown
-ENV NEXT_OUTPUT=standalone
+ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
+    NEXT_PUBLIC_ENV=${NEXT_PUBLIC_ENV} \
+    NEXT_PUBLIC_GIT_SHA=${GIT_SHA} \
+    NEXT_OUTPUT=standalone
 RUN NODE_OPTIONS=--max-old-space-size=2048 npm run build
 
 FROM node:22-alpine AS runtime
