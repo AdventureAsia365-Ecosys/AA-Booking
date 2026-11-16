@@ -7,13 +7,27 @@ re-run adds what is missing to a draft and leaves an issued invoice alone.
 a day, the SaaS draft of the **current** month (start of period, d9) and the settlement draft of the **previous** month
 (the closed month); staff can run either for any month (``POST /booking/agency-billing/runs``).
 
-**SaaS** (:func:`run_saas`): the live subscriptions (``active``, ``past_due``) of every agency from the CIS view
-``catalog.v_tenant_billing_v1`` (CIS 377; without it the run is ``skipped``). Per subscription one ``subscription``
-line: the plan's monthly USD price x seats for a per-seat plan (else x 1); a per-tenant / per-site plan with more seats
-than included adds an ``extra_seats`` line. A plan without a price (Enterprise: contract price) gets a zero line and is
-counted ``price_missing`` (finance adds the price as an adjustment on the draft). The invoice currency is the agency's
-``saas_currency`` (terms); plan prices are USD, so another currency is skipped (``currency_unsupported``). On a draft
-the job's own subscription lines are replaced (a plan change shows), adjustments stay.
+**SaaS** (:func:`run_saas`): the live subscriptions (``active``, ``past_due``; a ``trialing`` one is not billed during
+its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CIS 377; without it the run is
+``skipped``). The price rules are those of the CIS quote (``services/tenant_account/quote.py``, AA-1116 option B, CIS
+438, contract tenant.entitlements.v1 1.9), so the draft and what the agency sees on its Billing tab agree:
+
+- the invoice currency is the agency's CIS ``billing_currency`` (before CIS 438: the Booking ``saas_currency`` terms);
+  USD lines read the USD list, VND lines the VND list (``price_vnd_monthly`` / ``price_extra_seat_vnd``); another
+  currency is skipped (``currency_unsupported``);
+- per subscription one ``subscription`` line: a per-seat plan bills max(seats, ``seats_min``, 1) seats; any other plan
+  bills the plan price and, with more seats than included, an ``extra_seats`` line at the extra-seat list price;
+- an agreed price in the billing currency replaces the list UNIT price while ``agreed_until`` is empty or not before
+  the period start (per seat on a per-seat plan; the plan fee otherwise, extra seats stay at the list) (``agreed``);
+- a plan without a price in the currency (Enterprise: contract price) gets a zero line, counted ``price_missing``
+  (finance adds the price as an adjustment on the draft);
+- a subscription billed yearly gets a zero line "annual: invoice by hand" (``annual_manual``): no annual drafting;
+- a free pilot (``bill_free``: pilot while CIS ``cis.billing.pilot_free`` is on) is drafted at zero, every line kept
+  with its list price in the text (``pilot_free``);
+- no discount line: the founding and combo discounts are not in the CIS view, finance applies them by hand from the
+  Tenant 360 quote (S282 decision 7).
+
+On a draft the job's own subscription lines are replaced (a plan change shows), adjustments stay.
 
 **Settlement** (:func:`run_settlement`): every confirmed B2B hold (``b2b_holds.status = confirmed``), its quote total
 and currency (``b2b_quotes``), its departure (the trip case ``start_date``, else the first quote line date) and its
@@ -117,32 +131,87 @@ def period_label(start: date) -> str:
 # ── Pure line builders ───────────────────────────────────────────────────────
 
 
-def saas_lines(subs: list[dict[str, Any]], period_start: date) -> tuple[list[dict[str, Any]], int]:
-    """The subscription / extra-seat lines of one agency's live subscriptions, and how many plans have no price."""
-    lines: list[dict[str, Any]] = []
-    missing = 0
-    label = period_label(period_start)
-    for s in subs:
-        price = s.get("price_usd_monthly")
-        seats = s.get("seats")
-        per_seat = s.get("price_unit") == "seat"
-        name = f"{s.get('plan_name') or s['plan_key']} ({PRODUCT_LABEL.get(s['product'], s['product'])}), {label}"
-        if price is None:
-            missing += 1
-            lines.append({"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"],
-                          "description": f"{name}: contract price, add it as an adjustment",
-                          "quantity": Decimal(1), "unit_price": Decimal(0)})  # fmt: skip
-            continue
-        quantity = Decimal(max(int(seats or s.get("seats_included") or 1), 1)) if per_seat else Decimal(1)
-        lines.append({"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"],
-                      "description": name + (f", {int(quantity)} seats" if per_seat else ""),
-                      "quantity": quantity, "unit_price": Decimal(price)})  # fmt: skip
-        included, extra = s.get("seats_included"), s.get("price_extra_seat_usd")
-        if not per_seat and seats and included is not None and extra is not None and int(seats) > int(included):
-            lines.append({"line_role": "extra_seats", "product": s["product"], "plan_key": s["plan_key"],
-                          "description": f"Extra seats over {int(included)}, {name}",
-                          "quantity": Decimal(int(seats) - int(included)), "unit_price": Decimal(extra)})  # fmt: skip
-    return lines, missing
+# technical-constant: the currencies CIS keeps a list price in (shared.plan price_usd_* / price_vnd_*), not a policy.
+SAAS_CURRENCIES = ("USD", "VND")
+
+
+def _dec(value: Any) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
+
+
+def _list_price(s: dict[str, Any], currency: str, *, extra_seat: bool = False) -> Decimal | None:
+    if currency == "VND":
+        return _dec(s.get("price_extra_seat_vnd" if extra_seat else "price_vnd_monthly"))
+    return _dec(s.get("price_extra_seat_usd" if extra_seat else "price_usd_monthly"))
+
+
+def _agreed_price(s: dict[str, Any], currency: str, period_start: date) -> Decimal | None:
+    """The agreed unit price in force for the period: in the invoice currency, ``agreed_until`` empty or not before the
+    period start (as the CIS quote, which reads it against today: the draft runs on the period's first day)."""
+    price, until = _dec(s.get("agreed_price_monthly")), s.get("agreed_until")
+    if price is None or s.get("agreed_currency") != currency:
+        return None
+    if until is not None and until < period_start:
+        return None
+    return price
+
+
+def _money_text(amount: Decimal, currency: str) -> str:
+    return f"{amount:,.0f} VND" if currency == "VND" else f"{amount:,.2f} {currency}"
+
+
+def _priced_lines(s: dict[str, Any], name: str, unit: Decimal, currency: str) -> list[dict[str, Any]]:
+    """The subscription line at ``unit`` and, on a plan-fee plan with seats over the included ones, the extra seats."""
+    per_seat = s.get("price_unit") == "seat"
+    seats, included = s.get("seats"), s.get("seats_included")
+    quantity = max(int(seats or included or 1), int(s.get("seats_min") or 1), 1) if per_seat else 1
+    lines = [{"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"],
+              "description": name + (f", {quantity} seats" if per_seat else ""),
+              "quantity": Decimal(quantity), "unit_price": unit}]  # fmt: skip
+    extra = _list_price(s, currency, extra_seat=True)
+    if not per_seat and seats and included is not None and extra is not None and int(seats) > int(included):
+        lines.append({"line_role": "extra_seats", "product": s["product"], "plan_key": s["plan_key"],
+                      "description": f"Extra seats over {int(included)}, {name}",
+                      "quantity": Decimal(int(seats) - int(included)), "unit_price": extra})  # fmt: skip
+    return lines
+
+
+def _subscription_lines(s: dict[str, Any], period_start: date, currency: str, flags: dict[str, int]
+                        ) -> list[dict[str, Any]]:  # fmt: skip
+    name = f"{s.get('plan_name') or s['plan_key']} ({PRODUCT_LABEL.get(s['product'], s['product'])}), "
+    name += period_label(period_start)
+    zero = {"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"], "quantity": Decimal(1),
+            "unit_price": Decimal(0)}  # fmt: skip
+    if s.get("billing_interval") == "year":
+        flags["annual_manual"] += 1
+        return [{**zero, "description": f"{name}: annual: invoice by hand"}]
+    agreed = _agreed_price(s, currency, period_start)
+    unit = agreed if agreed is not None else _list_price(s, currency)
+    if unit is None:
+        flags["price_missing"] += 1
+        what = "contract price" if currency == "USD" else f"no {currency} price"
+        return [{**zero, "description": f"{name}: {what}, add it as an adjustment"}]
+    if agreed is not None:
+        flags["agreed"] += 1
+        until = s.get("agreed_until")
+        name += ", agreed price" + (f" until {until.isoformat()}" if until is not None else "")
+    lines = _priced_lines(s, name, unit, currency)
+    if s.get("bill_free"):
+        flags["pilot_free"] += 1
+        for ln in lines:
+            listed = _money_text(ln["quantity"] * ln["unit_price"], currency)
+            ln["description"] = f"{ln['description']}: pilot, free (list {listed})"
+            ln["unit_price"] = Decimal(0)
+    return lines
+
+
+def saas_lines(subs: list[dict[str, Any]], period_start: date, currency: str = "USD"
+               ) -> tuple[list[dict[str, Any]], dict[str, int]]:  # fmt: skip
+    """The subscription / extra-seat lines of one agency's live subscriptions in ``currency`` (pure), and the flags
+    counted: ``price_missing``, ``agreed``, ``annual_manual``, ``pilot_free`` (subscriptions)."""
+    flags = {"price_missing": 0, "agreed": 0, "annual_manual": 0, "pilot_free": 0}
+    lines = [ln for s in subs for ln in _subscription_lines(s, period_start, currency, flags)]
+    return lines, flags
 
 
 @dataclass(frozen=True)
@@ -260,7 +329,7 @@ async def _insert_lines(conn: asyncpg.Connection, invoice_id: str, kind: str, li
             ln.get("product"),
             ln.get("plan_key"),
             ln.get("source_hold_id"),
-            ln["description"],
+            ln["description"][:300],
             ln["quantity"],
             ln["unit_price"],
             amount,
@@ -273,6 +342,45 @@ async def _insert_lines(conn: asyncpg.Connection, invoice_id: str, kind: str, li
 def _empty_counts() -> dict[str, Any]:
     return {"agencies": 0, "invoices_created": 0, "drafts_updated": 0, "lines_added": 0, "period_issued": 0,
             "failed": 0}  # fmt: skip
+
+
+DELETE_JOB_LINES_SQL = (
+    "DELETE FROM booking.agency_invoice_line WHERE invoice_id = $1::uuid AND line_role = ANY($2::text[])"
+)
+OTHER_CURRENCY_DRAFTS_SQL = (
+    "SELECT id::text AS id FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'"
+    " AND period_start = $2 AND currency <> $3 AND status = 'draft'"
+    " AND EXISTS (SELECT 1 FROM booking.agency_invoice_line l WHERE l.invoice_id = agency_invoice.id"
+    " AND l.line_role IN ('subscription', 'extra_seats') AND NOT l.voided) FOR UPDATE"
+)
+
+
+async def _draft_agency_saas(conn: asyncpg.Connection, tid: Any, rows: list[dict[str, Any]],
+                            period: tuple[date, date], actor: str) -> dict[str, int]:  # fmt: skip
+    """One agency's SaaS draft for the period (inside its transaction); the counts it adds to the run."""
+    terms = await config.terms_for(conn, tid)
+    if terms is None:
+        raise RuntimeError("no billing terms row")
+    # AA-1116: the agency's CIS billing currency (CIS 438), else the Booking terms (before 438).
+    currency = (rows[0].get("billing_currency") or terms["saas_currency"]).strip().upper()
+    if currency not in SAAS_CURRENCIES:
+        return {"currency_unsupported": 1}
+    lines, done = saas_lines(rows, period[0], currency)
+    # A currency changed in CIS: the job lines of the period's draft in the old currency go (never two live software
+    # fees for one month); an issued invoice in the old currency is finance's to void.
+    for other in await conn.fetch(OTHER_CURRENCY_DRAFTS_SQL, str(tid), period[0], currency):
+        await conn.execute(DELETE_JOB_LINES_SQL, other["id"], list(JOB_LINE_ROLES))
+        await invoices.recompute(conn, other["id"])
+        done["currency_moved"] = done.get("currency_moved", 0) + 1
+    invoice_id, created = await _draft_for(conn, tid, "saas", period, currency, actor, rows[0].get("billing_country"))
+    if invoice_id is None:
+        return {"period_issued": 1, "currency_moved": done.get("currency_moved", 0)}
+    if not created:
+        await conn.execute(DELETE_JOB_LINES_SQL, invoice_id, list(JOB_LINE_ROLES))
+    done["lines_added"] = await _insert_lines(conn, invoice_id, "saas", lines, actor)
+    await invoices.recompute(conn, invoice_id)
+    done["invoices_created" if created else "drafts_updated"] = 1
+    return done
 
 
 async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | None, actor: str) -> dict[str, Any]:
@@ -289,7 +397,8 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
         if s.get("kind") == "internal":
             continue
         by_tenant[s["tenant_id"]].append(s)
-    counts = {**_empty_counts(), "price_missing": 0, "no_partner": 0, "currency_unsupported": 0}
+    counts = {**_empty_counts(), "price_missing": 0, "no_partner": 0, "currency_unsupported": 0, "agreed": 0,
+              "annual_manual": 0, "pilot_free": 0, "currency_moved": 0}  # fmt: skip
     for tid, rows in by_tenant.items():
         if tid not in partners:
             counts["no_partner"] += 1  # bk_tenant_pull has not projected the tenant yet: next run
@@ -297,31 +406,9 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
         counts["agencies"] += 1
         try:
             async with pool.acquire() as conn, conn.transaction():
-                terms = await config.terms_for(conn, tid)
-                if terms is None:
-                    raise RuntimeError("no billing terms row")
-                currency = terms["saas_currency"]
-                if currency != "USD":
-                    counts["currency_unsupported"] += 1
-                    continue
-                lines, missing = saas_lines(rows, start)
-                counts["price_missing"] += missing
-                invoice_id, created = await _draft_for(conn, tid, "saas", (start, end), currency, actor,
-                                                       rows[0].get("billing_country"))  # fmt: skip
-                if invoice_id is None:
-                    counts["period_issued"] += 1
-                    continue
-                if not created:
-                    await conn.execute(
-                        "DELETE FROM booking.agency_invoice_line WHERE invoice_id = $1::uuid"
-                        " AND line_role = ANY($2::text[])",
-                        invoice_id,
-                        list(JOB_LINE_ROLES),
-                    )
-                added = await _insert_lines(conn, invoice_id, "saas", lines, actor)
-                await invoices.recompute(conn, invoice_id)
-            counts["lines_added"] += added
-            counts["invoices_created" if created else "drafts_updated"] += 1
+                done = await _draft_agency_saas(conn, tid, rows, (start, end), actor)
+            for k, v in done.items():
+                counts[k] += v
         except Exception:  # noqa: BLE001 — one agency never holds the others; the run raises at the end
             counts["failed"] += 1
             log.exception("bk_saas_invoice_draft_failed tenant=%s", tid)

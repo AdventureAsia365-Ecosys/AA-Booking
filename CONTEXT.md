@@ -86,6 +86,11 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   **Agency billing read** (AA-1037, CIS 377, contract tenant.entitlements.v1 1.3): `catalog.v_tenant_billing_v1` (one row
   per tenant and subscription: plan price, unit, seats, status, and the bill-to fields CIS holds), read by
   `bk_saas_invoice_draft` and by an invoice issue (bill-to snapshot); feature-detected (`app/agency_billing/cis.py`).
+  AA-1116 (option B, CIS 438, contract 1.9): the appended terms (billing currency, VND list, seat minimum, agreed price
+  per billed unit / currency / end, billing interval, trial end, pilot, `bill_free`) are detected on their own; the
+  draft follows the CIS quote rules (`services/tenant_account/quote.py`): the agency's CIS currency (USD or VND list),
+  max(seats, seats_min, 1) seats, the agreed price while in force, a free pilot at 0, a yearly subscription a 0 line
+  "annual: invoice by hand", no discount line (finance applies founding / combo from the Tenant 360 quote).
   `catalog.v_tour_place_name` (CIS 298, AA-996: list destinations; the names and positions of `v_tour_place` without
   its per-place card / destination / segment lookups) is read too; the list never reads `v_tour_place`.
   **Parse-backed views** (`v_tour_day`, `v_tour_place`, `v_tour_place_name`; their day text parses every live
