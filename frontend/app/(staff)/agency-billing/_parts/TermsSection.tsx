@@ -9,6 +9,9 @@
 // agency's line shows every field in force for it. The deposit keeps the typed text (no float noise), every day count
 // shows its allowed range, and an empty or out-of-range field is refused under it (lib/billingTermsForm.ts) instead of
 // being sent as 0 or answered with a generic error.
+//
+// AA-1116 (option B): the software fee is drafted in the agency's CIS billing currency (Tenant 360); the field here is
+// read-only and only the fallback when CIS sends no currency.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -55,7 +58,7 @@ function TermsFields({ value, errors, disabled, onChange }: {
           />
         </Field>
       ))}
-      <Field label="Software fee currency">
+      <Field label="Software fee currency" hint="Set in CIS Tenant 360 (the agency's billing currency). This value is used only when CIS sends none.">
         <Input value={value.saas_currency} disabled />
       </Field>
     </div>

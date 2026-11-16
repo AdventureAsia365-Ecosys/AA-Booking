@@ -105,7 +105,7 @@ def sub(product: str, plan: str, price: str | None, **over: Any) -> dict[str, An
 
 
 def test_saas_lines() -> None:
-    lines, missing = drafts.saas_lines(
+    lines, flags = drafts.saas_lines(
         [
             sub("content", "content.growth", "799"),
             sub("crm", "crm.team", "30", price_unit="seat", seats=3),
@@ -114,7 +114,7 @@ def test_saas_lines() -> None:
         ],
         date(2026, 11, 1),
     )
-    assert missing == 1
+    assert flags["price_missing"] == 1
     assert [(ln["line_role"], ln["quantity"], ln["unit_price"]) for ln in lines] == [
         ("subscription", 1, Decimal(799)),
         ("subscription", 3, Decimal(30)),

@@ -65,8 +65,24 @@ export function AgencyBillingView() {
   const { get } = useUrlFilters();
   const tab = get("tab") || "invoices";
   const summary = useQuery({ queryKey: ["agency-billing", "summary"], queryFn: agencyBillingApi.summary });
-  const usd = summary.data?.by_currency.find((r) => r.currency === "USD");
+  // AA-1116: agencies are billed in USD or VND (their CIS billing currency): each money tile lists every currency.
+  const rows = summary.data?.by_currency ?? [];
   const loading = summary.isLoading ? undefined : null;
+  const perCurrency = (pick: (r: (typeof rows)[number]) => string) =>
+    summary.data ? (
+      rows.length ? (
+        <span className="flex flex-col">
+          {rows.map((r) => (
+            <Money key={r.currency} amount={pick(r)} currency={r.currency} />
+          ))}
+        </span>
+      ) : (
+        <Money amount="0" currency="USD" />
+      )
+    ) : (
+      loading
+    );
+  const overdue = rows.some((r) => Number(r.overdue) > 0);
   return (
     <PageFrame
       title="Agency billing"
@@ -75,9 +91,9 @@ export function AgencyBillingView() {
       {/* One column on a phone, like the billing KPIs: a money value at the tile size is wider than half of 390 px. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="Drafts to issue" value={summary.data ? String(summary.data.by_currency.reduce((n, r) => n + r.drafts, 0)) : loading} />
-        <KpiTile label="Open (USD)" value={usd ? <Money amount={usd.open} currency="USD" /> : loading} />
-        <KpiTile label="Overdue (USD)" value={usd ? <Money amount={usd.overdue} currency="USD" /> : loading} valueTone={usd && Number(usd.overdue) > 0 ? "danger" : undefined} />
-        <KpiTile label="Waiting for approval (USD)" value={usd ? <Money amount={usd.waiting} currency="USD" /> : loading} />
+        <KpiTile label="Open" value={perCurrency((r) => r.open)} />
+        <KpiTile label="Overdue" value={perCurrency((r) => r.overdue)} valueTone={overdue ? "danger" : undefined} />
+        <KpiTile label="Waiting for approval" value={perCurrency((r) => r.waiting)} />
       </div>
       <SavedTabs tabs={TABS} ariaLabel="Agency billing" />
       {tab === "invoices" && <InvoicesTab />}
