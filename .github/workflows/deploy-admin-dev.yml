@@ -24,6 +24,9 @@ name: Deploy Admin Dev
 #   vars.STAFF_WEB_ENABLED  "true" once staff_web.tf is applied; otherwise a push run is red (nothing to deploy to)
 #   vars.STAFF_WEB_ALB_DNS  the shared ALB's DNS name (not secret). The verify resolves booking. to it on this runner
 #                           only, so the ECS copy is checked before the cut-over (no effect after it)
+#   vars.ADMIN_PUBLIC_SENTRY_DSN  AA-1111: the browser + server Sentry DSN of project aa-booking-admin, baked in at build
+#                           time (public by design; empty or unset = Sentry off). A new value needs a new image: the
+#                           IMMUTABLE tag of an already-built commit is reused, so dispatch after a new commit.
 # The cluster, service, family, container and repository names are fixed below (Terraform outputs staff_web_*["booking"]).
 #
 # Pull requests that touch the Dockerfile or this workflow run only the image build (no AWS, no push).
@@ -125,6 +128,7 @@ jobs:
       - name: Build and push image (git-SHA tag only)
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
+          PUBLIC_SENTRY_DSN: ${{ vars.ADMIN_PUBLIC_SENTRY_DSN }}
         run: |
           set -euo pipefail
           IMAGE_TAG="${GITHUB_SHA}"
@@ -133,7 +137,8 @@ jobs:
           if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
             echo "image ${IMAGE_TAG} already in ECR: reusing it (no build, no push)"
           else
-            docker build --build-arg GIT_SHA="${GITHUB_SHA}" -t "$IMAGE" frontend
+            docker build --build-arg GIT_SHA="${GITHUB_SHA}" \
+              --build-arg NEXT_PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN}" -t "$IMAGE" frontend
             docker image inspect "$IMAGE" --format '{{.Architecture}}' | grep -qx arm64
             docker push "$IMAGE"
           fi
