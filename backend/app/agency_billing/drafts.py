@@ -24,8 +24,12 @@ its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CI
 - a subscription billed yearly gets a zero line "annual: invoice by hand" (``annual_manual``): no annual drafting;
 - a free pilot (``bill_free``: pilot while CIS ``cis.billing.pilot_free`` is on) is drafted at zero, every line kept
   with its list price in the text (``pilot_free``);
-- no discount line: the founding and combo discounts are not in the CIS view, finance applies them by hand from the
-  Tenant 360 quote (S282 decision 7).
+- discounts are flagged, not computed: the founding offer and the combo discount are not in the CIS view, so a draft
+  read with the CIS 438 terms and a positive amount ends with a zero line "discount: check the Tenant 360 quote ... add
+  it as an adjustment" (``discount_check``); finance applies the quote's discount by hand (S282 decision 7);
+- an agency whose CIS currency changed after the month's software invoice was issued in the old currency gets no new
+  draft (``currency_moved_issued``, counted ``period_issued``): finance voids and reissues by hand, never two software
+  fees for one month.
 
 On a draft the job's own subscription lines are replaced (a plan change shows), adjustments stay.
 
@@ -156,6 +160,12 @@ def _agreed_price(s: dict[str, Any], currency: str, period_start: date) -> Decim
     return price
 
 
+# The founding offer and the combo discount live in the CIS quote only (not in catalog.v_tenant_billing_v1).
+DISCOUNT_CHECK_TEXT = (
+    "Discount: check the Tenant 360 quote for a founding offer or combo discount and add it as an adjustment"
+)
+
+
 def _money_text(amount: Decimal, currency: str) -> str:
     return f"{amount:,.0f} VND" if currency == "VND" else f"{amount:,.2f} {currency}"
 
@@ -208,9 +218,18 @@ def _subscription_lines(s: dict[str, Any], period_start: date, currency: str, fl
 def saas_lines(subs: list[dict[str, Any]], period_start: date, currency: str = "USD"
                ) -> tuple[list[dict[str, Any]], dict[str, int]]:  # fmt: skip
     """The subscription / extra-seat lines of one agency's live subscriptions in ``currency`` (pure), and the flags
-    counted: ``price_missing``, ``agreed``, ``annual_manual``, ``pilot_free`` (subscriptions)."""
+    counted: ``price_missing``, ``agreed``, ``annual_manual``, ``pilot_free`` (subscriptions) and ``discount_check``
+    (agencies: a zero line asking finance to apply the Tenant 360 quote's discount, when the draft has an amount and
+    the rows carry the CIS 438 terms)."""
     flags = {"price_missing": 0, "agreed": 0, "annual_manual": 0, "pilot_free": 0}
     lines = [ln for s in subs for ln in _subscription_lines(s, period_start, currency, flags)]
+    flags["discount_check"] = 0
+    priced = next((ln for ln in lines if ln["quantity"] * ln["unit_price"] > 0), None)
+    if priced is not None and any(s.get("billing_currency") for s in subs):
+        # option B (CIS 438 terms read): a founding or combo discount may apply and Booking cannot see it
+        flags["discount_check"] = 1
+        check = {"line_role": "subscription", "product": priced["product"], "plan_key": priced["plan_key"]}
+        lines.append({**check, "quantity": Decimal(1), "unit_price": Decimal(0), "description": DISCOUNT_CHECK_TEXT})
     return lines, flags
 
 
@@ -347,6 +366,10 @@ def _empty_counts() -> dict[str, Any]:
 DELETE_JOB_LINES_SQL = (
     "DELETE FROM booking.agency_invoice_line WHERE invoice_id = $1::uuid AND line_role = ANY($2::text[])"
 )
+ISSUED_OTHER_CURRENCY_SQL = (
+    "SELECT currency FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'"
+    " AND period_start = $2 AND currency <> $3 AND status NOT IN ('draft', 'void') LIMIT 1"
+)
 OTHER_CURRENCY_DRAFTS_SQL = (
     "SELECT id::text AS id FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'"
     " AND period_start = $2 AND currency <> $3 AND status = 'draft'"
@@ -365,9 +388,13 @@ async def _draft_agency_saas(conn: asyncpg.Connection, tid: Any, rows: list[dict
     currency = (rows[0].get("billing_currency") or terms["saas_currency"]).strip().upper()
     if currency not in SAAS_CURRENCIES:
         return {"currency_unsupported": 1}
+    # A currency changed in CIS after the month was issued in the old one: no draft in the new currency (never two
+    # software fees for one month); finance voids the issued invoice and the next run drafts the new currency.
+    if await conn.fetchval(ISSUED_OTHER_CURRENCY_SQL, str(tid), period[0], currency) is not None:
+        return {"period_issued": 1, "currency_moved_issued": 1}
     lines, done = saas_lines(rows, period[0], currency)
-    # A currency changed in CIS: the job lines of the period's draft in the old currency go (never two live software
-    # fees for one month); an issued invoice in the old currency is finance's to void.
+    # A currency changed in CIS before the month was issued: the job lines of the period's draft in the old currency
+    # go (never two live software fees for one month).
     for other in await conn.fetch(OTHER_CURRENCY_DRAFTS_SQL, str(tid), period[0], currency):
         await conn.execute(DELETE_JOB_LINES_SQL, other["id"], list(JOB_LINE_ROLES))
         await invoices.recompute(conn, other["id"])
@@ -398,7 +425,8 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
             continue
         by_tenant[s["tenant_id"]].append(s)
     counts = {**_empty_counts(), "price_missing": 0, "no_partner": 0, "currency_unsupported": 0, "agreed": 0,
-              "annual_manual": 0, "pilot_free": 0, "currency_moved": 0}  # fmt: skip
+              "annual_manual": 0, "pilot_free": 0, "currency_moved": 0, "currency_moved_issued": 0,
+              "discount_check": 0}  # fmt: skip
     for tid, rows in by_tenant.items():
         if tid not in partners:
             counts["no_partner"] += 1  # bk_tenant_pull has not projected the tenant yet: next run

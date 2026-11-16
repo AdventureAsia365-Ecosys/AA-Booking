@@ -2,7 +2,8 @@
 billing terms. Pure line rules (:func:`app.agency_billing.drafts.saas_lines`) and the draft run on a scripted
 connection: the CIS billing currency (VND from the VND list instead of ``currency_unsupported``), the seat minimum, the
 agreed price while it is in force, a free pilot drafted at zero, an annual subscription flagged for a manual invoice,
-a currency change clearing the old currency's draft, and the 377 fallback (Booking ``saas_currency``). The same on
+a currency change clearing the old currency's draft (and drafting nothing when the month was already issued in the old
+currency), the discount check line, and the 377 fallback (Booking ``saas_currency``). The same on
 PostgreSQL: tests/integration/test_aa1116_saas_draft_pg.py. Names are invented."""
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ def test_seat_minimum_raises_the_quantity() -> None:
     lines, flags = drafts.saas_lines([sub("crm", "crm.team", "19", price_unit="seat", seats=1, seats_min=3)], NOV)
     assert _shape(lines) == [("subscription", Decimal(3), Decimal(19))]
     assert lines[0]["description"].endswith(", 3 seats")
-    assert flags == {"price_missing": 0, "agreed": 0, "annual_manual": 0, "pilot_free": 0}
+    assert flags == {"price_missing": 0, "agreed": 0, "annual_manual": 0, "pilot_free": 0, "discount_check": 0}
     more, _ = drafts.saas_lines([sub("crm", "crm.team", "19", price_unit="seat", seats=5, seats_min=3)], NOV)
     assert _shape(more) == [("subscription", Decimal(5), Decimal(19))]
     none, _ = drafts.saas_lines([sub("crm", "crm.team", "19", price_unit="seat")], NOV)
@@ -127,10 +128,29 @@ def test_free_pilot_is_drafted_at_zero_with_the_list_in_the_text() -> None:
     assert paid[0]["unit_price"] == Decimal(149)
 
 
+def test_option_b_draft_with_an_amount_ends_with_the_discount_check_line() -> None:
+    # CIS 438 terms read (billing_currency set) and an amount to bill: finance must apply the quote's discount
+    lines, flags = drafts.saas_lines([sub("content", "content.growth", "149", billing_currency="USD"),
+                                      sub("crm", "crm.pro", "39", billing_currency="USD")], NOV)  # fmt: skip
+    assert _shape(lines)[-1] == ("subscription", Decimal(1), Decimal(0)) and len(lines) == 3
+    assert lines[-1]["description"] == drafts.DISCOUNT_CHECK_TEXT and flags["discount_check"] == 1
+    assert (lines[-1]["product"], lines[-1]["plan_key"]) == ("content", "content.growth")
+    # nothing to discount: a free pilot, an annual subscription, a plan without a price
+    for row in (sub("content", "content.growth", "149", billing_currency="USD", bill_free=True),
+                sub("content", "content.growth", "149", billing_currency="USD", billing_interval="year"),
+                sub("content", "content.enterprise", None, billing_currency="USD")):  # fmt: skip
+        lines, flags = drafts.saas_lines([row], NOV)
+        assert flags["discount_check"] == 0 and all(ln["description"] != drafts.DISCOUNT_CHECK_TEXT for ln in lines)
+    # before CIS 438 (no billing_currency): no option B discount, no line
+    lines, flags = drafts.saas_lines([sub("content", "content.growth", "149")], NOV)
+    assert len(lines) == 1 and flags["discount_check"] == 0
+
+
 # ── The run on a scripted connection ─────────────────────────────────────────
 
 
-def saas_conn(rows: list[dict[str, Any]], *, terms_ready: bool = True, others: Any = None) -> ScriptedConn:
+def saas_conn(rows: list[dict[str, Any]], *, terms_ready: bool = True, others: Any = None,
+              issued_other: str | None = None) -> ScriptedConn:  # fmt: skip
     c = ScriptedConn()
     # the 377 view is always readable; the 438 columns only when ``terms_ready``
     c.on(VIEW_READY_FRAGMENT, lambda *a: terms_ready or "billing_currency" not in a[-1])
@@ -138,6 +158,7 @@ def saas_conn(rows: list[dict[str, Any]], *, terms_ready: bool = True, others: A
     c.on("SELECT tenant_id, agency_name FROM booking.b2b_partners", [{"tenant_id": T1, "agency_name": "Juniper"}])
     c.on("FROM booking.billing_terms", TERMS)
     c.on("currency <> $3 AND status = 'draft'", others or [])
+    c.on("currency <> $3 AND status NOT IN ('draft', 'void')", issued_other)
     c.on("status FROM booking.agency_invoice WHERE party_tenant_id", None)
     c.on("FROM booking.tax_rule", None)
     c.on("SELECT current_date", date(2026, 11, 1))
@@ -161,7 +182,7 @@ def _inserted_invoice_currency(c: ScriptedConn) -> str:
 async def test_run_drafts_a_vnd_agency_in_vnd() -> None:
     c = saas_conn([sub("content", "content.growth", "149", "3790000", billing_currency="VND")])
     out = await drafts.run_saas(c, period="2026-11", tenant_id=None, actor="job:x")
-    assert out["currency_unsupported"] == 0 and (out["invoices_created"], out["lines_added"]) == (1, 1)
+    assert out["currency_unsupported"] == 0 and (out["invoices_created"], out["lines_added"]) == (1, 2)
     assert _inserted_invoice_currency(c) == "VND"
     line = c.sql("INSERT INTO booking.agency_invoice_line")[0]
     assert line[9] == Decimal(3790000) and line[10] == Decimal("3790000.00")
@@ -174,7 +195,7 @@ async def test_run_counts_the_flags_and_refuses_another_currency() -> None:
                    sub("crm", "crm.team", "19", billing_currency="USD", price_unit="seat", seats=1, seats_min=3,
                        bill_free=True)])  # fmt: skip
     out = await drafts.run_saas(c, period="2026-11", tenant_id=None, actor="job:x")
-    assert (out["annual_manual"], out["pilot_free"], out["lines_added"]) == (1, 1, 2)
+    assert (out["annual_manual"], out["pilot_free"], out["lines_added"], out["discount_check"]) == (1, 1, 2, 0)
     liveness.reset_cache()
     out = await drafts.run_saas(saas_conn([sub("content", "content.growth", "149", billing_currency="EUR")]),
                                 period="2026-11", tenant_id=None, actor="job:x")  # fmt: skip
@@ -189,6 +210,24 @@ async def test_run_clears_the_old_currency_draft() -> None:
     assert out["currency_moved"] == 1
     deletes = c.sql("DELETE FROM booking.agency_invoice_line")
     assert deletes and deletes[0][0] == OLD
+
+
+@pytest.mark.asyncio
+async def test_run_drafts_nothing_when_the_month_was_issued_in_the_old_currency() -> None:
+    # November issued in USD, then CIS moved the agency to VND: no VND draft next to the issued USD invoice
+    c = saas_conn([sub("content", "content.growth", "149", "3790000", billing_currency="VND")], issued_other="USD")
+    out = await drafts.run_saas(c, period="2026-11", tenant_id=None, actor="job:x")
+    assert (out["period_issued"], out["currency_moved_issued"], out["invoices_created"]) == (1, 1, 0)
+    assert not c.sql("INSERT INTO booking.agency_invoice") and not c.sql("DELETE FROM booking.agency_invoice_line")
+    assert c.sql("status NOT IN ('draft', 'void')")[0][1:] == (NOV, "VND")
+
+
+@pytest.mark.asyncio
+async def test_run_counts_the_discount_check() -> None:
+    c = saas_conn([sub("content", "content.growth", "149", billing_currency="USD")])
+    out = await drafts.run_saas(c, period="2026-11", tenant_id=None, actor="job:x")
+    assert (out["discount_check"], out["lines_added"]) == (1, 2)
+    assert c.sql("INSERT INTO booking.agency_invoice_line")[-1][7] == drafts.DISCOUNT_CHECK_TEXT
 
 
 @pytest.mark.asyncio

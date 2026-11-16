@@ -4,7 +4,9 @@ terms from ``catalog.v_tenant_billing_v1`` (stood in by a table of its exact 438
 - a VND agency is drafted in VND from the VND list (no ``currency_unsupported``), with the seat minimum;
 - an agreed price in force replaces the list unit price; an annual subscription is a zero line "invoice by hand";
 - a free pilot is drafted at zero;
-- the agency's currency moving from USD to VND clears the job lines of the USD draft of the month.
+- the agency's currency moving from USD to VND clears the job lines of the USD draft of the month;
+- the same move after the USD invoice of the month was issued drafts nothing in VND (``currency_moved_issued``);
+- a draft with an amount ends with the zero "Discount: check the Tenant 360 quote" line (``discount_check``).
 
 Names and places are invented."""
 
@@ -115,16 +117,18 @@ async def test_vnd_agency_seat_minimum_agreed_and_annual(admin: asyncpg.Connecti
                         price_vnd_monthly=Decimal(2500000), billing_currency="VND",
                         billing_interval="year")  # fmt: skip
     out = await drafts.run_saas(pool, period="2026-11", tenant_id=tid, actor="job:test")
-    assert (out["invoices_created"], out["lines_added"], out["currency_unsupported"]) == (1, 3, 0)
-    assert (out["agreed"], out["annual_manual"]) == (1, 1)
+    assert (out["invoices_created"], out["lines_added"], out["currency_unsupported"]) == (1, 4, 0)
+    assert (out["agreed"], out["annual_manual"], out["discount_check"]) == (1, 1, 1)
     rows = await _invoices(admin, tid)
     assert {r["currency"] for r in rows} == {"VND"}
     assert [(r["line_role"], r["quantity"], r["amount"]) for r in rows] == [
         ("subscription", Decimal("1.00"), Decimal("3790000.00")),
         ("subscription", Decimal("3.00"), Decimal("1200000.00")),
         ("subscription", Decimal("1.00"), Decimal("0.00")),
+        ("subscription", Decimal("1.00"), Decimal("0.00")),
     ]
     assert rows[2]["description"].endswith("annual: invoice by hand")
+    assert rows[3]["description"] == drafts.DISCOUNT_CHECK_TEXT
     total = await admin.fetchval(
         "SELECT total FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'", tid
     )
@@ -137,7 +141,10 @@ async def test_pilot_free_and_currency_move(admin: asyncpg.Connection, pool: asy
                         price_vnd_monthly=Decimal(3790000))  # fmt: skip
     first = await drafts.run_saas(pool, period="2026-11", tenant_id=tid, actor="job:test")
     assert first["invoices_created"] == 1
-    assert [(r["currency"], r["amount"]) for r in await _invoices(admin, tid)] == [("USD", Decimal("149.00"))]
+    assert [(r["currency"], r["amount"]) for r in await _invoices(admin, tid)] == [
+        ("USD", Decimal("149.00")),
+        ("USD", Decimal("0.00")),
+    ]
 
     # CIS: the agency now bills in VND and is a free pilot
     await admin.execute(
@@ -154,3 +161,46 @@ async def test_pilot_free_and_currency_move(admin: asyncpg.Connection, pool: asy
         "SELECT total FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND currency = 'USD'", tid
     )
     assert usd_total == Decimal("0.00")
+
+
+async def _issue_by_hand(admin: asyncpg.Connection, tid: str) -> None:
+    """Mark the agency's SaaS draft issued (as bk_owner, guards off, like ``purge``): the issue path itself is
+    test_aa1037_agency_billing.py's; here only the state "issued in USD" matters."""
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        entity = await admin.fetchval(
+            "INSERT INTO booking.billing_entity (code, legal_entity, is_default, active)"
+            " VALUES ('IT1037-AA1116', 'Kestrel Harbour Travel Ltd', false, true) RETURNING id::text"
+        )
+        await admin.execute("ALTER TABLE booking.agency_invoice DISABLE TRIGGER USER")
+        await admin.execute(
+            "UPDATE booking.agency_invoice SET status = 'issued', number = 'AAS-2026-001116', issued_at = now(),"
+            " issued_by = 'it-1037', issued_on = current_date, due_date = current_date, billing_entity_id = $2::uuid,"
+            " issuer = '{}'::jsonb, bill_to = '{}'::jsonb WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'",
+            tid,
+            entity,
+        )
+        await admin.execute("ALTER TABLE booking.agency_invoice ENABLE TRIGGER USER")
+
+
+async def test_currency_move_after_the_month_was_issued(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    tid = await _partner(admin, "Kestrel Harbour")
+    await _subscription(admin, tid, "content", "content.growth", price_usd_monthly=Decimal("149.00"),
+                        price_vnd_monthly=Decimal(3790000))  # fmt: skip
+    assert (await drafts.run_saas(pool, period="2026-11", tenant_id=tid, actor="job:test"))["invoices_created"] == 1
+    await _issue_by_hand(admin, tid)
+
+    # CIS: the agency now bills in VND; November is already issued in USD
+    await admin.execute(
+        "UPDATE catalog.v_tenant_billing_v1 SET billing_currency = 'VND' WHERE tenant_id = $1::uuid", tid
+    )
+    again = await drafts.run_saas(pool, period="2026-11", tenant_id=tid, actor="job:test")
+    assert (again["period_issued"], again["currency_moved_issued"], again["invoices_created"]) == (1, 1, 0)
+    live = await admin.fetch(
+        "SELECT currency, status FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND status <> 'void'",
+        tid,
+    )
+    assert [(r["currency"], r["status"]) for r in live] == [("USD", "issued")]
+    # December (no invoice yet) is drafted in VND
+    dec = await drafts.run_saas(pool, period="2026-12", tenant_id=tid, actor="job:test")
+    assert (dec["invoices_created"], dec["currency_moved_issued"]) == (1, 0)
