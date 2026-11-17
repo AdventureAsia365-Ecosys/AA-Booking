@@ -90,9 +90,11 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   per billed unit / currency / end, billing interval, trial end, pilot, `bill_free`) are detected on their own; the
   draft follows the CIS quote rules (`services/tenant_account/quote.py`): the agency's CIS currency (USD or VND list),
   max(seats, seats_min, 1) seats, the agreed price while in force, a free pilot at 0, a yearly subscription a 0 line
-  "annual: invoice by hand", a 0 line "Discount: check the Tenant 360 quote" on every draft with an amount (the founding
-  / combo discount is not in the view; finance adds it as an adjustment), and no draft in a new CIS currency when the
-  month is already issued in the old one (`currency_moved_issued`; finance voids and reissues).
+  "annual: invoice by hand", and no draft in a new CIS currency when the month is already issued in the old one
+  (`currency_moved_issued`; finance voids and reissues). Contract 1.10 (CIS 444): the quote's founding / combo
+  discount of each row (`discount_pct`, `discount_kind`, detected on their own) is drafted as one negative `adjustment`
+  line per discounted subscription (the only adjustment with a product, so a re-run replaces it and keeps finance's
+  adjustments), rounded on the running total so the draft equals the CIS quote.
   `catalog.v_tour_place_name` (CIS 298, AA-996: list destinations; the names and positions of `v_tour_place` without
   its per-place card / destination / segment lookups) is read too; the list never reads `v_tour_place`.
   **Parse-backed views** (`v_tour_day`, `v_tour_place`, `v_tour_place_name`; their day text parses every live
