@@ -33,6 +33,13 @@ currency alone also counts as a change (the review is cleared). The run reports 
 (``references_structured``). Without either view (CIS not applied, no grant) the reference part is skipped and
 reported, the bridge still runs.
 
+**Season calendars** (AA-1091 bk-055, AA-1128 bk-059): after the bridge, up to ``season_sync_batch_size`` plans
+without a season calendar get the one of their first day's destination (:func:`_calendars`). The result counts every
+plan picked (``calendars``: assigned, no tour, no destination, timed out, not tried). When the step is skipped (catalog
+or policy unreadable) or a catalog read is cut by ``season_sync_read_timeout_seconds``, the run's ``outcome`` is
+``degraded`` with ``degraded: ["calendars"]`` and a warning log line, never a quiet ``ok``; the Seasons page shows the
+last run (``app.pricing.seasons_admin.list_calendars``).
+
 Without ``catalog.v_tour`` readable the run answers ``skipped``. Idempotent: a second run with nothing new writes
 nothing (``ON CONFLICT DO NOTHING``, updates only where something differs).
 """
@@ -53,7 +60,7 @@ from app.catalog import liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.pricing import seasons_admin
+from app.pricing import policy_values, seasons_admin
 
 log = logging.getLogger(__name__)
 
@@ -64,8 +71,10 @@ MAX_ATTEMPTS = 3
 SLOT_SECONDS = 900
 RAW_MAX = 500
 AUDIT_KEYS = 50
-# Plans given their default season calendar per run (one catalog place read each).
-CALENDAR_BATCH = 50
+# AA-1128 B1 (bk-059): the season calendar step reads its batch size and catalog read timeout from the pricing
+# policy (Pricing > Policy, administrator approval), never from a constant.
+BATCH_KEY = "season_sync_batch_size"
+TIMEOUT_KEY = "season_sync_read_timeout_seconds"
 
 TOUR_VIEW = liveness.View("catalog", "v_tour", ("source_system", "source_id"))
 REFERENCE_VIEW = liveness.View("catalog", "v_tour_price_reference_v1", ("source_system", "source_id", "price_raw"))
@@ -310,27 +319,47 @@ async def run(pool: asyncpg.Pool) -> dict[str, Any]:
                 summary=f"Trip plans from the CIS catalog: {len(created)} created, {len(adopted)} adopted",
             )
     calendars = await _calendars(pool)
+    degraded = ["calendars"] if calendars_degraded(calendars) else []
     result = {
-        "outcome": "ok",
+        "outcome": "degraded" if degraded else "ok",
+        "degraded": degraded,
         "tours": len(keys),
         "created": len(created),
         "adopted": len(adopted),
         **refs,
         "calendars": calendars,
     }
-    if created or adopted:
+    if degraded:
+        # AA-1128 B1: a skipped or cut step is never a quiet success (the job row's result says "degraded" and the
+        # Seasons page shows the last run).
+        log.warning("bk_trip_plan_sync degraded: %s", result)
+    elif created or adopted or calendars.get("assigned"):
         log.info("bk_trip_plan_sync: %s", result)
     return result
 
 
+def calendars_degraded(calendars: dict[str, Any]) -> bool:
+    """The season calendar step did not do its whole batch: skipped (catalog or policy unreadable), or a catalog read
+    was cut by the read timeout (the rest of the batch not tried)."""
+    return bool(calendars.get("skipped") or calendars.get("timed_out") or calendars.get("not_tried"))
+
+
 async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
     """AA-1091 (bk-055): plans without a season calendar get the one of their first day's destination
-    (:func:`app.pricing.seasons_admin.assign_default_calendars`), a batch per run. Fail soft: a catalog without the
-    place view or its destination column leaves the plans in the default low season and says so in the result."""
+    (:func:`app.pricing.seasons_admin.assign_default_calendars`), a batch per run of ``season_sync_batch_size`` plans,
+    each catalog read cut at ``season_sync_read_timeout_seconds`` (AA-1128, bk-059). Fail soft but loud: a catalog
+    without the views or the column, or a policy without the two values, skips the step and names why in
+    ``skipped``; the run is then degraded (:func:`calendars_degraded`)."""
     try:
         async with pool.acquire() as conn, conn.transaction():
+            policy = await policy_values.require(conn, await policy_values.today_utc(conn), BATCH_KEY, TIMEOUT_KEY)
             salt = schedule_key(datetime.now(UTC))
-            return await seasons_admin.assign_default_calendars(conn, CALENDAR_BATCH, salt)
+            return await seasons_admin.assign_default_calendars(
+                conn, policy.integer(BATCH_KEY), salt, float(policy.integer(TIMEOUT_KEY))
+            )
+    except policy_values.PolicyUnavailable:
+        log.warning("bk_trip_plan_sync calendars skipped: policy_unavailable")
+        return {"skipped": "policy_unavailable"}
     except (*CATALOG_ERRORS, asyncpg.UndefinedColumnError) as exc:
         log.warning("bk_trip_plan_sync calendars skipped: %s", type(exc).__name__)
         return {"skipped": type(exc).__name__}

@@ -18,7 +18,10 @@ maker-checker, like the other pricing data.
   No holiday date is ever written in code; a festive range takes its dates from the event row of each year.
 - **The calendar of a trip plan** (``trip_plans.season_calendar_id``): :func:`assign_default_calendars` (run by the
   catalog sync) gives every plan without one the calendar of the destination of its first day, creating that empty
-  calendar when it is missing. A staff change is a request with a reason (:func:`request_plan_calendar`) that a
+  calendar when it is missing. AA-1128: the batch is picked from ``booking.trip_plans`` alone and the CIS catalog is
+  read one plan at a time, each read cut at the policy's ``season_sync_read_timeout_seconds``; every plan picked is
+  counted under one outcome, and :func:`list_calendars` returns the last run's counts (``sync``) for the Seasons
+  page. A staff change is a request with a reason (:func:`request_plan_calendar`) that a
   second person approves or rejects (:func:`decide_plan_calendar`): the calendar drives the plan's peak uplift,
   festive quote validity and stop-sale, so it gets the maker-checker the ranges have.
 
@@ -184,13 +187,54 @@ async def _audit(conn: asyncpg.Connection, staff: Staff, action: str, kind: str,
 # ── Calendars ────────────────────────────────────────────────────────────────
 
 
+# AA-1128 B1: the last finished run of the catalog sync and its season calendar step (the job_kind_created_idx
+# index), and how many plans still wait for a calendar.
+LAST_SYNC_SQL = """
+SELECT j.finished_at, j.result::text AS result
+FROM booking.job j
+WHERE j.kind = 'bk_trip_plan_sync' AND j.status = 'succeeded'
+ORDER BY j.created_at DESC
+LIMIT 1
+"""
+PLAN_COVERAGE_SQL = """
+SELECT count(*)::int AS plans, count(*) FILTER (WHERE season_calendar_id IS NULL)::int AS without_calendar
+FROM booking.trip_plans
+"""
+SYNC_COUNTS = ("picked", "assigned", "calendars_created", "no_tour", "no_destination", "timed_out", "not_tried")
+
+
+def sync_out(finished_at: Any, result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The season calendar step of one catalog sync result, as the Seasons page shows it (``None`` = no run yet).
+    A run before AA-1128 has no ``picked``/``timed_out`` counts: they read 0; ``skipped`` names why a step did not
+    run, and ``degraded`` is true when it was skipped or cut (the same rule as the job result)."""
+    if result is None:
+        return None
+    step = result.get("calendars") if isinstance(result.get("calendars"), dict) else {}
+    counts = {k: int(step.get(k) or 0) for k in SYNC_COUNTS}
+    skipped = step.get("skipped")
+    return {
+        "finished_at": finished_at,
+        **counts,
+        "skipped": str(skipped) if skipped else None,
+        "degraded": bool(skipped or counts["timed_out"] or counts["not_tried"]),
+    }
+
+
 async def list_calendars(conn: asyncpg.Connection, staff: Staff, owner_kind: str | None = None) -> dict[str, Any]:
     _read(staff)
     rows = await conn.fetch(
         CALENDARS_SQL + " WHERE ($1::text IS NULL OR c.owner_kind = $1) ORDER BY c.owner_kind, c.name", owner_kind
     )
     items = await _people(conn, [calendar_out(r) for r in rows], CALENDAR_PEOPLE)
-    return {"items": items, "season_codes": list(seasons.SEASON_CODES)}
+    last = await conn.fetchrow(LAST_SYNC_SQL)
+    coverage = await conn.fetchrow(PLAN_COVERAGE_SQL)
+    return {
+        "items": items,
+        "season_codes": list(seasons.SEASON_CODES),
+        "sync": sync_out(last["finished_at"], json.loads(last["result"] or "null")) if last else None,
+        "plans": coverage["plans"] if coverage else 0,
+        "plans_without_calendar": coverage["without_calendar"] if coverage else 0,
+    }
 
 
 async def _calendar(conn: asyncpg.Connection, calendar_id: str, *, lock: bool = False) -> asyncpg.Record:
@@ -694,14 +738,19 @@ async def _plan_audit(
     )
 
 
+# AA-1128 B1: the batch comes from booking.trip_plans alone; the CIS catalog is read one plan at a time below (the old
+# batch query joined catalog.v_tour for every plan without a calendar before its LIMIT and ran past the statement
+# timeout on every run, so no calendar was ever assigned on Dev).
 UNASSIGNED_SQL = """
-SELECT p.id::text AS id, t.tour_id
+SELECT p.id::text AS id, p.source_system, p.source_id
 FROM booking.trip_plans p
-JOIN LATERAL (SELECT t.tour_id FROM catalog.v_tour t
-              WHERE t.source_system = p.source_system AND t.source_id = p.source_id LIMIT 1) t ON true
 WHERE p.season_calendar_id IS NULL
 ORDER BY md5(p.id::text || $2)
 LIMIT $1
+"""
+# One tour key at a time, by equality (a filter the view's plan reaches).
+TOUR_ID_SQL = """
+SELECT t.tour_id FROM catalog.v_tour t WHERE t.source_system = $1 AND t.source_id = $2 LIMIT 1
 """
 # One tour at a time (a tour_id = $1 filter reaches the view's parse; an ANY() list does not, lessons "Dữ liệu").
 DAY_ONE_SQL = """
@@ -724,15 +773,46 @@ SELECT id::text FROM booking.season_calendars WHERE destination_id = $1::uuid
 LIMIT 1
 """
 SYSTEM = "system:bk_trip_plan_sync"
+# A catalog read cut by the read timeout (client side: TimeoutError; server side: QueryCanceledError).
+READ_CUT: tuple[type[BaseException], ...] = (TimeoutError, asyncpg.QueryCanceledError)
 
 
-async def assign_default_calendars(conn: asyncpg.Connection, limit: int, salt: str) -> dict[str, int]:
+async def assign_default_calendars(
+    conn: asyncpg.Connection, limit: int, salt: str, read_timeout: float
+) -> dict[str, int]:
     """Give up to ``limit`` plans without a calendar the calendar of the destination of their first day (made empty
-    when missing). Plans whose first day names no destination stay without one (low season); ``salt`` rotates which
-    plans are tried, so those never block the others."""
-    out = {"assigned": 0, "calendars_created": 0, "no_destination": 0}
-    for plan in await conn.fetch(UNASSIGNED_SQL, limit, salt):
-        dest = await conn.fetchrow(DAY_ONE_SQL, plan["tour_id"])
+    when missing). ``salt`` rotates which plans are tried, so the ones that cannot get a calendar never block the
+    others. Every plan picked is counted under exactly one outcome (``picked`` = ``assigned`` + ``no_tour`` +
+    ``no_destination`` + ``timed_out`` + ``not_tried``):
+
+    - ``assigned`` (``calendars_created`` of them made a new empty calendar);
+    - ``no_tour``: the plan's tour is not in ``catalog.v_tour`` (paused or retired in CIS);
+    - ``no_destination``: its first day names no destination (the plan stays in the default low season);
+    - ``timed_out``: a catalog read took longer than ``read_timeout`` seconds (pricing policy
+      ``season_sync_read_timeout_seconds``): the read is rolled back to its savepoint and the batch ends there, since
+      a slow catalog would cut every next read too; the plans after it are ``not_tried``.
+
+    A caller treats ``timed_out`` or ``not_tried`` above zero as a degraded run (:mod:`app.catalog.trip_plan_sync`).
+    Catalog errors other than a cut read (view missing, no grant) propagate: the whole step is skipped."""
+    out = dict.fromkeys(SYNC_COUNTS, 0)
+    plans = await conn.fetch(UNASSIGNED_SQL, limit, salt)
+    out["picked"] = len(plans)
+    for done, plan in enumerate(plans):
+        try:
+            async with conn.transaction():  # a savepoint: a cut read rolls back alone
+                tour_id = await conn.fetchval(
+                    TOUR_ID_SQL, plan["source_system"], plan["source_id"], timeout=read_timeout
+                )
+                dest = None
+                if tour_id is not None:
+                    dest = await conn.fetchrow(DAY_ONE_SQL, tour_id, timeout=read_timeout)
+        except READ_CUT:
+            out["timed_out"] += 1
+            out["not_tried"] = len(plans) - done - 1
+            break
+        if tour_id is None:
+            out["no_tour"] += 1
+            continue
         if dest is None:
             out["no_destination"] += 1
             continue

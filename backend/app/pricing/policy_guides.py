@@ -551,6 +551,43 @@ GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu 14 ngày trước ngày bắt đầu.",
         ),
     ),
+    "season_sync_batch_size": _g(
+        (
+            "How many trip plans without a season calendar the catalog sync gives one in a single run; each plan "
+            "takes one read of the CIS catalog.",
+            "New tours get their destination's season calendar sooner; one run reads the catalog more often.",
+            "Each run is shorter and lighter on the catalog; new tours wait more runs for their calendar.",
+            "Change it when the Seasons page shows many tours still waiting for a calendar (raise it) or the sync "
+            "runs slow (lower it).",
+            "Starting value 50 plans per run.",
+        ),
+        (
+            "Mỗi lần đồng bộ danh mục gán lịch mùa cho tối đa bao nhiêu kế hoạch tour chưa có lịch; mỗi kế hoạch đọc "
+            "danh mục CIS một lần.",
+            "Tour mới nhận lịch mùa của điểm đến sớm hơn; mỗi lần chạy đọc danh mục nhiều hơn.",
+            "Mỗi lần chạy ngắn và nhẹ hơn cho danh mục; tour mới phải chờ thêm vài lần chạy mới có lịch.",
+            "Đổi khi trang Mùa giá còn nhiều tour chờ lịch (tăng) hoặc lần đồng bộ chạy chậm (giảm).",
+            "Giá trị ban đầu 50 kế hoạch mỗi lần chạy.",
+        ),
+    ),
+    "season_sync_read_timeout_seconds": _g(
+        (
+            "How many seconds one read of the CIS catalog may take in the season calendar step; a slower read ends "
+            "that run's batch and the run is marked degraded.",
+            "A slow catalog still gets read; a stuck read holds the run longer.",
+            "A slow catalog ends the batch sooner; more runs may end degraded.",
+            "Change it when the Seasons page reports runs cut by a slow catalog read (raise it).",
+            "Starting value 5 seconds.",
+        ),
+        (
+            "Một lần đọc danh mục CIS trong bước gán lịch mùa được phép kéo dài bao nhiêu giây; lần đọc chậm hơn sẽ "
+            "dừng lô của lần chạy đó và lần chạy được đánh dấu là suy giảm.",
+            "Danh mục chậm vẫn đọc được; một lần đọc bị treo giữ lần chạy lâu hơn.",
+            "Danh mục chậm làm dừng lô sớm hơn; nhiều lần chạy có thể bị đánh dấu suy giảm.",
+            "Đổi khi trang Mùa giá báo các lần chạy bị dừng vì đọc danh mục chậm (tăng).",
+            "Giá trị ban đầu 5 giây.",
+        ),
+    ),
     "supplier_answer_days": _g(
         (
             "How many days a requested supplier booking may wait for the supplier's answer before staff are reminded.",
