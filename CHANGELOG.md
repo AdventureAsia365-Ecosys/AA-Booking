@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.15.0...v0.16.0) (2026-11-17)
+
+
+### Features
+
+* monthly software draft follows the CIS option B billing terms ([#260](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/260)) ([abbf00e](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/abbf00e923a8cdc7b07bbb9e6cc218cf24ef5251))
+* monthly software draft writes the CIS quote discount lines ([#262](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/262)) ([31b6122](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/31b61227d056bb65b6d19164f62f170942a86e3e))
+* report Booking staff admin errors to Sentry ([#259](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/259)) ([1a5bc0a](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/1a5bc0a4695e6630a6c1eb9147d738ba68e1284f))
+
 ## [0.15.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.14.0...v0.15.0) (2026-11-14)
 
 
