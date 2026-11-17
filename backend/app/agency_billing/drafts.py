@@ -10,7 +10,7 @@ a day, the SaaS draft of the **current** month (start of period, d9) and the set
 **SaaS** (:func:`run_saas`): the live subscriptions (``active``, ``past_due``; a ``trialing`` one is not billed during
 its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CIS 377; without it the run is
 ``skipped``). The price rules are those of the CIS quote (``services/tenant_account/quote.py``, AA-1116 option B, CIS
-438, contract tenant.entitlements.v1 1.9), so the draft and what the agency sees on its Billing tab agree:
+438, contract tenant.entitlements.v1 1.9 / 1.10), so the draft and what the agency sees on its Billing tab agree:
 
 - the invoice currency is the agency's CIS ``billing_currency`` (before CIS 438: the Booking ``saas_currency`` terms);
   USD lines read the USD list, VND lines the VND list (``price_vnd_monthly`` / ``price_extra_seat_vnd``); another
@@ -24,14 +24,19 @@ its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CI
 - a subscription billed yearly gets a zero line "annual: invoice by hand" (``annual_manual``): no annual drafting;
 - a free pilot (``bill_free``: pilot while CIS ``cis.billing.pilot_free`` is on) is drafted at zero, every line kept
   with its list price in the text (``pilot_free``);
-- discounts are flagged, not computed: the founding offer and the combo discount are not in the CIS view, so a draft
-  read with the CIS 438 terms and a positive amount ends with a zero line "discount: check the Tenant 360 quote ... add
-  it as an adjustment" (``discount_check``); finance applies the quote's discount by hand (S282 decision 7);
+- the CIS quote's discount (contract 1.10, CIS 444: ``discount_pct`` / ``discount_kind`` per row, the founding offer
+  or the combo, never both) is taken off the amount each subscription bills (its subscription and extra-seat lines):
+  one negative ``adjustment`` line per discounted subscription, right after its lines, carrying the product (a job
+  discount line is the only adjustment with a product, so a re-run replaces it and leaves finance's adjustments).
+  The share is computed on the exact amounts and rounded like the quote (USD to the cent, VND to the dong) on the
+  running total, so the lines add up to the quote's rounded discount (``discounted``); a free pilot, an annual line or
+  a missing price bills nothing and gets no discount;
 - an agency whose CIS currency changed after the month's software invoice was issued in the old currency gets no new
   draft (``currency_moved_issued``, counted ``period_issued``): finance voids and reissues by hand, never two software
   fees for one month.
 
-On a draft the job's own subscription lines are replaced (a plan change shows), adjustments stay.
+On a draft the job's own subscription, extra-seat and discount lines are replaced (a plan change shows), finance's
+adjustments stay.
 
 **Settlement** (:func:`run_settlement`): every confirmed B2B hold (``b2b_holds.status = confirmed``), its quote total
 and currency (``b2b_quotes``), its departure (the trip case ``start_date``, else the first quote line date) and its
@@ -160,10 +165,9 @@ def _agreed_price(s: dict[str, Any], currency: str, period_start: date) -> Decim
     return price
 
 
-# The founding offer and the combo discount live in the CIS quote only (not in catalog.v_tenant_billing_v1).
-DISCOUNT_CHECK_TEXT = (
-    "Discount: check the Tenant 360 quote for a founding offer or combo discount and add it as an adjustment"
-)
+# technical-constant: the minor unit of each SaaS currency (the CIS quote's PLACES), not a policy.
+PLACES = {"USD": CENT, "VND": Decimal(1)}
+DISCOUNT_LABEL = {"founding": "Founding offer discount", "combo": "Combo discount"}
 
 
 def _money_text(amount: Decimal, currency: str) -> str:
@@ -215,21 +219,48 @@ def _subscription_lines(s: dict[str, Any], period_start: date, currency: str, fl
     return lines
 
 
+def _pct_text(pct: Decimal) -> str:
+    return f"{pct.normalize():f}%"
+
+
+def _discount_line(s: dict[str, Any], amount: Decimal, period_start: date) -> dict[str, Any]:
+    """The negative ``adjustment`` line of one subscription's discount. It carries the product (never the plan key: the
+    bk-041 source check keeps plan keys for subscription / extra-seat lines), which marks it as the job's own."""
+    pct = _dec(s["discount_pct"]) or Decimal(0)
+    label = DISCOUNT_LABEL.get(s.get("discount_kind") or "", "Discount")
+    name = f"{s.get('plan_name') or s['plan_key']} ({PRODUCT_LABEL.get(s['product'], s['product'])})"
+    text = f"{label} {_pct_text(pct)}: {name}, {period_label(period_start)}"
+    return {"line_role": "adjustment", "product": s["product"], "plan_key": None, "quantity": Decimal(1),
+            "unit_price": -amount, "description": text}  # fmt: skip
+
+
 def saas_lines(subs: list[dict[str, Any]], period_start: date, currency: str = "USD"
                ) -> tuple[list[dict[str, Any]], dict[str, int]]:  # fmt: skip
-    """The subscription / extra-seat lines of one agency's live subscriptions in ``currency`` (pure), and the flags
-    counted: ``price_missing``, ``agreed``, ``annual_manual``, ``pilot_free`` (subscriptions) and ``discount_check``
-    (agencies: a zero line asking finance to apply the Tenant 360 quote's discount, when the draft has an amount and
-    the rows carry the CIS 438 terms)."""
-    flags = {"price_missing": 0, "agreed": 0, "annual_manual": 0, "pilot_free": 0}
-    lines = [ln for s in subs for ln in _subscription_lines(s, period_start, currency, flags)]
-    flags["discount_check"] = 0
-    priced = next((ln for ln in lines if ln["quantity"] * ln["unit_price"] > 0), None)
-    if priced is not None and any(s.get("billing_currency") for s in subs):
-        # option B (CIS 438 terms read): a founding or combo discount may apply and Booking cannot see it
-        flags["discount_check"] = 1
-        check = {"line_role": "subscription", "product": priced["product"], "plan_key": priced["plan_key"]}
-        lines.append({**check, "quantity": Decimal(1), "unit_price": Decimal(0), "description": DISCOUNT_CHECK_TEXT})
+    """The subscription / extra-seat lines of one agency's live subscriptions in ``currency`` (pure), each followed by
+    its discount line when CIS gives the row a ``discount_pct`` (contract 1.10), and the flags counted:
+    ``price_missing``, ``agreed``, ``annual_manual``, ``pilot_free`` and ``discounted`` (subscriptions).
+
+    The discount of a subscription is ``discount_pct`` of what its lines bill, exact; each line takes the rounded
+    running total less what the lines before it took (USD cents, VND dong), so the lines add up to the CIS quote's
+    rounded discount (the quote sums the exact shares and rounds once)."""
+    flags = {"price_missing": 0, "agreed": 0, "annual_manual": 0, "pilot_free": 0, "discounted": 0}
+    place = PLACES.get(currency, CENT)
+    lines: list[dict[str, Any]] = []
+    exact_total, taken = Decimal(0), Decimal(0)
+    for s in subs:
+        own = _subscription_lines(s, period_start, currency, flags)
+        lines += own
+        pct = _dec(s.get("discount_pct"))
+        billed = sum((ln["quantity"] * ln["unit_price"] for ln in own), Decimal(0))
+        if pct is None or pct <= 0 or billed <= 0:
+            continue
+        exact_total += billed * pct / 100
+        amount = exact_total.quantize(place, rounding=ROUND_HALF_UP) - taken
+        if amount <= 0:
+            continue
+        taken += amount
+        flags["discounted"] += 1
+        lines.append(_discount_line(s, amount, period_start))
     return lines, flags
 
 
@@ -363,8 +394,11 @@ def _empty_counts() -> dict[str, Any]:
             "failed": 0}  # fmt: skip
 
 
+# The job's own lines: subscription / extra-seat lines and its discount lines (the only adjustments with a product;
+# finance's adjustments, invoices.add_line, never have one).
 DELETE_JOB_LINES_SQL = (
-    "DELETE FROM booking.agency_invoice_line WHERE invoice_id = $1::uuid AND line_role = ANY($2::text[])"
+    "DELETE FROM booking.agency_invoice_line WHERE invoice_id = $1::uuid"
+    " AND (line_role = ANY($2::text[]) OR (line_role = 'adjustment' AND product IS NOT NULL))"
 )
 ISSUED_OTHER_CURRENCY_SQL = (
     "SELECT currency FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'"
@@ -426,7 +460,7 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
         by_tenant[s["tenant_id"]].append(s)
     counts = {**_empty_counts(), "price_missing": 0, "no_partner": 0, "currency_unsupported": 0, "agreed": 0,
               "annual_manual": 0, "pilot_free": 0, "currency_moved": 0, "currency_moved_issued": 0,
-              "discount_check": 0}  # fmt: skip
+              "discounted": 0}  # fmt: skip
     for tid, rows in by_tenant.items():
         if tid not in partners:
             counts["no_partner"] += 1  # bk_tenant_pull has not projected the tenant yet: next run
