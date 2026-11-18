@@ -17,6 +17,11 @@ its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CI
   currency is skipped (``currency_unsupported``);
 - per subscription one ``subscription`` line: a per-seat plan bills max(seats, ``seats_min``, 1) seats; any other plan
   bills the plan price and, with more seats than included, an ``extra_seats`` line at the extra-seat list price;
+- seat overage on a per-seat plan (AA-1116, S284; the CIS quote's ``seat_split``): the ``subscription`` line bills the
+  seats the plan includes (max(``seats_included``, ``seats_min``, 1)) at the seat price and an ``extra_seats`` line the
+  seats above them at the plan's extra-seat list price in the invoice currency, else at the seat price (a plan with no
+  extra-seat price bills the same total as before); with an agreed price in force the extra seats are at the agreed
+  (locked) seat price;
 - an agreed price in the billing currency replaces the list UNIT price while ``agreed_until`` is empty or not before
   the period start (per seat on a per-seat plan; the plan fee otherwise, extra seats stay at the list) (``agreed``);
 - a plan without a price in the currency (Enterprise: contract price) gets a zero line, counted ``price_missing``
@@ -174,16 +179,39 @@ def _money_text(amount: Decimal, currency: str) -> str:
     return f"{amount:,.0f} VND" if currency == "VND" else f"{amount:,.2f} {currency}"
 
 
-def _priced_lines(s: dict[str, Any], name: str, unit: Decimal, currency: str) -> list[dict[str, Any]]:
-    """The subscription line at ``unit`` and, on a plan-fee plan with seats over the included ones, the extra seats."""
+def seat_split(seats: Any, seats_included: Any, seats_min: Any) -> tuple[int, int]:
+    """(seats billed at the seat price, extra seats) of a per-seat plan, as the CIS quote's ``seat_split``: the billed
+    total is max(seats, seats_min, 1) (no seats = the included ones); the plan includes max(seats_included, seats_min,
+    1) of them; the rest are extra. No ``seats_included`` = no extra seats. Pure."""
+    total = max(int(seats or seats_included or 1), int(seats_min or 1), 1)
+    if seats_included is None:
+        return total, 0
+    base = min(total, max(int(seats_included), int(seats_min or 1), 1))
+    return base, total - base
+
+
+def _priced_lines(s: dict[str, Any], name: str, unit: Decimal, currency: str, *, agreed: bool = False
+                  ) -> list[dict[str, Any]]:  # fmt: skip
+    """The subscription line at ``unit`` and, with seats over the included ones, the extra-seat line: on a per-seat plan
+    at the extra-seat list price (else ``unit``; an agreed price covers them), on a plan-fee plan at the extra-seat
+    list price."""
     per_seat = s.get("price_unit") == "seat"
     seats, included = s.get("seats"), s.get("seats_included")
-    quantity = max(int(seats or included or 1), int(s.get("seats_min") or 1), 1) if per_seat else 1
-    lines = [{"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"],
-              "description": name + (f", {quantity} seats" if per_seat else ""),
-              "quantity": Decimal(quantity), "unit_price": unit}]  # fmt: skip
     extra = _list_price(s, currency, extra_seat=True)
-    if not per_seat and seats and included is not None and extra is not None and int(seats) > int(included):
+    if per_seat:
+        quantity, over = seat_split(seats, included, s.get("seats_min"))
+        lines = [{"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"],
+                  "description": f"{name}, {quantity} seats", "quantity": Decimal(quantity),
+                  "unit_price": unit}]  # fmt: skip
+        if over:
+            price = unit if agreed or extra is None else extra
+            lines.append({"line_role": "extra_seats", "product": s["product"], "plan_key": s["plan_key"],
+                          "description": f"Extra seats over {quantity}, {name}",
+                          "quantity": Decimal(over), "unit_price": price})  # fmt: skip
+        return lines
+    lines = [{"line_role": "subscription", "product": s["product"], "plan_key": s["plan_key"], "description": name,
+              "quantity": Decimal(1), "unit_price": unit}]  # fmt: skip
+    if seats and included is not None and extra is not None and int(seats) > int(included):
         lines.append({"line_role": "extra_seats", "product": s["product"], "plan_key": s["plan_key"],
                       "description": f"Extra seats over {int(included)}, {name}",
                       "quantity": Decimal(int(seats) - int(included)), "unit_price": extra})  # fmt: skip
@@ -209,7 +237,7 @@ def _subscription_lines(s: dict[str, Any], period_start: date, currency: str, fl
         flags["agreed"] += 1
         until = s.get("agreed_until")
         name += ", agreed price" + (f" until {until.isoformat()}" if until is not None else "")
-    lines = _priced_lines(s, name, unit, currency)
+    lines = _priced_lines(s, name, unit, currency, agreed=agreed is not None)
     if s.get("bill_free"):
         flags["pilot_free"] += 1
         for ln in lines:

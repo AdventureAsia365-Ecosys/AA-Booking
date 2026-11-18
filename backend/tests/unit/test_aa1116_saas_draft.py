@@ -62,6 +62,48 @@ def test_seat_minimum_raises_the_quantity() -> None:
     assert _shape(none) == [("subscription", Decimal(1), Decimal(19))]
 
 
+def test_seat_overage_on_a_per_seat_plan() -> None:
+    """AA-1116 S284: the seats a per-seat plan includes on the subscription line, the seats above them on an
+    extra-seat line, at the plan's extra-seat price in the invoice currency, else at the seat price (same total)."""
+    crm = sub("crm", "crm.quill", "19", "490000", price_unit="seat", seats=5, seats_included=3, seats_min=3)
+    lines, _ = drafts.saas_lines([crm], NOV)
+    assert _shape(lines) == [("subscription", Decimal(3), Decimal(19)), ("extra_seats", Decimal(2), Decimal(19))]
+    assert lines[0]["description"].endswith(", 3 seats") and lines[1]["description"].startswith("Extra seats over 3, ")
+    priced = {**crm, "price_extra_seat_usd": Decimal(25), "price_extra_seat_vnd": Decimal(650000)}
+    assert _shape(drafts.saas_lines([priced], NOV)[0])[1] == ("extra_seats", Decimal(2), Decimal(25))
+    assert _shape(drafts.saas_lines([priced], NOV, "VND")[0]) == [
+        ("subscription", Decimal(3), Decimal(490000)),
+        ("extra_seats", Decimal(2), Decimal(650000)),
+    ]
+    # at or under the included seats, or no included seats on the plan: one line, as before
+    assert _shape(drafts.saas_lines([{**priced, "seats": 2}], NOV)[0]) == [("subscription", Decimal(3), Decimal(19))]
+    assert _shape(drafts.saas_lines([{**priced, "seats_included": None}], NOV)[0]) == [
+        ("subscription", Decimal(5), Decimal(19))
+    ]
+    # an agreed (locked) seat price covers the extra seats
+    locked = {**priced, "agreed_price_monthly": Decimal(17), "agreed_currency": "USD", "agreed_until": None}
+    assert _shape(drafts.saas_lines([locked], NOV)[0]) == [
+        ("subscription", Decimal(3), Decimal(17)),
+        ("extra_seats", Decimal(2), Decimal(17)),
+    ]
+    # the discount takes its share of both lines: (3 x 19 + 2 x 25) x 10 % = 10.70
+    lines, flags = drafts.saas_lines([{**priced, "discount_pct": Decimal(10), "discount_kind": "combo"}], NOV)
+    assert _shape(lines)[-1] == ("adjustment", Decimal(1), Decimal("-10.70")) and flags["discounted"] == 1
+    # a free pilot keeps both lines at zero with their list amounts in the text
+    lines, flags = drafts.saas_lines([{**priced, "bill_free": True}], NOV)
+    assert [ln["unit_price"] for ln in lines] == [Decimal(0), Decimal(0)]
+    assert "(list 50.00 USD)" in lines[1]["description"]
+
+
+@pytest.mark.parametrize(
+    ("seats", "included", "seats_min", "want"),
+    [(5, 3, 3, (3, 2)), (1, 3, 3, (3, 0)), (None, 3, 3, (3, 0)), (5, None, 3, (5, 0)), (8, 3, 5, (5, 3)),
+     (2, 3, None, (2, 0)), (None, None, None, (1, 0))],
+)  # fmt: skip
+def test_seat_split_matches_the_cis_quote(seats: Any, included: Any, seats_min: Any, want: tuple[int, int]) -> None:
+    assert drafts.seat_split(seats, included, seats_min) == want
+
+
 def test_vnd_lines_read_the_vnd_list() -> None:
     lines, flags = drafts.saas_lines(
         [
