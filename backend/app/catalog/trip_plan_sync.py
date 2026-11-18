@@ -38,7 +38,7 @@ without a season calendar get the one of their first day's destination (:func:`_
 plan picked (``calendars``: assigned, no tour, no destination, timed out, not tried). When the step is skipped (catalog
 or policy unreadable) or a catalog read is cut by ``season_sync_read_timeout_seconds``, the run's ``outcome`` is
 ``degraded`` with ``degraded: ["calendars"]`` and a warning log line, never a quiet ``ok``; the Seasons page shows the
-last run (``app.pricing.seasons_admin.list_calendars``).
+last run (``app.pricing.season_sync.last_run``).
 
 Without ``catalog.v_tour`` readable the run answers ``skipped``. Idempotent: a second run with nothing new writes
 nothing (``ON CONFLICT DO NOTHING``, updates only where something differs).
@@ -60,7 +60,7 @@ from app.catalog import liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.pricing import policy_values, seasons_admin
+from app.pricing import policy_values, season_sync
 
 log = logging.getLogger(__name__)
 
@@ -346,7 +346,7 @@ def calendars_degraded(calendars: dict[str, Any]) -> bool:
 
 async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
     """AA-1091 (bk-055): plans without a season calendar get the one of their first day's destination
-    (:func:`app.pricing.seasons_admin.assign_default_calendars`), a batch per run of ``season_sync_batch_size`` plans,
+    (:func:`app.pricing.season_sync.assign_default_calendars`), a batch per run of ``season_sync_batch_size`` plans,
     each catalog read cut at ``season_sync_read_timeout_seconds`` (AA-1128, bk-059). Fail soft but loud: a catalog
     without the views or the column, or a policy without the two values, skips the step and names why in
     ``skipped``; the run is then degraded (:func:`calendars_degraded`)."""
@@ -354,7 +354,7 @@ async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
         async with pool.acquire() as conn, conn.transaction():
             policy = await policy_values.require(conn, await policy_values.today_utc(conn), BATCH_KEY, TIMEOUT_KEY)
             salt = schedule_key(datetime.now(UTC))
-            return await seasons_admin.assign_default_calendars(
+            return await season_sync.assign_default_calendars(
                 conn, policy.integer(BATCH_KEY), salt, float(policy.integer(TIMEOUT_KEY))
             )
     except policy_values.PolicyUnavailable:

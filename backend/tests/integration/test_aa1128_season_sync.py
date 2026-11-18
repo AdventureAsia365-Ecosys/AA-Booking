@@ -19,7 +19,7 @@ import asyncpg
 import pytest
 
 from app.catalog import trip_plan_sync
-from app.pricing import seasons_admin
+from app.pricing import season_sync, seasons_admin
 from tests.integration.test_aa1029_price_chain import (  # noqa: F401 — fixtures used by name
     STAFF_TOUR,
     TOUR,
@@ -98,7 +98,7 @@ async def test_a_cut_catalog_read_ends_the_batch_and_keeps_the_connection(
         await tx.start()
         await blocker.execute("LOCK TABLE catalog.v_tour IN ACCESS EXCLUSIVE MODE")
         async with pool.acquire() as conn, conn.transaction():
-            out = await seasons_admin.assign_default_calendars(conn, int(waiting), "salt-it", 0.3)
+            out = await season_sync.assign_default_calendars(conn, int(waiting), "salt-it", 0.3)
             # the savepoint rolled back the cut read alone: the transaction still answers
             assert await conn.fetchval("SELECT 1") == 1
         await tx.rollback()
