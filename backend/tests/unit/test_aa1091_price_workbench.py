@@ -524,7 +524,9 @@ def test_reference_of_prefers_a_trusted_structured_amount() -> None:
     assert sync.reference_of(text, D("1390"), "USD", "per_person", "confirmed") == (D("1390.00"), "USD")
     assert sync.reference_of(text, D("1390"), "USD", "from", "parsed") == (D("1390.00"), "USD")
     assert sync.reference_of(text, D("3000"), "USD", "per_group", "confirmed") is None  # no per-person amount
-    assert sync.reference_of(text, D("1390"), "USD", "per_person", "needs_review") == (D("1450.00"), "USD")
+    # AA-1128: a doubtful text keeps no amount at all, neither CIS's nor Booking's parse (a traveller count first)
+    assert sync.reference_of(text, D("1390"), "USD", "per_person", "needs_review") is None
+    assert sync.reference_of("2 pax from USD 1,450", None, None, None, "needs_review") is None
     assert sync.reference_of(text, D("1390"), "USD", "per_person", None) == (D("1450.00"), "USD")  # v1: no status
     assert sync.reference_of(text, None, None, None, "confirmed") == (D("1450.00"), "USD")
     assert sync.reference_of(text, D("1390"), "US", "per_person", "confirmed") == (D("1450.00"), "USD")  # unusable

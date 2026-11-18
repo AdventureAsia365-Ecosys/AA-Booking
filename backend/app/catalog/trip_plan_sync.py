@@ -27,11 +27,20 @@ reference price the customer-service team reviews in CIS (``reference_amount`` /
 CIS parser, no doubts) is taken as it is: basis ``per_person`` or ``from`` (the lowest per-person price) is the
 per-person reference; ``per_group`` gives no per-person amount (the plan keeps the text only, never a group total
 shown as a per-person price). Status ``needs_review`` (the CIS parser had doubts, or the text changed since the value
-was set) is not trusted: Booking's own parse of the text decides, as without CIS's value. A change of the amount or
+was set) is not trusted, and neither is Booking's own parse of the same text (AA-1128, S283 UI audit: the first number
+of a doubtful text was often a traveller count, "2 pax from USD 1,450", shown as a 2 USD reference): the plan keeps the
+text only, no amount, until CIS confirms or parses it. A change of the amount or
 currency alone also counts as a change (the review is cleared). The run reports which view it read
 (``references_source`` ``structured`` | ``text``) and how many plans hold a CIS structured value
 (``references_structured``). Without either view (CIS not applied, no grant) the reference part is skipped and
 reported, the bridge still runs.
+
+**Season calendars** (AA-1091 bk-055, AA-1128 bk-059): after the bridge, up to ``season_sync_batch_size`` plans
+without a season calendar get the one of their first day's destination (:func:`_calendars`). The result counts every
+plan picked (``calendars``: assigned, no tour, no destination, timed out, not tried). When the step is skipped (catalog
+or policy unreadable) or a catalog read is cut by ``season_sync_read_timeout_seconds``, the run's ``outcome`` is
+``degraded`` with ``degraded: ["calendars"]`` and a warning log line, never a quiet ``ok``; the Seasons page shows the
+last run (``app.pricing.season_sync.last_run``).
 
 Without ``catalog.v_tour`` readable the run answers ``skipped``. Idempotent: a second run with nothing new writes
 nothing (``ON CONFLICT DO NOTHING``, updates only where something differs).
@@ -53,7 +62,7 @@ from app.catalog import liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.pricing import seasons_admin
+from app.pricing import policy_values, season_sync
 
 log = logging.getLogger(__name__)
 
@@ -64,8 +73,10 @@ MAX_ATTEMPTS = 3
 SLOT_SECONDS = 900
 RAW_MAX = 500
 AUDIT_KEYS = 50
-# Plans given their default season calendar per run (one catalog place read each).
-CALENDAR_BATCH = 50
+# AA-1128 B1 (bk-059): the season calendar step reads its batch size and catalog read timeout from the pricing
+# policy (Pricing > Policy, administrator approval), never from a constant.
+BATCH_KEY = "season_sync_batch_size"
+TIMEOUT_KEY = "season_sync_read_timeout_seconds"
 
 TOUR_VIEW = liveness.View("catalog", "v_tour", ("source_system", "source_id"))
 REFERENCE_VIEW = liveness.View("catalog", "v_tour_price_reference_v1", ("source_system", "source_id", "price_raw"))
@@ -192,8 +203,9 @@ def parse_reference(raw: str | None) -> tuple[Decimal, str] | None:
     return amount.quantize(Decimal("0.01")), currency
 
 
-# CIS 402 ``reference_status`` values Booking takes as they are; ``needs_review`` falls back to the text parse.
+# CIS 402 ``reference_status`` values Booking takes as they are; ``needs_review`` keeps the text only (AA-1128).
 TRUSTED_STATUSES = frozenset({"confirmed", "parsed"})
+NEEDS_REVIEW = "needs_review"
 # ``from`` = the lowest per-person price of the tour (CIS 401): still a per-person reference.
 PER_PERSON_BASES = frozenset({"per_person", "from"})
 PER_GROUP = "per_group"
@@ -222,7 +234,10 @@ def reference_of(
     raw: str | None, amount: Any = None, currency: Any = None, basis: Any = None, status: Any = None
 ) -> tuple[Decimal, str] | None:
     """The per-person reference of a plan: CIS's trusted structured value (a per-group one gives None: no per-person
-    amount), else the parse of the text. ``status`` None (v1, no structured value) always parses."""
+    amount), else the parse of the text. ``status`` None (v1, no structured value) always parses; ``needs_review``
+    gives None (the text is kept, no amount: AA-1128)."""
+    if status == NEEDS_REVIEW:
+        return None
     if trusted(amount, status):
         if (basis or "per_person") == PER_GROUP:
             return None
@@ -310,27 +325,47 @@ async def run(pool: asyncpg.Pool) -> dict[str, Any]:
                 summary=f"Trip plans from the CIS catalog: {len(created)} created, {len(adopted)} adopted",
             )
     calendars = await _calendars(pool)
+    degraded = ["calendars"] if calendars_degraded(calendars) else []
     result = {
-        "outcome": "ok",
+        "outcome": "degraded" if degraded else "ok",
+        "degraded": degraded,
         "tours": len(keys),
         "created": len(created),
         "adopted": len(adopted),
         **refs,
         "calendars": calendars,
     }
-    if created or adopted:
+    if degraded:
+        # AA-1128 B1: a skipped or cut step is never a quiet success (the job row's result says "degraded" and the
+        # Seasons page shows the last run).
+        log.warning("bk_trip_plan_sync degraded: %s", result)
+    elif created or adopted or calendars.get("assigned"):
         log.info("bk_trip_plan_sync: %s", result)
     return result
 
 
+def calendars_degraded(calendars: dict[str, Any]) -> bool:
+    """The season calendar step did not do its whole batch: skipped (catalog or policy unreadable), or a catalog read
+    was cut by the read timeout (the rest of the batch not tried)."""
+    return bool(calendars.get("skipped") or calendars.get("timed_out") or calendars.get("not_tried"))
+
+
 async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
     """AA-1091 (bk-055): plans without a season calendar get the one of their first day's destination
-    (:func:`app.pricing.seasons_admin.assign_default_calendars`), a batch per run. Fail soft: a catalog without the
-    place view or its destination column leaves the plans in the default low season and says so in the result."""
+    (:func:`app.pricing.season_sync.assign_default_calendars`), a batch per run of ``season_sync_batch_size`` plans,
+    each catalog read cut at ``season_sync_read_timeout_seconds`` (AA-1128, bk-059). Fail soft but loud: a catalog
+    without the views or the column, or a policy without the two values, skips the step and names why in
+    ``skipped``; the run is then degraded (:func:`calendars_degraded`)."""
     try:
         async with pool.acquire() as conn, conn.transaction():
+            policy = await policy_values.require(conn, await policy_values.today_utc(conn), BATCH_KEY, TIMEOUT_KEY)
             salt = schedule_key(datetime.now(UTC))
-            return await seasons_admin.assign_default_calendars(conn, CALENDAR_BATCH, salt)
+            return await season_sync.assign_default_calendars(
+                conn, policy.integer(BATCH_KEY), salt, float(policy.integer(TIMEOUT_KEY))
+            )
+    except policy_values.PolicyUnavailable:
+        log.warning("bk_trip_plan_sync calendars skipped: policy_unavailable")
+        return {"skipped": "policy_unavailable"}
     except (*CATALOG_ERRORS, asyncpg.UndefinedColumnError) as exc:
         log.warning("bk_trip_plan_sync calendars skipped: %s", type(exc).__name__)
         return {"skipped": type(exc).__name__}

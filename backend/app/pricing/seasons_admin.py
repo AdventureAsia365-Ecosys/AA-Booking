@@ -16,9 +16,10 @@ maker-checker, like the other pricing data.
 - **Holiday events** (``booking.holiday_events``): one row per country, event code and year, the same maker-checker
   and reasons.
   No holiday date is ever written in code; a festive range takes its dates from the event row of each year.
-- **The calendar of a trip plan** (``trip_plans.season_calendar_id``): :func:`assign_default_calendars` (run by the
-  catalog sync) gives every plan without one the calendar of the destination of its first day, creating that empty
-  calendar when it is missing. A staff change is a request with a reason (:func:`request_plan_calendar`) that a
+- **The calendar of a trip plan** (``trip_plans.season_calendar_id``): the catalog sync gives every plan without one
+  the calendar of the destination of its first day, creating that empty calendar when it is missing
+  (:mod:`app.pricing.season_sync`, AA-1128; :func:`list_calendars` adds the last run's counts for the Seasons page).
+  A staff change is a request with a reason (:func:`request_plan_calendar`) that a
   second person approves or rejects (:func:`decide_plan_calendar`): the calendar drives the plan's peak uplift,
   festive quote validity and stop-sale, so it gets the maker-checker the ranges have.
 
@@ -43,11 +44,11 @@ from app import audit
 from app.auth import people
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
-from app.pricing import seasons
+from app.pricing import season_sync, seasons
 
 ONE_DAY = timedelta(days=1)
 REASON_MAX = 300
-NAME_MAX = 120
+NAME_MAX = season_sync.NAME_MAX
 
 CALENDARS_SQL = """
 SELECT c.id::text AS id, c.owner_kind, c.destination_id::text AS destination_id,
@@ -190,7 +191,7 @@ async def list_calendars(conn: asyncpg.Connection, staff: Staff, owner_kind: str
         CALENDARS_SQL + " WHERE ($1::text IS NULL OR c.owner_kind = $1) ORDER BY c.owner_kind, c.name", owner_kind
     )
     items = await _people(conn, [calendar_out(r) for r in rows], CALENDAR_PEOPLE)
-    return {"items": items, "season_codes": list(seasons.SEASON_CODES)}
+    return {"items": items, "season_codes": list(seasons.SEASON_CODES), **(await season_sync.last_run(conn))}
 
 
 async def _calendar(conn: asyncpg.Connection, calendar_id: str, *, lock: bool = False) -> asyncpg.Record:
@@ -692,61 +693,3 @@ async def _plan_audit(
         entity_label=source_id[:80],
         summary=action.split(".")[1].replace("_", " ").capitalize(),
     )
-
-
-UNASSIGNED_SQL = """
-SELECT p.id::text AS id, t.tour_id
-FROM booking.trip_plans p
-JOIN LATERAL (SELECT t.tour_id FROM catalog.v_tour t
-              WHERE t.source_system = p.source_system AND t.source_id = p.source_id LIMIT 1) t ON true
-WHERE p.season_calendar_id IS NULL
-ORDER BY md5(p.id::text || $2)
-LIMIT $1
-"""
-# One tour at a time (a tour_id = $1 filter reaches the view's parse; an ANY() list does not, lessons "Dữ liệu").
-DAY_ONE_SQL = """
-SELECT pl.destination_id::text AS destination_id, pl.destination_name
-FROM catalog.v_tour_place pl
-WHERE pl.tour_id = $1 AND pl.day_number = 1 AND pl.destination_id IS NOT NULL
-ORDER BY pl.position
-LIMIT 1
-"""
-CALENDAR_FOR_SQL = """
-WITH made AS (
-    INSERT INTO booking.season_calendars (owner_kind, destination_id, name, created_by)
-    VALUES ('destination', $1::uuid, $2, $3)
-    ON CONFLICT (destination_id) WHERE destination_id IS NOT NULL DO NOTHING
-    RETURNING id
-)
-SELECT id::text FROM made
-UNION ALL
-SELECT id::text FROM booking.season_calendars WHERE destination_id = $1::uuid
-LIMIT 1
-"""
-SYSTEM = "system:bk_trip_plan_sync"
-
-
-async def assign_default_calendars(conn: asyncpg.Connection, limit: int, salt: str) -> dict[str, int]:
-    """Give up to ``limit`` plans without a calendar the calendar of the destination of their first day (made empty
-    when missing). Plans whose first day names no destination stay without one (low season); ``salt`` rotates which
-    plans are tried, so those never block the others."""
-    out = {"assigned": 0, "calendars_created": 0, "no_destination": 0}
-    for plan in await conn.fetch(UNASSIGNED_SQL, limit, salt):
-        dest = await conn.fetchrow(DAY_ONE_SQL, plan["tour_id"])
-        if dest is None:
-            out["no_destination"] += 1
-            continue
-        before = await conn.fetchval(
-            "SELECT count(*) FROM booking.season_calendars WHERE destination_id = $1::uuid", dest["destination_id"]
-        )
-        name = (dest["destination_name"] or "Destination")[:NAME_MAX]
-        cal = await conn.fetchval(CALENDAR_FOR_SQL, dest["destination_id"], name, SYSTEM)
-        out["calendars_created"] += int(not before)
-        await conn.execute(
-            "UPDATE booking.trip_plans SET season_calendar_id = $2::uuid WHERE id = $1::uuid AND"
-            " season_calendar_id IS NULL",
-            plan["id"],
-            cal,
-        )
-        out["assigned"] += 1
-    return out

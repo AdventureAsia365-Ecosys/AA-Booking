@@ -52,6 +52,9 @@ POLICY_SEED: dict[str, str] = {
     "supplier_answer_days": "2",
     "trip_check_reminder_days": "3",
     "supplier_bill_due_soon_days": "3",
+    # AA-1128 B1 (bk-059)
+    "season_sync_batch_size": "50",
+    "season_sync_read_timeout_seconds": "5",
     "emergency_contact_keep_days": "90",
     "agency_reminder_steps_days": "[1, 7, 14]",
     "rounding_increment_by_currency": '{"AUD": "5", "EUR": "5", "GBP": "5", "SGD": "5", "USD": "5"}',
@@ -82,6 +85,7 @@ class ScriptedConn:
     def __init__(self, rules: list[tuple[str, Answer]] | None = None) -> None:
         self.rules = list(rules or []) + [(POLICY_FRAGMENT, lambda *_: policy_rows())]
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.timeouts: list[tuple[str, float]] = []
 
     def on(self, fragment: str, answer: Answer) -> ScriptedConn:
         self.rules.insert(0, (fragment, answer))
@@ -110,14 +114,22 @@ class ScriptedConn:
         for row in rows:
             self._answer(sql, row)
 
-    async def fetchval(self, sql: str, *args: Any) -> Any:
+    async def fetchval(self, sql: str, *args: Any, **kw: Any) -> Any:
+        self._timeout(sql, kw.get("timeout"))
         return self._answer(sql, args)
 
-    async def fetchrow(self, sql: str, *args: Any) -> Any:
+    async def fetchrow(self, sql: str, *args: Any, **kw: Any) -> Any:
+        self._timeout(sql, kw.get("timeout"))
         return self._answer(sql, args)
 
-    async def fetch(self, sql: str, *args: Any) -> Any:
+    async def fetch(self, sql: str, *args: Any, **kw: Any) -> Any:
+        self._timeout(sql, kw.get("timeout"))
         return self._answer(sql, args) or []
+
+    def _timeout(self, sql: str, timeout: float | None) -> None:
+        """AA-1128: the per-call ``timeout`` of a read (asyncpg's keyword), recorded with its SQL."""
+        if timeout is not None:
+            self.timeouts.append((" ".join(sql.split()), timeout))
 
     @asynccontextmanager
     async def transaction(self, **_: Any):

@@ -765,31 +765,23 @@ async def test_decide_the_calendar_change_of_a_plan() -> None:
 
 
 @pytest.mark.asyncio
-async def test_default_calendars_follow_the_destination_of_day_one() -> None:
-    plans = [{"id": "p-1", "tour_id": "t-1"}, {"id": "p-2", "tour_id": "t-2"}, {"id": "p-3", "tour_id": "t-3"}]
-    places = {
-        "t-1": {"destination_id": DEST, "destination_name": "Invented Bay"},
-        "t-3": {"destination_id": DEST, "destination_name": None},
+async def test_list_calendars_reports_the_last_sync_and_the_plans_waiting() -> None:
+    """AA-1128 B1: the Seasons page shows the last catalog sync's season step and how many plans wait."""
+    result = {"outcome": "degraded", "calendars": {"picked": 5, "assigned": 2, "timed_out": 1, "not_tried": 2}}
+    conn = db(cal=calendar())
+    conn.on("WHERE j.kind = 'bk_trip_plan_sync'", {"finished_at": STAMP, "result": json.dumps(result)})
+    conn.on("FILTER (WHERE season_calendar_id IS NULL)", {"plans": 9, "without_calendar": 7})
+    out = await sa.list_calendars(conn, SALES)
+    assert out["sync"] == {
+        "finished_at": STAMP,
+        "picked": 5,
+        "assigned": 2,
+        "calendars_created": 0,
+        "no_tour": 0,
+        "no_destination": 0,
+        "timed_out": 1,
+        "not_tried": 2,
+        "skipped": None,
+        "degraded": True,
     }
-    made: list[str] = []
-
-    def count(dest: str) -> int:
-        return int(dest in made)
-
-    def calendar_for(dest: str, name: str, who: str) -> str:
-        made.append(dest)
-        return CAL
-
-    conn = ScriptedConn(
-        [
-            ("WHERE p.season_calendar_id IS NULL ORDER BY md5", plans),
-            ("FROM catalog.v_tour_place pl", lambda tour: places.get(tour)),
-            ("SELECT count(*) FROM booking.season_calendars WHERE destination_id", count),
-            ("WITH made AS", calendar_for),
-        ]
-    )
-    out = await sa.assign_default_calendars(conn, 10, "salt-1")
-    assert out == {"assigned": 2, "calendars_created": 1, "no_destination": 1}
-    assert conn.sql("WITH made AS") == [(DEST, "Invented Bay", sa.SYSTEM), (DEST, "Destination", sa.SYSTEM)]
-    assert conn.sql("SET season_calendar_id = $2::uuid") == [("p-1", CAL), ("p-3", CAL)]
-    assert conn.sql("ORDER BY md5")[0] == (10, "salt-1")
+    assert (out["plans"], out["plans_without_calendar"]) == (9, 7)

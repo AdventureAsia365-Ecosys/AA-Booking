@@ -74,6 +74,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-056",  # AA-1096: thresholds as pricing policy parameters (holds, desk, ages, ops, rounding, retention); MIG-4
     "bk-057",  # AA-1093 L3: tenant erasure log + erase guards (bk_tenant_erase, bk_tenant_pull skips erased); MIG-4
     "bk-058",  # AA-1096 S280: reject / withdraw of pending pricing rules, FX rates, cancellation policies; MIG-4
+    "bk-059",  # AA-1128 B1: season calendar step batch size and read timeout as pricing policy values; MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

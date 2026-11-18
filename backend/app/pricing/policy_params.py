@@ -41,6 +41,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.pricing import policy_cross_checks as cross
+
 INTEGER = "integer"
 DECIMAL = "decimal"
 BOOLEAN = "boolean"
@@ -110,55 +112,6 @@ class Param:
     cross_check: Callable[[Any, Mapping[str, Any]], str | None] | None = field(default=None, compare=False)
 
 
-def _festive_not_longer(value: Any, current: Mapping[str, Any]) -> str | None:
-    days = current.get("quote_validity_days")
-    if isinstance(days, int) and value > days:
-        return f"must not be longer than quote_validity_days ({days})"
-    return None
-
-
-def _validity_covers_festive(value: Any, current: Mapping[str, Any]) -> str | None:
-    festive = current.get("quote_validity_festive_days")
-    if isinstance(festive, int) and value < festive:
-        return f"must not be shorter than quote_validity_festive_days ({festive})"
-    return None
-
-
-def _publish_before_start(value: Any, current: Mapping[str, Any]) -> str | None:
-    start = current.get("tariff_year_start")
-    if isinstance(start, str) and value == start:
-        return "must be another day than tariff_year_start"
-    return None
-
-
-def _infant_below_child(value: Any, current: Mapping[str, Any]) -> str | None:
-    child = current.get("b2b_child_age_max")
-    if isinstance(child, int) and value >= child:
-        return f"must be below b2b_child_age_max ({child})"
-    return None
-
-
-def _child_above_infant(value: Any, current: Mapping[str, Any]) -> str | None:
-    infant = current.get("b2b_infant_age_max")
-    if isinstance(infant, int) and value <= infant:
-        return f"must be above b2b_infant_age_max ({infant})"
-    return None
-
-
-def _failed_not_shorter(value: Any, current: Mapping[str, Any]) -> str | None:
-    succeeded = current.get("retention_job_succeeded_days")
-    if isinstance(succeeded, int) and value < succeeded:
-        return f"must not be shorter than retention_job_succeeded_days ({succeeded})"
-    return None
-
-
-def _succeeded_not_longer(value: Any, current: Mapping[str, Any]) -> str | None:
-    failed = current.get("retention_job_failed_days")
-    if isinstance(failed, int) and value > failed:
-        return f"must not be longer than retention_job_failed_days ({failed})"
-    return None
-
-
 SURCHARGES_PENDING = "Surcharges after confirmation are not built yet."
 TERMS_PENDING = "Agency invoices follow the deposit and balance terms on the Agency billing page today."
 
@@ -190,7 +143,7 @@ PARAMS: dict[str, Param] = {
             "Next tariff published by",
             "The day the next tariff year should be published; a reminder date, it blocks nothing.",
             "stored",
-            cross_check=_publish_before_start,
+            cross_check=cross.publish_before_start,
             section="quotes",
             pending="No reminder of the next tariff publication is built yet.",
         ),
@@ -205,7 +158,7 @@ PARAMS: dict[str, Param] = {
             "app.b2b.quotes",
             minimum=_d("1"),
             maximum=_d("30"),
-            cross_check=_validity_covers_festive,
+            cross_check=cross.validity_covers_festive,
             section="quotes",
         ),
         Param(
@@ -219,7 +172,7 @@ PARAMS: dict[str, Param] = {
             "app.b2b.quotes",
             minimum=_d("1"),
             maximum=_d("30"),
-            cross_check=_festive_not_longer,
+            cross_check=cross.festive_not_longer,
             section="quotes",
         ),
         Param(
@@ -528,7 +481,7 @@ PARAMS: dict[str, Param] = {
             section="travellers",
             minimum=_d("2"),
             maximum=_d("17"),
-            cross_check=_child_above_infant,
+            cross_check=cross.child_above_infant,
         ),
         Param(
             "b2b_infant_age_max",
@@ -542,7 +495,7 @@ PARAMS: dict[str, Param] = {
             section="travellers",
             minimum=_d("0"),
             maximum=_d("4"),
-            cross_check=_infant_below_child,
+            cross_check=cross.infant_below_child,
         ),
         Param(
             "departure_decision_days_default",
@@ -609,6 +562,33 @@ PARAMS: dict[str, Param] = {
             minimum=_d("0"),
             maximum=_d("60"),
         ),
+        # AA-1128 B1 (bk-059): the season calendar step of the catalog sync (app.catalog.trip_plan_sync).
+        Param(
+            "season_sync_batch_size",
+            INTEGER,
+            "plans",
+            "S279",
+            ADMIN,
+            "Season calendar batch",
+            "Trip plans the catalog sync gives their season calendar in one run (one catalog read each).",
+            "app.catalog.trip_plan_sync",
+            section="operations",
+            minimum=_d("1"),
+            maximum=_d("500"),
+        ),
+        Param(
+            "season_sync_read_timeout_seconds",
+            INTEGER,
+            "seconds",
+            "S279",
+            ADMIN,
+            "Season calendar read timeout",
+            "Seconds one catalog read of the season calendar step may take; a slower read ends the batch (degraded).",
+            "app.catalog.trip_plan_sync",
+            section="operations",
+            minimum=_d("1"),
+            maximum=_d("60"),
+        ),
         Param(
             "agency_reminder_steps_days",
             INTEGERS,
@@ -648,7 +628,7 @@ PARAMS: dict[str, Param] = {
             section="retention",
             minimum=_d("7"),
             maximum=_d("365"),
-            cross_check=_succeeded_not_longer,
+            cross_check=cross.succeeded_not_longer,
         ),
         Param(
             "retention_job_failed_days",
@@ -662,7 +642,7 @@ PARAMS: dict[str, Param] = {
             section="retention",
             minimum=_d("30"),
             maximum=_d("730"),
-            cross_check=_failed_not_shorter,
+            cross_check=cross.failed_not_shorter,
         ),
         Param(
             "retention_inbox_redact_days",
