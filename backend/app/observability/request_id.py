@@ -28,6 +28,8 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.observability.security_headers import SECURITY_HEADERS
+
 HEADER = "X-Request-ID"
 _HEADER_RAW = HEADER.lower().encode("latin-1")
 _VALID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -99,6 +101,8 @@ class RequestIdMiddleware:
 async def unhandled_error_handler(request: Request, exc: Exception) -> Response:
     """The unhandled-500 answer, with the request id (Starlette's ServerErrorMiddleware sends it outside every user
     middleware, so the header is added here). Same body as Starlette's default; the exception is re-raised by Starlette
-    afterwards, so uvicorn and Sentry still see it."""
-    headers = {HEADER: rid} if (rid := request_id_of(request)) else None
+    afterwards, so uvicorn and Sentry still see it. AA-1111: the security headers are added here for the same reason."""
+    headers = dict(SECURITY_HEADERS)
+    if rid := request_id_of(request):
+        headers[HEADER] = rid
     return PlainTextResponse("Internal Server Error", status_code=500, headers=headers)

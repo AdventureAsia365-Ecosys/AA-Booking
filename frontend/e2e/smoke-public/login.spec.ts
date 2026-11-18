@@ -11,7 +11,9 @@
 //   - no console error, no uncaught page error, no failed or >= 400 same-origin request while the page loads;
 //   - the response carries every header next.config.ts sets, with the same value, and at least the six AA-879
 //     security headers (CSP frame-ancestors, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy);
-//     no X-Powered-By.
+//     no X-Powered-By. AA-1111 (S284): plus COOP; the CSP comes from proxy.ts with a per-response nonce (scripts by
+//     nonce, no 'unsafe-inline' for scripts, default-src 'self'), so the page loading without a console error also
+//     proves every script it needs carries the nonce. /robots.txt, a 404 and the BFF carry the set too.
 // A full-page screenshot lands in SMOKE_SHOTS_DIR (default e2e/smoke-public/results), uploaded by the workflow.
 import fs from "node:fs";
 import path from "node:path";
@@ -28,7 +30,17 @@ const REQUIRED_HEADERS = [
   "x-content-type-options",
   "referrer-policy",
   "permissions-policy",
+  "cross-origin-opener-policy",
 ];
+
+/** AA-1111: the full policy, scripts by nonce only (proxy.ts / lib/securityHeaders.ts). */
+function expectNonceCsp(csp: string | undefined, label: string, nonce = true) {
+  expect(csp, `${label}: CSP`).toContain("frame-ancestors 'none'");
+  expect(csp, `${label}: CSP default-src`).toContain("default-src 'self'");
+  const script = (csp ?? "").split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src ")) ?? "";
+  expect(script, `${label}: script-src without unsafe-inline`).not.toContain("'unsafe-inline'");
+  if (nonce) expect(script, `${label}: script-src nonce`).toMatch(/'nonce-[A-Za-z0-9+/=]+'/);
+}
 
 async function configuredHeaders(): Promise<Record<string, string>> {
   const rules = (await nextConfig.headers?.()) ?? [];
@@ -71,12 +83,12 @@ test("GET /login renders with the security headers and no errors", async ({ page
   const got = await res!.allHeaders();
   const want = await configuredHeaders();
   for (const name of REQUIRED_HEADERS) {
-    expect(Object.keys(want), `next.config.ts still sets ${name}`).toContain(name);
+    expect(Object.keys(got), `the response carries ${name}`).toContain(name);
   }
   for (const [name, value] of Object.entries(want)) {
     expect(got[name], `response header ${name}`).toBe(value);
   }
-  expect(want["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expectNonceCsp(got["content-security-policy"], "/login");
   expect(got["x-powered-by"], "no X-Powered-By").toBeUndefined();
 
   fs.mkdirSync(SHOTS_DIR, { recursive: true });
@@ -85,3 +97,14 @@ test("GET /login renders with the security headers and no errors", async ({ page
   expect(failed, "failed same-origin requests").toEqual([]);
   expect(consoleErrors, "console errors").toEqual([]);
 });
+
+// AA-1111 (S284, ZAP baseline): a static route, a 404 (the gate sends it to /login: a 307) and the BFF carry the set.
+for (const target of ["/robots.txt", "/aa1111-no-such-page", "/api/auth/session"]) {
+  test(`GET ${target} carries the security headers`, async ({ request }) => {
+    const res = await request.get(target, { maxRedirects: 0 });
+    const got = res.headers();
+    for (const name of REQUIRED_HEADERS) expect(Object.keys(got), `${target}: ${name}`).toContain(name);
+    expectNonceCsp(got["content-security-policy"], target, !target.startsWith("/api/"));
+    expect(got["x-powered-by"], `${target}: no X-Powered-By`).toBeUndefined();
+  });
+}

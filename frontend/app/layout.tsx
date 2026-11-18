@@ -8,12 +8,14 @@
 // admin's). The sidebar script carries a stored Booking `bk_sidebar` choice over to that key once.
 
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { BookingQueryProvider } from "@/ui/booking/QueryProvider";
 // Server component: the modules directly, not the "@/ui" barrel.
 import { ToastProvider } from "@/ui/core/Toast";
 import { BRAND } from "@/ui/core/brand";
 import { themeStore } from "@/ui/local/theme";
+import { NONCE_HEADER } from "@/lib/securityHeaders";
 
 export const metadata: Metadata = {
   title: { default: "Booking · Adventure Asia", template: "%s · Booking" },
@@ -30,12 +32,15 @@ export const viewport: Viewport = {
 
 const SIDEBAR_RESTORE = `(function(){try{var s=localStorage.getItem('cis_sidebar');if(s===null){var o=localStorage.getItem('bk_sidebar');if(o==='collapsed'||o==='expanded'){localStorage.setItem('cis_sidebar',o);s=o;}localStorage.removeItem('bk_sidebar');}document.documentElement.setAttribute('data-sidebar',s==='collapsed'?'collapsed':'expanded');}catch(e){document.documentElement.setAttribute('data-sidebar','expanded');}})();`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// AA-1111 (S284): the CSP allows a script only with this request's nonce (proxy.ts); reading the request headers also
+// renders every page per request, so no prerendered page is served with an inline script the policy would refuse.
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeStore.restoreScript }} />
-        <script dangerouslySetInnerHTML={{ __html: SIDEBAR_RESTORE }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeStore.restoreScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: SIDEBAR_RESTORE }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* eslint-disable-next-line @next/next/no-page-custom-font -- same Google Fonts link as the CIS kit (AA-605) */}

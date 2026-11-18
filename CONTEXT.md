@@ -2359,10 +2359,16 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   `docs/ops/runbooks/staff-web-ecs-cutover.md`). Behind the ALB the standalone server's `request.url` /
   `nextUrl` name its bind address (`https://0.0.0.0:3001`), so the auth redirects use a relative Location
   (`lib/redirect.ts`) and `lib/sameOrigin.ts` takes the public origin from `Host` when `X-Forwarded-Proto` is https.
-- Security headers (AA-879): `frontend/next.config.ts` sends the same six headers as the CIS admin, the CIS portal and
-  TripPlanner (HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, a minimal CSP `frame-ancestors 'none';
-  base-uri 'self'; form-action 'self'; object-src 'none'`, `Permissions-Policy`). Every deploy checks them on the
-  production host through the public smoke below.
+- Security headers (AA-879; AA-1111 S284 after the ZAP baseline): the same set as the CIS admin
+  (`frontend/lib/securityHeaders.ts`): HSTS (two years, sub-domains, no preload), `nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy: same-origin` from `next.config.ts`, and a full
+  CSP (`default-src 'self'`, scripts only with a per-response nonce + `'strict-dynamic'`, `style-src` keeps
+  `'unsafe-inline'` for the kit's inline styles, images from any https host, `connect-src` self + the Sentry DSN
+  origin, `frame-ancestors 'none'`). `frontend/proxy.ts` sends it with the nonce on every path but `/api/*` and the
+  build chunks (static files pass without the session gate, `isStaticFile`); `app/layout.tsx` puts the nonce
+  (`x-nonce`) on the restore scripts; `/api/*` and `/_next/*` get the policy without a nonce. The API adds `nosniff`
+  + HSTS to every response (`backend/app/observability/security_headers.py`) and uvicorn runs with
+  `--no-server-header`. Every deploy checks the admin set on the production host through the public smoke below.
 - Public smoke (AA-993 V5): after a verified deploy the job `smoke` of `deploy-admin-dev.yml` runs the Playwright project
   `smoke-public` (`frontend/e2e/smoke-public/`) against `booking.lumiguides.it.com` after the deploy: GET `/login` 200
   on the same host, the card and "Sign in with company email" render, no console error, no failed same-origin request,
