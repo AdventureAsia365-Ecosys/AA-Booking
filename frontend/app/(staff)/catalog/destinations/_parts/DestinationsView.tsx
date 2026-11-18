@@ -27,7 +27,6 @@ import {
   useUrlFilters,
   RowMenu,
 } from "@/ui";
-import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { DestinationPicker } from "@/app/(staff)/suppliers/_parts/DestinationPicker";
 import { CIS_PLACES_PATH, CustomerVisibilityBadge, DestinationDrawer, GeoStatusBadge, HIDDEN_REASON_LABEL, coords } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
@@ -42,7 +41,9 @@ export function DestinationsView() {
   const paging = useOffsetPage();
   const canWrite = useCan("catalog.admin");
   const status = useGeoStatus();
-  const countries = useCountries();
+  // AA-1128 B2: the Country filter lists the countries that have CIS places (the same source as the "Countries covered"
+  // tile), not Booking's sold-country list: a destination is always reachable by its own country.
+  const countries = useQuery({ queryKey: ["geo", "countries", {}], queryFn: () => geoApi.countries(), staleTime: 60_000 });
   const [adding, setAdding] = useState(false);
 
   const query = {
@@ -151,7 +152,10 @@ export function DestinationsView() {
                   key: "country",
                   label: "Country",
                   allLabel: "All countries",
-                  options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
+                  options: (countries.data?.items ?? [])
+                    .filter((c) => c.destinations > 0)
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((c) => ({ value: c.country_code, label: c.name })),
                   width: 170,
                 },
                 {

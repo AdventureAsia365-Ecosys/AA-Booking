@@ -102,14 +102,14 @@ export default function StaffPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
         <span>
           Staff accounts, invites and Booking roles are managed in CIS → Platform → Staff (company e-mail sign-in, no
-          password). A person appears here after their first sign-in to Booking.
+          password). A person appears here after their first sign-in to Booking, or when a profile is set up for them.
         </span>
         <ManagedInCisLink path={CIS_STAFF_PATH} label="Open CIS → Platform → Staff" />
       </div>
       <div className="aa-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiTile label="Total staff" value={value(items.length)} />
         <KpiTile label="Active" value={value(items.length - pending)} />
-        <KpiTile label="Pending activation" value={value(pending)} hint={pending > 0 ? "Waiting for an admin to activate" : undefined} hintTone="warning" />
+        <KpiTile label="Inactive" value={value(pending)} hint={pending > 0 ? "Not active: never signed in or deactivated" : undefined} hintTone="warning" />
       </div>
       <Section>
         <DataTable<StaffProfile>

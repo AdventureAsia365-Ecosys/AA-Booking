@@ -18,6 +18,7 @@ export const WORKBENCH_CHECKS = ["components", "rates", "fx", "rule", "price", "
 export type WorkbenchCheck = (typeof WORKBENCH_CHECKS)[number];
 
 export const NEXT_STEPS = [
+  "not_served",
   "add_components",
   "fix_inactive",
   "load_rates",

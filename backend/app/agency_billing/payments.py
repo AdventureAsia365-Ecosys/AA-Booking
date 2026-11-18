@@ -74,7 +74,8 @@ async def list_payments(conn: asyncpg.Connection, *, state: str | None = None, i
         f"{LIST_SQL} WHERE {cond} ORDER BY p.recorded_at DESC, p.id LIMIT ${len(args) - 1} OFFSET ${len(args)}",
         *args,
     )
-    return {"items": [_out(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+    items = await invoices.with_people_names(conn, [_out(r) for r in rows])
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 async def record(

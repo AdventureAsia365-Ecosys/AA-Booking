@@ -46,6 +46,7 @@ import {
   useToast,
   useUrlFilters,
 } from "@/ui";
+import { isPastDay, localToday } from "@/ui/booking/dates";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 import { ChargeFeeModal } from "../../../departures/_parts/ChargeFeeModal";
 
@@ -88,11 +89,13 @@ function dayFromToday(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function DepartureStatusPills({ d }: { d: Pick<Departure, "status" | "at_risk"> }) {
+export function DepartureStatusPills({ d }: { d: Pick<Departure, "status" | "at_risk"> & { start_date?: string } }) {
+  // AA-1128: a departure that has left is marked, never shown as still open for sale.
+  const gone = d.status !== "cancelled" && isPastDay(d.start_date, localToday());
   return (
     <span className="flex flex-wrap gap-1">
-      <Pill tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Pill>
-      {d.at_risk && <Pill tone="warning">At risk</Pill>}
+      {gone ? <Pill tone="neutral">Departed</Pill> : <Pill tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Pill>}
+      {d.at_risk && !gone && <Pill tone="warning">At risk</Pill>}
     </span>
   );
 }

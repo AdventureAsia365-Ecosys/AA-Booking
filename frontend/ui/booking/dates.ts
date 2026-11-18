@@ -128,3 +128,14 @@ export function localizeIsoDates(text: string): string {
     },
   );
 }
+
+/** AA-1128: today's calendar day "YYYY-MM-DD" on the viewer's clock. */
+export function localToday(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+/** AA-1128 (S283 UI audit): a departure (or any day) that is before today has gone: lists mark it instead of showing it
+ *  as still "Scheduled". An unreadable day is never past. */
+export function isPastDay(day: string | null | undefined, today: string): boolean {
+  return isIsoDay(day) && isIsoDay(today) && day < today;
+}

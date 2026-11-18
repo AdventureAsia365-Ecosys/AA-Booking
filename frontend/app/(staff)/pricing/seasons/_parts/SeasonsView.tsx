@@ -20,6 +20,8 @@ import {
   type SeasonCalendar,
   type SeasonCode,
   type SeasonRange,
+  type SeasonCalendarList,
+  type SeasonSync,
 } from "@/lib/api/priceVersions";
 import { suppliersApi } from "@/lib/api/suppliers";
 import {
@@ -473,6 +475,50 @@ function NewCalendarDrawer({ onClose, onMade }: { onClose: () => void; onMade: (
   );
 }
 
+/** AA-1128 B1: what the last catalog sync did with season calendars, so a run that assigns nothing is never silent. */
+function SyncPanel({ sync }: { sync: SeasonSync | null }) {
+  const t = useT(S);
+  if (!sync) return <p className="text-[13px] text-muted">{t("syncNone")}</p>;
+  const when = sync.finished_at ? formatDay(sync.finished_at.slice(0, 10)) : "—";
+  return (
+    <div
+      role="status"
+      className={`flex flex-col gap-1 rounded-lg border px-4 py-3 text-[13px] text-body ${sync.degraded ? "border-warning bg-warning-soft" : "border-line bg-panel"}`}
+    >
+      <span className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-ink">{t("syncTitle")}</span>
+        {sync.degraded && <Pill tone="warning">{t("syncDegradedPill") as string}</Pill>}
+      </span>
+      {sync.degraded && <span>{t("syncDegraded")}</span>}
+      {sync.skipped ? (
+        <span>{t("syncSkipped", sync.skipped)}</span>
+      ) : (
+        <>
+          <span>{t("syncLine", when, sync.assigned, sync.picked)}</span>
+          <span className="text-muted">{t("syncRest", sync.no_tour, sync.no_destination)}</span>
+          {sync.timed_out > 0 && <span>{t("syncCut", sync.timed_out, sync.not_tried)}</span>}
+        </>
+      )}
+      <span className="text-xs text-muted">{t("syncPolicy")}</span>
+    </div>
+  );
+}
+
+/** The tours still without a calendar and the last sync, once the API sends them (hidden before). */
+function SyncSummary({ data }: { data: SeasonCalendarList | undefined }) {
+  const t = useT(S);
+  const without = data?.plans_without_calendar;
+  if (without === undefined) return null;
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <KpiTile label={t("kpiWithout")} value={without} hintTone={without ? "warning" : "neutral"} />
+      <div className="sm:col-span-2">
+        <SyncPanel sync={data?.sync ?? null} />
+      </div>
+    </div>
+  );
+}
+
 function Seasons() {
   const t = useT(S);
   const canWrite = useCan("season.write");
@@ -517,6 +563,7 @@ function Seasons() {
         />
         <KpiTile label={t("kpiPlans")} value={list.data ? items.reduce((n, c) => n + c.plans, 0) : undefined} />
       </div>
+      <SyncSummary data={list.data} />
       <Section>
         <DataTable<SeasonCalendar>
           tableId="season-calendars"

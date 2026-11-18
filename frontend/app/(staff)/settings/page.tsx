@@ -49,6 +49,7 @@ import {
 } from "@/ui";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
+import { formatDay } from "@/ui/booking/dates";
 
 const TABS = [
   { key: "general", label: "General" },
@@ -132,7 +133,7 @@ function GeneralTab() {
     <div className="flex flex-col gap-8">
       <Block
         title="Profile information"
-        description="You sign in with your CIS account. Name, e-mail and password are managed in CIS."
+        description="You sign in with a code sent to your company e-mail (no password). Your name and e-mail are managed in CIS."
         actions={<ManagedInCisLink label="Manage in CIS" />}
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -332,7 +333,7 @@ function PolicyRows({ items }: { items: PolicyParam[] }) {
           </>
         }
       >
-        {validity?.current ? `${days(validity)} after sending (since ${validity.current.effective_from})` : "No value in force"}
+        {validity?.current ? `${days(validity)} after sending (since ${formatDay(validity.current.effective_from)})` : "No value in force"}
       </ReadOnlyField>
       <ReadOnlyField
         label="Deposit on confirmation"

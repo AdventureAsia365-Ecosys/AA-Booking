@@ -5,10 +5,10 @@
 //   GET /booking/trip-cases/summary                       → KPI tiles + pipeline by phase
 //   GET /booking/trip-cases?sort=-updated_at&limit=5      → "Recent trip cases"
 //   GET /booking/trip-cases?assignee=me&status=<open>&…   → "My queue"
-//   GET /booking/staff?active=false (admin only)          → "Awaiting activation" tile (spec Q6)
+//   GET /booking/staff?active=false (admin only)          → "Inactive staff" tile (spec Q6; AA-1128 wording)
 //
 // Tiles follow the role (Nghiệp S236): New inquiries, In progress, Proposals sent, and a fourth tile that is
-// "Awaiting activation" for admins and "My open cases" for sales / contracting. content_creator has no trip
+// "Inactive staff" for admins and "My open cases" for sales / contracting. content_creator has no trip
 // case permission, so it gets the catalog card (CIS) instead. W2/W3 tiles (Active suppliers, Outstanding
 // balance, Rate sheets awaiting publish) are added when their endpoints exist, never as dummies.
 // Every tile's hint describes its own number. The open-case total and the month-over-month delta (spec §4.2 "Open
@@ -43,7 +43,7 @@ import {
   useStaff,
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
-import { casePartyLabel } from "@/ui/booking/caseFacts";
+import { casePartyLabel, casePartySub } from "@/ui/booking/caseFacts";
 
 /** Worked on by staff, not yet sent to the customer (phase "Inquiry" after triage + "Proposal" building). */
 const IN_PROGRESS: TripCaseStatus[] = ["discovery", "building"];
@@ -182,9 +182,9 @@ function SalesDashboard({ role }: { role: string }) {
           />
         </TileLink>
         {isAdmin ? (
-          <TileLink href="/staff" label="Awaiting activation: open staff">
+          <TileLink href="/staff" label="Inactive staff: open staff">
             <KpiTile
-              label="Awaiting activation"
+              label="Inactive staff"
               icon={<UserPlus size={16} />}
               value={pendingCount ?? (pending.isError ? null : undefined)}
               hint={
@@ -193,7 +193,7 @@ function SalesDashboard({ role }: { role: string }) {
                   : pendingCount === undefined
                     ? undefined
                     : pendingCount > 0
-                      ? "Staff signed in, waiting for a role"
+                      ? "Not active: never signed in or deactivated"
                       : "Nobody waiting"
               }
               hintTone={pendingCount ? "warning" : pending.isError ? "danger" : "neutral"}
@@ -282,7 +282,7 @@ const RECENT_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       <PersonCell
         className="md:max-w-[220px]"
         name={casePartyLabel(row.original)}
-        sub={row.original.channel === "b2b" ? row.original.party_tenant_id : "read-only"}
+        sub={casePartySub(row.original)}
       />
     ),
   },
@@ -373,7 +373,6 @@ function RecentCards({
 
 /** The 13 statuses grouped into the 4 phases of the case stepper (Nghiệp S236 decision 4), plus Cancelled. */
 function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary | undefined; loading: boolean; failed: boolean }) {
-  const delta = summary?.mom_delta.delta ?? 0;
   const phases = STATUS_PHASES.map((p) => ({
     ...p,
     count: summary ? p.statuses.reduce((t, k) => t + (summary.by_status[k] ?? 0), 0) : 0,
@@ -388,11 +387,8 @@ function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary |
         summary ? (
           <span className="text-right text-xs text-muted">
             <span className="font-semibold text-ink">{summary.open}</span> open ·{" "}
-            <span className={delta > 0 ? "text-success" : delta < 0 ? "text-danger" : undefined}>
-              {delta > 0 ? "+" : ""}
-              {delta}
-            </span>{" "}
-            opened vs last month
+            <span className="font-semibold text-ink">{summary.mom_delta.created_this_month}</span> opened so far this
+            month · {summary.mom_delta.created_last_month} in all of last month
           </span>
         ) : undefined
       }

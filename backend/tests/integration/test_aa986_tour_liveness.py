@@ -265,6 +265,10 @@ async def test_retire_pause_restore_end_to_end(
     assert item["catalog"]["reason"] == "source_deleted" and item["confirmed_holds"] == 1 and item["open_cases"] == 1
     facets = await _ok(await c.get("/catalog/trip-plans/facets", headers=staff))
     assert facets["orphaned"] == 1
+    # AA-1128: the price pages tell a retired tour apart and give it no setup step (its trip plan page would 404).
+    bench = await _ok(await c.get("/catalog/price-workbench", params={"q": SOURCE_ID}, headers=staff))
+    [row] = bench["items"]
+    assert (row["in_catalog"], row["catalog_state"], row["next_step"]) == (False, "retired", "not_served")
 
     # Paused (Master inactive): refused, but never listed as withdrawn.
     await admin_conn.execute(
@@ -283,6 +287,12 @@ async def test_retire_pause_restore_end_to_end(
     assert (await _ok(await c.get("/catalog/trip-plans/facets", headers=staff)))["orphaned"] == 0
     case = await _ok(await c.get(f"/trip-cases/{case_id}", headers=staff))
     assert case["tour_alerts"] == [] and case["legs"][0]["catalog"]["state"] == "paused"
+    # AA-1128: paused, never "no longer in the catalog", and no setup step on the price pages.
+    ready = await _ok(await c.get("/catalog/price-readiness", params={"q": SOURCE_ID}, headers=staff))
+    assert [(r["in_catalog"], r["catalog_state"]) for r in ready["items"]] == [(False, "paused")]
+    bench = await _ok(await c.get("/catalog/price-workbench", params={"q": SOURCE_ID}, headers=staff))
+    assert [(r["catalog_state"], r["next_step"]) for r in bench["items"]] == [("paused", "not_served")]
+    assert bench["summary"]["by_next_step"]["not_served"] >= 1
     await _event(admin_conn, "tle:2", "paused", "master_inactive")
     assert (await _pull(db))["applied"] == {"ignored": 1}
 

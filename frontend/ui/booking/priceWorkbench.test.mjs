@@ -3,7 +3,15 @@
 // Run: node --test ui/booking/priceWorkbench.test.mjs (`npm run test:unit` runs every ui/booking/*.test.mjs).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeComponents, problemLine, problemsBySheet, skippedReasons, stepHref } from "./priceWorkbench.ts";
+import {
+  mergeComponents,
+  outOfCatalog,
+  problemLine,
+  problemsBySheet,
+  skippedReasons,
+  stepHref,
+  tourName,
+} from "./priceWorkbench.ts";
 
 const KEY = "aa109100-0000-4000-8000-000000000001";
 
@@ -16,6 +24,21 @@ test("every next step links to the page where it is done", () => {
   assert.equal(stepHref("recompute", KEY), `/catalog/trip-plans/${KEY}/commercial`);
   assert.equal(stepHref("make_sellable", KEY), `/catalog/trip-plans/${KEY}`);
   assert.equal(stepHref("done", "a b"), "/catalog/trip-plans/a%20b");
+  assert.equal(stepHref("not_served", KEY), null); // AA-1128: the trip plan page would 404
+});
+
+test("a tour out of the catalog is told paused, retired or gone; a served or unknown one is not flagged", () => {
+  assert.equal(outOfCatalog({ in_catalog: true, catalog_state: "served" }), null);
+  assert.equal(outOfCatalog({ in_catalog: null, catalog_state: null }), null);
+  assert.equal(outOfCatalog({ in_catalog: false, catalog_state: "paused" }), "paused");
+  assert.equal(outOfCatalog({ in_catalog: false, catalog_state: "retired" }), "retired");
+  assert.equal(outOfCatalog({ in_catalog: false, catalog_state: "not_in_catalog" }), "gone");
+  assert.equal(outOfCatalog({ in_catalog: false, catalog_state: null }), "gone");
+});
+
+test("a tour without a title is named by a short label, never the full key", () => {
+  assert.equal(tourName({ title: "Invented Ridge Trek", tour_key: KEY }, "Tour"), "Invented Ridge Trek");
+  assert.equal(tourName({ title: null, tour_key: KEY }, "Tour"), "Tour aa109100");
 });
 
 test("accepted suggestions are added to the plan's set, removed items leave it, each item once a day", () => {

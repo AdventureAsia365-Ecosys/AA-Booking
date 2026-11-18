@@ -22,6 +22,7 @@ import {
   type AgencyPayment,
   type AgencyPaymentMethod,
   type InvoiceReminder,
+  paymentRecorder,
 } from "@/lib/api/agencyBilling";
 import {
   Button,
@@ -48,7 +49,7 @@ export default function AgencyInvoicePage() {
   if (q.isLoading) return <PageFrame title="Agency invoice"><p className="text-[13px]">Loading…</p></PageFrame>;
   if (q.isError || !q.data) {
     return (
-      <PageFrame title="Agency invoice" breadcrumbs={[{ label: "Agency billing", href: "/agency-billing" }]}>
+      <PageFrame title="Agency invoice" breadcrumbs={[{ label: "Settlement", href: "/agency-billing" }]}>
         <p className="text-[13px]">{q.isError ? errorText(q.error) : "Not found"}</p>
       </PageFrame>
     );
@@ -120,7 +121,7 @@ function InvoiceView({ inv }: { inv: AgencyInvoiceDetail }) {
     <PageFrame
       title={title}
       description={`${inv.agency_name} · ${KIND_LABEL[inv.invoice_kind]} · ${periodLabel(inv.period_start)}`}
-      breadcrumbs={[{ label: "Agency billing", href: "/agency-billing" }, { label: title }]}
+      breadcrumbs={[{ label: "Settlement", href: "/agency-billing" }, { label: title }]}
       actions={
         canWrite ? (
           <span className="flex flex-wrap gap-2">
@@ -258,7 +259,7 @@ function PaymentsSection({ inv, onChange }: { inv: AgencyInvoiceDetail; onChange
     { id: "method", header: "Method", cell: ({ row }) => AGENCY_PAYMENT_METHOD_LABEL[row.original.method] },
     { id: "reference", header: "Reference", cell: ({ row }) => row.original.reference ?? "—" },
     { id: "document", header: "Evidence", cell: ({ row }) => row.original.document_ref },
-    { id: "by", header: "Recorded by", cell: ({ row }) => row.original.recorded_by },
+    { id: "by", header: "Recorded by", cell: ({ row }) => paymentRecorder(row.original) },
     { id: "status", header: "Status", cell: ({ row }) => <PaymentStatusPill status={row.original.status} /> },
     {
       id: "actions",

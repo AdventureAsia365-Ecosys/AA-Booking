@@ -399,7 +399,7 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
         <CisFieldset
           title="Country"
           editPath={CIS_EDITOR_ROLES.has(me.role) ? CIS_PLACES_PATH : null}
-          description="Derived from CIS places and tours. Country descriptions, FAQs and festivals have no CIS source yet (UI spec Q18), so Booking does not author them."
+          description="Derived from CIS places and tours. Country descriptions, FAQs and festivals have no CIS source yet, so Booking does not author them."
         >
           <CisField label="Country">{c ? `${c.name} (${c.country_code})` : detail.isLoading ? "…" : null}</CisField>
           <CisField label="Destinations">{c ? `${c.destinations} places` : null}</CisField>

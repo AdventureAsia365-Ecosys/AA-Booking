@@ -28,6 +28,7 @@ import {
   type AgencyPayment,
   type BillingStatusRow,
   type InvoiceKind,
+  paymentRecorder,
 } from "@/lib/api/agencyBilling";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { agencyFilterLabel, tenantFilter } from "@/ui/booking/agencyFilter";
@@ -375,7 +376,7 @@ function PaymentsTab() {
     { id: "received", header: "Received", cell: ({ row }) => <DateText value={row.original.received_on} /> },
     { id: "method", header: "Method", cell: ({ row }) => AGENCY_PAYMENT_METHOD_LABEL[row.original.method] },
     { id: "document", header: "Evidence", cell: ({ row }) => row.original.document_ref },
-    { id: "by", header: "Recorded by", cell: ({ row }) => row.original.recorded_by },
+    { id: "by", header: "Recorded by", cell: ({ row }) => paymentRecorder(row.original) },
     { id: "status", header: "Status", cell: ({ row }) => <PaymentStatusPill status={row.original.status} /> },
     {
       id: "actions",

@@ -273,7 +273,7 @@ test.describe("slice 4 behaviour at 1440", () => {
     await expect(tabs.getByRole("tab", { name: /Open\s*42/ })).toHaveAttribute("aria-selected", "true");
     await expect(tabs.getByRole("tab", { name: /Overdue\s*18/ })).toBeVisible();
     await expect(tabs.getByRole("tab", { name: /Done\s*102/ })).toBeVisible();
-    await expect(page.getByTestId("trip-progress").first()).toHaveAttribute("title", /of \d+ checks done/);
+    await expect(page.getByTestId("trip-progress").first()).toHaveAttribute("title", /of \d+ checks resolved/);
     // The chip is narrower than the case status badge above it, so it never sets the Trip case column's width.
     const wider = await page.getByTestId("trip-progress").evaluateAll((chips) =>
       chips
@@ -301,7 +301,7 @@ test.describe("slice 4 behaviour at 1440", () => {
     await page.locator(ROW).first().click();
     const context = page.getByTestId("check-trip-context");
     await expect(context).toContainText("Sales");
-    await expect(context).toContainText(/\d+ of \d+ checks done/);
+    await expect(context).toContainText(/\d+ of \d+ checks resolved/);
     await expect(context.getByRole("link", { name: "Open Checks tab" })).toHaveAttribute("href", /\/cases\/TC-000200\?tab=checks/);
     // The drawer's due-date box has the kit control look, like the Select beside it (AA-994 S6d review: form date
     // boxes rendered bare, no border and auto height, once the shared form classes became layout only).

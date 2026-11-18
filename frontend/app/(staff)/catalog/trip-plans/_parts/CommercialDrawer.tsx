@@ -25,6 +25,7 @@ import { CisField, CisFieldset } from "../../../_parts/CisFields";
 import { CIS_EDITOR_ROLES } from "./shared";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 import { PriceChainPanel } from "./PriceChainPanel";
+import { countText, daysText } from "@/ui/booking/plural";
 
 const textareaCls = "min-h-[96px] w-full";
 
@@ -159,8 +160,8 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         </CisField>
         <CisField label="SKU">{plan.sku}</CisField>
         <CisField label="Country">{plan.country}</CisField>
-        <CisField label="Duration">{plan.duration_raw || (plan.duration_days ? `${plan.duration_days} days` : null)}</CisField>
-        <CisField label="Days in CIS">{plan.days.length ? `${plan.days.length} days, ${plan.photos.length} photos` : null}</CisField>
+        <CisField label="Duration">{plan.duration_raw || (plan.duration_days ? daysText(plan.duration_days) : null)}</CisField>
+        <CisField label="Days in CIS">{plan.days.length ? `${daysText(plan.days.length)}, ${countText(plan.photos.length, "photo")}` : null}</CisField>
         <CisField label="Summary" multiline wide>
           {plan.summary || plan.description}
         </CisField>

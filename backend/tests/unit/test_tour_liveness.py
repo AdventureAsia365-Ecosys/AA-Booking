@@ -448,3 +448,41 @@ async def test_orphaned_facet_leaves_paused_keys_out_when_the_tombstone_is_reada
     degraded = ScriptedConn().on(VIEW_READY_FRAGMENT, None)
     await trip_plans.facets(degraded)
     assert all("v_tour_retired" not in flat for flat, _ in degraded.calls)
+
+
+# ── AA-1128 B3: notifications name the tour by its title ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_notifications_name_the_tour_by_its_title() -> None:
+    conn = _pull_conn([_event()]).on("FROM catalog.v_tour t WHERE t.source_system = $1", "Invented Ridge Trek")
+    await lifecycle.pull(conn, Job("j", lifecycle.KIND, {}, 1, 5), today=date(2026, 10, 23))
+    rows = _notifications(conn)
+    assert [r[2] for r in rows] == ["Tour withdrawn: TC-000042", "Tour withdrawn: Invented Ridge Trek"]
+    assert all("“Invented Ridge Trek”" in r[3] and KEY not in r[3] for r in rows)
+    assert {json.loads(r[6])["tour_title"] for r in rows} == {"Invented Ridge Trek"}
+
+
+@pytest.mark.asyncio
+async def test_a_retired_tour_out_of_the_catalog_takes_its_itinerary_title() -> None:
+    conn = _pull_conn([_event("restored", "restore")]).on("data->>'source_id' = $2", True)
+    conn.on("FROM catalog.v_tour t WHERE t.source_system = $1", asyncpg.UndefinedTableError("no view"))
+    conn.on("FROM booking.trip_case_version_itinerary i", "Invented Lake Loop")
+    await lifecycle.pull(conn, Job("j", lifecycle.KIND, {}, 1, 5))
+    rows = _notifications(conn)
+    assert rows and all(r[3].startswith("“Invented Lake Loop” is served again") for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_without_any_title_the_key_is_the_last_resort() -> None:
+    conn = _pull_conn([_event()])
+    await lifecycle.pull(conn, Job("j", lifecycle.KIND, {}, 1, 5), today=date(2026, 10, 23))
+    rows = _notifications(conn)
+    assert rows[1][2] == f"Tour withdrawn: trip plan {KEY[:8]}"
+    assert f"AA no longer serves tour {KEY}" in rows[0][3]
+    assert json.loads(rows[0][6])["tour_title"] is None
+
+
+@pytest.mark.parametrize(("title", "label"), [("Invented Bay", "“Invented Bay”"), (None, f"tour {KEY}")])
+def test_tour_label(title: str | None, label: str) -> None:
+    assert lifecycle.tour_label(KEY, title) == label

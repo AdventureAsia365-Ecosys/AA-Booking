@@ -64,6 +64,12 @@ CASE_COLUMNS = """
     tc.start_date, tc.end_date, tc.pax, tc.pax_adults, tc.pax_children, tc.currency, tc.notes, tc.source_system,
     tc.source_id, tc.channel, tc.party_tenant_id::text AS party_tenant_id, tc.created_at, tc.updated_at
 """
+# AA-1128 B3: the agency of a B2B case by name (the list, the dashboard and the People card showed the raw
+# party_tenant_id); NULL for a direct customer or an agency Booking has no partner row for.
+PARTY_AGENCY = """
+    (SELECT bp.agency_name FROM booking.b2b_partners bp
+     WHERE bp.tenant_id = tc.party_tenant_id ORDER BY bp.created_at LIMIT 1) AS party_agency_name
+"""
 OPEN_ASSIGNEES = """
     (SELECT coalesce(json_agg(json_build_object(
                 'cis_user_id', a.staff_user_id, 'role', a.role, 'name', s.name, 'assigned_at', a.assigned_at)
@@ -188,7 +194,8 @@ async def list_cases(
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(
         f"""
-        SELECT {CASE_COLUMNS}, {OPEN_ASSIGNEES}, {sql.LEGS_JSON}, {sql.COUNTRIES_ARRAY}, {sql.B2B_HEADLINE},
+        SELECT {CASE_COLUMNS}, {PARTY_AGENCY}, {OPEN_ASSIGNEES}, {sql.LEGS_JSON}, {sql.COUNTRIES_ARRAY},
+               {sql.B2B_HEADLINE},
                tc.inquiry_snapshot::text AS inquiry_snapshot,
                (SELECT max(v.version_number) FROM booking.trip_case_versions v
                 WHERE v.trip_case_id = tc.id AND v.deleted_at IS NULL) AS latest_version
@@ -266,7 +273,7 @@ async def get_case(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
     where, arg = _case_filter(ref)
     row = await conn.fetchrow(
         f"""
-        SELECT {CASE_COLUMNS}, {OPEN_ASSIGNEES}, {sql.COUNTRIES_ARRAY},
+        SELECT {CASE_COLUMNS}, {PARTY_AGENCY}, {OPEN_ASSIGNEES}, {sql.COUNTRIES_ARRAY},
                tc.inquiry_snapshot::text AS inquiry_snapshot, tc.inbox_event_id::text AS inbox_event_id
         FROM booking.trip_cases tc
         WHERE {where} AND tc.deleted_at IS NULL

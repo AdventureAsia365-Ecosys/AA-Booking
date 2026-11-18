@@ -22,7 +22,7 @@ import {
   type WorkbenchCheck,
   type WorkbenchItem,
 } from "@/lib/api/priceWorkbench";
-import { skippedReasons, stepHref } from "@/ui/booking/priceWorkbench";
+import { outOfCatalog, skippedReasons, stepHref, tourName } from "@/ui/booking/priceWorkbench";
 import {
   Button,
   DataTable,
@@ -49,6 +49,7 @@ import { M, type MessageKey } from "./messages";
 
 const RECOMPUTE_MAX = 50;
 const STEP_TONE: Record<string, "success" | "warning" | "danger" | "info" | "neutral"> = {
+  not_served: "neutral",
   done: "success",
   make_sellable: "info",
   recompute: "info",
@@ -123,14 +124,15 @@ function Price({ row }: { row: WorkbenchItem }) {
 
 function Tour({ row }: { row: WorkbenchItem }) {
   const t = useT(M);
+  const out = outOfCatalog(row);
   const facts = [row.country, row.duration_days ? t("days", row.duration_days) : null, row.sellable ? t("sellable") : null]
     .filter(Boolean)
     .join(" · ");
   return (
     <span className="flex min-w-0 flex-col">
-      <span className="break-words font-medium text-ink">{row.title ?? row.tour_key}</span>
+      <span className="break-words font-medium text-ink">{tourName(row, t("unnamedTour"))}</span>
       {facts && <span className="text-xs text-muted">{facts}</span>}
-      {row.in_catalog === false && <span className="text-xs text-muted">{t("notInCatalog")}</span>}
+      {out && <span className="text-xs text-muted">{t(`out_${out}` as MessageKey) as string}</span>}
     </span>
   );
 }
@@ -218,19 +220,24 @@ function Workbench() {
       cell: ({ row }) => {
         const r = row.original;
         const opensDrawer = r.next_step === "add_components" || r.next_step === "fix_inactive";
+        // AA-1128: a tour out of the catalog has no component suggestions and no trip plan page (both read CIS).
+        const served = r.next_step !== "not_served";
+        const href = stepHref(r.next_step, r.tour_key);
         return (
           <span className="flex flex-col items-start gap-1">
             <Pill tone={STEP_TONE[r.next_step] ?? "warning"}>{t(`step_${r.next_step}` as MessageKey) as string}</Pill>
             <span className="flex flex-wrap gap-x-3 gap-y-1 text-[13px]">
-              <LinkButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setTab("components");
-                  setComponents(r);
-                }}
-              >
-                {t("openComponents")}
-              </LinkButton>
+              {served && (
+                <LinkButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTab("components");
+                    setComponents(r);
+                  }}
+                >
+                  {t("openComponents")}
+                </LinkButton>
+              )}
               <LinkButton
                 onClick={(e) => {
                   e.stopPropagation();
@@ -240,9 +247,9 @@ function Workbench() {
               >
                 {t("openVersions")}
               </LinkButton>
-              {!opensDrawer && (
+              {!opensDrawer && href && (
                 <Link
-                  href={stepHref(r.next_step, r.tour_key)}
+                  href={href}
                   onClick={(e) => e.stopPropagation()}
                   className="font-semibold text-accent-deep hover:underline"
                 >
@@ -349,7 +356,7 @@ function Workbench() {
           error={report.isError ? (report.error as Error).message : null}
           onRetry={() => report.refetch()}
           onRowClick={(r) => {
-            setTab("components");
+            setTab(r.next_step === "not_served" ? "versions" : "components");
             setComponents(r);
           }}
           enableSelection={canEdit}
