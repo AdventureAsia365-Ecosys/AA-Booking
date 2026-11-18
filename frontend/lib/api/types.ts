@@ -118,6 +118,8 @@ export interface TripCaseListItem extends TripShape {
   channel: TripCaseChannel;
   /** The agency (AA-Partner tenant id) of a B2B case; null on B2C. */
   party_tenant_id: string | null;
+  /** AA-1128: the agency's name from booking.b2b_partners (null on B2C or when Booking has no partner row). */
+  party_agency_name?: string | null;
   trip_style: string | null;
   start_date: IsoDate | null;
   end_date: IsoDate | null;

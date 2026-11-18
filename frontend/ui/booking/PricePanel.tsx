@@ -22,6 +22,8 @@ import { formatMoney } from "../core/format";
 import { Money } from "../core/Money";
 import { DateText } from "../core/DateText";
 import { useCan } from "../local/StaffContext";
+import { currencyOptions } from "./fxInForce";
+import { useCurrenciesInForce } from "./fxInForceQuery";
 
 const inputCls = "w-full min-w-0";
 
@@ -164,6 +166,8 @@ export function PriceSettings({
   showReason?: boolean;
 }) {
   const set = <K extends keyof PriceSettingsValue>(k: K, v: PriceSettingsValue[K]) => onChange({ ...value, [k]: v });
+  // AA-1128: a selling currency without an approved FX rate today cannot price (the API answers 422).
+  const selling = currencyOptions(SELLING_CURRENCIES, useCurrenciesInForce(), value.currency);
   const overrideBad = value.override.trim() !== "" && !/^\d{1,14}(\.\d{1,2})?$/.test(value.override.trim());
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -180,9 +184,9 @@ export function PriceSettings({
       <label className="flex flex-col gap-1">
         <span className="text-[12px] font-medium text-ink">Selling currency</span>
         <Select size="sm" value={value.currency} disabled={disabled} onChange={(e) => set("currency", e.target.value)} className={inputCls}>
-          {SELLING_CURRENCIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {selling.map((c) => (
+            <option key={c.code} value={c.code} disabled={!c.usable && c.code !== value.currency}>
+              {c.usable ? c.code : `${c.code} (no FX rate today)`}
             </option>
           ))}
         </Select>

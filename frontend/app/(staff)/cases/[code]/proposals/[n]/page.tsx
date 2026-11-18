@@ -89,7 +89,7 @@ import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisNewTitle, cisTourName, cisUpdates, refreshFromCis } from "@/ui/booking/cisReadback";
 import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 import { ItemDrawer, type ItemDraftFields } from "./ItemDrawer";
-import { casePartyLabel } from "@/ui/booking/caseFacts";
+import { casePartyLabel, lockedPriceText } from "@/ui/booking/caseFacts";
 
 const TERMINAL = ["completed", "cancelled"];
 
@@ -531,11 +531,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
             {canPrice && (
               <Section
                 title="Price"
-                description={locked ? "The price saved on this version when it was sent. It no longer changes." : "Live quote from the Booking pricing engine; Apply price saves it on the version."}
+                description={locked ? lockedPriceText(c.channel, v.sent_at, v.is_approved).note : "Live quote from the Booking pricing engine; Apply price saves it on the version."}
               >
                 <div className="flex flex-col gap-4">
                   {locked ? (
-                    <LockedPrice v={v} />
+                    <LockedPrice v={v} channel={c.channel} />
                   ) : (
                     <>
                       <PriceSettings value={price} onChange={setPrice} belowFloor={!!fresh?.below_floor} disabled={locked} />
@@ -695,7 +695,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
 
 /** The price panel of a sent or approved version (AA-996, audit item 12): the saved total and how it was locked,
  *  instead of the editing empty state "No quote yet". */
-function LockedPrice({ v }: { v: VersionWithItems }) {
+function LockedPrice({ v, channel }: { v: VersionWithItems; channel: string }) {
   const row = (label: string, value: React.ReactNode) => (
     <>
       <dt className="text-muted">{label}</dt>
@@ -734,9 +734,7 @@ function LockedPrice({ v }: { v: VersionWithItems }) {
         {v.is_approved && row("Approved", <DateText value={v.approved_at} />)}
       </dl>
       <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
-        {v.is_approved
-          ? "The customer approved this price. Invoices are made from it on the Billing tab."
-          : "This is the price the customer received. To change it, create a new version from the case."}
+        {lockedPriceText(channel, v.sent_at, v.is_approved).footnote}
       </p>
     </div>
   );

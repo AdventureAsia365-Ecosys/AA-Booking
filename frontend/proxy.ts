@@ -9,6 +9,10 @@
 // is retired with the CIS -> Booking bridge; a browser still holding that cookie is sent to /login with it cleared.
 // /api/* is not matched: the BFF route handlers answer 401 JSON themselves (lib/session.ts).
 // Role checks per page happen in the shell (lib/rbac.ts); the Booking API enforces its own matrix.
+// AA-1111 (S284, ZAP baseline): every response this proxy handles carries the full CSP with a fresh nonce
+// (lib/securityHeaders.ts), also set on the request so Next puts the nonce on its scripts (app/layout.tsx reads x-nonce
+// for the restore scripts). The proxy now runs on /robots.txt, /favicon.ico and /assets/* too (they were outside the
+// matcher): they pass without the session gate, as before.
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -20,8 +24,17 @@ import {
   isCognitoAccess,
   needsRefresh,
 } from "./lib/session";
+import { NONCE_HEADER, contentSecurityPolicy, newNonce, sentryOrigin } from "./lib/securityHeaders";
 
 const PUBLIC_PATHS = ["/login"];
+
+// The paths the matcher used to leave out (besides /api and the build chunks): static files, no session gate.
+function isStaticFile(pathname: string): boolean {
+  return pathname === "/favicon.ico" || pathname === "/robots.txt" || pathname.startsWith("/assets/");
+}
+
+// The browser posts Sentry events to the DSN's origin (a public build-time value; none = no Sentry).
+const SENTRY_ORIGIN = sentryOrigin(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
 function toLogin(request: NextRequest, clear: boolean, reason?: string) {
   const url = new URL("/login", request.url);
@@ -40,21 +53,38 @@ function toRefresh(request: NextRequest) {
 }
 
 export function proxy(request: NextRequest) {
+  const nonce = newNonce();
+  const csp = contentSecurityPolicy({
+    nonce,
+    dev: process.env.NODE_ENV === "development",
+    connectSrc: [SENTRY_ORIGIN],
+  });
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(NONCE_HEADER, nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+  const res = gate(request, () => NextResponse.next({ request: { headers: requestHeaders } }));
+  res.headers.set("Content-Security-Policy", csp);
+  return res;
+}
+
+function gate(request: NextRequest, pass: () => NextResponse): NextResponse {
   const { pathname } = request.nextUrl;
-  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
-    return NextResponse.next();
+  if (isStaticFile(pathname) || PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return pass();
   }
 
   const access = request.cookies.get(ACCESS_COOKIE)?.value;
   const legacy = request.cookies.get(CIS_SESSION_COOKIE)?.value;
   if (isCognitoAccess(access) && !legacy) {
-    return needsRefresh(access) ? toRefresh(request) : NextResponse.next();
+    return needsRefresh(access) ? toRefresh(request) : pass();
   }
   // A retired bridge session (or a bridge token left in bk_access) ends here: clear it, sign in again.
   return legacy || access ? toLogin(request, true, "expired") : toLogin(request, false);
 }
 
 export const config = {
-  // Everything except the BFF, Next internals and static files.
-  matcher: ["/((?!api/|_next/static|_next/image|assets/|favicon.ico|robots.txt).*)"],
+  // Everything except the BFF and the build chunks (AA-1111: static files now get the nonce CSP too, isStaticFile()).
+  // /api/* stays out: a running proxy clones the request body and cuts it at 10 MiB; next.config.ts gives /api and
+  // /_next the same policy without a nonce.
+  matcher: ["/((?!api/|_next/static|_next/image).*)"],
 };

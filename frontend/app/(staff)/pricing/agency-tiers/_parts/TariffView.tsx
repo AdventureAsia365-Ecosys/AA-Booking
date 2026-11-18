@@ -14,6 +14,9 @@ import { Download, Printer } from "lucide-react";
 import { agencyPricingApi, TARIFF_CURRENCIES, type TariffItem, type UnpricedTariffRow } from "@/lib/api/agencyPricing";
 import { pct } from "@/lib/proposalDraft";
 import { Button, DataTable, DateText, EmptyState, Money, PageFrame, Section, Select, useToast, useUrlFilters, type ColumnDef } from "@/ui";
+import { daysText } from "@/ui/booking/plural";
+import { currencyOptions } from "@/ui/booking/fxInForce";
+import { useCurrenciesInForce } from "@/ui/booking/fxInForceQuery";
 
 function band(min: number, max: number | null): string {
   if (max === null) return `${min}+`;
@@ -31,7 +34,7 @@ function rowId(r: {
 }
 
 function Tour({ row }: { row: { title: string | null; tour: { source_id: string }; country?: string | null; duration_days?: number | null } }) {
-  const facts = [row.country, row.duration_days ? `${row.duration_days} days` : null].filter(Boolean).join(" · ");
+  const facts = [row.country, row.duration_days ? daysText(row.duration_days) : null].filter(Boolean).join(" · ");
   return (
     <span className="flex flex-col">
       <span className="font-medium text-ink">{row.title ?? row.tour.source_id}</span>
@@ -110,6 +113,8 @@ export function TariffView() {
   const toast = useToast();
   const partnerId = get("partner");
   const currency = (TARIFF_CURRENCIES as readonly string[]).includes(get("currency")) ? get("currency") : "USD";
+  // AA-1128: only USD and the quote currencies with an approved FX rate in force today can price a tariff.
+  const currencies = currencyOptions(TARIFF_CURRENCIES, useCurrenciesInForce(), currency);
   const [downloading, setDownloading] = useState(false);
 
   const tariff = useQuery({
@@ -165,9 +170,9 @@ export function TariffView() {
       actions={
         <div className="bk-no-print flex flex-wrap items-center gap-2">
           <Select size="sm" aria-label="Currency" value={currency} onChange={(e) => set("currency", e.target.value)}>
-            {TARIFF_CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            {currencies.map((c) => (
+              <option key={c.code} value={c.code} disabled={!c.usable && c.code !== currency}>
+                {c.usable ? c.code : `${c.code} (no FX rate today)`}
               </option>
             ))}
           </Select>

@@ -154,7 +154,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
             </Section>
             <Section title="Country information" actions={<FromCisTag />}>
               <p className="text-[13px] text-muted">
-                CIS has no country description, FAQ or festival content yet (UI spec Q18). When CIS publishes it, it shows here
+                CIS has no country description, FAQ or festival content yet. When CIS publishes it, it shows here
                 read-only; Booking does not write it.
               </p>
             </Section>

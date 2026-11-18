@@ -17667,6 +17667,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "not_served",
                     "add_components",
                     "fix_inactive",
                     "load_rates",
@@ -18414,6 +18415,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "not_served",
                     "add_components",
                     "fix_inactive",
                     "load_rates",

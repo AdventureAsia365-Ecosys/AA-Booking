@@ -465,6 +465,25 @@ async def test_decide_payment() -> None:
     assert (await payments.list_payments(listed, state="recorded", invoice="AAS-2026-000001"))["total"] == 1
 
 
+@pytest.mark.asyncio
+async def test_payment_rows_carry_staff_names_beside_the_refs() -> None:
+    """AA-1128 B3: "Recorded by" shows a name, never the raw sign-in subject; the refs stay for maker-checker."""
+    row = {**STORED, "recorded_by": "cog:invented-sub-1", "approved_by": "cis-checker", "rejected_by": None}
+    names = ScriptedConn(
+        [
+            ("SELECT count(*)", 1),
+            ("FROM booking.agency_payment p", [row]),
+            (
+                "FROM booking.staff_users WHERE cis_user_id = ANY",
+                [{"cis_user_id": "cog:invented-sub-1", "name": "Invented Clerk"}],
+            ),
+        ]
+    )
+    [item] = (await payments.list_payments(names))["items"]
+    assert (item["recorded_by"], item["recorded_by_name"]) == ("cog:invented-sub-1", "Invented Clerk")
+    assert (item["approved_by_name"], item["rejected_by_name"]) == (None, None)
+
+
 # ── CIS read ─────────────────────────────────────────────────────────────────
 
 

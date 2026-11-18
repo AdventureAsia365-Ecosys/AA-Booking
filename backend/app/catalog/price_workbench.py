@@ -16,7 +16,9 @@ provisional price.
 - ``departures``: upcoming fixed departures (not cancelled, after today). Optional: a tailor-made tour has none, so it
   never decides the next step, but it can be filtered on.
 
-**Next step** (``next_step``, the first that applies): ``add_components``, ``fix_inactive``, ``load_rates``,
+**Next step** (``next_step``, the first that applies): ``not_served`` (AA-1128: the tour is not in ``catalog.v_tour``
+now, paused or retired in CIS or gone: nothing in Booking can make it sellable, so no setup step and no link to the
+trip plan page, which reads the tour from the catalog), ``add_components``, ``fix_inactive``, ``load_rates``,
 ``approve_fx``, ``approve_rule``, ``recompute`` (the cost sheet prices it; the next run stores the rows),
 ``make_sellable``, then ``done``. Hand prices alone never make a plan ``done``: an agency quote prices the components
 (``app.b2b.components``), so a plan without them cannot be quoted whatever its matrix says.
@@ -55,6 +57,7 @@ from app.errors import Invalid
 MAX_ACTION_PLANS = 200
 MAX_RECOMPUTE = 50
 
+NOT_SERVED = "not_served"
 ADD_COMPONENTS = "add_components"
 FIX_INACTIVE = "fix_inactive"
 LOAD_RATES = "load_rates"
@@ -64,6 +67,7 @@ RECOMPUTE = "recompute"
 MAKE_SELLABLE = "make_sellable"
 DONE = "done"
 NEXT_STEPS: tuple[str, ...] = (
+    NOT_SERVED,
     ADD_COMPONENTS,
     FIX_INACTIVE,
     LOAD_RATES,
@@ -144,6 +148,8 @@ def hint_is_reference(extra: Extra) -> bool:
 
 def next_step(row: Mapping[str, Any]) -> str:
     """The first thing the plan still needs (see the module doc)."""
+    if row.get("in_catalog") is False:
+        return NOT_SERVED
     step = STEP_OF_REASON.get(row["reason"] or "")
     if step is not None:
         return step

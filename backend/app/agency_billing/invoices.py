@@ -25,6 +25,7 @@ import asyncpg
 
 from app import audit
 from app.agency_billing import cis, config, reminders
+from app.auth import people
 from app.errors import Conflict, Invalid, NotFound
 from app.ops.money import line_amount, looks_like_card_number
 
@@ -70,6 +71,21 @@ PAYMENT_COLUMNS = """
     id::text AS id, invoice_id::text AS invoice_id, amount, currency, method, received_on, reference, document_ref,
     note, status, recorded_by, recorded_at, approved_by, approved_at, rejected_by, rejected_at, reject_reason
 """
+PAYMENT_PEOPLE = ("recorded_by", "approved_by", "rejected_by")
+
+
+async def with_people_names(conn: asyncpg.Connection, payments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """AA-1128 B3: each staff ref of a payment row (``recorded_by`` ...: a ``cog:<sub>`` or CIS staff key) gets its
+    directory name beside it (``recorded_by_name`` ...; None for a marker or a person not in the directory), so the
+    staff pages never show a raw sign-in subject. The refs stay as they are (filters and maker-checker compare them)."""
+    names = await people.names_of(conn, (p.get(f) for p in payments for f in PAYMENT_PEOPLE))
+    for p in payments:
+        for f in PAYMENT_PEOPLE:
+            if f in p:
+                p[f"{f}_name"] = names.get(p[f]) if p[f] else None
+    return payments
+
+
 # AA-1037 (booking.b2b.v1 1.5): the agency sees approved payments only, and only when and how much (never the bank
 # reference, the document, the note or who recorded / approved it).
 AGENCY_PAYMENT_SQL = """
@@ -166,6 +182,7 @@ async def get(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
             inv["id"],
         )
     ]
+    await with_people_names(conn, payments)
     # AA-1037 G4: the overdue reminder steps already handled (bk-044).
     return {**inv, "lines": lines, "payments": payments, "reminders": await reminders.for_invoice(conn, inv["id"])}
 

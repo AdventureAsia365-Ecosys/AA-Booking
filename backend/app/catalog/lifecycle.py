@@ -37,6 +37,7 @@ import asyncpg
 
 from app import audit
 from app.catalog import liveness
+from app.catalog.destinations import CATALOG_ERRORS
 from app.jobs import queue
 from app.jobs.queue import Job
 from app.notifications import service as notifications
@@ -163,11 +164,49 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
-def plan_retired_message(source_id: str, reason: str | None, confirmed: int, active: int) -> str:
+# AA-1128 B3: a notification names the tour by its title, never only by its CIS key. The catalog has the title while
+# the tour is served (a restore; a retirement read before CIS hides it); a retired tour may have left the view, so a
+# trip case itinerary line of the key (the title it was sold with) is the fallback, the key the last resort.
+TOUR_TITLE_SQL = """
+SELECT t.title::text FROM catalog.v_tour t WHERE t.source_system = $1 AND t.source_id = $2 LIMIT 1
+"""
+ITINERARY_TITLE_SQL = """
+SELECT i.title FROM booking.trip_case_version_itinerary i
+WHERE i.source_tour_id = $1 AND btrim(i.title) <> ''
+ORDER BY i.updated_at DESC
+LIMIT 1
+"""
+TITLE_MAX = 120  # technical-constant: display length of a tour title in a notification
+
+
+async def tour_title(conn: asyncpg.Connection, source_id: str) -> str | None:
+    """The tour's title for staff text: the catalog's, else the newest itinerary line of the key, else ``None``. The
+    catalog read runs in a savepoint: a missing view, a missing grant or a cut read never aborts the pull."""
+    title = None
+    try:
+        async with conn.transaction():
+            title = await conn.fetchval(TOUR_TITLE_SQL, SOURCE, source_id)
+    except CATALOG_ERRORS as exc:
+        log.warning("tour title from catalog.v_tour skipped: %s", type(exc).__name__)
+    if not (title and str(title).strip()):
+        title = await conn.fetchval(ITINERARY_TITLE_SQL, source_id)
+    text = str(title).strip() if title else ""
+    return text[:TITLE_MAX] or None
+
+
+def tour_label(source_id: str, title: str | None) -> str:
+    """``"Invented Ridge Trek"`` (quoted title) or, without one, ``tour <key>``."""
+    return f"\u201c{title}\u201d" if title else f"tour {source_id}"
+
+
+def plan_retired_message(
+    source_id: str, reason: str | None, confirmed: int, active: int, title: str | None = None
+) -> str:
     """The staff text for a retired trip plan. Confirmed bookings are kept; active holds are NOT safe: confirm is
     refused (409 ``tour_not_served``) and they expire on their own, so staff must contact the agency (Q4)."""
     text = (
-        f"AA no longer serves tour {source_id} ({_why(reason)}). Its trip plan is no longer offered to agencies. "
+        f"AA no longer serves {tour_label(source_id, title)} ({_why(reason)}). Its trip plan is no longer offered to "
+        "agencies. "
         f"{_plural(confirmed, 'confirmed booking')} on future departures "
         f"{'is' if confirmed == 1 else 'are'} kept."
     )
@@ -188,24 +227,32 @@ def _hold_list(plan: Any) -> list[dict[str, Any]]:
 
 async def _notify(conn: asyncpg.Connection, kind: str, row: Any, cases: list[Any], plan: Any | None) -> dict[str, int]:
     source_id, reason = row["source_id"], row["reason"]
-    base = {"source_system": SOURCE, "source_id": source_id, "reason": reason, "outbox_id": row["event_id"]}
+    title = await tour_title(conn, source_id) if (cases or plan is not None) else None
+    label = tour_label(source_id, title)
+    base = {
+        "source_system": SOURCE,
+        "source_id": source_id,
+        "reason": reason,
+        "outbox_id": row["event_id"],
+        "tour_title": title,
+    }
     retired = kind == TYPE_RETIRED
     for case in cases:
         via = [w for w, on in (("leg", case["via_leg"]), ("case", case["via_case"]), ("item", case["via_item"])) if on]
         if retired:
-            title = f"Tour withdrawn: {case['code']}"
+            heading = f"Tour withdrawn: {case['code']}"
             message = (
-                f"AA no longer serves tour {source_id} ({_why(reason)}). Trip case {case['code']} "
+                f"AA no longer serves {label} ({_why(reason)}). Trip case {case['code']} "
                 f"({case['status']}) uses it and is kept as it is; decide with the "
                 f"{'agency' if case['channel'] == 'b2b' else 'customer'} what to do (cancelling is a staff decision)."
             )
         else:
-            title = f"Tour back in the catalog: {case['code']}"
-            message = f"Tour {source_id} is served again; trip case {case['code']} can use it as before."
+            heading = f"Tour back in the catalog: {case['code']}"
+            message = f"{label[0].upper()}{label[1:]} is served again; trip case {case['code']} can use it as before."
         await notifications.notify_staff(
             conn,
             type=kind,
-            title=title,
+            title=heading,
             message=message,
             entity_type="trip_case",
             entity_id=case["id"],
@@ -213,15 +260,15 @@ async def _notify(conn: asyncpg.Connection, kind: str, row: Any, cases: list[Any
         )
     if plan is not None:
         if retired:
-            title = f"Tour withdrawn: trip plan {source_id[:8]}"
-            message = plan_retired_message(source_id, reason, plan["confirmed_holds"], plan["active_holds"])
+            heading = f"Tour withdrawn: {title or 'trip plan ' + source_id[:8]}"
+            message = plan_retired_message(source_id, reason, plan["confirmed_holds"], plan["active_holds"], title)
         else:
-            title = f"Tour back in the catalog: trip plan {source_id[:8]}"
-            message = f"Tour {source_id} is served again; its trip plan is offered as before."
+            heading = f"Tour back in the catalog: {title or 'trip plan ' + source_id[:8]}"
+            message = f"{label[0].upper()}{label[1:]} is served again; its trip plan is offered as before."
         await notifications.notify_staff(
             conn,
             type=kind,
-            title=title,
+            title=heading,
             message=message,
             entity_type="trip_plan",
             entity_id=plan["id"],

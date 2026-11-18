@@ -8,6 +8,9 @@
 //   - no failed same-origin request (status >= 400 or a network failure), except the document's own expected status;
 //     on a mocked run, no API call without a fixture;
 //   - the kit frame is on the page (`[data-kit-frame]`) unless the page says frame: false; the theme applied;
+//   - AA-1131: every visible form control, dialog and icon button has an accessible name (a11yNames.ts). A control the
+//     kit core renders (a data-kit-* hook) must be named on every page, and every control on the kit gallery; a page's
+//     own unnamed controls elsewhere are listed in the report (`unnamed`), not failed;
 //   - a PNG of the page (the inner scroll region grown into the viewport first: the shell's document never scrolls).
 // Each result goes to e2e/visual/results/report/<page>__<viewport>__<theme>.json; summary.mjs merges them.
 // Read-only: the run only navigates.
@@ -24,7 +27,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { answer, CLOCK } from "../layout/fixtures";
+import { unnamedControls } from "./a11yNames";
 import { expectedOutcome, PAGES, selectPages } from "./pages";
+import { addFakeSession } from "./session";
 
 const THEMES = ["light", "dark"] as const;
 const OUT = path.join(__dirname, "results");
@@ -42,17 +47,12 @@ const SLUGS = (process.env.VISUAL_SLUGS ?? "all").trim();
 const GALLERY = process.env.VISUAL_GALLERY === "1";
 const SELFTEST = process.env.VISUAL_SELFTEST === "1";
 
-/** An unsigned JWT shaped like a Cognito access token (the layout check's: proxy.ts only decodes it). */
-function fakeAccessToken(): string {
-  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  return `${b64({ alg: "none", typ: "JWT" })}.${b64({ token_use: "access", client_id: "layout-mock", sub: "u-layout", exp: 4102444800 })}.layout-mock`;
-}
 const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
 
 /** The mocked target: the session cookie, the frozen clock, fixtures for the BFF, a pixel for external images. */
 async function mock(page: Page, origin: string, unmocked: string[]) {
   await page.clock.setFixedTime(new Date(CLOCK));
-  await page.context().addCookies([{ name: "bk_access", value: fakeAccessToken(), url: origin }]);
+  await addFakeSession(page, origin);
   await page.route("**/*", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -165,6 +165,9 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
       const appliedTheme = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));
       const hasFrame = (await page.locator("[data-kit-frame]").count()) > 0;
       const overflow = await probeOverflow(page);
+      const unnamed = await unnamedControls(page).catch(() => []);
+      // The gate: kit-rendered controls everywhere, every control on the gallery (not on its self-test plants).
+      const unnamedGate = p.gallery && !p.selftest ? unnamed : unnamed.filter((u) => u.kit);
 
       const name = `${p.slug}__${viewport}__${theme}`;
       fs.mkdirSync(SHOT_DIR, { recursive: true });
@@ -174,7 +177,7 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
 
       const result = {
         page: p.slug, path: p.path, auth: p.auth, viewport, theme, selftest: p.selftest ?? null,
-        status: res?.status() ?? null, expectedStatus: want.status, finalPath, expectedPath: want.finalPath, appliedTheme, hasFrame, frameExpected: p.frame !== false, overflow, consoleErrors, failedRequests: failed, unmocked,
+        status: res?.status() ?? null, expectedStatus: want.status, finalPath, expectedPath: want.finalPath, appliedTheme, hasFrame, frameExpected: p.frame !== false, overflow, consoleErrors, failedRequests: failed, unmocked, unnamed, unnamedGate,
       };
       fs.mkdirSync(REPORT_DIR, { recursive: true });
       fs.writeFileSync(path.join(REPORT_DIR, `${name}.json`), JSON.stringify(result, null, 1));
@@ -188,6 +191,7 @@ for (const p of selectPages(PAGES, { auth: AUTH, slugs: SLUGS, gallery: GALLERY,
       expect.soft(overflow.frames, `the page frame scrolls sideways: ${overflow.offenders.join(", ")}`).toEqual([]);
       expect.soft(consoleErrors, "console errors").toEqual([]);
       expect.soft(failed, "failed same-origin requests").toEqual([]);
+      expect.soft(unnamedGate, "controls with no accessible name (kit controls, or any on the kit gallery)").toEqual([]);
       expect.soft(unmocked, "API calls without a layout-mock fixture (e2e/layout/fixtures.ts)").toEqual([]);
     });
   }

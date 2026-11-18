@@ -3,7 +3,7 @@
 // TZ is pinned by the npm script (America/Los_Angeles) so a day that would shift west of Greenwich is caught.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatDay, isIsoDay, localizeIsoDates, normalizeTime, parseDayInput, parseTimeInput } from "./dates.ts";
+import { formatDay, isIsoDay, isPastDay, localToday, localizeIsoDates, normalizeTime, parseDayInput, parseTimeInput } from "./dates.ts";
 
 test("formatDay shows the en-GB day without a time-zone shift", () => {
   assert.equal(formatDay("2026-10-09"), "9 Oct 2026");
@@ -81,4 +81,13 @@ test("localizeIsoDates rewrites ISO days and instants inside text", () => {
   assert.equal(localizeIsoDates("Ref 12026-10-01x"), "Ref 12026-10-01x");
   // An instant with a zone is shown in the viewer's zone (America/Los_Angeles under npm run test:unit).
   assert.equal(localizeIsoDates("Paid at 2026-10-27T09:30:00Z"), "Paid at 27 Oct 2026, 02:30");
+});
+
+test("a day before today is past; today, later or unreadable days are not (AA-1128)", () => {
+  assert.equal(isPastDay("2026-11-13", "2026-11-17"), true);
+  assert.equal(isPastDay("2026-11-17", "2026-11-17"), false);
+  assert.equal(isPastDay("2026-12-01", "2026-11-17"), false);
+  assert.equal(isPastDay(null, "2026-11-17"), false);
+  assert.equal(isPastDay("13 Nov 2026", "2026-11-17"), false);
+  assert.equal(localToday(new Date(2026, 10, 7, 23, 59)), "2026-11-07");
 });

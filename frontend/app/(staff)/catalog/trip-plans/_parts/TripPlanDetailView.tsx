@@ -27,6 +27,7 @@ import { DeparturesPanel } from "./DeparturesPanel";
 import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
 import { UseForTripCaseModal } from "./UseForTripCaseModal";
 import { useSellableToggle } from "./useSellableToggle";
+import { daysText } from "@/ui/booking/plural";
 
 const CHANNEL_LABEL: Record<string, string> = Object.fromEntries(CHANNELS.map((c) => [c.value, c.label]));
 
@@ -139,7 +140,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                 </Section>
                 <Section title="Facts" actions={<FromCisTag />}>
                   <FactGrid>
-                    <Fact label="Duration">{p.duration_raw || (p.duration_days ? `${p.duration_days} days` : "—")}</Fact>
+                    <Fact label="Duration">{p.duration_raw || (p.duration_days ? daysText(p.duration_days) : "—")}</Fact>
                     <Fact label="Group size">{p.group_size || "—"}</Fact>
                     <Fact label="Best time to go">{p.best_time_to_go || "—"}</Fact>
                     <Fact label="Lifecycle">{p.lifecycle_stage || "—"}</Fact>

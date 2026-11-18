@@ -65,6 +65,10 @@ def _row(**over: Any) -> dict[str, Any]:
         ({"status": "missing_rates", "reason": None, "components": 2}, "load_rates"),  # no common window
         ({"status": "priced", "reason": None, "components": 2, "computed_rows": 6}, "make_sellable"),
         ({"status": "priced", "reason": None, "components": 2, "computed_rows": 6, "sellable": True}, "done"),
+        # AA-1128: a tour out of catalog.v_tour (paused, retired, gone) has no setup step, whatever else it lacks
+        ({"in_catalog": False}, "not_served"),
+        ({"in_catalog": False, "status": "priced", "reason": None, "components": 2, "computed_rows": 6}, "not_served"),
+        ({"in_catalog": None}, "add_components"),  # catalog join degraded: unknown, the usual steps
     ],
 )
 def test_next_step(over: dict[str, Any], step: str) -> None:

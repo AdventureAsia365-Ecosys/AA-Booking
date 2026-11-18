@@ -29,18 +29,20 @@ import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { QueryError, isForbidden } from "./_parts/QueryError";
 import { StatusMultiSelect, parseStatuses } from "./_parts/StatusMultiSelect";
 import { sortStaff, useStaffDirectory } from "./_parts/StaffSelect";
-import { casePartyLabel } from "@/ui/booking/caseFacts";
+import { casePartyLabel, casePartySub } from "@/ui/booking/caseFacts";
+import { daysText } from "@/ui/booking/plural";
 
 const PRE_SALE: TripCaseStatus[] = ["new_inquiry", "discovery", "building", "proposal_sent"];
 const CLOSED: TripCaseStatus[] = ["completed", "cancelled"];
 
-/** Saved filters (spec §4.5): each sets the status / assignee query. */
+/** Saved filters (spec §4.5): each sets the status / assignee query. AA-1128: no "Inquiries" tab (customer inquiries
+ *  were the retired B2C channel; an old ?tab=inquiries link opens All), and the pre-sale statuses are named
+ *  "Pre-sale", not "Active" (confirmed and later cases are open too). */
 const CASE_TABS = [
   { key: "all", label: "All" },
-  { key: "inquiries", label: "Inquiries", status: ["new_inquiry"] as TripCaseStatus[] },
   { key: "mine", label: "Mine", assignee: "me" },
   { key: "unassigned", label: "Unassigned", assignee: "none" },
-  { key: "active", label: "Active", status: PRE_SALE },
+  { key: "active", label: "Pre-sale", status: PRE_SALE },
   { key: "closed", label: "Closed", status: CLOSED },
 ] as const;
 
@@ -49,7 +51,6 @@ function tabCount(key: string, s: TripCaseSummary | undefined): number | undefin
   if (!s) return undefined;
   const sum = (list: TripCaseStatus[]) => list.reduce((n, st) => n + (s.by_status[st] ?? 0), 0);
   if (key === "all") return Object.values(s.by_status).reduce((a, b) => a + b, 0);
-  if (key === "inquiries") return s.new_inquiry;
   if (key === "active") return sum(PRE_SALE);
   if (key === "closed") return sum(CLOSED);
   return undefined;
@@ -192,7 +193,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       <PersonCell
         className="md:max-w-[140px] min-[1200px]:max-w-[180px]"
         name={casePartyLabel(row.original)}
-        sub={row.original.channel === "b2b" ? row.original.party_tenant_id : "read-only"}
+        sub={casePartySub(row.original)}
         chips={row.original.channel === "b2b" ? <Pill tone="accent" dot={false}>B2B</Pill> : null}
       />
     ),
@@ -222,11 +223,11 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     accessorKey: "start_date",
     cell: ({ row }) => {
       const r = row.original;
-      const sub = [r.duration_days ? `${r.duration_days} days` : null, r.pax ? `${r.pax} pax` : null].filter(Boolean).join(" · ");
+      const sub = [r.duration_days ? daysText(r.duration_days) : null, r.pax ? `${r.pax} pax` : null].filter(Boolean).join(" · ");
       if (!r.start_date) {
         return (
           <span className="text-[13px] text-muted">
-            {r.duration_days ? <span className="whitespace-nowrap">{r.duration_days} days</span> : "—"}
+            {r.duration_days ? <span className="whitespace-nowrap">{daysText(r.duration_days)}</span> : "—"}
             {r.duration_days ? <span className="block text-xs">no date yet</span> : null}
             {r.pax ? <span className="block text-xs">{r.pax} pax</span> : null}
           </span>
