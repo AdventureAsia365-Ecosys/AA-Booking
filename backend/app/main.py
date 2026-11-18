@@ -55,6 +55,7 @@ from app.jobs.metrics import JobMetricsSampler
 from app.jobs.worker import Worker
 from app.observability import setup as setup_observability
 from app.observability.request_id import RequestIdMiddleware, unhandled_error_handler
+from app.observability.security_headers import SecurityHeadersMiddleware
 from app.ops import files as ops_files
 from app.ops import lifecycle as ops_lifecycle
 from app.outbox import OutboxSequencer
@@ -214,6 +215,9 @@ def create_app(
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     # AA-871: the unhandled 500 keeps the request id (it is answered outside the middleware below).
     app.add_exception_handler(Exception, unhandled_error_handler)
+    # AA-1111 (S284, ZAP baseline): nosniff + HSTS on every response, just inside the request id (the unhandled 500
+    # gets them from unhandled_error_handler).
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(docs.router)
