@@ -255,9 +255,33 @@ export interface RangeBody {
   note: string;
 }
 
+/** AA-1128 B1: the season calendar step of the last finished catalog sync (null before the first run). */
+export interface SeasonSync {
+  finished_at: IsoDateTime | null;
+  picked: number;
+  assigned: number;
+  calendars_created: number;
+  no_tour: number;
+  no_destination: number;
+  timed_out: number;
+  not_tried: number;
+  /** Why the step did not run ("TimeoutError", "policy_unavailable", ...); null when it ran. */
+  skipped: string | null;
+  /** Skipped, or a catalog read was cut: the run did not try its whole batch. */
+  degraded: boolean;
+}
+
+export interface SeasonCalendarList {
+  items: SeasonCalendar[];
+  season_codes: SeasonCode[];
+  /** AA-1128: present once the API serves it. */
+  sync?: SeasonSync | null;
+  plans?: number;
+  plans_without_calendar?: number;
+}
+
 export const seasonsApi = {
-  calendars: (ownerKind?: string) =>
-    bkGet<{ items: SeasonCalendar[]; season_codes: SeasonCode[] }>("pricing/season-calendars", { owner_kind: ownerKind }),
+  calendars: (ownerKind?: string) => bkGet<SeasonCalendarList>("pricing/season-calendars", { owner_kind: ownerKind }),
   create: (body: { owner_kind: string; destination_id?: string | null; supplier_contract_id?: string | null; name: string }) =>
     bkSend<CalendarDetail>("pricing/season-calendars", { body }),
   calendar: (id: string, year?: number) =>

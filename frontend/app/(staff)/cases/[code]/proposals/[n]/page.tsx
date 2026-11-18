@@ -531,11 +531,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
             {canPrice && (
               <Section
                 title="Price"
-                description={locked ? "The price saved on this version when it was sent. It no longer changes." : "Live quote from the Booking pricing engine; Apply price saves it on the version."}
+                description={locked ? lockedPriceNote(c.channel, v.sent_at) : "Live quote from the Booking pricing engine; Apply price saves it on the version."}
               >
                 <div className="flex flex-col gap-4">
                   {locked ? (
-                    <LockedPrice v={v} />
+                    <LockedPrice v={v} b2b={c.channel === "b2b"} />
                   ) : (
                     <>
                       <PriceSettings value={price} onChange={setPrice} belowFloor={!!fresh?.below_floor} disabled={locked} />
@@ -695,7 +695,14 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
 
 /** The price panel of a sent or approved version (AA-996, audit item 12): the saved total and how it was locked,
  *  instead of the editing empty state "No quote yet". */
-function LockedPrice({ v }: { v: VersionWithItems }) {
+/** AA-1128 B4: a B2B version is approved by the agency's hold confirm and never sent, so its locked price is "saved on
+ *  approval", not "when it was sent". */
+function lockedPriceNote(channel: string, sentAt: string | null | undefined): string {
+  if (channel === "b2b" || !sentAt) return "The price saved on this version when it was approved. It no longer changes.";
+  return "The price saved on this version when it was sent. It no longer changes.";
+}
+
+function LockedPrice({ v, b2b }: { v: VersionWithItems; b2b: boolean }) {
   const row = (label: string, value: React.ReactNode) => (
     <>
       <dt className="text-muted">{label}</dt>
@@ -735,7 +742,9 @@ function LockedPrice({ v }: { v: VersionWithItems }) {
       </dl>
       <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
         {v.is_approved
-          ? "The customer approved this price. Invoices are made from it on the Billing tab."
+          ? b2b
+            ? "The agency confirmed this price with its booking. Agency invoices are made from it."
+            : "The customer approved this price. Invoices are made from it on the Billing tab."
           : "This is the price the customer received. To change it, create a new version from the case."}
       </p>
     </div>

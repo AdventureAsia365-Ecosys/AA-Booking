@@ -35,7 +35,7 @@ export const M = defineMessages(
     colChecks: "Checks",
     colPrice: "Price",
     colNext: "Next step",
-    days: (n: number) => `${n} days`,
+    days: (n: number) => (n === 1 ? "1 day" : `${n} days`),
     sellable: "Sellable",
     notInCatalog: "No longer in the catalog",
     rrp2: "RRP for 2",

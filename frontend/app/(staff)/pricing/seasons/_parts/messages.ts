@@ -13,6 +13,19 @@ export const S = defineMessages(
     kpiCalendars: "Calendars",
     kpiWaiting: "Waiting for approval",
     kpiPlans: "Tours with a calendar",
+    kpiWithout: "Tours without a calendar",
+    syncTitle: "Catalog sync",
+    syncNone: "The catalog sync has not run yet.",
+    syncLine: (when: string, assigned: number, picked: number) =>
+      `Last run ${when}: ${assigned} of ${picked} ${picked === 1 ? "tour" : "tours"} given a calendar.`,
+    syncRest: (noTour: number, noDest: number) =>
+      `${noTour} not in the CIS catalog (paused or retired), ${noDest} with no destination on day 1 (low season).`,
+    syncDegradedPill: "Degraded",
+    syncDegraded: "This run did not try its whole batch.",
+    syncCut: (cut: number, rest: number) =>
+      `A catalog read took longer than the read timeout (${cut}); ${rest} ${rest === 1 ? "tour was" : "tours were"} left for the next run.`,
+    syncSkipped: (why: string) => `The step did not run (${why}).`,
+    syncPolicy: "Batch size and read timeout: Pricing › Policy, Operations.",
     colName: "Calendar",
     colOwner: "For",
     colDefault: "Other dates",
@@ -119,6 +132,18 @@ export const S = defineMessages(
     kpiCalendars: "Lịch",
     kpiWaiting: "Chờ duyệt",
     kpiPlans: "Tour có lịch",
+    kpiWithout: "Tour chưa có lịch",
+    syncTitle: "Đồng bộ danh mục",
+    syncNone: "Đồng bộ danh mục chưa chạy lần nào.",
+    syncLine: (when: string, assigned: number, picked: number) => `Lần chạy gần nhất ${when}: gán lịch cho ${assigned}/${picked} tour.`,
+    syncRest: (noTour: number, noDest: number) =>
+      `${noTour} tour không có trong danh mục CIS (tạm dừng hoặc ngừng bán), ${noDest} tour không có điểm đến ở ngày 1 (mùa thấp).`,
+    syncDegradedPill: "Suy giảm",
+    syncDegraded: "Lần chạy này không thử hết lô.",
+    syncCut: (cut: number, rest: number) =>
+      `Một lần đọc danh mục vượt thời gian chờ (${cut}); ${rest} tour để lại cho lần chạy sau.`,
+    syncSkipped: (why: string) => `Bước này không chạy (${why}).`,
+    syncPolicy: "Kích thước lô và thời gian chờ đọc: Giá › Chính sách, mục Vận hành.",
     colName: "Lịch",
     colOwner: "Dùng cho",
     colDefault: "Các ngày khác",

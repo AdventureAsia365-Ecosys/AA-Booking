@@ -97,6 +97,16 @@ export interface AgencyPayment {
   approved_by: string | null;
   rejected_by: string | null;
   reject_reason: string | null;
+  /** AA-1128: the staff directory names beside the refs (null for a marker or someone not in the directory). */
+  recorded_by_name?: string | null;
+  approved_by_name?: string | null;
+  rejected_by_name?: string | null;
+}
+
+/** AA-1128 B3: who recorded a payment, by name; never the raw sign-in subject ("cog:…"). */
+export function paymentRecorder(p: Pick<AgencyPayment, "recorded_by" | "recorded_by_name">): string {
+  if (p.recorded_by_name?.trim()) return p.recorded_by_name.trim();
+  return p.recorded_by?.startsWith("cog:") ? "A staff member" : p.recorded_by || "—";
 }
 
 /** AA-1037 extras G4: an overdue reminder step handled for an invoice (bk-044). */

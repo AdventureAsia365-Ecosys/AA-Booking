@@ -32,6 +32,7 @@ import {
   useUrlFilters,
   type ColumnDef,
 } from "@/ui";
+import { daysText } from "@/ui/booking/plural";
 
 const MAX_LISTED = 3;
 
@@ -74,7 +75,7 @@ function Needs({ row }: { row: ReadinessItem }) {
 }
 
 function Tour({ row }: { row: ReadinessItem }) {
-  const facts = [row.country, row.duration_days ? `${row.duration_days} days` : null, row.sellable ? "Sellable" : null]
+  const facts = [row.country, row.duration_days ? daysText(row.duration_days) : null, row.sellable ? "Sellable" : null]
     .filter(Boolean)
     .join(" · ");
   return (

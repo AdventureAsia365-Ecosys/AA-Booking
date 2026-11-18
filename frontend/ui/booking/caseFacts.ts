@@ -113,7 +113,8 @@ export function inclusiveDays(start: string | null, end: string | null): number 
   return days >= 1 ? days : null;
 }
 
-/** How far a trip is from ready: done and not-applicable checks count as resolved (the board's open = the rest). */
+/** How far a trip is from ready: done and not-applicable checks count as resolved (the board's open = the rest; AA-1128:
+ *  the label says "resolved", since a not-applicable check is not done). */
 export function checkProgress(checks: { total: number; done: number; not_applicable: number } | null | undefined): {
   resolved: number;
   total: number;
@@ -123,7 +124,7 @@ export function checkProgress(checks: { total: number; done: number; not_applica
   if (!checks || checks.total <= 0) return null;
   const resolved = Math.min(checks.total, checks.done + checks.not_applicable);
   const pct = Math.round((resolved / checks.total) * 100);
-  return { resolved, total: checks.total, pct, label: `${resolved} of ${checks.total} checks done` };
+  return { resolved, total: checks.total, pct, label: `${resolved} of ${checks.total} checks resolved` };
 }
 
 /** /trip-checks status tabs (AA-996 review fix): may the tab badges show the API's counts? The counts apply the
@@ -141,6 +142,15 @@ export function tabCountsShown(tab: string, due: string): boolean {
 
 /** AA-1046: who a case is for, in one line. The B2C half is retired, so a b2c case names no traveller (no customer
  *  record is kept); a B2B case is an agency booking. */
-export function casePartyLabel(c: { channel: "b2c" | "b2b" | string }): string {
-  return c.channel === "b2b" ? "B2B agency" : "Traveller (B2C history)";
+export function casePartyLabel(c: { channel: "b2c" | "b2b" | string; party_agency_name?: string | null }): string {
+  if (c.channel !== "b2b") return "Traveller (B2C history)";
+  return c.party_agency_name?.trim() || "B2B agency";
+}
+
+/** AA-1128 B3: the line under a case's party: never the raw tenant UUID. A B2B case reads "B2B agency booking" when
+ *  the agency has a name, "Agency not in Booking yet" when the API sent none; a B2C case is read-only history. */
+export function casePartySub(c: { channel: "b2c" | "b2b" | string; party_tenant_id?: string | null; party_agency_name?: string | null }): string {
+  if (c.channel !== "b2b") return "read-only";
+  if (!c.party_tenant_id) return "No agency on this case";
+  return c.party_agency_name?.trim() ? "B2B agency booking" : "Agency not in Booking yet";
 }

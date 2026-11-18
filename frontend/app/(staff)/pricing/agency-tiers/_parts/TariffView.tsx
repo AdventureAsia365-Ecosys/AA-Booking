@@ -14,6 +14,7 @@ import { Download, Printer } from "lucide-react";
 import { agencyPricingApi, TARIFF_CURRENCIES, type TariffItem, type UnpricedTariffRow } from "@/lib/api/agencyPricing";
 import { pct } from "@/lib/proposalDraft";
 import { Button, DataTable, DateText, EmptyState, Money, PageFrame, Section, Select, useToast, useUrlFilters, type ColumnDef } from "@/ui";
+import { daysText } from "@/ui/booking/plural";
 
 function band(min: number, max: number | null): string {
   if (max === null) return `${min}+`;
@@ -31,7 +32,7 @@ function rowId(r: {
 }
 
 function Tour({ row }: { row: { title: string | null; tour: { source_id: string }; country?: string | null; duration_days?: number | null } }) {
-  const facts = [row.country, row.duration_days ? `${row.duration_days} days` : null].filter(Boolean).join(" · ");
+  const facts = [row.country, row.duration_days ? daysText(row.duration_days) : null].filter(Boolean).join(" · ");
   return (
     <span className="flex flex-col">
       <span className="font-medium text-ink">{row.title ?? row.tour.source_id}</span>

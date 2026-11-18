@@ -44,6 +44,7 @@ import { dayDate, itemsByDay, useVersion } from "@/app/(staff)/_parts/useVersion
 import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisTourName, cisUpdates } from "@/ui/booking/cisReadback";
 import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
+import { daysText } from "@/ui/booking/plural";
 
 
 function longDate(d: Date | null): string | null {
@@ -54,7 +55,7 @@ function longDate(d: Date | null): string | null {
 /** "Valid for 14 days once sent": the quote validity of the pricing policy in force. */
 function validityText(listing: PolicyListing | undefined): string {
   const value = listing?.items.find((i) => i.key === "quote_validity_days")?.current?.value;
-  return typeof value === "number" ? `Valid for ${value} days once sent` : "Valid for the quote validity once sent";
+  return typeof value === "number" ? `Valid for ${daysText(value)} once sent` : "Valid for the quote validity once sent";
 }
 
 /** The deposit follows the agency's payment terms on a b2b case and the customer invoice schedule on a b2c case. */
@@ -103,7 +104,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const builderHref = `/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}`;
   const tripName = v.title ?? c.trip_title ?? "Custom trip";
   const dates = c.start_date
-    ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}${c.duration_days ? ` (${c.duration_days} days)` : ""}`
+    ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}${c.duration_days ? ` (${daysText(c.duration_days)})` : ""}`
     : "Dates to be confirmed";
   const sales = c.assignees.find((a) => a.role === "sales")?.name ?? null;
   const countries = caseCountries(c).codes;
@@ -165,7 +166,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
           <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved ? (
-              <span>Approved by the customer: this version is locked.</span>
+              <span>{c.channel === "b2b" ? "Approved by the agency" : "Approved by the customer"}: this version is locked.</span>
             ) : (
               <span>
                 Marked as sent on <DateText value={v.sent_at} />: this version is locked. Booking does not send e-mail yet.

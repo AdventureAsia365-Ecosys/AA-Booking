@@ -25,6 +25,27 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   b2b_hold: "B2B hold",
   b2b_partner: "B2B partner",
   retention: "Retention",
+  // AA-1128 B3 (S283 audit): every entity type the backend writes has a label and a filter option.
+  price_list_version: "Price list version",
+  tenant: "Agency",
+  agency_invoice: "Agency invoice",
+  agency_payment: "Agency payment",
+  agency_billing_export: "Agency billing export",
+  cancellation_policy: "Cancellation policy",
+  country_profile: "Country profile",
+  destination_profile: "Destination profile",
+  departure_cost: "Departure cost",
+  entity_media: "Photo",
+  job: "Background job",
+  partner_rate_card: "Agency rate card",
+  partner_tier: "Agency tier",
+  partner_tier_discount: "Agency tier discount",
+  pricing_policy: "Pricing policy",
+  supplier_bill: "Supplier bill",
+  supplier_booking: "Supplier booking",
+  supplier_order: "Supplier order",
+  terms_clause: "Terms clause",
+  trip_case_check: "Trip check",
 };
 
 export function auditEntityLabel(entityType: string): string {

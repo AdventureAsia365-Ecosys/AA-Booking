@@ -3,7 +3,7 @@
 // `npm run test:unit` runs every ui/booking/*.test.mjs once the audit slice 1 script is on main).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { caseCountries, checkProgress, inclusiveDays, inquiryPrefs, tabCountsShown } from "./caseFacts.ts";
+import { caseCountries, casePartyLabel, casePartySub, checkProgress, inclusiveDays, inquiryPrefs, tabCountsShown } from "./caseFacts.ts";
 
 test("inquiryPrefs is null when the snapshot carries only the route", () => {
   assert.equal(inquiryPrefs(null), null);
@@ -52,8 +52,8 @@ test("inclusiveDays counts both ends and refuses bad input", () => {
 });
 
 test("checkProgress counts not-applicable checks as resolved", () => {
-  assert.deepEqual(checkProgress({ total: 9, done: 2, not_applicable: 1 }), { resolved: 3, total: 9, pct: 33, label: "3 of 9 checks done" });
-  assert.deepEqual(checkProgress({ total: 3, done: 3, not_applicable: 0 }), { resolved: 3, total: 3, pct: 100, label: "3 of 3 checks done" });
+  assert.deepEqual(checkProgress({ total: 9, done: 2, not_applicable: 1 }), { resolved: 3, total: 9, pct: 33, label: "3 of 9 checks resolved" });
+  assert.deepEqual(checkProgress({ total: 3, done: 3, not_applicable: 0 }), { resolved: 3, total: 3, pct: 100, label: "3 of 3 checks resolved" });
   assert.equal(checkProgress({ total: 0, done: 0, not_applicable: 0 }), null);
   assert.equal(checkProgress(undefined), null);
 });
@@ -66,4 +66,19 @@ test("tabCountsShown hides the trip-check tab counts while a due window narrows 
   assert.equal(tabCountsShown("all", "30d"), false);
   assert.equal(tabCountsShown("open", "14d"), false);
   assert.equal(tabCountsShown("done", "overdue"), false);
+});
+
+test("a case's party shows the agency name, never the tenant id (AA-1128)", () => {
+  const tenant = "00000000-0000-4000-8000-00000000a128";
+  assert.equal(casePartyLabel({ channel: "b2b", party_agency_name: "Invented Heron Tours" }), "Invented Heron Tours");
+  assert.equal(casePartyLabel({ channel: "b2b", party_agency_name: null }), "B2B agency");
+  assert.equal(casePartyLabel({ channel: "b2c" }), "Traveller (B2C history)");
+  const subs = [
+    casePartySub({ channel: "b2b", party_tenant_id: tenant, party_agency_name: "Invented Heron Tours" }),
+    casePartySub({ channel: "b2b", party_tenant_id: tenant, party_agency_name: null }),
+    casePartySub({ channel: "b2b", party_tenant_id: null }),
+    casePartySub({ channel: "b2c", party_tenant_id: null }),
+  ];
+  assert.deepEqual(subs, ["B2B agency booking", "Agency not in Booking yet", "No agency on this case", "read-only"]);
+  assert.ok(subs.every((s) => !s.includes(tenant)));
 });

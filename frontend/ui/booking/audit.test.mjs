@@ -3,7 +3,7 @@
 // Run: node --test ui/booking/*.test.mjs (Node 22 strips the TypeScript types of audit.ts itself).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { auditActionLabel, auditActionTone } from "./audit.ts";
+import { AUDIT_ENTITY_LABEL, auditActionLabel, auditActionTone, auditEntityLabel } from "./audit.ts";
 
 test("create class is success", () => {
   for (const a of ["trip_case.created", "staff.provisioned", "payment.recorded", "supplier_media.uploaded", "b2b_hold.placed"]) {
@@ -39,4 +39,11 @@ test("a staff.updated row that switched access reads as what it did", () => {
   const role = { action: "staff.updated", before: { active: true, role: "sales" }, after: { active: true, role: "admin" } };
   assert.equal(auditActionTone(role), "info");
   assert.equal(auditActionLabel("trip_case_version.items_replaced"), "items replaced");
+});
+
+test("every entity type the backend audits has a label (AA-1128)", () => {
+  for (const t of ["price_list_version", "tenant", "agency_payment", "pricing_policy", "trip_case_check"]) {
+    assert.ok(AUDIT_ENTITY_LABEL[t], t);
+    assert.notEqual(auditEntityLabel(t), t.replace(/_/g, " "));
+  }
 });

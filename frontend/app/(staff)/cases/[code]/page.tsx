@@ -41,7 +41,7 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
-import { caseCountries, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFacts";
+import { caseCountries, casePartyLabel, casePartySub, inclusiveDays, inquiryPrefs } from "@/ui/booking/caseFacts";
 import { QueryError } from "../_parts/QueryError";
 import { useCountryNames } from "../_parts/CountryPicker";
 import { AgencyBookingPanel, VouchersButton } from "./AgencyBookingPanel";
@@ -52,6 +52,7 @@ import { NotesCard } from "./NotesCard";
 import { ProposalsTab } from "./ProposalsTab";
 import { StatusActions } from "./StatusActions";
 import { SuppliersTab } from "./SuppliersTab";
+import { daysText } from "@/ui/booking/plural";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -215,7 +216,7 @@ function salesName(c: TripCaseDetail): string | null {
 /** "6 Dec 2026 – 19 Dec 2026 (14 days)"; the length comes from the legs, else from the two dates. */
 function tripDates(c: TripCaseDetail): string {
   const end = c.trip_end_date ?? c.end_date;
-  if (!c.start_date) return c.duration_days ? `Dates not set · ${c.duration_days} days` : "Dates not set";
+  if (!c.start_date) return c.duration_days ? `Dates not set · ${daysText(c.duration_days)}` : "Dates not set";
   const days = c.duration_days ?? inclusiveDays(c.start_date, end);
   return `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}${days ? ` (${days} day${days === 1 ? "" : "s"})` : ""}`;
 }
@@ -373,8 +374,8 @@ function Overview({
               </p>
               {c.channel === "b2b" ? (
                 <PersonCell
-                  name="B2B agency booking"
-                  sub={c.party_tenant_id ? `Partner tenant ${c.party_tenant_id}` : "No agency on this case"}
+                  name={casePartyLabel(c)}
+                  sub={casePartySub(c)}
                   chips={<Pill tone="accent" dot={false}>B2B</Pill>}
                 />
               ) : (
