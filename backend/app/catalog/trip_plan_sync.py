@@ -27,7 +27,9 @@ reference price the customer-service team reviews in CIS (``reference_amount`` /
 CIS parser, no doubts) is taken as it is: basis ``per_person`` or ``from`` (the lowest per-person price) is the
 per-person reference; ``per_group`` gives no per-person amount (the plan keeps the text only, never a group total
 shown as a per-person price). Status ``needs_review`` (the CIS parser had doubts, or the text changed since the value
-was set) is not trusted: Booking's own parse of the text decides, as without CIS's value. A change of the amount or
+was set) is not trusted, and neither is Booking's own parse of the same text (AA-1128, S283 UI audit: the first number
+of a doubtful text was often a traveller count, "2 pax from USD 1,450", shown as a 2 USD reference): the plan keeps the
+text only, no amount, until CIS confirms or parses it. A change of the amount or
 currency alone also counts as a change (the review is cleared). The run reports which view it read
 (``references_source`` ``structured`` | ``text``) and how many plans hold a CIS structured value
 (``references_structured``). Without either view (CIS not applied, no grant) the reference part is skipped and
@@ -201,8 +203,9 @@ def parse_reference(raw: str | None) -> tuple[Decimal, str] | None:
     return amount.quantize(Decimal("0.01")), currency
 
 
-# CIS 402 ``reference_status`` values Booking takes as they are; ``needs_review`` falls back to the text parse.
+# CIS 402 ``reference_status`` values Booking takes as they are; ``needs_review`` keeps the text only (AA-1128).
 TRUSTED_STATUSES = frozenset({"confirmed", "parsed"})
+NEEDS_REVIEW = "needs_review"
 # ``from`` = the lowest per-person price of the tour (CIS 401): still a per-person reference.
 PER_PERSON_BASES = frozenset({"per_person", "from"})
 PER_GROUP = "per_group"
@@ -231,7 +234,10 @@ def reference_of(
     raw: str | None, amount: Any = None, currency: Any = None, basis: Any = None, status: Any = None
 ) -> tuple[Decimal, str] | None:
     """The per-person reference of a plan: CIS's trusted structured value (a per-group one gives None: no per-person
-    amount), else the parse of the text. ``status`` None (v1, no structured value) always parses."""
+    amount), else the parse of the text. ``status`` None (v1, no structured value) always parses; ``needs_review``
+    gives None (the text is kept, no amount: AA-1128)."""
+    if status == NEEDS_REVIEW:
+        return None
     if trusted(amount, status):
         if (basis or "per_person") == PER_GROUP:
             return None

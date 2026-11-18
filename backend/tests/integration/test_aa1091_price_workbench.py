@@ -557,7 +557,8 @@ async def test_structured_reference_from_cis(
     )
     needs = await trip_plan_sync.run(pool)
     assert needs["references_changed"] == 1 and needs["references_structured"] == 1
-    assert (await admin.fetchrow(ref, TOUR))["reference_amount"] == Decimal("1450.00")  # the parse decides
+    # AA-1128: a needs-review value keeps the text only, no amount (the parse of a doubtful text is not trusted either)
+    assert tuple(await admin.fetchrow(ref, TOUR)) == ("from USD 1,450 pp", None, None)
     await admin.execute(
         "UPDATE catalog.v_tour_price_reference_v2 SET reference_status = 'confirmed' WHERE source_id = $1", TOUR
     )
