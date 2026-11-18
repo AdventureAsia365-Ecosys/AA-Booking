@@ -154,3 +154,22 @@ export function casePartySub(c: { channel: "b2c" | "b2b" | string; party_tenant_
   if (!c.party_tenant_id) return "No agency on this case";
   return c.party_agency_name?.trim() ? "B2B agency booking" : "Agency not in Booking yet";
 }
+
+/** AA-1128 B4: the wording of a locked version's price. A B2B version is approved by the agency's hold confirm and
+ *  never sent, so its price is "saved on approval" and the agency confirmed it; a sent B2C version keeps its words. */
+export function lockedPriceText(channel: string, sentAt: string | null | undefined, approved: boolean): { note: string; footnote: string } {
+  const b2b = channel === "b2b";
+  const note = b2b || !sentAt
+    ? "The price saved on this version when it was approved. It no longer changes."
+    : "The price saved on this version when it was sent. It no longer changes.";
+  if (!approved) return { note, footnote: "This is the price the customer received. To change it, create a new version from the case." };
+  const footnote = b2b
+    ? "The agency confirmed this price with its booking. Agency invoices are made from it."
+    : "The customer approved this price. Invoices are made from it on the Billing tab.";
+  return { note, footnote };
+}
+
+/** Who approved a locked version, for the preview banner. */
+export function approvedByText(channel: string): string {
+  return channel === "b2b" ? "Approved by the agency" : "Approved by the customer";
+}

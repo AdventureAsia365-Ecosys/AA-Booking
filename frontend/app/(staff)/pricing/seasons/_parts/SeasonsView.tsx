@@ -20,6 +20,7 @@ import {
   type SeasonCalendar,
   type SeasonCode,
   type SeasonRange,
+  type SeasonCalendarList,
   type SeasonSync,
 } from "@/lib/api/priceVersions";
 import { suppliersApi } from "@/lib/api/suppliers";
@@ -503,6 +504,21 @@ function SyncPanel({ sync }: { sync: SeasonSync | null }) {
   );
 }
 
+/** The tours still without a calendar and the last sync, once the API sends them (hidden before). */
+function SyncSummary({ data }: { data: SeasonCalendarList | undefined }) {
+  const t = useT(S);
+  const without = data?.plans_without_calendar;
+  if (without === undefined) return null;
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <KpiTile label={t("kpiWithout")} value={without} hintTone={without ? "warning" : "neutral"} />
+      <div className="sm:col-span-2">
+        <SyncPanel sync={data?.sync ?? null} />
+      </div>
+    </div>
+  );
+}
+
 function Seasons() {
   const t = useT(S);
   const canWrite = useCan("season.write");
@@ -547,18 +563,7 @@ function Seasons() {
         />
         <KpiTile label={t("kpiPlans")} value={list.data ? items.reduce((n, c) => n + c.plans, 0) : undefined} />
       </div>
-      {list.data?.plans_without_calendar !== undefined && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <KpiTile
-            label={t("kpiWithout")}
-            value={list.data.plans_without_calendar}
-            hintTone={list.data.plans_without_calendar ? "warning" : "neutral"}
-          />
-          <div className="sm:col-span-2">
-            <SyncPanel sync={list.data.sync ?? null} />
-          </div>
-        </div>
-      )}
+      <SyncSummary data={list.data} />
       <Section>
         <DataTable<SeasonCalendar>
           tableId="season-calendars"

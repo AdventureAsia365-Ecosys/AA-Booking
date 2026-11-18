@@ -39,7 +39,7 @@ import {
   useCan,
 } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
-import { caseCountries, casePartyLabel } from "@/ui/booking/caseFacts";
+import { approvedByText, caseCountries, casePartyLabel } from "@/ui/booking/caseFacts";
 import { dayDate, itemsByDay, useVersion } from "@/app/(staff)/_parts/useVersion";
 import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisTourName, cisUpdates } from "@/ui/booking/cisReadback";
@@ -166,7 +166,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
           <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved ? (
-              <span>{c.channel === "b2b" ? "Approved by the agency" : "Approved by the customer"}: this version is locked.</span>
+              <span>{approvedByText(c.channel)}: this version is locked.</span>
             ) : (
               <span>
                 Marked as sent on <DateText value={v.sent_at} />: this version is locked. Booking does not send e-mail yet.

@@ -3,7 +3,7 @@
 // `npm run test:unit` runs every ui/booking/*.test.mjs once the audit slice 1 script is on main).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { caseCountries, casePartyLabel, casePartySub, checkProgress, inclusiveDays, inquiryPrefs, tabCountsShown } from "./caseFacts.ts";
+import { approvedByText, caseCountries, casePartyLabel, casePartySub, checkProgress, inclusiveDays, inquiryPrefs, lockedPriceText, tabCountsShown } from "./caseFacts.ts";
 
 test("inquiryPrefs is null when the snapshot carries only the route", () => {
   assert.equal(inquiryPrefs(null), null);
@@ -81,4 +81,15 @@ test("a case's party shows the agency name, never the tenant id (AA-1128)", () =
   ];
   assert.deepEqual(subs, ["B2B agency booking", "Agency not in Booking yet", "No agency on this case", "read-only"]);
   assert.ok(subs.every((s) => !s.includes(tenant)));
+});
+
+test("a locked B2B version says approved and agency, never sent or customer (AA-1128)", () => {
+  const b2b = lockedPriceText("b2b", null, true);
+  assert.match(b2b.note, /when it was approved/);
+  assert.match(b2b.footnote, /agency confirmed/);
+  const b2c = lockedPriceText("b2c", "2026-10-01T09:00:00Z", true);
+  assert.match(b2c.note, /when it was sent/);
+  assert.match(b2c.footnote, /customer approved/);
+  assert.equal(approvedByText("b2b"), "Approved by the agency");
+  assert.equal(approvedByText("b2c"), "Approved by the customer");
 });
