@@ -32,12 +32,17 @@ export interface UnratedComponent {
   supplier_code: string | null;
 }
 
+export type CatalogState = "served" | "paused" | "retired" | "not_in_catalog";
+
 export interface ReadinessItem {
   tour_key: string;
   title: string | null;
   country: string | null;
   duration_days: number | null;
   in_catalog: boolean | null;
+  /** AA-1128: served (in catalog.v_tour), paused or retired in CIS, not_in_catalog; null = unknown (catalog read
+   *  degraded). */
+  catalog_state: CatalogState | null;
   sellable: boolean;
   status: ReadinessStatus;
   /** The cost sheet's reason today (null = nothing stops it). */

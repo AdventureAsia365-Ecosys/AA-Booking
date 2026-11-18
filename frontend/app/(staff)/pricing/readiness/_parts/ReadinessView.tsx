@@ -33,8 +33,16 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { daysText } from "@/ui/booking/plural";
+import { outOfCatalog, tourName, type OutOfCatalog } from "@/ui/booking/priceWorkbench";
 
 const MAX_LISTED = 3;
+
+// AA-1128: a paused tour is temporary in CIS, never "no longer in the catalog".
+const OUT_OF_CATALOG: Record<OutOfCatalog, string> = {
+  paused: "Paused in CIS: back on sale once CIS serves it again",
+  retired: "Retired in CIS",
+  gone: "No longer in the catalog",
+};
 
 function componentText(c: UnratedComponent): string {
   const name = c.room_type ? `${c.code ?? "?"} ${c.room_type}` : (c.code ?? "?");
@@ -75,14 +83,15 @@ function Needs({ row }: { row: ReadinessItem }) {
 }
 
 function Tour({ row }: { row: ReadinessItem }) {
+  const out = outOfCatalog(row);
   const facts = [row.country, row.duration_days ? daysText(row.duration_days) : null, row.sellable ? "Sellable" : null]
     .filter(Boolean)
     .join(" · ");
   return (
     <span className="flex min-w-0 flex-col">
-      <span className="font-medium text-ink">{row.title ?? row.tour_key}</span>
+      <span className="font-medium text-ink">{tourName(row, "Tour")}</span>
       {facts && <span className="text-xs text-muted">{facts}</span>}
-      {row.in_catalog === false && <span className="text-xs text-muted">No longer in the catalog</span>}
+      {out && <span className="text-xs text-muted">{OUT_OF_CATALOG[out]}</span>}
     </span>
   );
 }
@@ -146,15 +155,19 @@ export function ReadinessView() {
       id: "open",
       header: "Trip plan",
       enableSorting: false,
-      cell: ({ row }) => (
-        <Link
-          href={planHref(row.original)}
-          onClick={(e) => e.stopPropagation()}
-          className="whitespace-nowrap text-[13px] font-semibold text-accent-deep hover:underline"
-        >
-          {canEditPlans ? "Open prices" : "Open"}
-        </Link>
-      ),
+      // AA-1128: the trip plan pages read the tour from the catalog: no link for a tour out of it (it would 404).
+      cell: ({ row }) =>
+        row.original.in_catalog === false ? (
+          <span className="text-[13px] text-muted">—</span>
+        ) : (
+          <Link
+            href={planHref(row.original)}
+            onClick={(e) => e.stopPropagation()}
+            className="whitespace-nowrap text-[13px] font-semibold text-accent-deep hover:underline"
+          >
+            {canEditPlans ? "Open prices" : "Open"}
+          </Link>
+        ),
     },
   ];
 
@@ -254,7 +267,9 @@ export function ReadinessView() {
           loading={report.isLoading}
           error={report.isError ? (report.error as Error).message : null}
           onRetry={() => report.refetch()}
-          onRowClick={(r) => router.push(planHref(r))}
+          onRowClick={(r) => {
+            if (r.in_catalog !== false) router.push(planHref(r));
+          }}
           emptyTitle={filtered ? "No trip plans match" : "No trip plans yet"}
           emptyDescription={
             filtered

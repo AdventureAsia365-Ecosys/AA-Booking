@@ -88,7 +88,15 @@ ReadinessStatus = Literal[
 ]
 WorkbenchCheck = Literal["components", "rates", "fx", "rule", "price", "sellable", "departures"]
 WorkbenchStep = Literal[
-    "add_components", "fix_inactive", "load_rates", "approve_fx", "approve_rule", "recompute", "make_sellable", "done"
+    "not_served",
+    "add_components",
+    "fix_inactive",
+    "load_rates",
+    "approve_fx",
+    "approve_rule",
+    "recompute",
+    "make_sellable",
+    "done",
 ]
 WorkbenchAction = Literal["make_sellable", "make_not_sellable", "apply_provisional", "clear_provisional", "recompute"]
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

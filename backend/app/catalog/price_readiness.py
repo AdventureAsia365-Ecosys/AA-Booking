@@ -30,6 +30,12 @@ whose rule just ended shows it before the next recompute removes its rows.
 the components of the plans that have some and their items' rate spans in batches of :data:`BATCH`; no net is read.
 The CIS catalog join fails soft: without it the plans are listed without title, country and days (``degraded``).
 
+**Catalog state** (``catalog_state``, AA-1128): ``served`` for a plan whose tour is in ``catalog.v_tour``; for the
+others the served state of :mod:`app.catalog.liveness` (``paused``, ``retired`` or ``not_in_catalog``), read once for
+those keys only (soft: a liveness read that fails leaves it ``None``); ``None`` too when the catalog join is degraded.
+A paused tour (Master inactive in CIS, temporary) is told apart from a retired one, so the pages never call it "no
+longer in the catalog".
+
 **Rate-sheet impact** (:func:`impact`): for a rate sheet's dry run, the plans whose components use the sheet's room
 types or services, whether each would have a rate for every component once this draft is published, its status after,
 and how many plans would move to priced. The draft itself is never written by this read.
@@ -47,7 +53,7 @@ from typing import Any
 import asyncpg
 
 from app.b2b.tariff import FORMULA_START
-from app.catalog import cost_sheet
+from app.catalog import cost_sheet, liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.pricing import engine
 
@@ -189,6 +195,7 @@ class Plan:
     country: str | None = None
     duration_days: int | None = None
     in_catalog: bool | None = None
+    catalog_state: str | None = None
     components: list[Component] = field(default_factory=list)
     computed_rows: int = 0
     hand_rows: int = 0
@@ -379,7 +386,9 @@ async def load(conn: asyncpg.Connection, on: date, plan_ids: Sequence[str] | Non
             hand_rows=int(r["hand_rows"]),
             hand_rows_expired=int(r["hand_rows_expired"]),
             from_price=price,
+            catalog_state=liveness.SERVED if r["in_catalog"] else None,
         )
+    await _catalog_states(conn, plans.values())
     with_parts = [r["plan_id"] for r in rows if r["components"]]
     rooms: set[str] = set()
     services: set[str] = set()
@@ -412,6 +421,18 @@ async def load(conn: asyncpg.Connection, on: date, plan_ids: Sequence[str] | Non
     return Facts(on, pricing, list(plans.values()), rated, ["catalog"] if degraded else [])
 
 
+async def _catalog_states(conn: asyncpg.Connection, plans: Iterable[Plan]) -> None:
+    """``catalog_state`` of the plans whose tour is not in ``catalog.v_tour`` (paused, retired or not in the catalog),
+    one soft liveness read for those keys only; a failed read leaves them ``None``."""
+    gone = [p for p in plans if p.in_catalog is False]
+    if not gone:
+        return
+    found = await liveness.states(conn, [p.source_id for p in gone])
+    for plan in gone:
+        state = found.get(plan.source_id)
+        plan.catalog_state = state.state if state is not None else None
+
+
 def _item(plan: Plan, verdict: Verdict, *, pending: bool = False, note: str | None = None) -> dict[str, Any]:
     return {
         "tour_key": plan.source_id,
@@ -419,6 +440,7 @@ def _item(plan: Plan, verdict: Verdict, *, pending: bool = False, note: str | No
         "country": plan.country,
         "duration_days": plan.duration_days,
         "in_catalog": plan.in_catalog,
+        "catalog_state": plan.catalog_state,
         "sellable": plan.sellable,
         "status": verdict.status,
         "reason": verdict.reason,

@@ -894,6 +894,7 @@ function readinessItem(i: number): ReadinessItem {
     country: ["Invented Land", "Lake Country of the North", "Coastland"][i % 3],
     duration_days: 3 + (i % 12),
     in_catalog: i !== 9,
+    catalog_state: i === 9 ? ("paused" as const) : ("served" as const),
     sellable: i % 4 === 0,
     status,
     reason: priced ? (status === "hand_priced" ? "no_components" : null) : status,
@@ -943,7 +944,8 @@ const STEP_OF: Record<string, NextStep> = {
 };
 function workbenchItem(r: ReadinessItem, i: number): WorkbenchItem {
   const priced = r.status === "priced" || r.status === "hand_priced";
-  const next: NextStep = STEP_OF[r.reason ?? ""] ?? (r.sellable ? "done" : "make_sellable");
+  const next: NextStep =
+    r.in_catalog === false ? "not_served" : (STEP_OF[r.reason ?? ""] ?? (r.sellable ? "done" : "make_sellable"));
   const provisional = !priced && i % 3 === 0;
   const checks = {
     components: { ok: r.components > 0, count: r.components },
@@ -1023,7 +1025,7 @@ const WORKBENCH: Workbench = {
   ...READINESS,
   summary: {
     ...READINESS.summary,
-    by_next_step: { add_components: 731, fix_inactive: 4, load_rates: 96, approve_fx: 8, approve_rule: 0, recompute: 2, make_sellable: 30, done: 21 },
+    by_next_step: { not_served: 0, add_components: 731, fix_inactive: 4, load_rates: 96, approve_fx: 8, approve_rule: 0, recompute: 2, make_sellable: 30, done: 21 },
     by_missing: { components: 731, rates: 827, fx: 8, rule: 0, price: 839, sellable: 860, departures: 870 },
     provisional: 240,
   },

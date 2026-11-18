@@ -9,10 +9,12 @@ import io
 from datetime import date, timedelta
 from typing import Any
 
+import asyncpg
 import pytest
 
-from app.catalog import cost_sheet, price_readiness
+from app.catalog import cost_sheet, liveness, price_readiness
 from app.catalog.price_readiness import Component, Plan
+from tests.unit.fakes import STATES_FRAGMENT, VIEW_READY_FRAGMENT, ScriptedConn, state_row
 
 ON = date(2027, 3, 1)
 ROOM, GUIDE, BOAT = "room-1", "svc-guide", "svc-boat"
@@ -264,3 +266,60 @@ async def test_a_plan_only_the_cost_sheet_can_decide_is_probed(monkeypatch: pyte
     assert (out["k-2"]["status"], out["k-2"]["note"]) == ("missing_rates", price_readiness.NOTE_NO_COMMON_WINDOW)
     assert (out["k-3"]["status"], out["k-3"]["note"]) == ("missing_rates", price_readiness.NOTE_NOT_CHECKED)
     assert out["k-4"]["status"] == "no_components" and out["k-4"]["pending_recompute"] is False
+
+
+# ── AA-1128: the catalog state of a plan whose tour is not in catalog.v_tour ──
+
+PAUSED, RETIRED, GONE, LIVE = (f"aa112800-0000-4000-8000-00000000000{n}" for n in (1, 2, 3, 4))
+
+
+@pytest.mark.asyncio
+async def test_a_tour_out_of_the_catalog_is_told_paused_retired_or_gone() -> None:
+    liveness.reset_cache()
+    conn = ScriptedConn(
+        [
+            (VIEW_READY_FRAGMENT, True),
+            (
+                STATES_FRAGMENT,
+                lambda keys: [
+                    state_row(PAUSED, in_catalog=False, tomb_state="paused", tomb_reason="master_inactive"),
+                    state_row(RETIRED, in_catalog=False, tomb_state="retired", tomb_reason="retired"),
+                    state_row(GONE, in_catalog=False),
+                ],
+            ),
+        ]
+    )
+    plans = [
+        Plan("p-1", PAUSED, False, in_catalog=False),
+        Plan("p-2", RETIRED, False, in_catalog=False),
+        Plan("p-3", GONE, False, in_catalog=False),
+        Plan("p-4", LIVE, False, in_catalog=True, catalog_state=liveness.SERVED),
+        Plan("p-5", "k-degraded", False, in_catalog=None),
+    ]
+    await price_readiness._catalog_states(conn, plans)  # type: ignore[arg-type]
+    assert [p.catalog_state for p in plans] == ["paused", "retired", "not_in_catalog", "served", None]
+    asked = conn.sql(STATES_FRAGMENT)
+    assert len(asked) == 1 and sorted(asked[0][0]) == sorted([PAUSED, RETIRED, GONE])  # only the keys out of v_tour
+    liveness.reset_cache()
+
+
+@pytest.mark.asyncio
+async def test_no_liveness_read_when_every_tour_is_served_and_a_failed_read_leaves_none() -> None:
+    liveness.reset_cache()
+    served = ScriptedConn([(VIEW_READY_FRAGMENT, True)])
+    await price_readiness._catalog_states(served, [Plan("p-4", LIVE, False, in_catalog=True)])  # type: ignore[arg-type]
+    assert served.calls == []
+    liveness.reset_cache()
+    broken = ScriptedConn(
+        [(VIEW_READY_FRAGMENT, True), (STATES_FRAGMENT, lambda keys: asyncpg.UndefinedTableError("x"))]
+    )
+    plan = Plan("p-1", PAUSED, False, in_catalog=False)
+    await price_readiness._catalog_states(broken, [plan])  # type: ignore[arg-type]
+    assert plan.catalog_state is None
+    liveness.reset_cache()
+
+
+def test_the_item_carries_the_catalog_state() -> None:
+    plan = Plan("p-1", PAUSED, False, in_catalog=False, catalog_state="paused")
+    item = price_readiness._item(plan, price_readiness.Verdict("no_components", "no_components", (), ()))
+    assert item["catalog_state"] == "paused" and item["in_catalog"] is False

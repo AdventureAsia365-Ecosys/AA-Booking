@@ -7,6 +7,7 @@
 // Import-free on purpose: priceWorkbench.test.mjs loads this file with Node's type stripping (`npm run test:unit`).
 
 export type Step =
+  | "not_served"
   | "add_components"
   | "fix_inactive"
   | "load_rates"
@@ -16,8 +17,10 @@ export type Step =
   | "make_sellable"
   | "done";
 
-/** The staff page where the next step of a plan is done. */
-export function stepHref(step: Step, tourKey: string): string {
+/** The staff page where the next step of a plan is done; null for a tour out of the catalog (paused or retired in
+ *  CIS): the trip plan page reads the tour from the catalog and would answer 404 (AA-1128). */
+export function stepHref(step: Step, tourKey: string): string | null {
+  if (step === "not_served") return null;
   const plan = `/catalog/trip-plans/${encodeURIComponent(tourKey)}`;
   switch (step) {
     case "add_components":
@@ -34,6 +37,25 @@ export function stepHref(step: Step, tourKey: string): string {
     default:
       return plan;
   }
+}
+
+/** AA-1128: what the pages say about a tour that is not in the CIS catalog now. */
+export type OutOfCatalog = "paused" | "retired" | "gone";
+
+/** Why a plan's tour is not served, from the API's in_catalog / catalog_state; null = served (or unknown). A paused
+ *  tour (temporary in CIS) is never called "no longer in the catalog". */
+export function outOfCatalog(row: { in_catalog: boolean | null; catalog_state?: string | null }): OutOfCatalog | null {
+  if (row.in_catalog !== false) return null;
+  if (row.catalog_state === "paused") return "paused";
+  if (row.catalog_state === "retired") return "retired";
+  return "gone";
+}
+
+/** The tour's name on a list: its CIS title, else (the tour has left the catalog view, so its title too) a short
+ *  plain label with the first block of the key, never the full UUID. */
+export function tourName(row: { title: string | null; tour_key: string }, fallback: string): string {
+  if (row.title) return row.title;
+  return `${fallback} ${row.tour_key.split("-")[0]}`;
 }
 
 export interface ItemRef {
