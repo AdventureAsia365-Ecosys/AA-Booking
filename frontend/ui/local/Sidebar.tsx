@@ -9,7 +9,9 @@
 //   - AA-996: the `[` key does nothing in the compact density window (the sidebar is the forced icon rail there);
 //   - S264: each group folds (kit core NavGroup + useNavGroups, scope "booking"): folded unless the user opened it, the
 //     group of the current page open on arrival; the icon rail (collapsed, or the compact window) shows every item;
-//   - AA-1037: an entry may open one tab of a page (`tab` / `notTabs` in nav.tsx), so the active state reads `?tab=`.
+//   - AA-1037: an entry may open one tab of a page (`tab` / `notTabs` in nav.tsx), so the active state reads `?tab=`;
+//   - AA-1131 (S283 UI audit): the footer (Settings, staff card, Collapse) is pinned: only the nav scrolls, so with the
+//     Supply group open at 1440 x 900 Collapse is no longer cut at the bottom edge.
 
 import { useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -77,8 +79,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
         flexDirection: "column",
         gap: 22,
         height: "100vh",
-        overflowY: "auto",
-        overflowX: "hidden",
+        overflow: "hidden",
         transition: "width .18s ease",
       }}
     >
@@ -140,7 +141,22 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
       </div>
 
       {/* Nav */}
-      <nav aria-label="Primary" style={{ flex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
+      <nav
+        aria-label="Primary"
+        data-testid="sidebar-nav"
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          // A thin, dark-surface scrollbar (the page's global light track would be a white strip on the sidebar).
+          scrollbarWidth: "thin",
+          scrollbarColor: "rgba(255,255,255,0.18) transparent",
+          display: "flex",
+          flexDirection: "column",
+          gap: 18,
+        }}
+      >
         {groups.map((group) => {
           const id = navGroupId(group.label);
           return (
@@ -162,8 +178,8 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
         })}
       </nav>
 
-      {/* Settings, staff card, collapse */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* Settings, staff card, collapse (pinned: outside the scrolling nav) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: "none" }}>
         <NavItem
           entry={SETTINGS_ENTRY}
           active={navActive(SETTINGS_ENTRY, pathname)}

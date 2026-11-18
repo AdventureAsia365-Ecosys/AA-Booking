@@ -137,9 +137,6 @@
 }
 
 
-/* AA-994 S4b — the kit core PageHeader (ui/core/primitives.tsx) puts the text block's `flex` and the actions'
-   alignment in classes (an inline style would win over a media rule). Same values as AA-CIS-App app/globals.css, so the
-   header lays out exactly as the former inline-style copy did. The CIS phone "stack" rule (actions under the text when
-   the header has a description) is left out on purpose: S4b keeps every Booking page as it was. */
-.aa-page-header-text { flex: 1 1 240px; }
-.aa-page-header-actions { justify-content: flex-end; max-width: 100%; }
+/* AA-1131 — the kit core PageHeader layout (text beside the actions; a header with a description AND actions gives the
+   text a 420 px basis and stacks below 768 px) is the kit's own stylesheet now (ui/core/PageHeaderStyles.tsx
+   PAGE_HEADER_CSS), so the AA-994 S4b copy that stood here is gone. */
