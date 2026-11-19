@@ -6,9 +6,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "next dev --port 3100",
+    "dev": "next dev --port 3001",
     "build": "next build",
-    "start": "next start --port 3100",
+    "start": "next start --port 3001",
     "lint": "eslint --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test:unit": "TZ=America/Los_Angeles node --test ui/booking/*.test.mjs lib/*.test.mjs",

@@ -22,7 +22,7 @@ test("behind the ALB the public origin comes from Host when the request came ove
 });
 
 test("without X-Forwarded-Proto https (next dev, plain HTTP) nextUrl stays the origin", () => {
-  assert.equal(requestOrigin(req({ host: "localhost:3100" }, { origin: "http://localhost:3100" })), "http://localhost:3100");
+  assert.equal(requestOrigin(req({ host: "localhost:3001" }, { origin: "http://localhost:3001" })), "http://localhost:3001");
   assert.equal(requestOrigin(req({ host: "evil.example.test", "x-forwarded-proto": "http" })), BIND);
 });
 
@@ -39,7 +39,7 @@ test("Vercel and next dev keep the old rule (Origin equals nextUrl.origin)", () 
   const vercel = req({ host: "desk.example-staff.test", "x-forwarded-proto": "https", origin: "https://desk.example-staff.test" },
     { origin: "https://desk.example-staff.test" });
   assert.equal(isSameOrigin(vercel), true);
-  const dev = req({ host: "localhost:3100", origin: "http://localhost:3100" }, { origin: "http://localhost:3100" });
+  const dev = req({ host: "localhost:3001", origin: "http://localhost:3001" }, { origin: "http://localhost:3001" });
   assert.equal(isSameOrigin(dev), true);
 });
 

@@ -29,7 +29,7 @@ name: Deploy Dev
 #      Booking accepts only a token from this workflow file on main, environment dev, event push or
 #      workflow_dispatch (app/auth/ci.py). No secret is involved.
 #   3. safe_to_deploy true → pass (the gate's blocked_by is empty). The other queued/running counts are information
-#      only; kinds in DEPLOY_GATE_EXEMPT (bk_inquiry_pull, always queued; bk_noop_sleep, test-only) are left out.
+#      only; kinds in DEPLOY_GATE_EXEMPT (bk_noop_sleep, test-only) are left out.
 #   4. not safe, or the gate is unreachable / not JSON (fail closed) → the deploy is blocked, unless a
 #      workflow_dispatch run gives `override_running_jobs` (Nghiệp only, with the reason): then a warning
 #      names the reason and the count, and the deploy goes on.

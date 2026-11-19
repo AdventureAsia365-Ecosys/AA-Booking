@@ -121,7 +121,7 @@ export default function TripCasesPage() {
   return (
     <PageFrame
       title="Trip cases"
-      description="Every inquiry and booking in one list, from the first TripPlanner inquiry to the trip itself."
+      description="Every partner booking in one list, from the first request to the trip itself."
       // AA-1046: no "New trip case": a staff-made case was a B2C case; B2B cases come from the partner API.
     >
       {forbidden ? (
@@ -165,7 +165,7 @@ export default function TripCasesPage() {
                 emptyTitle={tab.key === "all" && !get("q") && !pickedStatus.length ? "No trip cases yet" : "No trip cases match these filters"}
                 emptyDescription={
                   tab.key === "all" && !get("q") && !pickedStatus.length
-                    ? "Cases appear here when a TripPlanner inquiry arrives or when you create one."
+                    ? "Cases appear here when a partner agency sends a booking through the B2B API."
                     : "Change the filters or the tab, or use Reset filters to see every case."
                 }
                 onRowClick={(r) => router.push(`/cases/${encodeURIComponent(r.code)}`)}

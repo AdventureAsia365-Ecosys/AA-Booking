@@ -165,7 +165,7 @@ The shortest path that works without AWS access. The [README](README.md#local-de
 | Unit tests | `.venv/bin/pytest tests/unit` (in `backend/`) | nothing else: no database, no AWS |
 | API | `ENVIRONMENT=local .venv/bin/uvicorn app.main:app --port 8000`, then `curl -s localhost:8000/booking/health` | nothing for liveness; `/booking/health/ready` and every data route need a database |
 | Integration tests | `.venv/bin/python -m tests.integration.bootstrap_roles <superuser-dsn> <admin-dsn>`, then `.venv/bin/pytest tests/integration` with the admin DSN set as in the README | a throwaway PostgreSQL 15 database whose name ends in `_test` or `_ci` (the setup drops the `booking`, `tripplanner` and `catalog` schemas in it) |
-| Staff admin | `cd frontend && npm ci && npm run dev` (port 3100); `npm run lint`, `npm run typecheck` | Node; it calls the Dev Booking API unless its server environment points elsewhere |
+| Staff admin | `cd frontend && npm ci && npm run dev` (port 3001, the Cognito dev callback and the container port); `npm run lint`, `npm run typecheck` | Node; it calls the Dev Booking API unless its server environment points elsewhere |
 | Pre-push checks | `scripts/install-hooks.sh` once per clone; each push then runs `scripts/pre-push.sh` | |
 
 - Never point a local run at the Dev database. Run frontend installs in a worktree, not in the main checkout of the
@@ -1393,8 +1393,8 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   within 15 min** (`blocking_due`, `DEPLOY_BLOCKING_HORIZON_SECONDS`: the preflight runs before the image build, and the
   old task would claim it before its SIGTERM). Queued / running rows
   of every other kind no longer block (the worker releases a running job on shutdown, the new task re-claims it); they
-  stay in `active` / `by_status` / `by_kind` as information, kinds in `DEPLOY_GATE_EXEMPT` (`bk_inquiry_pull`, the
-  always-queued pull; `bk_noop_sleep`, test-only) not counted there. Booking does not read CIS rerun waves. The
+  stay in `active` / `by_status` / `by_kind` as information, kinds in `DEPLOY_GATE_EXEMPT` (`bk_noop_sleep`,
+  test-only; the retired B2C pull left the list in AA-1134) not counted there. Booking does not read CIS rerun waves. The
   `preflight` job of `deploy-dev.yml` (logic in
   `.github/scripts/booking-deploy-preflight.sh`, tested with stub `aws`/`curl` by
   `backend/tests/unit/test_deploy_preflight_script.py`) skips the gate only when the service has no task running,
