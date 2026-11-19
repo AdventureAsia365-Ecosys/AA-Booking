@@ -50,21 +50,9 @@ import { formatDay } from "@/ui/booking/dates";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./BillDrawer.messages";
+import { Fact, Field } from "./BillFields";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
-
-function Field({ label, required = false, children, hint }: { label: string; required?: boolean; children: React.ReactNode; hint?: string }) {
-  const tx = useTx();
-  return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-xs font-semibold text-muted">
-        {tx(label)} {required && <span className="text-danger">*</span>}
-      </span>
-      {children}
-      {hint && <span className="text-xs text-muted">{tx(hint)}</span>}
-    </label>
-  );
-}
 
 async function uploadFor(kind: "bill" | "payout", entityId: string, file: File): Promise<OpsFile> {
   const doc = await prepareEvidence(file);
@@ -436,16 +424,6 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
         </div>
       )}
     </Drawer>
-  );
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  const tx = useTx();
-  return (
-    <div className="flex min-w-0 flex-col">
-      <dt className="text-xs text-muted">{tx(label)}</dt>
-      <dd className="truncate text-[13px] text-ink">{children}</dd>
-    </div>
   );
 }
 
