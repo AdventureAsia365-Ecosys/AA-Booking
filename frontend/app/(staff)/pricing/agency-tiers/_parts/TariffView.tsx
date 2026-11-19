@@ -18,6 +18,7 @@ import { daysText } from "@/ui/booking/plural";
 import { currencyOptions } from "@/ui/booking/fxInForce";
 import { useCurrenciesInForce } from "@/ui/booking/fxInForceQuery";
 import { useT } from "@/ui/core/useI18n";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./TariffView.messages";
 
 /** "3 travellers:" in the UI language (a column cell is outside a component, so it renders this one). */
@@ -118,6 +119,7 @@ const unpricedColumns: ColumnDef<UnpricedTariffRow, unknown>[] = [
 
 export function TariffView() {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const { get, set } = useUrlFilters();
   const toast = useToast();
   const partnerId = get("partner");
@@ -173,7 +175,7 @@ export function TariffView() {
       title={partner ? t("Tariff: {0}", partner.agency_name) : t("Agency tariff")}
       description={
         partner
-          ? t("{0} tier. Prices as a B2B quote on {1} would charge them, per person for the smallest group of each band sharing twin rooms, for a departure on any of the row's travel dates. Prices follow supplier rates, rules and exchange rates; the quote is binding.", partner.tier_label, data?.priced_on ?? "today")
+          ? t("{0} tier. Prices as a B2B quote on {1} would charge them, per person for the smallest group of each band sharing twin rooms, for a departure on any of the row's travel dates. Prices follow supplier rates, rules and exchange rates; the quote is binding.", partner.tier_label, data?.priced_on ? formatDay(data.priced_on) : t("today"))
           : t("The agency's own price per tour, season and number of travellers.")
       }
       actions={

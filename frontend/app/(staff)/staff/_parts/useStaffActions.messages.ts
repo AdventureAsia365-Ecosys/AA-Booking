@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "unknown": "unknown",
     "{0} is now {1}.": (...a: unknown[]) => `${a[0]} is now ${a[1]}.`,
     "{0} can now use Booking.": (...a: unknown[]) => `${a[0]} can now use Booking.`,
     "{0} can no longer use Booking.": (...a: unknown[]) => `${a[0]} can no longer use Booking.`,
@@ -38,6 +39,7 @@ export const MSG = phrasebook(
     "Could not update the staff profile.": "Could not update the staff profile.",
   },
   {
+    "unknown": "không rõ",
     "{0} is now {1}.": (...a: unknown[]) => `${a[0]} giờ là ${a[1]}.`,
     "{0} can now use Booking.": (...a: unknown[]) => `${a[0]} giờ đã dùng được Booking.`,
     "{0} can no longer use Booking.": (...a: unknown[]) => `${a[0]} không còn dùng được Booking.`,

@@ -162,7 +162,7 @@ function RoleDrawer({
       error={tx(error)}
     >
       <p className="text-[13px] text-muted">
-        {t("Role of")} <span className="font-medium text-ink">{staff.name ?? staff.email ?? staff.cis_user_id}</span> {t("in Booking. Their CIS role ({0}) is managed in CIS and does not change here.", staff.cis_role ?? "unknown")}
+        {t("Role of")} <span className="font-medium text-ink">{staff.name ?? staff.email ?? staff.cis_user_id}</span> {t("in Booking. Their CIS role ({0}) is managed in CIS and does not change here.", staff.cis_role ?? t("unknown"))}
       </p>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-[13px] font-medium text-ink">{t("Booking role")}</legend>

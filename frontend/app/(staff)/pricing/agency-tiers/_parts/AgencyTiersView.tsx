@@ -372,7 +372,7 @@ export function AgencyTiersView() {
         <strong className="text-ink">{tr("Maker-checker.")}</strong> {tr("A new discount or rate card starts as")} <em>{tr("Pending")}</em> {tr("and is not used until another staff member approves it. Rows are never edited: enter a new row with a later date.")}
         {rule && (
           <>
-            {tr("B2B rule in force: target margin {0}, floor {1}, card fee {2}{3}.", pct(rule.target_margin), pct(rule.floor_margin), pct(rule.card_fee_pct), rule.rrp_markup_pct ? `, suggested retail price = agency price + ${pct(rule.rrp_markup_pct)}` : "")}
+            {tr("B2B rule in force: target margin {0}, floor {1}, card fee {2}{3}.", pct(rule.target_margin), pct(rule.floor_margin), pct(rule.card_fee_pct), rule.rrp_markup_pct ? tr(", suggested retail price = agency price + {0}", pct(rule.rrp_markup_pct)) : "")}
           </>
         )}
       </div>

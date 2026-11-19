@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "today": "today",
     "{0} traveller{1}:": (...a: unknown[]) => `${a[0]} traveller${a[1]}:`,
     "The tariff could not be downloaded.": "The tariff could not be downloaded.",
     "Agency tariff": "Agency tariff",
@@ -38,6 +39,7 @@ export const MSG = phrasebook(
     "Why it has no price": "Why it has no price",
   },
   {
+    "today": "hôm nay",
     "{0} traveller{1}:": (...a: unknown[]) => `${a[0]} khách:`,
     "The tariff could not be downloaded.": "Không tải xuống được bảng giá.",
     "Agency tariff": "Bảng giá đại lý",

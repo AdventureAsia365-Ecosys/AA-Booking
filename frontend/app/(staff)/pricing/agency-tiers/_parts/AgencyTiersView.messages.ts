@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    ", suggested retail price = agency price + {0}": (...a: unknown[]) => `, suggested retail price = agency price + ${a[0]}`,
     "{0} approved: {1}.": (...a: unknown[]) => `${a[0]} approved: ${a[1]}.`,
     "{0} is now {1} ({2} off the agency price).": (...a: unknown[]) => `${a[0]} is now ${a[1]} (${a[2]} off the agency price).`,
     "Could not change the tier.": "Could not change the tier.",
@@ -100,6 +101,7 @@ export const MSG = phrasebook(
     "Migration seed": "Migration seed",
   },
   {
+    ", suggested retail price = agency price + {0}": (...a: unknown[]) => `, giá bán lẻ đề xuất = giá đại lý + ${a[0]}`,
     "{0} approved: {1}.": (...a: unknown[]) => `Đã duyệt ${a[0]}: ${a[1]}.`,
     "{0} is now {1} ({2} off the agency price).": (...a: unknown[]) => `${a[0]} giờ là ${a[1]} (giảm ${a[2]} trên giá đại lý).`,
     "Could not change the tier.": "Không đổi được hạng.",
