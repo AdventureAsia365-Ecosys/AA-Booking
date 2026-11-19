@@ -29,8 +29,9 @@ This PR is migration-only (MIG-4); the Booking code (resolver, role editor, `me.
   `pricing.approve`, `supplier.activate`, `contract.publish` and `stop_sale.approve` are reserved ahead of use: the
   CHECK refuses them to custom roles, but nothing gates on them yet. The root spec orders the fix: the lean-roles
   step-1 Booking split (activate, publish, stop-sale) and task T4.1 (`pricing.approve`, allotments on
-  `b2b_desk.approve`) merge before the resolver (T5), and no one gets `booking-custom` before both are live. This
-  migration is safe meanwhile: no code reads the new tables, so the seeded role reaches no one.
+  `b2b_desk.approve`) merge before the resolver (T5); until T5 a `booking-custom` group resolves to no role, and the
+  real person gets it only once T5 is live. This migration is safe meanwhile: no code reads the new tables, so the
+  seeded role reaches no one.
 
 ## Should know
 - Renumber if bk-062 is taken at merge: `git grep '062_'` and `bk-062` (this file, the migration, the integration
