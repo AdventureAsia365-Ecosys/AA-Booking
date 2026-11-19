@@ -338,7 +338,7 @@ function FeesSection({ data }: { data: BoardDetail }) {
             <Button
               key={`${s.reason}-${s.partner_id ?? "all"}`}
               size="sm"
-              onClick={() => setCharging({ reason: tx(s.reason), partner: s.partner_id ?? undefined, seats: s.seats })}
+              onClick={() => setCharging({ reason: s.reason, partner: s.partner_id ?? undefined, seats: s.seats })}
             >
               <Coins size={14} /> {t("Charge {0} ({1} seat{2}{3})", tx(FEE_REASON_LABEL[s.reason]).toLowerCase(), s.seats, s.seats === 1 ? "" : "s", s.partner_id ? `, ${data.agencies.find((a) => a.partner_id === s.partner_id)?.agency_name ?? t("agency")}` : "")}
             </Button>
@@ -352,7 +352,7 @@ function FeesSection({ data }: { data: BoardDetail }) {
         <ChargeFeeModal
           departureId={d.id}
           title={t("Departure {0}{1}", formatDay(d.start_date), d.tour_title ? `, ${d.tour_title}` : "")}
-          reason={tx(charging.reason)}
+          reason={charging.reason}
           partnerId={charging.partner}
           seats={charging.seats}
           onClose={() => setCharging(null)}
