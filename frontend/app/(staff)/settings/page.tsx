@@ -49,7 +49,7 @@ import {
 } from "@/ui";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
-import { formatDay } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useLang, useSetLang, useT } from "@/ui/core/useI18n";
 import { LANGS, LANG_LABEL } from "@/ui/core/i18n";
 import { useTx } from "@/ui/local/useTx";
@@ -333,6 +333,7 @@ function CommercialDefaults() {
 
 function PolicyRows({ items }: { items: PolicyParam[] }) {
   const tr = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const canBilling = useCan("agency_billing.read");
   const validity = items.find((i) => i.key === "quote_validity_days");
   const festive = items.find((i) => i.key === "quote_validity_festive_days");

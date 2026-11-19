@@ -37,7 +37,6 @@ import {
   Select,
   Tabs,
   Textarea,
-  formatDay,
   useCan,
   useStaff,
   useT,
@@ -47,6 +46,7 @@ import { draftsFrom, draftsToBody, paxBandLabel, type DraftError, type PriceDraf
 import { VERSION_TONE, changeText, personText, versionActions } from "@/ui/booking/priceVersions";
 import { PriceMatrixEditor } from "../../../catalog/trip-plans/_parts/PriceMatrixEditor";
 import { V, type VersionMessage } from "./versions.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 type Tab = "components" | "versions";
 
@@ -85,6 +85,7 @@ function useWho(): (p: Person | null | undefined) => string {
 
 function VersionCard({ v, onOpen }: { v: PriceVersion; onOpen: () => void }) {
   const t = useT(V);
+  const { formatDay } = useBookingFormat();
   const who = useWho();
   return (
     <Pressable onClick={onOpen} testId="version-card">
@@ -106,6 +107,7 @@ function VersionCard({ v, onOpen }: { v: PriceVersion; onOpen: () => void }) {
 
 function DiffView({ detail }: { detail: VersionDetail }) {
   const t = useT(V);
+  const { formatDay } = useBookingFormat();
   const diff = detail.diff;
   if (!diff || !diff.rows) return null;
   const s = diff.summary;
@@ -166,6 +168,7 @@ function DiffView({ detail }: { detail: VersionDetail }) {
 
 function RowsView({ detail }: { detail: VersionDetail }) {
   const t = useT(V);
+  const { formatDay } = useBookingFormat();
   return (
     <section className="flex flex-col gap-2">
       <h3 className="text-[13px] font-semibold text-ink">{t("rowsTitle")}</h3>
@@ -318,6 +321,7 @@ function DraftEditor({ detail, onDone }: { detail: VersionDetail; onDone: () => 
 
 function Decisions({ detail, onDone }: { detail: VersionDetail; onDone: () => void }) {
   const t = useT(V);
+  const { formatDay } = useBookingFormat();
   const toast = useToast();
   const qc = useQueryClient();
   const me = useStaff().cis_user_id;
@@ -419,6 +423,7 @@ function Decisions({ detail, onDone }: { detail: VersionDetail; onDone: () => vo
 
 function VersionPanel({ id, onBack }: { id: string; onBack: () => void }) {
   const t = useT(V);
+  const { formatDay } = useBookingFormat();
   const who = useWho();
   const me = useStaff().cis_user_id;
   const canWrite = useCan("price_version.write");
@@ -599,6 +604,7 @@ export function VersionsDrawer({
   onTab: (tab: Tab) => void;
 }) {
   const t = useT(V);
+  const { formatDay } = useBookingFormat();
   const toast = useToast();
   const qc = useQueryClient();
   const canWrite = useCan("price_version.write");

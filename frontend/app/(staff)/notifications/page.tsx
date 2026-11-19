@@ -30,7 +30,7 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
-import { localizeIsoDates } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
@@ -160,6 +160,7 @@ export default function NotificationsPage() {
 
 function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (id: string) => void; busy: boolean }) {
   const t = useT(MSG);
+  const { localizeIsoDates } = useBookingFormat();
   const tx = useTx();
   const target = notificationTarget(n);
   const label = NOTIFICATION_TYPE_LABEL[n.type] ?? n.type;

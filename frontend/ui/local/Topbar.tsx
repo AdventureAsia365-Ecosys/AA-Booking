@@ -215,7 +215,9 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
   );
 }
 
-const THEME_OPTIONS: { key: ThemeChoice; label: string; icon: React.ReactNode }[] = [
+// The labels are Topbar.messages keys: the title shows them in the UI language (AA-1128), never as English words
+// inside a Vietnamese sentence.
+const THEME_OPTIONS: { key: ThemeChoice; label: "Light" | "Dark" | "System"; icon: React.ReactNode }[] = [
   { key: "light", label: "Light", icon: <Sun size={16} /> },
   { key: "dark", label: "Dark", icon: <Moon size={16} /> },
   { key: "system", label: "System", icon: <Monitor size={16} /> },
@@ -233,8 +235,8 @@ function ThemeToggle() {
   return (
     <button
       onClick={() => setChoice(next.key)}
-      title={t("Theme: {0}. Click for {1}", cur.label, next.label)}
-      aria-label={t("Theme: {0}. Switch to {1}", cur.label, next.label)}
+      title={t("Theme: {0}. Click for {1}", t(cur.label), t(next.label))}
+      aria-label={t("Theme: {0}. Switch to {1}", t(cur.label), t(next.label))}
       style={{
         display: "flex",
         alignItems: "center",

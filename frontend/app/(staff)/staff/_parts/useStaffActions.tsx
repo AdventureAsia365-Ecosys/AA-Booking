@@ -42,6 +42,7 @@ type Pending = { kind: "activate" | "deactivate"; staff: StaffProfile } | null;
 
 export function useStaffActions() {
   const t = useT(MSG);
+  const tx = useTx();
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -54,7 +55,7 @@ export function useStaffActions() {
     onSuccess: (updated, { staff, body }) => {
       qc.invalidateQueries({ queryKey: ["staff"] });
       const name = updated.name ?? staff.name ?? staff.email ?? "Staff member";
-      if (body.role !== undefined) toast.success(t("{0} is now {1}.", name, ROLE_LABEL[updated.role] ?? updated.role));
+      if (body.role !== undefined) toast.success(t("{0} is now {1}.", name, tx(ROLE_LABEL[updated.role]) ?? updated.role));
       else toast.success(updated.active ? t("{0} can now use Booking.", name) : t("{0} can no longer use Booking.", name));
       setPending(null);
       setRoleFor(null);

@@ -41,7 +41,9 @@ import {
   Pill,
   Section,
   useCan,
+  formatNumber,
   useFormat,
+  useLang,
   useT,
   useToast,
   useUrlFilters,
@@ -52,9 +54,9 @@ import { NewFxRateDrawer, NewRuleDrawer } from "./PolicyDrawers";
 import { R, type RKey } from "./messages";
 import { TONE, apiErrorText, channelLabel, type RT } from "./rulesText";
 
-function rate(value: string): string {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: 8 }) : value;
+/** An FX rate in the UI language's separators, up to 8 decimals. */
+function rate(value: string, lang: "en" | "vi"): string {
+  return formatNumber(value, lang, 8);
 }
 
 function PolicyStatusBadge({ status }: { status: PolicyStatus }) {
@@ -182,9 +184,10 @@ function useRuleColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>
 
 function useFxColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>) => void): ColumnDef<FxRateRow, unknown>[] {
   const t = useT(R);
+  const lang = useLang();
   return [
     { id: "currency", header: t("colCurrency"), accessorKey: "currency", cell: ({ row }) => <span className="font-mono font-semibold text-ink">{row.original.currency}</span> },
-    { id: "rate", header: t("colRate"), accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{rate(row.original.rate_per_usd)}</span> },
+    { id: "rate", header: t("colRate"), accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{rate(row.original.rate_per_usd, lang)}</span> },
     { id: "buffer", header: t("colBuffer"), accessorFn: (r) => Number(r.buffer_pct), cell: ({ row }) => pct(row.original.buffer_pct) },
     { id: "as_of", header: t("colAsOf"), accessorKey: "as_of", cell: ({ row }) => <DateText value={row.original.as_of} className="whitespace-nowrap" /> },
     {
@@ -220,10 +223,11 @@ function useFxColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>) 
 function ApproveDialog({ approving, busy, error, onClose, onConfirm }: { approving: Approving; busy: boolean; error: string | null; onClose: () => void; onConfirm: () => void }) {
   const t = useT(R);
   const { formatDate } = useFormat();
+  const lang = useLang();
   const body = (): string | null => {
     if (approving?.kind === "fx") {
       const r = approving.row;
-      return t("approveFxBody", r.currency, rate(r.rate_per_usd), pct(r.buffer_pct), formatDate(r.as_of), r.source) as string;
+      return t("approveFxBody", r.currency, rate(r.rate_per_usd, lang), pct(r.buffer_pct), formatDate(r.as_of), r.source) as string;
     }
     if (approving?.kind === "rule") {
       const r = approving.row;

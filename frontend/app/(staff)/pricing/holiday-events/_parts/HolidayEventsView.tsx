@@ -22,7 +22,6 @@ import {
   Pill,
   Section,
   Select,
-  formatDay,
   useCan,
   useT,
   useToast,
@@ -32,6 +31,7 @@ import {
 import { CHANGE_TONE, eventCode } from "@/ui/booking/priceVersions";
 import { ChangeButtons, useWho } from "../../seasons/_parts/SeasonsView";
 import { S, type SeasonMessage } from "../../seasons/_parts/messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -104,6 +104,7 @@ function NewEventDrawer({ countries, onClose }: { countries: { iso2: string; nam
 
 function HolidayEvents() {
   const t = useT(S);
+  const { formatDay } = useBookingFormat();
   const toast = useToast();
   const qc = useQueryClient();
   const canWrite = useCan("season.write");

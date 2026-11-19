@@ -104,7 +104,7 @@ export function AgencyTiersView() {
       a.kind === "discount" ? agencyPricingApi.approveDiscount(a.row.id) : agencyPricingApi.approveRateCard(a.row.id),
     onSuccess: (row, a) => {
       qc.invalidateQueries({ queryKey: ["agency-pricing"] });
-      toast.success(tr("{0} approved: {1}.", a.kind === "discount" ? "Discount" : "Rate card", STATUS_META[row.status]?.label ?? row.status));
+      toast.success(tr("{0} approved: {1}.", a.kind === "discount" ? tr("Discount") : tr("Rate card"), tx(STATUS_META[row.status]?.label) ?? row.status));
       setApproving(null);
     },
     onError: (err) => {

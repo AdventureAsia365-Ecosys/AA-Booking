@@ -18,7 +18,7 @@ import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, proposalsApi, type Chann
 import { costLineError, pct, type CostLine } from "@/lib/proposalDraft";
 import { EmptyState, Spinner } from "../core/primitives";
 import { Checkbox, Input, Select, Textarea } from "../core/FormControls";
-import { formatMoney } from "../core/format";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { Money } from "../core/Money";
 import { DateText } from "../core/DateText";
 import { useCan } from "../local/StaffContext";
@@ -316,6 +316,7 @@ export function QuoteResult({
   readOnlyNote?: string;
 }) {
   const tr = useT(MSG);
+  const { formatMoney } = useBookingFormat();
   const tx = useTx();
   const [details, setDetails] = useState(false);
   if (!query.hasRequest) {

@@ -11,7 +11,8 @@ import { suppliersApi, type SupplierCategory } from "@/lib/api/suppliers";
 import type { RateUnit, ServiceType, ServiceUnit, SupplierRate } from "@/lib/api/supply";
 import { Select, Code, DataTable, DateText, Pill } from "@/ui";
 import { inputCls } from "./FormField";
-import { useT } from "@/ui/core/useI18n";
+import { formatNumber } from "@/ui/booking/dates";
+import { useLang, useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./supply.messages";
 
@@ -103,10 +104,9 @@ export function rateTarget(r: SupplierRate): string {
   return r.hotel_room_type_id ? `${r.hotel_name} · ${r.room_type_name}` : (r.service_title ?? "");
 }
 
-export function amountText(amount: string, currency: string): string {
-  const n = Number(amount);
-  const text = Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : amount;
-  return `${text} ${currency}`;
+/** A supplier rate's net amount in the UI language's separators (`lang`, default English), with its currency code. */
+export function amountText(amount: string, currency: string, lang: "en" | "vi" = "en"): string {
+  return `${formatNumber(amount, lang, 2)} ${currency}`;
 }
 
 function paxText(r: SupplierRate): string {
@@ -162,6 +162,7 @@ export function RatesTable({
 }) {
   const t = useT(MSG);
   const tx = useTx();
+  const lang = useLang();
   const columns: ColumnDef<SupplierRate, unknown>[] = [
     ...(showTarget
       ? [
@@ -239,7 +240,7 @@ export function RatesTable({
       cell: ({ row }) => (
         <span className="flex flex-col">
           <span className="bk-tabular whitespace-nowrap text-[13px] font-medium text-ink">
-            {amountText(row.original.net_amount, row.original.currency)}
+            {amountText(row.original.net_amount, row.original.currency, lang)}
           </span>
           <span className="text-xs text-muted">{tx(UNIT_LABEL[row.original.unit])}</span>
         </span>

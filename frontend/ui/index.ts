@@ -75,6 +75,8 @@ export { PageFrame } from "./booking/PageFrame";
 export { ShellFrame, useShell, type ShellControls } from "./core/ShellFrame";
 export { TimeField } from "./booking/TimeField";
 export * from "./booking/dates";
+// AA-1128 (vi): the date / number / money formatters bound to the UI language.
+export { useBookingFormat, type BookingFormat } from "./local/useBookingFormat";
 export * from "./booking/StatusBadge";
 export * from "./booking/Stepper";
 export * from "./booking/FormDrawer";

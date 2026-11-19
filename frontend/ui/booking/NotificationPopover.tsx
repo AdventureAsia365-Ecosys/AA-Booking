@@ -15,7 +15,7 @@ import type { StaffNotification } from "@/lib/api/types";
 import { DateText } from "../core/DateText";
 import { NOTIFICATION_TYPE_LABEL, notificationTarget } from "./notifications";
 import { NotificationIcon, NotificationMessage } from "./NotificationItem";
-import { localizeIsoDates } from "./dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./NotificationPopover.messages";
@@ -24,6 +24,7 @@ export const NOTIFICATIONS_KEY = ["notifications", "popover"] as const;
 
 export function NotificationPopover() {
   const t = useT(MSG);
+  const { localizeIsoDates } = useBookingFormat();
   const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();

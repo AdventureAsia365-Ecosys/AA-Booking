@@ -93,3 +93,9 @@ test("a locked B2B version says approved and agency, never sent or customer (AA-
   assert.equal(approvedByText("b2b"), "Approved by the agency");
   assert.equal(approvedByText("b2c"), "Approved by the customer");
 });
+
+test("AA-1128 (vi): the inquiry budget uses the UI language's separators", () => {
+  const prefs = inquiryPrefs({ budget: { min: 3000, max: 4500, currency: "USD" } }, "vi");
+  assert.equal(prefs?.budget, "3.000 – 4.500 USD");
+  assert.equal(inquiryPrefs({ budget: { min: 3000, max: 4500, currency: "USD" } })?.budget, "3,000 – 4,500 USD");
+});
