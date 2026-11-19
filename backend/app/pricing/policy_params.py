@@ -78,6 +78,7 @@ SECTIONS = (
     "agency_billing",
     "rounding",
     "retention",
+    "security",
 )
 # The selling currencies a rounding increment is required for (app.pricing.engine.SELLING_CURRENCIES; the engine
 # imports nothing from here, the unit test keeps the two equal).
@@ -686,6 +687,18 @@ PARAMS: dict[str, Param] = {
             section="retention",
             minimum=_d("0"),
             maximum=_d("3650"),
+        ),
+        # AA-1111 S2 (bk-061, root ADR 0006c): the administrator MFA switch; off until every administrator has TOTP.
+        Param(
+            "staff_admin_mfa_required",
+            BOOLEAN,
+            None,
+            "S285",
+            ADMIN,
+            "Administrators need an authenticator code",
+            "On: a Booking administrator session signed in without an authenticator app code is refused.",
+            "app.auth.admin_mfa",
+            section="security",
         ),
     )
 }

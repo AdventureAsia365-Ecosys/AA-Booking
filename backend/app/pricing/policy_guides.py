@@ -759,6 +759,28 @@ GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu 90 ngày sau khi chuyến kết thúc.",
         ),
     ),
+    "staff_admin_mfa_required": _g(
+        (
+            "Whether a Booking administrator must sign in with a password and a six-digit code from an authenticator "
+            "app before the staff pages answer.",
+            "On: an administrator who signed in with an e-mail code only is refused and must sign in again with the "
+            "authenticator code; a stolen mailbox no longer opens trip cases and customers.",
+            "Off: administrators can work with an e-mail code sign-in; their sessions are only logged.",
+            "Turn it on only after every administrator has set up an authenticator app and one test sign-in shows the "
+            "code was used; turn it off only to let an administrator back in while the authenticator is being reset.",
+            "Starting value off.",
+        ),
+        (
+            "Quản trị viên Booking có phải đăng nhập bằng mật khẩu và mã 6 số từ ứng dụng xác thực thì các trang nhân "
+            "viên mới trả lời hay không.",
+            "Bật: quản trị viên chỉ đăng nhập bằng mã e-mail bị từ chối và phải đăng nhập lại kèm mã xác thực; hộp thư "
+            "bị lộ không còn mở được hồ sơ chuyến và khách hàng.",
+            "Tắt: quản trị viên làm việc với đăng nhập mã e-mail; phiên của họ chỉ được ghi log.",
+            "Chỉ bật sau khi mọi quản trị viên đã cài ứng dụng xác thực và một lần đăng nhập thử cho thấy mã đã được "
+            "dùng; chỉ tắt để cho một quản trị viên vào lại trong lúc đặt lại ứng dụng xác thực.",
+            "Giá trị ban đầu là tắt.",
+        ),
+    ),
 }
 
 
