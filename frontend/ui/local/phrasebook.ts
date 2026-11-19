@@ -27,7 +27,7 @@ interface Pattern {
   vi: (string | number)[];
 }
 const PATTERNS: Pattern[] = [];
-const PATTERN_KEYS = new Set<string>();
+const PATTERN_KEYS = new Map<string, { viT: string; pattern: Pattern }>();
 
 const MARK = (i: number) => `\u0001${i}\u0002`;
 const MARK_RE = /\u0001(\d)\u0002/g;
@@ -48,10 +48,15 @@ function template(fn: (...a: unknown[]) => string): string | null {
 }
 
 function addPattern(key: string, en: (...a: unknown[]) => string, vi: (...a: unknown[]) => string): void {
-  if (PATTERN_KEYS.has(key)) return;
   const enT = template(en);
   const viT = template(vi);
   if (!enT || !viT) return;
+  // Same rule as the plain strings: on a second wording of the same key, the Vietnamese template that sorts first wins.
+  const had = PATTERN_KEYS.get(key);
+  if (had !== undefined) {
+    if (viT >= had.viT) return;
+    PATTERNS.splice(PATTERNS.indexOf(had.pattern), 1);
+  }
   const pieces = enT.split(MARK_RE); // literal, index, literal, index, ...
   const literals = pieces.filter((_, i) => i % 2 === 0);
   const indexes = pieces.filter((_, i) => i % 2 === 1).map(Number);
@@ -63,10 +68,11 @@ function addPattern(key: string, en: (...a: unknown[]) => string, vi: (...a: unk
   const re = new RegExp(`^${literals.map(escapeRe).join("(.+?)")}$`);
   const viPieces = viT.split(MARK_RE).map((p, i) => (i % 2 === 1 ? Number(p) : p));
   const anchor = literals.reduce((a, b) => (b.length > a.length ? b : a), "");
-  PATTERN_KEYS.add(key);
-  PATTERNS.push({ anchor, re, vi: viPieces.map((p, i) => (i % 2 === 1 ? indexes.indexOf(p as number) : p)) });
+  const pattern: Pattern = { anchor, re, vi: viPieces.map((p, i) => (i % 2 === 1 ? indexes.indexOf(p as number) : p)) };
+  PATTERN_KEYS.set(key, { viT, pattern });
+  PATTERNS.push(pattern);
   // Longer literal text first: "{0} adults, {1} children" before "{0} adults".
-  PATTERNS.sort((a, b) => b.re.source.length - a.re.source.length);
+  PATTERNS.sort((a, b) => b.re.source.length - a.re.source.length || (a.re.source < b.re.source ? -1 : a.re.source > b.re.source ? 1 : 0));
 }
 
 /** Register a catalogue's Vietnamese text by its English key; returns the catalogue unchanged. */
@@ -74,7 +80,11 @@ export function phrasebook<E extends Catalog>(messages: Messages<E>): Messages<E
   const en = messages.en as Record<string, unknown>;
   for (const [key, value] of Object.entries(messages.vi as Record<string, unknown>)) {
     if (typeof value === "string") {
-      if (value !== "" && !VI.has(key)) VI.set(key, value);
+      // Two catalogues may word one English text differently: keep the one that sorts first, so the pick never
+      // depends on the order the modules were loaded in (the server keeps every page's modules, a browser only the
+      // pages it opened).
+      const had = VI.get(key);
+      if (value !== "" && (had === undefined || value < had)) VI.set(key, value);
     } else if (typeof value === "function" && typeof en[key] === "function") {
       addPattern(key, en[key] as (...a: unknown[]) => string, value as (...a: unknown[]) => string);
     }

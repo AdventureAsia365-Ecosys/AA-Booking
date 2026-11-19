@@ -26,7 +26,7 @@ phrasebook({
     "{0}: {1}": fn("{0}: {1}"),
   },
 });
-// A second catalogue never overrides the first one's text for the same key.
+// A second wording of the same key: the one that sorts first wins, whatever the load order.
 phrasebook({ en: { Pending: "Pending" }, vi: { Pending: "Đang chờ" } });
 
 test("English, null and empty text pass through unchanged", () => {
@@ -36,8 +36,12 @@ test("English, null and empty text pass through unchanged", () => {
   assert.equal(phrase("", "vi"), "");
 });
 
-test("a registered string is translated exactly; the first catalogue wins", () => {
-  assert.equal(phrase("Pending", "vi"), "Chờ duyệt");
+test("a registered string is translated exactly; of two wordings the one that sorts first wins", () => {
+  assert.equal(phrase("Pending", "vi"), "Chờ duyệt"); // "Chờ duyệt" < "Đang chờ"
+  phrasebook({ en: { Pending: "Pending" }, vi: { Pending: "A first" } });
+  assert.equal(phrase("Pending", "vi"), "A first");
+  phrasebook({ en: { Pending: "Pending" }, vi: { Pending: "Chờ duyệt" } });
+  assert.equal(phrase("Pending", "vi"), "A first");
   assert.equal(phrase("Pending approval", "vi"), "Pending approval");
 });
 

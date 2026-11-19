@@ -29,7 +29,7 @@ import { MSG } from "./AdminShell.messages";
 import { I18nProvider } from "../core/useI18n";
 import type { Lang } from "../core/i18n";
 import { langStore } from "./lang";
-import "./bookingPhrases";
+import "./phrases";
 
 export function AdminShell({ children, initialLang }: { children: React.ReactNode; initialLang?: Lang }) {
   return (
