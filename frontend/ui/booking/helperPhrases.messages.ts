@@ -11,6 +11,11 @@ import { phrasebook } from "../local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
     {
+      "{0} days": (...a: unknown[]) => `${a[0]} days`,
+      "{0} photos": (...a: unknown[]) => `${a[0]} photos`,
+      "{0} days · {1} pax": (...a: unknown[]) => `${a[0]} days · ${a[1]} pax`,
+      "1 day · {0} pax": (...a: unknown[]) => `1 day · ${a[0]} pax`,
+      "+{0} more legs": (...a: unknown[]) => `+${a[0]} more legs`,
       "{0} adults, {1} children": (...a: unknown[]) => `${a[0]} adults, ${a[1]} children`,
       "{0} adults, {1} child": (...a: unknown[]) => `${a[0]} adults, ${a[1]} child`,
       "{0} adult, {1} children": (...a: unknown[]) => `${a[0]} adult, ${a[1]} children`,
@@ -57,6 +62,11 @@ export const MSG = phrasebook(
         `Overlaps row ${a[0]}: same channel and currency, overlapping dates and pax.`,
     },
     {
+      "{0} days": (...a: unknown[]) => `${a[0]} ngày`,
+      "{0} photos": (...a: unknown[]) => `${a[0]} ảnh`,
+      "{0} days · {1} pax": (...a: unknown[]) => `${a[0]} ngày · ${a[1]} khách`,
+      "1 day · {0} pax": (...a: unknown[]) => `1 ngày · ${a[0]} khách`,
+      "+{0} more legs": (...a: unknown[]) => `+${a[0]} chặng nữa`,
       "{0} adults, {1} children": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
       "{0} adults, {1} child": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
       "{0} adult, {1} children": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
