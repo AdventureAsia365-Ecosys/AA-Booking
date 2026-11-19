@@ -43,8 +43,8 @@ FIELDS = (
     "credit_days_after",
     "child_pct",
 )
-DAYS_MAX = 365  # technical bound of the bk-060 CHECKs
-PCT_PLACES = Decimal("0.01")
+DAYS_MAX = 365  # technical-constant: the bk-060 CHECK bound of a payment day count
+PCT_PLACES = Decimal("0.01")  # technical-constant: numeric(5,2) precision
 
 
 @dataclass(frozen=True)

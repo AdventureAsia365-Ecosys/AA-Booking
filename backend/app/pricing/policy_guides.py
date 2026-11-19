@@ -668,6 +668,26 @@ GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu 5 cho mọi đồng tiền bán (AUD, EUR, GBP, SGD, USD): 1.231 thành 1.235.",
         ),
     ),
+    "child_price_pct_by_service_type": _g(
+        (
+            "A child pays this % of the adult supplier net of a per-person service when the supplier gives no child "
+            "rate and the contract no child %. 100 = the adult price, with an age note on the quote line.",
+            "Children on that service type cost closer to adults; agency prices for families go up.",
+            "Children on that service type cost less; family quotes go down and margins depend on the supplier "
+            "really charging less.",
+            "Change it when suppliers of a service type usually charge children a set share of the adult price.",
+            "Starting value 100 for every service type (activity, entrance, guide, meal, transfer).",
+        ),
+        (
+            "Trẻ em trả % này của giá net người lớn cho dịch vụ tính theo người khi nhà cung cấp không có giá trẻ em "
+            "và hợp đồng không ghi % trẻ em. 100 = giá người lớn, dòng báo giá kèm ghi chú độ tuổi.",
+            "Trẻ em ở loại dịch vụ đó gần bằng giá người lớn; giá cho gia đình tăng.",
+            "Trẻ em ở loại dịch vụ đó rẻ hơn; báo giá gia đình giảm và biên lợi nhuận phụ thuộc việc nhà cung cấp "
+            "thật sự tính ít hơn.",
+            "Đổi khi nhà cung cấp của một loại dịch vụ thường tính trẻ em theo một tỉ lệ cố định của giá người lớn.",
+            "Giá trị ban đầu 100 cho mọi loại dịch vụ (activity, entrance, guide, meal, transfer).",
+        ),
+    ),
     "retention_job_succeeded_days": _g(
         (
             "Days a finished background job is kept before it is archived and deleted. Must not be longer than the "

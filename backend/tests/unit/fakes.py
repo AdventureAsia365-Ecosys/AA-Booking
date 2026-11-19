@@ -61,6 +61,9 @@ POLICY_SEED: dict[str, str] = {
     "retention_job_succeeded_days": "30",
     "retention_job_failed_days": "90",
     "retention_inbox_redact_days": "90",
+    # AA-1145 (bk-060)
+    "child_price_pct_by_service_type": '{"activity": "100", "entrance": "100", "guide": "100", "meal": "100",'
+    ' "transfer": "100"}',
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
 # The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure

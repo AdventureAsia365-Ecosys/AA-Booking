@@ -57,7 +57,7 @@ EDITABLE = (
 )
 PAX_TYPES = ("adult", "child", "infant")
 ADULT = "adult"
-AGE_MAX = 17  # technical bound of the bk-060 CHECK (a child or infant is under 18)
+AGE_MAX = 17  # technical-constant: the bk-060 CHECK bound (a child or infant is under 18)
 CENT = Decimal("0.01")
 HUNDRED = Decimal("100")
 SOURCE_NUMBERS = ("published_amount", "commission_pct")
@@ -448,7 +448,7 @@ async def create_rate(conn: asyncpg.Connection, staff: Staff, contract_id: str, 
         rate,
         supplier,
         contract,
-        after={k: rate[k] for k in ("hotel_room_type_id", "service_id", "unit", "currency", *EDITABLE)},
+        after={k: rate.get(k) for k in ("hotel_room_type_id", "service_id", "unit", "currency", *EDITABLE)},
         summary=f"Added rate {rate['net_amount']} {rate['currency']} per {UNIT_LABELS[rate['unit']]}",
     )
     return rate
@@ -462,18 +462,18 @@ async def update_rate(conn: asyncpg.Connection, staff: Staff, rate_id: str, chan
     contract, supplier = await _draft_contract(conn, current["contract_id"])
     values = _normalize(changes)
     # B7: while the rate keeps its source numbers, the net follows them (a net change alone must still match).
-    source = {k: values.get(k, current[k]) for k in SOURCE_NUMBERS}
+    source = {k: values.get(k, current.get(k)) for k in SOURCE_NUMBERS}
     if any(v is not None for v in source.values()):
         net = {"net_amount": values["net_amount"]} if "net_amount" in values else {}
         values.update(commissionable({**source, **net}))
     for key in DECIMAL_FIELDS:
         if values.get(key) is not None:
             values[key] = Decimal(str(values[key]))
-            if current[key] is not None and values[key] == Decimal(str(current[key])):
+            if current.get(key) is not None and values[key] == Decimal(str(current[key])):
                 values.pop(key)
-        elif key in values and current[key] is None:
+        elif key in values and current.get(key) is None:
             values.pop(key)
-    changed = {k: v for k, v in values.items() if k in DECIMAL_FIELDS or current[k] != v}
+    changed = {k: v for k, v in values.items() if k in DECIMAL_FIELDS or current.get(k) != v}
     if not changed:
         return {**current, "changed": []}
     _check({**current, **changed}, contract)
@@ -517,6 +517,6 @@ async def delete_rate(conn: asyncpg.Connection, staff: Staff, rate_id: str) -> N
         current,
         supplier,
         contract,
-        before={k: current[k] for k in ("hotel_room_type_id", "service_id", "unit", "currency", *EDITABLE)},
+        before={k: current.get(k) for k in ("hotel_room_type_id", "service_id", "unit", "currency", *EDITABLE)},
         summary=f"Removed rate {current['net_amount']} {current['currency']}",
     )

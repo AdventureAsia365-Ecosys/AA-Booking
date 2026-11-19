@@ -59,9 +59,9 @@ TERM_KINDS = (ALLOTMENT, FREE_SALE, ON_REQUEST_KIND)
 KINDS = (*TERM_KINDS, STOP_SALE)
 CONTRACT_STATUS = "contract"
 STOP_IN_EFFECT = ("pending", "approved")
-MAX_NOTE = 300
-MAX_SPAN_DAYS = 731  # technical bound of one row (bk-060 CHECK), not a business policy
-MAX_CHECK_DAYS = 62  # technical bound of one staff availability check
+MAX_NOTE = 300  # technical-constant: the bk-060 CHECK length of a note or reason
+MAX_SPAN_DAYS = 731  # technical-constant: the bk-060 CHECK span of one row (two years)
+MAX_CHECK_DAYS = 62  # technical-constant: page size of one staff availability check (two months)
 
 # Reasons of a verdict (the staff check shows them; the quote stores ``stop_sale`` in the line's price note).
 R_STOP, R_ALLOTMENT, R_FREE = "stop_sale", "allotment", "free_sale"

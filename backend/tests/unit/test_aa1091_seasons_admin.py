@@ -153,7 +153,7 @@ def db(
                     for i in ids
                 ],
             ),
-            ("WHERE r.calendar_id = ANY($1::uuid[]) AND r.status = 'approved'", lambda *_: list(approved or [])),
+            ("WHERE r.calendar_id = ANY($1::uuid[]) AND r.ended_at IS NULL", lambda *_: list(approved or [])),
             ("FROM booking.holiday_events e WHERE e.status = 'approved'", lambda *_: list(events or [])),
             ("WHERE r.calendar_id = $1::uuid ORDER BY r.created_at DESC", lambda *_: list(ranges or [])),
             ("AND r.status IN ('pending', 'approved') AND r.id <> coalesce", lambda *_: list(live or [])),

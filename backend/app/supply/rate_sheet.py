@@ -100,7 +100,7 @@ SERVICE_COLUMNS = (
 # A rate row needs a Net or the Published + Commission % pair (B7); the columns themselves are optional.
 REQUIRED = {HOTEL_SHEET: ("Hotel code", "Room type"), "service": ("Service code",)}
 PAX_TYPES = ("adult", "child", "infant")
-AGE_MAX = 17  # technical bound of the bk-060 CHECK
+AGE_MAX = 17  # technical-constant: the bk-060 CHECK bound (a child or infant is under 18)
 MAX_ERRORS = 200
 
 

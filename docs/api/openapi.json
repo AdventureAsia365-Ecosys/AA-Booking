@@ -2899,6 +2899,37 @@
         "title": "CreditStatus",
         "type": "object"
       },
+      "Decision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "reject",
+              "withdraw"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "Decision",
+        "type": "object"
+      },
       "DecisionBody": {
         "additionalProperties": false,
         "description": "A decision's reason: required to reject, withdraw, ask for a removal or reject one (checked in the service);\noptional to approve.",
@@ -3747,6 +3778,22 @@
           }
         },
         "title": "DraftIn",
+        "type": "object"
+      },
+      "EndRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "EndRequest",
         "type": "object"
       },
       "EntryIn": {
@@ -6154,7 +6201,51 @@
       },
       "NewRate": {
         "additionalProperties": false,
+        "description": "A rate needs ``net_amount``, or ``published_amount`` + ``commission_pct`` (B7: the net is derived).",
         "properties": {
+          "age_max": {
+            "anyOf": [
+              {
+                "maximum": 17.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Max"
+          },
+          "age_min": {
+            "anyOf": [
+              {
+                "maximum": 17.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Min"
+          },
+          "commission_pct": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Pct"
+          },
           "hotel_room_type_id": {
             "anyOf": [
               {
@@ -6194,6 +6285,9 @@
               {
                 "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
                 "type": "string"
+              },
+              {
+                "type": "null"
               }
             ],
             "title": "Net Amount"
@@ -6235,6 +6329,38 @@
               }
             ],
             "title": "Pax Min"
+          },
+          "pax_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "adult",
+                  "child",
+                  "infant"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pax Type"
+          },
+          "published_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Amount"
           },
           "season": {
             "anyOf": [
@@ -6285,9 +6411,6 @@
             "title": "Valid To"
           }
         },
-        "required": [
-          "net_amount"
-        ],
         "title": "NewRate",
         "type": "object"
       },
@@ -6492,6 +6615,43 @@
         "title": "NewService",
         "type": "object"
       },
+      "NewStopSale": {
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "description": "rt:<room type id> or sv:<service id>",
+            "maxLength": 64,
+            "minLength": 3,
+            "title": "Component Id",
+            "type": "string"
+          },
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "note": {
+            "description": "why, e.g. the supplier e-mail that announced it",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "date_from",
+          "date_to",
+          "note"
+        ],
+        "title": "NewStopSale",
+        "type": "object"
+      },
       "NewSupplier": {
         "additionalProperties": false,
         "properties": {
@@ -6658,6 +6818,96 @@
           "categories"
         ],
         "title": "NewSupplier",
+        "type": "object"
+      },
+      "NewTerm": {
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "description": "rt:<room type id> or sv:<service id>",
+            "maxLength": 64,
+            "minLength": 3,
+            "title": "Component Id",
+            "type": "string"
+          },
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "inventory_kind": {
+            "enum": [
+              "allotment",
+              "free_sale",
+              "on_request"
+            ],
+            "title": "Inventory Kind",
+            "type": "string"
+          },
+          "max_pax": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Pax"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "release_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Days"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          }
+        },
+        "required": [
+          "component_id",
+          "inventory_kind",
+          "date_from",
+          "date_to"
+        ],
+        "title": "NewTerm",
         "type": "object"
       },
       "OpsContact": {
@@ -8415,6 +8665,49 @@
       "RateFields": {
         "additionalProperties": false,
         "properties": {
+          "age_max": {
+            "anyOf": [
+              {
+                "maximum": 17.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Max"
+          },
+          "age_min": {
+            "anyOf": [
+              {
+                "maximum": 17.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Min"
+          },
+          "commission_pct": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Pct"
+          },
           "meal_plan": {
             "anyOf": [
               {
@@ -8486,6 +8779,38 @@
               }
             ],
             "title": "Pax Min"
+          },
+          "pax_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "adult",
+                  "child",
+                  "infant"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pax Type"
+          },
+          "published_amount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Amount"
           },
           "season": {
             "anyOf": [
@@ -10141,6 +10466,185 @@
         "title": "TaxRuleIn",
         "type": "object"
       },
+      "TermPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "date_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To"
+          },
+          "max_pax": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Pax"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "release_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Days"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          }
+        },
+        "title": "TermPatch",
+        "type": "object"
+      },
+      "TermsBody": {
+        "additionalProperties": false,
+        "description": "The whole terms of a draft contract (a field left out is cleared).",
+        "properties": {
+          "balance_due_days_before": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Balance Due Days Before"
+          },
+          "cancellation_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Tier"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancellation Tiers"
+          },
+          "child_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Pct"
+          },
+          "credit_days_after": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Days After"
+          },
+          "deposit_due_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deposit Due Days"
+          },
+          "deposit_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deposit Pct"
+          }
+        },
+        "title": "TermsBody",
+        "type": "object"
+      },
       "TermsClause": {
         "additionalProperties": false,
         "properties": {
@@ -10255,6 +10759,37 @@
           "body"
         ],
         "title": "TermsClauseIn",
+        "type": "object"
+      },
+      "Tier": {
+        "additionalProperties": false,
+        "properties": {
+          "fee_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Fee Pct"
+          },
+          "min_days": {
+            "maximum": 730.0,
+            "minimum": 0.0,
+            "title": "Min Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_days",
+          "fee_pct"
+        ],
+        "title": "Tier",
         "type": "object"
       },
       "TierCreate": {
@@ -20141,6 +20676,247 @@
         ]
       }
     },
+    "/booking/contracts/{contract_id}/restrictions": {
+      "post": {
+        "operationId": "create_term_booking_contracts__contract_id__restrictions_post",
+        "parameters": [
+          {
+            "description": "Contract UUID",
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "description": "Contract UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewTerm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Term Booking Contracts  Contract Id  Restrictions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Term",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/contracts/{contract_id}/stop-sales": {
+      "post": {
+        "description": "A stop-sale on a published contract: in effect at once (pending), a second person reviews it.",
+        "operationId": "create_stop_sale_booking_contracts__contract_id__stop_sales_post",
+        "parameters": [
+          {
+            "description": "Contract UUID",
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "description": "Contract UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewStopSale"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Stop Sale Booking Contracts  Contract Id  Stop Sales Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Stop Sale",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/contracts/{contract_id}/terms": {
+      "get": {
+        "operationId": "get_terms_booking_contracts__contract_id__terms_get",
+        "parameters": [
+          {
+            "description": "Contract UUID",
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "description": "Contract UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Terms Booking Contracts  Contract Id  Terms Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Terms",
+        "tags": [
+          "supply"
+        ]
+      },
+      "put": {
+        "operationId": "put_terms_booking_contracts__contract_id__terms_put",
+        "parameters": [
+          {
+            "description": "Contract UUID",
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "description": "Contract UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Terms Booking Contracts  Contract Id  Terms Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Terms",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
     "/booking/countries": {
       "get": {
         "operationId": "list_countries_booking_countries_get",
@@ -28572,6 +29348,106 @@
         ]
       }
     },
+    "/booking/supply/availability": {
+      "get": {
+        "description": "The availability engine per date (stop_sale > allotment / free_sale > on_request), with its reason.",
+        "operationId": "availability_booking_supply_availability_get",
+        "parameters": [
+          {
+            "description": "rt:<id> or sv:<id>",
+            "in": "query",
+            "name": "component_id",
+            "required": true,
+            "schema": {
+              "description": "rt:<id> or sv:<id>",
+              "maxLength": 64,
+              "minLength": 3,
+              "title": "Component Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pax",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 999,
+              "minimum": 1,
+              "title": "Pax",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "rooms or seats the booking needs",
+            "in": "query",
+            "name": "units",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "rooms or seats the booking needs",
+              "maximum": 999,
+              "minimum": 1,
+              "title": "Units",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Availability Booking Supply Availability Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Availability",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
     "/booking/supply/options": {
       "get": {
         "operationId": "supply_options_booking_supply_options_get",
@@ -28745,6 +29621,23 @@
               ],
               "title": "Pax"
             }
+          },
+          {
+            "description": "bk-060: whose rate",
+            "in": "query",
+            "name": "pax_type",
+            "required": false,
+            "schema": {
+              "default": "adult",
+              "description": "bk-060: whose rate",
+              "enum": [
+                "adult",
+                "child",
+                "infant"
+              ],
+              "title": "Pax Type",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -28777,6 +29670,513 @@
           }
         ],
         "summary": "Rate In Force",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/supply/restrictions": {
+      "get": {
+        "operationId": "list_restrictions_booking_supply_restrictions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "contract_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contract Id"
+            }
+          },
+          {
+            "description": "rt:<id> or sv:<id>",
+            "in": "query",
+            "name": "component_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "rt:<id> or sv:<id>",
+              "title": "Component Id"
+            }
+          },
+          {
+            "description": "allotment | free_sale | on_request | stop_sale",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "allotment | free_sale | on_request | stop_sale",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "only the rows in effect",
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "only the rows in effect",
+              "title": "Active",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Restrictions Booking Supply Restrictions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Restrictions",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/supply/restrictions/{restriction_id}": {
+      "delete": {
+        "operationId": "delete_term_booking_supply_restrictions__restriction_id__delete",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Term",
+        "tags": [
+          "supply"
+        ]
+      },
+      "get": {
+        "operationId": "get_restriction_booking_supply_restrictions__restriction_id__get",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Restriction Booking Supply Restrictions  Restriction Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Restriction",
+        "tags": [
+          "supply"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_term_booking_supply_restrictions__restriction_id__patch",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Term Booking Supply Restrictions  Restriction Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Term",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/supply/stop-sales/{restriction_id}/decision": {
+      "post": {
+        "description": "``approve`` / ``reject`` (a second person) or ``withdraw`` (its maker) a pending stop-sale.",
+        "operationId": "decide_stop_sale_booking_supply_stop_sales__restriction_id__decision_post",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Stop Sale Booking Supply Stop Sales  Restriction Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Stop Sale",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/supply/stop-sales/{restriction_id}/end": {
+      "post": {
+        "operationId": "approve_end_booking_supply_stop_sales__restriction_id__end_post",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve End Booking Supply Stop Sales  Restriction Id  End Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve End",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/supply/stop-sales/{restriction_id}/end-request": {
+      "delete": {
+        "operationId": "cancel_end_request_booking_supply_stop_sales__restriction_id__end_request_delete",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel End Request Booking Supply Stop Sales  Restriction Id  End Request Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel End Request",
+        "tags": [
+          "supply"
+        ]
+      },
+      "post": {
+        "description": "Ask to lift an approved stop-sale; it stays in effect until a second person approves the end.",
+        "operationId": "request_end_booking_supply_stop_sales__restriction_id__end_request_post",
+        "parameters": [
+          {
+            "description": "Restriction UUID",
+            "in": "path",
+            "name": "restriction_id",
+            "required": true,
+            "schema": {
+              "description": "Restriction UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Restriction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Request End Booking Supply Stop Sales  Restriction Id  End Request Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request End",
         "tags": [
           "supply"
         ]
