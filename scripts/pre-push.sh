@@ -9,6 +9,10 @@
 #                                    and a missing optional tool (lychee) is a failure, not a warning
 #   scripts/pre-push.sh --plan       print the checks it would run and exit (no tool is invoked)
 #   scripts/pre-push.sh --self-test  test the decision logic on fixture diffs (no tool is invoked)
+#   scripts/pre-push.sh --select-only  print the unit test files fast mode would pick for the changes vs the base,
+#                                    committed or not (one "unit <repo-relative path>" line each, "note <text>" lines
+#                                    for warnings) and exit 0; no tool runs, nothing is written (AA-1136: for the
+#                                    agent change hooks, to call once when a lane stops)
 # Environment: AA_PREPUSH=full (same as --full), AA_PREPUSH_BASE=<ref> (default origin/main),
 #   AA_PREPUSH_VENV=<venv dir> (Python env with backend/requirements-dev.txt installed).
 # Bypass once: git push --no-verify. Uninstall: git config --unset core.hooksPath.
@@ -113,6 +117,39 @@ unit_all_files() {
 # names stay as they are). Fails (non-zero) when git cannot compute the diff, e.g. no merge base.
 changed_files() {
   git -C "$1" -c core.quotePath=false diff --name-only -z "$2...HEAD"
+}
+
+# worktree_changes <repo root> <base> -> NUL-separated paths changed since the merge base, committed or not: the
+# committed diff, staged and unstaged changes of tracked files, and untracked files git does not ignore (a lane may
+# stop before it commits). Fails (non-zero) when the committed diff cannot be computed.
+worktree_changes() {
+  local out
+  out="$(changed_files "$1" "$2" 2>/dev/null | tr '\0' '\n')" || return 1
+  {
+    [[ -n "$out" ]] && printf '%s\n' "$out"
+    git -C "$1" -c core.quotePath=false diff --name-only HEAD
+    git -C "$1" -c core.quotePath=false ls-files --others --exclude-standard
+  } | sed '/^$/d' | sort -u | tr '\n' '\0'
+}
+
+# select_only <repo root> <base> (--select-only): the unit test files for the changes, one "unit <path>" line each
+# (repo-relative, run them from backend/ without the prefix), plus "note <text>" lines. Always exits 0.
+select_only() {
+  local root="$1" base="$2" files=() f
+  if ! git -C "$root" rev-parse --verify -q "$base" >/dev/null; then
+    echo "note $base not found (git fetch origin?): nothing selected"
+    return 0
+  fi
+  mapfile -d '' -t files < <(worktree_changes "$root" "$base" || printf '__error__')
+  if [[ " ${files[*]} " == *" __error__ "* ]]; then
+    echo "note cannot diff $base...HEAD: nothing selected"
+    return 0
+  fi
+  for f in $(unit_all_files "${files[@]}"); do
+    echo "note shared fixture/deps changed ($f): CI runs the whole unit suite"
+  done
+  select_unit_tests "$root/backend" "${files[@]}" | sed 's#^#unit backend/#'
+  return 0
 }
 
 # deletes_or_renames <repo root> <base> -> exit 0 when the diff deletes or renames a file.
@@ -249,6 +286,40 @@ self_test() {
     else echo "FAIL diff reader: deletes/renames"; fails=$((fails + 1)); fi
   else
     n=$((n + 1)); echo "FAIL diff reader: could not build the scratch repo"; fails=$((fails + 1))
+  fi
+  rm -rf "$tmp"
+
+  # --select-only on a scratch repo (AA-1136): committed, staged, unstaged and untracked changes count, ignored files
+  # do not, the output is "unit <repo-relative path>" lines, a bad base is a note and never an error.
+  tmp="$(mktemp -d)"
+  g=(git -C "$tmp" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null)
+  if "${g[@]}" init -q -b main 2>/dev/null && mkdir -p "$tmp/backend/app" "$tmp/backend/tests/unit" &&
+    : >"$tmp/backend/app/alpha.py" && : >"$tmp/backend/app/beta.py" && : >"$tmp/backend/app/gamma.py" &&
+    : >"$tmp/backend/tests/unit/test_alpha.py" && : >"$tmp/backend/tests/unit/test_beta.py" &&
+    : >"$tmp/backend/tests/unit/test_gamma.py" && : >"$tmp/backend/tests/unit/test_delta.py" &&
+    echo "ignored_*.py" >"$tmp/.gitignore" && "${g[@]}" add -A && "${g[@]}" commit -q -m base &&
+    echo "x = 1" >"$tmp/backend/app/alpha.py" && "${g[@]}" commit -q -am alpha &&
+    echo "y = 1" >"$tmp/backend/app/beta.py" && "${g[@]}" add backend/app/beta.py &&
+    echo "z = 1" >"$tmp/backend/app/gamma.py" && : >"$tmp/backend/app/delta.py" && : >"$tmp/backend/app/ignored_x.py"; then
+    local want="unit backend/tests/unit/test_alpha.py unit backend/tests/unit/test_beta.py"
+    want+=" unit backend/tests/unit/test_delta.py unit backend/tests/unit/test_gamma.py"
+    got="$(select_only "$tmp" main~1 | tr '\n' ' ' | sed 's/ $//')"
+    n=$((n + 1))
+    if [[ "$got" == "$want" ]]; then echo "ok   select-only: committed + staged + unstaged + untracked, not ignored"
+    else echo "FAIL select-only: committed + staged + unstaged + untracked"; echo "     want: $want"; echo "     got:  $got"; fails=$((fails + 1)); fi
+    got="$(select_only "$tmp" no-such-ref; echo "rc=$?")"
+    n=$((n + 1))
+    if [[ "$got" == $'note no-such-ref not found (git fetch origin?): nothing selected\nrc=0' ]]; then
+      echo "ok   select-only: a bad base is a note, exit 0"
+    else echo "FAIL select-only: a bad base"; echo "     got:  $got"; fails=$((fails + 1)); fi
+    "${g[@]}" checkout -q --orphan other && "${g[@]}" commit -q -m orphan
+    got="$(select_only "$tmp" main; echo "rc=$?")"
+    n=$((n + 1))
+    if [[ "$got" == $'note cannot diff main...HEAD: nothing selected\nrc=0' ]]; then
+      echo "ok   select-only: no merge base is a note, exit 0"
+    else echo "FAIL select-only: no merge base"; echo "     got:  $got"; fails=$((fails + 1)); fi
+  else
+    n=$((n + 1)); echo "FAIL select-only: could not build the scratch repo"; fails=$((fails + 1))
   fi
   rm -rf "$tmp"
 
@@ -492,20 +563,23 @@ run_check() {
 # ---------------------------------------------------------------------------------------------------------------
 MODE="fast"
 PLAN_ONLY=0
+SELECT_ONLY=0
 [[ "${AA_PREPUSH:-}" == "full" ]] && MODE="full"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --full) [[ "$MODE" != "ci" ]] && MODE="full" ;;
     --ci) MODE="ci" ;;
     --plan) PLAN_ONLY=1 ;;
+    --select-only) SELECT_ONLY=1 ;;
     --self-test) self_test; exit $? ;;
-    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "pre-push: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
 done
 
 BASE="${AA_PREPUSH_BASE:-origin/main}"
+if [[ $SELECT_ONLY -eq 1 ]]; then select_only "$REPO_ROOT" "$BASE"; exit 0; fi
 CHANGED=()
 PLAN_INPUT=()
 if [[ "$MODE" == "fast" ]]; then
