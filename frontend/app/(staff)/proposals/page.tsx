@@ -48,6 +48,9 @@ import {
 } from "@/ui";
 import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
 import { casePartyLabel } from "@/ui/booking/caseFacts";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const CLOSED = ["completed", "cancelled"];
 const builderHref = (r: { trip_case_code: string; version_number: number }) =>
@@ -56,6 +59,8 @@ const builderHref = (r: { trip_case_code: string; version_number: number }) =>
 type RowAction = { kind: "copy" | "delete"; row: VersionListItem } | null;
 
 export default function ProposalsPage() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -80,7 +85,7 @@ export default function ProposalsPage() {
     mutationFn: (r: VersionListItem) => proposalsApi.create(r.trip_case_code),
     onSuccess: async (v, r) => {
       await Promise.all([qc.invalidateQueries({ queryKey: ["versions"] }), qc.invalidateQueries({ queryKey: ["trip-case", r.trip_case_code] })]);
-      toast.success(`${r.trip_case_code} V${v.version_number} created`);
+      toast.success(tr("{0} V{1} created", r.trip_case_code, v.version_number));
       setAction(null);
       router.push(builderHref({ trip_case_code: r.trip_case_code, version_number: v.version_number }));
     },
@@ -89,7 +94,7 @@ export default function ProposalsPage() {
     mutationFn: (r: VersionListItem) => proposalsApi.remove(r.trip_case_code, r.version_number),
     onSuccess: async (_, r) => {
       await Promise.all([qc.invalidateQueries({ queryKey: ["versions"] }), qc.invalidateQueries({ queryKey: ["trip-case", r.trip_case_code] })]);
-      toast.success(`Draft ${r.trip_case_code} V${r.version_number} deleted`);
+      toast.success(tr("Draft {0} V{1} deleted", r.trip_case_code, r.version_number));
       setAction(null);
     },
   });
@@ -99,7 +104,7 @@ export default function ProposalsPage() {
       ...COLUMNS,
       {
         id: "actions",
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{tr("Actions")}</span>,
         cell: ({ row }) => (
           <RowActions
             row={row.original}
@@ -116,18 +121,18 @@ export default function ProposalsPage() {
     ],
     // copy / remove are stable mutation objects; reset() is all the cell uses.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canWrite, router],
+    [canWrite, router, tr],
   );
 
   const target = action?.row;
   return (
     <PageFrame
-      title="Proposals"
-      description="Every proposal version across trip cases: drafts, sent, approved and superseded."
+      title={tr("Proposals")}
+      description={tr("Every proposal version across trip cases: drafts, sent, approved and superseded.")}
       actions={
         canWrite ? (
           <Button variant="primary" onClick={() => setPickerOpen(true)}>
-            <Plus size={14} /> New proposal
+            <Plus size={14} /> {tr("New proposal")}
           </Button>
         ) : undefined
       }
@@ -136,25 +141,25 @@ export default function ProposalsPage() {
         <DataTable<VersionListItem>
           filters={
             <FilterBar
-              search={{ placeholder: "Search case code, customer or version title" }}
+              search={{ placeholder: tr("Search case code, customer or version title") }}
               selects={[
                 {
                   key: "badge",
-                  label: "Status",
-                  allLabel: "All statuses",
-                  options: Object.entries(VERSION_BADGE_META).map(([value, m]) => ({ value, label: m.label })),
+                  label: tr("Status"),
+                  allLabel: tr("All statuses"),
+                  options: Object.entries(VERSION_BADGE_META).map(([value, m]) => ({ value, label: tx(m.label) })),
                 },
                 {
                   key: "assignee",
-                  label: "Sales",
-                  allLabel: "Anyone",
+                  label: tr("Sales"),
+                  allLabel: tr("Anyone"),
                   options: [
-                    { value: "me", label: "Mine" },
-                    { value: "none", label: "Unassigned" },
+                    { value: "me", label: tr("Mine") },
+                    { value: "none", label: tr("Unassigned") },
                   ],
                 },
               ]}
-              dateRange={{ fromKey: "from", toKey: "to", label: "Updated" }}
+              dateRange={{ fromKey: "from", toKey: "to", label: tr("Updated") }}
             />
           }
           searchable={false}
@@ -169,8 +174,8 @@ export default function ProposalsPage() {
           onRetry={() => list.refetch()}
           pageSizeOptions={PAGE_SIZES}
           serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-          emptyTitle="No proposals match"
-          emptyDescription="Proposals are created from a trip case. Change the filters to widen the list."
+          emptyTitle={tr("No proposals match")}
+          emptyDescription={tr("Proposals are created from a trip case. Change the filters to widen the list.")}
           onRowClick={(r) => router.push(builderHref(r))}
         />
       </Section>
@@ -179,32 +184,30 @@ export default function ProposalsPage() {
         open={action?.kind === "copy"}
         onClose={() => setAction(null)}
         onConfirm={() => target && copy.mutate(target)}
-        title="New version"
+        title={tr("New version")}
         message={
           <>
-            Create the next version of <strong>{target?.trip_case_code}</strong>. It copies the case&apos;s <strong>latest</strong> version
-            (items, title, price) into a new draft, whichever row you started from.
+            {tr("Create the next version of")} <strong>{target?.trip_case_code}</strong>{tr(". It copies the case's")} <strong>{tr("latest")}</strong> {tr("version (items, title, price) into a new draft, whichever row you started from.")}
           </>
         }
-        confirmLabel="Create version"
+        confirmLabel={tr("Create version")}
         busy={copy.isPending}
-        error={copy.error?.message}
+        error={tx(copy.error?.message)}
       />
       <ConfirmDialog
         open={action?.kind === "delete"}
         onClose={() => setAction(null)}
         onConfirm={() => target && remove.mutate(target)}
-        title="Delete draft version"
+        title={tr("Delete draft version")}
         message={
           <>
-            Delete draft <strong>{target?.trip_case_code} V{target?.version_number}</strong>? It disappears from the case; its number is not
-            reused.
+            {tr("Delete draft")} <strong>{target?.trip_case_code} V{target?.version_number}</strong>{tr("? It disappears from the case; its number is not reused.")}
           </>
         }
-        confirmLabel="Delete draft"
+        confirmLabel={tr("Delete draft")}
         danger
         busy={remove.isPending}
-        error={remove.error?.message}
+        error={tx(remove.error?.message)}
       />
       <CasePicker open={pickerOpen} onClose={() => setPickerOpen(false)} />
     </PageFrame>
@@ -222,6 +225,7 @@ function RowActions({
   onOpen: (href: string) => void;
   onAction: (kind: "copy" | "delete") => void;
 }) {
+  const tr = useT(MSG);
   const closed = CLOSED.includes(row.trip_case_status);
   const draft = row.badge === "draft";
   const label = `${row.trip_case_code} V${row.version_number}`;
@@ -229,17 +233,17 @@ function RowActions({
   // Stop the row click so an action never also opens the builder.
   return (
     <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-      <IconButton title="Open builder" label={`Open builder for ${label}`} onClick={() => onOpen(builderHref(row))}>
+      <IconButton title={tr("Open builder")} label={tr("Open builder for {0}", label)} onClick={() => onOpen(builderHref(row))}>
         <Pencil size={14} />
       </IconButton>
-      <IconButton title="Preview" label={`Preview ${label}`} onClick={() => onOpen(`${builderHref(row)}/preview`)}>
+      <IconButton title={tr("Preview")} label={tr("Preview {0}", label)} onClick={() => onOpen(`${builderHref(row)}/preview`)}>
         <Eye size={14} />
       </IconButton>
       {writable && (
         <>
           <IconButton
-            title="New version (copies the latest)"
-            label={`New version of ${row.trip_case_code}`}
+            title={tr("New version (copies the latest)")}
+            label={tr("New version of {0}", row.trip_case_code)}
             disabled={closed}
             onClick={() => onAction("copy")}
           >
@@ -247,8 +251,8 @@ function RowActions({
           </IconButton>
           <IconButton
             tone="danger"
-            title={draft ? "Delete draft" : "Only a draft can be deleted"}
-            label={`Delete ${label}`}
+            title={draft ? tr("Delete draft") : tr("Only a draft can be deleted")}
+            label={tr("Delete {0}", label)}
             disabled={!draft || closed}
             onClick={() => onAction("delete")}
           >
@@ -262,14 +266,17 @@ function RowActions({
 
 /** "+ New proposal": pick a trip case, then open its latest version (or create V1 when it has none). */
 function CasePicker({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const tr = useT(MSG);
   return (
-    <Modal open={open} onClose={onClose} title="New proposal" width={560}>
+    <Modal open={open} onClose={onClose} title={tr("New proposal")} width={560}>
       {open && <CasePickerBody onClose={onClose} />}
     </Modal>
   );
 }
 
 function CasePickerBody({ onClose }: { onClose: () => void }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -297,7 +304,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
         const created = await proposalsApi.create(code);
         n = created.version_number;
         await Promise.all([qc.invalidateQueries({ queryKey: ["versions"] }), qc.invalidateQueries({ queryKey: ["trip-case", code] })]);
-        toast.success(`${code} V${n} created`);
+        toast.success(tr("{0} V{1} created", code, n));
       }
       onClose();
       router.push(builderHref({ trip_case_code: code, version_number: n }));
@@ -310,29 +317,29 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex flex-col gap-3 font-sans">
       <p className="text-[13px] text-muted">
-        A proposal belongs to a trip case. Pick the case: its latest version opens, or V1 is created from its trip legs when it has none.
+        {tr("A proposal belongs to a trip case. Pick the case: its latest version opens, or V1 is created from its trip legs when it has none.")}
       </p>
       <label className="relative block">
-        <span className="sr-only">Search trip cases</span>
+        <span className="sr-only">{tr("Search trip cases")}</span>
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted2" />
         <Input
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Case code, customer name or e-mail"
+          placeholder={tr("Case code, customer name or e-mail")}
           className="w-full" style={{ paddingLeft: 36 }}
         />
       </label>
       {cases.isLoading ? (
         <div className="flex items-center gap-2 py-6 text-[13px] text-muted">
-          <Spinner /> Loading trip cases…
+          <Spinner /> {tr("Loading trip cases…")}
         </div>
       ) : cases.isError ? (
         <p role="alert" className="text-[13px] text-danger">
-          {(cases.error as Error).message}
+          {tx((cases.error as Error).message)}
         </p>
       ) : (cases.data?.items.length ?? 0) === 0 ? (
-        <p className="py-6 text-center text-[13px] text-muted">{debounced ? "No trip case matches." : "No trip cases yet. Create one from Trip cases first."}</p>
+        <p className="py-6 text-center text-[13px] text-muted">{debounced ? tr("No trip case matches.") : tr("No trip cases yet. Create one from Trip cases first.")}</p>
       ) : (
         <ul className="flex max-h-[360px] flex-col divide-y divide-line2 overflow-y-auto rounded-md border border-line">
           {cases.data!.items.map((c) => {
@@ -348,7 +355,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                   style={{ gap: 12, padding: "10px 12px", borderRadius: 0 }}
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-medium text-ink">{casePartyLabel(c)}</span>
+                    <span className="block truncate text-[13px] font-medium text-ink">{tx(casePartyLabel(c))}</span>
                     <span className="text-xs text-muted">
                       <Code>{c.code}</Code>
                       {c.start_date ? ` · ${formatDay(c.start_date)}` : ""}
@@ -356,7 +363,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {pending === c.code && <Spinner />}
-                    {frozen && <span className="text-xs text-muted">Read-only</span>}
+                    {frozen && <span className="text-xs text-muted">{tr("Read-only")}</span>}
                     <TripCaseStatusBadge status={c.status} />
                   </span>
                 </ListButton>
@@ -367,7 +374,7 @@ function CasePickerBody({ onClose }: { onClose: () => void }) {
       )}
       {error && (
         <p role="alert" className="text-[13px] text-danger">
-          {error}
+          {tx(error)}
         </p>
       )}
     </div>
@@ -387,6 +394,12 @@ function FlexCell({ min, children }: { min: number; children: React.ReactNode })
 }
 
 const CLAMP = "block break-words md:line-clamp-1";
+
+/** "by <name>" under the last-edited date, in the UI language (the column is defined outside a component). */
+function UpdatedBy({ name }: { name: string }) {
+  const t = useT(MSG);
+  return <span className="block text-xs">{t("by {0}", name)}</span>;
+}
 
 const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
   {
@@ -444,7 +457,7 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
     cell: ({ row }) => (
       <span className="text-[13px] text-muted">
         <DateText value={row.original.updated_at} relative />
-        {row.original.updated_by?.name && <span className="block text-xs">by {row.original.updated_by.name}</span>}
+        {row.original.updated_by?.name && <UpdatedBy name={row.original.updated_by.name} />}
       </span>
     ),
   },

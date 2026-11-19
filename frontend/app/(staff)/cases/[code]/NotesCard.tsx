@@ -10,8 +10,13 @@ import { Textarea, Button, IconButton, Section, useCan } from "@/ui";
 import { textareaCls } from "../_parts/fields";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./NotesCard.messages";
 
 export function NotesCard({ c }: { c: TripCaseDetail }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("trip_case.write");
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
@@ -26,11 +31,11 @@ export function NotesCard({ c }: { c: TripCaseDetail }) {
 
   return (
     <Section
-      title="Internal notes"
-      description="Staff only. Earlier text is kept in the Activity tab."
+      title={t("Internal notes")}
+      description={t("Staff only. Earlier text is kept in the Activity tab.")}
       actions={
         canWrite && !editing ? (
-          <IconButton onClick={start} label="Edit internal notes">
+          <IconButton onClick={start} label={t("Edit internal notes")}>
             <Pencil size={14} />
           </IconButton>
         ) : undefined
@@ -45,21 +50,21 @@ export function NotesCard({ c }: { c: TripCaseDetail }) {
             update.mutate({ notes: text.trim() || null }, { onSuccess: () => setEditing(false) });
           }}
         >
-          <Textarea className={textareaCls} value={text} maxLength={10000} rows={6} onChange={(e) => setText(e.target.value)} aria-label="Internal notes" autoFocus />
-          {update.isError && <p className="text-[13px] text-danger">{friendlyError(update.error)}</p>}
+          <Textarea className={textareaCls} value={text} maxLength={10000} rows={6} onChange={(e) => setText(e.target.value)} aria-label={t("Internal notes")} autoFocus />
+          {update.isError && <p className="text-[13px] text-danger">{tx(friendlyError(update.error))}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={update.isPending}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button variant="primary" size="sm" type="submit" disabled={update.isPending}>
-              {update.isPending ? "Saving…" : "Save notes"}
+              {update.isPending ? t("Saving…") : t("Save notes")}
             </Button>
           </div>
         </form>
       ) : current ? (
-        <p className="whitespace-pre-wrap break-words text-[13px] text-body">{c.notes}</p>
+        <p className="whitespace-pre-wrap break-words text-[13px] text-body">{tx(c.notes)}</p>
       ) : (
-        <p className="text-[13px] text-muted">No notes yet.{canWrite && " Use the pencil to add one."}</p>
+        <p className="text-[13px] text-muted">{t("No notes yet.")}{canWrite && t(" Use the pencil to add one.")}</p>
       )}
     </Section>
   );

@@ -7,6 +7,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import { TRIP_CASE_STATUS_META, useToast } from "@/ui";
 import type { TripCaseStatus } from "@/lib/api/types";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./useCaseMutations.messages";
 
 export function useCaseRefresh(code: string) {
   const qc = useQueryClient();
@@ -18,37 +20,40 @@ export function useCaseRefresh(code: string) {
 }
 
 export function useChangeStatus(code: string) {
+  const t = useT(MSG);
   const toast = useToast();
   const refresh = useCaseRefresh(code);
   return useMutation({
     mutationFn: ({ to, reason }: { to: TripCaseStatus; reason?: string }) => api.tripCases.changeStatus(code, to, reason || undefined),
     onSuccess: async (_, { to }) => {
       await refresh();
-      toast.success(`Trip case ${code} is now ${TRIP_CASE_STATUS_META[to].label.toLowerCase()}`);
+      toast.success(t("Trip case {0} is now {1}", code, TRIP_CASE_STATUS_META[to].label.toLowerCase()));
     },
   });
 }
 
 export function useAssign(code: string) {
+  const t = useT(MSG);
   const toast = useToast();
   const refresh = useCaseRefresh(code);
   return useMutation({
     mutationFn: ({ cisUserId }: { cisUserId: string | null; quiet?: boolean }) => api.tripCases.assign(code, cisUserId, "sales"),
     onSuccess: async (res, { cisUserId, quiet }) => {
       await refresh();
-      if (!quiet && res.changed) toast.success(cisUserId ? `Trip case ${code} assigned` : `Trip case ${code} is unassigned`);
+      if (!quiet && res.changed) toast.success(cisUserId ? t("Trip case {0} assigned", code) : t("Trip case {0} is unassigned", code));
     },
   });
 }
 
 export function useUpdateCase(code: string) {
+  const t = useT(MSG);
   const toast = useToast();
   const refresh = useCaseRefresh(code);
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.tripCases.update(code, body),
     onSuccess: async () => {
       await refresh();
-      toast.success(`Trip case ${code} updated`);
+      toast.success(t("Trip case {0} updated", code));
     },
   });
 }

@@ -55,6 +55,9 @@ import { SavedTabs } from "../../_parts/SavedTabs";
 import { ChargeFeeModal } from "../../departures/_parts/ChargeFeeModal";
 import { AgencyBookingsTab } from "./AgencyBookingsTab";
 import { formatDay } from "@/ui/booking/dates";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./B2BDeskView.messages";
 
 const SLA_META: Record<Sla, { label: string; tone: BookingTone; help: string }> = {
   overdue: { label: "Overdue", tone: "danger", help: "Past the 1 business day answer deadline" },
@@ -92,43 +95,44 @@ function pax(p: OnRequestLine["pax"]): string {
 }
 
 export function B2BDeskView() {
+  const t = useT(MSG);
   const { get } = useUrlFilters();
   const tab = get("tab") || "on-request";
   const summary = useQuery({ queryKey: ["b2b-desk", "summary"], queryFn: b2bDeskApi.summary, refetchInterval: 60_000 });
   const s = summary.data;
   return (
     <PageFrame
-      title="B2B desk"
-      description="Agency bookings that need AA ops: on-request lines to accept or decline within 1 business day, and incidents on departures. Agencies see every answer in their CRM."
+      title={t("B2B desk")}
+      description={t("Agency bookings that need AA ops: on-request lines to accept or decline within 1 business day, and incidents on departures. Agencies see every answer in their CRM.")}
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <KpiTile label="On request" value={s?.on_request.open} icon={<ClipboardCheck size={16} />} hint="Waiting for an answer" hintTone="neutral" />
+        <KpiTile label={t("On request")} value={s?.on_request.open} icon={<ClipboardCheck size={16} />} hint={t("Waiting for an answer")} hintTone="neutral" />
         <KpiTile
-          label="Overdue"
+          label={t("Overdue")}
           value={s?.on_request.overdue}
           icon={<CircleAlert size={16} />}
-          hint={s ? (s.on_request.overdue ? "Past the deadline" : "None") : undefined}
+          hint={s ? (s.on_request.overdue ? t("Past the deadline") : t("None")) : undefined}
           hintTone={s?.on_request.overdue ? "danger" : "neutral"}
         />
         <KpiTile
-          label="Due soon"
+          label={t("Due soon")}
           value={s?.on_request.due_soon}
           icon={<AlarmClock size={16} />}
-          hint={s ? `Within ${s.due_soon_hours} h` : undefined}
+          hint={s ? t("Within {0} h", s.due_soon_hours) : undefined}
           hintTone={s?.on_request.due_soon ? "warning" : "neutral"}
         />
         <KpiTile
-          label="Open incidents"
+          label={t("Open incidents")}
           value={s?.open_incidents}
           icon={<Siren size={16} />}
-          hint={s ? (s.open_incidents ? "Agencies were told" : "None") : undefined}
+          hint={s ? (s.open_incidents ? t("Agencies were told") : t("None")) : undefined}
           hintTone={s?.open_incidents ? "warning" : "neutral"}
         />
         <KpiTile
-          label="Departures at risk"
+          label={t("Departures at risk")}
           value={s?.departures_at_risk}
           icon={<TriangleAlert size={16} />}
-          hint={s ? (s.departures_at_risk ? "Short of the minimum" : "None") : undefined}
+          hint={s ? (s.departures_at_risk ? t("Short of the minimum") : t("None")) : undefined}
           hintTone={s?.departures_at_risk ? "warning" : "neutral"}
         />
       </div>
@@ -136,9 +140,9 @@ export function B2BDeskView() {
         <div className="mb-4">
           <SavedTabs
             tabs={[
-              { key: "on-request", label: "On request", count: s?.on_request.open },
-              { key: "departures", label: "Departures & incidents", count: s ? s.open_incidents + (s.departures_at_risk ?? 0) : undefined },
-              { key: "agency-bookings", label: "Agency bookings" },
+              { key: "on-request", label: t("On request"), count: s?.on_request.open },
+              { key: "departures", label: t("Departures & incidents"), count: s ? s.open_incidents + (s.departures_at_risk ?? 0) : undefined },
+              { key: "agency-bookings", label: t("Agency bookings") },
             ]}
           />
         </div>
@@ -151,6 +155,8 @@ export function B2BDeskView() {
 // ── On request ───────────────────────────────────────────────────────────────
 
 function OnRequestTab() {
+  const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const paging = useOffsetPage();
   const canWrite = useCan("b2b_desk.write");
@@ -165,7 +171,7 @@ function OnRequestTab() {
   const accept = useMutation({
     mutationFn: (l: OnRequestLine) => b2bDeskApi.accept(l.hold_id, l.line_ref),
     onSuccess: (l) => {
-      toast.success(`Line ${l.line_ref} of ${l.trip_case.code} confirmed; the agency is told`);
+      toast.success(t("Line {0} of {1} confirmed; the agency is told", l.line_ref, l.trip_case.code));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -180,12 +186,12 @@ function OnRequestTab() {
         const meta = SLA_META[row.original.sla];
         return (
           <span className="flex min-w-0 flex-col gap-1">
-            <Pill tone={meta.tone} title={meta.help}>
-              {meta.label}
+            <Pill tone={meta.tone} title={tx(meta.help)}>
+              {tx(meta.label)}
             </Pill>
             {row.original.answer_due_at && row.original.status === "on_request" && (
               <span className="text-xs text-muted">
-                by <DateText value={row.original.answer_due_at} withTime />
+                {t("by")} <DateText value={row.original.answer_due_at} withTime />
               </span>
             )}
           </span>
@@ -194,7 +200,7 @@ function OnRequestTab() {
     },
     {
       id: "item",
-      header: "Item",
+      header: t("Item"),
       accessorFn: (r) => r.component.label ?? r.component.id,
       cell: ({ row }) => {
         const l = row.original;
@@ -206,10 +212,9 @@ function OnRequestTab() {
             </span>
             <span
               className="text-xs text-muted md:truncate"
-              title={`${KIND_LABEL[l.component.kind] ?? l.component.kind}${l.component.supplier ? ` · ${l.component.supplier.name}` : ""} · line ${l.line_ref}`}
+              title={t("{0}{1} · line {2}", KIND_LABEL[l.component.kind] ?? l.component.kind, l.component.supplier ? ` · ${l.component.supplier.name}` : "", l.line_ref)}
             >
-              {KIND_LABEL[l.component.kind] ?? l.component.kind}
-              {l.component.supplier ? ` · ${l.component.supplier.name}` : ""} · line {l.line_ref}
+              {t("{0}{1} · line {2}", KIND_LABEL[l.component.kind] ?? l.component.kind, l.component.supplier ? ` · ${l.component.supplier.name}` : "", l.line_ref)}
             </span>
           </span>
         );
@@ -217,21 +222,21 @@ function OnRequestTab() {
     },
     {
       id: "when",
-      header: "Service date",
+      header: t("Service date"),
       accessorFn: (r) => r.service_date,
       cell: ({ row }) => (
         <span className="flex flex-col text-[13px] text-body">
           <DateText value={row.original.service_date} />
           <span className="text-xs text-muted">
             {pax(row.original.pax)}
-            {row.original.nights ? ` · ${row.original.nights} night${row.original.nights === 1 ? "" : "s"}` : ""}
+            {row.original.nights ? t(" · {0} night{1}", row.original.nights, row.original.nights === 1 ? "" : "s") : ""}
           </span>
         </span>
       ),
     },
     {
       id: "booking",
-      header: "Booking",
+      header: t("Booking"),
       accessorFn: (r) => r.trip_case.code,
       cell: ({ row }) => (
         <span className="flex flex-col">
@@ -246,18 +251,18 @@ function OnRequestTab() {
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       accessorFn: (r) => r.status,
       cell: ({ row }) => {
         const l = row.original;
         const meta = LINE_STATUS[l.status];
         return (
           <span className="flex flex-col gap-1">
-            <Pill tone={meta.tone}>{meta.label}</Pill>
-            {l.decline_code && <span className="text-xs text-muted">{DECLINE_LABEL[l.decline_code]}</span>}
+            <Pill tone={meta.tone}>{tx(meta.label)}</Pill>
+            {l.decline_code && <span className="text-xs text-muted">{tx(DECLINE_LABEL[l.decline_code])}</span>}
             {l.answered_at && (
               <span className="text-xs text-muted">
-                {l.answered_by?.name ?? "Staff"} · <DateText value={l.answered_at} relative className="whitespace-nowrap" />
+                {l.answered_by?.name ?? t("Staff")} · <DateText value={l.answered_at} relative className="whitespace-nowrap" />
               </span>
             )}
           </span>
@@ -277,9 +282,9 @@ function OnRequestTab() {
                   <a
                     className="text-right text-xs font-medium text-accent-deep hover:underline"
                     href={`/cases/${encodeURIComponent(row.original.trip_case.code)}?tab=suppliers`}
-                    title="Confirm or decline the supplier booking on the case's Suppliers tab; the line follows"
+                    title={t("Confirm or decline the supplier booking on the case's Suppliers tab; the line follows")}
                   >
-                    Answer on Suppliers tab ({row.original.supplier_booking})
+                    {t("Answer on Suppliers tab ({0})", row.original.supplier_booking)}
                   </a>
                 </span>
               ) : row.original.status === "on_request" ? (
@@ -289,17 +294,17 @@ function OnRequestTab() {
                     variant="primary"
                     disabled={accept.isPending}
                     onClick={() => accept.mutate(row.original)}
-                    ariaLabel={`Accept line ${row.original.line_ref} of ${row.original.trip_case.code}`}
+                    ariaLabel={t("Accept line {0} of {1}", row.original.line_ref, row.original.trip_case.code)}
                   >
-                    Accept
+                    {t("Accept")}
                   </Button>
                   <Button
                     size="sm"
                     variant="danger"
                     onClick={() => setDeclining(row.original)}
-                    ariaLabel={`Decline line ${row.original.line_ref} of ${row.original.trip_case.code}`}
+                    ariaLabel={t("Decline line {0} of {1}", row.original.line_ref, row.original.trip_case.code)}
                   >
-                    Decline
+                    {t("Decline")}
                   </Button>
                 </span>
               ) : null,
@@ -313,12 +318,12 @@ function OnRequestTab() {
       <SegmentedControl
         appearance="chips"
         size="sm"
-        label="Request state"
+        label={t("Request state")}
         className="mb-3"
         options={[
-          { value: "open", label: "Waiting for an answer" },
-          { value: "answered", label: "Answered" },
-          { value: "all", label: "All" },
+          { value: "open", label: t("Waiting for an answer") },
+          { value: "answered", label: t("Answered") },
+          { value: "all", label: t("All") },
         ]}
         value={state}
         onChange={(k) => set("state", k === "open" ? null : k)}
@@ -334,13 +339,12 @@ function OnRequestTab() {
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-        emptyTitle={state === "open" ? "Nothing waits for an answer" : "No lines here yet"}
-        emptyDescription="A line comes here when an agency confirms a booking with an item AA must check with the supplier first (no fixed departure, or a departure that does not auto-confirm)."
+        emptyTitle={state === "open" ? t("Nothing waits for an answer") : t("No lines here yet")}
+        emptyDescription={t("A line comes here when an agency confirms a booking with an item AA must check with the supplier first (no fixed departure, or a departure that does not auto-confirm).")}
         tableMinWidth={canWrite ? 980 : 820}
       />
       <p className="mt-3 text-xs text-muted">
-        The deadline is 1 business day (Monday to Friday, Vietnam time) after the agency confirmed. Public holidays are not counted
-        yet.
+        {t("The deadline is 1 business day (Monday to Friday, Vietnam time) after the agency confirmed. Public holidays are not counted yet.")}
       </p>
       <DeclineModal line={declining} onClose={() => setDeclining(null)} onDone={refresh} />
     </>
@@ -348,12 +352,14 @@ function OnRequestTab() {
 }
 
 function DeclineModal({ line, onClose, onDone }: { line: OnRequestLine | null; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [code, setCode] = useState<DeclineCode>("supplier_unavailable");
   const decline = useMutation({
     mutationFn: () => b2bDeskApi.decline(line!.hold_id, line!.line_ref, code),
     onSuccess: (l) => {
-      toast.success(`Line ${l.line_ref} of ${l.trip_case.code} declined; the agency is told`);
+      toast.success(t("Line {0} of {1} declined; the agency is told", l.line_ref, l.trip_case.code));
       onDone();
       onClose();
     },
@@ -362,12 +368,12 @@ function DeclineModal({ line, onClose, onDone }: { line: OnRequestLine | null; o
     <Modal
       open={!!line}
       onClose={onClose}
-      title="Decline on-request line"
+      title={t("Decline on-request line")}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="danger" disabled={decline.isPending} onClick={() => decline.mutate()}>
-            Decline line
+            {t("Decline line")}
           </Button>
         </>
       }
@@ -375,20 +381,19 @@ function DeclineModal({ line, onClose, onDone }: { line: OnRequestLine | null; o
       {line && (
         <div className="flex flex-col gap-3 text-[13px] text-body">
           <p>
-            {line.component.label ?? line.component.id} on <DateText value={line.service_date} /> for {line.trip_case.code} (
-            {line.partner.agency_name}). Its seats are released and the agency sees the line as declined.
+            {t("{0} on", line.component.label ?? line.component.id)} <DateText value={line.service_date} /> {t("for {0} ({1}). Its seats are released and the agency sees the line as declined.", line.trip_case.code, line.partner.agency_name)}
           </p>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Reason</span>
+            <span className="text-xs font-semibold text-muted">{t("Reason")}</span>
             <Select size="sm" className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as DeclineCode)}>
               {DECLINE_CODES.map((c) => (
                 <option key={c} value={c}>
-                  {DECLINE_LABEL[c]}
+                  {tx(DECLINE_LABEL[c])}
                 </option>
               ))}
             </Select>
           </label>
-          {decline.isError && <p className="text-danger">{errorText(decline.error)}</p>}
+          {decline.isError && <p className="text-danger">{tx(errorText(decline.error))}</p>}
         </div>
       )}
     </Modal>
@@ -404,6 +409,8 @@ const DEP_STATUS: Record<DeskDeparture["status"], { label: string; tone: Booking
 };
 
 function DeparturesTab() {
+  const t = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("b2b_desk.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -414,7 +421,7 @@ function DeparturesTab() {
   const clear = useMutation({
     mutationFn: (incidentId: string) => b2bDeskApi.clear(incidentId),
     onSuccess: () => {
-      toast.success("Incident cleared; the agencies are told");
+      toast.success(t("Incident cleared; the agencies are told"));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -423,24 +430,24 @@ function DeparturesTab() {
   const columns: ColumnDef<DeskDeparture, unknown>[] = [
     {
       id: "date",
-      header: "Departure",
+      header: t("Departure"),
       accessorFn: (r) => r.start_date,
       cell: ({ row }) => (
         <span className="flex flex-col">
           <a
             className="text-[13.5px] font-medium text-ink hover:underline"
             href={`/departures?month=${row.original.start_date.slice(0, 7)}&departure=${encodeURIComponent(row.original.id)}`}
-            title="Open on the departure board"
+            title={t("Open on the departure board")}
           >
             <DateText value={row.original.start_date} />
           </a>
           <span className="max-w-[300px] truncate text-xs text-muted" title={row.original.tour_title ?? row.original.source_id}>
-            {row.original.tour_title ?? `Tour ${row.original.source_id.slice(0, 8)}`}
+            {row.original.tour_title ?? t("Tour {0}", row.original.source_id.slice(0, 8))}
           </span>
           {row.original.sold > 0 && (
             // AA-1075 (bk-13): the operations manifest of the departure (counts only, printable).
             <a className="text-xs font-medium text-accent-deep hover:underline" href={`/b2b-desk/manifest/${encodeURIComponent(row.original.id)}`}>
-              Manifest
+              {t("Manifest")}
             </a>
           )}
         </span>
@@ -448,27 +455,27 @@ function DeparturesTab() {
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       accessorFn: (r) => r.status,
       cell: ({ row }) => (
         <span className="flex flex-wrap gap-1">
-          <Pill tone={DEP_STATUS[row.original.status].tone}>{DEP_STATUS[row.original.status].label}</Pill>
-          {row.original.at_risk && <Pill tone="warning">At risk</Pill>}
+          <Pill tone={DEP_STATUS[row.original.status].tone}>{tx(DEP_STATUS[row.original.status].label)}</Pill>
+          {row.original.at_risk && <Pill tone="warning">{t("At risk")}</Pill>}
         </span>
       ),
     },
     {
       id: "seats",
-      header: "Seats",
+      header: t("Seats"),
       accessorFn: (r) => r.sold,
       cell: ({ row }) => (
         <span className="flex flex-col">
           <span className="bk-tabular text-[13px] text-body">
-            {row.original.sold} sold · {row.original.held} held · {row.original.available} free / {row.original.capacity}
+            {t("{0} sold · {1} held · {2} free / {3}", row.original.sold, row.original.held, row.original.available, row.original.capacity)}
           </span>
           {(minimumLabel(row.original) || row.original.allotted > 0) && (
             <span className="text-xs text-muted">
-              {[minimumLabel(row.original), row.original.allotted ? `${row.original.allotted} in allotments` : null].filter(Boolean).join(" · ")}
+              {[minimumLabel(row.original), row.original.allotted ? t("{0} in allotments", row.original.allotted) : null].filter(Boolean).join(" · ")}
             </span>
           )}
         </span>
@@ -476,22 +483,22 @@ function DeparturesTab() {
     },
     {
       id: "partners",
-      header: "Agencies",
+      header: t("Agencies"),
       accessorFn: (r) => r.partners,
       cell: ({ row }) => <span className="bk-tabular text-[13px] text-body">{row.original.partners}</span>,
     },
     {
       id: "incident",
-      header: "Incident",
+      header: t("Incident"),
       accessorFn: (r) => r.open_incident?.incident_code ?? "",
       cell: ({ row }) => {
         const inc = row.original.open_incident;
         if (!inc) return <span className="text-[13px] text-muted2">—</span>;
         return (
           <span className="flex flex-col gap-1">
-            <Pill tone="danger">{INCIDENT_LABEL[inc.incident_code]}</Pill>
+            <Pill tone="danger">{tx(INCIDENT_LABEL[inc.incident_code])}</Pill>
             <span className="text-xs text-muted">
-              {inc.flagged_by.name ?? "Staff"} · <DateText value={inc.flagged_at} relative className="whitespace-nowrap" />
+              {inc.flagged_by.name ?? t("Staff")} · <DateText value={inc.flagged_at} relative className="whitespace-nowrap" />
             </span>
           </span>
         );
@@ -509,17 +516,17 @@ function DeparturesTab() {
               return (
                 <span className="flex flex-wrap justify-end gap-2">
                   {d.at_risk && (
-                    <Button size="sm" onClick={() => setCharging(d)} ariaLabel={`Charge a fee on departure ${formatDay(d.start_date)}`}>
-                      Charge fee
+                    <Button size="sm" onClick={() => setCharging(d)} ariaLabel={t("Charge a fee on departure {0}", formatDay(d.start_date))}>
+                      {t("Charge fee")}
                     </Button>
                   )}
                   {d.open_incident ? (
                     <Button size="sm" disabled={clear.isPending} onClick={() => clear.mutate(d.open_incident!.id)}>
-                      Clear incident
+                      {t("Clear incident")}
                     </Button>
                   ) : (
-                    <Button size="sm" variant="danger" onClick={() => setFlagging(d)} ariaLabel={`Flag incident on departure ${formatDay(d.start_date)}`}>
-                      Flag incident
+                    <Button size="sm" variant="danger" onClick={() => setFlagging(d)} ariaLabel={t("Flag incident on departure {0}", formatDay(d.start_date))}>
+                      {t("Flag incident")}
                     </Button>
                   )}
                 </span>
@@ -543,19 +550,18 @@ function DeparturesTab() {
         error={list.isError ? (list.error as Error).message : null}
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
-        emptyTitle="No departures in this window"
-        emptyDescription="Departures are created on a trip plan (Catalog → Trip Plans). This list shows those starting from 14 days ago to 90 days ahead."
+        emptyTitle={t("No departures in this window")}
+        emptyDescription={t("Departures are created on a trip plan (Catalog → Trip Plans). This list shows those starting from 14 days ago to 90 days ahead.")}
         tableMinWidth={canWrite ? 900 : 760}
       />
       <p className="mt-3 text-xs text-muted">
-        Flagging tells every agency with seats on the departure (CRM banner and draft message). AA never messages travellers, and an
-        incident carries only its type: no names, no free text.
+        {t("Flagging tells every agency with seats on the departure (CRM banner and draft message). AA never messages travellers, and an incident carries only its type: no names, no free text.")}
       </p>
       <FlagModal departure={flagging} onClose={() => setFlagging(null)} onDone={refresh} />
       {charging && (
         <ChargeFeeModal
           departureId={charging.id}
-          title={`Departure ${formatDay(charging.start_date)}${charging.tour_title ? `, ${charging.tour_title}` : ""} is at risk (${charging.sold} of ${charging.min_to_operate} sold)`}
+          title={t("Departure {0}{1} is at risk ({2} of {3} sold)", formatDay(charging.start_date), charging.tour_title ? `, ${charging.tour_title}` : "", charging.sold, charging.min_to_operate)}
           reason="min_shortfall"
           seats={Math.max(charging.min_to_operate - charging.sold, 1)}
           onClose={() => setCharging(null)}
@@ -566,11 +572,12 @@ function DeparturesTab() {
 }
 
 function RunChecks({ onDone }: { onDone: () => void }) {
+  const t = useT(MSG);
   const toast = useToast();
   const run = useMutation({
     mutationFn: () => departuresApi.runChecks(false),
     onSuccess: () => {
-      toast.success("Departure checks queued; the list updates in a minute");
+      toast.success(t("Departure checks queued; the list updates in a minute"));
       setTimeout(onDone, 15_000);
     },
     onError: (e) => toast.error(errorText(e)),
@@ -578,23 +585,24 @@ function RunChecks({ onDone }: { onDone: () => void }) {
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
       <span>
-        Every day at 08:00 Vietnam time a check guarantees departures that reached their minimum, flags those short of it on their decision
-        date, and releases agency allotments that reached their release date.
+        {t("Every day at 08:00 Vietnam time a check guarantees departures that reached their minimum, flags those short of it on their decision date, and releases agency allotments that reached their release date.")}
       </span>
       <Button size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
-        <RefreshCw size={14} /> Run checks now
+        <RefreshCw size={14} /> {t("Run checks now")}
       </Button>
     </div>
   );
 }
 
 function FlagModal({ departure, onClose, onDone }: { departure: DeskDeparture | null; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [code, setCode] = useState<IncidentCode>("weather");
   const flag = useMutation({
     mutationFn: () => b2bDeskApi.flag(departure!.id, code),
     onSuccess: (inc) => {
-      toast.success(`Incident flagged; ${inc.partners_notified ?? 0} agenc${inc.partners_notified === 1 ? "y" : "ies"} told`);
+      toast.success(t("Incident flagged; {0} agenc{1} told", inc.partners_notified ?? 0, inc.partners_notified === 1 ? "y" : "ies"));
       onDone();
       onClose();
     },
@@ -603,12 +611,12 @@ function FlagModal({ departure, onClose, onDone }: { departure: DeskDeparture | 
     <Modal
       open={!!departure}
       onClose={onClose}
-      title="Flag incident on departure"
+      title={t("Flag incident on departure")}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="danger" disabled={flag.isPending} onClick={() => flag.mutate()}>
-            Flag incident
+            {t("Flag incident")}
           </Button>
         </>
       }
@@ -616,20 +624,19 @@ function FlagModal({ departure, onClose, onDone }: { departure: DeskDeparture | 
       {departure && (
         <div className="flex flex-col gap-3 text-[13px] text-body">
           <p>
-            {departure.tour_title ?? "This tour"}, departure <DateText value={departure.start_date} />. {departure.partners} agenc
-            {departure.partners === 1 ? "y is" : "ies are"} on it and will see the incident in their CRM.
+            {t("{0}, departure", departure.tour_title ?? t("This tour"))} <DateText value={departure.start_date} />{t(". {0} agenc{1} on it and will see the incident in their CRM.", departure.partners, departure.partners === 1 ? "y is" : "ies are")}
           </p>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Type</span>
+            <span className="text-xs font-semibold text-muted">{t("Type")}</span>
             <Select size="sm" className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as IncidentCode)}>
               {INCIDENT_CODES.map((c) => (
                 <option key={c} value={c}>
-                  {INCIDENT_LABEL[c]}
+                  {tx(INCIDENT_LABEL[c])}
                 </option>
               ))}
             </Select>
           </label>
-          {flag.isError && <p className="text-danger">{errorText(flag.error)}</p>}
+          {flag.isError && <p className="text-danger">{tx(errorText(flag.error))}</p>}
         </div>
       )}
     </Modal>

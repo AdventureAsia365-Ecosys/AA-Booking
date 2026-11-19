@@ -32,6 +32,10 @@ import {
 import { casePartyLabel, checkProgress, tabCountsShown } from "@/ui/booking/caseFacts";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { CheckDrawer, checkTitle, isOverdue } from "./_parts/CheckDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const STATUS_TABS = [
   { key: "open", label: "Open" },
@@ -50,15 +54,16 @@ function activeTab(status: string, due: string): StatusTab {
 
 /** "3/9" and a thin bar: the trip's resolved checks of all its checks (/trip-checks rows only). */
 function TripProgress({ checks }: { checks: TripCheck["trip_case"]["checks"] }) {
+  const tx = useTx();
   const p = checkProgress(checks);
   if (!p) return null;
   return (
-    <span className="flex items-center gap-1.5" title={p.label} data-testid="trip-progress">
+    <span className="flex items-center gap-1.5" title={tx(p.label)} data-testid="trip-progress">
       <span className="block h-1.5 w-14 overflow-hidden rounded-full bg-line2" aria-hidden="true">
         <span className={`block h-full rounded-full ${p.pct === 100 ? "bg-success" : "bg-accent"}`} style={{ width: `${p.pct}%` }} />
       </span>
       <span className="bk-tabular text-[11px] text-muted">
-        <span className="sr-only">{p.label}</span>
+        <span className="sr-only">{tx(p.label)}</span>
         <span aria-hidden="true">
           {p.resolved}/{p.total}
         </span>
@@ -121,7 +126,7 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => {
       const t = row.original.trip_case;
-      if (t.channel === "b2b") return <Pill tone="accent" dot={false}>B2B agency</Pill>;
+      if (t.channel === "b2b") return <Pill tone="accent" dot={false}><Phrase text="B2B agency" /></Pill>;
       return (
         <span className="block max-w-[180px] truncate text-[13px] text-body md:max-w-[110px]">{casePartyLabel(t)}</span>
       );
@@ -168,6 +173,8 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
 ];
 
 export default function TripChecksPage() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const canRead = useCan("ops.read");
   const { get, setMany } = useUrlFilters();
   const paging = useOffsetPage();
@@ -200,60 +207,60 @@ export default function TripChecksPage() {
 
   return (
     <PageFrame
-      title="Trip checks"
-      description="Pre-departure checks across sold trips: re-check bookings, emergency contact, insurance and your own checks. Soonest due first."
+      title={tr("Trip checks")}
+      description={tr("Pre-departure checks across sold trips: re-check bookings, emergency contact, insurance and your own checks. Soonest due first.")}
     >
       {canRead && (
         <SavedTabs
           active={tab}
           onSelect={pickTab}
-          tabs={STATUS_TABS.map(({ key, label }) => ({ key, label, count: countsShown ? counts?.[key] : undefined, countPending: countsShown && !counts && list.isPending }))}
+          tabs={STATUS_TABS.map(({ key, label }) => ({ key, label: tx(label), count: countsShown ? counts?.[key] : undefined, countPending: countsShown && !counts && list.isPending }))}
         />
       )}
       <Section>
         <DataTable<TripCheck>
           filters={
             <FilterBar
-              search={{ placeholder: "Search case code or check" }}
+              search={{ placeholder: tr("Search case code or check") }}
               selects={[
                 {
                   key: "status",
-                  label: "Status",
-                  allLabel: "Open",
+                  label: tr("Status"),
+                  allLabel: tr("Open"),
                   options: [
-                    { value: "done", label: "Done" },
-                    { value: "not_applicable", label: "Not applicable" },
-                    { value: "all", label: "All statuses" },
+                    { value: "done", label: tr("Done") },
+                    { value: "not_applicable", label: tr("Not applicable") },
+                    { value: "all", label: tr("All statuses") },
                   ],
                   width: 150,
                 },
                 {
                   key: "due",
-                  label: "Due",
-                  allLabel: "Any time",
+                  label: tr("Due"),
+                  allLabel: tr("Any time"),
                   options: [
-                    { value: "overdue", label: "Overdue" },
-                    { value: "7d", label: "Within 7 days" },
-                    { value: "14d", label: "Within 14 days" },
-                    { value: "30d", label: "Within 30 days" },
+                    { value: "overdue", label: tr("Overdue") },
+                    { value: "7d", label: tr("Within 7 days") },
+                    { value: "14d", label: tr("Within 14 days") },
+                    { value: "30d", label: tr("Within 30 days") },
                   ],
                   width: 150,
                 },
                 {
                   key: "owner",
-                  label: "Owner",
-                  allLabel: "Anyone",
+                  label: tr("Owner"),
+                  allLabel: tr("Anyone"),
                   options: [
-                    { value: "me", label: "Mine" },
-                    { value: "none", label: "No owner" },
+                    { value: "me", label: tr("Mine") },
+                    { value: "none", label: tr("No owner") },
                   ],
                   width: 130,
                 },
                 {
                   key: "check",
-                  label: "Check",
-                  allLabel: "All checks",
-                  options: Object.entries(TRIP_CHECK_CODE_LABEL).map(([value, label]) => ({ value, label })),
+                  label: tr("Check"),
+                  allLabel: tr("All checks"),
+                  options: Object.entries(TRIP_CHECK_CODE_LABEL).map(([value, label]) => ({ value, label: tx(label) })),
                   width: 170,
                 },
               ]}
@@ -267,12 +274,12 @@ export default function TripChecksPage() {
           columns={COLUMNS}
           getRowId={(r) => r.id}
           loading={list.isLoading}
-          error={list.isError ? (list.error instanceof ApiError ? list.error.message : "Could not load the checks") : null}
+          error={list.isError ? (list.error instanceof ApiError ? list.error.message : tr("Could not load the checks")) : null}
           onRetry={() => list.refetch()}
           pageSizeOptions={PAGE_SIZES}
           serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-          emptyTitle={canRead ? (status === "open" ? "No open check" : "No check matches") : "Trip checks need the operations role"}
-          emptyDescription="Checks appear when a trip is confirmed. Change the filters to widen the list."
+          emptyTitle={canRead ? (status === "open" ? tr("No open check") : tr("No check matches")) : tr("Trip checks need the operations role")}
+          emptyDescription={tr("Checks appear when a trip is confirmed. Change the filters to widen the list.")}
           onRowClick={(r) => setOpenId(r.id)}
           tableMinWidth={980}
         />
@@ -285,30 +292,30 @@ export default function TripChecksPage() {
 
 /** The latest daily runs: what the case lifecycle moved (or, in a DRY RUN, would move) and the reminders it wrote. */
 function LifecycleRuns() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const runs = useQuery({ queryKey: ["trip-checks", "runs"], queryFn: () => tripChecksApi.runs(6), staleTime: 60_000 });
   const items = runs.data?.items ?? [];
   return (
     <Section
-      title="Automatic updates"
+      title={tr("Automatic updates")}
       description={
         runs.data
-          ? `Once a day the trip status follows the travel dates (Pre-departure, On trip, Completed)${
-              runs.data.scheduled_mode === "dry_run" ? "; the daily run is still a dry run (it only reports)" : ""
-            }, and owners are reminded of checks due soon.`
-          : "Once a day the trip status follows the travel dates and owners are reminded of checks due soon."
+          ? tr("Once a day the trip status follows the travel dates (Pre-departure, On trip, Completed){0}, and owners are reminded of checks due soon.", runs.data.scheduled_mode === "dry_run" ? "; the daily run is still a dry run (it only reports)" : "")
+          : tr("Once a day the trip status follows the travel dates and owners are reminded of checks due soon.")
       }
     >
       {runs.isLoading ? (
-        <p className="text-[13px] text-muted">Loading…</p>
+        <p className="text-[13px] text-muted">{tr("Loading…")}</p>
       ) : runs.isError ? (
-        <p className="text-[13px] text-danger">Could not load the runs.</p>
+        <p className="text-[13px] text-danger">{tr("Could not load the runs.")}</p>
       ) : items.length === 0 ? (
-        <p className="text-[13px] text-muted">No run yet.</p>
+        <p className="text-[13px] text-muted">{tr("No run yet.")}</p>
       ) : (
         <ul className="flex flex-col divide-y divide-line2 text-[13px]">
           {items.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-              <span className="min-w-0 text-body">{runSummary(r)}</span>
+              <span className="min-w-0 text-body">{tx(runSummary(r))}</span>
               <span className="flex items-center gap-2 text-xs text-muted">
                 <Pill tone={r.status === "succeeded" ? "success" : r.status === "failed" ? "danger" : "neutral"} dot={false}>
                   {r.status}

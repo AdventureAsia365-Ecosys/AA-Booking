@@ -90,22 +90,26 @@ import { cisNewTitle, cisTourName, cisUpdates, refreshFromCis } from "@/ui/booki
 import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 import { ItemDrawer, type ItemDraftFields } from "./ItemDrawer";
 import { casePartyLabel, lockedPriceText } from "@/ui/booking/caseFacts";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const TERMINAL = ["completed", "cancelled"];
 
 export default function VersionBuilderPage({ params }: { params: Promise<{ code: string; n: string }> }) {
+  const tr = useT(MSG);
   const { code: rawCode, n: rawN } = use(params);
   const code = decodeURIComponent(rawCode);
   const n = Number(rawN);
   const { tripCase, version } = useVersion(code, n);
 
-  if (!Number.isInteger(n) || n < 1) return <PageError error={new ApiError("Not found", 404)} what="this proposal version" />;
+  if (!Number.isInteger(n) || n < 1) return <PageError error={new ApiError(tr("Not found"), 404)} what={tr("this proposal version")} />;
   if (tripCase.isLoading || version.isLoading) return <PageSkeleton />;
   if (tripCase.isError || version.isError || !tripCase.data || !version.data) {
     return (
       <PageError
         error={tripCase.error ?? version.error}
-        what="this proposal"
+        what={tr("this proposal")}
         onRetry={() => {
           tripCase.refetch();
           version.refetch();
@@ -127,6 +131,8 @@ function fullDate(d: Date | null): string | null {
 type DrawerState = { mode: "add"; day: number } | { mode: "edit"; key: string } | null;
 
 function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -172,7 +178,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   }, [dirty]);
 
   const leave = (href: string) => {
-    if (!dirty || window.confirm("You have unsaved item or cost changes. Leave without saving?")) router.push(href);
+    if (!dirty || window.confirm(tr("You have unsaved item or cost changes. Leave without saving?"))) router.push(href);
   };
 
   const versionKey = ["trip-case", c.code, "version", v.version_number];
@@ -194,7 +200,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
       qc.invalidateQueries({ queryKey: ["trip-case", c.code] });
       const cleared = v.total_price != null && res.total_price == null;
       toast.success(
-        `${c.code} V${v.version_number}: ${res.items.length} item(s) saved` + (cleared ? "; apply the price again before sending" : ""),
+        tr("{0} V{1}: {2} item(s) saved", c.code, v.version_number, res.items.length) + (cleared ? tr("; apply the price again before sending") : ""),
       );
     },
     onError: (e: Error) => toast.error(e.message),
@@ -204,7 +210,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
     mutationFn: () => proposalsApi.remove(c.code, v.version_number),
     onSuccess: async () => {
       await refreshCase();
-      toast.success(`Draft V${v.version_number} deleted`);
+      toast.success(tr("Draft V{0} deleted", v.version_number));
       router.push(`/cases/${encodeURIComponent(c.code)}?tab=proposals`);
     },
   });
@@ -213,7 +219,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
     mutationFn: (note: string) => proposalsApi.approve(c.code, v.version_number, note || undefined),
     onSuccess: async () => {
       await Promise.all([refreshCase(), qc.invalidateQueries({ queryKey: versionKey })]);
-      toast.success(`Approval of V${v.version_number} recorded; ${c.code} is confirmed`);
+      toast.success(tr("Approval of V{0} recorded; {1} is confirmed", v.version_number, c.code));
       setApproveOpen(false);
     },
   });
@@ -229,17 +235,17 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const uncosted = ordered.filter((it) => it.costs.length === 0);
   const reasonMissing = !!fresh?.below_floor && !price.overrideReason.trim();
   const applyBlocked = !canWrite
-    ? "Your role cannot change proposals."
+    ? tr("Your role cannot change proposals.")
     : dirty
-      ? "Save your item and cost changes first: the price is computed from the saved lines."
+      ? tr("Save your item and cost changes first: the price is computed from the saved lines.")
       : ordered.length === 0
-        ? "Add at least one item."
+        ? tr("Add at least one item.")
         : uncosted.length > 0
-          ? `Every item needs a net cost line (0 for an included item): ${uncosted.map((it) => it.title).join(", ")}.`
+          ? tr("Every item needs a net cost line (0 for an included item): {0}.", uncosted.map((it) => it.title).join(", "))
           : !fresh
-            ? "Wait for the live quote."
+            ? tr("Wait for the live quote.")
             : reasonMissing
-              ? "Give a reason for pricing below the floor."
+              ? tr("Give a reason for pricing below the floor.")
               : null;
   const applyPrice = useMutation({
     mutationFn: () =>
@@ -253,7 +259,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
     onSuccess: (res) => {
       qc.setQueryData<VersionWithItems>(versionKey, (old) => (old ? { ...old, ...res.version, items: old.items } : old));
       refreshCase();
-      toast.success(`V${v.version_number} priced at ${formatMoney(res.version.total_price, res.version.currency)}`);
+      toast.success(tr("V{0} priced at {1}", v.version_number, formatMoney(res.version.total_price, res.version.currency)));
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -266,7 +272,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const cisNow = cisUpdates(items);
   const refreshCis = () => {
     setItems((list) => refreshFromCis(list));
-    toast.success(`${cisNow.count} title(s) copied from CIS. Save to keep them.`);
+    toast.success(tr("{0} title(s) copied from CIS. Save to keep them.", cisNow.count));
   };
 
   const groups = groupByDay(items, extraDays);
@@ -274,7 +280,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const editing = drawer?.mode === "edit" ? items.find((it) => it.key === drawer.key) : undefined;
   const drawerInitial: ItemDraftFields = editing
     ? {
-        title: editing.title,
+        title: tx(editing.title),
         day_from: editing.day_from,
         day_to: editing.day_to,
         notes: editing.notes,
@@ -309,25 +315,25 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           <div className="flex min-w-0 items-start gap-3">
             <IconButton
               onClick={() => leave(`/cases/${encodeURIComponent(c.code)}?tab=proposals`)}
-              label="Back to the case"
+              label={tr("Back to the case")}
               className="mt-1"
             >
               <ArrowLeft size={16} />
             </IconButton>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="font-display text-2xl font-semibold text-ink">Proposal V{v.version_number}</h1>
+                <h1 className="font-display text-2xl font-semibold text-ink">{tr("Proposal V")}{v.version_number}</h1>
                 <VersionBadgePill badge={v.badge} />
-                {itemsDirty && <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[11px] font-semibold text-warning">Unsaved changes</span>}
+                {itemsDirty && <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[11px] font-semibold text-warning">{tr("Unsaved changes")}</span>}
               </div>
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
                 <Code>{c.code}</Code>
                 <span>·</span>
-                <span>{casePartyLabel(c)}</span>
+                <span>{tx(casePartyLabel(c))}</span>
                 {v.title && (
                   <>
                     <span>·</span>
-                    <span className="text-ink">{v.title}</span>
+                    <span className="text-ink">{tx(v.title)}</span>
                   </>
                 )}
                 <TripCaseStatusBadge status={c.status} />
@@ -337,11 +343,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           <div className="flex flex-wrap items-center gap-2">
             {editable && (
               <Button variant="ghost" size="sm" onClick={() => setDetailsOpen(true)}>
-                <Pencil size={13} /> Title & notes
+                <Pencil size={13} /> {tr("Title & notes")}
               </Button>
             )}
             <Button variant="secondary" onClick={() => leave(`/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}/preview`)}>
-              <Eye size={14} /> Preview
+              <Eye size={14} /> {tr("Preview")}
             </Button>
             {editable && (
               <Button
@@ -350,7 +356,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                 disabled={!itemsDirty || save.isPending || !!costError}
                 title={costError ? `${costError.item.title}: ${costError.error}` : undefined}
               >
-                <Save size={14} /> {save.isPending ? "Saving…" : "Save"}
+                <Save size={14} /> {save.isPending ? tr("Saving…") : tr("Save")}
               </Button>
             )}
             {canWrite && v.badge === "sent" && c.status === "proposal_sent" && (
@@ -358,9 +364,9 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                 variant="primary"
                 onClick={() => setApproveOpen(true)}
                 disabled={v.items.length === 0}
-                title={v.items.length === 0 ? "A version with no items cannot be approved" : undefined}
+                title={v.items.length === 0 ? tr("A version with no items cannot be approved") : undefined}
               >
-                <CheckCircle2 size={14} /> Record approval
+                <CheckCircle2 size={14} /> {tr("Record approval")}
               </Button>
             )}
           </div>
@@ -368,12 +374,12 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
 
         {canWrite && v.badge === "sent" && c.status === "proposal_sent" && v.items.length === 0 && (
           <p role="alert" className="-mt-2 text-xs text-danger">
-            This sent version has no items, so it cannot be approved. Create a new version with the itinerary and send that one.
+            {tr("This sent version has no items, so it cannot be approved. Create a new version with the itinerary and send that one.")}
           </p>
         )}
         {editable && itemsDirty && costError && (
           <p role="alert" className="-mt-2 text-xs text-danger">
-            Cannot save yet: a cost line on &ldquo;{costError.item.title}&rdquo; is incomplete ({costError.error})
+            {tr("Cannot save yet: a cost line on “{0}” is incomplete ({1})", costError.item.title, costError.error)}
           </p>
         )}
 
@@ -381,14 +387,14 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           <div role="status" data-testid="builder-read-only" className="flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved
-              ? "Approved: this version is locked."
+              ? tr("Approved: this version is locked.")
               : v.is_sent_to_customer
-                ? "Sent to the customer: this version is locked. Create a new version from the case to change anything."
+                ? tr("Sent to the customer: this version is locked. Create a new version from the case to change anything.")
                 : closed
-                  ? `The case is ${c.status}: its proposals cannot change.`
+                  ? tr("The case is {0}: its proposals cannot change.", c.status)
                   : isFrozenCase(c.channel, B2C_INTAKE_OPEN)
                     ? B2C_READ_ONLY_NOTE
-                    : "Read-only: your role can view proposals but not edit them."}
+                    : tr("Read-only: your role can view proposals but not edit them.")}
           </div>
         )}
 
@@ -396,15 +402,15 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           summary={cisNow}
           hint={
             editable
-              ? "Refresh copies today's CIS titles into this draft; nothing is saved until you press Save."
+              ? tr("Refresh copies today's CIS titles into this draft; nothing is saved until you press Save.")
               : locked
-                ? "This version stays as it was sent. Create a new version from the case and refresh it there."
-                : "Only an editable draft can be refreshed."
+                ? tr("This version stays as it was sent. Create a new version from the case and refresh it there.")
+                : tr("Only an editable draft can be refreshed.")
           }
           action={
             editable ? (
               <Button size="sm" variant="secondary" onClick={refreshCis}>
-                <RefreshCw size={13} /> Refresh from CIS
+                <RefreshCw size={13} /> {tr("Refresh from CIS")}
               </Button>
             ) : undefined
           }
@@ -413,25 +419,25 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
         <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           {/* ── Day timeline ── */}
           <Section
-            title="Itinerary"
-            description={c.start_date ? `Starts ${fullDate(dayDate(c.start_date, 1))}` : "No start date on the case yet: days are numbered only."}
+            title={tr("Itinerary")}
+            description={c.start_date ? tr("Starts {0}", fullDate(dayDate(c.start_date, 1))) : tr("No start date on the case yet: days are numbered only.")}
             actions={
               editable ? (
                 <Button size="sm" variant="secondary" onClick={() => setDrawer({ mode: "add", day: Math.max(1, lastDay) })} disabled={items.length >= MAX_ITEMS}>
-                  <Plus size={13} /> Add item
+                  <Plus size={13} /> {tr("Add item")}
                 </Button>
               ) : undefined
             }
           >
             {groups.length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-accent-border px-4 py-10 text-center">
-                <p className="text-sm font-semibold text-ink">No items in this version</p>
+                <p className="text-sm font-semibold text-ink">{tr("No items in this version")}</p>
                 <p className="max-w-md text-[13px] text-muted">
-                  An item is one line of the proposal with a day range, e.g. &ldquo;Ha Long Bay overnight cruise, days 3–4&rdquo;.
+                  {tr("An item is one line of the proposal with a day range, e.g. “Ha Long Bay overnight cruise, days 3–4”.")}
                 </p>
                 {editable && (
                   <Button variant="primary" onClick={() => setDrawer({ mode: "add", day: 1 })}>
-                    <Plus size={14} /> Add the first item
+                    <Plus size={14} /> {tr("Add the first item")}
                   </Button>
                 )}
               </div>
@@ -454,11 +460,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                     >
                       <div className="flex items-center justify-between gap-2 bg-panel px-4 py-3">
                         <div>
-                          <p className="text-[15px] font-semibold text-ink">Day {g.day}</p>
+                          <p className="text-[15px] font-semibold text-ink">{tr("Day")} {g.day}</p>
                           {date && <p className="text-xs text-muted">{date}</p>}
                         </div>
                         <IconButton
-                          label={isCollapsed ? `Expand day ${g.day}` : `Collapse day ${g.day}`}
+                          label={isCollapsed ? tr("Expand day {0}", g.day) : tr("Collapse day {0}", g.day)}
                           aria-expanded={!isCollapsed}
                           onClick={() =>
                             setCollapsed((s) => {
@@ -476,10 +482,10 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                         <div className="flex flex-col gap-2 p-3">
                           {g.continues.map((it) => (
                             <p key={`c-${it.key}`} className="rounded-md bg-panel px-3 py-1.5 text-xs text-muted">
-                              Continues: <span className="text-body">{it.title}</span> (day {g.day - it.day_from + 1} of {it.day_to - it.day_from + 1})
+                              {tr("Continues:")} <span className="text-body">{tx(it.title)}</span> {tr("(day {0} of {1})", g.day - it.day_from + 1, it.day_to - it.day_from + 1)}
                             </p>
                           ))}
-                          {g.starts.length === 0 && g.continues.length === 0 && <p className="px-1 py-1 text-[13px] text-muted2">Free day</p>}
+                          {g.starts.length === 0 && g.continues.length === 0 && <p className="px-1 py-1 text-[13px] text-muted2">{tr("Free day")}</p>}
                           {g.starts.map((it, idx) => (
                             <ItemCard
                               key={it.key}
@@ -506,7 +512,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                               onClick={() => setDrawer({ mode: "add", day: g.day })}
                               disabled={items.length >= MAX_ITEMS}
                             >
-                              <Plus size={13} /> Add item on day {g.day}
+                              <Plus size={13} /> {tr("Add item on day {0}", g.day)}
                             </Button>
                           )}
                         </div>
@@ -518,11 +524,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
             )}
             {editable && groups.length > 0 && (
               <Button variant="dashed" onClick={() => setExtraDays(lastDay + 1)} className="mt-3" style={{ width: "100%" }}>
-                <CalendarPlus size={15} /> Add another day
+                <CalendarPlus size={15} /> {tr("Add another day")}
               </Button>
             )}
             {editable && extraDays > 0 && extraDays > Math.max(0, ...items.map((i) => i.day_to)) && (
-              <p className="mt-2 text-xs text-muted">Empty days at the end are not saved: add an item to keep them.</p>
+              <p className="mt-2 text-xs text-muted">{tr("Empty days at the end are not saved: add an item to keep them.")}</p>
             )}
           </Section>
 
@@ -530,8 +536,8 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           <div className="flex flex-col gap-5">
             {canPrice && (
               <Section
-                title="Price"
-                description={locked ? lockedPriceText(c.channel, v.sent_at, v.is_approved).note : "Live quote from the Booking pricing engine; Apply price saves it on the version."}
+                title={tr("Price")}
+                description={locked ? lockedPriceText(c.channel, v.sent_at, v.is_approved).note : tr("Live quote from the Booking pricing engine; Apply price saves it on the version.")}
               >
                 <div className="flex flex-col gap-4">
                   {locked ? (
@@ -543,9 +549,9 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                     </>
                   )}
                   <div>
-                    <p className="mb-2 text-[12px] font-medium uppercase tracking-[0.06em] text-muted">Net costs by item</p>
+                    <p className="mb-2 text-[12px] font-medium uppercase tracking-[0.06em] text-muted">{tr("Net costs by item")}</p>
                     {ordered.length === 0 ? (
-                      <p className="text-xs text-muted">Add items first; each item carries its own net costs.</p>
+                      <p className="text-xs text-muted">{tr("Add items first; each item carries its own net costs.")}</p>
                     ) : (
                       <ul className="flex flex-col gap-2">
                         {ordered.map((it) => (
@@ -567,13 +573,13 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                       <QuoteResult
                         query={quote}
                         canManageRules={canManageRules}
-                        emptyHint="Enter net costs on the items above to see the selling price."
-                        readOnlyNote="The saved version total below is still correct."
+                        emptyHint={tr("Enter net costs on the items above to see the selling price.")}
+                        readOnlyNote={tr("The saved version total below is still correct.")}
                       />
                     </div>
                   )}
                   {fresh?.below_floor && price.override.trim() && !price.overrideReason.trim() && (
-                    <p className="text-xs text-danger">A reason is required before a below-floor price can be applied.</p>
+                    <p className="text-xs text-danger">{tr("A reason is required before a below-floor price can be applied.")}</p>
                   )}
                   {editable && (
                     <div className="flex flex-col gap-1.5">
@@ -583,7 +589,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                         disabled={!!applyBlocked || applyPrice.isPending}
                         title={applyBlocked ?? undefined}
                       >
-                        <BadgeCheck size={14} /> {applyPrice.isPending ? "Applying…" : "Apply price to this version"}
+                        <BadgeCheck size={14} /> {applyPrice.isPending ? tr("Applying…") : tr("Apply price to this version")}
                       </Button>
                       {applyBlocked && <p className="text-xs text-muted">{applyBlocked}</p>}
                     </div>
@@ -591,47 +597,46 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
                   {!locked && (
                     <div className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
                       <p>
-                        Saved version total: <Money amount={v.total_price} currency={v.currency} strong />
+                        {tr("Saved version total:")} <Money amount={v.total_price} currency={v.currency} strong />
                         {v.fx_locked && v.currency !== "USD" ? (
                           <>
-                            {" "}
-                            at 1 USD = {v.fx_locked.rate} {v.currency}
+                            {tr("at 1 USD = {0}", v.fx_locked.rate)} {v.currency}
                           </>
                         ) : null}{" "}
-                        (this is what Send locks).
+                        {tr("(this is what Send locks).")}
                       </p>
                       <p className="mt-1">
-                        Apply price computes it on the server from the saved cost lines. Saving changed items or costs clears it.
+                        {tr("Apply price computes it on the server from the saved cost lines. Saving changed items or costs clears it.")}
                       </p>
                     </div>
                   )}
                 </div>
               </Section>
             )}
-            <Section title="Version">
+            <Section title={tr("Version")}>
               <dl className="grid grid-cols-2 gap-y-2 text-[13px]">
-                <dt className="text-muted">Title</dt>
+                <dt className="text-muted">{tr("Title")}</dt>
                 <dd className="truncate text-right text-ink">{v.title ?? "—"}</dd>
-                <dt className="text-muted">Created</dt>
+                <dt className="text-muted">{tr("Created")}</dt>
                 <dd className="text-right text-ink"><DateText value={v.created_at} /></dd>
-                <dt className="text-muted">Last edited</dt>
+                <dt className="text-muted">{tr("Last edited")}</dt>
                 <dd className="text-right text-ink"><DateText value={v.updated_at} withTime /></dd>
-                <dt className="text-muted">Sent</dt>
+                <dt className="text-muted">{tr("Sent")}</dt>
                 <dd className="text-right text-ink"><DateText value={v.sent_at} /></dd>
-                <dt className="text-muted">Valid until</dt>
+                <dt className="text-muted">{tr("Valid until")}</dt>
                 <dd className="text-right text-ink"><DateText value={v.valid_until} /></dd>
-                <dt className="text-muted">Approved</dt>
+                <dt className="text-muted">{tr("Approved")}</dt>
                 <dd className="text-right text-ink"><DateText value={v.approved_at} /></dd>
               </dl>
-              {v.notes && <p className="mt-3 whitespace-pre-wrap rounded-md bg-panel px-3 py-2 text-xs text-body">{v.notes}</p>}
+              {v.notes && <p className="mt-3 whitespace-pre-wrap rounded-md bg-panel px-3 py-2 text-xs text-body">{tx(v.notes)}</p>}
               {editable && v.badge === "draft" && (
                 <LinkButton tone="danger" size="sm" onClick={() => setDeleteOpen(true)} className="mt-4">
-                  <Trash2 size={13} /> Delete draft version
+                  <Trash2 size={13} /> {tr("Delete draft version")}
                 </LinkButton>
               )}
             </Section>
             <Link href={`/cases/${encodeURIComponent(c.code)}`} className="text-[13px] font-medium text-accent-deep hover:underline" onClick={(e) => { if (dirty) { e.preventDefault(); leave(`/cases/${encodeURIComponent(c.code)}`); } }}>
-              Open case {c.code}
+              {tr("Open case {0}", c.code)}
             </Link>
           </div>
         </div>
@@ -646,49 +651,46 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           if (removing) setItems((list) => list.filter((it) => it.key !== removing.key));
           setRemoving(null);
         }}
-        title="Remove item"
+        title={tr("Remove item")}
         message={
           <>
-            Remove <strong>{removing?.title}</strong> from V{v.version_number}? It leaves the version when you save
-            {removing?.costs.length ? `, with its ${removing.costs.length} net cost line(s)` : ""}.
+            {tr("Remove")} <strong>{tx(removing?.title)}</strong> {tr("from V{0}? It leaves the version when you save{1}.", v.version_number, removing?.costs.length ? `, with its ${removing.costs.length} net cost line(s)` : "")}
           </>
         }
-        confirmLabel="Remove item"
+        confirmLabel={tr("Remove item")}
         danger
       />
       <ConfirmDialog
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onConfirm={() => remove.mutate()}
-        title="Delete draft version"
+        title={tr("Delete draft version")}
         message={
           <>
-            Delete draft <strong>V{v.version_number}</strong> of {c.code}? It disappears from the case; its number is not reused.
-            Sent and approved versions cannot be deleted.
+            {tr("Delete draft")} <strong>V{v.version_number}</strong> {tr("of {0}? It disappears from the case; its number is not reused. Sent and approved versions cannot be deleted.", c.code)}
           </>
         }
-        confirmLabel="Delete draft"
+        confirmLabel={tr("Delete draft")}
         danger
         busy={remove.isPending}
-        error={remove.error?.message}
+        error={tx(remove.error?.message)}
       />
       <ConfirmDialog
         open={approveOpen}
         onClose={() => setApproveOpen(false)}
         onConfirm={(note) => approve.mutate(note)}
-        title="Record the customer's approval"
+        title={tr("Record the customer's approval")}
         message={
           <>
-            The customer approved <strong>V{v.version_number}</strong> ({formatMoney(v.total_price, v.currency)}). The version stays locked and{" "}
-            {c.code} moves to Confirmed.
+            {tr("The customer approved")} <strong>V{v.version_number}</strong> {tr("({0}). The version stays locked and {1} moves to Confirmed.", formatMoney(v.total_price, v.currency), c.code)}
           </>
         }
-        reason={{ label: "Note (how the customer approved)", placeholder: "e.g. approved by phone on 14 Oct" }}
-        confirmLabel="Record approval"
+        reason={{ label: tr("Note (how the customer approved)"), placeholder: tr("e.g. approved by phone on 14 Oct") }}
+        confirmLabel={tr("Record approval")}
         busy={approve.isPending}
-        error={approve.error?.message}
+        error={tx(approve.error?.message)}
       />
-      {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={v.title} notes={v.notes} onClose={() => setDetailsOpen(false)} />}
+      {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={tx(v.title)} notes={tx(v.notes)} onClose={() => setDetailsOpen(false)} />}
     </PageFrame>
   );
 }
@@ -696,45 +698,47 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
 /** The price panel of a sent or approved version (AA-996, audit item 12): the saved total and how it was locked,
  *  instead of the editing empty state "No quote yet". */
 function LockedPrice({ v, channel }: { v: VersionWithItems; channel: string }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const row = (label: string, value: React.ReactNode) => (
     <>
-      <dt className="text-muted">{label}</dt>
+      <dt className="text-muted">{tx(label)}</dt>
       <dd className="text-right text-ink">{value}</dd>
     </>
   );
   return (
     <div className="flex flex-col gap-3" data-testid="locked-price">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted">Total</span>
+        <span className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted">{tr("Total")}</span>
         <span className="font-display text-2xl font-semibold text-ink bk-tabular">
           {v.total_price != null ? formatMoney(v.total_price, v.currency) : "—"}
         </span>
       </div>
-      {v.total_price == null && <p className="text-xs text-danger">This version was locked without a saved total.</p>}
+      {v.total_price == null && <p className="text-xs text-danger">{tr("This version was locked without a saved total.")}</p>}
       <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-[13px]">
         {row("Channel", v.channel ? (CHANNELS.find((ch) => ch.value === v.channel)?.label ?? v.channel) : "—")}
         {row("Currency", v.currency ?? "—")}
         {row(
-          "FX locked",
+          tr("FX locked"),
           v.fx_locked && v.currency !== "USD" ? (
             <>
-              1 USD = {v.fx_locked.rate} {v.currency}
+              {tr("1 USD = {0}", v.fx_locked.rate)} {v.currency}
               {v.fx_locked.as_of && (
                 <span className="block text-xs text-muted">
-                  as of <DateText value={v.fx_locked.as_of} />
+                  {tr("as of")} <DateText value={v.fx_locked.as_of} />
                 </span>
               )}
             </>
           ) : (
-            "Not needed (USD)"
+            tr("Not needed (USD)")
           ),
         )}
         {row("Sent", <DateText value={v.sent_at} />)}
-        {row("Valid until", <DateText value={v.valid_until} />)}
+        {row(tr("Valid until"), <DateText value={v.valid_until} />)}
         {v.is_approved && row("Approved", <DateText value={v.approved_at} />)}
       </dl>
       <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
-        {lockedPriceText(channel, v.sent_at, v.is_approved).footnote}
+        {tx(lockedPriceText(channel, v.sent_at, v.is_approved).footnote)}
       </p>
     </div>
   );
@@ -767,6 +771,8 @@ function ItemCard({
   onDragEnd: () => void;
   onDropBefore: () => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   // Per-line selling amounts only: the API returns no per-item total, and summing decimal strings in floating
   // point here could disagree with the server by a cent (S236 review finding 10).
   const priced = sellAmounts.filter((a): a is string => a != null);
@@ -790,47 +796,46 @@ function ItemCard({
       className="flex gap-2 rounded-lg border border-line bg-card p-3"
     >
       {editable && (
-        <span className="mt-1 hidden cursor-grab text-muted2 sm:block" aria-hidden="true" title="Drag to reorder or to another day">
+        <span className="mt-1 hidden cursor-grab text-muted2 sm:block" aria-hidden="true" title={tr("Drag to reorder or to another day")}>
           <GripVertical size={16} />
         </span>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 break-words text-sm font-medium text-ink">{item.title}</span>
+          <span className="min-w-0 break-words text-sm font-medium text-ink">{tx(item.title)}</span>
           <span className="rounded-full bg-accent-tint px-2 py-0.5 text-[11px] font-semibold text-accent-deep">
-            {item.day_to > item.day_from ? `Days ${item.day_from}–${item.day_to}` : `Day ${item.day_from}`}
+            {item.day_to > item.day_from ? tr("Days {0}–{1}", item.day_from, item.day_to) : tr("Day {0}", item.day_from)}
           </span>
           {item.source_tour_id && <FromCisTag />}
           {item.supply && (
             <span className="rounded-full border border-line bg-panel px-2 py-0.5 text-[11px] font-medium text-body" title={item.supply.code}>
-              {item.supply.kind === "room_type" ? "Room" : "Service"} · {item.supply.label}
+              {item.supply.kind === "room_type" ? tr("Room") : tr("Service")} · {tx(item.supply.label)}
             </span>
           )}
-          {!item.id && <span className="text-[11px] font-semibold text-warning">New</span>}
+          {!item.id && <span className="text-[11px] font-semibold text-warning">{tr("New")}</span>}
         </div>
-        {cisTour && <p className="mt-1 break-words text-[12.5px] text-muted">Tour: {cisTour}</p>}
+        {cisTour && <p className="mt-1 break-words text-[12.5px] text-muted">{tr("Tour:")} {cisTour}</p>}
         {cisTitle && (
           <p className="mt-1 break-words text-[12.5px] text-warning" data-testid="cis-new-title">
-            CIS now: <span className="font-medium">{cisTitle}</span>
+            {tr("CIS now:")} <span className="font-medium">{tx(cisTitle)}</span>
           </p>
         )}
-        {item.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] text-muted">{item.notes}</p>}
+        {item.notes && <p className="mt-1 whitespace-pre-wrap text-[13px] text-muted">{tx(item.notes)}</p>}
         {item.supply?.description && (
-          <p className="mt-1 line-clamp-2 text-[12.5px] text-muted" title="Published in CIS for this hotel / service">
-            <span className="font-medium text-body">From CIS: </span>
+          <p className="mt-1 line-clamp-2 text-[12.5px] text-muted" title={tr("Published in CIS for this hotel / service")}>
+            <span className="font-medium text-body">{tr("From CIS:")} </span>
             {showsAiBadge(item.supply.description, item.supply.ai) && (
               <AiNotice form="badge" testId="proposal-item-ai-badge" style={{ marginRight: 6, verticalAlign: "middle" }} />
             )}
-            <span {...aiTextAttrs(item.supply.description, item.supply.ai)}>{item.supply.description}</span>
+            <span {...aiTextAttrs(item.supply.description, item.supply.ai)}>{tx(item.supply.description)}</span>
           </p>
         )}
         {item.costs.length > 0 && (
           <p className="mt-1.5 text-xs text-muted">
-            {item.costs.length} net cost line(s)
+            {tr("{0} net cost line(s)", item.costs.length)}
             {priced.length > 0 && sellCurrency && (
               <>
-                {" "}
-                · sells{" "}
+                {tr("· sells")}
                 {priced.map((a, i) => (
                   <span key={i}>
                     {i > 0 && " + "}
@@ -843,17 +848,17 @@ function ItemCard({
         )}
       </div>
       {editable && (
-        <ButtonGroup label={`Actions for ${item.title}`} gap="sm" className="shrink-0 flex-col self-start sm:flex-row">
-          <IconButton label={`Move ${item.title} up`} disabled={first} onClick={() => onMove(-1)}>
+        <ButtonGroup label={tr("Actions for {0}", item.title)} gap="sm" className="shrink-0 flex-col self-start sm:flex-row">
+          <IconButton label={tr("Move {0} up", item.title)} disabled={first} onClick={() => onMove(-1)}>
             <ArrowUp size={14} />
           </IconButton>
-          <IconButton label={`Move ${item.title} down`} disabled={last} onClick={() => onMove(1)}>
+          <IconButton label={tr("Move {0} down", item.title)} disabled={last} onClick={() => onMove(1)}>
             <ArrowDown size={14} />
           </IconButton>
-          <IconButton label={`Edit ${item.title}`} onClick={onEdit}>
+          <IconButton label={tr("Edit {0}", item.title)} onClick={onEdit}>
             <Pencil size={14} />
           </IconButton>
-          <IconButton tone="danger" label={`Remove ${item.title}`} onClick={onRemove}>
+          <IconButton tone="danger" label={tr("Remove {0}", item.title)} onClick={onRemove}>
             <Trash2 size={14} />
           </IconButton>
         </ButtonGroup>
@@ -877,6 +882,8 @@ function CostGroup({
   sellAmounts: (string | null)[];
   sellCurrency?: string;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const [open, setOpen] = useState(item.costs.length > 0);
   return (
     <li className="rounded-md border border-line">
@@ -886,9 +893,9 @@ function CostGroup({
         style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 12px", textAlign: "left" }}
       >
         <span className="min-w-0">
-          <span className="block truncate text-[13px] font-medium text-ink">{item.title}</span>
+          <span className="block truncate text-[13px] font-medium text-ink">{tx(item.title)}</span>
           <span className="text-xs text-muted">
-            {item.day_to > item.day_from ? `Days ${item.day_from}–${item.day_to}` : `Day ${item.day_from}`} · {item.costs.length} line(s)
+            {tr("{0} · {1} line(s)", item.day_to > item.day_from ? `Days ${item.day_from}–${item.day_to}` : `Day ${item.day_from}`, item.costs.length)}
           </span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} />
@@ -903,6 +910,7 @@ function CostGroup({
 }
 
 function DetailsDrawer({ code, n, title, notes, onClose }: { code: string; n: number; title: string | null; notes: string | null; onClose: () => void }) {
+  const tr = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const [t, setT] = useState(title ?? "");
@@ -919,7 +927,7 @@ function DetailsDrawer({ code, n, title, notes, onClose }: { code: string; n: nu
         qc.invalidateQueries({ queryKey: ["trip-case", code] }),
         qc.invalidateQueries({ queryKey: ["versions"] }),
       ]);
-      toast.success(res.changed.length ? `V${n}: ${res.changed.join(", ")} updated` : "Nothing changed");
+      toast.success(res.changed.length ? tr("V{0}: {1} updated", n, res.changed.join(", ")) : tr("Nothing changed"));
       onClose();
     },
   });
@@ -929,7 +937,7 @@ function DetailsDrawer({ code, n, title, notes, onClose }: { code: string; n: nu
     <FormDrawer
       open
       onClose={onClose}
-      title={`Title and notes · V${n}`}
+      title={tr("Title and notes · V{0}", n)}
       onSubmit={() => save.mutate()}
       busy={save.isPending}
       dirty={t !== (title ?? "") || nt !== (notes ?? "")}
@@ -937,12 +945,12 @@ function DetailsDrawer({ code, n, title, notes, onClose }: { code: string; n: nu
       fieldErrors={err?.fieldErrors ?? []}
     >
       <label className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium text-ink">Proposal title</span>
-        <Input value={t} maxLength={200} onChange={(e) => setT(e.target.value)} placeholder="e.g. Vietnam north to south, family pace" className={cls} />
-        <span className="text-xs text-muted">Shown to the customer as the proposal name. A title cannot be cleared once set.</span>
+        <span className="text-[13px] font-medium text-ink">{tr("Proposal title")}</span>
+        <Input value={t} maxLength={200} onChange={(e) => setT(e.target.value)} placeholder={tr("e.g. Vietnam north to south, family pace")} className={cls} />
+        <span className="text-xs text-muted">{tr("Shown to the customer as the proposal name. A title cannot be cleared once set.")}</span>
       </label>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium text-ink">Internal notes</span>
+        <span className="text-[13px] font-medium text-ink">{tr("Internal notes")}</span>
         <Textarea value={nt} rows={6} maxLength={10_000} onChange={(e) => setNt(e.target.value)} className={cls} />
       </label>
     </FormDrawer>

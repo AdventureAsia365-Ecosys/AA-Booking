@@ -1,0 +1,60 @@
+// app/(staff)/cases/[code]/CostVsBilled.messages.ts
+// AA-1128 (B5): the English and Vietnamese text of CostVsBilled.tsx (kit core/i18n.ts). The keys are the English
+// text; the phrasebook registers the Vietnamese side for text kept in module-level tables (ui/local/phrasebook.ts).
+import { defineMessages } from "@/ui/core/i18n";
+import { phrasebook } from "@/ui/local/phrasebook";
+
+export const MSG = phrasebook(
+  defineMessages(
+  {
+    "Not billed yet": "Not billed yet",
+    "Other currency": "Other currency",
+    "Cost vs billed": "Cost vs billed",
+    "Expected supplier net of each booking next to what the suppliers billed (bills not cancelled). A positive variance means a supplier billed more than costed.": "Expected supplier net of each booking next to what the suppliers billed (bills not cancelled). A positive variance means a supplier billed more than costed.",
+    "Bills of this case": "Bills of this case",
+    "Enter bill": "Enter bill",
+    "Loading…": "Loading…",
+    "Could not load the costs": "Could not load the costs",
+    "No supplier booking yet.": "No supplier booking yet.",
+    "planned {0} · billed {1} ·": (...a: unknown[]) => `planned ${a[0]} · billed ${a[1]} ·`,
+    "variance {0}": (...a: unknown[]) => `variance ${a[0]}`,
+    "· FX difference {0}": (...a: unknown[]) => `· FX difference ${a[0]}`,
+    "Best cost:": "Best cost:",
+    " (departure share {0})": (...a: unknown[]) => ` (departure share ${a[0]})`,
+    "A currency has no approved FX rate": "A currency has no approved FX rate",
+    "Shared: {0} · {1} of {2} seats · {3}": (...a: unknown[]) => `Shared: ${a[0]} · ${a[1]} of ${a[2]} seats · ${a[3]}`,
+    "net {0} · billed {1} ·": (...a: unknown[]) => `net ${a[0]} · billed ${a[1]} ·`,
+    "variance": "variance",
+    "Booking": "Booking",
+    "Supplier": "Supplier",
+    "Expected net": "Expected net",
+    "Billed": "Billed",
+    "Variance": "Variance",
+  },
+  {
+    "Not billed yet": "Chưa có hoá đơn",
+    "Other currency": "Tiền tệ khác",
+    "Cost vs billed": "Chi phí so với hoá đơn",
+    "Expected supplier net of each booking next to what the suppliers billed (bills not cancelled). A positive variance means a supplier billed more than costed.": "Giá net dự kiến của nhà cung cấp cho từng đặt chỗ bên cạnh số tiền nhà cung cấp đã xuất hoá đơn (hoá đơn chưa huỷ). Chênh lệch dương nghĩa là nhà cung cấp tính nhiều hơn chi phí dự kiến.",
+    "Bills of this case": "Hoá đơn của hồ sơ này",
+    "Enter bill": "Nhập hoá đơn",
+    "Loading…": "Đang tải…",
+    "Could not load the costs": "Không tải được chi phí",
+    "No supplier booking yet.": "Chưa có đặt chỗ nhà cung cấp.",
+    "planned {0} · billed {1} ·": (...a: unknown[]) => `dự kiến ${a[0]} · đã tính ${a[1]} ·`,
+    "variance {0}": (...a: unknown[]) => `chênh lệch ${a[0]}`,
+    "· FX difference {0}": (...a: unknown[]) => `· chênh lệch tỷ giá ${a[0]}`,
+    "Best cost:": "Chi phí tốt nhất:",
+    " (departure share {0})": (...a: unknown[]) => ` (phần của chuyến khởi hành ${a[0]})`,
+    "A currency has no approved FX rate": "Có tiền tệ chưa có tỷ giá đã duyệt",
+    "Shared: {0} · {1} of {2} seats · {3}": (...a: unknown[]) => `Dùng chung: ${a[0]} · ${a[1]} trên ${a[2]} chỗ · ${a[3]}`,
+    "net {0} · billed {1} ·": (...a: unknown[]) => `net ${a[0]} · đã tính ${a[1]} ·`,
+    "variance": "chênh lệch",
+    "Booking": "Booking",
+    "Supplier": "Nhà cung cấp",
+    "Expected net": "Net dự kiến",
+    "Billed": "Đã tính",
+    "Variance": "Chênh lệch",
+  },
+  ),
+);

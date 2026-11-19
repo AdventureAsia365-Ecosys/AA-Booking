@@ -19,6 +19,9 @@ import { supplierBillsApi, type CaseCostLine } from "@/lib/api/supplierBills";
 import type { TripCaseDetail } from "@/lib/api/types";
 import { Button, DataTable, Money, Pill, Section, formatMoney, useCan } from "@/ui";
 import { nativeTotals } from "@/ui/booking/financeLabels";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { MSG } from "./CostVsBilled.messages";
 
 function tone(variance: string | null): string {
   if (variance === null) return "text-muted";
@@ -59,7 +62,7 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
       if (l.billed.length === 0)
         return l.unbilled ? (
           <Pill tone="neutral" dot={false}>
-            Not billed yet
+            <Phrase text="Not billed yet" />
           </Pill>
         ) : (
           <span className="text-muted">—</span>
@@ -83,7 +86,7 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
       if (l.currency_mismatch)
         return (
           <Pill tone="warning" dot={false}>
-            Other currency
+            <Phrase text="Other currency" />
           </Pill>
         );
       return <span className={`text-[13px] ${tone(l.variance)}`}>{l.variance === null ? "—" : formatMoney(l.variance, l.net_currency)}</span>;
@@ -107,6 +110,7 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
 ];
 
 export function CostVsBilled({ c }: { c: TripCaseDetail }) {
+  const tr = useT(MSG);
   const canBills = useCan("bill.read");
   const canPricing = useCan("pricing.read");
   const canWrite = useCan("bill.write");
@@ -121,24 +125,24 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
   const billsHref = `/billing?tab=supplier-bills&case=${encodeURIComponent(c.code)}`;
   return (
     <Section
-      title="Cost vs billed"
-      description="Expected supplier net of each booking next to what the suppliers billed (bills not cancelled). A positive variance means a supplier billed more than costed."
+      title={tr("Cost vs billed")}
+      description={tr("Expected supplier net of each booking next to what the suppliers billed (bills not cancelled). A positive variance means a supplier billed more than costed.")}
       actions={
         <div className="flex flex-wrap items-center gap-3">
           <Link href={billsHref} className="text-[13px] font-semibold text-accent-deep hover:underline">
-            Bills of this case
+            {tr("Bills of this case")}
           </Link>
           {canWrite && (
             <Button size="sm" onClick={() => setEntering(true)}>
-              <Plus size={13} /> Enter bill
+              <Plus size={13} /> {tr("Enter bill")}
             </Button>
           )}
         </div>
       }
     >
-      {q.isLoading && <p className="text-[13px] text-muted">Loading…</p>}
-      {q.isError && <p className="text-[13px] text-danger">{q.error instanceof ApiError ? q.error.message : "Could not load the costs"}</p>}
-      {data && data.lines.length === 0 && <p className="text-[13px] text-muted">No supplier booking yet.</p>}
+      {q.isLoading && <p className="text-[13px] text-muted">{tr("Loading…")}</p>}
+      {q.isError && <p className="text-[13px] text-danger">{q.error instanceof ApiError ? q.error.message : tr("Could not load the costs")}</p>}
+      {data && data.lines.length === 0 && <p className="text-[13px] text-muted">{tr("No supplier booking yet.")}</p>}
       {data && data.lines.length > 0 && (
         <div className="flex flex-col gap-3">
           <DataTable<CaseCostLine>
@@ -152,20 +156,19 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
           {data.usd && (
             <div className="flex flex-wrap gap-4 text-[13px]" data-testid="case-costs-usd">
               <span>
-                <span className="text-muted">USD:</span> planned {formatMoney(data.usd.planned, "USD")} · billed{" "}
-                {formatMoney(data.usd.billed, "USD")} ·{" "}
+                <span className="text-muted">USD:</span> {tr("planned {0} · billed {1} ·", formatMoney(data.usd.planned, "USD"), formatMoney(data.usd.billed, "USD"))}
                 <span className={tone(data.usd.variance === "0" || data.usd.variance === "0.00" ? null : data.usd.variance)}>
-                  variance {formatMoney(data.usd.variance, "USD")}
+                  {tr("variance {0}", formatMoney(data.usd.variance, "USD"))}
                 </span>{" "}
-                · FX difference {formatMoney(data.usd.fx_difference, "USD")}
+                {tr("· FX difference {0}", formatMoney(data.usd.fx_difference, "USD"))}
               </span>
               <span>
-                <span className="text-muted">Best cost:</span> <strong>{formatMoney(data.usd.cost, "USD")}</strong>
-                {Number(data.usd.shared) > 0 && ` (departure share ${formatMoney(data.usd.shared, "USD")})`}
+                <span className="text-muted">{tr("Best cost:")}</span> <strong>{formatMoney(data.usd.cost, "USD")}</strong>
+                {Number(data.usd.shared) > 0 && tr(" (departure share {0})", formatMoney(data.usd.shared, "USD"))}
               </span>
               {data.usd.fx_missing && (
                 <Pill tone="warning" dot={false}>
-                  A currency has no approved FX rate
+                  {tr("A currency has no approved FX rate")}
                 </Pill>
               )}
             </div>
@@ -174,7 +177,7 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
             <ul className="flex flex-col gap-1 text-[13px] text-body">
               {data.shared_costs.map((s) => (
                 <li key={s.departure_cost_id}>
-                  Shared: {s.item_description} · {s.seats} of {s.departure_seats} seats · {formatMoney(s.share_net, s.currency)}
+                  {tr("Shared: {0} · {1} of {2} seats · {3}", s.item_description, s.seats, s.departure_seats, formatMoney(s.share_net, s.currency))}
                 </li>
               ))}
             </ul>
@@ -183,8 +186,8 @@ export function CostVsBilled({ c }: { c: TripCaseDetail }) {
             <div className="flex flex-wrap gap-4 text-[13px]" data-testid="case-costs-native">
               {totals.map((t) => (
                 <span key={t.currency}>
-                  <span className="text-muted">{t.currency}:</span> net {formatMoney(t.net, t.currency)} · billed {formatMoney(t.billed, t.currency)} ·{" "}
-                  <span className={tone(t.variance)}>variance {t.variance === null ? "—" : formatMoney(t.variance, t.currency)}</span>
+                  <span className="text-muted">{t.currency}:</span> {tr("net {0} · billed {1} ·", formatMoney(t.net, t.currency), formatMoney(t.billed, t.currency))}
+                  <span className={tone(t.variance)}>{tr("variance")} {t.variance === null ? "—" : formatMoney(t.variance, t.currency)}</span>
                 </span>
               ))}
             </div>

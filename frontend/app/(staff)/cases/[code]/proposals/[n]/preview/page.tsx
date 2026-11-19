@@ -45,6 +45,9 @@ import { CisUpdatedNotice } from "@/app/(staff)/_parts/CisUpdatedNotice";
 import { cisTourName, cisUpdates } from "@/ui/booking/cisReadback";
 import { aiTextAttrs, showsAiBadge } from "@/ui/booking/aiMark";
 import { daysText } from "@/ui/booking/plural";
+import { useFormat, useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 
 function longDate(d: Date | null): string | null {
@@ -64,6 +67,9 @@ function depositText(channel: string): string {
 }
 
 export default function VersionPreviewPage({ params }: { params: Promise<{ code: string; n: string }> }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  const { formatDate } = useFormat();
   const { code: rawCode, n: rawN } = use(params);
   const code = decodeURIComponent(rawCode);
   const n = Number(rawN);
@@ -80,13 +86,13 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const canWrite = useCan("version.write");
   const router = useRouter();
 
-  if (!Number.isInteger(n) || n < 1) return <PageError error={new ApiError("Not found", 404)} what="this proposal version" />;
+  if (!Number.isInteger(n) || n < 1) return <PageError error={new ApiError(t("Not found"), 404)} what={t("this proposal version")} />;
   if (tripCase.isLoading || version.isLoading) return <PageSkeleton />;
   if (tripCase.isError || version.isError || !tripCase.data || !version.data) {
     return (
       <PageError
         error={tripCase.error ?? version.error}
-        what="this proposal"
+        what={t("this proposal")}
         onRetry={() => {
           tripCase.refetch();
           version.refetch();
@@ -104,8 +110,8 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
   const builderHref = `/cases/${encodeURIComponent(c.code)}/proposals/${v.version_number}`;
   const tripName = v.title ?? c.trip_title ?? "Custom trip";
   const dates = c.start_date
-    ? `${formatDay(c.start_date)}${c.trip_end_date ? ` – ${formatDay(c.trip_end_date)}` : ""}${c.duration_days ? ` (${daysText(c.duration_days)})` : ""}`
-    : "Dates to be confirmed";
+    ? `${formatDate(c.start_date)}${c.trip_end_date ? ` – ${formatDate(c.trip_end_date)}` : ""}${c.duration_days ? ` (${tx(daysText(c.duration_days))})` : ""}`
+    : t("Dates to be confirmed");
   const sales = c.assignees.find((a) => a.role === "sales")?.name ?? null;
   const countries = caseCountries(c).codes;
   const cisNow = cisUpdates(v.items);
@@ -117,12 +123,12 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
         <div className="flex items-center gap-3 border-b border-line pb-3">
           <Link
             href={builderHref}
-            aria-label="Back to the builder"
+            aria-label={t("Back to the builder")}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-card text-muted hover:text-ink"
           >
             <ArrowLeft size={16} />
           </Link>
-          <p className="text-[15px] font-medium text-ink">Proposal preview</p>
+          <p className="text-[15px] font-medium text-ink">{t("Proposal preview")}</p>
           <VersionBadgePill badge={v.badge} />
         </div>
 
@@ -140,7 +146,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                 <CalendarDays size={14} /> {dates}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <User size={14} /> {casePartyLabel(c)}
+                <User size={14} /> {tx(casePartyLabel(c))}
               </span>
               {countries.length > 0 && (
                 <span className="inline-flex items-center gap-1.5">
@@ -152,11 +158,11 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
           <div className="flex flex-wrap items-center gap-2">
             {canWrite && !locked ? (
               <Button variant="secondary" onClick={() => router.push(builderHref)}>
-                <Pencil size={14} /> Edit
+                <Pencil size={14} /> {t("Edit")}
               </Button>
             ) : (
               <Button variant="secondary" onClick={() => router.push(builderHref)}>
-                <Eye size={14} /> Open builder
+                <Eye size={14} /> {t("Open builder")}
               </Button>
             )}
           </div>
@@ -166,13 +172,13 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
           <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
             <Lock size={15} className="shrink-0 text-accent-deep" />
             {v.is_approved ? (
-              <span>{approvedByText(c.channel)}: this version is locked.</span>
+              <span>{tx(approvedByText(c.channel))}{t(": this version is locked.")}</span>
             ) : (
               <span>
-                Marked as sent on <DateText value={v.sent_at} />: this version is locked. Booking does not send e-mail yet.
+                {t("Marked as sent on")} <DateText value={v.sent_at} />{t(": this version is locked. Booking does not send e-mail yet.")}
               </span>
             )}
-            {liveSupplyText && <span className="text-muted">Hotel and service descriptions show what CIS publishes today.</span>}
+            {liveSupplyText && <span className="text-muted">{t("Hotel and service descriptions show what CIS publishes today.")}</span>}
           </div>
         )}
 
@@ -180,10 +186,10 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
           summary={cisNow}
           hint={
             locked
-              ? "This version stays as it was sent. Create a new version from the case and refresh it in the builder."
+              ? t("This version stays as it was sent. Create a new version from the case and refresh it in the builder.")
               : canWrite
-                ? "Open the builder and use Refresh from CIS to copy today's titles into this draft."
-                : "Staff who edit proposals can refresh the titles in the builder."
+                ? t("Open the builder and use Refresh from CIS to copy today's titles into this draft.")
+                : t("Staff who edit proposals can refresh the titles in the builder.")
           }
         />
 
@@ -193,12 +199,12 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
             {days.length === 0 ? (
               <div className="rounded-lg border border-line bg-card p-5">
                 <EmptyState
-                  title="This version has no days yet"
-                  description="Add items in the builder; they appear here as the customer will read them."
+                  title={t("This version has no days yet")}
+                  description={t("Add items in the builder; they appear here as the customer will read them.")}
                   action={
                     canWrite && !locked ? (
                       <Button variant="primary" onClick={() => router.push(builderHref)}>
-                        <Pencil size={14} /> Open the builder
+                        <Pencil size={14} /> {t("Open the builder")}
                       </Button>
                     ) : undefined
                   }
@@ -207,46 +213,46 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
             ) : (
               days.map((d) => {
                 const date = dayDate(c.start_date, d.day);
-                const headline = d.items[0]?.title ?? "Free day";
+                const headline = d.items[0]?.title ?? t("Free day");
                 return (
                   <article key={d.day} className="overflow-hidden rounded-lg border border-line bg-card">
                     <header className="flex items-start justify-between gap-3 bg-panel px-5 py-4">
                       <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">Day {d.day}</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">{t("Day")} {d.day}</p>
                         <h2 className="mt-0.5 break-words text-[17px] font-medium text-ink">{headline}</h2>
                       </div>
-                      {date && <span className="shrink-0 text-[13px] text-muted">{formatDay(date.toISOString().slice(0, 10))}</span>}
+                      {date && <span className="shrink-0 text-[13px] text-muted">{tx(formatDay(date.toISOString().slice(0, 10)))}</span>}
                     </header>
                     <div className="flex gap-4 px-5 py-4">
                       <div className="hidden w-10 shrink-0 text-center sm:block" aria-hidden="true">
                         <p className="font-display text-2xl font-semibold text-accent">{d.day}</p>
-                        <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Day</p>
+                        <p className="text-[11px] uppercase tracking-[0.08em] text-muted">{t("Day")}</p>
                       </div>
                       <div className="flex min-w-0 flex-1 flex-col gap-2">
                         {date && <p className="text-[13px] text-muted">{longDate(date)}</p>}
                         {d.items.length === 0 ? (
-                          <p className="text-sm text-muted">A free day to explore at your own pace.</p>
+                          <p className="text-sm text-muted">{t("A free day to explore at your own pace.")}</p>
                         ) : (
                           d.items.map((it) => (
                             <div key={it.id} className="min-w-0 rounded-md bg-panel px-4 py-3">
                               <div className="flex flex-wrap items-center gap-2">
-                                <p className="min-w-0 break-words text-sm font-medium text-ink">{it.title}</p>
+                                <p className="min-w-0 break-words text-sm font-medium text-ink">{tx(it.title)}</p>
                                 {it.day_to > it.day_from && (
                                   <span className="text-xs text-muted">
-                                    day {d.day - it.day_from + 1} of {it.day_to - it.day_from + 1}
+                                    {t("day {0} of {1}", d.day - it.day_from + 1, it.day_to - it.day_from + 1)}
                                   </span>
                                 )}
                                 {it.source_tour_id && <FromCisTag />}
                               </div>
-                              {cisTourName(it) && <p className="mt-1 break-words text-[13px] text-muted">{cisTourName(it)}</p>}
-                              {it.notes && <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-body">{it.notes}</p>}
+                              {cisTourName(it) && <p className="mt-1 break-words text-[13px] text-muted">{tx(cisTourName(it))}</p>}
+                              {it.notes && <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-body">{tx(it.notes)}</p>}
                               {it.supply?.description && (
                                 <div className="mt-1.5 text-[13px] leading-relaxed text-body">
                                   {showsAiBadge(it.supply.description, it.supply.ai) && (
                                     <AiNotice form="badge" testId="proposal-preview-ai-badge" style={{ marginBottom: 4 }} />
                                   )}
                                   <p className="whitespace-pre-line" {...aiTextAttrs(it.supply.description, it.supply.ai)}>
-                                    {it.supply.description}
+                                    {tx(it.supply.description)}
                                   </p>
                                   {(it.supply.highlights?.length ?? 0) > 0 && (
                                     <ul className="mt-1 list-disc pl-5">
@@ -268,17 +274,17 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
             )}
             {days.length > 0 && (
               <p className="text-xs text-muted">
-                Day titles and notes are the text saved on this version. Tour descriptions and photos are on the trip plan page.
+                {t("Day titles and notes are the text saved on this version. Tour descriptions and photos are on the trip plan page.")}
               </p>
             )}
           </div>
 
           {/* ── Side panels ── */}
           <div className="flex min-w-0 flex-col gap-5">
-            <Section title="Overview">
+            <Section title={t("Overview")}>
               <dl className="flex flex-col gap-3 text-[13px]">
                 <div>
-                  <dt className="text-xs text-muted">Trip case</dt>
+                  <dt className="text-xs text-muted">{t("Trip case")}</dt>
                   <dd className="mt-0.5 text-ink">
                     <Link href={`/cases/${encodeURIComponent(c.code)}`} className="hover:underline">
                       <Code>{c.code}</Code>
@@ -286,39 +292,39 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">For</dt>
-                  <dd className="mt-0.5 text-ink">{casePartyLabel(c)}</dd>
+                  <dt className="text-xs text-muted">{t("For")}</dt>
+                  <dd className="mt-0.5 text-ink">{tx(casePartyLabel(c))}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Dates</dt>
+                  <dt className="text-xs text-muted">{t("Dates")}</dt>
                   <dd className="mt-0.5 text-ink">{dates}</dd>
                 </div>
                 {c.pax ? (
                   <div>
-                    <dt className="text-xs text-muted">Travellers</dt>
+                    <dt className="text-xs text-muted">{t("Travellers")}</dt>
                     <dd className="mt-0.5 text-ink">{c.pax}</dd>
                   </div>
                 ) : null}
                 <div>
-                  <dt className="text-xs text-muted">Destinations</dt>
+                  <dt className="text-xs text-muted">{t("Destinations")}</dt>
                   <dd className="mt-0.5 text-ink">{countries.length ? countries.join(", ") : "—"}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Status</dt>
+                  <dt className="text-xs text-muted">{t("Status")}</dt>
                   <dd className="mt-1">
                     <TripCaseStatusBadge status={c.status} />
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Sales</dt>
-                  <dd className="mt-0.5 text-ink">{sales ?? "Unassigned"}</dd>
+                  <dt className="text-xs text-muted">{t("Sales")}</dt>
+                  <dd className="mt-0.5 text-ink">{sales ?? t("Unassigned")}</dd>
                 </div>
               </dl>
             </Section>
-            <Section title="Price">
+            <Section title={t("Price")}>
               {v.total_price == null ? (
                 <p className="text-[13px] text-muted">
-                  No price on this version yet. Enter the net costs in the builder, save, then use Apply price.
+                  {t("No price on this version yet. Enter the net costs in the builder, save, then use Apply price.")}
                 </p>
               ) : (
                 <>
@@ -329,16 +335,16 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                     {v.is_approved ? (
                       // AA-996 (audit item 12): an approved price no longer expires.
                       <>
-                        Approved on <DateText value={v.approved_at} />
+                        {t("Approved on")} <DateText value={v.approved_at} />
                       </>
                     ) : v.valid_until ? (
                       <>
-                        Valid until <DateText value={v.valid_until} />
+                        {t("Valid until")} <DateText value={v.valid_until} />
                       </>
                     ) : (
-                      validity
+                      tx(validity)
                     )}
-                    {depositText(c.channel)}
+                    {tx(depositText(c.channel))}
                   </p>
                 </>
               )}

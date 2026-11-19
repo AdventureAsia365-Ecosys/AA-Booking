@@ -52,7 +52,9 @@ import { NotesCard } from "./NotesCard";
 import { ProposalsTab } from "./ProposalsTab";
 import { StatusActions } from "./StatusActions";
 import { SuppliersTab } from "./SuppliersTab";
-import { daysText } from "@/ui/booking/plural";
+import { useFormat, useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -63,6 +65,7 @@ const TABS = [
 ] as const;
 
 export default function CaseWorkspacePage({ params }: { params: Promise<{ code: string }> }) {
+  const tr = useT(MSG);
   const { code } = use(params);
   const ref = decodeURIComponent(code);
   const q = useQuery({ queryKey: ["trip-case", ref], queryFn: () => api.tripCases.get(ref) });
@@ -74,16 +77,16 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
       <PageFrame width="full">
         {notFound ? (
           <EmptyState
-            title={`Trip case ${ref} not found`}
-            description="It may have been removed, or the code is wrong."
+            title={tr("Trip case {0} not found", ref)}
+            description={tr("It may have been removed, or the code is wrong.")}
             action={
               <Link href="/cases" className="text-[13px] font-semibold text-accent-deep">
-                Back to trip cases
+                {tr("Back to trip cases")}
               </Link>
             }
           />
         ) : (
-          <QueryError error={q.error} onRetry={() => q.refetch()} what="this trip case" />
+          <QueryError error={q.error} onRetry={() => q.refetch()} what={tr("this trip case")} />
         )}
       </PageFrame>
     );
@@ -94,6 +97,9 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ code: 
 }
 
 function Workspace({ c }: { c: TripCaseDetail }) {
+  const tr = useT(MSG);
+  const tx = useTx();
+  const { formatDate } = useFormat();
   const { get, set } = useUrlFilters();
   const tab = TABS.find((t) => t.key === get("tab"))?.key ?? "overview";
   const canWrite = useCan("trip_case.write");
@@ -109,20 +115,20 @@ function Workspace({ c }: { c: TripCaseDetail }) {
         <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 items-start gap-3">
-              <Link href="/cases" aria-label="Back to trip cases" className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-card text-muted hover:text-ink">
+              <Link href="/cases" aria-label={tr("Back to trip cases")} className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-card text-muted hover:text-ink">
                 <ArrowLeft size={16} />
               </Link>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="break-words font-display text-xl font-semibold text-ink sm:text-2xl">{c.trip_title ?? "Custom trip"}</h1>
+                  <h1 className="break-words font-display text-xl font-semibold text-ink sm:text-2xl">{c.trip_title ?? tr("Custom trip")}</h1>
                   <TripCaseStatusBadge status={c.status} />
                   <SupplyBadge supply={c.supply} />
-                  {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>TripPlanner</Pill>}
+                  {c.source_system === "tripplanner" && <Pill tone="info" dot={false}>{tr("TripPlanner")}</Pill>}
                   {c.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
                   {frozen && (
-                    <span title={B2C_READ_ONLY_NOTE} data-testid="case-read-only">
+                    <span title={tx(B2C_READ_ONLY_NOTE)} data-testid="case-read-only">
                       <Pill tone="neutral" dot={false}>
-                        Read-only
+                        {tr("Read-only")}
                       </Pill>
                     </span>
                   )}
@@ -132,19 +138,19 @@ function Workspace({ c }: { c: TripCaseDetail }) {
                   <Code>{c.code}</Code>
                   <span className="inline-flex min-w-0 items-center gap-1">
                     <User size={14} className="shrink-0" />
-                    <span className="truncate text-body">{c.channel === "b2b" ? "B2B agency" : "Traveller (B2C history)"}</span>
+                    <span className="truncate text-body">{c.channel === "b2b" ? tr("B2B agency") : tr("Traveller (B2C history)")}</span>
                   </span>
                   <span className="inline-flex min-w-0 items-center gap-1">
                     <Briefcase size={14} className="shrink-0" />
-                    <span className="truncate">Agent: {salesName(c) ?? "Unassigned"}</span>
+                    <span className="truncate">{tr("Agent:")} {salesName(c) ?? tr("Unassigned")}</span>
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <CalendarDays size={14} />
-                    {tripDates(c)}
+                    {tripDates(c, tr, formatDate)}
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <UsersIcon size={14} />
-                    {paxLabel(c)}
+                    {tx(paxLabel(c))}
                   </span>
                 </div>
               </div>
@@ -152,12 +158,12 @@ function Workspace({ c }: { c: TripCaseDetail }) {
             <div className="flex flex-wrap items-center gap-2">
               {canAssign && (
                 <Button variant="ghost" onClick={() => setPanel("assign")}>
-                  <UserPlus size={14} /> Assign
+                  <UserPlus size={14} /> {tr("Assign")}
                 </Button>
               )}
               {canWrite && (
                 <Button variant="ghost" onClick={() => setPanel("edit")}>
-                  <Pencil size={14} /> Edit details
+                  <Pencil size={14} /> {tr("Edit details")}
                 </Button>
               )}
               {c.channel === "b2b" && <ConfirmationButton code={c.code} />}
@@ -165,17 +171,17 @@ function Workspace({ c }: { c: TripCaseDetail }) {
               {c.channel !== "b2b" && <StatusActions c={c} />}
             </div>
           </div>
-          <Stepper status={c.status} cancelReason={cancelNote} />
+          <Stepper status={c.status} cancelReason={tx(cancelNote)} />
           <Tabs
             variant="underline"
-            ariaLabel="Trip case sections"
+            ariaLabel={tr("Trip case sections")}
             gap={20}
             className="bk-tabstrip -mb-5"
             tabs={TABS.map((t) => {
               const later = "wave" in t;
               return {
                 key: t.key,
-                label: t.label,
+                label: tx(t.label),
                 disabled: later,
                 title: later ? `Coming in wave ${t.wave}` : undefined,
                 count:
@@ -213,12 +219,14 @@ function salesName(c: TripCaseDetail): string | null {
   return a ? (a.name ?? a.cis_user_id) : null;
 }
 
-/** "6 Dec 2026 – 19 Dec 2026 (14 days)"; the length comes from the legs, else from the two dates. */
-function tripDates(c: TripCaseDetail): string {
+/** "6 Dec 2026 – 19 Dec 2026 (14 days)"; the length comes from the legs, else from the two dates. AA-1128: in the UI
+ *  language (`tr` of this file's catalogue, `fmt` the kit date format of the language). */
+function tripDates(c: TripCaseDetail, tr: ReturnType<typeof useT<typeof MSG.en>>, fmt: (d: string) => string): string {
   const end = c.trip_end_date ?? c.end_date;
-  if (!c.start_date) return c.duration_days ? `Dates not set · ${daysText(c.duration_days)}` : "Dates not set";
+  if (!c.start_date) return c.duration_days ? tr("Dates not set · {0} days", c.duration_days) : tr("Dates not set");
   const days = c.duration_days ?? inclusiveDays(c.start_date, end);
-  return `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}${days ? ` (${days} day${days === 1 ? "" : "s"})` : ""}`;
+  const range = `${fmt(c.start_date)}${end ? ` – ${fmt(end)}` : ""}`;
+  return days ? tr("{0} ({1} days)", range, days) : range;
 }
 
 function paxLabel(c: TripCaseDetail): string {
@@ -230,9 +238,10 @@ function paxLabel(c: TripCaseDetail): string {
 }
 
 function WorkspaceSkeleton() {
+  const tr = useT(MSG);
   return (
     <PageFrame bleed>
-      <div role="status" aria-busy="true" aria-label="Loading trip case">
+      <div role="status" aria-busy="true" aria-label={tr("Loading trip case")}>
       <div className="border-b border-line bg-bg px-4 pb-5 pt-6 sm:px-8">
         <div className="mx-auto flex max-w-[1440px] flex-col gap-4">
           <Skeleton w={280} h={26} />
@@ -252,30 +261,31 @@ function WorkspaceSkeleton() {
 /** AA-986 L5 (root ADR 0015, Q4): a tour this case uses left the CIS catalog. The case is kept as it is; staff decide
  *  with the customer or agency (cancelling is never automatic). Paused tours raise no alert (temporary). */
 function TourAlerts({ c }: { c: TripCaseDetail }) {
-  const where = { leg: "a trip leg", case: "the trip plan it started from", item: "a proposal item" } as const;
+  const tr = useT(MSG);
+  const tx = useTx();
+  const where = { leg: tr("a trip leg"), case: tr("the trip plan it started from"), item: tr("a proposal item") } as const;
   return (
     <div role="alert" className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[13px]">
-      <p className="font-semibold text-ink">AA no longer serves a tour in this case</p>
+      <p className="font-semibold text-ink">{tr("AA no longer serves a tour in this case")}</p>
       <ul className="mt-1.5 flex flex-col gap-1 text-body">
         {(c.tour_alerts ?? []).map((a) => (
           <li key={a.source_id} className="min-w-0 break-words">
-            <Pill tone={CATALOG_STATE_META[a.state].tone}>{CATALOG_STATE_META[a.state].label}</Pill>{" "}
+            <Pill tone={CATALOG_STATE_META[a.state].tone}>{tx(CATALOG_STATE_META[a.state].label)}</Pill>{" "}
             <span className="break-all font-mono text-[11px] text-muted2">{a.source_id}</span>
             {" — "}
-            {catalogReasonLabel(a.reason)}
+            {tx(catalogReasonLabel(a.reason))}
             {a.changed_at ? (
               <>
-                {" since "}
+                {tr("since")}
                 <DateText value={a.changed_at} />
               </>
             ) : null}
-            {"; used by "}
-            {a.used_by.map((u) => where[u]).join(", ")}.
+            {tr("; used by {0}.", a.used_by.map((u) => where[u]).join(", "))}
           </li>
         ))}
       </ul>
       <p className="mt-1.5 text-xs text-muted">
-        Confirmed bookings and holds are kept. New quotes and holds on this tour are refused. Cancelling is your decision.
+        {tr("Confirmed bookings and holds are kept. New quotes and holds on this tour are refused. Cancelling is your decision.")}
       </p>
     </div>
   );
@@ -296,6 +306,8 @@ function Overview({
   onAssign: () => void;
   onEdit: () => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const days = snapshotDays(c.inquiry_snapshot);
   const customDays = snapshotCustomDays(c.inquiry_snapshot);
   const prefs = c.source_system === "tripplanner" ? inquiryPrefs(c.inquiry_snapshot) : null;
@@ -306,46 +318,45 @@ function Overview({
         {!!c.tour_alerts?.length && <TourAlerts c={c} />}
         <TripFacts c={c} canEdit={canEdit} onEdit={onEdit} />
         {c.source_system === "tripplanner" && (
-          <Section title="Inquiry" description="What the customer built in TripPlanner, as received. Read-only." actions={<Pill tone="info" dot={false}>TripPlanner</Pill>}>
+          <Section title={tr("Inquiry")} description={tr("What the customer built in TripPlanner, as received. Read-only.")} actions={<Pill tone="info" dot={false}>{tr("TripPlanner")}</Pill>}>
             <p className="mb-3 text-[13px] text-muted">
-              Received <DateText value={c.created_at} withTime />
+              {tr("Received")} <DateText value={c.created_at} withTime />
             </p>
             {prefs && <InquiryPrefsBlock prefs={prefs} />}
             {days.length ? (
               <ol className="flex flex-col divide-y divide-line2 rounded-md border border-line">
                 {days.map((d, i) => (
                   <li key={i} className="flex gap-3 px-3 py-2 text-[13px]">
-                    <span className="w-14 shrink-0 font-semibold text-accent-deep">Day {d.day ?? i + 1}</span>
-                    <span className="min-w-0 break-words text-body">{d.name ?? "Unnamed stop"}</span>
+                    <span className="w-14 shrink-0 font-semibold text-accent-deep">{tr("Day")} {d.day ?? i + 1}</span>
+                    <span className="min-w-0 break-words text-body">{d.name ?? tr("Unnamed stop")}</span>
                   </li>
                 ))}
               </ol>
             ) : (
-              <p className="text-[13px] text-muted">The inquiry carried no day-by-day route.</p>
+              <p className="text-[13px] text-muted">{tr("The inquiry carried no day-by-day route.")}</p>
             )}
             {customDays.length > 0 && (
               <p className="mt-3 text-[13px] text-muted">
-                Plus {customDays.length} custom day{customDays.length === 1 ? "" : "s"} the customer added
-                {customDays.some((d) => d.kind) ? ` (${[...new Set(customDays.map((d) => (d.kind ?? "custom").replace(/_/g, " ")))].join(", ")})` : ""}.
+                {tr("Plus {0} custom day{1} the customer added{2}.", customDays.length, customDays.length === 1 ? "" : "s", customDays.some((d) => d.kind) ? ` (${[...new Set(customDays.map((d) => (d.kind ?? "custom").replace(/_/g, " ")))].join(", ")})` : "")}
               </p>
             )}
           </Section>
         )}
         {c.legs.length ? (
-          <Section title="Trip legs" description="The CIS tours this case is built from, in day order." actions={<FromCisTag />}>
+          <Section title={tr("Trip legs")} description={tr("The CIS tours this case is built from, in day order.")} actions={<FromCisTag />}>
             <ol className="flex flex-col gap-2">
               {c.legs.map((l, i) => (
                 <li key={`${l.source_tour_id}-${l.position}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-line px-3 py-2.5">
                   <span className="min-w-0">
                     <span className="block break-words text-[13px] font-medium text-ink">{c.leg_titles[i] ?? l.source_tour_id}</span>
                     <span className="text-xs text-muted">
-                      Days {l.day_from}–{l.day_to}
+                      {tr("Days {0}–{1}", l.day_from, l.day_to)}
                     </span>
                   </span>
                   <span className="flex min-w-0 flex-wrap items-center gap-2">
                     {l.catalog && isFlaggedState(l.catalog.state) && (
-                      <Pill tone={CATALOG_STATE_META[l.catalog.state].tone} title={CATALOG_STATE_META[l.catalog.state].help}>
-                        {CATALOG_STATE_META[l.catalog.state].label}
+                      <Pill tone={CATALOG_STATE_META[l.catalog.state].tone} title={tx(CATALOG_STATE_META[l.catalog.state].help)}>
+                        {tx(CATALOG_STATE_META[l.catalog.state].label)}
                       </Pill>
                     )}
                     <span className="break-all font-mono text-[11px] text-muted2">{l.source_tour_id}</span>
@@ -357,47 +368,47 @@ function Overview({
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-line bg-card px-4 py-3 text-[13px]" data-testid="legs-empty">
             <span className="min-w-0 text-muted">
-              <span className="font-semibold text-ink">Trip legs</span> ·{" "}
+              <span className="font-semibold text-ink">{tr("Trip legs")}</span> ·{" "}
               {/* AA-1088 (M13): a B2B booking has no TripPlanner legs; its tours are the lines of its version */}
-              {c.channel === "b2b" ? "An agency booking: the tours sold are listed in its version." : "A custom trip: no CIS tour is linked yet."}
+              {c.channel === "b2b" ? tr("An agency booking: the tours sold are listed in its version.") : tr("A custom trip: no CIS tour is linked yet.")}
             </span>
             <FromCisTag />
           </div>
         )}
       </div>
       <div className="flex min-w-0 flex-col gap-5">
-        <Section title="People">
+        <Section title={tr("People")}>
           <div className="flex flex-col gap-4">
             <div>
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
-                {c.channel === "b2b" ? "Agency" : "Traveller"}
+                {c.channel === "b2b" ? tr("Agency") : tr("Traveller")}
               </p>
               {c.channel === "b2b" ? (
                 <PersonCell
                   name={casePartyLabel(c)}
-                  sub={casePartySub(c)}
+                  sub={tx(casePartySub(c))}
                   chips={<Pill tone="accent" dot={false}>B2B</Pill>}
                 />
               ) : (
                 <PersonCell
                   name="Traveller (B2C history)"
-                  sub="Adventure Asia keeps no traveller record since the B2B-only model: this case is read-only history."
+                  sub={tr("Adventure Asia keeps no traveller record since the B2B-only model: this case is read-only history.")}
                 />
               )}
             </div>
             <div>
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Assigned sales</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{tr("Assigned sales")}</p>
                 {canAssign && (
                   <LinkButton size="sm" onClick={onAssign}>
-                    {sales.length ? "Change" : "Assign"}
+                    {sales.length ? tr("Change") : tr("Assign")}
                   </LinkButton>
                 )}
               </div>
               {sales.length ? (
-                sales.map((a) => <PersonCell key={a.cis_user_id} name={a.name ?? a.cis_user_id} sub="Sales" />)
+                sales.map((a) => <PersonCell key={a.cis_user_id} name={a.name ?? a.cis_user_id} sub={tr("Sales")} />)
               ) : (
-                <p className="text-[13px] text-muted">Unassigned</p>
+                <p className="text-[13px] text-muted">{tr("Unassigned")}</p>
               )}
             </div>
           </div>
@@ -411,6 +422,8 @@ function Overview({
 
 /** The trip facts card (Figma "Trip Information"): two columns of label / value, Edit opens the Edit details drawer. */
 function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean; onEdit: () => void }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const { codes, fromLegs } = caseCountries(c);
   const countryNames = useCountryNames(codes);
   const approved = c.versions.find((v) => v.is_approved) ?? null;
@@ -418,7 +431,7 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
   const days = c.duration_days ?? inclusiveDays(c.start_date, end);
   const fact = (label: string, value: React.ReactNode, hint?: React.ReactNode) => (
     <div className="min-w-0">
-      <dt className="text-xs text-muted">{label}</dt>
+      <dt className="text-xs text-muted">{tx(label)}</dt>
       <dd className="mt-0.5 break-words text-[13px] text-ink">
         {value}
         {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
@@ -427,10 +440,10 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
   );
   return (
     <Section
-      title="Trip details"
+      title={tr("Trip details")}
       actions={
         canEdit ? (
-          <IconButton onClick={onEdit} label="Edit trip details" title="Edit details">
+          <IconButton onClick={onEdit} label={tr("Edit trip details")} title={tr("Edit details")}>
             <Pencil size={14} />
           </IconButton>
         ) : undefined
@@ -439,22 +452,22 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
       <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2" data-testid="trip-facts">
         {fact("Status", TRIP_CASE_STATUS_META[c.status].label)}
         {fact(
-          "Travel dates",
-          c.start_date ? `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}` : "Not set",
+          tr("Travel dates"),
+          c.start_date ? `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}` : tr("Not set"),
           days ? `${days} day${days === 1 ? "" : "s"}` : undefined,
         )}
-        {fact("Adults / children", c.pax_adults != null ? `${c.pax_adults} / ${c.pax_children ?? 0}` : c.pax ? `${c.pax} pax` : "Not set")}
-        {fact("Countries", codes.length ? countryNames : "—", fromLegs ? "From the trip legs" : undefined)}
-        {fact("Trip style", c.trip_style ?? "—")}
+        {fact(tr("Adults / children"), c.pax_adults != null ? `${c.pax_adults} / ${c.pax_children ?? 0}` : c.pax ? `${c.pax} pax` : tr("Not set"))}
+        {fact("Countries", codes.length ? countryNames : "—", fromLegs ? tr("From the trip legs") : undefined)}
+        {fact(tr("Trip style"), c.trip_style ?? "—")}
         {fact("Currency", c.currency ?? "—")}
         {fact(
-          "Approved total",
+          tr("Approved total"),
           approved ? (
             <Link href={`/cases/${encodeURIComponent(c.code)}/proposals/${approved.version_number}`} className="hover:underline">
               <Money amount={approved.total_price} currency={approved.currency} strong />
             </Link>
           ) : (
-            <span className="text-muted">No approved proposal yet</span>
+            <span className="text-muted">{tr("No approved proposal yet")}</span>
           ),
           approved ? `V${approved.version_number}` : undefined,
         )}
@@ -465,10 +478,10 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
           ) : c.source_system === "manual" ? (
             "Manual"
           ) : c.source_system === "crm" ? (
-            "B2B agency (AA-Partner CRM)"
+            tr("B2B agency (AA-Partner CRM)")
           ) : c.source_id ? (
             <Link href={`/catalog/trip-plans/${encodeURIComponent(c.source_id)}`} className="text-accent-deep hover:underline">
-              CIS trip plan
+              {tr("CIS trip plan")}
             </Link>
           ) : (
             "CIS"
@@ -482,27 +495,29 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
 
 /** Figma USER DETAILS-3 "Client message & preferences": the customer's words quoted, then a two-column fact grid. */
 function InquiryPrefsBlock({ prefs }: { prefs: NonNullable<ReturnType<typeof inquiryPrefs>> }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const w = prefs.travelWindow;
   const when = w ? (w.text ?? [w.start ? formatDay(w.start) : null, w.end ? formatDay(w.end) : null].filter(Boolean).join(" – ")) : null;
   const facts = [
-    ["Estimated budget", prefs.budget],
-    ["Travel window", when],
-    ["Travel style", prefs.travelStyle],
-    ["Party", prefs.party],
+    [tr("Estimated budget"), prefs.budget],
+    [tr("Travel window"), when],
+    [tr("Travel style"), prefs.travelStyle],
+    [tr("Party"), prefs.party],
   ].filter((f): f is [string, string] => !!f[1]);
   return (
     <div className="mb-4 flex flex-col gap-3" data-testid="inquiry-prefs">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Client message &amp; preferences</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{tr("Client message & preferences")}</p>
       {prefs.message && (
         <blockquote className="whitespace-pre-wrap break-words rounded-md border-l-2 border-accent bg-panel px-3 py-2 text-[13px] italic text-body">
-          {prefs.message}
+          {tx(prefs.message)}
         </blockquote>
       )}
       {facts.length > 0 && (
         <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           {facts.map(([label, value]) => (
             <div key={label} className="min-w-0">
-              <dt className="text-xs text-muted">{label}</dt>
+              <dt className="text-xs text-muted">{tx(label)}</dt>
               <dd className="mt-0.5 break-words text-[13px] text-ink">{value}</dd>
             </div>
           ))}
@@ -525,6 +540,7 @@ function snapshotCustomDays(snapshot: Record<string, unknown> | null): { kind?: 
 }
 
 function Activity({ code }: { code: string }) {
+  const tr = useT(MSG);
   const q = useInfiniteQuery({
     queryKey: ["trip-case", code, "activity"],
     queryFn: ({ pageParam }) => api.tripCases.activity(code, pageParam),
@@ -533,7 +549,7 @@ function Activity({ code }: { code: string }) {
   });
   const items: ActivityItem[] = q.data?.pages.flatMap((p) => p.items) ?? [];
   return (
-    <Section title="Activity" description="Status changes and every staff edit on this case and its versions.">
+    <Section title={tr("Activity")} description={tr("Status changes and every staff edit on this case and its versions.")}>
       {q.isLoading ? (
         <div className="flex flex-col gap-3" aria-busy="true">
           <Skeleton h={14} />
@@ -541,9 +557,9 @@ function Activity({ code }: { code: string }) {
           <Skeleton w="60%" h={14} />
         </div>
       ) : q.isError ? (
-        <QueryError error={q.error} onRetry={() => q.refetch()} what="the case activity" />
+        <QueryError error={q.error} onRetry={() => q.refetch()} what={tr("the case activity")} />
       ) : items.length === 0 ? (
-        <p className="text-[13px] text-muted">Nothing recorded yet.</p>
+        <p className="text-[13px] text-muted">{tr("Nothing recorded yet.")}</p>
       ) : (
         <ol className="flex flex-col">
           {items.map((a) => (
@@ -552,7 +568,7 @@ function Activity({ code }: { code: string }) {
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] text-ink">{a.summary ?? a.action}</p>
                 <p className="text-xs text-muted">
-                  {a.actor.name ?? "System"} · <DateText value={a.at} withTime />
+                  {a.actor.name ?? tr("System")} · <DateText value={a.at} withTime />
                 </p>
               </div>
             </li>
@@ -561,7 +577,7 @@ function Activity({ code }: { code: string }) {
       )}
       {q.hasNextPage && (
         <LinkButton onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage} className="mt-3">
-          {q.isFetchingNextPage ? "Loading…" : "Show older"}
+          {q.isFetchingNextPage ? tr("Loading…") : tr("Show older")}
         </LinkButton>
       )}
     </Section>
@@ -570,6 +586,7 @@ function Activity({ code }: { code: string }) {
 
 // AA-1037 extras G2: the booking confirmation the agency gets (HTML file, prints to PDF; no traveller names, no prices).
 function ConfirmationButton({ code }: { code: string }) {
+  const tr = useT(MSG);
   const canRead = useCan("b2b_desk.read");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -580,7 +597,7 @@ function ConfirmationButton({ code }: { code: string }) {
     try {
       saveBlob(await agencyBillingApi.confirmation(code), `booking-confirmation-${code}.html`);
     } catch (e) {
-      setFailed(e instanceof ApiError && e.status === 404 ? "No confirmed agency booking yet" : "The confirmation could not be downloaded");
+      setFailed(e instanceof ApiError && e.status === 404 ? tr("No confirmed agency booking yet") : tr("The confirmation could not be downloaded"));
     } finally {
       setBusy(false);
     }
@@ -588,7 +605,7 @@ function ConfirmationButton({ code }: { code: string }) {
   return (
     <span className="inline-flex items-center gap-2">
       <Button variant="ghost" disabled={busy} onClick={download}>
-        <FileText size={14} /> {busy ? "Preparing…" : "Confirmation"}
+        <FileText size={14} /> {busy ? tr("Preparing…") : tr("Confirmation")}
       </Button>
       {failed && <span className="text-[12px] text-danger">{failed}</span>}
     </span>

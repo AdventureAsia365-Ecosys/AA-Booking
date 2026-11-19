@@ -7,10 +7,15 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supplyApi, type SupplyOption } from "@/lib/api/supply";
 import { Input, ListButton } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SupplyPicker.messages";
 
 const inputCls = "w-full";
 
 export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -38,7 +43,7 @@ export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) 
         onChange={(e) => type(e.target.value)}
         onFocus={() => setOpen(true)}
         onBlur={() => window.setTimeout(() => setOpen(false), 150)}
-        placeholder="Type 2+ letters of a hotel, room or service"
+        placeholder={t("Type 2+ letters of a hotel, room or service")}
         role="combobox"
         aria-expanded={open && q.length >= 2}
         aria-controls="supply-options"
@@ -50,10 +55,10 @@ export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) 
           role="listbox"
           className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-64 overflow-y-auto rounded-md border border-line bg-card py-1 shadow-lg"
         >
-          {options.isLoading && <li className="px-3 py-2 text-[13px] text-muted">Searching…</li>}
-          {options.isError && <li className="px-3 py-2 text-[13px] text-danger">{(options.error as Error).message}</li>}
+          {options.isLoading && <li className="px-3 py-2 text-[13px] text-muted">{t("Searching…")}</li>}
+          {options.isError && <li className="px-3 py-2 text-[13px] text-danger">{tx((options.error as Error).message)}</li>}
           {!options.isLoading && !options.isError && items.length === 0 && (
-            <li className="px-3 py-2 text-[13px] text-muted">No active room type or service matches.</li>
+            <li className="px-3 py-2 text-[13px] text-muted">{t("No active room type or service matches.")}</li>
           )}
           {items.map((o) => (
             <li key={`${o.kind}:${o.id}`} role="presentation">
@@ -70,8 +75,8 @@ export function SupplyPicker({ onPick }: { onPick: (o: SupplyOption) => void }) 
                 style={{ borderRadius: 0 }}
               >
                 <span className="min-w-0 truncate text-ink">
-                  <span className="text-muted">{o.kind === "room_type" ? "Room · " : "Service · "}</span>
-                  {o.label}
+                  <span className="text-muted">{o.kind === "room_type" ? t("Room · ") : t("Service · ")}</span>
+                  {tx(o.label)}
                 </span>
                 <span className="shrink-0 text-xs text-muted">{o.supplier_name}</span>
               </ListButton>

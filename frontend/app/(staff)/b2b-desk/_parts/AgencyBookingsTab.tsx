@@ -50,6 +50,9 @@ import {
 import { TripPlanPicker } from "../../cases/_parts/TripPlanPicker";
 import { SupplyPicker } from "../../cases/[code]/proposals/[n]/SupplyPicker";
 import { defaultRoomsLabel, deskLines } from "@/ui/booking/deskEntry";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./AgencyBookingsTab.messages";
 
 const STATUS_TONE: Record<EntryStatus, BookingTone> = {
   awaiting_approval: "warning",
@@ -64,6 +67,8 @@ function errorText(e: unknown): string {
 }
 
 export function AgencyBookingsTab() {
+  const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const paging = useOffsetPage();
   const canBook = useCan("b2b_desk.book");
@@ -79,7 +84,7 @@ export function AgencyBookingsTab() {
     mutationFn: ({ id, approve }: { id: string; approve: boolean }) =>
       approve ? agencyOpsApi.approveEntry(id) : agencyOpsApi.rejectEntry(id),
     onSuccess: (e) => {
-      toast.success(e.status === "booked" ? `Booked as ${e.trip_case?.code}; the agency is told` : "Rejected; the seats are released");
+      toast.success(e.status === "booked" ? t("Booked as {0}; the agency is told", e.trip_case?.code) : t("Rejected; the seats are released"));
       refresh();
     },
     onError: (e) => {
@@ -91,20 +96,20 @@ export function AgencyBookingsTab() {
   const columns: ColumnDef<DeskEntry, unknown>[] = [
     {
       id: "agency",
-      header: "Agency",
+      header: t("Agency"),
       accessorFn: (r) => r.agency.name,
       cell: ({ row }) => (
         <span className="flex min-w-0 flex-col">
           <span className="max-w-[220px] truncate text-[13.5px] font-medium text-ink" title={row.original.agency.name}>
             {row.original.agency.name}
           </span>
-          <span className="text-xs text-muted">Ref {row.original.agency_ref}</span>
+          <span className="text-xs text-muted">{t("Ref")} {row.original.agency_ref}</span>
         </span>
       ),
     },
     {
       id: "booking",
-      header: "Booking",
+      header: t("Booking"),
       accessorFn: (r) => r.trip_case?.code ?? "",
       cell: ({ row }) =>
         row.original.trip_case ? (
@@ -113,13 +118,13 @@ export function AgencyBookingsTab() {
           </a>
         ) : (
           <span className="text-xs text-muted">
-            Held until <DateText value={row.original.hold_expires_at} withTime />
+            {t("Held until")} <DateText value={row.original.hold_expires_at} withTime />
           </span>
         ),
     },
     {
       id: "price",
-      header: "Price",
+      header: t("Price"),
       accessorFn: (r) => Number(r.total),
       cell: ({ row }) => {
         const e = row.original;
@@ -130,8 +135,7 @@ export function AgencyBookingsTab() {
             </span>
             {e.override_total && (
               <span className="text-xs text-muted" title={e.override_reason ?? ""}>
-                Rule price {e.quoted_total}
-                {e.floor_total ? ` · floor ${e.floor_total}` : ""}
+                {t("Rule price {0}{1}", e.quoted_total, e.floor_total ? ` · floor ${e.floor_total}` : "")}
               </span>
             )}
           </span>
@@ -140,13 +144,13 @@ export function AgencyBookingsTab() {
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       accessorFn: (r) => r.status,
       cell: ({ row }) => (
         <span className="flex flex-col items-start gap-1">
-          <Pill tone={STATUS_TONE[row.original.status]}>{ENTRY_STATUS_LABEL[row.original.status]}</Pill>
+          <Pill tone={STATUS_TONE[row.original.status]}>{tx(ENTRY_STATUS_LABEL[row.original.status])}</Pill>
           <span className="text-xs text-muted">
-            {row.original.entered_by.name ?? "Staff"} · <DateText value={row.original.entered_at} relative />
+            {row.original.entered_by.name ?? t("Staff")} · <DateText value={row.original.entered_at} relative />
           </span>
         </span>
       ),
@@ -163,18 +167,18 @@ export function AgencyBookingsTab() {
               variant="primary"
               disabled={decide.isPending}
               onClick={() => decide.mutate({ id: row.original.id, approve: true })}
-              ariaLabel={`Approve the price for ${row.original.agency.name}`}
+              ariaLabel={t("Approve the price for {0}", row.original.agency.name)}
             >
-              Approve
+              {t("Approve")}
             </Button>
             <Button
               size="sm"
               variant="danger"
               disabled={decide.isPending}
               onClick={() => decide.mutate({ id: row.original.id, approve: false })}
-              ariaLabel={`Reject the price for ${row.original.agency.name}`}
+              ariaLabel={t("Reject the price for {0}", row.original.agency.name)}
             >
-              Reject
+              {t("Reject")}
             </Button>
           </span>
         ) : null,
@@ -187,18 +191,18 @@ export function AgencyBookingsTab() {
         <SegmentedControl
           appearance="chips"
           size="sm"
-          label="Booking state"
+          label={t("Booking state")}
           options={[
-            { value: "", label: "All" },
-            { value: "awaiting_approval", label: "Waiting for approval" },
-            { value: "booked", label: "Booked" },
+            { value: "", label: t("All") },
+            { value: "awaiting_approval", label: t("Waiting for approval") },
+            { value: "booked", label: t("Booked") },
           ]}
           value={status}
           onChange={(k) => set("entry", k || null)}
         />
         {canBook && (
           <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus size={14} /> New agency booking
+            <Plus size={14} /> {t("New agency booking")}
           </Button>
         )}
       </div>
@@ -213,7 +217,7 @@ export function AgencyBookingsTab() {
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-        emptyTitle="No agency booking entered by staff yet"
+        emptyTitle={t("No agency booking entered by staff yet")}
       />
       {creating && (
         <NewBookingDrawer
@@ -222,8 +226,8 @@ export function AgencyBookingsTab() {
             setCreating(false);
             toast.success(
               e.status === "booked"
-                ? `Booked as ${e.trip_case?.code}; the agency's CRM imports it`
-                : "The price is below the floor: a second person approves it; the seats are held",
+                ? t("Booked as {0}; the agency's CRM imports it", e.trip_case?.code)
+                : t("The price is below the floor: a second person approves it; the seats are held"),
             );
             refresh();
           }}
@@ -234,6 +238,7 @@ export function AgencyBookingsTab() {
 }
 
 function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e: DeskEntry) => void }) {
+  const t = useT(MSG);
   const agencies = useQuery({ queryKey: ["b2b-desk", "agencies"], queryFn: agencyOpsApi.agencies });
   const [key] = useState(() => actionKey("desk"));
   const [partner, setPartner] = useState("");
@@ -290,8 +295,8 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
     <FormDrawer
       open
       onClose={onClose}
-      title="New agency booking"
-      submitLabel={override.trim() ? "Hold and ask for approval" : "Book"}
+      title={t("New agency booking")}
+      submitLabel={override.trim() ? t("Hold and ask for approval") : t("Book")}
       onSubmit={() => (ready ? save.mutate() : undefined)}
       busy={save.isPending}
       dirty={!!(partner || agencyRef || plan)}
@@ -300,11 +305,10 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
       width={560}
     >
       <p className="mb-4 text-[13px] text-muted">
-        For an agency that sent its booking by e-mail or chat. The agency&apos;s rules apply (seats, allotment, credit stop,
-        cancellation policy) and its CRM imports the booking. Enter counts only, never traveller names.
+        {t("For an agency that sent its booking by e-mail or chat. The agency's rules apply (seats, allotment, credit stop, cancellation policy) and its CRM imports the booking. Enter counts only, never traveller names.")}
       </p>
       <div className="flex flex-col gap-4">
-        <Field label="Agency" required>
+        <Field label={t("Agency")} required>
           <Select
             value={partner}
             onChange={(e) => {
@@ -312,57 +316,57 @@ function NewBookingDrawer({ onClose, onDone }: { onClose: () => void; onDone: (e
               const a = agencies.data?.items.find((x) => x.partner_id === e.target.value);
               if (a) setCurrency(a.billing_currency);
             }}
-            placeholder={agencies.isLoading ? "Loading…" : "Choose the agency"}
+            placeholder={agencies.isLoading ? t("Loading…") : t("Choose the agency")}
             options={(agencies.data?.items ?? []).map((a) => ({ value: a.partner_id, label: a.agency_name }))}
           />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Agency reference" required hint="The agency's own booking id (from its e-mail)">
+          <Field label={t("Agency reference")} required hint={t("The agency's own booking id (from its e-mail)")}>
             <Input value={agencyRef} maxLength={64} onChange={(e) => setAgencyRef(e.target.value)} />
           </Field>
-          <Field label="Currency">
+          <Field label={t("Currency")}>
             <Select value={currency} onChange={(e) => setCurrency(e.target.value)} options={CURRENCIES.map((c) => ({ value: c, label: c }))} />
           </Field>
         </div>
-        <Field label="Tour" required as="div">
+        <Field label={t("Tour")} required as="div">
           <TripPlanPicker value={plan} onChange={(p) => { setPlan(p); setDeparture(""); }} />
         </Field>
         {plan && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Departure" hint={upcoming.length ? "Fixed departures of this tour" : "No fixed departure: on request"}>
+            <Field label={t("Departure")} hint={upcoming.length ? t("Fixed departures of this tour") : t("No fixed departure: on request")}>
               <Select
                 value={departure}
                 onChange={(e) => setDeparture(e.target.value)}
-                placeholder={upcoming.length ? "Choose a departure" : "None"}
+                placeholder={upcoming.length ? t("Choose a departure") : t("None")}
                 disabled={!upcoming.length}
-                options={upcoming.map((d) => ({ value: d.id, label: `${d.start_date} · ${d.available} free` }))}
+                options={upcoming.map((d) => ({ value: d.id, label: t("{0} · {1} free", d.start_date, d.available) }))}
               />
             </Field>
             {!departure && (
-              <Field label="Start date" required>
+              <Field label={t("Start date")} required>
                 <DateField value={serviceDate} onChange={setServiceDate} />
               </Field>
             )}
           </div>
         )}
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Adults" required>
+          <Field label={t("Adults")} required>
             <Input type="number" min={1} max={60} value={adult} onChange={(e) => setAdult(e.target.value)} />
           </Field>
-          <Field label="Children">
+          <Field label={t("Children")}>
             <Input type="number" min={0} max={60} value={child} onChange={(e) => setChild(e.target.value)} />
           </Field>
-          <Field label="Infants">
+          <Field label={t("Infants")}>
             <Input type="number" min={0} max={20} value={infant} onChange={(e) => setInfant(e.target.value)} />
           </Field>
         </div>
         <RoomMixEditor rooms={rooms} onChange={setRooms} party={(Number(adult) || 0) + (Number(child) || 0)} />
         <ExtrasEditor extras={extras} onChange={setExtras} />
-        <Field label="Price override (total)" hint="Leave empty for the agency's price. Below the floor margin a second person approves it.">
+        <Field label={t("Price override (total)")} hint={t("Leave empty for the agency's price. Below the floor margin a second person approves it.")}>
           <Input inputMode="decimal" value={override} placeholder="e.g. 1250.00" onChange={(e) => setOverride(e.target.value)} />
         </Field>
         {override.trim() && (
-          <Field label="Why this price" required>
+          <Field label={t("Why this price")} required>
             <Textarea value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
           </Field>
         )}
@@ -381,40 +385,42 @@ interface Extra {
 
 /** The tour's room mix. Empty = the engine default (doubles plus a single when the party is odd). */
 function RoomMixEditor({ rooms, onChange, party }: { rooms: RoomMix[]; onChange: (r: RoomMix[]) => void; party: number }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const used = new Set(rooms.map((r) => r.occupancy));
   const next = OCCUPANCIES.find((o) => !used.has(o));
   const set = (i: number, patch: Partial<RoomMix>) => onChange(rooms.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <Field
-      label="Room mix"
+      label={t("Room mix")}
       as="div"
       hint={
         rooms.length
-          ? "The rooms must hold the adults; children may share."
-          : `Empty = ${defaultRoomsLabel(party)} for ${party || 0} travellers (doubles, plus a single when odd).`
+          ? t("The rooms must hold the adults; children may share.")
+          : t("Empty = {0} for {1} travellers (doubles, plus a single when odd).", defaultRoomsLabel(party), party || 0)
       }
     >
       <div className="flex flex-col gap-2" data-testid="desk-room-mix">
         {rooms.map((r, i) => (
           <div key={r.occupancy} className="grid grid-cols-[1fr_96px_auto] items-center gap-2">
             <Select
-              aria-label="Room occupancy"
+              aria-label={t("Room occupancy")}
               value={r.occupancy}
               onChange={(e) => set(i, { occupancy: e.target.value as Occupancy })}
               options={OCCUPANCIES.filter((o) => o === r.occupancy || !used.has(o)).map((o) => ({
                 value: o,
-                label: OCCUPANCY_LABEL[o],
+                label: tx(OCCUPANCY_LABEL[o]),
               }))}
             />
             <Input
-              aria-label="Rooms"
+              aria-label={t("Rooms")}
               type="number"
               min={1}
               max={30}
               value={String(r.count)}
               onChange={(e) => set(i, { count: Math.min(30, Math.max(0, Number(e.target.value) || 0)) })}
             />
-            <IconButton title="Remove" label={`Remove the ${OCCUPANCY_LABEL[r.occupancy]} rooms`} onClick={() => onChange(rooms.filter((_, j) => j !== i))}>
+            <IconButton title={t("Remove")} label={t("Remove the {0} rooms", OCCUPANCY_LABEL[r.occupancy])} onClick={() => onChange(rooms.filter((_, j) => j !== i))}>
               <X size={14} />
             </IconButton>
           </div>
@@ -422,7 +428,7 @@ function RoomMixEditor({ rooms, onChange, party }: { rooms: RoomMix[]; onChange:
         {next && (
           <span>
             <Button size="sm" variant="ghost" onClick={() => onChange([...rooms, { occupancy: next, count: 1 }])}>
-              <Plus size={14} /> Add rooms
+              <Plus size={14} /> {t("Add rooms")}
             </Button>
           </span>
         )}
@@ -433,18 +439,20 @@ function RoomMixEditor({ rooms, onChange, party }: { rooms: RoomMix[]; onChange:
 
 /** Extra hotel rooms or services (transfers, activities, guides) booked with the tour, each its own priced line. */
 function ExtrasEditor({ extras, onChange }: { extras: Extra[]; onChange: (x: Extra[]) => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const set = (key: string, patch: Partial<Extra>) => onChange(extras.map((x) => (x.key === key ? { ...x, ...patch } : x)));
   return (
-    <Field label="Extra rooms and services" as="div" hint="Priced at the supplier rate in force, for the same travellers. Date empty = the tour's start.">
+    <Field label={t("Extra rooms and services")} as="div" hint={t("Priced at the supplier rate in force, for the same travellers. Date empty = the tour's start.")}>
       <div className="flex flex-col gap-2" data-testid="desk-extras">
         {extras.map((x) => (
           <div key={x.key} className="flex flex-col gap-2 rounded-lg border border-line2 p-2">
             <div className="flex items-center justify-between gap-2 text-[13px]">
               <span className="min-w-0 truncate text-ink">
-                <span className="text-muted">{x.option.kind === "room_type" ? "Room · " : "Service · "}</span>
-                {x.option.label}
+                <span className="text-muted">{x.option.kind === "room_type" ? t("Room · ") : t("Service · ")}</span>
+                {tx(x.option.label)}
               </span>
-              <IconButton title="Remove" label={`Remove ${x.option.label}`} onClick={() => onChange(extras.filter((y) => y.key !== x.key))}>
+              <IconButton title={t("Remove")} label={t("Remove {0}", x.option.label)} onClick={() => onChange(extras.filter((y) => y.key !== x.key))}>
                 <X size={14} />
               </IconButton>
             </div>
@@ -452,7 +460,7 @@ function ExtrasEditor({ extras, onChange }: { extras: Extra[]; onChange: (x: Ext
               <DateField value={x.date} onChange={(d) => set(x.key, { date: d })} />
               {x.option.kind === "room_type" && (
                 <Input
-                  aria-label="Nights"
+                  aria-label={t("Nights")}
                   type="number"
                   min={1}
                   max={60}

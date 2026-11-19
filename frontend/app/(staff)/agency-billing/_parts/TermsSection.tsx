@@ -20,6 +20,9 @@ import { agencyOpsApi } from "@/lib/api/agencyOps";
 import { DAY_RANGE, parseTerms, pctText, termsToText, type DayKey, type TermsErrors, type TermsText } from "@/lib/billingTermsForm";
 import { Button, ConfirmDialog, Field, FormDrawer, Input, Section, Select, useCan, useToast } from "@/ui";
 import { errorText } from "./shared";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./TermsSection.messages";
 
 const TERM_FIELDS: { key: DayKey; label: string; hint: string }[] = [
   { key: "balance_days_before_departure", label: "Balance due before departure (days)", hint: "Booked later than this: billed in full." },
@@ -29,11 +32,6 @@ const TERM_FIELDS: { key: DayKey; label: string; hint: string }[] = [
   { key: "suspend_after_days", label: "Suspend after (overdue days)", hint: "More than the warning days." },
 ];
 
-function rangeHint(key: DayKey, hint: string): string {
-  const { min, max } = DAY_RANGE[key];
-  return `${hint ? `${hint} ` : ""}Allowed: ${min}–${max} days.`;
-}
-
 /** The terms fields, shared by the default terms and an agency's drawer. */
 function TermsFields({ value, errors, disabled, onChange }: {
   value: TermsText;
@@ -41,13 +39,15 @@ function TermsFields({ value, errors, disabled, onChange }: {
   disabled: boolean;
   onChange: (next: TermsText) => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-      <Field label="Deposit (%)" hint="Billed when an agency booking is confirmed. Allowed: 0–100." error={errors.deposit}>
+      <Field label={tr("Deposit (%)")} hint={tr("Billed when an agency booking is confirmed. Allowed: 0–100.")} error={errors.deposit}>
         <Input inputMode="decimal" disabled={disabled} value={value.deposit} onChange={(e) => onChange({ ...value, deposit: e.target.value })} />
       </Field>
       {TERM_FIELDS.map((tf) => (
-        <Field key={tf.key} label={tf.label} hint={rangeHint(tf.key, tf.hint)} error={errors[tf.key]}>
+        <Field key={tf.key} label={tx(tf.label)} hint={[tx(tf.hint), tr("Allowed: {0}–{1} days.", DAY_RANGE[tf.key].min, DAY_RANGE[tf.key].max)].filter(Boolean).join(" ")} error={tx(errors[tf.key])}>
           <Input
             type="number"
             min={DAY_RANGE[tf.key].min}
@@ -58,14 +58,14 @@ function TermsFields({ value, errors, disabled, onChange }: {
           />
         </Field>
       ))}
-      <Field label="Software fee currency" hint="Set in CIS Tenant 360 (the agency's billing currency). This value is used only when CIS sends none.">
+      <Field label={tr("Software fee currency")} hint={tr("Set in CIS Tenant 360 (the agency's billing currency). This value is used only when CIS sends none.")}>
         <Input value={value.saas_currency} disabled />
       </Field>
     </div>
   );
 }
 
-function termsLine(t: BillingTerms): string {
+function termsLine(t: BillingTerms, tx: <S extends string | null | undefined>(s: S) => S): string {
   return [
     `deposit ${pctText(t.deposit_pct)} %`,
     `balance ${t.balance_days_before_departure} d before departure`,
@@ -73,12 +73,15 @@ function termsLine(t: BillingTerms): string {
     `settlement due ${t.settlement_due_days} d`,
     `warn ${t.warn_after_days} d`,
     `suspend ${t.suspend_after_days} d`,
-  ].join(" · ");
+  ]
+    .map((part) => tx(part))
+    .join(" · ");
 }
 
 type Editing = { tenantId: string; name: string | null; text: TermsText; isNew: boolean };
 
 function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; taken: Set<string>; onClose: () => void }) {
+  const tr = useT(MSG);
   const toast = useToast();
   const qc = useQueryClient();
   const [form, setForm] = useState(editing);
@@ -88,7 +91,7 @@ function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; take
   const save = useMutation({
     mutationFn: (body: BillingTerms) => agencyBillingApi.putAgencyTerms(form.tenantId, body),
     onSuccess: () => {
-      toast.success("Agency terms saved");
+      toast.success(tr("Agency terms saved"));
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
       onClose();
     },
@@ -104,21 +107,21 @@ function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; take
     <FormDrawer
       open
       onClose={onClose}
-      title={editing.isNew ? "Add agency terms" : `Terms of ${editing.name ?? "this agency"}`}
+      title={editing.isNew ? tr("Add agency terms") : tr("Terms of {0}", editing.name ?? "this agency")}
       onSubmit={submit}
-      submitLabel="Save terms"
+      submitLabel={tr("Save terms")}
       busy={save.isPending}
-      error={save.isError ? errorText(save.error) : missing ? "Pick an agency." : null}
+      error={save.isError ? errorText(save.error) : missing ? tr("Pick an agency.") : null}
       width={640}
     >
       <div className="flex flex-col gap-4" data-testid="agency-terms-drawer">
-        <p className="text-[13px] text-muted">These terms replace the default terms for this agency as a whole.</p>
+        <p className="text-[13px] text-muted">{tr("These terms replace the default terms for this agency as a whole.")}</p>
         {editing.isNew && (
-          <Field label="Agency" required hint={agencies.isError ? "The agency list could not be loaded." : "Active B2B agencies without their own terms."}>
+          <Field label={tr("Agency")} required hint={agencies.isError ? tr("The agency list could not be loaded.") : tr("Active B2B agencies without their own terms.")}>
             <Select
               value={form.tenantId}
               onChange={(e) => setForm({ ...form, tenantId: e.target.value })}
-              options={[{ value: "", label: "Pick an agency" }, ...options]}
+              options={[{ value: "", label: tr("Pick an agency") }, ...options]}
             />
           </Field>
         )}
@@ -129,6 +132,8 @@ function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; take
 }
 
 function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]; defaults: BillingTerms | null; canEdit: boolean }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -136,7 +141,7 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
   const remove = useMutation({
     mutationFn: (tenantId: string) => agencyBillingApi.deleteAgencyTerms(tenantId),
     onSuccess: () => {
-      toast.success("The agency follows the default terms again");
+      toast.success(tr("The agency follows the default terms again"));
       setRemoving(null);
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
     },
@@ -146,27 +151,27 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
   return (
     <div className="mt-4" data-testid="agency-terms">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[13px] font-semibold">Agency terms</h3>
+        <h3 className="text-[13px] font-semibold">{tr("Agency terms")}</h3>
         {canEdit && defaults && (
           <Button size="sm" variant="secondary" onClick={() => setEditing({ tenantId: "", name: null, text: termsToText(defaults), isNew: true })}>
-            Add agency terms
+            {tr("Add agency terms")}
           </Button>
         )}
       </div>
       {overrides.length === 0 ? (
-        <p className="text-[13px] text-muted">Every agency follows the default terms.</p>
+        <p className="text-[13px] text-muted">{tr("Every agency follows the default terms.")}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {overrides.map((o) => (
             <li key={o.party_tenant_id ?? ""} className="flex flex-wrap items-center gap-3 text-[13px]">
               <span className="font-semibold">{o.agency_name ?? o.party_tenant_id}</span>
-              <span className="min-w-0 break-words text-body">{termsLine(o)}</span>
+              <span className="min-w-0 break-words text-body">{termsLine(o, tx)}</span>
               {canEdit && (
                 <span className="flex gap-2">
                   <Button size="sm" variant="ghost" onClick={() => setEditing({ tenantId: o.party_tenant_id ?? "", name: o.agency_name ?? null, text: termsToText(o), isNew: false })}>
-                    Edit
+                    {tr("Edit")}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setRemoving(o)}>Use the default</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRemoving(o)}>{tr("Use the default")}</Button>
                 </span>
               )}
             </li>
@@ -178,9 +183,9 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
         open={removing !== null}
         onClose={() => setRemoving(null)}
         onConfirm={() => removing?.party_tenant_id && remove.mutate(removing.party_tenant_id)}
-        title="Use the default terms"
-        message={`${removing?.agency_name ?? "This agency"} follows the default terms from now on; its own terms are removed.`}
-        confirmLabel="Use the default"
+        title={tr("Use the default terms")}
+        message={tr("{0} follows the default terms from now on; its own terms are removed.", removing?.agency_name ?? "This agency")}
+        confirmLabel={tr("Use the default")}
         busy={remove.isPending}
       />
     </div>
@@ -188,10 +193,11 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
 }
 
 function SaveBar({ busy, onCancel, onSave }: { busy: boolean; onCancel: () => void; onSave: () => void }) {
+  const tr = useT(MSG);
   return (
     <span className="flex gap-2">
-      <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-      <Button variant="primary" disabled={busy} onClick={onSave}>Save terms</Button>
+      <Button variant="ghost" onClick={onCancel}>{tr("Cancel")}</Button>
+      <Button variant="primary" disabled={busy} onClick={onSave}>{tr("Save terms")}</Button>
     </span>
   );
 }
@@ -202,6 +208,7 @@ function shownTerms(draft: TermsText | null, current: BillingTerms | null): Term
 }
 
 export function TermsSection() {
+  const tr = useT(MSG);
   const canEdit = useCan("billing_config.write");
   const toast = useToast();
   const qc = useQueryClient();
@@ -212,7 +219,7 @@ export function TermsSection() {
   const save = useMutation({
     mutationFn: (body: BillingTerms) => agencyBillingApi.putDefaultTerms(body),
     onSuccess: () => {
-      toast.success("Default terms saved");
+      toast.success(tr("Default terms saved"));
       setDraft(null);
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
     },
@@ -227,14 +234,14 @@ export function TermsSection() {
   const shown = shownTerms(draft, current);
   return (
     <Section
-      title="Payment terms"
-      description="The default terms of every agency; an agency's own contract terms replace them as a whole."
+      title={tr("Payment terms")}
+      description={tr("The default terms of every agency; an agency's own contract terms replace them as a whole.")}
       actions={canEdit && draft ? <SaveBar busy={save.isPending} onCancel={() => { setDraft(null); setErrors({}); }} onSave={submit} /> : undefined}
     >
       {shown ? (
         <TermsFields value={shown} errors={errors} disabled={!canEdit} onChange={setDraft} />
       ) : (
-        <p className="text-[13px] text-muted">{list.isLoading ? "Loading…" : "No default terms row."}</p>
+        <p className="text-[13px] text-muted">{list.isLoading ? tr("Loading…") : tr("No default terms row.")}</p>
       )}
       <Overrides overrides={(list.data?.items ?? []).filter((t) => t.party_tenant_id)} defaults={current} canEdit={canEdit} />
     </Section>

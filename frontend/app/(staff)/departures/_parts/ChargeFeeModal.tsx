@@ -11,6 +11,9 @@ import { ApiError } from "@/lib/api/client";
 import { FEE_REASON_LABEL, departureBoardApi, type FeeReason } from "@/lib/api/departureBoard";
 import { Button, Input, Modal, Select, Textarea, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../_parts/FormField";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ChargeFeeModal.messages";
 
 const REASONS: FeeReason[] = ["min_shortfall", "allotment_unreleased", "other"];
 
@@ -34,6 +37,8 @@ export function ChargeFeeModal({
   seats?: number;
   onClose: () => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const detail = useQuery({ queryKey: ["departure-board", "detail", departureId], queryFn: () => departureBoardApi.detail(departureId) });
@@ -56,7 +61,7 @@ export function ChargeFeeModal({
         note: note.trim() || null,
       }),
     onSuccess: (fee) => {
-      toast.success(`Fee of ${fee.amount} ${fee.currency} proposed; another person approves it`);
+      toast.success(t("Fee of {0} {1} proposed; another person approves it", fee.amount, fee.currency));
       qc.invalidateQueries({ queryKey: ["departure-board"] });
       qc.invalidateQueries({ queryKey: ["b2b-desk"] });
       onClose();
@@ -68,26 +73,26 @@ export function ChargeFeeModal({
     <Modal
       open
       onClose={onClose}
-      title="Charge departure fee"
+      title={t("Charge departure fee")}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="primary" disabled={!partner || !price || !seatValue || propose.isPending} onClick={() => propose.mutate()}>
-            {propose.isPending ? "Proposing…" : "Propose fee"}
+            {propose.isPending ? t("Proposing…") : t("Propose fee")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-4 text-[13px] text-body" data-testid="charge-fee">
         <p>
-          {title}. The fee waits for a second person to approve it; the agency is then told and it goes on its next settlement invoice.
+          {t("{0}. The fee waits for a second person to approve it; the agency is then told and it goes on its next settlement invoice.", title)}
         </p>
-        <FormField label="Agency" required error={errorFor(errors, "partner_id")}>
+        <FormField label={t("Agency")} required error={errorFor(errors, "partner_id")}>
           <Select className={inputCls} value={partner} onChange={(e) => setPartner(e.target.value)}>
-            <option value="">{detail.isLoading ? "Loading…" : "Choose an agency"}</option>
+            <option value="">{detail.isLoading ? t("Loading…") : t("Choose an agency")}</option>
             {(detail.data?.agencies ?? []).map((a) => (
               <option key={a.partner_id} value={a.partner_id}>
-                {a.agency_name} (on this departure)
+                {t("{0} (on this departure)", a.agency_name)}
               </option>
             ))}
             {(detail.data?.partner_options ?? [])
@@ -99,35 +104,35 @@ export function ChargeFeeModal({
               ))}
           </Select>
         </FormField>
-        <FormField label="Reason" required error={errorFor(errors, "reason")}>
+        <FormField label={t("Reason")} required error={errorFor(errors, "reason")}>
           <Select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value as FeeReason)}>
             {REASONS.map((r) => (
               <option key={r} value={r}>
-                {FEE_REASON_LABEL[r]}
+                {tx(FEE_REASON_LABEL[r])}
               </option>
             ))}
           </Select>
         </FormField>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <FormField label="Seats" required error={errorFor(errors, "seats")}>
+          <FormField label={t("Seats")} required error={errorFor(errors, "seats")}>
             <Input className={inputCls} type="number" min={1} max={1000} value={seatValue} onChange={(e) => setSeats(e.target.value)} />
           </FormField>
-          <FormField label="Price per seat" required error={errorFor(errors, "price_per_seat")}>
+          <FormField label={t("Price per seat")} required error={errorFor(errors, "price_per_seat")}>
             <Input className={inputCls} inputMode="decimal" value={price} placeholder="0.00" onChange={(e) => setPrice(e.target.value)} />
           </FormField>
-          <FormField label="Currency" required error={errorFor(errors, "currency")}>
+          <FormField label={t("Currency")} required error={errorFor(errors, "currency")}>
             <Input className={inputCls} maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
           </FormField>
         </div>
-        <FormField label="Note" required={reason === "other"} hint="Why the fee is charged. Never a traveller's name." error={errorFor(errors, "note")}>
+        <FormField label={t("Note")} required={reason === "other"} hint={t("Why the fee is charged. Never a traveller's name.")} error={errorFor(errors, "note")}>
           <Textarea className={inputCls} rows={2} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
         </FormField>
         <p className="bk-tabular text-[13px] font-medium text-ink">
-          Total {total > 0 ? total.toFixed(2) : "0.00"} {currency || "USD"}
+          {t("Total {0} {1}", total > 0 ? total.toFixed(2) : "0.00", currency || "USD")}
         </p>
         {propose.isError && !errors.length && (
           <p role="alert" className="text-danger">
-            {errorText(propose.error)}
+            {tx(errorText(propose.error))}
           </p>
         )}
       </div>

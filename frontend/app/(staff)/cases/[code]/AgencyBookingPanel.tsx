@@ -30,6 +30,9 @@ import {
 import { bkGet } from "@/lib/api/client";
 import type { TripCaseDetail } from "@/lib/api/types";
 import { Button, DateText, Field, FormDrawer, Input, Pill, Section, Select, Textarea, useCan, useToast } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./AgencyBookingPanel.messages";
 
 interface ConfirmationLine {
   line_ref: string;
@@ -51,6 +54,7 @@ function money(m: { amount: string; currency: string }): string {
 
 /** Header button: the vouchers file of a confirmed agency booking (opens in a new tab to print). */
 export function VouchersButton({ code }: { code: string }) {
+  const t = useT(MSG);
   const canRead = useCan("b2b_desk.read");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -61,7 +65,7 @@ export function VouchersButton({ code }: { code: string }) {
     try {
       openBlob(await agencyOpsApi.vouchers(code));
     } catch (e) {
-      setFailed(e instanceof ApiError && e.status === 404 ? "No confirmed agency booking yet" : "The vouchers could not be opened");
+      setFailed(e instanceof ApiError && e.status === 404 ? t("No confirmed agency booking yet") : t("The vouchers could not be opened"));
     } finally {
       setBusy(false);
     }
@@ -69,7 +73,7 @@ export function VouchersButton({ code }: { code: string }) {
   return (
     <span className="inline-flex items-center gap-2">
       <Button variant="ghost" disabled={busy} onClick={open}>
-        <FileText size={14} /> {busy ? "Preparing…" : "Vouchers"}
+        <FileText size={14} /> {busy ? t("Preparing…") : t("Vouchers")}
       </Button>
       {failed && <span className="text-[12px] text-danger">{failed}</span>}
     </span>
@@ -77,6 +81,7 @@ export function VouchersButton({ code }: { code: string }) {
 }
 
 export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
+  const t = useT(MSG);
   const canRead = useCan("b2b_desk.read");
   const canBook = useCan("b2b_desk.book");
   const qc = useQueryClient();
@@ -103,7 +108,7 @@ export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
     mutationFn: ({ approve, pct }: { approve: boolean; pct: string }) =>
       approve ? agencyOpsApi.approveOverride(c.code, pct) : agencyOpsApi.rejectOverride(c.code),
     onSuccess: (x) => {
-      toast.success(x.override?.status === "approved" ? `Fee lowered to ${money(x.fee)}; the agency is told` : "The policy fee stays");
+      toast.success(x.override?.status === "approved" ? t("Fee lowered to {0}; the agency is told", money(x.fee)) : t("The policy fee stays"));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -114,16 +119,16 @@ export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
 
   return (
     <Section
-      title="Agency booking"
-      description="Changes after the sale. The agency's CRM gets each one as an event; travellers are counts only."
+      title={t("Agency booking")}
+      description={t("Changes after the sale. The agency's CRM gets each one as an event; travellers are counts only.")}
       actions={
         canBook && live ? (
           <span className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" onClick={() => setDrawer("reduce")}>
-              <UserMinus size={14} /> Fewer travellers
+              <UserMinus size={14} /> {t("Fewer travellers")}
             </Button>
             <Button size="sm" variant="danger" onClick={() => setDrawer("cancel")}>
-              <XCircle size={14} /> Cancel for the agency
+              <XCircle size={14} /> {t("Cancel for the agency")}
             </Button>
           </span>
         ) : null
@@ -132,20 +137,20 @@ export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
       {x ? (
         <CancellationCard x={x} canAsk={canBook} onAsk={() => setDrawer("override")} decide={decide} />
       ) : (
-        <p className="text-[13px] text-muted">Confirmed. No cancellation.</p>
+        <p className="text-[13px] text-muted">{t("Confirmed. No cancellation.")}</p>
       )}
       {(reductions.data?.items.length ?? 0) > 0 && (
         <div className="mt-4">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Fewer travellers</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{t("Fewer travellers")}</p>
           <ul className="flex flex-col gap-2">
             {reductions.data!.items.map((r, i) => (
               <li key={`${r.line_ref}-${i}`} className="text-[13px] text-body">
-                Line {r.line_ref}: {paxText(r.removed)} removed, fee {money(r.fee)}, refundable {money(r.refundable_b2b_amount)}
+                {t("Line {0}: {1} removed, fee {2}, refundable {3}", r.line_ref, paxText(r.removed), money(r.fee), money(r.refundable_b2b_amount))}
                 {r.reduced_at && (
                   <span className="text-xs text-muted">
                     {" "}
                     · <DateText value={r.reduced_at} withTime />
-                    {r.entered_via === "staff" ? " · by AA" : " · by the agency"}
+                    {r.entered_via === "staff" ? t(" · by AA") : t(" · by the agency")}
                   </span>
                 )}
               </li>
@@ -173,42 +178,43 @@ function CancellationCard({
   onAsk: () => void;
   decide: { mutate: (v: { approve: boolean; pct: string }) => void; isPending: boolean };
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const pending = x.override?.status === "pending";
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Pill tone="neutral">Cancelled</Pill>
+        <Pill tone="neutral">{t("Cancelled")}</Pill>
         <span className="text-[13px] text-body">
-          {CANCEL_REASON_LABEL[x.reason_code]} · <DateText value={x.cancelled_at} /> · {x.entered_via === "staff" ? "entered by AA" : "by the agency"}
+          {tx(CANCEL_REASON_LABEL[x.reason_code])} · <DateText value={x.cancelled_at} /> · {x.entered_via === "staff" ? t("entered by AA") : t("by the agency")}
         </span>
       </div>
       <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-[13px] sm:grid-cols-[180px_1fr]">
-        <dt className="text-muted">Booking total</dt>
+        <dt className="text-muted">{t("Booking total")}</dt>
         <dd>{money(x.total)}</dd>
-        <dt className="text-muted">Policy fee ({x.fee_pct} %)</dt>
+        <dt className="text-muted">{t("Policy fee ({0} %)", x.fee_pct)}</dt>
         <dd>{money(x.policy_fee)}</dd>
-        <dt className="text-muted">Fee charged</dt>
+        <dt className="text-muted">{t("Fee charged")}</dt>
         <dd className="font-medium text-ink">{money(x.fee)}</dd>
-        <dt className="text-muted">Refundable</dt>
+        <dt className="text-muted">{t("Refundable")}</dt>
         <dd>{money(x.refundable)}</dd>
       </dl>
       {x.override && (
         <div className="rounded-lg border border-line2 p-3 text-[13px]">
           <p className="flex flex-wrap items-center gap-2">
-            <Pill tone={pending ? "warning" : "success"}>{pending ? "Lower fee waiting for approval" : "Lower fee approved"}</Pill>
+            <Pill tone={pending ? "warning" : "success"}>{pending ? t("Lower fee waiting for approval") : t("Lower fee approved")}</Pill>
             <span>{x.override.fee_pct} %</span>
           </p>
           <p className="mt-1 text-muted">
-            {x.override.reason} · asked by {x.override.requested_by.name ?? "staff"}
-            {x.override.approved_by ? ` · approved by ${x.override.approved_by.name ?? "staff"}` : ""}
+            {t("{0} · asked by {1}{2}", x.override.reason, x.override.requested_by.name ?? "staff", x.override.approved_by ? ` · approved by ${x.override.approved_by.name ?? "staff"}` : "")}
           </p>
           {x.can_approve_override && (
             <span className="mt-2 flex gap-2">
               <Button size="sm" variant="primary" disabled={decide.isPending} onClick={() => x.override && decide.mutate({ approve: true, pct: x.override.fee_pct })}>
-                Approve lower fee
+                {t("Approve lower fee")}
               </Button>
               <Button size="sm" variant="danger" disabled={decide.isPending} onClick={() => x.override && decide.mutate({ approve: false, pct: x.override.fee_pct })}>
-                Keep policy fee
+                {t("Keep policy fee")}
               </Button>
             </span>
           )}
@@ -217,7 +223,7 @@ function CancellationCard({
       {canAsk && !x.override && Number(x.fee_pct) > 0 && (
         <span>
           <Button size="sm" variant="ghost" onClick={onAsk}>
-            Ask for a lower fee or a waiver
+            {t("Ask for a lower fee or a waiver")}
           </Button>
         </span>
       )}
@@ -226,6 +232,8 @@ function CancellationCard({
 }
 
 function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [key] = useState(() => actionKey("cancel"));
   const [reason, setReason] = useState<CancelReason>("agency_cancelled");
@@ -241,7 +249,7 @@ function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
   const run = useMutation({
     mutationFn: () => agencyOpsApi.cancel(code, body(), key, false),
     onSuccess: (r) => {
-      toast.success(`${r.trip_case_code} cancelled, fee ${money(r.fee)}${lower.trim() ? "; the lower fee waits for approval" : ""}`);
+      toast.success(t("{0} cancelled, fee {1}{2}", r.trip_case_code, money(r.fee), lower.trim() ? "; the lower fee waits for approval" : ""));
       onDone();
     },
   });
@@ -250,8 +258,8 @@ function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
     <FormDrawer
       open
       onClose={onClose}
-      title="Cancel for the agency"
-      submitLabel={preview ? "Cancel the booking" : "Preview the fee"}
+      title={t("Cancel for the agency")}
+      submitLabel={preview ? t("Cancel the booking") : t("Preview the fee")}
       onSubmit={() => (preview ? run.mutate() : dry.mutate())}
       busy={dry.isPending || run.isPending}
       dirty={!!preview}
@@ -259,28 +267,27 @@ function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
     >
       <div className="flex flex-col gap-4">
         <p className="text-[13px] text-muted">
-          The fee follows the cancellation policy locked on the booking. The seats go back on sale and the agency is told.
+          {t("The fee follows the cancellation policy locked on the booking. The seats go back on sale and the agency is told.")}
         </p>
-        <Field label="Reason" required>
+        <Field label={t("Reason")} required>
           <Select
             value={reason}
             onChange={(e) => { setReason(e.target.value as CancelReason); setPreview(null); }}
-            options={CANCEL_REASONS.map((r) => ({ value: r, label: CANCEL_REASON_LABEL[r] }))}
+            options={CANCEL_REASONS.map((r) => ({ value: r, label: tx(CANCEL_REASON_LABEL[r]) }))}
           />
         </Field>
-        <Field label="Lower fee % (optional)" hint="0 waives the fee. A second person approves it.">
+        <Field label={t("Lower fee % (optional)")} hint={t("0 waives the fee. A second person approves it.")}>
           <Input inputMode="decimal" value={lower} onChange={(e) => setLower(e.target.value)} placeholder="e.g. 10" />
         </Field>
         {lower.trim() && (
-          <Field label="Why the lower fee" required>
+          <Field label={t("Why the lower fee")} required>
             <Textarea value={why} maxLength={500} onChange={(e) => setWhy(e.target.value)} />
           </Field>
         )}
         {preview && (
           <div className="rounded-lg border border-line2 p-3 text-[13px]">
             <p>
-              Fee {money(preview.fee)} ({preview.fee_basis.fee_pct} %, {preview.fee_basis.days_before_departure} days before departure);
-              refundable {money(preview.refundable_b2b_amount)}.
+              {t("Fee {0} ({1} %, {2} days before departure); refundable {3}.", money(preview.fee), preview.fee_basis.fee_pct, preview.fee_basis.days_before_departure, money(preview.refundable_b2b_amount))}
             </p>
           </div>
         )}
@@ -290,6 +297,7 @@ function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
 }
 
 function OverrideDrawer({ code, x, onClose, onDone }: { code: string; x: Cancellation; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
   const [pct, setPct] = useState("0");
   const [why, setWhy] = useState("");
   const save = useMutation({ mutationFn: () => agencyOpsApi.requestOverride(code, { fee_override_pct: pct, waive_reason: why.trim() }), onSuccess: onDone });
@@ -297,8 +305,8 @@ function OverrideDrawer({ code, x, onClose, onDone }: { code: string; x: Cancell
     <FormDrawer
       open
       onClose={onClose}
-      title="Ask for a lower fee"
-      submitLabel="Ask for approval"
+      title={t("Ask for a lower fee")}
+      submitLabel={t("Ask for approval")}
       onSubmit={() => save.mutate()}
       busy={save.isPending}
       dirty={!!why}
@@ -306,12 +314,12 @@ function OverrideDrawer({ code, x, onClose, onDone }: { code: string; x: Cancell
     >
       <div className="flex flex-col gap-4">
         <p className="text-[13px] text-muted">
-          The policy fee is {x.fee_pct} % ({money(x.policy_fee)}). A second person approves the lower fee; the agency is told then.
+          {t("The policy fee is {0} % ({1}). A second person approves the lower fee; the agency is told then.", x.fee_pct, money(x.policy_fee))}
         </p>
-        <Field label="New fee %" required hint="Below the policy fee; 0 waives it">
+        <Field label={t("New fee %")} required hint={t("Below the policy fee; 0 waives it")}>
           <Input inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} />
         </Field>
-        <Field label="Why" required>
+        <Field label={t("Why")} required>
           <Textarea value={why} maxLength={500} onChange={(e) => setWhy(e.target.value)} />
         </Field>
       </div>
@@ -320,6 +328,8 @@ function OverrideDrawer({ code, x, onClose, onDone }: { code: string; x: Cancell
 }
 
 function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [key] = useState(() => actionKey("reduce"));
   const lines = useQuery({
@@ -339,7 +349,7 @@ function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
   const run = useMutation({
     mutationFn: () => agencyOpsApi.reduce(code, ref, body(), key, false),
     onSuccess: (r) => {
-      toast.success(`Line ${r.line_ref}: ${paxText(r.removed)} removed, fee ${money(r.fee)}`);
+      toast.success(t("Line {0}: {1} removed, fee {2}", r.line_ref, paxText(r.removed), money(r.fee)));
       onDone();
     },
   });
@@ -349,8 +359,8 @@ function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
     <FormDrawer
       open
       onClose={onClose}
-      title="Fewer travellers"
-      submitLabel={preview ? "Remove the travellers" : "Preview the fee"}
+      title={t("Fewer travellers")}
+      submitLabel={preview ? t("Remove the travellers") : t("Preview the fee")}
       onSubmit={() => (preview ? run.mutate() : dry.mutate())}
       busy={dry.isPending || run.isPending}
       dirty={!!preview}
@@ -358,39 +368,38 @@ function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
     >
       <div className="flex flex-col gap-4">
         <p className="text-[13px] text-muted">
-          Tours, activities, entrances and meals only (rooms and transfers are re-quoted). At least one adult stays.
+          {t("Tours, activities, entrances and meals only (rooms and transfers are re-quoted). At least one adult stays.")}
         </p>
-        <Field label="Line" required>
+        <Field label={t("Line")} required>
           <Select
             value={ref}
             onChange={(e) => { setLineRef(e.target.value); setPreview(null); }}
-            placeholder={lines.isLoading ? "Loading…" : options.length ? undefined : "No line can be reduced"}
+            placeholder={lines.isLoading ? t("Loading…") : options.length ? undefined : t("No line can be reduced")}
             options={options.map((l) => ({ value: l.line_ref, label: `${l.title} (${paxText(l.pax)})` }))}
           />
         </Field>
-        {current && <p className="text-xs text-muted">Now on the line: {paxText(current.pax)}</p>}
+        {current && <p className="text-xs text-muted">{t("Now on the line:")} {tx(paxText(current.pax))}</p>}
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Adults">
+          <Field label={t("Adults")}>
             <Input type="number" min={0} value={adult} onChange={(e) => { setAdult(e.target.value); setPreview(null); }} />
           </Field>
-          <Field label="Children">
+          <Field label={t("Children")}>
             <Input type="number" min={0} value={child} onChange={(e) => { setChild(e.target.value); setPreview(null); }} />
           </Field>
-          <Field label="Infants">
+          <Field label={t("Infants")}>
             <Input type="number" min={0} value={infant} onChange={(e) => { setInfant(e.target.value); setPreview(null); }} />
           </Field>
         </div>
-        <Field label="Reason" required>
+        <Field label={t("Reason")} required>
           <Select
             value={reason}
             onChange={(e) => setReason(e.target.value as ReduceReason)}
-            options={REDUCE_REASONS.map((r) => ({ value: r, label: CANCEL_REASON_LABEL[r] }))}
+            options={REDUCE_REASONS.map((r) => ({ value: r, label: tx(CANCEL_REASON_LABEL[r]) }))}
           />
         </Field>
         {preview && (
           <div className="rounded-lg border border-line2 p-3 text-[13px]">
-            Their share {money(preview.removed_b2b_amount)}; fee {money(preview.fee)} ({preview.fee_basis.fee_pct} %); refundable{" "}
-            {money(preview.refundable_b2b_amount)}. {preview.seats_after} seat(s) stay on the line.
+            {t("Their share {0}; fee {1} ({2} %); refundable {3}. {4} seat(s) stay on the line.", money(preview.removed_b2b_amount), money(preview.fee), preview.fee_basis.fee_pct, money(preview.refundable_b2b_amount), preview.seats_after)}
           </div>
         )}
       </div>

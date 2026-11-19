@@ -4,6 +4,8 @@
 
 import { Lock } from "lucide-react";
 import { Field as KitField } from "@/ui";
+import { useTx } from "@/ui/local/useTx";
+import "./fields.messages";
 
 // Layout only: the look (40 px, border, focus / disabled states) comes from the kit Input / Select / Textarea (AA-994 S6d).
 export const inputCls = "w-full";
@@ -37,8 +39,9 @@ export function Field({
   children: React.ReactNode;
   className?: string;
 }) {
+  const tx = useTx();
   return (
-    <KitField label={label} required={required} hint={hint} error={error} className={className || undefined}>
+    <KitField label={tx(label)} required={required} hint={hint} error={tx(error)} className={className || undefined}>
       {children}
     </KitField>
   );
@@ -46,13 +49,14 @@ export function Field({
 
 /** A read-only value shown as a disabled input with a lock (Figma ADD NEW ACTIVITY-2 "customer locked"). */
 export function LockedValue({ value, hint }: { value: React.ReactNode; hint?: string }) {
+  const tx = useTx();
   return (
     <div className="flex flex-col gap-1">
       <div className="flex h-10 items-center justify-between gap-2 rounded-md border border-line bg-panel px-3 text-sm text-muted">
         <span className="truncate">{value}</span>
         <Lock size={14} className="shrink-0 text-muted2" aria-hidden="true" />
       </div>
-      {hint && <span className="text-xs text-muted">{hint}</span>}
+      {hint && <span className="text-xs text-muted">{tx(hint)}</span>}
     </div>
   );
 }
