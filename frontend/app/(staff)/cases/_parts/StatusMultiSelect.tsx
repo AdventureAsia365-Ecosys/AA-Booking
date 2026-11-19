@@ -7,6 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { TRIP_CASE_STATUSES, type TripCaseStatus } from "@/lib/api/types";
 import { Checkbox, ListButton, Pressable, STATUS_PHASES, TRIP_CASE_STATUS_META, controlStyle } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./StatusMultiSelect.messages";
 
 export function parseStatuses(raw: string): TripCaseStatus[] {
   return raw
@@ -16,6 +19,8 @@ export function parseStatuses(raw: string): TripCaseStatus[] {
 }
 
 export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]; onChange: (next: TripCaseStatus[]) => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,13 +40,13 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
 
   const toggle = (s: TripCaseStatus) => onChange(value.includes(s) ? value.filter((v) => v !== s) : [...value, s]);
   const label =
-    value.length === 0 ? "All statuses" : value.length === 1 ? TRIP_CASE_STATUS_META[value[0]].label : `${value.length} statuses`;
-  const groups = [...STATUS_PHASES, { key: "closed", label: "Closed", statuses: ["cancelled"] as TripCaseStatus[] }];
+    value.length === 0 ? t("All statuses") : value.length === 1 ? TRIP_CASE_STATUS_META[value[0]].label : t("{0} statuses", value.length);
+  const groups = [...STATUS_PHASES, { key: "closed", label: t("Closed"), statuses: ["cancelled"] as TripCaseStatus[] }];
 
   return (
     // AA-996: the FilterBar shape (inline label before a 36 px control), so it shares the bar's single row.
     <div ref={ref} className="relative flex items-center gap-1.5" data-kit-filter="">
-      <span className="shrink-0 whitespace-nowrap text-[12px] font-medium text-muted">Status</span>
+      <span className="shrink-0 whitespace-nowrap text-[12px] font-medium text-muted">{t("Status")}</span>
       {/* A select-like trigger: the kit control look on a bare surface (the kit focus ring stays: no `outline`). */}
       <Pressable
         display="inline"
@@ -50,19 +55,19 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
         onClick={() => setOpen((o) => !o)}
         style={{ ...controlStyle("sm"), outline: undefined, minWidth: 140, justifyContent: "space-between", gap: 8 }}
       >
-        <span className="truncate">{label}</span>
+        <span className="truncate">{tx(label)}</span>
         <ChevronDown size={14} className="shrink-0 text-muted" />
       </Pressable>
       {open && (
         <div
           role="listbox"
           aria-multiselectable="true"
-          aria-label="Statuses"
+          aria-label={t("Statuses")}
           className="absolute left-0 top-full z-30 mt-1 max-h-[360px] w-[240px] overflow-y-auto rounded-lg border border-line bg-card p-2 shadow-lg"
         >
           {groups.map((g) => (
             <div key={g.key} className="mb-1 last:mb-0">
-              <p className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted2">{g.label}</p>
+              <p className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted2">{tx(g.label)}</p>
               {g.statuses.map((s) => (
                 <label
                   key={s}
@@ -71,14 +76,14 @@ export function StatusMultiSelect({ value, onChange }: { value: TripCaseStatus[]
                   className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-body hover:bg-bg"
                 >
                   <Checkbox checked={value.includes(s)} onChange={() => toggle(s)} />
-                  {TRIP_CASE_STATUS_META[s].label}
+                  {tx(TRIP_CASE_STATUS_META[s].label)}
                 </label>
               ))}
             </div>
           ))}
           {value.length > 0 && (
             <ListButton density="compact" onClick={() => onChange([])} className="mt-1">
-              Clear status filter
+              {t("Clear status filter")}
             </ListButton>
           )}
         </div>

@@ -10,6 +10,9 @@ import type { StaffDirectoryEntry } from "@/lib/api/types";
 import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
 import { Select, useStaff } from "@/ui";
 import { inputCls } from "./fields";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./StaffSelect.messages";
 
 export function useStaffDirectory() {
   return useQuery({
@@ -41,6 +44,8 @@ export function StaffSelect({
   id?: string;
   ariaLabel?: string;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const me = useStaff();
   const directory = useStaffDirectory();
   const items = sortStaff(directory.data?.items ?? []);
@@ -49,19 +54,19 @@ export function StaffSelect({
   return (
     <Select
       id={id}
-      aria-label={ariaLabel}
+      aria-label={tx(ariaLabel)}
       className={inputCls}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={directory.isLoading}
     >
-      <option value="">{directory.isLoading ? "Loading staff…" : emptyLabel}</option>
-      {!known && <option value={value}>{value} (inactive)</option>}
+      <option value="">{directory.isLoading ? t("Loading staff…") : emptyLabel}</option>
+      {!known && <option value={value}>{value} {t("(inactive)")}</option>}
       {items.map((s) => (
         <option key={s.cis_user_id} value={s.cis_user_id}>
           {s.name ?? s.cis_user_id}
           {s.role !== "sales" ? ` · ${isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role}` : ""}
-          {s.cis_user_id === me.cis_user_id ? " (me)" : ""}
+          {s.cis_user_id === me.cis_user_id ? t(" (me)") : ""}
         </option>
       ))}
     </Select>

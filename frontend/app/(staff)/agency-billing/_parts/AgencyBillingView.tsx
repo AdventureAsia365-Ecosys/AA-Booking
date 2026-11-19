@@ -54,6 +54,10 @@ import {
 import { SavedTabs } from "../../_parts/SavedTabs";
 import { BillingSettings } from "./BillingSettings";
 import { HealthPill, InvoiceStatusPill, PaymentStatusPill, errorText, thisMonth } from "./shared";
+import { useLang, useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./AgencyBillingView.messages";
 
 const TABS = [
   { key: "invoices", label: "Invoices" },
@@ -63,6 +67,7 @@ const TABS = [
 ];
 
 export function AgencyBillingView() {
+  const t = useT(MSG);
   const { get } = useUrlFilters();
   const tab = get("tab") || "invoices";
   const summary = useQuery({ queryKey: ["agency-billing", "summary"], queryFn: agencyBillingApi.summary });
@@ -86,17 +91,17 @@ export function AgencyBillingView() {
   const overdue = rows.some((r) => Number(r.overdue) > 0);
   return (
     <PageFrame
-      title="Agency billing"
-      description="Every invoice from AA to an agency: the software fee and the tour settlement. Drafts come from the monthly jobs; finance issues them, records payments and a second person approves each payment."
+      title={t("Agency billing")}
+      description={t("Every invoice from AA to an agency: the software fee and the tour settlement. Drafts come from the monthly jobs; finance issues them, records payments and a second person approves each payment.")}
     >
       {/* One column on a phone, like the billing KPIs: a money value at the tile size is wider than half of 390 px. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiTile label="Drafts to issue" value={summary.data ? String(summary.data.by_currency.reduce((n, r) => n + r.drafts, 0)) : loading} />
-        <KpiTile label="Open" value={perCurrency((r) => r.open)} />
-        <KpiTile label="Overdue" value={perCurrency((r) => r.overdue)} valueTone={overdue ? "danger" : undefined} />
-        <KpiTile label="Waiting for approval" value={perCurrency((r) => r.waiting)} />
+        <KpiTile label={t("Drafts to issue")} value={summary.data ? String(summary.data.by_currency.reduce((n, r) => n + r.drafts, 0)) : loading} />
+        <KpiTile label={t("Open")} value={perCurrency((r) => r.open)} />
+        <KpiTile label={t("Overdue")} value={perCurrency((r) => r.overdue)} valueTone={overdue ? "danger" : undefined} />
+        <KpiTile label={t("Waiting for approval")} value={perCurrency((r) => r.waiting)} />
       </div>
-      <SavedTabs tabs={TABS} ariaLabel="Agency billing" />
+      <SavedTabs tabs={TABS} ariaLabel={t("Agency billing")} />
       {tab === "invoices" && <InvoicesTab />}
       {tab === "payments" && <PaymentsTab />}
       {tab === "agencies" && <AgenciesTab />}
@@ -107,19 +112,25 @@ export function AgencyBillingView() {
 
 // ── Invoices ─────────────────────────────────────────────────────────────────
 
+/** The invoice period ("November 2026") in the UI language, for the module-level columns. */
+function PeriodText({ start }: { start: string }) {
+  const lang = useLang();
+  return <span className="whitespace-nowrap">{periodLabel(start, lang)}</span>;
+}
+
 const INVOICE_COLUMNS: ColumnDef<AgencyInvoice, unknown>[] = [
   {
     id: "number",
     header: "Invoice",
     cell: ({ row }) => (
       <Link href={`/agency-billing/invoices/${row.original.number ?? row.original.id}`} className="font-semibold whitespace-nowrap">
-        {row.original.number ?? "Draft"}
+        {row.original.number ?? <Phrase text="Draft" />}
       </Link>
     ),
   },
   { id: "agency", header: "Agency", cell: ({ row }) => row.original.agency_name },
-  { id: "kind", header: "Kind", cell: ({ row }) => KIND_LABEL[row.original.invoice_kind] },
-  { id: "period", header: "Period", cell: ({ row }) => <span className="whitespace-nowrap">{periodLabel(row.original.period_start)}</span> },
+  { id: "kind", header: "Kind", cell: ({ row }) => <Phrase text={KIND_LABEL[row.original.invoice_kind]} /> },
+  { id: "period", header: "Period", cell: ({ row }) => <PeriodText start={row.original.period_start} /> },
   {
     id: "total",
     header: "Total",
@@ -139,6 +150,8 @@ const INVOICE_COLUMNS: ColumnDef<AgencyInvoice, unknown>[] = [
 ];
 
 function InvoicesTab() {
+  const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const kind = get("kind");
   const status = get("status");
@@ -165,43 +178,43 @@ function InvoicesTab() {
   const agencyName = tenant ? agencyFilterLabel(tenant, agencies.data?.items, list.data?.items) : "";
   return (
     <Section
-      title="Invoices"
+      title={t("Invoices")}
       actions={
         <span className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={() => setExportOpen(true)}>Export for accountant</Button>
-          {canWrite && <Button variant="primary" onClick={() => setRunOpen(true)}>Run drafts</Button>}
+          <Button variant="ghost" onClick={() => setExportOpen(true)}>{t("Export for accountant")}</Button>
+          {canWrite && <Button variant="primary" onClick={() => setRunOpen(true)}>{t("Run drafts")}</Button>}
         </span>
       }
     >
       <div className="mb-3 flex flex-wrap gap-3">
-        <Field label="Kind">
+        <Field label={t("Kind")}>
           <Select
             value={kind}
             onChange={(e) => set("kind", e.target.value || null)}
-            options={[{ value: "", label: "All kinds" }, { value: "saas", label: KIND_LABEL.saas }, { value: "settlement", label: KIND_LABEL.settlement }]}
+            options={[{ value: "", label: t("All kinds") }, { value: "saas", label: tx(KIND_LABEL.saas) }, { value: "settlement", label: tx(KIND_LABEL.settlement) }]}
           />
         </Field>
-        <Field label="Status">
+        <Field label={t("Status")}>
           <Select
             value={status}
             onChange={(e) => set("status", e.target.value || null)}
             options={[
-              { value: "", label: "All" },
-              { value: "draft", label: "Draft" },
-              { value: "issued", label: "Issued" },
-              { value: "overdue", label: "Overdue" },
-              { value: "waiting", label: "Payment waiting" },
-              { value: "paid", label: "Paid" },
-              { value: "void", label: "Void" },
+              { value: "", label: t("All") },
+              { value: "draft", label: t("Draft") },
+              { value: "issued", label: t("Issued") },
+              { value: "overdue", label: t("Overdue") },
+              { value: "waiting", label: t("Payment waiting") },
+              { value: "paid", label: t("Paid") },
+              { value: "void", label: t("Void") },
             ]}
           />
         </Field>
-        <Field label="Search">
-          <Input defaultValue={q} placeholder="Number, agency or e-invoice number" onBlur={(e) => set("q", e.target.value.trim() || null)} />
+        <Field label={t("Search")}>
+          <Input defaultValue={q} placeholder={t("Number, agency or e-invoice number")} onBlur={(e) => set("q", e.target.value.trim() || null)} />
         </Field>
         {tenant && (
-          <Field label="Agency" as="div">
-            <ChipButton selected ariaLabel={`${agencyName}: remove the agency filter`} title="Show every agency" onClick={() => set("tenant", null)}>
+          <Field label={t("Agency")} as="div">
+            <ChipButton selected ariaLabel={t("{0}: remove the agency filter", agencyName)} title={t("Show every agency")} onClick={() => set("tenant", null)}>
               <span className="block max-w-[220px] truncate">{agencyName}</span>
               <X size={14} aria-hidden="true" />
             </ChipButton>
@@ -219,8 +232,8 @@ function InvoicesTab() {
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-        emptyTitle="No agency invoices here"
-        emptyDescription="Drafts appear when the monthly jobs run (software fee at the start of a month, settlement for the closed month), or when finance runs them for a month."
+        emptyTitle={t("No agency invoices here")}
+        emptyDescription={t("Drafts appear when the monthly jobs run (software fee at the start of a month, settlement for the closed month), or when finance runs them for a month.")}
         tableMinWidth={980}
       />
       <RunDraftsModal open={runOpen} onClose={() => setRunOpen(false)} />
@@ -238,6 +251,7 @@ function monthBounds(): { from: string; to: string } {
 
 // AA-1037 extras G5: one CSV of the invoices issued, or the payments received, in a period (at most 366 days).
 function ExportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT(MSG);
   const toast = useToast();
   const [what, setWhat] = useState<ExportWhat>("invoices");
   const [range, setRange] = useState(monthBounds);
@@ -254,29 +268,29 @@ function ExportModal({ open, onClose }: { open: boolean; onClose: () => void }) 
     <Modal
       open={open}
       onClose={onClose}
-      title="Export for the accountant"
+      title={t("Export for the accountant")}
       footer={
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="primary" disabled={run.isPending || !valid} onClick={() => run.mutate()}>
-            {run.isPending ? "Preparing…" : "Download CSV"}
+            {run.isPending ? t("Preparing…") : t("Download CSV")}
           </Button>
         </div>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="What" hint="Invoices: issued in the period (paid and void included, no drafts). Payments: received in the period, every status.">
+        <Field label={t("What")} hint={t("Invoices: issued in the period (paid and void included, no drafts). Payments: received in the period, every status.")}>
           <Select
             value={what}
             onChange={(e) => setWhat(e.target.value as ExportWhat)}
-            options={[{ value: "invoices", label: "Invoices" }, { value: "payments", label: "Payments" }]}
+            options={[{ value: "invoices", label: t("Invoices") }, { value: "payments", label: t("Payments") }]}
           />
         </Field>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="From">
+          <Field label={t("From")}>
             <Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
           </Field>
-          <Field label="To (included)">
+          <Field label={t("To (included)")}>
             <Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
           </Field>
         </div>
@@ -286,6 +300,8 @@ function ExportModal({ open, onClose }: { open: boolean; onClose: () => void }) 
 }
 
 function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const qc = useQueryClient();
   const [kind, setKind] = useState<InvoiceKind>("saas");
@@ -293,7 +309,7 @@ function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void 
   const run = useMutation({
     mutationFn: () => agencyBillingApi.run({ kind, period }),
     onSuccess: (r) => {
-      toast.success(`${KIND_LABEL[kind]} drafts for ${r.period} are queued; they appear in a minute`);
+      toast.success(t("{0} drafts for {1} are queued; they appear in a minute", tx(KIND_LABEL[kind]), r.period));
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
       onClose();
     },
@@ -303,25 +319,25 @@ function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void 
     <Modal
       open={open}
       onClose={onClose}
-      title="Run invoice drafts"
+      title={t("Run invoice drafts")}
       footer={
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="primary" disabled={run.isPending || !/^\d{4}-\d{2}$/.test(period)} onClick={() => run.mutate()}>
-            {run.isPending ? "Queuing…" : "Run"}
+            {run.isPending ? t("Queuing…") : t("Run")}
           </Button>
         </div>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Kind">
+        <Field label={t("Kind")}>
           <Select
             value={kind}
             onChange={(e) => setKind(e.target.value as InvoiceKind)}
-            options={[{ value: "saas", label: KIND_LABEL.saas }, { value: "settlement", label: KIND_LABEL.settlement }]}
+            options={[{ value: "saas", label: tx(KIND_LABEL.saas) }, { value: "settlement", label: tx(KIND_LABEL.settlement) }]}
           />
         </Field>
-        <Field label="Month" hint="YYYY-MM. Drafts are idempotent: running a month again only adds what is missing.">
+        <Field label={t("Month")} hint={t("YYYY-MM. Drafts are idempotent: running a month again only adds what is missing.")}>
           <Input value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="2026-11" />
         </Field>
       </div>
@@ -332,6 +348,8 @@ function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void 
 // ── Payments ─────────────────────────────────────────────────────────────────
 
 function PaymentsTab() {
+  const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const state = get("state") || "recorded";
   const paging = useOffsetPage();
@@ -347,7 +365,7 @@ function PaymentsTab() {
   const approve = useMutation({
     mutationFn: (p: AgencyPayment) => agencyBillingApi.approve(p.id),
     onSuccess: () => {
-      toast.success("Payment approved");
+      toast.success(t("Payment approved"));
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
     },
     onError: (e) => toast.error(errorText(e)),
@@ -355,7 +373,7 @@ function PaymentsTab() {
   const reject = useMutation({
     mutationFn: ({ p, reason }: { p: AgencyPayment; reason: string }) => agencyBillingApi.reject(p.id, reason),
     onSuccess: () => {
-      toast.success("Payment rejected");
+      toast.success(t("Payment rejected"));
       setRejecting(null);
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
     },
@@ -364,48 +382,48 @@ function PaymentsTab() {
   const columns: ColumnDef<AgencyPayment, unknown>[] = [
     {
       id: "invoice",
-      header: "Invoice",
+      header: t("Invoice"),
       cell: ({ row }) => (
         <Link href={`/agency-billing/invoices/${row.original.invoice_number ?? row.original.invoice_id}`} className="font-semibold whitespace-nowrap">
           {row.original.invoice_number}
         </Link>
       ),
     },
-    { id: "agency", header: "Agency", cell: ({ row }) => row.original.agency_name },
-    { id: "amount", header: "Amount", cell: ({ row }) => <Money amount={row.original.amount} currency={row.original.currency} strong /> },
-    { id: "received", header: "Received", cell: ({ row }) => <DateText value={row.original.received_on} /> },
-    { id: "method", header: "Method", cell: ({ row }) => AGENCY_PAYMENT_METHOD_LABEL[row.original.method] },
-    { id: "document", header: "Evidence", cell: ({ row }) => row.original.document_ref },
-    { id: "by", header: "Recorded by", cell: ({ row }) => paymentRecorder(row.original) },
-    { id: "status", header: "Status", cell: ({ row }) => <PaymentStatusPill status={row.original.status} /> },
+    { id: "agency", header: t("Agency"), cell: ({ row }) => row.original.agency_name },
+    { id: "amount", header: t("Amount"), cell: ({ row }) => <Money amount={row.original.amount} currency={row.original.currency} strong /> },
+    { id: "received", header: t("Received"), cell: ({ row }) => <DateText value={row.original.received_on} /> },
+    { id: "method", header: t("Method"), cell: ({ row }) => tx(AGENCY_PAYMENT_METHOD_LABEL[row.original.method]) },
+    { id: "document", header: t("Evidence"), cell: ({ row }) => row.original.document_ref },
+    { id: "by", header: t("Recorded by"), cell: ({ row }) => paymentRecorder(row.original) },
+    { id: "status", header: t("Status"), cell: ({ row }) => <PaymentStatusPill status={row.original.status} /> },
     {
       id: "actions",
       header: "",
       cell: ({ row }) => {
         const p = row.original;
         if (!canApprove || p.status !== "recorded") return null;
-        if (p.recorded_by === me.cis_user_id) return <span className="text-[12px] text-muted">Another person approves</span>;
+        if (p.recorded_by === me.cis_user_id) return <span className="text-[12px] text-muted">{t("Another person approves")}</span>;
         return (
           <span className="flex gap-2">
-            <Button size="sm" variant="primary" disabled={approve.isPending} onClick={() => approve.mutate(p)}>Approve</Button>
-            <Button size="sm" variant="ghost" onClick={() => setRejecting(p)}>Reject</Button>
+            <Button size="sm" variant="primary" disabled={approve.isPending} onClick={() => approve.mutate(p)}>{t("Approve")}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setRejecting(p)}>{t("Reject")}</Button>
           </span>
         );
       },
     },
   ];
   return (
-    <Section title="Payments">
+    <Section title={t("Payments")}>
       <div className="mb-3 flex gap-3">
-        <Field label="Status">
+        <Field label={t("Status")}>
           <Select
             value={state}
             onChange={(e) => set("state", e.target.value)}
             options={[
-              { value: "recorded", label: "Waiting for approval" },
-              { value: "approved", label: "Approved" },
-              { value: "rejected", label: "Rejected" },
-              { value: "all", label: "All" },
+              { value: "recorded", label: t("Waiting for approval") },
+              { value: "approved", label: t("Approved") },
+              { value: "rejected", label: t("Rejected") },
+              { value: "all", label: t("All") },
             ]}
           />
         </Field>
@@ -421,19 +439,19 @@ function PaymentsTab() {
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-        emptyTitle="No payments here"
-        emptyDescription="A payment is recorded on an issued invoice; it counts only once a second person approves it."
+        emptyTitle={t("No payments here")}
+        emptyDescription={t("A payment is recorded on an issued invoice; it counts only once a second person approves it.")}
         tableMinWidth={1100}
       />
       <ConfirmDialog
         open={rejecting !== null}
         onClose={() => setRejecting(null)}
         onConfirm={(reason) => rejecting && reject.mutate({ p: rejecting, reason })}
-        title="Reject payment"
-        message="The payment will not count. Say why (for example: not on the bank statement)."
-        confirmLabel="Reject"
+        title={t("Reject payment")}
+        message={t("The payment will not count. Say why (for example: not on the bank statement).")}
+        confirmLabel={t("Reject")}
         destructive
-        reason={{ label: "Reason", required: true, maxLength: 500 }}
+        reason={{ label: t("Reason"), required: true, maxLength: 500 }}
         busy={reject.isPending}
       />
     </Section>
@@ -445,7 +463,7 @@ function PaymentsTab() {
 const STATUS_COLUMNS: ColumnDef<BillingStatusRow, unknown>[] = [
   { id: "agency", header: "Agency", cell: ({ row }) => row.original.agency_name },
   { id: "status", header: "Billing status", cell: ({ row }) => <HealthPill status={row.original.status} /> },
-  { id: "oldest", header: "Oldest overdue", cell: ({ row }) => (row.original.oldest_overdue_days ? `${row.original.oldest_overdue_days} days` : "—") },
+  { id: "oldest", header: "Oldest overdue", cell: ({ row }) => (row.original.oldest_overdue_days ? <Phrase text={`${row.original.oldest_overdue_days} days`} /> : "—") },
   { id: "invoices", header: "Overdue invoices", cell: ({ row }) => row.original.overdue_invoices || "—" },
   { id: "amount", header: "Overdue amount", cell: ({ row }) => overdueText(row.original.overdue_amount) },
   { id: "paid", header: "Software paid through", cell: ({ row }) => (row.original.paid_through ? <DateText value={row.original.paid_through} /> : "—") },
@@ -457,11 +475,12 @@ const STATUS_COLUMNS: ColumnDef<BillingStatusRow, unknown>[] = [
 ];
 
 function AgenciesTab() {
+  const t = useT(MSG);
   const list = useQuery({ queryKey: ["agency-billing", "status"], queryFn: agencyBillingApi.status });
   return (
     <Section
-      title="Agencies"
-      description="CIS reads this status every hour: a warning moves the agency's account to its grace state and rings its bell; past the suspend days the account is suspended until the money is approved here."
+      title={t("Agencies")}
+      description={t("CIS reads this status every hour: a warning moves the agency's account to its grace state and rings its bell; past the suspend days the account is suspended until the money is approved here.")}
     >
       <DataTable<BillingStatusRow>
         searchable={false}
@@ -472,8 +491,8 @@ function AgenciesTab() {
         loading={list.isLoading}
         error={list.isError ? errorText(list.error) : null}
         onRetry={() => list.refetch()}
-        emptyTitle="No agencies yet"
-        emptyDescription="Every CIS tenant gets a partner row from the tenant projection; they show here."
+        emptyTitle={t("No agencies yet")}
+        emptyDescription={t("Every CIS tenant gets a partner row from the tenant projection; they show here.")}
         tableMinWidth={900}
       />
     </Section>

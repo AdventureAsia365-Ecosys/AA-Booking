@@ -23,14 +23,17 @@ import {
   Section,
   TripCaseStatusBadge,
   useUrlFilters,
-  formatDay,
-} from "@/ui";
+  } from "@/ui";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { QueryError, isForbidden } from "./_parts/QueryError";
 import { StatusMultiSelect, parseStatuses } from "./_parts/StatusMultiSelect";
 import { sortStaff, useStaffDirectory } from "./_parts/StaffSelect";
 import { casePartyLabel, casePartySub } from "@/ui/booking/caseFacts";
 import { daysText } from "@/ui/booking/plural";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const PRE_SALE: TripCaseStatus[] = ["new_inquiry", "discovery", "building", "proposal_sent"];
 const CLOSED: TripCaseStatus[] = ["completed", "cancelled"];
@@ -57,6 +60,8 @@ function tabCount(key: string, s: TripCaseSummary | undefined): number | undefin
 }
 
 export default function TripCasesPage() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const { get, set } = useUrlFilters();
   const paging = useOffsetPage();
@@ -84,14 +89,14 @@ export default function TripCasesPage() {
   // AA-996 (audit slice 1): drawn in the table toolbar, so the filters and the Columns / CSV tools share one row.
   const filterBar = (
     <FilterBar
-      search={{ placeholder: "Search case code" }}
+      search={{ placeholder: tr("Search case code") }}
       selects={[
         {
           key: "sales",
-          label: "Sales rep",
-          allLabel: "All reps",
+          label: tr("Sales rep"),
+          allLabel: tr("All reps"),
           options: [
-            { value: "none", label: "Unassigned" },
+            { value: "none", label: tr("Unassigned") },
             ...sortStaff(directory.data?.items ?? []).map((s) => ({ value: s.cis_user_id, label: s.name ?? s.cis_user_id })),
           ],
           // AA-910 (S250): the staff names load after the page; a fixed width keeps the bar from growing and
@@ -100,18 +105,18 @@ export default function TripCasesPage() {
         },
         {
           key: "source",
-          label: "Source",
-          allLabel: "All sources",
+          label: tr("Source"),
+          allLabel: tr("All sources"),
           options: [
-            { value: "tripplanner", label: "TripPlanner" },
-            { value: "manual", label: "Manual" },
-            { value: "cis", label: "CIS trip plan" },
-            { value: "crm", label: "B2B agency (CRM)" },
+            { value: "tripplanner", label: tr("TripPlanner") },
+            { value: "manual", label: tr("Manual") },
+            { value: "cis", label: tr("CIS trip plan") },
+            { value: "crm", label: tr("B2B agency (CRM)") },
           ],
           width: 150,
         },
       ]}
-      dateRange={{ fromKey: "from", toKey: "to", label: "Created" }}
+      dateRange={{ fromKey: "from", toKey: "to", label: tr("Created") }}
       extraKeys={["status"]}
     >
       <StatusMultiSelect value={pickedStatus} onChange={(next) => set("status", next.length ? next.join(",") : null)} />
@@ -120,20 +125,20 @@ export default function TripCasesPage() {
 
   return (
     <PageFrame
-      title="Trip cases"
-      description="Every partner booking in one list, from the first request to the trip itself."
+      title={tr("Trip cases")}
+      description={tr("Every partner booking in one list, from the first request to the trip itself.")}
       // AA-1046: no "New trip case": a staff-made case was a B2C case; B2B cases come from the partner API.
     >
       {forbidden ? (
         <Section>
-          <QueryError error={list.error} what="trip cases" />
+          <QueryError error={list.error} what={tr("trip cases")} />
         </Section>
       ) : (
         <>
           <SavedTabs
             tabs={CASE_TABS.map(({ key, label }) => ({
               key,
-              label,
+              label: tx(label),
               count: tabCount(key, summary.data),
               countPending: summary.isPending && key !== "mine" && key !== "unassigned",
             }))}
@@ -142,7 +147,7 @@ export default function TripCasesPage() {
             {list.isError ? (
               <>
                 <div className="mb-4">{filterBar}</div>
-                <QueryError error={list.error} onRetry={() => list.refetch()} what="trip cases" />
+                <QueryError error={list.error} onRetry={() => list.refetch()} what={tr("trip cases")} />
               </>
             ) : (
               <DataTable<TripCaseListItem>
@@ -162,11 +167,11 @@ export default function TripCasesPage() {
                 }}
                 enableCsv
                 csvFilename="trip-cases.csv"
-                emptyTitle={tab.key === "all" && !get("q") && !pickedStatus.length ? "No trip cases yet" : "No trip cases match these filters"}
+                emptyTitle={tab.key === "all" && !get("q") && !pickedStatus.length ? tr("No trip cases yet") : tr("No trip cases match these filters")}
                 emptyDescription={
                   tab.key === "all" && !get("q") && !pickedStatus.length
-                    ? "Cases appear here when a partner agency sends a booking through the B2B API."
-                    : "Change the filters or the tab, or use Reset filters to see every case."
+                    ? tr("Cases appear here when a partner agency sends a booking through the B2B API.")
+                    : tr("Change the filters or the tab, or use Reset filters to see every case.")
                 }
                 onRowClick={(r) => router.push(`/cases/${encodeURIComponent(r.code)}`)}
                 tableMinWidth={1000}
@@ -205,11 +210,11 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     cell: ({ row }) => (
       <span className="block max-w-[280px] text-[13px] text-body md:max-w-[130px] min-[1200px]:max-w-[170px]">
         <span className="block truncate" title={row.original.trip_title ?? undefined}>
-          {row.original.trip_title ?? "Custom trip"}
+          {row.original.trip_title ?? <Phrase text="Custom trip" />}
         </span>
-        {row.original.leg_count > 1 && <span className="text-xs text-muted">+{row.original.leg_count - 1} more legs</span>}
+        {row.original.leg_count > 1 && <span className="text-xs text-muted"><Phrase text={`+${row.original.leg_count - 1} more legs`} /></span>}
         {row.original.source_system === "tripplanner" && row.original.leg_count <= 1 && (
-          <span className="text-xs text-muted">From TripPlanner</span>
+          <span className="text-xs text-muted"><Phrase text="From TripPlanner" /></span>
         )}
       </span>
     ),
@@ -227,22 +232,22 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       if (!r.start_date) {
         return (
           <span className="text-[13px] text-muted">
-            {r.duration_days ? <span className="whitespace-nowrap">{daysText(r.duration_days)}</span> : "—"}
-            {r.duration_days ? <span className="block text-xs">no date yet</span> : null}
-            {r.pax ? <span className="block text-xs">{r.pax} pax</span> : null}
+            {r.duration_days ? <span className="whitespace-nowrap"><Phrase text={daysText(r.duration_days)} /></span> : "—"}
+            {r.duration_days ? <span className="block text-xs"><Phrase text="no date yet" /></span> : null}
+            {r.pax ? <span className="block text-xs"><Phrase text={`${r.pax} pax`} /></span> : null}
           </span>
         );
       }
       return (
         <span className="text-[13px] text-body">
-          <span className="whitespace-nowrap">{formatDay(r.start_date)}</span>
+          <DateText value={r.start_date} className="whitespace-nowrap" />
           {r.trip_end_date && (
             <>
               {" "}
-              – <span className="whitespace-nowrap">{formatDay(r.trip_end_date)}</span>
+              – <DateText value={r.trip_end_date} className="whitespace-nowrap" />
             </>
           )}
-          {sub && <span className="block text-xs text-muted">{sub}</span>}
+          {sub && <span className="block text-xs text-muted"><Phrase text={sub} /></span>}
         </span>
       );
     },
@@ -258,7 +263,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
         <TripCaseStatusBadge status={row.original.status} />
         {/* AA-910: the date never breaks, but it may drop under "Updated" (a row older than 7 days shows the full date, much wider than "3 d ago"). */}
         <span className="text-xs text-muted">
-          Updated <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
+          <Phrase text="Updated" /> <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
         </span>
       </span>
     ),
@@ -270,7 +275,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     accessorFn: (r) => r.assignees.find((a) => a.role === "sales")?.name ?? "",
     cell: ({ row }) => {
       const sales = row.original.assignees.find((a) => a.role === "sales");
-      if (!sales) return <span className="text-[13px] text-muted">Unassigned</span>;
+      if (!sales) return <span className="text-[13px] text-muted"><Phrase text="Unassigned" /></span>;
       const name = sales.name ?? sales.cis_user_id;
       return (
         <span className="block text-[13px] text-body md:max-w-[90px] md:truncate" title={name}>

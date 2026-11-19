@@ -7,6 +7,9 @@
 import { ShieldOff } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { EmptyState, ErrorState } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./QueryError.messages";
 
 export function isForbidden(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403;
@@ -34,14 +37,16 @@ export function friendlyError(error: unknown, fallback = "Something went wrong."
 }
 
 export function QueryError({ error, onRetry, what }: { error: unknown; onRetry?: () => void; what: string }) {
+  const t = useT(MSG);
+  const tx = useTx();
   if (isForbidden(error)) {
     return (
       <EmptyState
         icon={<ShieldOff size={30} />}
-        title={`You do not have access to ${what}`}
-        description="Your Booking role does not include this. Ask a Booking admin if you need it."
+        title={t("You do not have access to {0}", what)}
+        description={t("Your Booking role does not include this. Ask a Booking admin if you need it.")}
       />
     );
   }
-  return <ErrorState message={errorMessage(error, `Could not load ${what}.`)} onRetry={onRetry} />;
+  return <ErrorState message={tx(errorMessage(error, t("Could not load {0}.", what)))} onRetry={onRetry} />;
 }

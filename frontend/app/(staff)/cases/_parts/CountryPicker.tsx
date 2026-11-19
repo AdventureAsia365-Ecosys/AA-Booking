@@ -9,6 +9,8 @@ import { X } from "lucide-react";
 import { api } from "@/lib/api/client";
 import { inputCls } from "./fields";
 import { IconButton, Select } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./CountryPicker.messages";
 
 export const MAX_COUNTRIES = 20;
 
@@ -17,6 +19,7 @@ export function useCountries() {
 }
 
 export function CountryPicker({ value, onChange }: { value: string[]; onChange: (codes: string[]) => void }) {
+  const t = useT(MSG);
   const countries = useCountries();
   const items = countries.data?.items ?? [];
   const name = (iso: string) => items.find((c) => c.iso2 === iso)?.name ?? iso;
@@ -25,7 +28,7 @@ export function CountryPicker({ value, onChange }: { value: string[]; onChange: 
   return (
     <div className="flex flex-col gap-2">
       {value.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5" aria-label="Selected countries">
+        <ul className="flex flex-wrap gap-1.5" aria-label={t("Selected countries")}>
           {value.map((iso) => (
             <li
               key={iso}
@@ -37,7 +40,7 @@ export function CountryPicker({ value, onChange }: { value: string[]; onChange: 
                 size="xs"
                 round
                 onClick={() => onChange(value.filter((v) => v !== iso))}
-                label={`Remove ${name(iso)}`}
+                label={t("Remove {0}", name(iso))}
               >
                 <X size={12} />
               </IconButton>
@@ -48,20 +51,20 @@ export function CountryPicker({ value, onChange }: { value: string[]; onChange: 
       <Select
         className={inputCls}
         value=""
-        aria-label="Add a country"
+        aria-label={t("Add a country")}
         disabled={countries.isLoading || countries.isError || full}
         onChange={(e) => e.target.value && onChange([...value, e.target.value])}
       >
         <option value="">
           {countries.isLoading
-            ? "Loading countries…"
+            ? t("Loading countries…")
             : countries.isError
-              ? "Countries could not load"
+              ? t("Countries could not load")
               : full
-                ? `At most ${MAX_COUNTRIES} countries`
+                ? t("At most {0} countries", MAX_COUNTRIES)
                 : items.length === 0
-                  ? "No country is set up in Booking yet"
-                  : "Add a country…"}
+                  ? t("No country is set up in Booking yet")
+                  : t("Add a country…")}
         </option>
         {left.map((c) => (
           <option key={c.iso2} value={c.iso2}>
