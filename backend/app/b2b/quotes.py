@@ -251,6 +251,15 @@ def season_availability(availability: str, component_id: str, day: seasons.Seaso
     return availability
 
 
+def _child_age_max(policy: policy_values.Policy) -> int | None:
+    """The policy's child age for the age note of a child priced as an adult (B4); None when it has no value (the note
+    then says less, the price is the same)."""
+    try:
+        return policy.age_bands[0]
+    except policy_values.PolicyUnavailable:
+        return None
+
+
 def supply_availability(
     availability: str, verdicts: list[restrictions.Verdict], days: list[date]
 ) -> tuple[str, dict[str, Any] | None]:
@@ -530,16 +539,11 @@ async def quote_in(
 
     # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
     await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
-    child_age_max: int | None
-    try:
-        child_age_max = pricing_policy.age_bands[0]
-    except policy_values.PolicyUnavailable:
-        child_age_max = None  # only the age note of a child priced as an adult says less
     costs: list[LineCost] = await price_lines(
         conn,
         [line.ask for line in lines],
         child_pct_by_type=pricing_policy.child_price_pct_by_service_type,
-        child_age_max=child_age_max,
+        child_age_max=_child_age_max(pricing_policy),
     )
     # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip.
     supply_asks = [a for lc in costs for a in lc.supply]

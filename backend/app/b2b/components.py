@@ -266,7 +266,7 @@ async def price_lines(
         row = services.get(service_id)
         if row is None or row["status"] != "active" or row["service_type"] not in SERVICE_KINDS:
             raise _no_price(ask.line_ref, "unknown or inactive service")
-        budget.take(3 if split else 1)
+        budget.take(1 + 2 * int(split))  # B4: a split unit also looks up the child and infant rates
         units.append(_Unit(no, None, service_id, on, ask.party, days=days, split=split))
         return str(row["service_type"])
 
@@ -278,7 +278,7 @@ async def price_lines(
             room_units(no, ask, ident, start=ask.service_date, nights=nights)
         elif prefix == PREFIX_SERVICE:
             check_room_types(ask, set())
-            split = bool(ask.child or ask.infant)
+            split = ask.child + ask.infant > 0
             out.append(LineCost(kind=service_unit(no, ask, ident, on=ask.service_date, days=nights, split=split)))
         else:
             plan = plans.get(ident)
@@ -295,28 +295,7 @@ async def price_lines(
                 else:
                     service_unit(no, ask, part["service_id"], on=on, days=1)
 
-    lookups = [RateAsk(u.room_type_id, u.service_id, u.on, u.pax) for u in units]
-    split_units = [u for u in units if u.split]
-    for u in split_units:  # B4: the child and infant rates of the same service and day (same party band)
-        lookups += [
-            RateAsk(None, u.service_id, u.on, u.pax, "child"),
-            RateAsk(None, u.service_id, u.on, u.pax, "infant"),
-        ]
-    found = await rates_in_force_many(conn, lookups)
-    rates, extra = found[: len(units)], iter(found[len(units) :])
-    by_split = {id(u): (next(extra), next(extra)) for u in split_units}
-    contract_pct: dict[str, Decimal] = {}
-    need_terms = sorted(
-        {
-            r["contract_id"]
-            for u, r in zip(units, rates, strict=True)
-            if u.split and r is not None and r["unit"] == "person" and asks[u.line].child and by_split[id(u)][0] is None
-        }
-    )
-    if need_terms:
-        contract_pct = {
-            r["contract_id"]: Decimal(str(r["child_pct"])) for r in await conn.fetch(CONTRACT_CHILD_SQL, need_terms)
-        }
+    rates, by_split, contract_pct = await _lookup(conn, asks, units)
     for unit, rate in zip(units, rates, strict=True):
         ask = asks[unit.line]
         if rate is None:
@@ -324,28 +303,88 @@ async def price_lines(
             raise _no_price(ask.line_ref, f"no rate in force on {unit.on.isoformat()}{who}")
         line = out[unit.line]
         line.rate_ids.append(rate["id"])
-        if unit.room_type_id:
-            line.supply.append(SupplyAsk(unit.room_type_id, None, unit.on, ask.party, units=unit.rooms))
-        else:
-            line.supply.append(SupplyAsk(None, unit.service_id, unit.on, ask.party, units=max(ask.party, 1)))
-        if unit.split and rate["unit"] == "person":
-            child_rate, infant_rate = by_split[id(unit)]
-            line.costs.append(
-                _split_cost(
-                    ask,
-                    line,
-                    rate,
-                    child_rate,
-                    infant_rate,
-                    contract_pct=contract_pct.get(rate["contract_id"]),
-                    policy_pct=(child_pct_by_type or {}).get(str(services[unit.service_id]["service_type"])),
-                    child_age_max=child_age_max,
-                )
+        line.supply.append(_supply_ask(unit, ask))
+        policy_pct = (child_pct_by_type or {}).get(str(services.get(unit.service_id or "", {}).get("service_type")))
+        line.costs.append(
+            _unit_cost(
+                unit,
+                ask,
+                line,
+                rate,
+                by_split.get(id(unit)),
+                contract_pct=contract_pct.get(rate["contract_id"]),
+                policy_pct=policy_pct,
+                child_age_max=child_age_max,
             )
-            continue
-        qty = unit.rooms if unit.room_type_id else _service_quantity(rate["unit"], ask, days=unit.days)
-        line.costs.append((Decimal(str(rate["net_amount"])) * qty, rate["currency"]))
+        )
     return out
+
+
+def _unit_cost(
+    unit: _Unit,
+    ask: LineAsk,
+    line: LineCost,
+    rate: dict[str, Any],
+    split: tuple[dict[str, Any] | None, dict[str, Any] | None] | None,
+    *,
+    contract_pct: Decimal | None,
+    policy_pct: Decimal | None,
+    child_age_max: int | None,
+) -> tuple[Decimal, str]:
+    """A room night x its rooms, a service x its unit's quantity (the whole party alike), or, for a per-person service
+    of an sv: line with children or infants, the B4 split (:func:`_split_cost`)."""
+    if split is not None and rate["unit"] == "person":
+        child_rate, infant_rate = split
+        return _split_cost(
+            ask,
+            line,
+            rate,
+            child_rate,
+            infant_rate,
+            contract_pct=contract_pct,
+            policy_pct=policy_pct,
+            child_age_max=child_age_max,
+        )
+    qty = unit.rooms if unit.room_type_id else _service_quantity(rate["unit"], ask, days=unit.days)
+    return Decimal(str(rate["net_amount"])) * qty, rate["currency"]
+
+
+def _supply_ask(unit: _Unit, ask: LineAsk) -> SupplyAsk:
+    """The availability engine's ask of one rate lookup: a room night (its room count) or a service day (the party)."""
+    if unit.room_type_id:
+        return SupplyAsk(unit.room_type_id, None, unit.on, ask.party, units=unit.rooms)
+    return SupplyAsk(None, unit.service_id, unit.on, ask.party, units=max(ask.party, 1))
+
+
+Split = dict[int, tuple[dict[str, Any] | None, dict[str, Any] | None]]
+
+
+async def _lookup(
+    conn: asyncpg.Connection, asks: list[LineAsk], units: list[_Unit]
+) -> tuple[list[dict[str, Any] | None], Split, dict[str, Decimal]]:
+    """One batched rate query for every unit (plus, B4, the child and infant rates of a split unit's service and day,
+    same party band), and the child % of the contracts a child still needs (only when one does)."""
+    lookups = [RateAsk(u.room_type_id, u.service_id, u.on, u.pax) for u in units]
+    split_units = [u for u in units if u.split]
+    for u in split_units:
+        lookups += [
+            RateAsk(None, u.service_id, u.on, u.pax, "child"),
+            RateAsk(None, u.service_id, u.on, u.pax, "infant"),
+        ]
+    found = await rates_in_force_many(conn, lookups)
+    rates, extra = found[: len(units)], iter(found[len(units) :])
+    by_split: Split = {id(u): (next(extra), next(extra)) for u in split_units}
+    need_terms = sorted(
+        {
+            r["contract_id"]
+            for u, r in zip(units, rates, strict=True)
+            if u.split and r is not None and r["unit"] == "person" and asks[u.line].child and by_split[id(u)][0] is None
+        }
+    )
+    if not need_terms:
+        return rates, by_split, {}
+    rows = await conn.fetch(CONTRACT_CHILD_SQL, need_terms)
+    return rates, by_split, {r["contract_id"]: Decimal(str(r["child_pct"])) for r in rows}
 
 
 def _split_cost(

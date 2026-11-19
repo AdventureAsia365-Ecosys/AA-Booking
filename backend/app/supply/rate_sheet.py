@@ -263,6 +263,13 @@ def _contract(ws: Any, problems: list[Problem]) -> dict[str, Any]:
     return out
 
 
+def _applies(label: str, sheet: str) -> bool:
+    """A meal plan belongs to the hotel sheet, a pax type and age band to the service sheets (bk-060)."""
+    if label == "Meal plan":
+        return sheet == HOTEL_SHEET
+    return sheet != HOTEL_SHEET or label not in ("Pax type", "Age min", "Age max")
+
+
 def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> list[RateRow]:
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
@@ -310,9 +317,7 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
             ("Age min", "age_min", _age),
             ("Age max", "age_max", _age),
         ):
-            if label == "Meal plan" and sheet != HOTEL_SHEET:
-                continue
-            if label in ("Pax type", "Age min", "Age max") and sheet == HOTEL_SHEET:
+            if not _applies(label, sheet):
                 continue
             try:
                 value = conv(cell(row, label))
