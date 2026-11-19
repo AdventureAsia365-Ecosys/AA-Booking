@@ -157,7 +157,7 @@ FROM booking.cancellation_policies p
 JOIN booking.policy_approvals a ON a.cancellation_policy_id = p.id
 WHERE p.channel = $1 AND (p.trip_plan_id = $2::uuid OR p.trip_plan_id IS NULL) AND p.valid_from <= $3
   AND ($4::timestamptz IS NULL OR a.approved_at <= $4)
-ORDER BY (p.trip_plan_id IS NULL), p.valid_from DESC
+ORDER BY (p.trip_plan_id IS NULL), p.valid_from DESC, a.approved_at DESC, p.id DESC
 LIMIT 1
 """  # noqa: S608 — constant fragment
 BY_ID_SQL = f"SELECT {POLICY_COLUMNS} FROM booking.cancellation_policies p WHERE p.id = $1::uuid"  # noqa: S608
@@ -477,7 +477,7 @@ WITH in_force AS (
     FROM booking.cancellation_policies p
     JOIN booking.policy_approvals ap ON ap.cancellation_policy_id = p.id
     WHERE p.valid_from <= $1
-    ORDER BY p.channel, p.trip_plan_id, p.valid_from DESC
+    ORDER BY p.channel, p.trip_plan_id, p.valid_from DESC, ap.approved_at DESC, p.id DESC
 )
 SELECT p.id::text AS id, p.channel, p.trip_plan_id::text AS trip_plan_id, tp.source_id, p.valid_from, p.title,
        p.tiers::text AS tiers, p.note, p.created_at, p.created_by, cs.name AS created_by_name,

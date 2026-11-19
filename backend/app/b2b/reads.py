@@ -110,7 +110,7 @@ SELECT DISTINCT ON (f.currency) f.currency::text AS currency, f.rate_per_usd, f.
 FROM booking.fx_rates f
 JOIN booking.policy_approvals a ON a.fx_rate_id = f.id
 WHERE f.as_of <= $1
-ORDER BY f.currency, f.as_of DESC
+ORDER BY f.currency, f.as_of DESC, a.approved_at DESC, f.id DESC
 """
 
 PLAN_HINT_SQL = f"""
