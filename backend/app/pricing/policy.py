@@ -77,7 +77,7 @@ WITH in_force AS (
     FROM booking.pricing_rules r
     JOIN booking.policy_approvals ap ON ap.pricing_rule_id = r.id
     WHERE r.valid_from <= $1
-    ORDER BY r.channel, r.valid_from DESC
+    ORDER BY r.channel, r.valid_from DESC, ap.approved_at DESC, r.id DESC
 )
 SELECT p.id::text AS id, p.channel, p.target_margin, p.floor_margin, p.peak_uplift_pts, p.card_fee_pct,
        p.valid_from, p.note, p.rrp_markup_pct, p.child_pct, p.infant_flat_usd, p.early_days, p.early_discount_pts,
@@ -102,7 +102,7 @@ WITH in_force AS (
     FROM booking.fx_rates f
     JOIN booking.policy_approvals ap ON ap.fx_rate_id = f.id
     WHERE f.as_of <= $1
-    ORDER BY f.currency, f.as_of DESC
+    ORDER BY f.currency, f.as_of DESC, ap.approved_at DESC, f.id DESC
 )
 SELECT p.id::text AS id, p.currency, p.rate_per_usd, p.buffer_pct, p.as_of, p.source, p.created_at,
        p.created_by, cs.name AS created_by_name,
