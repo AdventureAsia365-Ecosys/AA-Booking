@@ -21,6 +21,7 @@ import "@/app/(staff)/cases/[code]/ProposalsTab.messages";
 import "@/app/(staff)/cases/[code]/StatusActions.messages";
 import "@/app/(staff)/cases/[code]/SuppliersTab.messages";
 import "@/app/(staff)/cases/[code]/page.messages";
+import "@/app/(staff)/cases/[code]/proposals/[n]/DetailsDrawer.messages";
 import "@/app/(staff)/cases/[code]/proposals/[n]/ItemDrawer.messages";
 import "@/app/(staff)/cases/[code]/proposals/[n]/SupplyPicker.messages";
 import "@/app/(staff)/cases/[code]/proposals/[n]/page.messages";
