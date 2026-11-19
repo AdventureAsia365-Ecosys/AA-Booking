@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "Up to {0}": (...a: unknown[]) => `Up to ${a[0]}`,
     "Hotel": "Hotel",
     "Loading hotel": "Loading hotel",
     "Could not load the hotel.": "Could not load the hotel.",
@@ -48,6 +49,7 @@ export const MSG = phrasebook(
     "Occupancy not set": "Occupancy not set",
   },
   {
+    "Up to {0}": (...a: unknown[]) => `Tối đa ${a[0]}`,
     "Hotel": "Khách sạn",
     "Loading hotel": "Đang tải khách sạn",
     "Could not load the hotel.": "Không tải được khách sạn.",

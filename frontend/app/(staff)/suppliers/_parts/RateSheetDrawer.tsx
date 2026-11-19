@@ -15,6 +15,7 @@ import { suppliersApi, type RateSheetImpact, type RateSheetProblem, type RateShe
 import { Button, FormDrawer, LinkButton, PriceReadinessBadge, useToast } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./RateSheetDrawer.messages";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -45,7 +46,7 @@ function Impact({ impact }: { impact: RateSheetImpact }) {
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-line p-3 text-xs text-body" data-testid="rate-sheet-impact">
       <p className="font-medium text-ink">
-        {t("{0} trip plan{1} these items. Once this draft is published, {2}", impact.plans_total, impact.plans_total > 1 ? "s use" : " uses", moving ? `${moving} would price from rates.` : t("none would move to priced."))}
+        {t("{0} trip plan{1} these items. Once this draft is published, {2}", impact.plans_total, impact.plans_total > 1 ? "s use" : " uses", moving ? t("{0} would price from rates.", moving) : t("none would move to priced."))}
       </p>
       <ul className="flex flex-col gap-1.5">
         {impact.plans.slice(0, MAX_IMPACT_LISTED).map((p) => (
@@ -76,6 +77,7 @@ function Impact({ impact }: { impact: RateSheetImpact }) {
 export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string; onClose: () => void }) {
   const t = useT(MSG);
   const tx = useTx();
+  const { formatNumber } = useBookingFormat();
   const qc = useQueryClient();
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
@@ -171,7 +173,7 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
           <ul className="flex flex-col gap-0.5 text-muted">
             {preview.rates.slice(0, 12).map((r) => (
               <li key={`${r.sheet}-${r.row}`}>
-                {t("{0} row {1}: {2} per {3}{4}{5}", r.sheet, r.row, r.net_amount, r.unit.replace("_", " "), r.season ? ` · ${r.season}` : "", r.pax_min || r.pax_max ? ` · pax ${r.pax_min ?? 1}–${r.pax_max ?? "more"}` : "")}
+                {t("{0} row {1}: {2} per {3}{4}{5}", r.sheet, r.row, formatNumber(r.net_amount), tx(r.unit.replace("_", " ")), r.season ? ` · ${r.season}` : "", r.pax_min || r.pax_max ? t(" · pax {0}–{1}", r.pax_min ?? 1, r.pax_max ?? t("more")) : "")}
               </li>
             ))}
             {preview.rates.length > 12 && <li>{t("… and {0} more", preview.rates.length - 12)}</li>}

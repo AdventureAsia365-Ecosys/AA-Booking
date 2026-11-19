@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "item": "item",
     "V{0} added to {1} from this plan": (...a: unknown[]) => `V${a[0]} added to ${a[1]} from this plan`,
     "Use for trip case": "Use for trip case",
     "Cancel": "Cancel",
@@ -22,6 +23,7 @@ export const MSG = phrasebook(
     "day items": "day items",
   },
   {
+    "item": "mục",
     "V{0} added to {1} from this plan": (...a: unknown[]) => `Đã thêm V${a[0]} vào ${a[1]} từ kế hoạch này`,
     "Use for trip case": "Dùng cho hồ sơ chuyến đi",
     "Cancel": "Huỷ",

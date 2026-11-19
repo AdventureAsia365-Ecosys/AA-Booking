@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "{0} room types": (...a: unknown[]) => `${a[0]} room types`,
     "View hotel": "View hotel",
     "Edit hotel": "Edit hotel",
     "Deactivate": "Deactivate",
@@ -61,6 +62,7 @@ export const MSG = phrasebook(
     "Photos": "Photos",
   },
   {
+    "{0} room types": (...a: unknown[]) => `${a[0]} loại phòng`,
     "View hotel": "Xem khách sạn",
     "Edit hotel": "Sửa khách sạn",
     "Deactivate": "Ngưng hoạt động",

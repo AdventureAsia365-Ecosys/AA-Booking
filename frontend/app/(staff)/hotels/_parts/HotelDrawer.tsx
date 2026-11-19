@@ -203,7 +203,7 @@ function RoomTypes({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
                 <span className="min-w-0">
                   <span className="block text-[13.5px] font-medium text-ink">{r.name}</span>
                   <span className="text-xs text-muted">
-                    {tr("{0}{1} · {2} rate{3} in force", r.max_occupancy ? `Up to ${r.max_occupancy}` : tr("Occupancy not set"), r.bed_types.length ? ` · ${r.bed_types.join(", ")}` : "", r.rates_in_force, r.rates_in_force === 1 ? "" : "s")}
+                    {tr("{0}{1} · {2} rate{3} in force", r.max_occupancy ? tr("Up to {0}", r.max_occupancy) : tr("Occupancy not set"), r.bed_types.length ? ` · ${r.bed_types.join(", ")}` : "", r.rates_in_force, r.rates_in_force === 1 ? "" : "s")}
                   </span>
                 </span>
               </span>

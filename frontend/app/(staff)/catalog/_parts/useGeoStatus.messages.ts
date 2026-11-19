@@ -7,6 +7,8 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "activated": "activated",
+    "deactivated": "deactivated",
     "{0} {1} in Booking.": (...a: unknown[]) => `${a[0]} ${a[1]} in Booking.`,
     "Activate {0}": (...a: unknown[]) => `Activate ${a[0]}`,
     "Deactivate {0}": (...a: unknown[]) => `Deactivate ${a[0]}`,
@@ -18,6 +20,8 @@ export const MSG = phrasebook(
     "in Booking? Nothing is deleted: its content stays in CIS, trip cases and suppliers there are kept, and it shows as inactive until it is activated again.": "in Booking? Nothing is deleted: its content stays in CIS, trip cases and suppliers there are kept, and it shows as inactive until it is activated again.",
   },
   {
+    "activated": "đã bật",
+    "deactivated": "đã tắt",
     "{0} {1} in Booking.": (...a: unknown[]) => `${a[0]} ${a[1]} trong Booking.`,
     "Activate {0}": (...a: unknown[]) => `Kích hoạt ${a[0]}`,
     "Deactivate {0}": (...a: unknown[]) => `Ngưng hoạt động ${a[0]}`,

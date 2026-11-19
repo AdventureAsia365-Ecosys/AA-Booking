@@ -16,7 +16,6 @@ import { CalendarPlus, Plus, Repeat } from "lucide-react";
 import { ApiError, type FieldError } from "@/lib/api/client";
 import {
   ALLOTMENT_STATE_LABEL,
-  END_REASON_LABEL,
   WEEKDAYS,
   departuresApi,
   minimumLabel,
@@ -40,7 +39,6 @@ import {
   Pill,
   Section,
   Select,
-  formatDay,
   useCan,
   useStaff,
   useToast,
@@ -53,6 +51,7 @@ import { useT } from "@/ui/core/useI18n";
 import { Phrase } from "@/ui/local/Phrase";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./DeparturesPanel.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 const STATUS: Record<DepartureStatus, { label: string; tone: "neutral" | "success" | "danger" }> = {
   scheduled: { label: "Scheduled", tone: "neutral" },
@@ -285,6 +284,7 @@ function NewDepartureDrawer({
   onClose: () => void;
 }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const qc = useQueryClient();
   const toast = useToast();
   const [start, setStart] = useState(dayFromToday(30));
@@ -326,6 +326,7 @@ function GenerateDrawer({
   onClose: () => void;
 }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
@@ -350,7 +351,7 @@ function GenerateDrawer({
         setPreview(out);
         return;
       }
-      toast.success(t("{0} departures created{1}", out.created_count, out.skipped_count ? `, ${out.skipped_count} dates already had one` : ""));
+      toast.success(t("{0} departures created{1}", out.created_count, out.skipped_count ? t(", {0} dates already had one", out.skipped_count) : ""));
       qc.invalidateQueries({ queryKey: ["departures", sourceId] });
       onClose();
     },
@@ -455,6 +456,7 @@ function GenerateDrawer({
 
 function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departure; sourceId: string; onClose: () => void }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const canWrite = useCan("trip_plan.write");
   const canDesk = useCan("b2b_desk.read");
@@ -542,6 +544,7 @@ function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departur
 
 function AllotmentsSection({ departure, sourceId }: { departure: Departure; sourceId: string }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const canWrite = useCan("b2b_desk.write");
   const me = useStaff();
@@ -568,7 +571,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
     mutationFn: ({ id, action }: { id: string; action: "approve" | "end" }) =>
       action === "approve" ? departuresApi.approveAllotment(id) : departuresApi.endAllotment(id),
     onSuccess: (a) => {
-      toast.success(a.state === "in_force" ? t("Allotment approved") : t("Allotment {0}", a.end_reason ?? "ended"));
+      toast.success(a.state === "in_force" ? t("Allotment approved") : t("Allotment {0}", t(`end_${a.end_reason ?? "ended"}`)));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -673,7 +676,7 @@ function AllotmentRow({
           {t("Release")} <DateText value={a.release_date} />
           {a.state === "in_force" && a.unused !== null && t(" · {0} used, {1} kept", a.used ?? 0, a.unused)}
           {a.created_by?.name && t(" · proposed by {0}", a.created_by.name)}
-          {a.end_reason && ` · ${END_REASON_LABEL[a.end_reason]}`}
+          {a.end_reason && ` · ${t(`end_${a.end_reason}`)}`}
         </span>
       </span>
       <span className="flex flex-wrap items-center gap-2">

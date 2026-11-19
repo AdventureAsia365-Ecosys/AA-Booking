@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "; {0} left out (no net or no day)": (...a: unknown[]) => `; ${a[0]} left out (no net or no day)`,
     "Group departure {0}": (...a: unknown[]) => `Group departure ${a[0]}`,
     "Purchase orders": "Purchase orders",
     "One order per supplier, currency and service month, grouping the pending supplier bookings of trip cases and departures. Sending it asks the supplier for every line at once.": "One order per supplier, currency and service month, grouping the pending supplier bookings of trip cases and departures. Sending it asks the supplier for every line at once.",
@@ -59,6 +60,7 @@ export const MSG = phrasebook(
     "Supplier answer": "Supplier answer",
   },
   {
+    "; {0} left out (no net or no day)": (...a: unknown[]) => `; bỏ qua ${a[0]} (không có giá net hoặc không có ngày)`,
     "Group departure {0}": (...a: unknown[]) => `Chuyến khởi hành đoàn ${a[0]}`,
     "Purchase orders": "Đơn đặt hàng",
     "One order per supplier, currency and service month, grouping the pending supplier bookings of trip cases and departures. Sending it asks the supplier for every line at once.": "Mỗi nhà cung cấp, tiền tệ và tháng dịch vụ một đơn, gom các đặt chỗ nhà cung cấp đang chờ của hồ sơ và chuyến khởi hành. Gửi đơn là yêu cầu nhà cung cấp cho mọi dòng cùng lúc.",

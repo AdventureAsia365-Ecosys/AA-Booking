@@ -13,12 +13,13 @@
 import { Plus, Trash2 } from "lucide-react";
 import { CHANNELS, COST_CURRENCIES, SELLING_CURRENCIES, type Channel } from "@/lib/api/proposals";
 import type { PriceRow } from "@/lib/api/tripPlans";
-import { Badge, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
+import { Badge, Input, Select, DateField, IconButton, LinkButton, Money } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./PriceMatrixEditor.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 const CHANNEL_SHORT: Record<string, string> = Object.fromEntries(CHANNELS.map((c) => [c.value, c.label]));
 
@@ -48,6 +49,7 @@ export function PriceMatrixEditor({
   today: string;
 }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const set = (i: number, patch: Partial<PriceDraft>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const errorOf = (i: number, field: DraftError["field"]) => errors.find((e) => e.row === i && e.field === field)?.message;

@@ -7,6 +7,8 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "no longer sellable": "no longer sellable",
+    "now sellable": "now sellable",
     "not sellable": "not sellable",
     "sellable": "sellable",
     "{0} is {1}.": (...a: unknown[]) => `${a[0]} is ${a[1]}.`,
@@ -18,6 +20,8 @@ export const MSG = phrasebook(
     "{0}? Sales can then start trip cases from it.": (...a: unknown[]) => `${a[0]}? Sales can then start trip cases from it.`,
   },
   {
+    "no longer sellable": "không còn bán được",
+    "now sellable": "đã bán được",
     "not sellable": "không bán",
     "sellable": "bán được",
     "{0} is {1}.": (...a: unknown[]) => `${a[0]} giờ là ${a[1]}.`,

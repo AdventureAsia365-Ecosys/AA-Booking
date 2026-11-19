@@ -47,7 +47,7 @@ export function useSellableToggle() {
     },
     onSuccess: (_res, t) => {
       qc.invalidateQueries({ queryKey: ["trip-plans"] });
-      toast.success(tr("{0} is {1}.", t.title, t.sellable ? "no longer sellable" : "now sellable"));
+      toast.success(tr("{0} is {1}.", t.title, t.sellable ? tr("no longer sellable") : tr("now sellable")));
       setTarget(null);
     },
   });

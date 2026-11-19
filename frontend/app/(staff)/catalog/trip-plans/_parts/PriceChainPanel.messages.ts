@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "staff": "staff",
     "Prices recomputed: {0} rows from the rates": (...a: unknown[]) => `Prices recomputed: ${a[0]} rows from the rates`,
     "Prices are up to date": "Prices are up to date",
     "The prices could not be recomputed. Try again.": "The prices could not be recomputed. Try again.",
@@ -31,6 +32,7 @@ export const MSG = phrasebook(
     "No published supplier rate covers this plan's components.": "No published supplier rate covers this plan's components.",
   },
   {
+    "staff": "nhân viên",
     "Prices recomputed: {0} rows from the rates": (...a: unknown[]) => `Đã tính lại giá: ${a[0]} dòng từ giá nhà cung cấp`,
     "Prices are up to date": "Giá đã được cập nhật",
     "The prices could not be recomputed. Try again.": "Không tính lại được giá. Hãy thử lại.",

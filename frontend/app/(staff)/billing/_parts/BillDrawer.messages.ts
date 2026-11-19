@@ -7,6 +7,9 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    " — not the bill amount {0} yet: it can be saved, but not approved.": (...a: unknown[]) => ` — not the bill amount ${a[0]} yet: it can be saved, but not approved.`,
+    "the bill is paid": "the bill is paid",
+    "{0} left to pay": (...a: unknown[]) => `${a[0]} left to pay`,
     "File removed": "File removed",
     "No file yet.": "No file yet.",
     "Download (link valid 5 minutes)": "Download (link valid 5 minutes)",
@@ -115,6 +118,9 @@ export const MSG = phrasebook(
     "Billed": "Billed",
   },
   {
+    " — not the bill amount {0} yet: it can be saved, but not approved.": (...a: unknown[]) => ` — chưa bằng số tiền hoá đơn ${a[0]}: có thể lưu nhưng chưa duyệt được.`,
+    "the bill is paid": "hoá đơn đã thanh toán xong",
+    "{0} left to pay": (...a: unknown[]) => `còn ${a[0]} phải trả`,
     "File removed": "Đã xoá tệp",
     "No file yet.": "Chưa có tệp.",
     "Download (link valid 5 minutes)": "Tải xuống (liên kết hiệu lực 5 phút)",

@@ -7,6 +7,12 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    ", {0} dates already had one": (...a: unknown[]) => `, ${a[0]} dates already had one`,
+    "end_replaced": "replaced",
+    "end_withdrawn": "withdrawn",
+    "end_rejected": "rejected",
+    "end_departure_cancelled": "departure cancelled",
+    "end_ended": "ended",
     "{0} in agency allotments ({1} unused)": (...a: unknown[]) => `${a[0]} in agency allotments (${a[1]} unused)`,
     "None": "None",
     "Departed": "Departed",
@@ -91,6 +97,12 @@ export const MSG = phrasebook(
     "On request": "On request",
   },
   {
+    ", {0} dates already had one": (...a: unknown[]) => `, ${a[0]} ngày đã có sẵn`,
+    "end_replaced": "đã được thay thế",
+    "end_withdrawn": "đã rút lại",
+    "end_rejected": "bị từ chối",
+    "end_departure_cancelled": "chuyến khởi hành bị huỷ",
+    "end_ended": "đã kết thúc",
     "{0} in agency allotments ({1} unused)": (...a: unknown[]) => `${a[0]} trong allotment đại lý (${a[1]} chưa dùng)`,
     "None": "Không có",
     "Departed": "Đã khởi hành",

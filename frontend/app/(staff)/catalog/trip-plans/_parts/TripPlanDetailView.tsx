@@ -17,7 +17,7 @@ import { Briefcase, CalendarDays, EyeOff, Globe, Hash, Pencil, Store } from "luc
 import { CHANNELS } from "@/lib/api/proposals";
 import { tripPlansApi } from "@/lib/api/tripPlans";
 import { daysNights, marginLabel, paxBandLabel } from "@/ui/booking/tripPlans";
-import { PageFrame, Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, formatDay, useCan, useStaff } from "@/ui";
+import { PageFrame, Button, CisPhoto, DateText, FromCisTag, ManagedInCisLink, Money, Section, useCan, useStaff } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
 import { DetailHeader, Fact, FactGrid, MetaItem, useDetailTab } from "../../../_parts/DetailHeader";
 import { AgencyTermsPanel } from "./AgencyTermsPanel";
@@ -31,6 +31,7 @@ import { daysText } from "@/ui/booking/plural";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./TripPlanDetailView.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 const CHANNEL_LABEL: Record<string, string> = Object.fromEntries(CHANNELS.map((c) => [c.value, c.label]));
 
@@ -47,6 +48,7 @@ function highlightList(value: unknown): string[] {
 
 export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId: string; editOnOpen?: boolean }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const me = useStaff();
   const canEdit = useCan("trip_plan.write");
@@ -312,7 +314,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                             <span className="font-normal text-muted"> · {tx(paxBandLabel(r.pax_min, r.pax_max))}</span>
                           </span>
                           <span className="block text-xs text-muted">
-                            {CHANNEL_LABEL[r.channel] ?? r.channel} · {tx(formatDay(r.valid_from))} – {tx(formatDay(r.valid_to))}
+                            {CHANNEL_LABEL[r.channel] ?? r.channel} · {formatDay(r.valid_from)} – {formatDay(r.valid_to)}
                             {r.priced && marginLabel(r.effective_margin) && t(" · margin {0}", marginLabel(r.effective_margin))}
                           </span>
                           {(r.child_amount || r.infant_amount || r.single_supplement_amount) && (

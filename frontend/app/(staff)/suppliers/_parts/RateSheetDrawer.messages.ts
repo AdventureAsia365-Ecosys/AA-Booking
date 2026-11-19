@@ -7,6 +7,14 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "{0} would price from rates.": (...a: unknown[]) => `${a[0]} would price from rates.`,
+    " · pax {0}–{1}": (...a: unknown[]) => ` · pax ${a[0]}–${a[1]}`,
+    "more": "more",
+    "room night": "room night",
+    "person": "person",
+    "group": "group",
+    "vehicle": "vehicle",
+    "day": "day",
     "The file could not be read.": "The file could not be read.",
     "No trip plan uses these hotels or services yet.": "No trip plan uses these hotels or services yet.",
     "{0} trip plan{1} these items. Once this draft is published, {2}": (...a: unknown[]) => `${a[0]} trip plan${a[1]} these items. Once this draft is published, ${a[2]}`,
@@ -34,6 +42,14 @@ export const MSG = phrasebook(
     "; every component has a rate": "; every component has a rate",
   },
   {
+    "{0} would price from rates.": (...a: unknown[]) => `${a[0]} sẽ tính giá từ bảng giá.`,
+    " · pax {0}–{1}": (...a: unknown[]) => ` · ${a[0]}–${a[1]} khách`,
+    "more": "trở lên",
+    "room night": "đêm phòng",
+    "person": "người",
+    "group": "nhóm",
+    "vehicle": "xe",
+    "day": "ngày",
     "The file could not be read.": "Không đọc được tệp.",
     "No trip plan uses these hotels or services yet.": "Chưa có kế hoạch chuyến đi nào dùng các khách sạn hoặc dịch vụ này.",
     "{0} trip plan{1} these items. Once this draft is published, {2}": (...a: unknown[]) => `${a[0]} kế hoạch chuyến đi dùng các mục này. Khi bản nháp này được công bố, ${a[2]}`,

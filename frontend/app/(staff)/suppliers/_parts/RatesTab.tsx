@@ -15,13 +15,14 @@ import { RatesTable, amountText, rateTarget, supplyError } from "@/app/(staff)/_
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { RateDrawer } from "./RateDrawer";
 import { ContractPhaseBadge } from "./shared";
-import { useT } from "@/ui/core/useI18n";
+import { useLang, useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./RatesTab.messages";
 
 export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const t = useT(MSG);
   const tx = useTx();
+  const lang = useLang();
   const qc = useQueryClient();
   const toast = useToast();
   const contracts = useQuery({ queryKey: ["supplier", s.code, "contracts"], queryFn: () => suppliersApi.contracts(s.code) });
@@ -124,7 +125,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
         confirmLabel={t("Remove")}
         message={
           <>
-            {t("Remove the {0} rate for", removing ? amountText(removing.net_amount, removing.currency) : "")}
+            {t("Remove the {0} rate for", removing ? amountText(removing.net_amount, removing.currency, lang) : "")}
             <strong className="text-ink">{removing ? rateTarget(removing) : ""}</strong> {t("from this draft?")}
           </>
         }

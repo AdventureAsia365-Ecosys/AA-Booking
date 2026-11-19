@@ -7,6 +7,8 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "country": "country",
+    "countries": "countries",
     "View supplier": "View supplier",
     "Edit profile": "Edit profile",
     "Deactivate": "Deactivate",
@@ -49,6 +51,8 @@ export const MSG = phrasebook(
     "Updated": "Updated",
   },
   {
+    "country": "quốc gia",
+    "countries": "quốc gia",
     "View supplier": "Xem nhà cung cấp",
     "Edit profile": "Sửa hồ sơ",
     "Deactivate": "Ngưng hoạt động",

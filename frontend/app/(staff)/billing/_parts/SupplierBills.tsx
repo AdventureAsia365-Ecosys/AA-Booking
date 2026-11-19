@@ -23,7 +23,6 @@ import {
   Money,
   Section,
   SupplierBillStatusBadge,
-  formatDay,
   formatMoney,
   useCan,
   useUrlFilters,
@@ -31,30 +30,32 @@ import {
 import { BillDrawer, BillForm } from "./BillDrawer";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./SupplierBills.messages";
 
-function kpiValue(k: BillKpi | undefined): React.ReactNode {
+function kpiValue(k: BillKpi | undefined, lang: "en" | "vi"): React.ReactNode {
   if (!k) return undefined;
-  if (k.by_currency.length === 0) return formatMoney("0", "USD");
-  return k.by_currency.map((c) => formatMoney(c.amount, c.currency)).join(" + ");
+  if (k.by_currency.length === 0) return formatMoney("0", "USD", lang);
+  return k.by_currency.map((c) => formatMoney(c.amount, c.currency, lang)).join(" + ");
 }
 
 export function SupplierBillKpis() {
   const t = useT(MSG);
+  const { formatDay, lang } = useBookingFormat();
   const canRead = useCan("bill.read");
   const q = useQuery({ queryKey: ["supplier-bills", "summary"], queryFn: supplierBillsApi.summary, enabled: canRead });
   const s = q.data;
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <KpiTile label={t("To approve")} value={canRead ? kpiValue(s?.to_approve) : null} hint={s ? t("{0} bill(s) received", s.to_approve.count) : undefined} />
-      <KpiTile label={t("To pay")} value={canRead ? kpiValue(s?.to_pay) : null} hint={s ? t("{0} approved bill(s), balance left", s.to_pay.count) : undefined} />
+      <KpiTile label={t("To approve")} value={canRead ? kpiValue(s?.to_approve, lang) : null} hint={s ? t("{0} bill(s) received", s.to_approve.count) : undefined} />
+      <KpiTile label={t("To pay")} value={canRead ? kpiValue(s?.to_pay, lang) : null} hint={s ? t("{0} approved bill(s), balance left", s.to_pay.count) : undefined} />
       <KpiTile
         label={t("Overdue")}
-        value={canRead ? kpiValue(s?.overdue) : null}
+        value={canRead ? kpiValue(s?.overdue, lang) : null}
         hint={s ? t("{0} bill(s) past their due date", s.overdue.count) : undefined}
         hintTone={s && s.overdue.count ? "danger" : "neutral"}
       />
-      <KpiTile label={t("Paid out this month")} value={canRead ? kpiValue(s?.paid_this_month) : null} hint={s ? t("{0} payout(s) since {1}", s.paid_this_month.count, formatDay(s.month_start)) : undefined} />
+      <KpiTile label={t("Paid out this month")} value={canRead ? kpiValue(s?.paid_this_month, lang) : null} hint={s ? t("{0} payout(s) since {1}", s.paid_this_month.count, formatDay(s.month_start)) : undefined} />
     </div>
   );
 }

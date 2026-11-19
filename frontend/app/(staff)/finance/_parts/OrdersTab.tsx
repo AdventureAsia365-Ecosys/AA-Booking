@@ -142,7 +142,7 @@ function CreateOrdersModal({ onClose, onCreated }: { onClose: () => void; onCrea
       const skipped = r.skipped.no_net + r.skipped.no_date;
       toast.success(
         r.lines
-          ? t("{0} booking(s) on {1} order(s){2}", r.lines, r.orders.length, skipped ? `; ${skipped} left out (no net or no day)` : "")
+          ? t("{0} booking(s) on {1} order(s){2}", r.lines, r.orders.length, skipped ? t("; {0} left out (no net or no day)", skipped) : "")
           : t("No pending supplier booking to order"),
       );
       onCreated(r.orders.length === 1 ? r.orders[0]!.code : null);

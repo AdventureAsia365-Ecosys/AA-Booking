@@ -39,14 +39,13 @@ import {
   Money,
   PayoutStateBadge,
   SupplierBillStatusBadge,
-  formatMoney,
   useCan,
   useToast,
   DateField,
 } from "@/ui";
 import { fromCents, sumCents, toCents } from "./money";
 import { errorText, fieldCls, prepareEvidence, today } from "./evidence";
-import { formatDay } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./BillDrawer.messages";
@@ -166,7 +165,14 @@ function lineColumns(currency: string, canPricing: boolean): ColumnDef<SupplierB
           </span>
           <span className="text-xs text-muted">
             {row.original.code}
-            {row.original.service_date ? ` · ${formatDay(row.original.service_date)}` : ""}
+            {row.original.service_date ? (
+              <>
+                {" · "}
+                <DateText value={row.original.service_date} />
+              </>
+            ) : (
+              ""
+            )}
           </span>
         </span>
       ),
@@ -191,6 +197,7 @@ type Dialog = { kind: "approve" } | { kind: "cancel" } | { kind: "pay" } | { kin
 
 export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClose: () => void }) {
   const t = useT(MSG);
+  const { formatDay, formatMoney } = useBookingFormat();
   const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
@@ -461,6 +468,7 @@ export function BillForm({
   onSaved: (b: SupplierBillDetail) => void;
 }) {
   const t = useT(MSG);
+  const { formatDay, formatMoney } = useBookingFormat();
   const tx = useTx();
   const toast = useToast();
   const editing = !!bill;
@@ -698,7 +706,7 @@ export function BillForm({
             )}
             {picked.length > 0 && (
               <p className={`text-xs ${mismatch ? "text-warning" : "text-muted"}`}>
-                {t("Lines total {0}{1}", linesTotal === null ? "—" : formatMoney(fromCents(linesTotal), currency), mismatch ? ` — not the bill amount ${formatMoney(amount, currency)} yet: it can be saved, but not approved.` : ".")}
+                {t("Lines total {0}{1}", linesTotal === null ? "—" : formatMoney(fromCents(linesTotal), currency), mismatch ? t(" — not the bill amount {0} yet: it can be saved, but not approved.", formatMoney(amount, currency)) : ".")}
               </p>
             )}
           </div>
@@ -722,6 +730,7 @@ export function BillForm({
 /** Record money paid to the supplier. One Idempotency-Key per opening: a retry of the same save returns the same payout. */
 export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetail; onClose: () => void; onDone: () => void }) {
   const t = useT(MSG);
+  const { formatMoney } = useBookingFormat();
   const tx = useTx();
   const toast = useToast();
   const [key] = useState(() => newIdempotencyKey("spo"));
@@ -757,7 +766,7 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
       return { p, fileError };
     },
     onSuccess: ({ p, fileError }) => {
-      toast.success(t("{0} recorded: {1}", p.code, p.bill.status === "paid" ? "the bill is paid" : `${formatMoney(p.bill.balance, p.currency)} left to pay`));
+      toast.success(t("{0} recorded: {1}", p.code, p.bill.status === "paid" ? t("the bill is paid") : t("{0} left to pay", formatMoney(p.bill.balance, p.currency))));
       if (fileError) toast.error(t("The bank slip was not added: {0}. Add it from the payout.", fileError));
       onDone();
       onClose();

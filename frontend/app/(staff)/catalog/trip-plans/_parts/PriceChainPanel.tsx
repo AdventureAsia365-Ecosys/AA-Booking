@@ -103,7 +103,7 @@ export function PriceChainPanel({ sourceId, matrix, dirty }: { sourceId: string;
         <ul className="flex flex-col gap-0.5 text-xs text-muted" aria-label={t("Price history")}>
           {matrix.changes.slice(0, 5).map((c) => (
             <li key={`${c.at}-${c.change_source}`}>
-              <DateText value={c.at} /> {t("· {0} · {1} rows in force", c.change_source === "cost_sheet" ? t("cost sheet") : "staff", c.rows)}
+              <DateText value={c.at} /> {t("· {0} · {1} rows in force", c.change_source === "cost_sheet" ? t("cost sheet") : t("staff"), c.rows)}
             </li>
           ))}
         </ul>

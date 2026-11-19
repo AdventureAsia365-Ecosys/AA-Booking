@@ -76,7 +76,7 @@ export function UseForTripCaseModal({ plan, onClose }: { plan: TripPlanDetail; o
         }}
       >
         <p className="text-[13px] text-muted">
-          {t("The proposal starts with the {0} {1} of", dayCount, dayCount === 1 ? "item" : t("day items"))}
+          {t("The proposal starts with the {0} {1} of", dayCount, dayCount === 1 ? t("item") : t("day items"))}
           <span className="font-medium text-ink">{tx(plan.title)}</span>{t(", titled from CIS. It is not priced: add cost lines and price it in the builder.")}
         </p>
           <Field

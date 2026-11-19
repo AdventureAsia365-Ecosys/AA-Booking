@@ -84,7 +84,7 @@ export function SuppliersListView() {
       }
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label={t("Total suppliers")} value={s?.total} hint={s ? t("Across {0} {1}", s.countries, s.countries === 1 ? "country" : "countries") : undefined} />
+        <KpiTile label={t("Total suppliers")} value={s?.total} hint={s ? t("Across {0} {1}", s.countries, s.countries === 1 ? t("country") : t("countries")) : undefined} />
         <KpiTile label={t("Active")} value={s?.active} hintTone="success" hint={s ? t("Can take new contracts") : undefined} />
         <KpiTile label={t("Inactive")} value={s?.inactive} hint={s ? t("Kept on record, no new contracts") : undefined} />
         <KpiTile

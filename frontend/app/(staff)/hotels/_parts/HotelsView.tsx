@@ -416,7 +416,7 @@ function HotelCard({ hotel: h, onOpen, menu }: { hotel: Hotel; onOpen: () => voi
           </span>
         </div>
         <p className="text-xs text-muted">
-          {t("{0} · {1} rates in force", h.room_type_count === 1 ? t("1 room type") : `${h.room_type_count} room types`, h.rates_in_force)}
+          {t("{0} · {1} rates in force", h.room_type_count === 1 ? t("1 room type") : t("{0} room types", h.room_type_count), h.rates_in_force)}
         </p>
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-line2 pt-2">
           <SupplierStatusBadge status={h.status} />

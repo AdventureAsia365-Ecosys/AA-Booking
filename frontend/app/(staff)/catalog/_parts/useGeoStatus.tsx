@@ -28,7 +28,7 @@ export function useGeoStatus() {
     },
     onSuccess: (_res, { t }) => {
       qc.invalidateQueries({ queryKey: ["geo"] });
-      toast.success(tr("{0} {1} in Booking.", t.name, t.activate ? "activated" : "deactivated"));
+      toast.success(tr("{0} {1} in Booking.", t.name, t.activate ? tr("activated") : tr("deactivated")));
       setTarget(null);
     },
   });
