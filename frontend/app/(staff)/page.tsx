@@ -44,6 +44,9 @@ import {
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 import { casePartyLabel, casePartySub } from "@/ui/booking/caseFacts";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 /** Worked on by staff, not yet sent to the customer (phase "Inquiry" after triage + "Proposal" building). */
 const IN_PROGRESS: TripCaseStatus[] = ["discovery", "building"];
@@ -55,11 +58,12 @@ const EMPTY_CASES = "Partner agency bookings appear here.";
 const casesHref = (statuses: readonly string[]) => `/cases?status=${encodeURIComponent(statuses.join(","))}`;
 
 export default function DashboardPage() {
+  const tr = useT(MSG);
   const staff = useStaff();
   const { name } = staffDisplay(staff);
   const canCases = canSeePage(staff.role, "/cases");
   return (
-    <PageFrame title="Dashboard" description={`Welcome back, ${name}. Here is what needs your attention today.`}>
+    <PageFrame title={tr("Dashboard")} description={tr("Welcome back, {0}. Here is what needs your attention today.", name)}>
       {canCases ? <SalesDashboard role={staff.role} /> : <CatalogDashboard />}
     </PageFrame>
   );
@@ -71,20 +75,22 @@ function isForbidden(e: unknown): boolean {
 
 /** Permission-denied state (the API refused; the shell already hides pages a role cannot open). */
 function NoAccess({ what }: { what: string }) {
+  const tr = useT(MSG);
   return (
     <EmptyState
       icon={<Lock size={28} />}
-      title="You do not have access to this"
-      description={`Your Booking role cannot see ${what}. Ask a Booking admin if you need it.`}
+      title={tr("You do not have access to this")}
+      description={tr("Your Booking role cannot see {0}. Ask a Booking admin if you need it.", what)}
     />
   );
 }
 
 function TileLink({ href, label, children }: { href: string; label: string; children: React.ReactNode }) {
+  const tx = useTx();
   return (
     <Link
       href={href}
-      aria-label={label}
+      aria-label={tx(label)}
       className="block min-w-0 rounded-lg outline-none [&>div]:h-full transition hover:-translate-y-px hover:shadow-kit-md focus-visible:ring-2 focus-visible:ring-accent-border"
     >
       {children}
@@ -95,6 +101,7 @@ function TileLink({ href, label, children }: { href: string; label: string; chil
 /** AA-682 S1: supplier bookings waiting for the supplier's answer (requested), the late ones (past the
  *  supplier_answer_days setting) and those not yet requested. Opens the cases in Supplier confirming. */
 function SupplierAnswers() {
+  const tr = useT(MSG);
   const canOps = useCan("ops.read");
   const q = useQuery({
     queryKey: ["supplier-bookings", "summary"],
@@ -106,20 +113,20 @@ function SupplierAnswers() {
   const d = q.data;
   return (
     <div className="aa-kpi-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-      <TileLink href={casesHref(["confirmed", "supplier_confirming"])} label="Supplier answers pending: open the cases booking suppliers">
+      <TileLink href={casesHref(["confirmed", "supplier_confirming"])} label={tr("Supplier answers pending: open the cases booking suppliers")}>
         <KpiTile
-          label="Supplier answers pending"
+          label={tr("Supplier answers pending")}
           icon={<Hotel size={16} />}
           value={d ? d.requested : q.isError ? null : undefined}
           hint={
             q.isError
-              ? "Could not load supplier bookings"
+              ? tr("Could not load supplier bookings")
               : d
                 ? d.overdue > 0
-                  ? `${d.overdue} waiting more than ${d.answer_days} days`
+                  ? tr("{0} waiting more than {1} days", d.overdue, d.answer_days)
                   : d.pending > 0
-                    ? `${d.pending} still to request`
-                    : "Nothing late"
+                    ? tr("{0} still to request", d.pending)
+                    : tr("Nothing late")
                 : undefined
           }
           hintTone={d && d.overdue > 0 ? "danger" : d && d.pending > 0 ? "warning" : "neutral"}
@@ -130,6 +137,8 @@ function SupplierAnswers() {
 }
 
 function SalesDashboard({ role }: { role: string }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const isPhone = useIsPhone();
   const isAdmin = role === "admin";
@@ -150,7 +159,7 @@ function SalesDashboard({ role }: { role: string }) {
   if (isForbidden(summary.error) && isForbidden(recent.error)) {
     return (
       <Section>
-        <NoAccess what="trip cases" />
+        <NoAccess what={tr("trip cases")} />
       </Section>
     );
   }
@@ -164,48 +173,48 @@ function SalesDashboard({ role }: { role: string }) {
     <>
       <div className="aa-kpi-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {/* AA-1046: no "New inquiries" tile: TripPlanner inquiries were the B2C intake, retired with it. */}
-        <TileLink href={casesHref(IN_PROGRESS)} label="In progress: open the cases being worked on">
+        <TileLink href={casesHref(IN_PROGRESS)} label={tr("In progress: open the cases being worked on")}>
           <KpiTile
-            label="In progress"
+            label={tr("In progress")}
             icon={<Hammer size={16} />}
             value={v(inProgress)}
-            hint={s ? "In discovery or building" : undefined}
+            hint={s ? tr("In discovery or building") : undefined}
           />
         </TileLink>
-        <TileLink href={casesHref(["proposal_sent"])} label="Proposals sent: open the cases waiting for the customer">
+        <TileLink href={casesHref(["proposal_sent"])} label={tr("Proposals sent: open the cases waiting for the customer")}>
           <KpiTile
-            label="Proposals sent"
+            label={tr("Proposals sent")}
             icon={<Send size={16} />}
             value={v((x) => x.proposals_awaiting)}
-            hint={s ? "Waiting for the customer" : undefined}
+            hint={s ? tr("Waiting for the customer") : undefined}
             hintTone={s && s.proposals_awaiting > 0 ? "warning" : "neutral"}
           />
         </TileLink>
         {isAdmin ? (
-          <TileLink href="/staff" label="Inactive staff: open staff">
+          <TileLink href="/staff" label={tr("Inactive staff: open staff")}>
             <KpiTile
-              label="Inactive staff"
+              label={tr("Inactive staff")}
               icon={<UserPlus size={16} />}
               value={pendingCount ?? (pending.isError ? null : undefined)}
               hint={
                 pending.isError
-                  ? "Could not load staff"
+                  ? tr("Could not load staff")
                   : pendingCount === undefined
                     ? undefined
                     : pendingCount > 0
-                      ? "Not active: never signed in or deactivated"
-                      : "Nobody waiting"
+                      ? tr("Not active: never signed in or deactivated")
+                      : tr("Nobody waiting")
               }
               hintTone={pendingCount ? "warning" : pending.isError ? "danger" : "neutral"}
             />
           </TileLink>
         ) : (
-          <TileLink href="/cases?tab=mine" label="My open cases: open my cases">
+          <TileLink href="/cases?tab=mine" label={tr("My open cases: open my cases")}>
             <KpiTile
-              label="My open cases"
+              label={tr("My open cases")}
               icon={<UserCheck size={16} />}
               value={v((x) => x.mine)}
-              hint={s ? "Open cases with you on them" : undefined}
+              hint={s ? tr("Open cases with you on them") : undefined}
             />
           </TileLink>
         )}
@@ -213,7 +222,7 @@ function SalesDashboard({ role }: { role: string }) {
       {summary.isError && !isForbidden(summary.error) && (
         <Section>
           <ErrorState
-            message={`The dashboard counts could not load. ${(summary.error as Error).message}`}
+            message={tr("The dashboard counts could not load. {0}", (summary.error as Error).message)}
             onRetry={() => summary.refetch()}
           />
         </Section>
@@ -221,20 +230,20 @@ function SalesDashboard({ role }: { role: string }) {
       <SupplierAnswers />
 
       <Section
-        title="Recent trip cases"
-        description="The five cases updated most recently."
+        title={tr("Recent trip cases")}
+        description={tr("The five cases updated most recently.")}
         padded={false}
         actions={
           <Link
             href="/cases"
             className="inline-flex items-center gap-1 rounded-full border border-accent-border px-3.5 py-1.5 text-xs font-semibold text-accent-deep hover:bg-accent-tint"
           >
-            View all cases <ArrowRight size={13} />
+            {tr("View all cases")} <ArrowRight size={13} />
           </Link>
         }
       >
         {isForbidden(recent.error) ? (
-          <NoAccess what="trip cases" />
+          <NoAccess what={tr("trip cases")} />
         ) : isPhone ? (
           <RecentCards
             items={recent.data?.items}
@@ -255,8 +264,8 @@ function SalesDashboard({ role }: { role: string }) {
               onRetry={() => recent.refetch()}
               pageSize={5}
               pageSizeOptions={[5]}
-              emptyTitle="No trip cases yet"
-              emptyDescription={EMPTY_CASES}
+              emptyTitle={tr("No trip cases yet")}
+              emptyDescription={tx(EMPTY_CASES)}
               onRowClick={(r) => router.push(`/cases/${encodeURIComponent(r.code)}`)}
               tableMinWidth={760}
             />
@@ -311,10 +320,11 @@ function salesOf(c: TripCaseListItem): string {
 }
 
 function TripText({ item }: { item: TripCaseListItem }) {
+  const tr = useT(MSG);
   return (
     <span className="text-[13px] text-body">
-      {item.trip_title ?? "Custom trip"}
-      {item.leg_count > 1 && <span className="text-muted"> +{item.leg_count - 1} legs</span>}
+      {item.trip_title ?? tr("Custom trip")}
+      {item.leg_count > 1 && <span className="text-muted"> {tr("+{0} legs", item.leg_count - 1)}</span>}
     </span>
   );
 }
@@ -331,9 +341,11 @@ function RecentCards({
   error: string | null;
   onRetry: () => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   if (loading) {
     return (
-      <ul aria-busy="true" aria-label="Loading recent trip cases">
+      <ul aria-busy="true" aria-label={tr("Loading recent trip cases")}>
         {[0, 1, 2].map((i) => (
           <li key={i} className="flex flex-col gap-2 border-b border-line2 px-4 py-3 last:border-b-0">
             <SkeletonBar w="40%" h={12} />
@@ -343,10 +355,10 @@ function RecentCards({
       </ul>
     );
   }
-  if (error) return <ErrorState message={error} onRetry={onRetry} />;
+  if (error) return <ErrorState message={tx(error)} onRetry={onRetry} />;
   if (!items?.length) {
     return (
-      <EmptyState title="No trip cases yet" description={EMPTY_CASES} />
+      <EmptyState title={tr("No trip cases yet")} description={tx(EMPTY_CASES)} />
     );
   }
   return (
@@ -358,10 +370,10 @@ function RecentCards({
               <Code>{c.code}</Code>
               <TripCaseStatusBadge status={c.status} />
             </span>
-            <span className="truncate text-[13.5px] font-semibold text-ink">{casePartyLabel(c)}</span>
+            <span className="truncate text-[13.5px] font-semibold text-ink">{tx(casePartyLabel(c))}</span>
             <TripText item={c} />
             <span className="flex items-center justify-between gap-2 text-xs text-muted">
-              <span className="truncate">{salesOf(c)}</span>
+              <span className="truncate">{tx(salesOf(c))}</span>
               <DateText value={c.updated_at} relative />
             </span>
           </Link>
@@ -373,6 +385,8 @@ function RecentCards({
 
 /** The 13 statuses grouped into the 4 phases of the case stepper (Nghiệp S236 decision 4), plus Cancelled. */
 function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary | undefined; loading: boolean; failed: boolean }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const phases = STATUS_PHASES.map((p) => ({
     ...p,
     count: summary ? p.statuses.reduce((t, k) => t + (summary.by_status[k] ?? 0), 0) : 0,
@@ -381,14 +395,13 @@ function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary |
   const max = Math.max(1, ...phases.map((p) => p.count), cancelled);
   return (
     <Section
-      title="Pipeline by phase"
-      description="All trip cases, grouped like the case stepper."
+      title={tr("Pipeline by phase")}
+      description={tr("All trip cases, grouped like the case stepper.")}
       actions={
         summary ? (
           <span className="text-right text-xs text-muted">
-            <span className="font-semibold text-ink">{summary.open}</span> open ·{" "}
-            <span className="font-semibold text-ink">{summary.mom_delta.created_this_month}</span> opened so far this
-            month · {summary.mom_delta.created_last_month} in all of last month
+            <span className="font-semibold text-ink">{summary.open}</span> {tr("open ·")}
+            <span className="font-semibold text-ink">{summary.mom_delta.created_this_month}</span> {tr("opened so far this month · {0} in all of last month", summary.mom_delta.created_last_month)}
           </span>
         ) : undefined
       }
@@ -400,13 +413,13 @@ function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary |
           ))}
         </div>
       ) : failed || !summary ? (
-        <p className="text-[13px] text-muted">Counts unavailable.</p>
+        <p className="text-[13px] text-muted">{tr("Counts unavailable.")}</p>
       ) : (
         <ul className="flex flex-col gap-3">
-          {[...phases, { key: "cancelled", label: "Cancelled", statuses: ["cancelled" as TripCaseStatus], count: cancelled }].map((p) => (
+          {[...phases, { key: "cancelled", label: tr("Cancelled"), statuses: ["cancelled" as TripCaseStatus], count: cancelled }].map((p) => (
             <li key={p.key}>
               <Link href={casesHref(p.statuses)} className="group grid grid-cols-[96px_minmax(0,1fr)_40px] items-center gap-3">
-                <span className="text-[13px] text-body group-hover:text-ink">{p.label}</span>
+                <span className="text-[13px] text-body group-hover:text-ink">{tx(p.label)}</span>
                 <span className="h-2 overflow-hidden rounded-full bg-line2">
                   <span
                     className={`block h-full rounded-full ${p.key === "cancelled" ? "bg-muted2" : "bg-accent"}`}
@@ -425,6 +438,8 @@ function PipelineCard({ summary, loading, failed }: { summary: TripCaseSummary |
 
 /** "My queue" (spec §3): open cases assigned to the signed-in staff member, most recently touched first. */
 function MyQueue() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const q = useQuery({
     queryKey: ["trip-cases", "my-queue"],
     queryFn: () => api.tripCases.list({ assignee: "me", status: OPEN_STATUSES, sort: "-updated_at", limit: 5 }),
@@ -432,12 +447,12 @@ function MyQueue() {
   });
   return (
     <Section
-      title="My queue"
-      description="Open cases assigned to you."
+      title={tr("My queue")}
+      description={tr("Open cases assigned to you.")}
       padded={false}
       actions={
         <Link href="/cases?tab=mine" className="text-xs font-semibold text-accent-deep hover:underline">
-          All my cases
+          {tr("All my cases")}
         </Link>
       }
     >
@@ -448,11 +463,11 @@ function MyQueue() {
           ))}
         </div>
       ) : isForbidden(q.error) ? (
-        <NoAccess what="trip cases" />
+        <NoAccess what={tr("trip cases")} />
       ) : q.isError ? (
-        <ErrorState message={(q.error as Error).message} onRetry={() => q.refetch()} />
+        <ErrorState message={tx((q.error as Error).message)} onRetry={() => q.refetch()} />
       ) : !q.data?.items.length ? (
-        <EmptyState title="Nothing assigned to you" description="Cases you are assigned to appear here." />
+        <EmptyState title={tr("Nothing assigned to you")} description={tr("Cases you are assigned to appear here.")} />
       ) : (
         <ul>
           {q.data.items.map((c) => (
@@ -463,7 +478,7 @@ function MyQueue() {
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <Code>{c.code}</Code>
-                  <span className="truncate text-[13px] text-ink">{casePartyLabel(c)}</span>
+                  <span className="truncate text-[13px] text-ink">{tx(casePartyLabel(c))}</span>
                 </span>
                 <TripCaseStatusBadge status={c.status} />
               </Link>
@@ -476,14 +491,14 @@ function MyQueue() {
 }
 
 function CatalogDashboard() {
+  const tr = useT(MSG);
   return (
-    <Section title="Catalog" description="Tours, destinations and countries are written in CIS and read here.">
+    <Section title={tr("Catalog")} description={tr("Tours, destinations and countries are written in CIS and read here.")}>
       <div className="flex flex-col gap-3 text-[13px] text-body">
         <p>
-          Your role works on catalog content. Booking shows that content read-only; the catalog pages open in
-          wave 2. Edit tours, places and photos in the CIS admin.
+          {tr("Your role works on catalog content. Booking shows that content read-only; the catalog pages open in wave 2. Edit tours, places and photos in the CIS admin.")}
         </p>
-        <ManagedInCisLink label="Open CIS admin" />
+        <ManagedInCisLink label={tr("Open CIS admin")} />
       </div>
     </Section>
   );

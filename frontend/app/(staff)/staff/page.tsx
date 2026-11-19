@@ -21,8 +21,13 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { useStaffActions } from "./_parts/useStaffActions";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 export default function StaffPage() {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const q = useQuery({ queryKey: ["staff", "list"], queryFn: () => api.staff.list() });
   const actions = useStaffActions();
@@ -50,7 +55,7 @@ export default function StaffPage() {
     ...COLUMNS,
     {
       id: "actions",
-      header: "Actions",
+      header: t("Actions"),
       enableSorting: false,
       cell: ({ row }) => {
         const s = row.original;
@@ -58,11 +63,11 @@ export default function StaffPage() {
         const managed = actions.roleManagedInCis(s);
         return (
           <span className="inline-flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-            <IconAction label="View profile" onClick={() => router.push(`/staff/${encodeURIComponent(s.cis_user_id)}`)}>
+            <IconAction label={t("View profile")} onClick={() => router.push(`/staff/${encodeURIComponent(s.cis_user_id)}`)}>
               <Eye size={15} />
             </IconAction>
             <IconAction
-              label={self ? "You cannot change your own role" : managed ? "Role is set in CIS → Platform → Staff" : "Change role"}
+              label={self ? t("You cannot change your own role") : managed ? t("Role is set in CIS → Platform → Staff") : t("Change role")}
               disabled={self || managed}
               onClick={() => actions.changeRole(s)}
             >
@@ -72,18 +77,18 @@ export default function StaffPage() {
               href={`${CIS_STAFF_URL}/${encodeURIComponent(s.cis_user_id)}`}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Sign-in & invites in CIS for ${s.name ?? s.email ?? s.cis_user_id}`}
-              title="Sign-in & invites in CIS ↗ (no password exists in Booking)"
+              aria-label={t("Sign-in & invites in CIS for {0}", s.name ?? s.email ?? s.cis_user_id)}
+              title={t("Sign-in & invites in CIS ↗ (no password exists in Booking)")}
               className="grid h-8 w-8 place-items-center rounded-md border border-line bg-card text-muted hover:border-accent-border hover:text-ink"
             >
               <KeyRound size={15} />
             </a>
             {s.active ? (
-              <IconAction label={self ? "You cannot deactivate yourself" : "Deactivate"} danger disabled={self} onClick={() => actions.deactivate(s)}>
+              <IconAction label={self ? t("You cannot deactivate yourself") : t("Deactivate")} danger disabled={self} onClick={() => actions.deactivate(s)}>
                 <Ban size={15} />
               </IconAction>
             ) : (
-              <IconAction label="Activate" success onClick={() => actions.activate(s)}>
+              <IconAction label={t("Activate")} success onClick={() => actions.activate(s)}>
                 <CheckCircle2 size={15} />
               </IconAction>
             )}
@@ -95,30 +100,29 @@ export default function StaffPage() {
 
   return (
     <PageFrame
-      title="Staff"
-      description="Booking profiles of CIS staff accounts: their Booking role and whether they can use Booking."
-      actions={<ManagedInCisLink path={CIS_STAFF_PATH} label="Manage staff & invites in CIS" />}
+      title={t("Staff")}
+      description={t("Booking profiles of CIS staff accounts: their Booking role and whether they can use Booking.")}
+      actions={<ManagedInCisLink path={CIS_STAFF_PATH} label={t("Manage staff & invites in CIS")} />}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
         <span>
-          Staff accounts, invites and Booking roles are managed in CIS → Platform → Staff (company e-mail sign-in, no
-          password). A person appears here after their first sign-in to Booking, or when a profile is set up for them.
+          {t("Staff accounts, invites and Booking roles are managed in CIS → Platform → Staff (company e-mail sign-in, no password). A person appears here after their first sign-in to Booking, or when a profile is set up for them.")}
         </span>
-        <ManagedInCisLink path={CIS_STAFF_PATH} label="Open CIS → Platform → Staff" />
+        <ManagedInCisLink path={CIS_STAFF_PATH} label={t("Open CIS → Platform → Staff")} />
       </div>
       <div className="aa-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <KpiTile label="Total staff" value={value(items.length)} />
-        <KpiTile label="Active" value={value(items.length - pending)} />
-        <KpiTile label="Inactive" value={value(pending)} hint={pending > 0 ? "Not active: never signed in or deactivated" : undefined} hintTone="warning" />
+        <KpiTile label={t("Total staff")} value={value(items.length)} />
+        <KpiTile label={t("Active")} value={value(items.length - pending)} />
+        <KpiTile label={t("Inactive")} value={value(pending)} hint={pending > 0 ? t("Not active: never signed in or deactivated") : undefined} hintTone="warning" />
       </div>
       <Section>
         <DataTable<StaffProfile>
           filters={
             <FilterBar
-              search={{ placeholder: "Search name or e-mail" }}
+              search={{ placeholder: t("Search name or e-mail") }}
               selects={[
-                { key: "status", label: "Status", allLabel: "All statuses", options: [{ value: "active", label: "Active" }, { value: "inactive", label: "Pending / inactive" }] },
-                { key: "role", label: "Role", allLabel: "All roles", options: STAFF_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] })) },
+                { key: "status", label: t("Status"), allLabel: t("All statuses"), options: [{ value: "active", label: t("Active") }, { value: "inactive", label: t("Pending / inactive") }] },
+                { key: "role", label: t("Role"), allLabel: t("All roles"), options: STAFF_ROLES.map((r) => ({ value: r, label: tx(ROLE_LABEL[r]) })) },
               ]}
             />
           }
@@ -133,9 +137,9 @@ export default function StaffPage() {
           pageSizeOptions={[25, 50, 100]}
           enableCsv
           csvFilename="staff.csv"
-          emptyTitle={filtered ? "No staff match" : "No staff profiles yet"}
+          emptyTitle={filtered ? t("No staff match") : t("No staff profiles yet")}
           emptyDescription={
-            filtered ? "Change the search or the filters." : "A profile is created the first time a CIS staff member signs in to Booking."
+            filtered ? t("Change the search or the filters.") : t("A profile is created the first time a CIS staff member signs in to Booking.")
           }
           onRowClick={(r) => router.push(`/staff/${encodeURIComponent(r.cis_user_id)}`)}
           tableMinWidth={900}
@@ -161,10 +165,11 @@ function IconAction({
   success?: boolean;
   disabled?: boolean;
 }) {
+  const tx = useTx();
   // Deactivate / Activate keep their red / green icon at rest (the kit button stays neutral; the icon carries the tone).
   const iconTone = danger ? "text-danger" : success ? "text-success" : undefined;
   return (
-    <IconButton label={label} tone={danger ? "danger" : "neutral"} disabled={disabled} onClick={onClick}>
+    <IconButton label={tx(label)} tone={danger ? "danger" : "neutral"} disabled={disabled} onClick={onClick}>
       {iconTone ? <span className={`inline-grid ${iconTone}`}>{children}</span> : children}
     </IconButton>
   );

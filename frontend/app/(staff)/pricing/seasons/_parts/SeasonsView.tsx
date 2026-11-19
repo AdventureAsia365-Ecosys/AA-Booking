@@ -33,16 +33,13 @@ import {
   Drawer,
   Field,
   FormDrawer,
-  I18nProvider,
   Input,
   KpiTile,
-  LangSwitch,
   PageFrame,
   Pill,
   Section,
   Select,
   formatDay,
-  langStore,
   useCan,
   useStaff,
   useT,
@@ -545,7 +542,6 @@ function Seasons() {
       description={t("description")}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <LangSwitch ariaLabel={t("language")} />
           {canWrite && (
             <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
               <Plus size={13} /> {t("newCalendar")}
@@ -593,11 +589,7 @@ function Seasons() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function SeasonsView() {
-  return (
-    <I18nProvider store={langStore}>
-      <Seasons />
-    </I18nProvider>
-  );
+  return <Seasons />;
 }

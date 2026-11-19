@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { canSeePage } from "@/lib/rbac";
 import { hrefPath, navActive, type NavMatch } from "./navMatch";
+import "./nav.messages";
 
 export type Wave = 1 | 2 | 3;
 

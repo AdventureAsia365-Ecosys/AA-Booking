@@ -37,12 +37,9 @@ import {
   ConfirmDialog,
   DataTable,
   DateText,
-  I18nProvider,
-  LangSwitch,
   PageFrame,
   Pill,
   Section,
-  langStore,
   useCan,
   useFormat,
   useT,
@@ -271,7 +268,6 @@ function PageActions({ canWrite, onNew }: { canWrite: boolean; onNew: (d: "rule"
   const t = useT(R);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <LangSwitch ariaLabel={t("language")} />
       {canWrite && (
         <>
           <Button variant="secondary" size="sm" onClick={() => onNew("fx")}>
@@ -386,11 +382,7 @@ function RulesAndFx() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function PricingRulesView() {
-  return (
-    <I18nProvider store={langStore}>
-      <RulesAndFx />
-    </I18nProvider>
-  );
+  return <RulesAndFx />;
 }

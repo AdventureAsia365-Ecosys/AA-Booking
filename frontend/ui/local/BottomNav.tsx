@@ -11,6 +11,9 @@ import { K } from "../core/tokens";
 import { navActive } from "./nav";
 import { useStaff } from "./StaffContext";
 import { canSeePage } from "@/lib/rbac";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./BottomNav.messages";
 
 const ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutGrid },
@@ -20,12 +23,14 @@ const ITEMS = [
 ];
 
 export function BottomNav({ onOpenMore }: { onOpenMore: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const pathname = usePathname();
   const { role } = useStaff();
 
   return (
-    <nav className="aa-bottom-nav" data-testid="admin-bottom-nav" aria-label="Primary (mobile)">
+    <nav className="aa-bottom-nav" data-testid="admin-bottom-nav" aria-label={t("Primary (mobile)")}>
       {ITEMS.filter((it) => canSeePage(role, it.href)).map((it) => {
         const Icon = it.icon;
         const active = navActive({ href: it.href }, pathname);
@@ -34,17 +39,17 @@ export function BottomNav({ onOpenMore }: { onOpenMore: () => void }) {
             key={it.href}
             onClick={() => router.push(it.href)}
             aria-current={active ? "page" : undefined}
-            aria-label={it.label}
+            aria-label={tx(it.label)}
             style={bnBtn(active)}
           >
             <Icon size={20} />
-            <span style={{ fontSize: 10.5, fontWeight: active ? 600 : 500 }}>{it.label}</span>
+            <span style={{ fontSize: 10.5, fontWeight: active ? 600 : 500 }}>{tx(it.label)}</span>
           </button>
         );
       })}
-      <button onClick={onOpenMore} aria-label="More navigation" style={bnBtn(false)}>
+      <button onClick={onOpenMore} aria-label={t("More navigation")} style={bnBtn(false)}>
         <Menu size={20} />
-        <span style={{ fontSize: 10.5, fontWeight: 500 }}>More</span>
+        <span style={{ fontSize: 10.5, fontWeight: 500 }}>{t("More")}</span>
       </button>
     </nav>
   );

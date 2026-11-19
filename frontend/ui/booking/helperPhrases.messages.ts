@@ -1,0 +1,106 @@
+// ui/booking/helperPhrases.messages.ts
+// AA-1128 (B5): the Vietnamese of the text the import-free helpers of ui/booking build from numbers (caseFacts.ts,
+// tripPlans.ts, earlyBooking.ts, departureBoard.ts, PricePanel.tsx, app/(staff)/_parts/supply.tsx), and the English
+// defaults and error texts of shared parts that are set outside a component. The helpers stay English and import-free
+// (their node tests load them with type stripping); a page shows their result with `tx()`, and the phrasebook
+// (ui/local/phrasebook.ts) matches it exactly or against these patterns: each {n} stands for a number, an amount or a
+// currency code.
+import { defineMessages } from "../core/i18n";
+import { phrasebook } from "../local/phrasebook";
+
+export const MSG = phrasebook(
+  defineMessages(
+    {
+      "{0} adults, {1} children": (...a: unknown[]) => `${a[0]} adults, ${a[1]} children`,
+      "{0} adults, {1} child": (...a: unknown[]) => `${a[0]} adults, ${a[1]} child`,
+      "{0} adult, {1} children": (...a: unknown[]) => `${a[0]} adult, ${a[1]} children`,
+      "{0} adult, {1} child": (...a: unknown[]) => `${a[0]} adult, ${a[1]} child`,
+      "{0} adults": (...a: unknown[]) => `${a[0]} adults`,
+      "{0} adult": (...a: unknown[]) => `${a[0]} adult`,
+      "{0} travellers": (...a: unknown[]) => `${a[0]} travellers`,
+      "{0} traveller": (...a: unknown[]) => `${a[0]} traveller`,
+      "{0} days / {1} nights": (...a: unknown[]) => `${a[0]} days / ${a[1]} nights`,
+      "{0} days / {1} night": (...a: unknown[]) => `${a[0]} days / ${a[1]} night`,
+      "{0}+ pax": (...a: unknown[]) => `${a[0]}+ pax`,
+      "{0}–{1} pax": (...a: unknown[]) => `${a[0]}–${a[1]} pax`,
+      "{0} pax": (...a: unknown[]) => `${a[0]} pax`,
+      "from {0}": (...a: unknown[]) => `from ${a[0]}`,
+      "up to {0}": (...a: unknown[]) => `up to ${a[0]}`,
+      "{0} per person": (...a: unknown[]) => `${a[0]} per person`,
+      "{0} of {1} checks resolved": (...a: unknown[]) => `${a[0]} of ${a[1]} checks resolved`,
+      "{0} per traveller": (...a: unknown[]) => `${a[0]} per traveller`,
+      "early {0} pts": (...a: unknown[]) => `early ${a[0]} pts`,
+      "from {0} d": (...a: unknown[]) => `from ${a[0]} d`,
+      "Missing FX rate: {0}": (...a: unknown[]) => `Missing FX rate: ${a[0]}`,
+      Content: "Content",
+      "Saved filters": "Saved filters",
+      "The file could not be read.": "The file could not be read.",
+      "This file is not a photo the browser can read. Use JPEG, PNG or WebP.":
+        "This file is not a photo the browser can read. Use JPEG, PNG or WebP.",
+      "The photo is too large even after resizing. Use a smaller photo.":
+        "The photo is too large even after resizing. Use a smaller photo.",
+      "Something went wrong.": "Something went wrong.",
+      Save: "Save",
+      "this page": "this page",
+      "Invoice overpaid": "Invoice overpaid",
+      "Add at least one net cost line to see the selling price.": "Add at least one net cost line to see the selling price.",
+      "Pick the first day.": "Pick the first day.",
+      "Pick the last day.": "Pick the last day.",
+      "Ends before it starts.": "Ends before it starts.",
+      "Below the minimum.": "Below the minimum.",
+      "An amount above 0, up to 2 decimals.": "An amount above 0, up to 2 decimals.",
+      "An amount, up to 2 decimals.": "An amount, up to 2 decimals.",
+      "A net cost above 0, or enter the price.": "A net cost above 0, or enter the price.",
+      "Enter a price, or a net cost to price it from.": "Enter a price, or a net cost to price it from.",
+      "At most 80 characters.": "At most 80 characters.",
+      "Overlaps row {0}: same channel and currency, overlapping dates and pax.": (...a: unknown[]) =>
+        `Overlaps row ${a[0]}: same channel and currency, overlapping dates and pax.`,
+    },
+    {
+      "{0} adults, {1} children": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
+      "{0} adults, {1} child": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
+      "{0} adult, {1} children": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
+      "{0} adult, {1} child": (...a: unknown[]) => `${a[0]} người lớn, ${a[1]} trẻ em`,
+      "{0} adults": (...a: unknown[]) => `${a[0]} người lớn`,
+      "{0} adult": (...a: unknown[]) => `${a[0]} người lớn`,
+      "{0} travellers": (...a: unknown[]) => `${a[0]} khách`,
+      "{0} traveller": (...a: unknown[]) => `${a[0]} khách`,
+      "{0} days / {1} nights": (...a: unknown[]) => `${a[0]} ngày / ${a[1]} đêm`,
+      "{0} days / {1} night": (...a: unknown[]) => `${a[0]} ngày / ${a[1]} đêm`,
+      "{0}+ pax": (...a: unknown[]) => `${a[0]}+ khách`,
+      "{0}–{1} pax": (...a: unknown[]) => `${a[0]}–${a[1]} khách`,
+      "{0} pax": (...a: unknown[]) => `${a[0]} khách`,
+      "from {0}": (...a: unknown[]) => `từ ${a[0]}`,
+      "up to {0}": (...a: unknown[]) => `tới ${a[0]}`,
+      "{0} per person": (...a: unknown[]) => `${a[0]} mỗi người`,
+      "{0} of {1} checks resolved": (...a: unknown[]) => `Đã xử lý ${a[0]} trên ${a[1]} mục kiểm tra`,
+      "{0} per traveller": (...a: unknown[]) => `${a[0]} mỗi khách`,
+      "early {0} pts": (...a: unknown[]) => `đặt sớm ${a[0]} điểm`,
+      "from {0} d": (...a: unknown[]) => `từ ${a[0]} ngày`,
+      "Missing FX rate: {0}": (...a: unknown[]) => `Thiếu tỷ giá: ${a[0]}`,
+      Content: "Nội dung",
+      "Saved filters": "Bộ lọc đã lưu",
+      "The file could not be read.": "Không đọc được tệp.",
+      "This file is not a photo the browser can read. Use JPEG, PNG or WebP.":
+        "Tệp này không phải ảnh mà trình duyệt đọc được. Hãy dùng JPEG, PNG hoặc WebP.",
+      "The photo is too large even after resizing. Use a smaller photo.":
+        "Ảnh vẫn quá lớn sau khi thu nhỏ. Hãy dùng ảnh nhỏ hơn.",
+      "Something went wrong.": "Đã có lỗi xảy ra.",
+      Save: "Lưu",
+      "this page": "trang này",
+      "Invoice overpaid": "Hoá đơn thanh toán thừa",
+      "Add at least one net cost line to see the selling price.": "Hãy thêm ít nhất một dòng chi phí net để xem giá bán.",
+      "Pick the first day.": "Hãy chọn ngày đầu.",
+      "Pick the last day.": "Hãy chọn ngày cuối.",
+      "Ends before it starts.": "Kết thúc trước khi bắt đầu.",
+      "Below the minimum.": "Dưới mức tối thiểu.",
+      "An amount above 0, up to 2 decimals.": "Số tiền lớn hơn 0, tối đa 2 chữ số thập phân.",
+      "An amount, up to 2 decimals.": "Một số tiền, tối đa 2 chữ số thập phân.",
+      "A net cost above 0, or enter the price.": "Chi phí net lớn hơn 0, hoặc nhập giá.",
+      "Enter a price, or a net cost to price it from.": "Hãy nhập giá, hoặc chi phí net để tính giá từ đó.",
+      "At most 80 characters.": "Tối đa 80 ký tự.",
+      "Overlaps row {0}: same channel and currency, overlapping dates and pax.": (...a: unknown[]) =>
+        `Trùng với dòng ${a[0]}: cùng kênh và tiền tệ, trùng ngày và số khách.`,
+    },
+  ),
+);

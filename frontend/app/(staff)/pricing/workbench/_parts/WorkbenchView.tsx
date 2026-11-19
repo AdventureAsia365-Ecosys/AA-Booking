@@ -27,15 +27,12 @@ import {
   Button,
   DataTable,
   FilterBar,
-  I18nProvider,
   KpiTile,
-  LangSwitch,
   LinkButton,
   Money,
   PageFrame,
   Pill,
   Section,
-  langStore,
   useCan,
   useT,
   useToast,
@@ -274,7 +271,6 @@ function Workbench() {
       description={t("description")}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <LangSwitch ariaLabel={t("language")} />
           <Button variant="secondary" size="sm" onClick={downloadWorkbook} disabled={downloading || !items.length}>
             <Download size={13} /> {t("downloadWorkbook")}
           </Button>
@@ -421,11 +417,7 @@ function Workbench() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function WorkbenchView() {
-  return (
-    <I18nProvider store={langStore}>
-      <Workbench />
-    </I18nProvider>
-  );
+  return <Workbench />;
 }

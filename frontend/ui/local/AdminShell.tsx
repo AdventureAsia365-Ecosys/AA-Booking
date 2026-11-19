@@ -7,6 +7,10 @@
 // AA-1008 (S6e, root ADR 0016 decision 1): the frame is the kit core ShellFrame (layout, the phone drawer below 768px
 // with its backdrop and Esc, the ⌘K palette state); this file is the Booking configuration of it. Every page renders
 // its own PageFrame (`main="page"`), the "no access" state too.
+// AA-1128 (B5, S283 UI audit): the UI language. The shell renders the ONE kit I18nProvider of the staff app (store
+// ui/local/lang.ts, cookie `bk_lang`, English by default) around the frame and every page, and the Topbar carries the
+// one EN | VI switch. The staff layout reads the cookie and passes `initialLang`, so a Vietnamese user gets Vietnamese
+// HTML from the server (no English flash, no hydration mismatch).
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -20,8 +24,23 @@ import { PageFrame } from "../booking/PageFrame";
 import { ShellFrame } from "../core/ShellFrame";
 import { useStaff } from "./StaffContext";
 import { canSeePage } from "@/lib/rbac";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./AdminShell.messages";
+import { I18nProvider } from "../core/useI18n";
+import type { Lang } from "../core/i18n";
+import { langStore } from "./lang";
+import "./bookingPhrases";
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({ children, initialLang }: { children: React.ReactNode; initialLang?: Lang }) {
+  return (
+    <I18nProvider store={langStore} initialLang={initialLang}>
+      <ShellBody>{children}</ShellBody>
+    </I18nProvider>
+  );
+}
+
+function ShellBody({ children }: { children: React.ReactNode }) {
+  const t = useT(MSG);
   const pathname = usePathname();
   const { role } = useStaff();
   const allowed = canSeePage(role, pathname);
@@ -42,11 +61,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <PageFrame>
           <EmptyState
             icon={<ShieldOff size={30} />}
-            title="You do not have access to this page"
-            description="Your Booking role does not include this page. Ask a Booking admin if you need it."
+            title={t("You do not have access to this page")}
+            description={t("Your Booking role does not include this page. Ask a Booking admin if you need it.")}
             action={
               <Link href="/" className="text-[13px] font-semibold text-accent-deep hover:underline">
-                Back to the dashboard
+                {t("Back to the dashboard")}
               </Link>
             }
           />

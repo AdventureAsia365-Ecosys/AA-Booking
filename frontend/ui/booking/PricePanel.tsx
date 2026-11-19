@@ -24,6 +24,9 @@ import { DateText } from "../core/DateText";
 import { useCan } from "../local/StaffContext";
 import { currencyOptions } from "./fxInForce";
 import { useCurrenciesInForce } from "./fxInForceQuery";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./PricePanel.messages";
 
 const inputCls = "w-full min-w-0";
 
@@ -63,6 +66,8 @@ export function CostLinesEditor({
   sellAmounts?: (string | null)[];
   sellCurrency?: string;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const update = (i: number, patch: Partial<CostLine>) => onChange(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   return (
     <div className="flex flex-col gap-2">
@@ -71,24 +76,24 @@ export function CostLinesEditor({
           <option key={c} value={c} />
         ))}
       </datalist>
-      {lines.length === 0 && <p className="text-xs text-muted">No net cost yet.</p>}
+      {lines.length === 0 && <p className="text-xs text-muted">{tr("No net cost yet.")}</p>}
       {lines.map((l, i) => {
         const err = l.net_amount || l.net_currency !== "USD" ? costLineError(l) : null;
         const sell = sellAmounts?.[i];
         return (
           <div key={l.key} className="rounded-md border border-line2 bg-panel p-2">
             <div className="grid grid-cols-[minmax(0,1fr)_84px_auto] items-center gap-2">
-              <label className="sr-only" htmlFor={`${l.key}-amt`}>Net amount</label>
+              <label className="sr-only" htmlFor={`${l.key}-amt`}>{tr("Net amount")}</label>
               <Input size="sm"
                 id={`${l.key}-amt`}
                 inputMode="decimal"
-                placeholder="Net amount"
+                placeholder={tr("Net amount")}
                 value={l.net_amount}
                 disabled={disabled}
                 onChange={(e) => update(i, { net_amount: e.target.value.replace(/,/g, "") })}
                 className={`${inputCls} bk-tabular`}
               />
-              <label className="sr-only" htmlFor={`${l.key}-cur`}>Currency</label>
+              <label className="sr-only" htmlFor={`${l.key}-cur`}>{tr("Currency")}</label>
               <Input size="sm"
                 id={`${l.key}-cur`}
                 list="bk-cost-currencies"
@@ -100,7 +105,7 @@ export function CostLinesEditor({
               />
               <button
                 type="button"
-                aria-label="Remove cost line"
+                aria-label={tr("Remove cost line")}
                 disabled={disabled}
                 onClick={() => onChange(lines.filter((_, j) => j !== i))}
                 className="grid h-9 w-9 cursor-pointer place-items-center rounded-md text-muted hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
@@ -109,10 +114,10 @@ export function CostLinesEditor({
               </button>
             </div>
             <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-              <label className="sr-only" htmlFor={`${l.key}-note`}>Supplier note</label>
+              <label className="sr-only" htmlFor={`${l.key}-note`}>{tr("Supplier note")}</label>
               <Input size="sm"
                 id={`${l.key}-note`}
-                placeholder="Supplier / what this covers (optional)"
+                placeholder={tr("Supplier / what this covers (optional)")}
                 maxLength={200}
                 value={l.supplier_note}
                 disabled={disabled}
@@ -121,11 +126,11 @@ export function CostLinesEditor({
               />
               {sell != null && sellCurrency && (
                 <span className="text-right text-xs text-muted">
-                  sells <Money amount={sell} currency={sellCurrency} className="font-semibold text-ink" />
+                  {tr("sells")} <Money amount={sell} currency={sellCurrency} className="font-semibold text-ink" />
                 </span>
               )}
             </div>
-            {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+            {err && <p className="mt-1 text-xs text-danger">{tx(err)}</p>}
           </div>
         );
       })}
@@ -135,7 +140,7 @@ export function CostLinesEditor({
           onClick={() => onChange([...lines, newLine()])}
           className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-md px-2 py-1 text-[12px] font-semibold text-accent-deep hover:bg-accent-tint"
         >
-          <Plus size={14} /> Add net cost
+          <Plus size={14} /> {tr("Add net cost")}
         </button>
       )}
     </div>
@@ -165,6 +170,8 @@ export function PriceSettings({
   /** The calculator has no reason field: nothing is applied there. */
   showReason?: boolean;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const set = <K extends keyof PriceSettingsValue>(k: K, v: PriceSettingsValue[K]) => onChange({ ...value, [k]: v });
   // AA-1128: a selling currency without an approved FX rate today cannot price (the API answers 422).
   const selling = currencyOptions(SELLING_CURRENCIES, useCurrenciesInForce(), value.currency);
@@ -172,53 +179,53 @@ export function PriceSettings({
   return (
     <div className="grid grid-cols-2 gap-3">
       <label className="flex flex-col gap-1">
-        <span className="text-[12px] font-medium text-ink">Channel</span>
+        <span className="text-[12px] font-medium text-ink">{tr("Channel")}</span>
         <Select size="sm" value={value.channel} disabled={disabled} onChange={(e) => set("channel", e.target.value as Channel)} className={inputCls}>
           {CHANNELS.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {tx(c.label)}
             </option>
           ))}
         </Select>
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-[12px] font-medium text-ink">Selling currency</span>
+        <span className="text-[12px] font-medium text-ink">{tr("Selling currency")}</span>
         <Select size="sm" value={value.currency} disabled={disabled} onChange={(e) => set("currency", e.target.value)} className={inputCls}>
           {selling.map((c) => (
             <option key={c.code} value={c.code} disabled={!c.usable && c.code !== value.currency}>
-              {c.usable ? c.code : `${c.code} (no FX rate today)`}
+              {c.usable ? c.code : tr("{0} (no FX rate today)", c.code)}
             </option>
           ))}
         </Select>
       </label>
       <label className="col-span-2 flex cursor-pointer items-center gap-2 text-[13px] text-ink">
         <Checkbox checked={value.peak} disabled={disabled} onChange={(e) => set("peak", e.target.checked)} />
-        Peak season dates (adds the rule&apos;s peak uplift)
+        {tr("Peak season dates (adds the rule's peak uplift)")}
       </label>
       <label className="col-span-2 flex flex-col gap-1">
         <span className="text-[12px] font-medium text-ink">
-          Override total <span className="font-normal text-muted">(optional, in {value.currency})</span>
+          {tr("Override total")} <span className="font-normal text-muted">{tr("(optional, in {0})", value.currency)}</span>
         </span>
         <Input size="sm"
           inputMode="decimal"
-          placeholder="Leave empty to use the computed total"
+          placeholder={tr("Leave empty to use the computed total")}
           value={value.override}
           disabled={disabled}
           onChange={(e) => set("override", e.target.value.replace(/,/g, ""))}
           className={`${inputCls} bk-tabular`}
         />
-        {overrideBad && <span className="text-xs text-danger">A positive amount, at most 2 decimals.</span>}
+        {overrideBad && <span className="text-xs text-danger">{tr("A positive amount, at most 2 decimals.")}</span>}
       </label>
       {showReason && belowFloor && value.override.trim() && (
         <label className="col-span-2 flex flex-col gap-1">
-          <span className="text-[12px] font-medium text-danger">Reason for pricing below the floor *</span>
+          <span className="text-[12px] font-medium text-danger">{tr("Reason for pricing below the floor *")}</span>
           <Textarea
             rows={2}
             maxLength={500}
             value={value.overrideReason}
             disabled={disabled}
             onChange={(e) => set("overrideReason", e.target.value)}
-            placeholder="e.g. repeat client, matched a competitor quote"
+            placeholder={tr("e.g. repeat client, matched a competitor quote")}
             className="border-danger-border"
           />
         </label>
@@ -230,20 +237,21 @@ export function PriceSettings({
 // ── FX notice (S236 review finding 5; AA-810 S237: rates are entered on /pricing/rules) ──────────────
 /** Non-USD needs an approved, dated FX rate; admin / contracting get a link to the page that adds one. */
 export function FxNotice() {
+  const tr = useT(MSG);
   const canManage = useCan("pricing.write");
   return (
     <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
-      Non-USD costs and selling currencies need a dated FX rate that a second person has approved.{" "}
+      {tr("Non-USD costs and selling currencies need a dated FX rate that a second person has approved.")}
       {canManage ? (
         <>
-          Add or approve rates in{" "}
+          {tr("Add or approve rates in")}
           <Link href="/pricing/rules?tab=fx" className="font-semibold text-accent-deep hover:underline">
-            Pricing rules &amp; FX
+            {tr("Pricing rules & FX")}
           </Link>
           .
         </>
       ) : (
-        "Ask an admin or contracting user to add one if a currency is missing."
+        tr("Ask an admin or contracting user to add one if a currency is missing.")
       )}
     </p>
   );
@@ -307,18 +315,20 @@ export function QuoteResult({
    *  has no saved total, so it passes nothing). */
   readOnlyNote?: string;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const [details, setDetails] = useState(false);
   if (!query.hasRequest) {
-    return <EmptyState icon={<Calculator size={26} />} title="No quote yet" description={emptyHint} />;
+    return <EmptyState icon={<Calculator size={26} />} title={tr("No quote yet")} description={tx(emptyHint)} />;
   }
   if (query.isError && !query.isFetching) {
     const v = quoteErrorView(query.error, canManageRules);
     if (v.tone === "info") {
       return (
         <div role="status" className="rounded-md border border-line bg-panel px-3 py-3 text-[13px]" data-testid="quote-read-only">
-          <p className="font-semibold text-ink">{v.title}</p>
+          <p className="font-semibold text-ink">{tx(v.title)}</p>
           <p className="mt-0.5 text-body">
-            {v.body}
+            {tx(v.body)}
             {readOnlyNote ? ` ${readOnlyNote}` : ""}
           </p>
         </div>
@@ -326,11 +336,11 @@ export function QuoteResult({
     }
     return (
       <div role="alert" className="rounded-md border border-danger-border bg-danger-soft px-3 py-3 text-[13px] text-danger">
-        <p className="font-semibold">{v.title}</p>
-        <p className="mt-0.5 text-body">{v.body}</p>
+        <p className="font-semibold">{tx(v.title)}</p>
+        <p className="mt-0.5 text-body">{tx(v.body)}</p>
         {v.link && (
           <Link href={v.link} className="mt-1 inline-block font-semibold text-accent-deep hover:underline">
-            Open Pricing rules & FX
+            {tr("Open Pricing rules & FX")}
           </Link>
         )}
       </div>
@@ -340,7 +350,7 @@ export function QuoteResult({
   if (!q) {
     return (
       <div className="flex items-center gap-2 py-6 text-[13px] text-muted" aria-live="polite">
-        <Spinner /> Pricing…
+        <Spinner /> {tr("Pricing…")}
       </div>
     );
   }
@@ -348,38 +358,38 @@ export function QuoteResult({
   return (
     <div className={`flex flex-col gap-3 transition-opacity ${busy ? "opacity-60" : ""}`} aria-live="polite" aria-busy={busy}>
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted">Total</span>
+        <span className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted">{tr("Total")}</span>
         <span className="font-display text-2xl font-semibold text-ink bk-tabular">{formatMoney(q.final_total, q.currency)}</span>
       </div>
       {q.below_floor && (
         <div role="alert" className="flex gap-2 rounded-md border border-danger-border bg-danger-soft px-3 py-2 text-[13px] text-danger">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <span>
-            Below floor ({pct(q.effective_margin)} margin, floor {pct(q.floor_margin)}): a reason is required.
+            {tr("Below floor ({0} margin, floor {1}): a reason is required.", pct(q.effective_margin), pct(q.floor_margin))}
           </span>
         </div>
       )}
       <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-[13px]">
-        <dt className="text-muted">Net cost (USD)</dt>
+        <dt className="text-muted">{tr("Net cost (USD)")}</dt>
         <dd className="text-right"><Money amount={q.net_total_usd} currency="USD" /></dd>
-        <dt className="text-muted">Subtotal</dt>
+        <dt className="text-muted">{tr("Subtotal")}</dt>
         <dd className="text-right"><Money amount={q.subtotal} currency={q.currency} /></dd>
-        <dt className="text-muted">Computed total (rounded up to {q.rounding_increment})</dt>
+        <dt className="text-muted">{tr("Computed total (rounded up to {0})", q.rounding_increment)}</dt>
         <dd className="text-right"><Money amount={q.total} currency={q.currency} /></dd>
         {q.override_total && (
           <>
-            <dt className="text-muted">Override</dt>
+            <dt className="text-muted">{tr("Override")}</dt>
             <dd className="text-right"><Money amount={q.override_total} currency={q.currency} strong /></dd>
           </>
         )}
-        <dt className="text-muted">Margin applied</dt>
+        <dt className="text-muted">{tr("Margin applied")}</dt>
         <dd className="text-right text-ink">{pct(q.margin_applied)}</dd>
         {/* ADR 0005: the card fee is built into the price (never a surcharge); the rate comes from the rule. */}
-        <dt className="text-muted">Card fee (included in the price)</dt>
+        <dt className="text-muted">{tr("Card fee (included in the price)")}</dt>
         <dd className="text-right text-ink">{pct(q.rule.card_fee_pct)}</dd>
-        <dt className="text-muted">Effective margin</dt>
+        <dt className="text-muted">{tr("Effective margin")}</dt>
         <dd className={`text-right font-semibold ${q.below_floor ? "text-danger" : "text-success"}`}>
-          {pct(q.effective_margin)} <span className="font-normal text-muted">(floor {pct(q.floor_margin)})</span>
+          {pct(q.effective_margin)} <span className="font-normal text-muted">{tr("(floor {0})", pct(q.floor_margin))}</span>
         </dd>
       </dl>
       <button
@@ -388,37 +398,37 @@ export function QuoteResult({
         aria-expanded={details}
         className="inline-flex cursor-pointer items-center gap-1 self-start text-[12px] font-semibold text-accent-deep"
       >
-        <ChevronDown size={14} className={`transition-transform ${details ? "rotate-180" : ""}`} /> Rule, FX and lines
+        <ChevronDown size={14} className={`transition-transform ${details ? "rotate-180" : ""}`} /> {tr("Rule, FX and lines")}
       </button>
       {details && (
         <div className="flex flex-col gap-3 rounded-md bg-panel p-3 text-xs text-body">
           <div>
-            <p className="font-semibold text-ink">Rule in force ({CHANNELS.find((c) => c.value === q.rule.channel)?.label ?? q.rule.channel})</p>
+            <p className="font-semibold text-ink">{tr("Rule in force ({0})", CHANNELS.find((c) => c.value === q.rule.channel)?.label ?? q.rule.channel)}</p>
             <p className="mt-0.5">
-              Target {pct(q.rule.target_margin)} · floor {pct(q.rule.floor_margin)} · peak +{pct(q.rule.peak_uplift_pts)} · card fee {pct(q.rule.card_fee_pct)} · valid from <DateText value={q.rule.valid_from} />
+              {tr("Target {0} · floor {1} · peak +{2} · card fee {3} · valid from", pct(q.rule.target_margin), pct(q.rule.floor_margin), pct(q.rule.peak_uplift_pts), pct(q.rule.card_fee_pct))} <DateText value={q.rule.valid_from} />
             </p>
           </div>
           <div>
-            <p className="font-semibold text-ink">FX rates used</p>
+            <p className="font-semibold text-ink">{tr("FX rates used")}</p>
             {q.fx_rates.length === 0 ? (
-              <p className="mt-0.5">None: every amount is in USD.</p>
+              <p className="mt-0.5">{tr("None: every amount is in USD.")}</p>
             ) : (
               <ul className="mt-0.5 flex flex-col gap-0.5">
                 {q.fx_rates.map((r) => (
                   <li key={r.currency} className="bk-tabular">
-                    1 USD = {r.rate_per_usd} {r.currency} · buffer {pct(r.buffer_pct)} · as of <DateText value={r.as_of} /> · {r.source}
+                    {tr("1 USD = {0} {1} · buffer {2} · as of", r.rate_per_usd, r.currency, pct(r.buffer_pct))} <DateText value={r.as_of} /> · {r.source}
                   </li>
                 ))}
               </ul>
             )}
           </div>
           <div>
-            <p className="font-semibold text-ink">Lines</p>
+            <p className="font-semibold text-ink">{tr("Lines")}</p>
             <ul className="mt-0.5 flex flex-col gap-0.5">
               {q.lines.map((l, i) => (
                 <li key={i} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 bk-tabular">
                   <span>
-                    {formatMoney(l.net_amount, l.net_currency)} → {formatMoney(l.net_usd, "USD")} net
+                    {tr("{0} → {1} net", formatMoney(l.net_amount, l.net_currency), formatMoney(l.net_usd, "USD"))}
                   </span>
                   <span className="text-ink">{formatMoney(l.sell_amount, q.currency)}</span>
                 </li>
@@ -426,7 +436,7 @@ export function QuoteResult({
             </ul>
           </div>
           <p className="text-muted">
-            Priced on <DateText value={q.priced_on} />. Nothing is saved by this preview.
+            {tr("Priced on")} <DateText value={q.priced_on} />{tr(". Nothing is saved by this preview.")}
           </p>
         </div>
       )}

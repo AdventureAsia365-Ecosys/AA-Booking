@@ -16,6 +16,9 @@ import { api } from "@/lib/api/client";
 import { canSeePage } from "@/lib/rbac";
 import { TRIP_CASE_STATUS_META } from "../booking/StatusBadge";
 import { casePartyLabel } from "../booking/caseFacts";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CommandPalette.messages";
 
 type Row =
   | { kind: "page"; label: string; href: string; icon: React.ReactNode }
@@ -29,6 +32,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 }
 
 function PaletteDialog({ onClose }: { onClose: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const { role } = useStaff();
   const canCases = canSeePage(role, "/cases");
@@ -65,19 +70,19 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
       ? allEntries(role).filter((e) => e.label.toLowerCase().includes(q))
       : [];
     const pages: Row[] = pageEntries.map((e) => ({
-      kind: "page" as const, label: e.label, href: e.href, icon: e.icon,
+      kind: "page" as const, label: tx(e.label), href: e.href, icon: e.icon,
     }));
     const caseRows: Row[] = (cases?.items ?? []).map((c) => ({
       kind: "case" as const,
       label: `${c.code} · ${casePartyLabel(c)}`,
-      sub: [c.trip_title ?? "Custom trip", TRIP_CASE_STATUS_META[c.status]?.label].filter(Boolean).join(" · "),
+      sub: [c.trip_title ?? t("Custom trip"), TRIP_CASE_STATUS_META[c.status]?.label].filter(Boolean).join(" · "),
       href: `/cases/${encodeURIComponent(c.code)}`,
     }));
     return [
-      { title: "Pages", rows: pages },
-      { title: "Trip cases", rows: caseRows },
+      { title: t("Pages"), rows: pages },
+      { title: t("Trip cases"), rows: caseRows },
     ].filter((g) => g.rows.length > 0);
-  }, [cases, debounced, role]);
+  }, [cases, debounced, role, tx, t]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
 
@@ -119,7 +124,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Global search"
+        aria-label={t("Global search")}
         style={{
           width: 560, maxWidth: "100%", maxHeight: "70vh", display: "flex", flexDirection: "column",
           background: K.card, borderRadius: RADIUS.lg, border: `1px solid ${K.line}`,
@@ -132,8 +137,8 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
             ref={inputRef}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(0); }}
-            placeholder="Search pages and trip cases…"
-            aria-label="Search pages and trip cases"
+            placeholder={t("Search pages and trip cases…")}
+            aria-label={t("Search pages and trip cases")}
             style={{
               flex: 1, border: "none", outline: "none", background: "transparent",
               fontSize: 15, color: K.ink, fontFamily: sans,
@@ -142,23 +147,23 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
           <kbd style={{
             fontSize: 11, color: K.muted, border: `1px solid ${K.line}`, borderRadius: 6,
             padding: "2px 6px", background: K.bg,
-          }}>Esc</kbd>
+          }}>{t("Esc")}</kbd>
         </div>
 
         <div style={{ overflowY: "auto", padding: 6 }}>
           {debounced.length < 2 ? (
             <div style={{ padding: "22px 14px", fontSize: 13, color: K.muted, textAlign: "center" }}>
-              Type at least 2 characters to search.
+              {t("Type at least 2 characters to search.")}
             </div>
           ) : flat.length === 0 ? (
             <div style={{ padding: "22px 14px", fontSize: 13, color: K.muted, textAlign: "center" }}>
-              No results for “{debounced}”.
+              {t("No results for “{0}”.", debounced)}
             </div>
           ) : (
             groups.map((g) => (
               <div key={g.title} style={{ marginBottom: 4 }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: K.muted2, padding: "8px 10px 4px" }}>
-                  {g.title}
+                  {tx(g.title)}
                 </div>
                 {g.rows.map((row) => {
                   runningIndex += 1;
@@ -183,7 +188,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
                       </span>
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ display: "block", fontSize: 13.5, fontWeight: 500, color: K.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {row.label}
+                          {tx(row.label)}
                         </span>
                         {"sub" in row && row.sub && (
                           <span style={{ display: "block", fontSize: 11.5, color: K.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -201,9 +206,9 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ display: "flex", gap: 14, padding: "8px 14px", borderTop: `1px solid ${K.line}`, fontSize: 11, color: K.muted2 }}>
-          <span style={{ fontFamily: serif }}>↑ ↓ navigate</span>
-          <span>↵ open</span>
-          <span>esc close</span>
+          <span style={{ fontFamily: serif }}>{t("↑ ↓ navigate")}</span>
+          <span>{t("↵ open")}</span>
+          <span>{t("esc close")}</span>
         </div>
       </div>
     </div>

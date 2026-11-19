@@ -38,6 +38,9 @@ import { DataTable as KitDataTable, type DataTableProps } from "../core/DataTabl
 import { Drawer } from "../core/Drawer";
 import { K, RADIUS, sans } from "../core/tokens";
 import { useMediaQuery } from "../core/useMediaQuery";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./DataTable.messages";
 
 declare module "@tanstack/react-table" {
   // TanStack's documented way to type column meta (module augmentation); both type parameters are required by it.
@@ -72,7 +75,15 @@ export type BookingDataTableProps<T> = DataTableProps<T> & {
 
 export type CsvColumn<T> = { header: string; value: (row: T) => unknown };
 
-export function DataTable<T>({ columns, tableMinWidth, compactMinWidth, filters, csv, ...rest }: BookingDataTableProps<T>) {
+export function DataTable<T>({ columns: pageColumns, tableMinWidth, compactMinWidth, filters, csv, ...rest }: BookingDataTableProps<T>) {
+  // AA-1128 (B5): a plain-text column header kept in a module-level table (in English) is shown in the UI language
+  // (the phrasebook, ui/local/phrasebook.ts); headers a page already translated, and render-function headers, pass as
+  // they are. The CSV file uses the same headers.
+  const tx = useTx();
+  const columns = useMemo(
+    () => pageColumns.map((c) => (typeof c.header === "string" && c.header ? { ...c, header: tx(c.header) } : c)),
+    [pageColumns, tx],
+  );
   const compact = useIsCompact();
   const { data, getRowId, enableCsv = false, csvFilename = "export" } = rest;
   const toolbarExtra = filters ? (
@@ -198,12 +209,13 @@ function headerText<T>(c: ColumnDef<T, unknown>): string {
 }
 
 function DetailsButton({ label, onOpen }: { label: string; onOpen: () => void }) {
+  const t = useT(MSG);
   return (
     <button
       type="button"
       data-testid="bk-dt-details"
-      aria-label={`Show details (${label})`}
-      title={`Details: ${label}`}
+      aria-label={t("Show details ({0})", label)}
+      title={t("Details: {0}", label)}
       onClick={(e) => {
         e.stopPropagation();
         onOpen();
@@ -228,6 +240,8 @@ function RowDetails<T>({
   folded: ColumnDef<T, unknown>[];
   onClose: () => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const cols = useMemo(() => (title ? [title, ...folded] : folded), [title, folded]);
   const data = useMemo(() => [row], [row]);
   // The React Compiler skips TanStack's useReactTable (the kit table has the same rule off in eslint.config.mjs); this
@@ -238,13 +252,13 @@ function RowDetails<T>({
   const head = title ? cells[0] : undefined;
   const body = title ? cells.slice(1) : cells;
   return (
-    <Drawer open onClose={onClose} title="Details" width={420}>
+    <Drawer open onClose={onClose} title={t("Details")} width={420}>
       <div data-testid="bk-dt-details-drawer" className="flex flex-col gap-4">
         {head && <div className="text-[14px] font-semibold text-ink">{flexRender(head.column.columnDef.cell, head.getContext())}</div>}
         <dl className="flex flex-col gap-3">
           {body.map((cell) => (
             <div key={cell.id} className="flex items-baseline justify-between gap-4 border-b border-line2 pb-2">
-              <dt className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{headerText(cell.column.columnDef)}</dt>
+              <dt className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{tx(headerText(cell.column.columnDef))}</dt>
               <dd className="min-w-0 text-right text-[13px] text-body">{flexRender(cell.column.columnDef.cell, cell.getContext())}</dd>
             </div>
           ))}

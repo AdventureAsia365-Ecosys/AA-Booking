@@ -34,6 +34,9 @@ import {
 } from "@/ui";
 import { daysText } from "@/ui/booking/plural";
 import { outOfCatalog, tourName, type OutOfCatalog } from "@/ui/booking/priceWorkbench";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ReadinessView.messages";
 
 const MAX_LISTED = 3;
 
@@ -44,23 +47,25 @@ const OUT_OF_CATALOG: Record<OutOfCatalog, string> = {
   gone: "No longer in the catalog",
 };
 
-function componentText(c: UnratedComponent): string {
+/** The component's code and room type, with its supplier (the "Day N:" before it is the UI-language message). */
+function componentName(c: UnratedComponent): string {
   const name = c.room_type ? `${c.code ?? "?"} ${c.room_type}` : (c.code ?? "?");
-  return `Day ${c.day_no}: ${name}${c.supplier_code ? ` (${c.supplier_code})` : ""}`;
+  return `${name}${c.supplier_code ? ` (${c.supplier_code})` : ""}`;
 }
 
 /** What the plan still needs, in plain words (the reason, then the items behind it). */
 function Needs({ row }: { row: ReadinessItem }) {
+  const t = useT(MSG);
   const lines: string[] = [];
   const reason = row.reason;
-  if (row.status === "priced" && row.pending_recompute) lines.push("Prices on the next recompute.");
-  if (reason === "no_components") lines.push("No hotels or services mapped to this tour.");
-  if (reason === "inactive_component") lines.push("A hotel, room type or service of the tour is inactive.");
-  if (reason === "no_rule") lines.push("No approved agency pricing rule is in force today.");
-  if (reason === "missing_fx") lines.push(`No approved exchange rate today for ${row.missing_fx.join(", ")}.`);
+  if (row.status === "priced" && row.pending_recompute) lines.push(t("Prices on the next recompute."));
+  if (reason === "no_components") lines.push(t("No hotels or services mapped to this tour."));
+  if (reason === "inactive_component") lines.push(t("A hotel, room type or service of the tour is inactive."));
+  if (reason === "no_rule") lines.push(t("No approved agency pricing rule is in force today."));
+  if (reason === "missing_fx") lines.push(t("No approved exchange rate today for {0}.", row.missing_fx.join(", ")));
   if (reason === "missing_rates" && row.components_without_rate.length) {
     const n = row.components_without_rate.length;
-    lines.push(`${n} component${n > 1 ? "s" : ""} without a published rate:`);
+    lines.push(t("{0} component{1} without a published rate:", n, n > 1 ? "s" : ""));
   }
   if (row.note && !row.pending_recompute) lines.push(row.note.charAt(0).toUpperCase() + row.note.slice(1) + ".");
   const unrated = reason === "missing_rates" ? row.components_without_rate : [];
@@ -74,29 +79,32 @@ function Needs({ row }: { row: ReadinessItem }) {
       ))}
       {unrated.slice(0, MAX_LISTED).map((c) => (
         <span key={`${c.day_no}-${c.code}-${c.room_type}`} className="break-words text-xs text-muted">
-          {componentText(c)}
+          {t("Day {0}: {1}", c.day_no, componentName(c))}
         </span>
       ))}
-      {unrated.length > MAX_LISTED && <span className="text-xs text-muted">and {unrated.length - MAX_LISTED} more</span>}
+      {unrated.length > MAX_LISTED && <span className="text-xs text-muted">{t("and {0} more", unrated.length - MAX_LISTED)}</span>}
     </span>
   );
 }
 
 function Tour({ row }: { row: ReadinessItem }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const out = outOfCatalog(row);
-  const facts = [row.country, row.duration_days ? daysText(row.duration_days) : null, row.sellable ? "Sellable" : null]
+  const facts = [row.country, row.duration_days ? daysText(row.duration_days) : null, row.sellable ? t("Sellable") : null]
     .filter(Boolean)
     .join(" · ");
   return (
     <span className="flex min-w-0 flex-col">
-      <span className="font-medium text-ink">{tourName(row, "Tour")}</span>
+      <span className="font-medium text-ink">{tx(tourName(row, "Tour"))}</span>
       {facts && <span className="text-xs text-muted">{facts}</span>}
-      {out && <span className="text-xs text-muted">{OUT_OF_CATALOG[out]}</span>}
+      {out && <span className="text-xs text-muted">{tx(OUT_OF_CATALOG[out])}</span>}
     </span>
   );
 }
 
 export function ReadinessView() {
+  const t = useT(MSG);
   const router = useRouter();
   const toast = useToast();
   const { get } = useUrlFilters();
@@ -121,39 +129,39 @@ export function ReadinessView() {
   const columns: ColumnDef<ReadinessItem, unknown>[] = [
     {
       id: "tour",
-      header: "Tour",
+      header: t("Tour"),
       accessorFn: (r) => r.title ?? r.tour_key,
       cell: ({ row }) => <Tour row={row.original} />,
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       accessorKey: "status",
       cell: ({ row }) => <PriceReadinessBadge status={row.original.status} />,
     },
-    { id: "needs", header: "What it needs", enableSorting: false, accessorFn: (r) => r.reason ?? "", cell: ({ row }) => <Needs row={row.original} /> },
-    { id: "components", header: "Components", accessorKey: "components" },
+    { id: "needs", header: t("What it needs"), enableSorting: false, accessorFn: (r) => r.reason ?? "", cell: ({ row }) => <Needs row={row.original} /> },
+    { id: "components", header: t("Components"), accessorKey: "components" },
     {
       id: "rows",
-      header: "Price rows",
+      header: t("Price rows"),
       accessorFn: (r) => r.computed_rows + r.hand_rows,
       cell: ({ row }) => (
         <span className="flex flex-col whitespace-nowrap text-[13px]">
-          <span>{row.original.computed_rows} from rates</span>
-          <span className="text-xs text-muted">{row.original.hand_rows} by hand</span>
+          <span>{row.original.computed_rows} {t("from rates")}</span>
+          <span className="text-xs text-muted">{row.original.hand_rows} {t("by hand")}</span>
         </span>
       ),
     },
     {
       id: "from",
-      header: "From (RRP, 2 pax)",
+      header: t("From (RRP, 2 pax)"),
       accessorFn: (r) => Number(r.from_price?.amount ?? -1),
       cell: ({ row }) =>
         row.original.from_price ? <Money amount={row.original.from_price.amount} currency={row.original.from_price.currency} strong /> : "—",
     },
     {
       id: "open",
-      header: "Trip plan",
+      header: t("Trip plan"),
       enableSorting: false,
       // AA-1128: the trip plan pages read the tour from the catalog: no link for a tour out of it (it would 404).
       cell: ({ row }) =>
@@ -165,7 +173,7 @@ export function ReadinessView() {
             onClick={(e) => e.stopPropagation()}
             className="whitespace-nowrap text-[13px] font-semibold text-accent-deep hover:underline"
           >
-            {canEditPlans ? "Open prices" : "Open"}
+            {canEditPlans ? t("Open prices") : t("Open")}
           </Link>
         ),
     },
@@ -182,7 +190,7 @@ export function ReadinessView() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "The report could not be downloaded.");
+      toast.error(err instanceof Error ? err.message : t("The report could not be downloaded."));
     } finally {
       setDownloading(false);
     }
@@ -192,57 +200,57 @@ export function ReadinessView() {
   const filtered = !!(filters.status || filters.country || filters.q);
   return (
     <PageFrame
-      title="Price readiness"
-      description="Which trip plans have a price, and what each of the others still needs. A plan prices from supplier rates once every hotel and service of the tour has a published rate, every rate currency has an approved exchange rate and an agency pricing rule is in force."
+      title={t("Price readiness")}
+      description={t("Which trip plans have a price, and what each of the others still needs. A plan prices from supplier rates once every hotel and service of the tour has a published rate, every rate currency has an approved exchange rate and an agency pricing rule is in force.")}
       actions={
         <Button variant="secondary" size="sm" onClick={download} disabled={downloading || !items.length}>
-          <Download size={13} /> Download CSV
+          <Download size={13} /> {t("Download CSV")}
         </Button>
       }
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label="Trip plans" value={data?.summary.total} hint={data ? `Rates read to ${data.horizon_to}` : undefined} />
+        <KpiTile label={t("Trip plans")} value={data?.summary.total} hint={data ? t("Rates read to {0}", data.horizon_to) : undefined} />
         <KpiTile
-          label="Priced"
+          label={t("Priced")}
           value={priced}
           hintTone="success"
-          hint={counts ? `${counts.priced} from rates, ${counts.hand_priced} by hand` : undefined}
+          hint={counts ? t("{0} from rates, {1} by hand", counts.priced, counts.hand_priced) : undefined}
         />
         <KpiTile
-          label="Missing rates or FX"
+          label={t("Missing rates or FX")}
           value={counts ? counts.missing_rates + counts.missing_fx : undefined}
           hintTone={counts && counts.missing_rates + counts.missing_fx > 0 ? "warning" : "neutral"}
-          hint={counts ? `${counts.missing_fx} wait for an exchange rate` : undefined}
+          hint={counts ? t("{0} wait for an exchange rate", counts.missing_fx) : undefined}
         />
         <KpiTile
-          label="No components"
+          label={t("No components")}
           value={counts?.no_components}
-          hint={counts ? `${counts.inactive_component} with an inactive component` : undefined}
+          hint={counts ? t("{0} with an inactive component", counts.inactive_component) : undefined}
         />
       </div>
       {data && data.rules.length === 0 && (
         <div className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[13px] text-body" role="status">
-          No approved agency pricing rule is in force today, so no plan prices from rates.{" "}
+          {t("No approved agency pricing rule is in force today, so no plan prices from rates.")}
           <Link href="/pricing/rules" className="font-semibold text-accent-deep hover:underline">
-            Open Pricing rules &amp; FX
+            {t("Open Pricing rules & FX")}
           </Link>
         </div>
       )}
       {!!data?.degraded.length && (
         <div className="rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body" role="status">
-          The tour catalog could not be read: plans are listed by their key, without title or country.
+          {t("The tour catalog could not be read: plans are listed by their key, without title or country.")}
         </div>
       )}
       <Section>
         <DataTable<ReadinessItem>
           filters={
             <FilterBar
-              search={{ placeholder: "Search a tour title or key" }}
+              search={{ placeholder: t("Search a tour title or key") }}
               selects={[
                 {
                   key: "status",
-                  label: "Status",
-                  allLabel: "All statuses",
+                  label: t("Status"),
+                  allLabel: t("All statuses"),
                   options: READINESS_STATUSES.map((s) => ({
                     value: s,
                     label: counts ? `${PRICE_READINESS_META[s].label} (${counts[s]})` : PRICE_READINESS_META[s].label,
@@ -251,8 +259,8 @@ export function ReadinessView() {
                 },
                 {
                   key: "country",
-                  label: "Country",
-                  allLabel: "All countries",
+                  label: t("Country"),
+                  allLabel: t("All countries"),
                   options: (data?.summary.by_country ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.total})` })),
                   width: 170, // the countries load with the report: a fixed width keeps the bar from shifting
                 },
@@ -270,11 +278,11 @@ export function ReadinessView() {
           onRowClick={(r) => {
             if (r.in_catalog !== false) router.push(planHref(r));
           }}
-          emptyTitle={filtered ? "No trip plans match" : "No trip plans yet"}
+          emptyTitle={filtered ? t("No trip plans match") : t("No trip plans yet")}
           emptyDescription={
             filtered
-              ? "Change the search or the filters, or reset them to see every plan."
-              : "Trip plans appear here once the catalog sync has created them."
+              ? t("Change the search or the filters, or reset them to see every plan.")
+              : t("Trip plans appear here once the catalog sync has created them.")
           }
           tableMinWidth={980}
         />
