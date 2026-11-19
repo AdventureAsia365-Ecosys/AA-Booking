@@ -22,25 +22,19 @@ import { SessionNotice } from "./SessionNotice";
 import { AdminShell } from "@/ui/local/AdminShell";
 import { StaffProvider } from "@/ui/local/StaffContext";
 import { withoutB2cWrites } from "@/ui/booking/b2cFrozen";
-import { langFromCookie, translator } from "@/ui/core/i18n";
+import { langFromCookie, translator, type Lang } from "@/ui/core/i18n";
 import { langStore } from "@/ui/local/lang";
 import { MSG } from "./layout.messages";
 
 export const dynamic = "force-dynamic";
 
-export default async function StaffLayout({ children }: { children: React.ReactNode }) {
-  const jar = await cookies();
-  const token = jar.get(ACCESS_COOKIE)?.value;
-  if (!token) redirect("/login?reason=expired");
-  const lang = langFromCookie(jar.get(langStore.cookieName)?.value);
-  const t = translator(MSG, lang);
+type MeAnswer = Awaited<ReturnType<typeof fetchStaffMe>>;
 
-  const me = await fetchStaffMe(token);
-  if (me.kind === "unauthorized") redirect("/login?reason=expired");
+/** The full-page notice for an answer that does not open the app (null when the staff member gets the shell). */
+function staffNotice(me: MeAnswer, lang: Lang): React.ReactNode {
+  const t = translator(MSG, lang);
   if (me.kind === "inactive") {
-    return (
-      <SessionNotice lang={lang} tone="pending" title={t("inactiveTitle")} message={t("inactiveMessage")} />
-    );
+    return <SessionNotice lang={lang} tone="pending" title={t("inactiveTitle")} message={t("inactiveMessage")} />;
   }
   if (me.kind === "forbidden" && me.code === "no_booking_role") {
     return (
@@ -69,6 +63,19 @@ export default async function StaffLayout({ children }: { children: React.ReactN
       />
     );
   }
+  return null;
+}
+
+export default async function StaffLayout({ children }: { children: React.ReactNode }) {
+  const jar = await cookies();
+  const token = jar.get(ACCESS_COOKIE)?.value;
+  if (!token) redirect("/login?reason=expired");
+  const lang = langFromCookie(jar.get(langStore.cookieName)?.value);
+
+  const me = await fetchStaffMe(token);
+  if (me.kind === "unauthorized") redirect("/login?reason=expired");
+  const notice = staffNotice(me, lang);
+  if (notice || me.kind !== "ok") return notice;
 
   // AA-1037 (root ADR 0019 d8): while the B2C part is closed no page offers a write on customers, customer invoices or
   // payments (the API answers 410 b2b_only); the pages read these permissions with useCan.
