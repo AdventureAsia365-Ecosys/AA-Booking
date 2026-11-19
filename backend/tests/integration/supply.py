@@ -24,8 +24,16 @@ async def purge_supply(conn: asyncpg.Connection) -> None:
             await conn.execute("UPDATE booking.supplier_bookings SET voucher_file_id = NULL")
             await conn.execute("DELETE FROM booking.ops_files")
             await conn.execute("DELETE FROM booking.supplier_bookings")
-        for table in TRIGGERED:
+        # bk-060 (AA-1145): restrictions (stop-sales are never deleted by the app) and contract terms (draft only).
+        extra = [
+            t
+            for t in ("booking.supply_restrictions", "booking.supplier_contract_terms")
+            if await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", t)
+        ]
+        for table in (*TRIGGERED, *extra):
             await conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
+        for table in extra:
+            await conn.execute(f"DELETE FROM {table}")
         await conn.execute(
             "UPDATE booking.version_item_costs SET supplier_rate_id = NULL WHERE supplier_rate_id IS NOT NULL"
         )
@@ -34,7 +42,7 @@ async def purge_supply(conn: asyncpg.Connection) -> None:
             " WHERE hotel_room_type_id IS NOT NULL OR service_id IS NOT NULL"
         )
         await conn.execute("DELETE FROM booking.supplier_rates")
-        for table in TRIGGERED:
+        for table in (*TRIGGERED, *extra):
             await conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
         # bk-032 (AA-996): a trip plan may name its supplier; the modules that delete every supplier start clean.
         if await conn.fetchval(

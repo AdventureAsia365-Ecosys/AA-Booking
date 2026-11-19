@@ -81,6 +81,7 @@ from app.routers import (
     supplier_bookings,
     suppliers,
     supply,
+    supply_model,
     trip_cases,
     trip_checks,
 )
@@ -231,6 +232,7 @@ def create_app(
     app.include_router(catalog.router)
     app.include_router(price_versions.router)  # AA-1091: price list versions, seasons, holiday events (bk-054/055)
     app.include_router(supply.router)
+    app.include_router(supply_model.router)  # AA-1145: contract terms, restrictions, stop-sale (bk-060)
     app.include_router(retention.router)
     app.include_router(ops.router)
     app.include_router(b2b.router)

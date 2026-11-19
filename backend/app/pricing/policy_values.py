@@ -143,6 +143,11 @@ class Policy:
         return self.integers("agency_reminder_steps_days")
 
     @property
+    def child_price_pct_by_service_type(self) -> dict[str, Decimal]:
+        """AA-1145 (bk-060, B4): the default child net as a % of the adult net per service type (100 = adult price)."""
+        return self.amounts("child_price_pct_by_service_type")
+
+    @property
     def rounding_increments(self) -> dict[str, Decimal]:
         """``rounding_increment_by_currency``: the rounding step of each selling currency."""
         return self.amounts("rounding_increment_by_currency")

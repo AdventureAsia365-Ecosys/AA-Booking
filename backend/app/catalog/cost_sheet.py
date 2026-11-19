@@ -98,7 +98,8 @@ LEFT JOIN booking.services s ON s.id = c.service_id
 WHERE c.trip_plan_id = $1::uuid
 ORDER BY c.day_no, coalesce(c.hotel_room_type_id, c.service_id)
 """
-# Validity spans of every published rate of the plan's items (the rate's validity inside its contract's); also read by
+# Validity spans of every published adult rate of the plan's items (the rate's validity inside its contract's; a child
+# or infant rate, bk-060, never prices a component alone); also read by
 # the price readiness report (``app.catalog.price_readiness``), which uses the currency too.
 SPANS_SQL = """
 SELECT x.hotel_room_type_id::text AS room_type_id, x.service_id::text AS service_id, x.currency::text AS currency,
@@ -106,6 +107,7 @@ SELECT x.hotel_room_type_id::text AS room_type_id, x.service_id::text AS service
        least(coalesce(x.valid_to, '9999-12-31'::date), coalesce(k.valid_to, '9999-12-31'::date)) AS stop
 FROM booking.supplier_rates x JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
 WHERE k.status = 'published' AND (x.hotel_room_type_id = ANY($1::uuid[]) OR x.service_id = ANY($2::uuid[]))
+  AND x.pax_type = 'adult'
 """
 PLANS_SQL = """
 SELECT p.id::text AS id, p.source_id FROM booking.trip_plans p
