@@ -15,3 +15,6 @@
   set them.
 - Everything in Git is English. Keep per-issue decisions in `docs/implementation-notes/<ISSUE>.md`
   while working.
+- Lean repo (AA-1161): commit code, tests, config, text docs and only a few compressed key screenshots (at most
+  500 KiB each, 10 MiB per PR; compress with AA-Ecosys `tools/docs/compress_images.py`). Build artifacts (`dist/`, zips),
+  binaries and files over 5 MiB stay out of git (CI / S3 / Drive); `tools/repo/lean_guard.py` refuses them at push and in CI.
