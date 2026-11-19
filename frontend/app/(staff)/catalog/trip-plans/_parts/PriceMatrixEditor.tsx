@@ -77,7 +77,7 @@ export function PriceMatrixEditor({
                 {t("Row {0}", i + 1)}
                 <span className="font-normal text-muted">
                   {" "}
-                  · {CHANNEL_SHORT[r.channel]}
+                  · {tx(CHANNEL_SHORT[r.channel])}
                   {band && ` · ${band}`}
                 </span>
                 {r.computed && (

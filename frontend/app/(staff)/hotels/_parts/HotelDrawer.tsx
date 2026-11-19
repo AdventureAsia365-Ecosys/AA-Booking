@@ -13,6 +13,7 @@ import { supplyApi, type HotelDetail, type RoomType } from "@/lib/api/supply";
 import { Button, Code, DateText, Drawer, ErrorState, FromCisTag, Pill, Skeleton, useToast } from "@/ui";
 import { Fact, FactGrid } from "@/app/(staff)/_parts/DetailHeader";
 import { RatesTable, Stars, supplyError } from "@/app/(staff)/_parts/supply";
+import { hotelStyleText } from "@/app/(staff)/_parts/supplyLabels";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
@@ -46,7 +47,7 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
               <Code>{h.code}</Code>
               <Stars value={h.star_rating} />
               <span>
-                {tr("via")}
+                {tr("via")}{" "}
                 <Link href={`/suppliers/${encodeURIComponent(h.supplier_code)}`} className="font-medium text-accent-deep hover:underline">
                   {h.supplier_name}
                 </Link>
@@ -103,7 +104,7 @@ function Facts({ h }: { h: HotelDetail }) {
     <Block title={tr("Facts")}>
       <div className="rounded-lg border border-line bg-card p-4">
         <FactGrid>
-          <Fact label={tr("Style")}>{h.hotel_style ?? "—"}</Fact>
+          <Fact label={tr("Style")}>{h.hotel_style ? tx(hotelStyleText(h.hotel_style)) : "—"}</Fact>
           <Fact label={tr("Star rating")}>
             <Stars value={h.star_rating} />
           </Fact>

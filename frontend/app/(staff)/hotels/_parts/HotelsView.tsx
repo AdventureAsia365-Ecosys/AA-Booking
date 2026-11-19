@@ -34,7 +34,8 @@ import {
   type RowMenuItem,
 } from "@/ui";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
-import { Stars } from "@/app/(staff)/_parts/supply";
+import { RatesInForce, Stars } from "@/app/(staff)/_parts/supply";
+import { STAR_RATINGS, hotelStyleText, starsLabel } from "@/app/(staff)/_parts/supplyLabels";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { HotelDrawer } from "./HotelDrawer";
@@ -91,6 +92,7 @@ export function HotelsView() {
     },
   ];
   const filtered = !!(filters.q || filters.status || filters.country || filters.star_rating);
+  const search = { placeholder: t("Search hotel, HTL- code, address or supplier") };
   const view = get("view") === "table" ? "table" : "grid";
   const selects: FilterSelect[] = [
     {
@@ -113,7 +115,7 @@ export function HotelsView() {
       key: "stars",
       label: t("Stars"),
       allLabel: t("Any rating"),
-      options: [5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? "star" : "stars"}` })),
+      options: STAR_RATINGS.map((n) => ({ value: String(n), label: tx(starsLabel(n)) })),
     },
     {
       key: "sort",
@@ -160,7 +162,7 @@ export function HotelsView() {
         <Section>
           <div className="mb-4">
             <FilterBar
-              search={SEARCH}
+              search={search}
               selects={selects}
               tools={<ExportCsvButton rows={list.data?.items ?? []} columns={HOTEL_CSV} filename="hotels.csv" disabled={list.isLoading} />}
             />
@@ -198,7 +200,7 @@ export function HotelsView() {
       <Section>
         <div className="bk-dt-sticky-end">
           <DataTable<Hotel>
-            filters={<FilterBar search={SEARCH} selects={selects} />}
+            filters={<FilterBar search={search} selects={selects} />}
             searchable={false}
             tableId="hotels"
             enableCsv
@@ -250,11 +252,7 @@ const COLUMNS: ColumnDef<Hotel, unknown>[] = [
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
           <Code>{row.original.code}</Code>
-          {row.original.hotel_style && (
-            <span className="truncate" title={row.original.hotel_style}>
-              · {row.original.hotel_style}
-            </span>
-          )}
+          {row.original.hotel_style && <HotelStyle style={row.original.hotel_style} />}
         </span>
       </span>
     ),
@@ -287,7 +285,7 @@ const COLUMNS: ColumnDef<Hotel, unknown>[] = [
     ),
   },
   { id: "rooms", header: "Rooms", accessorKey: "room_type_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.room_type_count}</span> },
-  { id: "rates", header: "Rates", accessorKey: "rates_in_force", cell: ({ row }) => <span className="bk-tabular text-[13px]" title="Rates in force">{row.original.rates_in_force}</span> },
+  { id: "rates", header: "Rates", accessorKey: "rates_in_force", cell: ({ row }) => <RatesInForce count={row.original.rates_in_force} /> },
   {
     id: "status",
     header: "Status",
@@ -304,7 +302,17 @@ const COLUMNS: ColumnDef<Hotel, unknown>[] = [
   },
 ];
 
-const SEARCH = { placeholder: "Search hotel, HTL- code, address or supplier" };
+/** "· Boutique" after the hotel code: a usual style in the UI language, any other style as typed. */
+function HotelStyle({ style }: { style: string }) {
+  const tx = useTx();
+  const text = tx(hotelStyleText(style));
+  return (
+    <span className="truncate" title={text}>
+      · {text}
+    </span>
+  );
+}
+
 const GRID = "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4";
 
 /** "Hoi An, Vietnam" (the CIS place), the country alone, or null. */
@@ -400,11 +408,7 @@ function HotelCard({ hotel: h, onOpen, menu }: { hotel: Hotel; onOpen: () => voi
             </a>
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
               <Code>{h.code}</Code>
-              {h.hotel_style && (
-                <span className="truncate" title={h.hotel_style}>
-                  · {h.hotel_style}
-                </span>
-              )}
+              {h.hotel_style && <HotelStyle style={h.hotel_style} />}
             </span>
           </span>
           <span className="shrink-0">{menu}</span>

@@ -105,6 +105,7 @@ function Tour({ row }: { row: ReadinessItem }) {
 
 export function ReadinessView() {
   const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const toast = useToast();
   const { get } = useUrlFilters();
@@ -230,7 +231,7 @@ export function ReadinessView() {
       </div>
       {data && data.rules.length === 0 && (
         <div className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[13px] text-body" role="status">
-          {t("No approved agency pricing rule is in force today, so no plan prices from rates.")}
+          {t("No approved agency pricing rule is in force today, so no plan prices from rates.")}{" "}
           <Link href="/pricing/rules" className="font-semibold text-accent-deep hover:underline">
             {t("Open Pricing rules & FX")}
           </Link>
@@ -253,7 +254,7 @@ export function ReadinessView() {
                   allLabel: t("All statuses"),
                   options: READINESS_STATUSES.map((s) => ({
                     value: s,
-                    label: counts ? `${PRICE_READINESS_META[s].label} (${counts[s]})` : PRICE_READINESS_META[s].label,
+                    label: counts ? `${tx(PRICE_READINESS_META[s].label)} (${counts[s]})` : tx(PRICE_READINESS_META[s].label),
                   })),
                   width: 210,
                 },

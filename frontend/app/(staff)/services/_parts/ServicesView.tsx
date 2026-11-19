@@ -13,7 +13,7 @@ import { SERVICE_TYPES, supplyApi, type Service } from "@/lib/api/supply";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
 import { Button, Code, DataTable, DateText, FilterBar, PageFrame, Section, useUrlFilters, RowMenu, type RowMenuItem } from "@/ui";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
-import { SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
+import { RatesInForce, SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { ServiceFormDrawer } from "./ServiceFormDrawer";
@@ -171,8 +171,10 @@ const COLUMNS: ColumnDef<Service, unknown>[] = [
     accessorKey: "service_type",
     cell: ({ row }) => (
       <span className="flex flex-col whitespace-nowrap text-[13px] text-body">
-        {SERVICE_TYPE_LABEL[row.original.service_type] ?? row.original.service_type}
-        <span className="text-xs text-muted">{UNIT_LABEL[row.original.unit]}</span>
+        <Phrase text={SERVICE_TYPE_LABEL[row.original.service_type] ?? row.original.service_type} />
+        <span className="text-xs text-muted">
+          <Phrase text={UNIT_LABEL[row.original.unit]} />
+        </span>
       </span>
     ),
   },
@@ -202,7 +204,7 @@ const COLUMNS: ColumnDef<Service, unknown>[] = [
     ),
   },
   { id: "group", header: "Max pax", accessorKey: "max_group_size", cell: ({ row }) => row.original.max_group_size ?? "—" },
-  { id: "rates", header: "Rates", accessorKey: "rates_in_force", cell: ({ row }) => <span className="bk-tabular text-[13px]" title="Rates in force">{row.original.rates_in_force}</span> },
+  { id: "rates", header: "Rates", accessorKey: "rates_in_force", cell: ({ row }) => <RatesInForce count={row.original.rates_in_force} /> },
   {
     id: "status",
     header: "Status",

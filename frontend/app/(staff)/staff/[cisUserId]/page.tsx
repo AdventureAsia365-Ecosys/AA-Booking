@@ -13,7 +13,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, CalendarDays, CheckCircle2, Clock, Lock, Mail, Pencil, ShieldOff, UserRound } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import type { AuditLogItem, StaffAssignmentRow, StaffDetail } from "@/lib/api/types";
-import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
+import { ROLE_LABEL, cisRoleLabel, isStaffRole } from "@/lib/rbac";
 import { CIS_STAFF_PATH } from "@/lib/config";
 import {
   PageFrame,
@@ -182,7 +182,7 @@ function Overview({ s, roleLabel }: { s: StaffDetail; roleLabel: string }) {
         <FactGrid>
           <Fact label={t("Name")}>{s.name ?? "—"}</Fact>
           <Fact label="E-mail"><span className="break-all">{s.email ?? "—"}</span></Fact>
-          <Fact label={t("CIS role")}>{s.cis_role ?? "—"}</Fact>
+          <Fact label={t("CIS role")}>{s.cis_role ? tx(cisRoleLabel(s.cis_role)) : "—"}</Fact>
           <Fact label={t("Sign-in")}>{s.managed_in_directory ? t("Company e-mail (role from CIS)") : t("CIS password (legacy)")}</Fact>
           <Fact label={t("Staff key")}><span className="font-mono text-xs text-muted">{s.cis_user_id}</span></Fact>
         </FactGrid>

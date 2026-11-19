@@ -19,6 +19,27 @@ export const ROLE_LABEL: Record<StaffRole, string> = {
   finance: "Finance",
 };
 
+// AA-1128 follow-up (S285): the CIS role a staff row carries as information (backend app/auth/staff.py CIS_GROUP_ROLES,
+// the bridge token's cis_role), named as the CIS admin names it (AA-CIS-App lib/rbac.messages.ts). `reviewer` is the
+// old alias of `content`. Show it with `tx(cisRoleLabel(role))`: the Vietnamese is in ui/booking/roles.messages.ts.
+export const CIS_ROLE_LABEL: Record<string, string> = {
+  admin: "Administrator",
+  content_lead: "Content Lead",
+  ai_ops: "AI Operations",
+  customer_success: "Customer Success",
+  finance: "Finance",
+  content: "Content Team",
+  reviewer: "Content Team",
+  tenant_qa: "Tenant Content QA",
+  support: "Support",
+  viewer: "Viewer (read-only)",
+};
+
+/** The English name of a CIS role; an unknown role shows as it is (a new CIS role never breaks the page). */
+export function cisRoleLabel(role: string): string {
+  return Object.prototype.hasOwnProperty.call(CIS_ROLE_LABEL, role) ? CIS_ROLE_LABEL[role] : role;
+}
+
 export function isStaffRole(value: unknown): value is StaffRole {
   return typeof value === "string" && (STAFF_ROLES as readonly string[]).includes(value);
 }

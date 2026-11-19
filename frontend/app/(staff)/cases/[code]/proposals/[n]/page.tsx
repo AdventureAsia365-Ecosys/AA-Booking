@@ -712,7 +712,7 @@ function LockedPrice({ v, channel }: { v: VersionWithItems; channel: string }) {
       </div>
       {v.total_price == null && <p className="text-xs text-danger">{tr("This version was locked without a saved total.")}</p>}
       <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-[13px]">
-        {row("Channel", v.channel ? (CHANNELS.find((ch) => ch.value === v.channel)?.label ?? v.channel) : "—")}
+        {row("Channel", v.channel ? tx(CHANNELS.find((ch) => ch.value === v.channel)?.label ?? v.channel) : "—")}
         {row("Currency", v.currency ?? "—")}
         {row(
           tr("FX locked"),

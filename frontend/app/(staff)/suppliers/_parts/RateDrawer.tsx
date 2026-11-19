@@ -136,7 +136,7 @@ export function RateDrawer({
           </Select>
         </FormField>
       )}
-      {unit && <p className="-mt-2 text-xs text-muted">{t("Net is {0}.", UNIT_LABEL[unit])}</p>}
+      {unit && <p className="-mt-2 text-xs text-muted">{t("Net is {0}.", tx(UNIT_LABEL[unit]))}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FormField label={t("Net amount")} required hint={t("In {0}.", contract.currency)} error={errorFor(fe, "net_amount")}>
           <Input className={`${inputCls} bk-tabular`} inputMode="decimal" value={form.net_amount} onChange={(e) => set("net_amount")(e.target.value)} placeholder="1200000" />
