@@ -1,7 +1,8 @@
 // ui/booking/viOptionLabels.test.mjs — AA-1128 follow-up (S285): the option lists and enum labels that a live check in
 // Vietnamese still showed in English (service types, rate units, hotel stars and styles, pricing channels, Booking and
-// CIS roles, the trip case status and duration, "Unassigned", the open-case button name) resolve in Vietnamese through
-// the phrasebook (ui/local/phrasebook.ts), and a sentence followed by an inline link keeps the space between them.
+// CIS roles, the trip case status and duration, the trip check types, "Unassigned", the open-case button name) resolve
+// in Vietnamese through the phrasebook (ui/local/phrasebook.ts), and a sentence followed by an inline link keeps the
+// space between them.
 // Run: node --test ui/booking/viOptionLabels.test.mjs (`npm run test:unit` runs every ui/booking/*.test.mjs).
 //
 // The catalogues import "@/..." and extension-less relative paths (the Next.js resolution); a small resolve hook maps
@@ -49,6 +50,9 @@ const SUPPLY = (await load("app/(staff)/_parts/supply.messages.ts")).MSG;
 const ROLES = (await load("ui/booking/roles.messages.ts")).MSG;
 const CHANNEL_MSG = (await load("ui/booking/channels.messages.ts")).MSG;
 const CASES = (await load("app/(staff)/cases/page.messages.ts")).MSG;
+const { TRIP_CHECK_CODE_LABEL } = await load("lib/api/tripChecks.ts");
+const CHECKS = (await load("app/(staff)/trip-checks/_parts/CheckDrawer.messages.ts")).MSG;
+await load("app/(staff)/trip-checks/page.messages.ts");
 await load("app/(staff)/hotels/_parts/HotelsView.messages.ts");
 await load("ui/booking/StatusBadge.messages.ts");
 await load("ui/booking/helperPhrases.messages.ts");
@@ -116,6 +120,13 @@ test("the strings the live check found in English now resolve in Vietnamese", ()
   assert.equal(phrase("Manual", "vi"), "Thủ công");
   assert.equal(translator(CASES, "vi")("Open {0}", "TC-000028"), "Mở TC-000028");
   assert.equal(translator(CASES, "en")("Open {0}", "TC-000028"), "Open TC-000028");
+});
+
+test("every trip check type (list column, type filter, drawer title) resolves in Vietnamese", () => {
+  for (const label of Object.values(TRIP_CHECK_CODE_LABEL)) assertVi(label, CHECKS);
+  assert.equal(phrase(TRIP_CHECK_CODE_LABEL.pre_trip_recheck, "vi"), "Kiểm tra lại đặt chỗ");
+  assert.equal(phrase(TRIP_CHECK_CODE_LABEL.insurance, "vi"), "Bảo hiểm");
+  assert.equal(phrase(TRIP_CHECK_CODE_LABEL.emergency_contact, "vi"), "Liên hệ khẩn cấp");
 });
 
 function tsxFiles(dir) {

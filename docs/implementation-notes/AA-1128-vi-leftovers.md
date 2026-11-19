@@ -46,6 +46,10 @@ glued to their link. This slice fixes those with the same pattern (kit catalogue
 - Staff: Booking role chips, CIS role column, staff detail and settings CIS role, the activate dialog and the role
   drawer sentence, the staff picker suffix.
 - /cases: the row button's accessible name "Open TC-…" / "Mở TC-…".
+- Trip check types (`TRIP_CHECK_CODE_LABEL`): "Re-check bookings" and "Insurance" had no catalogue entry, so the
+  /trip-checks title column, its check-type filter, the check drawer title and the case Checks tab showed them in
+  English. Both are now in `trip-checks/_parts/CheckDrawer.messages.ts` (next to "Emergency contact"), and the unit
+  test checks every value of the map (review finding, fix pass).
 - Other enum maps that bypassed the phrasebook: trip check title + "Standard"/"Custom" on /trip-checks, finance
   departures cost basis, readiness status filter options, the notification type fallback title (page + popover).
 
