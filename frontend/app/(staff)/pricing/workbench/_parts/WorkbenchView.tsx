@@ -101,9 +101,10 @@ function Price({ row }: { row: WorkbenchItem }) {
     return (
       <span className="flex flex-col gap-0.5" data-testid="provisional-price">
         <Money amount={row.provisional.amount} currency={row.provisional.currency} />
-        <Pill tone="warning">
-          {t("provisional")}: {t("noSupplierPrice")}
-        </Pill>
+        {/* AA-1128: the pill keeps one short word (it never wraps); the reason is a line that wraps, so the longer
+            Vietnamese text does not push a phone card sideways. */}
+        <Pill tone="warning">{t("provisional")}</Pill>
+        <span className="break-words text-xs text-muted">{t("noSupplierPrice")}</span>
       </span>
     );
   }
