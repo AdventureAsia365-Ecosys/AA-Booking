@@ -20,7 +20,7 @@ export function useSupplierActions() {
   const t = useT(MSG);
   const tx = useTx();
   const canWrite = useCan("supply.write");
-  const canActivate = useCan("supplier.activate") && canWrite;
+  const canActivate = useCan("supplier.activate"); // held only next to supply.write (backend matrix test)
   const qc = useQueryClient();
   const toast = useToast();
   const [pending, setPending] = useState<Pending>(null);

@@ -91,17 +91,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
               >
                 <Pencil size={14} /> {t("Edit profile")}
               </Link>
-              {s.status === "active" ? (
-                <Button variant="secondary" onClick={() => actions.deactivate(s)}>
-                  <Ban size={14} /> {t("Deactivate")}
-                </Button>
-              ) : (
-                actions.canActivate && (
-                  <Button variant="secondary" onClick={() => actions.activate(s)}>
-                    <Power size={14} /> {t("Activate")}
-                  </Button>
-                )
-              )}
+              <StatusButton s={s} actions={actions} />
             </>
           )
         }
@@ -224,6 +214,24 @@ function Profile({ s }: { s: SupplierDetail }) {
 }
 
 type Move = { kind: "publish" | "expire"; contract: SupplierContract } | null;
+
+/** Deactivate an active supplier (supply.write) or activate an inactive one (AA-1150: supplier.activate, an approval). */
+function StatusButton({ s, actions }: { s: SupplierDetail; actions: ReturnType<typeof useSupplierActions> }) {
+  const t = useT(MSG);
+  if (s.status === "active") {
+    return (
+      <Button variant="secondary" onClick={() => actions.deactivate(s)}>
+        <Ban size={14} /> {t("Deactivate")}
+      </Button>
+    );
+  }
+  if (!actions.canActivate) return null;
+  return (
+    <Button variant="secondary" onClick={() => actions.activate(s)}>
+      <Power size={14} /> {t("Activate")}
+    </Button>
+  );
+}
 
 function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const t = useT(MSG);
