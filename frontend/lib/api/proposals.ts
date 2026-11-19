@@ -14,6 +14,7 @@
 //   POST   /booking/trip-cases/{ref}/versions/{n}/approve           record the customer's approval
 //   POST   /booking/pricing/quote-preview                           price net costs (writes nothing)
 
+import { CHANNELS, type Channel } from "./channels";
 import { bkSend } from "./client";
 import type { DecimalString, IsoDate, Version, VersionItem, VersionWithItems } from "./types";
 
@@ -41,12 +42,8 @@ export interface ItemInput {
 }
 
 // ── Pricing (bk-004, AA-810) ─────────────────────────────────────────────────
-export const CHANNELS = [
-  { value: "b2c_tailor_made", label: "B2C tailor-made" },
-  { value: "fixed_departure", label: "Fixed departure" },
-  { value: "b2b", label: "B2B" },
-] as const;
-export type Channel = (typeof CHANNELS)[number]["value"];
+// The channel list lives in an import-free module (lib/api/channels.ts) so a node unit test can check its labels.
+export { CHANNELS, type Channel };
 
 /** Selling currencies (bk-004 engine.SELLING_CURRENCIES, ADR 0005 decision 5). */
 export const SELLING_CURRENCIES = ["USD", "EUR", "GBP", "AUD", "SGD"] as const;

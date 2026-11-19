@@ -452,13 +452,13 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
       }
     >
       <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2" data-testid="trip-facts">
-        {fact("Status", TRIP_CASE_STATUS_META[c.status].label)}
+        {fact("Status", tx(TRIP_CASE_STATUS_META[c.status].label))}
         {fact(
           tr("Travel dates"),
           c.start_date ? `${formatDay(c.start_date)}${end ? ` – ${formatDay(end)}` : ""}` : tr("Not set"),
-          days ? `${days} day${days === 1 ? "" : "s"}` : undefined,
+          days ? tx(days === 1 ? "1 day" : `${days} days`) : undefined,
         )}
-        {fact(tr("Adults / children"), c.pax_adults != null ? `${c.pax_adults} / ${c.pax_children ?? 0}` : c.pax ? `${c.pax} pax` : tr("Not set"))}
+        {fact(tr("Adults / children"), c.pax_adults != null ? `${c.pax_adults} / ${c.pax_children ?? 0}` : c.pax ? tx(`${c.pax} pax`) : tr("Not set"))}
         {fact("Countries", codes.length ? countryNames : "—", fromLegs ? tr("From the trip legs") : undefined)}
         {fact(tr("Trip style"), c.trip_style ?? "—")}
         {fact("Currency", c.currency ?? "—")}
@@ -478,7 +478,7 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
           c.source_system === "tripplanner" ? (
             "TripPlanner"
           ) : c.source_system === "manual" ? (
-            "Manual"
+            tx("Manual")
           ) : c.source_system === "crm" ? (
             tr("B2B agency (AA-Partner CRM)")
           ) : c.source_id ? (

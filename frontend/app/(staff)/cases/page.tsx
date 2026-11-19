@@ -49,6 +49,21 @@ const CASE_TABS = [
   { key: "closed", label: "Closed", status: CLOSED },
 ] as const;
 
+/** The row's open button: its accessible name ("Open TC-000028") in the UI language. */
+function OpenCaseLink({ code }: { code: string }) {
+  const tr = useT(MSG);
+  return (
+    <Link
+      href={`/cases/${encodeURIComponent(code)}`}
+      aria-label={tr("Open {0}", code)}
+      onClick={(e) => e.stopPropagation()}
+      className="grid h-8 w-8 place-items-center rounded-md border border-line text-muted hover:border-accent-border hover:text-accent-deep"
+    >
+      <ArrowRight size={15} />
+    </Link>
+  );
+}
+
 /** Tab counts that the summary endpoint answers exactly; Mine / Unassigned have no exact count there. */
 function tabCount(key: string, s: TripCaseSummary | undefined): number | undefined {
   if (!s) return undefined;
@@ -288,15 +303,6 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
     id: "open",
     header: "",
     enableSorting: false,
-    cell: ({ row }) => (
-      <Link
-        href={`/cases/${encodeURIComponent(row.original.code)}`}
-        aria-label={`Open ${row.original.code}`}
-        onClick={(e) => e.stopPropagation()}
-        className="grid h-8 w-8 place-items-center rounded-md border border-line text-muted hover:border-accent-border hover:text-accent-deep"
-      >
-        <ArrowRight size={15} />
-      </Link>
-    ),
+    cell: ({ row }) => <OpenCaseLink code={row.original.code} />,
   },
 ];

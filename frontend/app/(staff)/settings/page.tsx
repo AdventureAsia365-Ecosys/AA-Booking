@@ -24,6 +24,7 @@ import Link from "next/link";
 import { agencyBillingApi } from "@/lib/api/agencyBilling";
 import { policyParamsApi, type PolicyParam } from "@/lib/api/policyParams";
 import { CIS_STAFF_PATH } from "@/lib/config";
+import { cisRoleLabel } from "@/lib/rbac";
 import type { SessionFacts } from "@/lib/sessionFacts";
 import type { StaffPreferences } from "@/lib/api/types";
 import {
@@ -153,7 +154,7 @@ function GeneralTab() {
           <div className={staff.cis_role ? "" : "sm:col-span-2"}>
             <ReadOnlyField label={tr("Name")}>{name}</ReadOnlyField>
           </div>
-          {staff.cis_role && <ReadOnlyField label={tr("CIS role")}>{staff.cis_role}</ReadOnlyField>}
+          {staff.cis_role && <ReadOnlyField label={tr("CIS role")}>{tx(cisRoleLabel(staff.cis_role))}</ReadOnlyField>}
           <div className="sm:col-span-2">
             <ReadOnlyField label={tr("E-mail address")} help={tr("Change your e-mail in CIS; Booking copies it at sign-in.")}>
               {staff.email ?? "—"}
@@ -352,7 +353,7 @@ function PolicyRows({ items }: { items: PolicyParam[] }) {
         label={tr("Quote validity")}
         help={
           <>
-            {tr("How long a sent quote can be approved at its price; {0} when it touches a festive period.{1}", days(festive), range)}
+            {tr("How long a sent quote can be approved at its price; {0} when it touches a festive period.{1}", days(festive), range)}{" "}
             <Link href="/pricing/policy?q=quote_validity" className="font-semibold text-accent-deep hover:underline">
               {tr("Change it on Pricing › Policy")}
             </Link>

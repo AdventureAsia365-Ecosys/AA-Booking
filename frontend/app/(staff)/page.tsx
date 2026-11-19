@@ -45,6 +45,7 @@ import {
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 import { casePartyLabel, casePartySub } from "@/ui/booking/caseFacts";
 import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
 
@@ -305,7 +306,7 @@ const RECENT_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   {
     id: "sales",
     header: "Sales",
-    cell: ({ row }) => <span className="text-[13px] text-body">{salesOf(row.original)}</span>,
+    cell: ({ row }) => <span className="text-[13px] text-body">{salesOf(row.original) ?? <Phrase text="Unassigned" />}</span>,
   },
   {
     id: "updated",
@@ -315,8 +316,9 @@ const RECENT_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
   },
 ];
 
-function salesOf(c: TripCaseListItem): string {
-  return c.assignees.find((a) => a.role === "sales")?.name ?? "Unassigned";
+/** The sales rep's name, or null when nobody is assigned (the page shows "Unassigned" in the UI language). */
+function salesOf(c: TripCaseListItem): string | null {
+  return c.assignees.find((a) => a.role === "sales")?.name ?? null;
 }
 
 function TripText({ item }: { item: TripCaseListItem }) {
@@ -373,7 +375,7 @@ function RecentCards({
             <span className="truncate text-[13.5px] font-semibold text-ink">{tx(casePartyLabel(c))}</span>
             <TripText item={c} />
             <span className="flex items-center justify-between gap-2 text-xs text-muted">
-              <span className="truncate">{tx(salesOf(c))}</span>
+              <span className="truncate">{salesOf(c) ?? tr("Unassigned")}</span>
               <DateText value={c.updated_at} relative />
             </span>
           </Link>

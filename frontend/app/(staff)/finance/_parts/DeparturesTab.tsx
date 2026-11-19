@@ -243,7 +243,7 @@ function costColumns(departureId: string): ColumnDef<DepartureCost, unknown>[] {
             {row.original.item_description}
           </span>
           <span className="text-xs text-muted">
-            {row.original.supplier.name} · {BASIS_LABEL[row.original.basis]} x {row.original.quantity}
+            {row.original.supplier.name} · <Phrase text={BASIS_LABEL[row.original.basis]} /> x {row.original.quantity}
             <Phrase text={row.original.pricing === "rate" ? ` · rate for ${row.original.priced_for_pax} seats` : " · by hand"} />
           </span>
         </span>

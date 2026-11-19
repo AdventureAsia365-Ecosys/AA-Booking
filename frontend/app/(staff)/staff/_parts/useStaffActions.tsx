@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
-import { ROLE_LABEL, STAFF_ROLES, type StaffRole } from "@/lib/rbac";
+import { ROLE_LABEL, STAFF_ROLES, cisRoleLabel, type StaffRole } from "@/lib/rbac";
 import { Radio, ConfirmDialog, FormDrawer, useStaff, useToast } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
@@ -89,7 +89,7 @@ export function useStaffActions() {
           pending?.kind === "activate" ? (
             <>
               {t("Activate")} <strong className="text-ink">{name}</strong> {t("as")}
-              <strong className="text-ink">{ROLE_LABEL[pending.staff.role] ?? pending.staff.role}</strong>{t("? They can use Booking with that role from their next page load. Change the role first if it is not right.")}
+              <strong className="text-ink">{tx(ROLE_LABEL[pending.staff.role] ?? pending.staff.role)}</strong>{t("? They can use Booking with that role from their next page load. Change the role first if it is not right.")}
             </>
           ) : (
             <>
@@ -162,7 +162,7 @@ function RoleDrawer({
       error={tx(error)}
     >
       <p className="text-[13px] text-muted">
-        {t("Role of")} <span className="font-medium text-ink">{staff.name ?? staff.email ?? staff.cis_user_id}</span> {t("in Booking. Their CIS role ({0}) is managed in CIS and does not change here.", staff.cis_role ?? t("unknown"))}
+        {t("Role of")} <span className="font-medium text-ink">{staff.name ?? staff.email ?? staff.cis_user_id}</span> {t("in Booking. Their CIS role ({0}) is managed in CIS and does not change here.", staff.cis_role ? tx(cisRoleLabel(staff.cis_role)) : t("unknown"))}
       </p>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-[13px] font-medium text-ink">{t("Booking role")}</legend>

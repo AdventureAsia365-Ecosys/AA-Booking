@@ -250,7 +250,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
           <>
           {prices.data && <PriceChainPanel sourceId={plan.source_id} matrix={prices.data} dirty={false} />}
           <p className="text-[13px] text-body" data-testid="price-versions-link">
-            {t("Prices change through price versions: a draft, a reason, and a second person approves it.")}
+            {t("Prices change through price versions: a draft, a reason, and a second person approves it.")}{" "}
             <Link
               href={`/pricing/workbench?versions=${encodeURIComponent(plan.source_id)}`}
               className="font-semibold text-accent-deep hover:underline"

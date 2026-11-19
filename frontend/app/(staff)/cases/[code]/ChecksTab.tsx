@@ -162,7 +162,7 @@ function DerivedRow({ d, code }: { d: DerivedCheck; code: string }) {
         t("Every supplier booking is confirmed.")
       ) : (
         <>
-          {t("Some bookings still wait for the supplier:")}
+          {t("Some bookings still wait for the supplier:")}{" "}
           <Link href={`/cases/${encodeURIComponent(code)}?tab=suppliers`} className="font-medium text-accent-deep hover:underline">
             {t("Suppliers tab")}
           </Link>
@@ -175,7 +175,7 @@ function DerivedRow({ d, code }: { d: DerivedCheck; code: string }) {
         t("Paid in full: every payment verified.")
       ) : (
         <>
-          {t("Not paid in full yet:")}
+          {t("Not paid in full yet:")}{" "}
           <Link href={`/cases/${encodeURIComponent(code)}?tab=billing`} className="font-medium text-accent-deep hover:underline">
             {t("Billing tab")}
           </Link>

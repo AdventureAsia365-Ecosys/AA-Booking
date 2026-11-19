@@ -65,7 +65,7 @@ export function StaffSelect({
       {items.map((s) => (
         <option key={s.cis_user_id} value={s.cis_user_id}>
           {s.name ?? s.cis_user_id}
-          {s.role !== "sales" ? ` · ${isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role}` : ""}
+          {s.role !== "sales" ? ` · ${tx(isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role)}` : ""}
           {s.cis_user_id === me.cis_user_id ? t(" (me)") : ""}
         </option>
       ))}

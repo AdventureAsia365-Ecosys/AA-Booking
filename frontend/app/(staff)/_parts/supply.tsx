@@ -8,7 +8,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Star } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type SupplierCategory } from "@/lib/api/suppliers";
-import type { RateUnit, ServiceType, ServiceUnit, SupplierRate } from "@/lib/api/supply";
+import type { ServiceType, SupplierRate } from "@/lib/api/supply";
 import { Select, Code, DataTable, DateText, Pill } from "@/ui";
 import { inputCls } from "./FormField";
 import { formatNumber } from "@/ui/booking/dates";
@@ -16,13 +16,9 @@ import { useLang, useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./supply.messages";
 
-export const SERVICE_TYPE_LABEL: Record<ServiceType, string> = {
-  activity: "Activity",
-  transfer: "Transfer",
-  guide: "Guide",
-  entrance: "Entrance",
-  meal: "Meal",
-};
+// The label tables live in an import-free module (supplyLabels.ts) so a node unit test can check their Vietnamese.
+import { SERVICE_TYPE_LABEL, SERVICE_UNIT_OPTIONS, UNIT_LABEL, starsLabel } from "./supplyLabels";
+export { SERVICE_TYPE_LABEL, SERVICE_UNIT_OPTIONS, UNIT_LABEL };
 
 /** The supplier category a hotel or a service type needs (bk-008 categories). */
 export const CATEGORY_FOR: Record<ServiceType | "hotel", SupplierCategory> = {
@@ -34,29 +30,25 @@ export const CATEGORY_FOR: Record<ServiceType | "hotel", SupplierCategory> = {
   meal: "meal",
 };
 
-export const UNIT_LABEL: Record<RateUnit, string> = {
-  room_night: "per room night",
-  person: "per person",
-  group: "per group",
-  vehicle: "per vehicle",
-  day: "per day",
-};
-
-export const SERVICE_UNIT_OPTIONS: { value: ServiceUnit; label: string }[] = [
-  { value: "person", label: "Per person" },
-  { value: "group", label: "Per group" },
-  { value: "vehicle", label: "Per vehicle" },
-  { value: "day", label: "Per day" },
-];
-
 export function Stars({ value }: { value: number | null }) {
-  const t = useT(MSG);
+  const tx = useTx();
   if (!value) return <span className="text-[13px] text-muted">—</span>;
+  const label = tx(starsLabel(value));
   return (
-    <span className="inline-flex items-center gap-0.5 text-warning" aria-label={t("{0} stars", value)} title={t("{0} stars", value)}>
+    <span className="inline-flex items-center gap-0.5 text-warning" aria-label={label} title={label}>
       {Array.from({ length: value }, (_, i) => (
         <Star key={i} size={13} fill="currentColor" strokeWidth={0} />
       ))}
+    </span>
+  );
+}
+
+/** A list cell: how many rates are in force, its tooltip in the UI language ("Rates in force" is in HotelsView.messages). */
+export function RatesInForce({ count }: { count: number }) {
+  const tx = useTx();
+  return (
+    <span className="bk-tabular text-[13px]" title={tx("Rates in force")}>
+      {count}
     </span>
   );
 }

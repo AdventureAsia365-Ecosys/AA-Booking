@@ -241,10 +241,10 @@ export function FxNotice() {
   const canManage = useCan("pricing.write");
   return (
     <p className="rounded-md bg-panel px-3 py-2 text-xs text-muted">
-      {tr("Non-USD costs and selling currencies need a dated FX rate that a second person has approved.")}
+      {tr("Non-USD costs and selling currencies need a dated FX rate that a second person has approved.")}{" "}
       {canManage ? (
         <>
-          {tr("Add or approve rates in")}
+          {tr("Add or approve rates in")}{" "}
           <Link href="/pricing/rules?tab=fx" className="font-semibold text-accent-deep hover:underline">
             {tr("Pricing rules & FX")}
           </Link>
@@ -404,7 +404,7 @@ export function QuoteResult({
       {details && (
         <div className="flex flex-col gap-3 rounded-md bg-panel p-3 text-xs text-body">
           <div>
-            <p className="font-semibold text-ink">{tr("Rule in force ({0})", CHANNELS.find((c) => c.value === q.rule.channel)?.label ?? q.rule.channel)}</p>
+            <p className="font-semibold text-ink">{tr("Rule in force ({0})", tx(CHANNELS.find((c) => c.value === q.rule.channel)?.label ?? q.rule.channel))}</p>
             <p className="mt-0.5">
               {tr("Target {0} · floor {1} · peak +{2} · card fee {3} · valid from", pct(q.rule.target_margin), pct(q.rule.floor_margin), pct(q.rule.peak_uplift_pts), pct(q.rule.card_fee_pct))} <DateText value={q.rule.valid_from} />
             </p>

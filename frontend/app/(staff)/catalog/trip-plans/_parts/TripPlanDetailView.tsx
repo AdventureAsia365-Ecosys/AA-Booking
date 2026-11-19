@@ -248,7 +248,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                         "—"
                       )}
                     </Fact>
-                    <Fact label={t("Default channel")}>{p.default_channel ? CHANNEL_LABEL[p.default_channel] ?? p.default_channel : "—"}</Fact>
+                    <Fact label={t("Default channel")}>{p.default_channel ? tx(CHANNEL_LABEL[p.default_channel] ?? p.default_channel) : "—"}</Fact>
                     <Fact label={t("Price hint")}>
                       {p.price_hint ? (
                         <span>
@@ -314,7 +314,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                             <span className="font-normal text-muted"> · {tx(paxBandLabel(r.pax_min, r.pax_max))}</span>
                           </span>
                           <span className="block text-xs text-muted">
-                            {CHANNEL_LABEL[r.channel] ?? r.channel} · {formatDay(r.valid_from)} – {formatDay(r.valid_to)}
+                            {tx(CHANNEL_LABEL[r.channel] ?? r.channel)} · {formatDay(r.valid_from)} – {formatDay(r.valid_to)}
                             {r.priced && marginLabel(r.effective_margin) && t(" · margin {0}", marginLabel(r.effective_margin))}
                           </span>
                           {(r.child_amount || r.infant_amount || r.single_supplement_amount) && (

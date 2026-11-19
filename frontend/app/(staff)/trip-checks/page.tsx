@@ -84,6 +84,17 @@ function dueBefore(key: string): string | undefined {
 
 // AA-996 (Figma audit, deviation 8): the list fits 1440 px with its Status column in view (it was cut at the card edge):
 // the free-text cells (check, customer, owner) truncate with the full text in the tooltip.
+/** A check's title: a standard check's name in the UI language, a custom check's title as typed. */
+function CheckTitle({ check }: { check: TripCheck }) {
+  const tx = useTx();
+  const title = tx(checkTitle(check));
+  return (
+    <span className="truncate text-[13.5px] font-medium text-ink" title={title}>
+      {title}
+    </span>
+  );
+}
+
 const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
   {
     id: "task",
@@ -91,10 +102,10 @@ const COLUMNS: ColumnDef<TripCheck, unknown>[] = [
     accessorFn: (r) => checkTitle(r),
     cell: ({ row }) => (
       <span className="flex min-w-0 flex-col md:max-w-[170px]">
-        <span className="truncate text-[13.5px] font-medium text-ink" title={checkTitle(row.original)}>
-          {checkTitle(row.original)}
+        <CheckTitle check={row.original} />
+        <span className="text-xs text-muted">
+          <Phrase text={row.original.standard ? "Standard" : "Custom"} />
         </span>
-        <span className="text-xs text-muted">{row.original.standard ? "Standard" : "Custom"}</span>
       </span>
     ),
   },

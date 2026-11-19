@@ -217,7 +217,7 @@ function FirstOf({ shown, total, href, what }: { shown: number; total: number; h
   if (shown >= total) return null;
   return (
     <p className="mb-3 text-[13px] text-muted" data-testid="country-first-of">
-      {t("Showing the first {0} of {1}.", shown, total)}
+      {t("Showing the first {0} of {1}.", shown, total)}{" "}
       <Link href={href} className="font-medium text-accent-deep hover:underline">
         {t("See all {0} {1} →", total, what)}
       </Link>
