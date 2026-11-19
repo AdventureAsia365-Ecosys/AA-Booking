@@ -13,7 +13,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, CalendarDays, CheckCircle2, FileSpreadsheet, FileText, Hash, MapPin, Pencil, Plus, Power, Store, Tag } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
-import { Button, Code, ConfirmDialog, DataTable, PageFrame, DateText, EmptyState, ErrorState, FromCisTag, Section, useStaff, useToast, RowMenu, type RowMenuItem } from "@/ui";
+import { Button, Code, ConfirmDialog, DataTable, PageFrame, DateText, EmptyState, ErrorState, FromCisTag, Section, useCan, useStaff, useToast, RowMenu, type RowMenuItem } from "@/ui";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { ContractDrawer } from "./ContractDrawer";
 import { RateSheetDrawer } from "./RateSheetDrawer";
@@ -96,9 +96,11 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
                   <Ban size={14} /> {t("Deactivate")}
                 </Button>
               ) : (
-                <Button variant="secondary" onClick={() => actions.activate(s)}>
-                  <Power size={14} /> {t("Activate")}
-                </Button>
+                actions.canActivate && (
+                  <Button variant="secondary" onClick={() => actions.activate(s)}>
+                    <Power size={14} /> {t("Activate")}
+                  </Button>
+                )
               )}
             </>
           )
@@ -227,6 +229,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const t = useT(MSG);
   const tx = useTx();
   const me = useStaff();
+  const canPublish = useCan("contract.publish"); // AA-1150: publishing is an approval, not a write
   const qc = useQueryClient();
   const toast = useToast();
   const list = useQuery({ queryKey: ["supplier", s.code, "contracts"], queryFn: () => suppliersApi.contracts(s.code) });
@@ -257,15 +260,18 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     if (!canWrite) return [];
     if (k.status === "draft") {
       const own = isMaker(k);
-      return [
+      const items: RowMenuItem[] = [
         { label: t("Edit draft"), icon: <Pencil size={15} />, onSelect: () => setDrawer({ contract: k }) },
-        {
+      ];
+      if (canPublish) {
+        items.push({
           label: own ? t("Publish (needs a second person)") : t("Publish"),
           icon: <CheckCircle2 size={15} />,
           onSelect: () => ask({ kind: "publish", contract: k }),
           disabled: own || s.status !== "active",
-        },
-      ];
+        });
+      }
+      return items;
     }
     if (k.status === "published") {
       return [{ label: t("Expire"), icon: <Ban size={15} />, onSelect: () => ask({ kind: "expire", contract: k }), danger: true }];

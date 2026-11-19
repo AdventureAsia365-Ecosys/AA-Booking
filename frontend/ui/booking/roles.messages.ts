@@ -10,7 +10,7 @@ export const MSG = phrasebook(
     {
       Admin: "Admin",
       Sales: "Sales",
-      Contracting: "Contracting",
+      "Product & operations": "Product & operations",
       "Content creator": "Content creator",
       Finance: "Finance",
       Administrator: "Administrator",
@@ -25,7 +25,7 @@ export const MSG = phrasebook(
     {
       Admin: "Quản trị",
       Sales: "Bán hàng",
-      Contracting: "Bộ phận hợp đồng",
+      "Product & operations": "Sản phẩm & điều hành",
       "Content creator": "Người tạo nội dung",
       Finance: "Tài chính",
       Administrator: "Quản trị viên",

@@ -33,7 +33,15 @@ trigger sets to the normalised address; lower-casing here can only cap more sess
 ``billing.write``) and runs agency billing (``agency_billing.*``, ``agency_payment.approve``, ``billing_config.write``,
 AA-1037). It comes ONLY from the WORKFORCE group ``booking-finance`` (granted on the CIS Staff page through
 ``shared.staff_app_grant`` role ``finance``); the CIS -> Booking bridge never yields it (:data:`ROLE_FROM_CIS` has no
-finance entry and CIS mints no bridge token for its new roles).
+finance entry and CIS mints no bridge token for its new roles). AA-1150 (S285 L7a): finance also reads trip cases,
+prices, supply, operations, supplier bills and the catalog (``trip_case.read``, ``pricing.read``, ``supply.read``,
+``ops.read``, ``bill.read``, ``catalog.read``); it writes none of them, and ``payout.write`` stays admin only.
+
+**Make / approve split (AA-1150).** Three approval capabilities are separate from the write rights that make the work:
+``supplier.activate`` (activate a supplier), ``contract.publish`` (publish a supplier contract) and
+``stop_sale.approve`` (review a pending stop-sale, approve or reject the end of one). A role with ``supply.write`` /
+``stop_sale.write`` alone makes the work and a second person approves it. The built-in ``admin`` and ``contracting``
+roles hold all three.
 
 **Dev-only E2E write identities (AA-1087, root ADR 0006a A10e).** Three more WORKFORCE E2E users may write, each only
 its own allow-listed routes, only on Dev and only on a synthetic agency's record (:mod:`app.auth.e2e_staff`): a staff
@@ -105,7 +113,9 @@ CIS_GROUP_ROLES: tuple[tuple[str, str], ...] = (
 COGNITO_KEY_PREFIX = "cog:"
 
 PERMISSIONS: dict[str, frozenset[str]] = {
-    "trip_case.read": frozenset({"admin", "sales", "contracting"}),
+    # AA-1150 (S285 L7a): finance reads trip cases, prices, supply, operations, supplier bills and the catalog (it
+    # writes none of them; payouts stay admin only, tech lead decision Q4).
+    "trip_case.read": frozenset({"admin", "sales", "contracting", "finance"}),
     "trip_case.write": frozenset({"admin", "sales"}),
     "trip_case.assign": frozenset({"admin", "sales"}),
     "version.write": frozenset({"admin", "sales"}),
@@ -114,18 +124,29 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "customer.admin": frozenset({"admin"}),  # block / unblock, archive
     "staff.directory": frozenset({"admin", "sales", "contracting"}),  # StaffPicker (D4)
     # Margins, net costs and FX are commercial data: sales quote, contracting owns rates (ADR 0005 d8).
-    "pricing.read": frozenset({"admin", "sales", "contracting"}),
+    "pricing.read": frozenset({"admin", "sales", "contracting", "finance"}),
     # New pricing rule / FX rows and their approval (maker-checker, bk-007): contracting owns rates, admin backs up.
     "pricing.write": frozenset({"admin", "contracting"}),
     # Supply (bk-008, ADR 0005 d8): contracting owns suppliers and contracts; sales reads them to quote.
-    "supply.read": frozenset({"admin", "sales", "contracting"}),
+    "supply.read": frozenset({"admin", "sales", "contracting", "finance"}),
     "supply.write": frozenset({"admin", "contracting"}),
+    # AA-1150 (make / approve split): approving supply is its own capability, never implied by supply.write. Activating
+    # a supplier (POST /suppliers/{ref}/activate) and publishing a contract (status published; still never by the
+    # draft's maker, 403 maker_checker) = admin and the built-in contracting ("Product & operations"), which keep both
+    # so the A10e-2 pricing checker and the CIS "Pricing team" preset work as before. A later custom maker role holds
+    # supply.write without them.
+    "supplier.activate": frozenset({"admin", "contracting"}),
+    "contract.publish": frozenset({"admin", "contracting"}),
     # AA-1145 (bk-060; T13 review 2.4): set, review and end a stop-sale on a supplier contract. Contracting (shown as
     # "Product & operations") and admin; sales never (403). A new stop-sale is in effect at once; its review and the
     # end of an approved one take a second person (403 maker_checker + CHECKs).
     "stop_sale.write": frozenset({"admin", "contracting"}),
+    # AA-1150: setting a stop-sale, withdrawing one's own and asking to end one stay stop_sale.write; reviewing a
+    # pending stop-sale (approve / reject) and approving or rejecting its end need stop_sale.approve (also on the
+    # stop-sale ranges of season calendars). Admin and contracting hold both.
+    "stop_sale.approve": frozenset({"admin", "contracting"}),
     # CIS catalog reads (content is read-only in Booking, O7): every staff role, content creators included.
-    "catalog.read": frozenset({"admin", "sales", "contracting", "content_creator"}),
+    "catalog.read": frozenset({"admin", "sales", "contracting", "content_creator", "finance"}),
     # Commercial row of a catalog tour (sellable, trip style, price hint, notes; bk-009): contracting + admin.
     "trip_plan.write": frozenset({"admin", "contracting"}),
     # Booking state of CIS countries and destinations (bk-029, AA-996): status, area, notes. Admin only (UI spec §3).
@@ -148,7 +169,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "b2b_desk.approve": frozenset({"admin", "contracting"}),
     # Operations (bk-026, AA-682 S1): supplier bookings of a sold trip and their documents. Every operational role
     # books and chases suppliers (no separate ops role yet, design D16); content creators do not.
-    "ops.read": frozenset({"admin", "sales", "contracting"}),
+    "ops.read": frozenset({"admin", "sales", "contracting", "finance"}),
     "ops.write": frozenset({"admin", "sales", "contracting"}),
     # Billing (bk-028, AA-682 S3): customer invoices and manual payments. Sales draft, send and record; only an admin
     # verifies a payment, and never one they recorded (maker-checker, design D6). Contracting does not see customer
@@ -160,7 +181,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # Supplier bills and payouts (bk-030, AA-682 S4, design §5): every operational role reads them; contracting (who
     # books suppliers) and admin enter and approve bills, never their own (maker-checker); only an admin records a
     # payout, never on a bill they entered. Not in preview sessions (payout references are bank references).
-    "bill.read": frozenset({"admin", "sales", "contracting"}),
+    "bill.read": frozenset({"admin", "sales", "contracting", "finance"}),
     "bill.write": frozenset({"admin", "contracting"}),
     "bill.approve": frozenset({"admin", "contracting"}),
     "payout.write": frozenset({"admin"}),

@@ -187,15 +187,8 @@ def test_finance_issues_invoices_and_records_payments_but_does_not_verify() -> N
     fin = staff("finance")
     assert fin.can("billing.read") and fin.can("billing.write")
     assert not fin.can("payment.verify")
-    for other in (
-        "trip_case.read",
-        "customer.read",
-        "pricing.read",
-        "supply.read",
-        "staff.admin",
-        "audit.read",
-        "bill.read",
-        "payout.write",
-    ):
+    # AA-1150 (L7a): finance now reads trip cases, prices, supply and supplier bills; payouts stay admin (Q4).
+    assert all(fin.can(p) for p in ("trip_case.read", "pricing.read", "supply.read", "bill.read"))
+    for other in ("customer.read", "staff.admin", "audit.read", "payout.write"):
         assert not fin.can(other), other
     assert not staff("finance", preview=True).can("billing.read")

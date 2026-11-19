@@ -591,10 +591,20 @@ async def _stop_sale(conn: asyncpg.Connection, restriction_id: str) -> dict[str,
     return row
 
 
+def require_approve(staff: Staff) -> None:
+    """AA-1150: reviewing a stop-sale or approving its end is an approval (``stop_sale.approve``), not a write."""
+    if not staff.can("stop_sale.approve"):
+        raise Forbidden("forbidden", "reviewing or ending a stop-sale needs stop_sale.approve")
+
+
 async def decide_stop_sale(
     conn: asyncpg.Connection, staff: Staff, restriction_id: str, action: str, reason: str | None = None
 ) -> dict[str, Any]:
-    """``approve`` / ``reject`` (a second person, never the maker) or ``withdraw`` (the maker) a pending stop-sale."""
+    """``approve`` / ``reject`` (a second person, never the maker) or ``withdraw`` (the maker) a pending stop-sale.
+    AA-1150: approve / reject is a review and needs ``stop_sale.approve`` (checked before any read); withdraw stays
+    with the route's ``stop_sale.write``."""
+    if action in ("approve", "reject"):
+        require_approve(staff)
     row = await _stop_sale(conn, restriction_id)
     if row["status"] != "pending":
         raise Conflict("stop_sale_not_pending", f"the stop-sale is {row['status']}")
@@ -655,6 +665,7 @@ async def request_end(conn: asyncpg.Connection, staff: Staff, restriction_id: st
 
 
 async def approve_end(conn: asyncpg.Connection, staff: Staff, restriction_id: str) -> dict[str, Any]:
+    require_approve(staff)
     row = await _stop_sale(conn, restriction_id)
     if row["end_requested_by"] is None or row["ended_at"] is not None:
         raise Conflict("no_end_request", "no end request is waiting")

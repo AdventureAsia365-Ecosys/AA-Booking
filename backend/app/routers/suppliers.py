@@ -1,9 +1,11 @@
 """Supplier and supplier contract endpoints for staff (bk-008, AA-822; UI spec §6.3, module spec 08).
 
-Permissions: ``supply.read`` (admin, contracting, sales) for every GET; ``supply.write`` (admin, contracting) for
-every write. AA-1029: ``GET /booking/rate-sheets/template`` and ``POST /booking/suppliers/{ref}/rate-sheets`` (the
-Excel import into a draft contract, ``app/supply/rate_sheet.py``). Publishing a contract also needs a second person
-(maker-checker, ADR 0005 d8): 403 ``maker_checker``.
+Permissions: ``supply.read`` (admin, contracting, sales, finance) for every GET; ``supply.write`` (admin, contracting)
+for every write. AA-1150: activating a supplier also needs ``supplier.activate`` and publishing a contract
+``contract.publish`` (admin, contracting; checked in ``app.suppliers.service``, 403 ``forbidden``). AA-1029: ``GET
+/booking/rate-sheets/template`` and ``POST /booking/suppliers/{ref}/rate-sheets`` (the Excel import into a draft
+contract, ``app/supply/rate_sheet.py``). Publishing a contract also needs a second person (maker-checker, ADR 0005 d8):
+403 ``maker_checker``.
 """
 
 from __future__ import annotations

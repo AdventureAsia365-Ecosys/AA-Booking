@@ -71,13 +71,16 @@ export function ChangeButtons({
   onAct,
   busy,
 }: {
-  item: { state: SeasonRange["state"]; created_by: Person; end_requested_by: Person | null };
+  item: { state: SeasonRange["state"]; created_by: Person; end_requested_by: Person | null; kind?: string };
   onAct: (action: ChangeAction, reason?: string) => void;
   busy: boolean;
 }) {
   const t = useT(S);
   const me = useStaff().cis_user_id;
-  const actions = changeActions(item, me, useCan("season.write"), useCan("season.approve"));
+  // AA-1150: reviewing a stop-sale range (or its removal) is a stop-sale approval too (stop_sale.approve).
+  const canApproveStop = useCan("stop_sale.approve");
+  const canApprove = useCan("season.approve") && (item.kind !== "stop_sale" || canApproveStop);
+  const actions = changeActions(item, me, useCan("season.write"), canApprove);
   const [asking, setAsking] = useState<ChangeAction | null>(null);
   if (!actions.length) return null;
   return (

@@ -183,7 +183,7 @@ def bill_body(**over: Any) -> dict[str, Any]:
 
 
 def test_permissions_follow_the_design() -> None:
-    assert PERMISSIONS["bill.read"] == frozenset({"admin", "sales", "contracting"})
+    assert PERMISSIONS["bill.read"] == frozenset({"admin", "sales", "contracting", "finance"})  # AA-1150 L7a
     assert PERMISSIONS["bill.write"] == PERMISSIONS["bill.approve"] == frozenset({"admin", "contracting"})
     assert PERMISSIONS["payout.write"] == frozenset({"admin"})
     assert not {"bill.read", "bill.write", "bill.approve", "payout.write"} & PREVIEW_PERMISSIONS

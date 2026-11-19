@@ -1,10 +1,12 @@
 """Supplier contract terms, supply restrictions and stop-sale for staff (AA-1145, bk-060; T12, B4, B8, T7, T13).
 
-Permissions: ``supply.read`` (admin, contracting, sales) for every GET; ``supply.write`` (admin, contracting) for the
-contract terms and the allotment / free-sale / on-request rows of a draft contract (the writer becomes the draft's
-maker, so a second person publishes them with the contract); ``stop_sale.write`` (admin, contracting; sales 403) to
-set, review and end a stop-sale (``app.supply.restrictions``: in effect at once, a second person reviews it; ending an
-approved one takes a second person, 403 ``maker_checker``).
+Permissions: ``supply.read`` (admin, contracting, sales, finance) for every GET; ``supply.write`` (admin, contracting)
+for the contract terms and the allotment / free-sale / on-request rows of a draft contract (the writer becomes the
+draft's maker, so a second person publishes them with the contract); ``stop_sale.write`` (admin, contracting; sales 403)
+to set, review and end a stop-sale (``app.supply.restrictions``: in effect at once, a second person reviews it; ending
+an approved one takes a second person, 403 ``maker_checker``). AA-1150: the review (approve / reject) and the end
+decision also need ``stop_sale.approve`` (admin, contracting); setting one, withdrawing one's own, asking to end one and
+taking that request back stay ``stop_sale.write``.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 CanRead = Annotated[Staff, Depends(require("supply.read"))]
 CanWrite = Annotated[Staff, Depends(require("supply.write"))]
 CanStop = Annotated[Staff, Depends(require("stop_sale.write"))]
+CanApproveStop = Annotated[Staff, Depends(require("stop_sale.approve"))]
 Component = Annotated[str, Field(min_length=3, max_length=64, description="rt:<room type id> or sv:<service id>")]
 Days = Annotated[int, Field(ge=0, le=contract_terms.DAYS_MAX)]
 Pct = Annotated[Decimal, Field(ge=0, le=100, max_digits=5, decimal_places=2)]
@@ -188,7 +191,7 @@ async def request_end(body: EndRequest, restriction_id: RestrictionId, staff: Ca
 
 
 @router.post("/supply/stop-sales/{restriction_id}/end")
-async def approve_end(restriction_id: RestrictionId, staff: CanStop, pool: Pool) -> dict[str, Any]:
+async def approve_end(restriction_id: RestrictionId, staff: CanApproveStop, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await restrictions.approve_end(conn, staff, restriction_id)
 

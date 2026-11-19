@@ -188,7 +188,7 @@ async def test_create_manual_cost_and_refusals() -> None:
             await costs.create(c, OPS, DEP, data)
         assert exc.value.code == code, code
     with pytest.raises(Forbidden):
-        await costs.create(cost_conn(), FIN, DEP, body)  # finance has no pricing.read
+        await costs.create(cost_conn(), WRITER, DEP, body)  # no pricing.read (finance reads prices since AA-1150)
     with pytest.raises(NotFound):
         await costs.create(cost_conn(), OPS, "not-a-uuid", body)
 
@@ -486,7 +486,7 @@ async def test_order_reads() -> None:
     with pytest.raises(NotFound):
         await orders.detail(order_conn(**{ORDER_ROW: None}), OPS, ORDER)
     with pytest.raises(Forbidden):
-        await orders.detail(order_conn(), FIN, ORDER)
+        await orders.detail(order_conn(), WRITER, ORDER)  # no pricing.read (finance reads prices since AA-1150)
     html = await orders.document(order_conn(), OPS, ORDER)
     assert html.startswith("<!doctype html>") and "TC-000001" in html and "Draft, not sent yet." in html
 
@@ -705,9 +705,10 @@ def test_routes_refuse_roles_without_the_permission(monkeypatch: pytest.MonkeyPa
     c, _ = route_client(OPS, monkeypatch)  # contracting: costs and orders, not profit
     assert c.get(f"/booking/departures/{DEP}/costs").status_code == 200
     assert c.get("/booking/finance/profit/cases").status_code == 403
-    c, _ = route_client(FIN, monkeypatch)  # finance: profit only
+    c, _ = route_client(FIN, monkeypatch)  # finance: profit, and since AA-1150 reads costs and orders too
     assert c.get("/booking/finance/profit/agencies").status_code == 200
-    assert c.get("/booking/supplier-orders").status_code == 403
+    assert c.get("/booking/supplier-orders").status_code == 200
+    assert c.post(f"/booking/departures/{DEP}/costs", json={}).status_code == 403  # writes stay ops.write
     c, _ = route_client(WRITER, monkeypatch)
     assert c.get(f"/booking/departures/{DEP}/costs").status_code == 403
 
