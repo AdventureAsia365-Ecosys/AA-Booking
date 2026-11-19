@@ -45,7 +45,8 @@
 -- Class: contract (root ADR 0017 d3): columns and CHECKs on an existing table, guard functions, a config row.
 -- Migration-only PR first (MIG-4); the code PR raises readiness to bk-060. The running code before the code PR never
 -- reads the new columns or tables (a rate row keeps pax_type adult), so nothing it reads changes here.
--- DM-6.1: no personal data. Commercial columns are tagged conf:commercial; notes are staff notes on supplier terms.
+-- DM-6.1: no personal data by rule. Commercial columns are tagged conf:commercial; the note and the three reason
+-- columns of supply_restrictions are staff text, tagged pii:free_text like the season-range reasons (bk-055).
 -- DM-7.1: both new tables have their row in the root data standards (root PR merged before the Infra copy).
 -- Locks: supplier_rates, supplier_contracts (FK) take short locks (small tables); lock_timeout 5s.
 -- Re-runnable (the Integration Tests replay every file): IF NOT EXISTS, DROP CONSTRAINT IF EXISTS, CREATE OR
@@ -260,13 +261,13 @@ COMMENT ON COLUMN booking.supply_restrictions.release_days IS
 COMMENT ON COLUMN booking.supply_restrictions.max_pax IS
     'conf:commercial; bk-060: free_sale only: most travellers per booking AA may confirm without asking (NULL = no limit).';
 COMMENT ON COLUMN booking.supply_restrictions.note IS
-    'conf:commercial; bk-060: staff note, e.g. the supplier e-mail that announced a stop-sale (no customer data).';
+    'pii:free_text; also conf:commercial (bk-060: staff note on the supplier term, e.g. the supplier e-mail that announced a stop-sale; staff text, never traveller data by rule).';
 COMMENT ON COLUMN booking.supply_restrictions.reject_reason IS
-    'bk-060: why the second person rejected a stop-sale (staff text, no customer data).';
+    'pii:free_text; bk-060: why the second person rejected a stop-sale (staff text, never traveller data by rule).';
 COMMENT ON COLUMN booking.supply_restrictions.withdraw_reason IS
-    'bk-060: why the maker withdrew a pending stop-sale (staff text, no customer data).';
+    'pii:free_text; bk-060: why the maker withdrew a pending stop-sale (staff text, never traveller data by rule).';
 COMMENT ON COLUMN booking.supply_restrictions.end_reason IS
-    'bk-060: why an approved stop-sale should end (staff text, no customer data).';
+    'pii:free_text; bk-060: why an approved stop-sale should end (staff text, never traveller data by rule).';
 
 CREATE OR REPLACE FUNCTION booking.supply_restriction_guard() RETURNS trigger
     LANGUAGE plpgsql
