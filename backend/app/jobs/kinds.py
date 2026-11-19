@@ -15,16 +15,16 @@ it (G4).
 
 ``DEPLOY_GATE_EXEMPT``: kinds the deploy gate leaves out of its ``active`` / ``by_status`` / ``by_kind`` counts
 (information only since G5). Before G5 these counts decided the deploy; the reasons below date from then.
-``bk_inquiry_pull`` is the recurring singleton that is always queued (re-enqueued at +60 s): counting it would block
-every deploy, and interrupting it is harmless (a release puts it back, the next pull re-reads the outbox).
 ``bk_b2b_hold_expire`` (AA-973) is not exempt: it is queued only while a B2B hold is due and finishes in seconds, so it
 holds a deploy back for one short run at most (DM-11.4 stays the default). ``bk_tour_lifecycle_pull`` (AA-986 L5) is
 not exempt either, for the same reason: queued only while the CIS lifecycle outbox has new rows, done in seconds. Same
 exemption idea as CIS ``deploy_gate_exempt``; the two lists stay separate until one registry exists (X1).
 ``bk_noop_sleep`` (AA-993 G4 proof, test-only) is exempt like the CIS ``noop_sleep``. AA-1046: the B2C kinds
 (``bk_inquiry_pull``, ``bk_inquiry_process``, ``bk_notify_email``) have no handler any more and leave
-``EXPECTED_SECONDS``; ``bk_inquiry_pull`` stays exempt so the deploy-gate answer (read by Deploy Dev) keeps its
-shape, and a leftover row is cancelled by the worker anyway (``app.b2c.RETIRED_KINDS``).
+``EXPECTED_SECONDS``; the worker cancels a leftover row (``app.b2c.RETIRED_KINDS``). AA-1134 (S283 docs audit): the
+retired recurring pull left ``DEPLOY_GATE_EXEMPT`` too. Its exemption existed because the singleton was always queued;
+with no handler and no schedule it is never queued again, and since G5 a queued row of a non-blocking kind is
+information only, so a leftover row cannot hold a deploy back.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from __future__ import annotations
 DEFAULT_EXPECTED_SECONDS = 300
 OVERDUE_FACTOR = 2
 
-DEPLOY_GATE_EXEMPT: frozenset[str] = frozenset({"bk_inquiry_pull", "bk_noop_sleep"})
+DEPLOY_GATE_EXEMPT: frozenset[str] = frozenset({"bk_noop_sleep"})
 
 # AA-993 G5 (design D1.4): the only kinds whose RUNNING row makes the deploy gate unsafe. The retention runs keep
 # no progress checkpoint (they are failed, not released, on shutdown: app.retention.jobs NOT_RELEASED), so a deploy mid

@@ -22,6 +22,7 @@ from app.jobs.kinds import (
     DEPLOY_BLOCKING_KINDS,
     DEPLOY_GATE_EXEMPT,
     EXPECTED_SECONDS,
+    TEST_KINDS,
 )
 from app.main import create_app
 from app.settings import Settings
@@ -238,9 +239,10 @@ async def test_active_count_empty_queue() -> None:
 
 
 def test_exempt_kinds_are_real_kinds() -> None:
-    assert DEPLOY_GATE_EXEMPT == frozenset({"bk_inquiry_pull", "bk_noop_sleep"})
-    # AA-1046: bk_inquiry_pull is a retired kind (no handler, so no expected run time); it stays exempt.
-    assert DEPLOY_GATE_EXEMPT - RETIRED_KINDS <= EXPECTED_SECONDS.keys()
+    assert DEPLOY_GATE_EXEMPT == frozenset({"bk_noop_sleep"})
+    # AA-1134: no retired kind (AA-1046) stays exempt; the exempt kinds are the test-only ones.
+    assert not DEPLOY_GATE_EXEMPT & RETIRED_KINDS
+    assert DEPLOY_GATE_EXEMPT <= TEST_KINDS
 
 
 def test_deploy_blocking_kinds_are_the_unreleased_retention_kinds() -> None:
@@ -312,13 +314,13 @@ def test_gate_safe_when_only_exempt_kinds_are_active() -> None:
         "by_status": {},
         "by_kind": {},
         "safe_to_deploy": True,
-        "exempt_kinds": ["bk_inquiry_pull", "bk_noop_sleep"],
+        "exempt_kinds": ["bk_noop_sleep"],
         "blocking_kinds": ["bk_retention_inbox_redact", "bk_retention_job"],
         "blocking_running": {},
         "blocking_due": {},
         "blocked_by": [],
     }
-    assert conn.sql("status IN ('queued', 'running')") == [(["bk_inquiry_pull", "bk_noop_sleep"],)]
+    assert conn.sql("status IN ('queued', 'running')") == [(["bk_noop_sleep"],)]
     assert conn.sql(BLOCKING_SQL) == [(["bk_retention_inbox_redact", "bk_retention_job"], 900)]
 
 

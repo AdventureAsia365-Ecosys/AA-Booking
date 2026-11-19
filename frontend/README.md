@@ -8,7 +8,7 @@ Decisions and trade-offs: `../docs/implementation-notes/AA-683.md`.
 
 ```bash
 npm ci
-npm run dev        # http://localhost:3100
+npm run dev        # http://localhost:3001 (the port the Cognito dev callback registers, and the container port)
 npm run lint       # eslint, no warnings allowed
 npm run typecheck  # tsc --noEmit
 npm run build      # next build

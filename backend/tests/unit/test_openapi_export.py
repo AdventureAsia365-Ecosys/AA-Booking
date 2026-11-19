@@ -18,7 +18,7 @@ export = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export)
 
 # Same rule as PUBLIC_PATHS in .github/workflows/api-contract.yml.
-PUBLIC_PATHS = re.compile(r"^/booking/(b2b/|customer/|health|ops/)")
+PUBLIC_PATHS = re.compile(r"^/booking/(b2b/|health|ops/)")
 
 
 def test_committed_document_is_current() -> None:
@@ -85,3 +85,14 @@ def test_every_public_response_names_its_fields() -> None:
                 if "$ref" not in schema:
                     untyped.append(f"{method.upper()} {path} {code}")
     assert not untyped, f"public route(s) without a named response model (declare response_model=): {untyped}"
+
+
+def test_public_paths_match_the_api_contract_workflow() -> None:
+    """AA-1134: the regex above is the workflow's PUBLIC_PATHS, and the retired B2C customer API is not public any more
+    (AA-1046: no /booking/customer route exists)."""
+    workflow = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "api-contract.yml").read_text()
+    m = re.search(r'PUBLIC_PATHS: "([^"]+)"', workflow)
+    assert m, "api-contract.yml sets PUBLIC_PATHS"
+    assert m.group(1) == PUBLIC_PATHS.pattern
+    assert not PUBLIC_PATHS.match("/booking/customer/v1/inquiries")
+    assert not any(p.startswith("/booking/customer") for p in export.build_spec()["paths"])

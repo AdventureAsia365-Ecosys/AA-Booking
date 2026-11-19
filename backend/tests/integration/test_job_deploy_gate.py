@@ -1,6 +1,6 @@
 """Deploy gate count on a real PostgreSQL, as role ``booking`` (AA-751 B3, plan §3): only ``queued`` / ``running`` rows
-count, with no time filter (a future ``run_after`` still counts), and the exempt ``bk_inquiry_pull`` singleton never
-does."""
+count, with no time filter (a future ``run_after`` still counts), and an exempt kind (``bk_noop_sleep``) never does.
+AA-1134: the retired ``bk_inquiry_pull`` left the exempt list; a leftover row counts as information like any kind."""
 
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ async def job(admin: asyncpg.Connection, kind: str, status: str = "queued", *, r
         )
 
 
-async def test_idle_queue_with_only_the_pull_is_safe(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
-    await job(admin, "bk_inquiry_pull", run_after="60 seconds")
+async def test_idle_queue_with_only_an_exempt_kind_is_safe(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    await job(admin, "bk_noop_sleep", run_after="60 seconds")
     await job(admin, "bk_notify_email", "succeeded")
     await job(admin, "bk_notify_email", "failed")
     await job(admin, "bk_notify_email", "cancelled")
@@ -68,7 +68,7 @@ async def test_idle_queue_with_only_the_pull_is_safe(admin: asyncpg.Connection, 
 
 
 async def test_queued_and_running_rows_count_by_status_and_kind(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
-    await job(admin, "bk_inquiry_pull", "running")
+    await job(admin, "bk_noop_sleep", "running")
     await job(admin, "bk_x6_probe")
     await job(admin, "bk_notify_email", run_after="1 hour")  # not due for an hour: still counted (no time filter)
     await job(admin, "bk_notify_email", "running")
@@ -81,10 +81,19 @@ async def test_queued_and_running_rows_count_by_status_and_kind(admin: asyncpg.C
     }
 
 
-async def test_without_exemptions_the_pull_counts(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
-    await job(admin, "bk_inquiry_pull")
+async def test_without_exemptions_the_exempt_kind_counts(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    await job(admin, "bk_noop_sleep")
     counts = await queue.active_count(pool)
+    assert counts == {"active": 1, "by_status": {"queued": 1}, "by_kind": {"bk_noop_sleep": 1}}
+
+
+async def test_a_leftover_retired_pull_row_is_counted_not_exempt(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:
+    """AA-1134: the retired recurring pull is no longer exempt; a leftover row shows in the counts (information only
+    since AA-993 G5: it is not a deploy-blocking kind)."""
+    await job(admin, "bk_inquiry_pull")
+    counts = await queue.active_count(pool, DEPLOY_GATE_EXEMPT)
     assert counts == {"active": 1, "by_status": {"queued": 1}, "by_kind": {"bk_inquiry_pull": 1}}
+    assert "bk_inquiry_pull" not in DEPLOY_BLOCKING_KINDS
 
 
 async def test_only_running_and_due_rows_of_the_blocking_kinds_count(
