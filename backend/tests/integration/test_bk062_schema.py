@@ -84,7 +84,7 @@ async def test_seed_is_the_exact_allow_list(admin: asyncpg.Connection) -> None:
     "capability",
     [
         "bill.approve", "b2b_desk.approve", "pricing_policy.approve_finance", "supplier.activate", "contract.publish",
-        "stop_sale.approve", "payout.write", "payment.verify", "billing_config.write", "staff.admin",
+        "stop_sale.approve", "payout.write", "payment.verify", "billing_config.write", "staff.admin", "pricing.approve",
         "Bill.Read", "bill", "bill.read;x", "a.b.c.d.e",
     ],
 )  # fmt: skip

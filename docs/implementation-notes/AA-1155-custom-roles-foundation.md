@@ -22,10 +22,15 @@ This PR is migration-only (MIG-4); the Booking code (resolver, role editor, `me.
   (entry only) to this role.
 
 ## Tradeoffs
-- `pricing.write` and `stop_sale.write` still carry approval paths in today's code (pricing rules / FX approval,
-  stop-sale review). The AA-1150 Booking change splits `stop_sale.approve`, `supplier.activate` and
-  `contract.publish` out of the write rights; the code lane must confirm that a custom holder of `pricing.write` cannot
-  approve a pricing rule (maker-checker) before the role is assigned.
+- The seed keeps `supply.write`, `stop_sale.write`, `pricing.write` and `b2b_desk.write`, which on main still gate
+  approvals: supplier / hotel / service activate and contract publish (`supply.write`), stop-sale review and end
+  (`stop_sale.write`), the approve of pricing rules, FX rates, cancellation policies, partner tier discounts, partner
+  rate cards and price adjustments (`pricing.write`), and allotment approve (`b2b_desk.write`). The names
+  `pricing.approve`, `supplier.activate`, `contract.publish` and `stop_sale.approve` are reserved ahead of use: the
+  CHECK refuses them to custom roles, but nothing gates on them yet. The root spec orders the fix: the lean-roles
+  step-1 Booking split (activate, publish, stop-sale) and task T4.1 (`pricing.approve`, allotments on
+  `b2b_desk.approve`) merge before the resolver (T5), and no one gets `booking-custom` before both are live. This
+  migration is safe meanwhile: no code reads the new tables, so the seeded role reaches no one.
 
 ## Should know
 - Renumber if bk-062 is taken at merge: `git grep '062_'` and `bk-062` (this file, the migration, the integration

@@ -21,6 +21,12 @@
 --      built-in roles: any *.approve or *.approve_<x>, supplier.activate, contract.publish, stop_sale.approve,
 --      payout.write, payment.verify, billing_config.write, staff.admin. The code also refuses a capability its
 --      PERMISSIONS set does not know (400 on the role editor).
+--      Reserved ahead of use: pricing.approve, supplier.activate, contract.publish and stop_sale.approve are not in
+--      PERMISSIONS yet. Until the Booking approve split (root spec task T4.1 and the lean-roles step-1 split) re-gates
+--      the routes, supply.write still carries supplier / hotel / service activate and contract publish,
+--      stop_sale.write the stop-sale review and end, pricing.write the approve of pricing rules, FX rates,
+--      cancellation policies, agency pricing and price adjustments, and b2b_desk.write the allotment approve. No one
+--      gets booking-custom before that split is live (the resolver of task T5 starts after it).
 --   3. booking.v_staff_role_capability (security_barrier): (role_code, label, based_on, archived, capability), one row
 --      per capability (a role without one: one row, capability NULL). Key-only: no person. SELECT to cis_app (the CIS
 --      "Roles & permissions" page and the Staff page pickers) and booking.
