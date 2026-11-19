@@ -10,6 +10,8 @@ import { RotateCcw } from "lucide-react";
 import { quoteRequest, newKey, type CostLine } from "@/lib/proposalDraft";
 import { Button, PageFrame, Section, useStaff } from "@/ui";
 import { CostLinesEditor, FxNotice, PriceSettings, QuoteResult, useQuotePreview, type PriceSettingsValue } from "@/ui/booking/PricePanel";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./page.messages";
 
 const DEFAULT_SETTINGS: PriceSettingsValue = { channel: "b2c_tailor_made", currency: "USD", peak: false, override: "", overrideReason: "" };
 
@@ -18,6 +20,7 @@ function blankLine(): CostLine {
 }
 
 export default function PricingCalculatorPage() {
+  const t = useT(MSG);
   const me = useStaff();
   const canManageRules = me.role === "admin" || me.role === "contracting";
   const [lines, setLines] = useState<CostLine[]>(() => [blankLine()]);
@@ -31,8 +34,8 @@ export default function PricingCalculatorPage() {
 
   return (
     <PageFrame
-      title="Pricing calculator"
-      description="Price a set of net costs with the rule and FX rates in force today, without a trip case. Nothing is saved."
+      title={t("Pricing calculator")}
+      description={t("Price a set of net costs with the rule and FX rates in force today, without a trip case. Nothing is saved.")}
       actions={
         <Button
           variant="ghost"
@@ -42,31 +45,31 @@ export default function PricingCalculatorPage() {
             setSettings(DEFAULT_SETTINGS);
           }}
         >
-          <RotateCcw size={13} /> Reset
+          <RotateCcw size={13} /> {t("Reset")}
         </Button>
       }
     >
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex flex-col gap-5">
-          <Section title="Net costs" description="One line per supplier cost: the net amount and the supplier's currency.">
+          <Section title={t("Net costs")} description={t("One line per supplier cost: the net amount and the supplier's currency.")}>
             <CostLinesEditor lines={lines} onChange={setLines} newLine={blankLine} sellAmounts={sellAmounts} sellCurrency={fresh?.currency} />
           </Section>
-          <Section title="Settings" description="Channel, selling currency, peak season and an optional override total.">
+          <Section title={t("Settings")} description={t("Channel, selling currency, peak season and an optional override total.")}>
             <div className="flex flex-col gap-3">
               <PriceSettings value={settings} onChange={setSettings} belowFloor={!!fresh?.below_floor} showReason={false} />
               <FxNotice />
             </div>
           </Section>
         </div>
-        <Section title="Result" description="Rule in force, FX rates used, each line in USD and selling currency, rounding, margin and the floor check.">
+        <Section title={t("Result")} description={t("Rule in force, FX rates used, each line in USD and selling currency, rounding, margin and the floor check.")}>
           <QuoteResult
             query={quote}
             canManageRules={canManageRules}
-            emptyHint={incomplete ? "Complete every cost line (amount and 3-letter currency) to see the price." : undefined}
+            emptyHint={incomplete ? t("Complete every cost line (amount and 3-letter currency) to see the price.") : undefined}
           />
           {fresh?.below_floor && (
             <p className="mt-3 text-xs text-muted">
-              The calculator only shows the check: a below-floor price needs a reason when it is applied to a proposal version.
+              {t("The calculator only shows the check: a below-floor price needs a reason when it is applied to a proposal version.")}
             </p>
           )}
         </Section>

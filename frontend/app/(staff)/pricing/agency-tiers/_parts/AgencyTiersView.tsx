@@ -38,6 +38,9 @@ import {
 } from "@/ui";
 import { SavedTabs } from "../../../_parts/SavedTabs";
 import { NewRateCardDrawer, NewTierDiscountDrawer, NewTierDrawer, type RateCardKind } from "./AgencyDrawers";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./AgencyTiersView.messages";
 
 const STATUS_META: Record<AgencyRowStatus, { label: string; tone: BookingTone; help: string }> = {
   pending: { label: "Pending", tone: "warning", help: "Waiting for a second person. Not used for prices." },
@@ -48,10 +51,11 @@ const STATUS_META: Record<AgencyRowStatus, { label: string; tone: BookingTone; h
 };
 
 function StatusPill({ status }: { status: AgencyRowStatus }) {
+  const tx = useTx();
   const meta = STATUS_META[status] ?? { label: status, tone: "neutral" as const, help: "" };
   return (
-    <Pill tone={meta.tone} title={meta.help}>
-      {meta.label}
+    <Pill tone={meta.tone} title={tx(meta.help)}>
+      {tx(meta.label)}
     </Pill>
   );
 }
@@ -74,6 +78,8 @@ function cardTerms(row: RateCardRow): string {
 }
 
 export function AgencyTiersView() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("pricing.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -98,7 +104,7 @@ export function AgencyTiersView() {
       a.kind === "discount" ? agencyPricingApi.approveDiscount(a.row.id) : agencyPricingApi.approveRateCard(a.row.id),
     onSuccess: (row, a) => {
       qc.invalidateQueries({ queryKey: ["agency-pricing"] });
-      toast.success(`${a.kind === "discount" ? "Discount" : "Rate card"} approved: ${STATUS_META[row.status]?.label ?? row.status}.`);
+      toast.success(tr("{0} approved: {1}.", a.kind === "discount" ? tr("Discount") : tr("Rate card"), tx(STATUS_META[row.status]?.label) ?? row.status));
       setApproving(null);
     },
     onError: (err) => {
@@ -110,9 +116,9 @@ export function AgencyTiersView() {
     mutationFn: ({ partner, tier }: { partner: PartnerTerms; tier: string }) => agencyPricingApi.setPartnerTier(partner.id, tier),
     onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["agency-pricing"] });
-      toast.success(`${row.agency_name} is now ${row.tier_label} (${pct(row.effective_discount)} off the agency price).`);
+      toast.success(tr("{0} is now {1} ({2} off the agency price).", row.agency_name, row.tier_label, pct(row.effective_discount)));
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not change the tier."),
+    onError: (err) => toast.error(err instanceof Error ? err.message : tr("Could not change the tier.")),
   });
 
   function statusCell(status: AgencyRowStatus, canApprove: boolean, onApprove: () => void) {
@@ -122,12 +128,12 @@ export function AgencyTiersView() {
         <StatusPill status={status} />
         {canApprove ? (
           <span onClick={(e) => e.stopPropagation()}>
-            <Button size="sm" variant="secondary" onClick={onApprove} title="Approve this row (maker-checker)">
-              Approve
+            <Button size="sm" variant="secondary" onClick={onApprove} title={tr("Approve this row (maker-checker)")}>
+              {tr("Approve")}
             </Button>
           </span>
         ) : (
-          <span className="block text-xs leading-snug text-muted md:max-w-[96px]">{canWrite ? "Needs a second person" : "Waiting"}</span>
+          <span className="block text-xs leading-snug text-muted md:max-w-[96px]">{canWrite ? tr("Needs a second person") : tr("Waiting")}</span>
         )}
       </span>
     );
@@ -136,19 +142,19 @@ export function AgencyTiersView() {
   const tierColumns: ColumnDef<PartnerTier, unknown>[] = [
     {
       id: "tier",
-      header: "Tier",
+      header: tr("Tier"),
       accessorKey: "label",
       cell: ({ row }) => (
         <span className="flex flex-col">
-          <span className="font-medium text-ink">{row.original.label}</span>
+          <span className="font-medium text-ink">{tx(row.original.label)}</span>
           <span className="font-mono text-xs text-muted">{row.original.code}</span>
         </span>
       ),
     },
-    { id: "discount", header: "Discount today", accessorFn: (r) => Number(r.discount_in_force), cell: ({ row }) => pct(row.original.discount_in_force) },
+    { id: "discount", header: tr("Discount today"), accessorFn: (r) => Number(r.discount_in_force), cell: ({ row }) => pct(row.original.discount_in_force) },
     {
       id: "margin",
-      header: "AA margin left",
+      header: tr("AA margin left"),
       accessorFn: (r) => Number(r.margin_after_discount ?? -1),
       cell: ({ row }) =>
         row.original.margin_after_discount === null ? (
@@ -157,29 +163,29 @@ export function AgencyTiersView() {
           <span className="flex flex-col items-end gap-1 md:items-start">
             <span className="tabular-nums">{pct(row.original.margin_after_discount)}</span>
             {row.original.below_floor && (
-              <Pill tone="danger" title="The margin left is under the b2b rule's floor. Quotes still use the discount.">
-                Below floor
+              <Pill tone="danger" title={tr("The margin left is under the b2b rule's floor. Quotes still use the discount.")}>
+                {tr("Below floor")}
               </Pill>
             )}
           </span>
         ),
     },
-    { id: "partners", header: "Agencies", accessorKey: "partners" },
+    { id: "partners", header: tr("Agencies"), accessorKey: "partners" },
     {
       id: "pending",
-      header: "Pending rows",
+      header: tr("Pending rows"),
       accessorKey: "pending",
       cell: ({ row }) => (row.original.pending ? <Pill tone="warning">{row.original.pending}</Pill> : <span className="text-muted">—</span>),
     },
   ];
 
   const discountColumns: ColumnDef<TierDiscountRow, unknown>[] = [
-    { id: "tier", header: "Tier", accessorKey: "tier_label", cell: ({ row }) => <span className="font-medium text-ink">{row.original.tier_label}</span> },
-    { id: "discount", header: "Discount", accessorFn: (r) => Number(r.discount_pct), cell: ({ row }) => pct(row.original.discount_pct) },
-    { id: "valid_from", header: "Valid from", accessorKey: "valid_from", cell: ({ row }) => <DateText value={row.original.valid_from} /> },
+    { id: "tier", header: tr("Tier"), accessorKey: "tier_label", cell: ({ row }) => <span className="font-medium text-ink">{tx(row.original.tier_label)}</span> },
+    { id: "discount", header: tr("Discount"), accessorFn: (r) => Number(r.discount_pct), cell: ({ row }) => pct(row.original.discount_pct) },
+    { id: "valid_from", header: tr("Valid from"), accessorKey: "valid_from", cell: ({ row }) => <DateText value={row.original.valid_from} /> },
     {
       id: "status",
-      header: "Status",
+      header: tr("Status"),
       accessorKey: "status",
       cell: ({ row }) =>
         statusCell(row.original.status, row.original.can_approve, () => {
@@ -187,40 +193,40 @@ export function AgencyTiersView() {
           setApproving({ kind: "discount", row: row.original });
         }),
     },
-    { id: "entered", header: "Entered by", accessorFn: (r) => r.created_by?.name ?? r.created_by?.id ?? "", cell: ({ row }) => personText(row.original.created_by) },
-    { id: "approved", header: "Approved by", accessorFn: (r) => r.approved_by?.name ?? r.approved_by?.id ?? "", cell: ({ row }) => personText(row.original.approved_by) },
-    { id: "note", header: "Note", accessorFn: (r) => r.note ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.note ?? "—"}</span> },
+    { id: "entered", header: tr("Entered by"), accessorFn: (r) => r.created_by?.name ?? r.created_by?.id ?? "", cell: ({ row }) => personText(row.original.created_by) },
+    { id: "approved", header: tr("Approved by"), accessorFn: (r) => r.approved_by?.name ?? r.approved_by?.id ?? "", cell: ({ row }) => personText(row.original.approved_by) },
+    { id: "note", header: tr("Note"), accessorFn: (r) => r.note ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.note ?? "—"}</span> },
   ];
 
   const partnerColumns: ColumnDef<PartnerTerms, unknown>[] = [
     {
       id: "agency",
-      header: "Agency",
+      header: tr("Agency"),
       accessorKey: "agency_name",
       cell: ({ row }) => (
         <span className="flex flex-col">
           <span className="font-medium text-ink">{row.original.agency_name}</span>
-          {row.original.status === "suspended" && <span className="text-xs text-muted">Suspended</span>}
+          {row.original.status === "suspended" && <span className="text-xs text-muted">{tr("Suspended")}</span>}
         </span>
       ),
     },
     {
       id: "tier",
-      header: "Tier",
+      header: tr("Tier"),
       accessorKey: "tier_label",
       cell: ({ row }) =>
         canWrite ? (
           <span onClick={(e) => e.stopPropagation()}>
             <Select
               size="sm"
-              aria-label={`Tier of ${row.original.agency_name}`}
+              aria-label={tr("Tier of {0}", row.original.agency_name)}
               value={row.original.tier_code}
               disabled={moveTier.isPending}
               onChange={(e) => moveTier.mutate({ partner: row.original, tier: e.target.value })}
             >
               {tierRows.map((t) => (
                 <option key={t.code} value={t.code}>
-                  {t.label}
+                  {tx(t.label)}
                 </option>
               ))}
             </Select>
@@ -229,17 +235,17 @@ export function AgencyTiersView() {
           row.original.tier_label
         ),
     },
-    { id: "tier_discount", header: "Tier discount", accessorFn: (r) => Number(r.tier_discount), cell: ({ row }) => pct(row.original.tier_discount) },
+    { id: "tier_discount", header: tr("Tier discount"), accessorFn: (r) => Number(r.tier_discount), cell: ({ row }) => pct(row.original.tier_discount) },
     {
       id: "card",
-      header: "Rate card",
+      header: tr("Rate card"),
       accessorFn: (r) => Number(r.card_discount ?? -1),
       cell: ({ row }) => (
         <span className="flex flex-col">
-          <span>{row.original.card_discount ? `${pct(row.original.card_discount)} every tour` : "—"}</span>
+          <span>{row.original.card_discount ? tr("{0} every tour", pct(row.original.card_discount)) : "—"}</span>
           {row.original.plan_cards > 0 && (
             <span className="text-xs text-muted">
-              + {row.original.plan_cards} tour card{row.original.plan_cards > 1 ? "s" : ""}
+              {tr("+ {0} tour card{1}", row.original.plan_cards, row.original.plan_cards > 1 ? "s" : "")}
             </span>
           )}
         </span>
@@ -247,14 +253,14 @@ export function AgencyTiersView() {
     },
     {
       id: "effective",
-      header: "Off the agency price",
+      header: tr("Off the agency price"),
       accessorFn: (r) => Number(r.effective_discount),
       cell: ({ row }) => <strong className="tabular-nums text-ink">{pct(row.original.effective_discount)}</strong>,
     },
     {
       // AA-1030 G3: the agency's own price per tour, season and pax band (printable, CSV).
       id: "tariff",
-      header: "Tariff",
+      header: tr("Tariff"),
       enableSorting: false,
       cell: ({ row }) => (
         <Link
@@ -262,17 +268,17 @@ export function AgencyTiersView() {
           onClick={(e) => e.stopPropagation()}
           className="whitespace-nowrap text-[13px] font-semibold text-accent-deep hover:underline"
         >
-          View tariff
+          {tr("View tariff")}
         </Link>
       ),
     },
   ];
 
   const cardColumns: ColumnDef<RateCardRow, unknown>[] = [
-    { id: "agency", header: "Agency", accessorKey: "agency_name", cell: ({ row }) => <span className="font-medium text-ink">{row.original.agency_name}</span> },
+    { id: "agency", header: tr("Agency"), accessorKey: "agency_name", cell: ({ row }) => <span className="font-medium text-ink">{row.original.agency_name}</span> },
     {
       id: "scope",
-      header: "Tours",
+      header: tr("Tours"),
       accessorFn: (r) => r.source_id ?? "",
       cell: ({ row }) =>
         row.original.source_id ? (
@@ -280,30 +286,30 @@ export function AgencyTiersView() {
             {row.original.source_id}
           </span>
         ) : (
-          "Every tour"
+          tr("Every tour")
         ),
     },
     {
       id: "discount",
-      header: "Discount",
+      header: tr("Discount"),
       accessorFn: (r) => (r.discount_pct === null ? -1 : Number(r.discount_pct)),
       cell: ({ row }) =>
-        row.original.discount_pct === null ? <span className="text-[13px] text-muted">{cardTerms(row.original)}</span> : cardTerms(row.original),
+        row.original.discount_pct === null ? <span className="text-[13px] text-muted">{tx(cardTerms(row.original))}</span> : cardTerms(row.original),
     },
     {
       id: "validity",
-      header: "Valid",
+      header: tr("Valid"),
       accessorKey: "valid_from",
       cell: ({ row }) => (
         <span className="flex flex-col whitespace-nowrap text-[13px]">
           <DateText value={row.original.valid_from} />
-          <span className="text-xs text-muted">{row.original.valid_to ? <>to <DateText value={row.original.valid_to} /></> : "no end date"}</span>
+          <span className="text-xs text-muted">{row.original.valid_to ? <>{tr("to")} <DateText value={row.original.valid_to} /></> : tr("no end date")}</span>
         </span>
       ),
     },
     {
       id: "status",
-      header: "Status",
+      header: tr("Status"),
       accessorKey: "status",
       cell: ({ row }) =>
         statusCell(row.original.status, row.original.can_approve, () => {
@@ -311,8 +317,8 @@ export function AgencyTiersView() {
           setApproving({ kind: "card", row: row.original });
         }),
     },
-    { id: "ref", header: "Contract", accessorFn: (r) => r.contract_ref ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.contract_ref ?? "—"}</span> },
-    { id: "entered", header: "Entered by", accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => personText(row.original.created_by) },
+    { id: "ref", header: tr("Contract"), accessorFn: (r) => r.contract_ref ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.contract_ref ?? "—"}</span> },
+    { id: "entered", header: tr("Entered by"), accessorFn: (r) => r.created_by?.name ?? "", cell: ({ row }) => personText(row.original.created_by) },
     {
       id: "end",
       header: "",
@@ -322,12 +328,12 @@ export function AgencyTiersView() {
           <Button
             variant="ghost"
             size="sm"
-            title="Add an end card for this agency and tours (back to the tier); a second person approves it"
+            title={tr("Add an end card for this agency and tours (back to the tier); a second person approves it")}
             onClick={() =>
               setCardPrefill({ partner: row.original.partner_id, tour: row.original.source_id ?? undefined, kind: "end" })
             }
           >
-            End
+            {tr("End")}
           </Button>
         ) : null,
     },
@@ -338,24 +344,24 @@ export function AgencyTiersView() {
 
   return (
     <PageFrame
-      title="Agency tiers"
-      description="Each agency's tier takes its discount off the agency price of every B2B quote; a contract rate card replaces the tier for one agency. The suggested retail price stays the same for every agency."
+      title={tr("Agency tiers")}
+      description={tr("Each agency's tier takes its discount off the agency price of every B2B quote; a contract rate card replaces the tier for one agency. The suggested retail price stays the same for every agency.")}
       actions={
         canWrite ? (
           <div className="flex flex-wrap gap-2">
             {tab === "tiers" && (
               <>
                 <Button variant="secondary" size="sm" onClick={() => setDrawer("tier")}>
-                  <Plus size={13} /> New tier
+                  <Plus size={13} /> {tr("New tier")}
                 </Button>
                 <Button variant="primary" size="sm" onClick={() => setDrawer("discount")} disabled={!tierRows.length}>
-                  <Plus size={13} /> New discount
+                  <Plus size={13} /> {tr("New discount")}
                 </Button>
               </>
             )}
             {tab !== "tiers" && (
               <Button variant="primary" size="sm" onClick={() => setDrawer("card")} disabled={!partnerRows.length}>
-                <Plus size={13} /> New rate card
+                <Plus size={13} /> {tr("New rate card")}
               </Button>
             )}
           </div>
@@ -363,27 +369,23 @@ export function AgencyTiersView() {
       }
     >
       <div className="rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
-        <strong className="text-ink">Maker-checker.</strong> A new discount or rate card starts as <em>Pending</em> and
-        is not used until another staff member approves it. Rows are never edited: enter a new row with a later date.
+        <strong className="text-ink">{tr("Maker-checker.")}</strong> {tr("A new discount or rate card starts as")} <em>{tr("Pending")}</em> {tr("and is not used until another staff member approves it. Rows are never edited: enter a new row with a later date.")}
         {rule && (
           <>
-            {" "}
-            B2B rule in force: target margin {pct(rule.target_margin)}, floor {pct(rule.floor_margin)}, card fee{" "}
-            {pct(rule.card_fee_pct)}
-            {rule.rrp_markup_pct ? `, suggested retail price = agency price + ${pct(rule.rrp_markup_pct)}` : ""}.
+            {tr("B2B rule in force: target margin {0}, floor {1}, card fee {2}{3}.", pct(rule.target_margin), pct(rule.floor_margin), pct(rule.card_fee_pct), rule.rrp_markup_pct ? tr(", suggested retail price = agency price + {0}", pct(rule.rrp_markup_pct)) : "")}
           </>
         )}
       </div>
       <SavedTabs
         tabs={[
-          { key: "tiers", label: "Tiers", count: pendingCount || undefined },
-          { key: "agencies", label: "Agencies" },
-          { key: "cards", label: "Rate cards", count: pendingCards || undefined },
+          { key: "tiers", label: tr("Tiers"), count: pendingCount || undefined },
+          { key: "agencies", label: tr("Agencies") },
+          { key: "cards", label: tr("Rate cards"), count: pendingCards || undefined },
         ]}
       />
       {tab === "tiers" && (
         <>
-          <Section title="Tiers" description="The discount in force today and the margin AA keeps on a B2B price after it.">
+          <Section title={tr("Tiers")} description={tr("The discount in force today and the margin AA keeps on a B2B price after it.")}>
             <DataTable<PartnerTier>
               tableId="agency-tiers"
               data={tierRows}
@@ -394,11 +396,11 @@ export function AgencyTiersView() {
               onRetry={() => tiers.refetch()}
               searchable={false}
               pageSizeOptions={[25, 50]}
-              emptyTitle="No tiers"
-              emptyDescription="The standard, silver and gold tiers come with the database update that adds tiers."
+              emptyTitle={tr("No tiers")}
+              emptyDescription={tr("The standard, silver and gold tiers come with the database update that adds tiers.")}
             />
           </Section>
-          <Section title="Discount history" description="Dated discount rows of every tier. The newest approved row on or before today is in force.">
+          <Section title={tr("Discount history")} description={tr("Dated discount rows of every tier. The newest approved row on or before today is in force.")}>
             <DataTable<TierDiscountRow>
               tableId="agency-tier-discounts"
               data={discountRows}
@@ -409,14 +411,14 @@ export function AgencyTiersView() {
               onRetry={() => discounts.refetch()}
               searchable={false}
               pageSizeOptions={[25, 50, 100]}
-              emptyTitle="No discount rows"
-              emptyDescription="Add a discount to a tier; a second person approves it."
+              emptyTitle={tr("No discount rows")}
+              emptyDescription={tr("Add a discount to a tier; a second person approves it.")}
             />
           </Section>
         </>
       )}
       {tab === "agencies" && (
-        <Section title="Agencies" description="Every B2B partner and what is taken off its agency price today. Changing the tier is recorded in the audit log.">
+        <Section title={tr("Agencies")} description={tr("Every B2B partner and what is taken off its agency price today. Changing the tier is recorded in the audit log.")}>
           <DataTable<PartnerTerms>
             tableId="agency-terms"
             data={partnerRows}
@@ -426,15 +428,15 @@ export function AgencyTiersView() {
             error={partners.isError ? (partners.error as Error).message : null}
             onRetry={() => partners.refetch()}
             pageSizeOptions={[25, 50, 100]}
-            emptyTitle="No B2B partners yet"
-            emptyDescription="Agencies appear here when their Content studio tenant is projected into Booking."
+            emptyTitle={tr("No B2B partners yet")}
+            emptyDescription={tr("Agencies appear here when their Content studio tenant is projected into Booking.")}
           />
         </Section>
       )}
       {tab === "cards" && (
         <Section
-          title="Contract rate cards"
-          description="A card in force replaces the agency's tier discount; a card for one tour wins over a card for every tour. To stop a card, add an end card (End): the agency is back on its tier from that day."
+          title={tr("Contract rate cards")}
+          description={tr("A card in force replaces the agency's tier discount; a card for one tour wins over a card for every tour. To stop a card, add an end card (End): the agency is back on its tier from that day.")}
         >
           <DataTable<RateCardRow>
             tableId="agency-rate-cards"
@@ -445,8 +447,8 @@ export function AgencyTiersView() {
             error={cards.isError ? (cards.error as Error).message : null}
             onRetry={() => cards.refetch()}
             pageSizeOptions={[25, 50, 100]}
-            emptyTitle="No rate cards"
-            emptyDescription="Agencies are priced by their tier until a contract rate card is approved."
+            emptyTitle={tr("No rate cards")}
+            emptyDescription={tr("Agencies are priced by their tier until a contract rate card is approved.")}
           />
         </Section>
       )}
@@ -457,28 +459,23 @@ export function AgencyTiersView() {
         onConfirm={() => approving && approve.mutate(approving)}
         busy={approve.isPending}
         error={approve.error ? approveErrorText(approve.error) : null}
-        title={approving?.kind === "card" ? "Approve rate card" : "Approve tier discount"}
-        confirmLabel="Approve"
+        title={approving?.kind === "card" ? tr("Approve rate card") : tr("Approve tier discount")}
+        confirmLabel={tr("Approve")}
         message={
           approving?.kind === "discount" ? (
             <>
-              Approve <strong className="text-ink">{approving.row.tier_label}</strong> at{" "}
-              <strong className="text-ink">{pct(approving.row.discount_pct)}</strong> off the agency price from{" "}
-              <DateText value={approving.row.valid_from} />? Quotes priced on or after that day use it.
+              {tr("Approve")} <strong className="text-ink">{tx(approving.row.tier_label)}</strong> {tr("at")}
+              <strong className="text-ink">{pct(approving.row.discount_pct)}</strong> {tr("off the agency price from")}
+              <DateText value={approving.row.valid_from} />{tr("? Quotes priced on or after that day use it.")}
             </>
           ) : approving?.kind === "card" && approving.row.discount_pct === null ? (
             <>
-              Approve ending the contract rate of <strong className="text-ink">{approving.row.agency_name}</strong> on{" "}
-              {approving.row.source_id ? "one tour" : "every tour"} from <DateText value={approving.row.valid_from} />? From
-              that day the agency&apos;s quotes use its tier discount again
-              {approving.row.source_id ? " (or its card for every tour)" : ""}.
+              {tr("Approve ending the contract rate of")} <strong className="text-ink">{approving.row.agency_name}</strong> {tr("on {0} from", approving.row.source_id ? tr("one tour") : tr("every tour"))} <DateText value={approving.row.valid_from} />{tr("? From that day the agency's quotes use its tier discount again{0}.", approving.row.source_id ? tr(" (or its card for every tour)") : "")}
             </>
           ) : approving?.kind === "card" ? (
             <>
-              Approve <strong className="text-ink">{pct(approving.row.discount_pct)}</strong> for{" "}
-              <strong className="text-ink">{approving.row.agency_name}</strong> on{" "}
-              {approving.row.source_id ? "one tour" : "every tour"} from <DateText value={approving.row.valid_from} />? It
-              replaces the agency&apos;s tier discount while it is valid.
+              {tr("Approve")} <strong className="text-ink">{pct(approving.row.discount_pct)}</strong> {tr("for")}
+              <strong className="text-ink">{approving.row.agency_name}</strong> {tr("on {0} from", approving.row.source_id ? tr("one tour") : tr("every tour"))} <DateText value={approving.row.valid_from} />{tr("? It replaces the agency's tier discount while it is valid.")}
             </>
           ) : null
         }

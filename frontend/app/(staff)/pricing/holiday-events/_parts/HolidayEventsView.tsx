@@ -17,15 +17,11 @@ import {
   Field,
   FilterBar,
   FormDrawer,
-  I18nProvider,
   Input,
-  LangSwitch,
   PageFrame,
   Pill,
   Section,
   Select,
-  formatDay,
-  langStore,
   useCan,
   useT,
   useToast,
@@ -35,6 +31,7 @@ import {
 import { CHANGE_TONE, eventCode } from "@/ui/booking/priceVersions";
 import { ChangeButtons, useWho } from "../../seasons/_parts/SeasonsView";
 import { S, type SeasonMessage } from "../../seasons/_parts/messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -107,6 +104,7 @@ function NewEventDrawer({ countries, onClose }: { countries: { iso2: string; nam
 
 function HolidayEvents() {
   const t = useT(S);
+  const { formatDay } = useBookingFormat();
   const toast = useToast();
   const qc = useQueryClient();
   const canWrite = useCan("season.write");
@@ -187,7 +185,6 @@ function HolidayEvents() {
       description={t("eventsDescription")}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <LangSwitch ariaLabel={t("language")} />
           {canWrite && (
             <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
               <Plus size={13} /> {t("newEvent")}
@@ -236,11 +233,7 @@ function HolidayEvents() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function HolidayEventsView() {
-  return (
-    <I18nProvider store={langStore}>
-      <HolidayEvents />
-    </I18nProvider>
-  );
+  return <HolidayEvents />;
 }

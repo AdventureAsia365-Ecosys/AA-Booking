@@ -14,6 +14,8 @@ import { CountryPicker } from "../_parts/CountryPicker";
 import { friendlyError } from "../_parts/QueryError";
 import { useUpdateCase } from "./useCaseMutations";
 import { casePartyLabel } from "@/ui/booking/caseFacts";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./EditDetailsDrawer.messages";
 
 interface Form {
   start_date: string;
@@ -56,6 +58,7 @@ export function EditDetailsDrawer({ c, open, onClose }: { c: TripCaseDetail; ope
 }
 
 function EditBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
+  const t = useT(MSG);
   const [f, setF] = useState<Form>(() => fromCase(c));
   const [tried, setTried] = useState(false);
   const update = useUpdateCase(c.code);
@@ -76,43 +79,43 @@ function EditBody({ c, onClose }: { c: TripCaseDetail; onClose: () => void }) {
     <FormDrawer
       open
       onClose={onClose}
-      title={`Edit trip case ${c.code}`}
+      title={t("Edit trip case {0}", c.code)}
       onSubmit={submit}
-      submitLabel="Save changes"
+      submitLabel={t("Save changes")}
       busy={update.isPending}
       dirty={dirty}
-      error={update.isError ? friendlyError(update.error) : tried && invalid ? "Some fields need attention." : null}
+      error={update.isError ? friendlyError(update.error) : tried && invalid ? t("Some fields need attention.") : null}
       fieldErrors={update.error instanceof ApiError ? update.error.fieldErrors : []}
       width={520}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">For</p>
-      <LockedValue value={casePartyLabel(c)} hint="A case keeps who it is for." />
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t("For")}</p>
+      <LockedValue value={casePartyLabel(c)} hint={t("A case keeps who it is for.")} />
 
-      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Trip details</p>
-      <Field label="Start date" hint="Clear it if the dates are not fixed yet.">
+      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t("Trip details")}</p>
+      <Field label={t("Start date")} hint={t("Clear it if the dates are not fixed yet.")}>
         <DateField className={inputCls} value={f.start_date} onChange={(v) => setF({ ...f, start_date: v })} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Adults" required error={tried ? pax.adults : null}>
+        <Field label={t("Adults")} required error={tried ? pax.adults : null}>
           <Input className={inputCls} type="number" inputMode="numeric" min={1} max={999} value={f.pax_adults} onChange={(e) => setF({ ...f, pax_adults: e.target.value })} />
         </Field>
-        <Field label="Children" error={tried ? pax.children : null}>
+        <Field label={t("Children")} error={tried ? pax.children : null}>
           <Input className={inputCls} type="number" inputMode="numeric" min={0} max={998} value={f.pax_children} onChange={(e) => setF({ ...f, pax_children: e.target.value })} />
         </Field>
       </div>
-      <Field label="Currency" hint="Proposals already sent keep the currency they were sent in.">
+      <Field label={t("Currency")} hint={t("Proposals already sent keep the currency they were sent in.")}>
         <Select className={inputCls} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>
           {currencies.map((cur) => (
             <option key={cur}>{cur}</option>
           ))}
         </Select>
       </Field>
-      <Field label="Countries">
+      <Field label={t("Countries")}>
         <CountryPicker value={f.countries} onChange={(countries) => setF({ ...f, countries })} />
       </Field>
 
-      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Notes</p>
-      <Field label="Internal notes" hint="Staff only. The customer never sees these.">
+      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t("Notes")}</p>
+      <Field label={t("Internal notes")} hint={t("Staff only. The customer never sees these.")}>
         <Textarea className={textareaCls} value={f.notes} maxLength={10000} onChange={(e) => setF({ ...f, notes: e.target.value })} />
       </Field>
     </FormDrawer>

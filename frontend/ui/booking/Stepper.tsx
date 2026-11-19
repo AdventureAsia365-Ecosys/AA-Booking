@@ -6,6 +6,9 @@
 import { Check, XCircle } from "lucide-react";
 import type { TripCaseStatus } from "@/lib/api/types";
 import { TRIP_CASE_STATUS_META } from "./StatusBadge";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./Stepper.messages";
 
 export const STATUS_PHASES: { key: string; label: string; statuses: TripCaseStatus[] }[] = [
   { key: "inquiry", label: "Inquiry", statuses: ["new_inquiry", "discovery"] },
@@ -61,6 +64,8 @@ export function Stepper({
   /** Shown in the cancelled banner (the last status-history note). */
   cancelReason?: string | null;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   if (status === "cancelled") {
     return (
       <div
@@ -69,8 +74,8 @@ export function Stepper({
       >
         <XCircle size={18} className="mt-0.5 shrink-0" />
         <div className="min-w-0">
-          <p className="text-sm font-semibold">This trip case is cancelled.</p>
-          {cancelReason && <p className="mt-0.5 text-[13px] text-body">Reason: {cancelReason}</p>}
+          <p className="text-sm font-semibold">{t("This trip case is cancelled.")}</p>
+          {cancelReason && <p className="mt-0.5 text-[13px] text-body">{t("Reason:")} {tx(cancelReason)}</p>}
         </div>
       </div>
     );
@@ -78,7 +83,7 @@ export function Stepper({
 
   const currentPhase = phaseOf(status);
   return (
-    <ol aria-label="Trip case progress" className="grid grid-cols-4 gap-2 md:gap-4">
+    <ol aria-label={t("Trip case progress")} className="grid grid-cols-4 gap-2 md:gap-4">
       {STATUS_PHASES.map((phase, pi) => {
         const phaseIndex = STATUS_PHASES.findIndex((p) => p.key === currentPhase);
         const phaseState: StepState =
@@ -96,11 +101,11 @@ export function Stepper({
               }`}
               aria-current={phaseState === "current" ? "step" : undefined}
             >
-              {phase.label}
+              {tx(phase.label)}
             </p>
             {/* Phone: the phase alone, plus the current status under the current phase. */}
             {phaseState === "current" && (
-              <p className="mt-0.5 truncate text-xs text-ink md:hidden">{TRIP_CASE_STATUS_META[status].label}</p>
+              <p className="mt-0.5 truncate text-xs text-ink md:hidden">{tx(TRIP_CASE_STATUS_META[status].label)}</p>
             )}
             <ul className="mt-2 hidden flex-col gap-1.5 md:flex">
               {phase.statuses.map((s) => {
@@ -117,7 +122,7 @@ export function Stepper({
                         st === "current" ? "font-semibold text-ink" : st === "done" ? "text-body" : "text-muted2"
                       }`}
                     >
-                      {TRIP_CASE_STATUS_META[s].label}
+                      {tx(TRIP_CASE_STATUS_META[s].label)}
                     </span>
                   </li>
                 );

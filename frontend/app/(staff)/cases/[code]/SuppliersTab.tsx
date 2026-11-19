@@ -54,6 +54,9 @@ import {
   Field,
 } from "@/ui";
 import { prepareUpload } from "../../_parts/SupplyContent";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SuppliersTab.messages";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 const fieldCls = "w-full";
@@ -96,6 +99,8 @@ type Dialog =
   | null;
 
 export function SuppliersTab({ c }: { c: TripCaseDetail }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("ops.write");
   const canDesk = useCan("b2b_desk.write");
   const canPrice = useCan("pricing.read");
@@ -112,7 +117,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
   const generate = useMutation({
     mutationFn: () => supplierBookingsApi.generate(c.code),
     onSuccess: (r) => {
-      toast.success(r.created ? `${r.created} supplier booking(s) added from the approved version` : "Nothing new to book");
+      toast.success(r.created ? t("{0} supplier booking(s) added from the approved version", r.created) : t("Nothing new to book"));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -120,7 +125,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
   const request = useMutation({
     mutationFn: (b: SupplierBooking) => supplierBookingsApi.request(b.id),
     onSuccess: (b) => {
-      toast.success(`${b.code} marked as requested from ${b.supplier.name}`);
+      toast.success(t("{0} marked as requested from {1}", b.code, b.supplier.name));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -134,20 +139,20 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
     const linked = !!b.b2b_line;
     const deskOk = !linked || canDesk;
     const items: RowMenuItem[] = [];
-    if (b.status === "pending") items.push({ label: "Mark as requested", onSelect: () => request.mutate(b) });
+    if (b.status === "pending") items.push({ label: t("Mark as requested"), onSelect: () => request.mutate(b) });
     if (b.status === "requested") {
-      items.push({ label: "Confirm…", onSelect: () => setDialog({ kind: "confirm", b }), disabled: !deskOk });
-      items.push({ label: "Declined by supplier…", onSelect: () => setDialog({ kind: "decline", b }), disabled: !deskOk });
+      items.push({ label: t("Confirm…"), onSelect: () => setDialog({ kind: "confirm", b }), disabled: !deskOk });
+      items.push({ label: t("Declined by supplier…"), onSelect: () => setDialog({ kind: "decline", b }), disabled: !deskOk });
     }
-    if (b.status === "confirmed" && !linked) items.push({ label: "Change with supplier…", onSelect: () => setDialog({ kind: "rerequest", b }) });
+    if (b.status === "confirmed" && !linked) items.push({ label: t("Change with supplier…"), onSelect: () => setDialog({ kind: "rerequest", b }) });
     // AA-1075 (bk-12, bk-14): the agency voucher's time and points; the supplier's fee once cancelled.
-    if (b.live) items.push({ label: "Voucher details…", onSelect: () => setDialog({ kind: "voucher", b }) });
+    if (b.live) items.push({ label: t("Voucher details…"), onSelect: () => setDialog({ kind: "voucher", b }) });
     if (b.status === "cancelled" && canPrice) {
-      items.push({ label: "Supplier's cancellation fee…", onSelect: () => setDialog({ kind: "fee", b }) });
+      items.push({ label: t("Supplier's cancellation fee…"), onSelect: () => setDialog({ kind: "fee", b }) });
     }
     if (b.live) {
       items.push({
-        label: "Cancel booking…",
+        label: t("Cancel booking…"),
         danger: true,
         divider: true,
         onSelect: () => setDialog({ kind: "cancel", b }),
@@ -160,18 +165,18 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
   const columns: ColumnDef<SupplierBooking, unknown>[] = [
     {
       id: "item",
-      header: "Booking",
+      header: t("Booking"),
       accessorFn: (r) => r.item_position ?? 999,
       cell: ({ row }) => {
         const b = row.original;
         return (
           <span className="flex min-w-0 flex-col md:max-w-[260px]">
-            <span className="truncate text-[13.5px] font-medium text-ink" title={b.item_description}>
-              {b.item_description}
+            <span className="truncate text-[13.5px] font-medium text-ink" title={tx(b.item_description)}>
+              {tx(b.item_description)}
             </span>
             <span className="text-xs text-muted">
               {b.code}
-              {b.item_position ? ` · item ${b.item_position}` : " · extra item"}
+              {b.item_position ? t(" · item {0}", b.item_position) : t(" · extra item")}
             </span>
           </span>
         );
@@ -179,7 +184,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
     },
     {
       id: "supplier",
-      header: "Supplier",
+      header: t("Supplier"),
       accessorFn: (r) => r.supplier.name,
       cell: ({ row }) => (
         <Link href={`/suppliers/${encodeURIComponent(row.original.supplier.code)}?tab=bookings`} className="text-[13px] text-accent-deep hover:underline">
@@ -189,16 +194,16 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
     },
     {
       id: "date",
-      header: "Service date",
+      header: t("Service date"),
       accessorFn: (r) => r.service_date ?? "",
       cell: ({ row }) => {
         const b = row.original;
         return (
           <span className="flex flex-col text-[13px] text-body">
-            {b.service_date ? <DateText value={b.service_date} /> : <span className="text-muted">Not set</span>}
+            {b.service_date ? <DateText value={b.service_date} /> : <span className="text-muted">{t("Not set")}</span>}
             <span className="text-xs text-muted">
-              {b.pax ? `${b.pax} pax` : ""}
-              {b.nights ? ` · ${b.nights} night${b.nights === 1 ? "" : "s"}` : ""}
+              {b.pax ? t("{0} pax", b.pax) : ""}
+              {b.nights ? t(" · {0} night{1}", b.nights, b.nights === 1 ? "" : "s") : ""}
             </span>
           </span>
         );
@@ -206,35 +211,35 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
     },
     {
       id: "net",
-      header: "Net",
+      header: t("Net"),
       cell: ({ row }) =>
         row.original.net_amount ? <Money amount={row.original.net_amount} currency={row.original.net_currency} /> : <span className="text-muted">—</span>,
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       accessorFn: (r) => r.status,
       cell: ({ row }) => {
         const b = row.original;
         return (
           <span className="flex flex-col gap-1">
             <SupplierBookingStatusBadge status={b.status} />
-            {b.confirmation_ref && <span className="text-xs text-muted">Ref {b.confirmation_ref}</span>}
-            {b.decline_code && <span className="text-xs text-muted">{DECLINE_LABEL[b.decline_code]}</span>}
-            {b.service_time && <span className="text-xs text-muted">At {b.service_time}{b.pickup_point ? ` · ${b.pickup_point}` : ""}</span>}
+            {b.confirmation_ref && <span className="text-xs text-muted">{t("Ref")} {b.confirmation_ref}</span>}
+            {b.decline_code && <span className="text-xs text-muted">{tx(DECLINE_LABEL[b.decline_code])}</span>}
+            {b.service_time && <span className="text-xs text-muted">{t("At")} {b.service_time}{b.pickup_point ? ` · ${b.pickup_point}` : ""}</span>}
             {b.supplier_cancel_fee && (
               <span className="text-xs text-muted">
-                Supplier fee {b.supplier_cancel_fee} {b.supplier_cancel_fee_currency}
+                {t("Supplier fee {0}", b.supplier_cancel_fee)} {b.supplier_cancel_fee_currency}
               </span>
             )}
             {b.cancel_reason && (
-              <span className="max-w-[200px] truncate text-xs text-muted" title={b.cancel_reason}>
-                {b.cancel_reason}
+              <span className="max-w-[200px] truncate text-xs text-muted" title={tx(b.cancel_reason)}>
+                {tx(b.cancel_reason)}
               </span>
             )}
             {b.b2b_line && (
-              <Link href="/b2b-desk" className="text-xs text-accent-deep hover:underline" title="This booking answers an on-request line of the agency">
-                B2B line {b.b2b_line.line_ref}: {b.b2b_line.status.replace("_", " ")}
+              <Link href="/b2b-desk" className="text-xs text-accent-deep hover:underline" title={t("This booking answers an on-request line of the agency")}>
+                {t("B2B line {0}: {1}", b.b2b_line.line_ref, b.b2b_line.status.replace("_", " "))}
               </Link>
             )}
           </span>
@@ -243,7 +248,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
     },
     {
       id: "docs",
-      header: "Documents",
+      header: t("Documents"),
       enableSorting: false,
       cell: ({ row }) => <Files b={row.original} />,
     },
@@ -257,7 +262,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
               const items = menu(row.original);
               return items.length ? (
                 <span className="flex justify-end">
-                  <RowMenu items={items} label={`Actions for ${row.original.code}`} />
+                  <RowMenu items={items} label={t("Actions for {0}", row.original.code)} />
                 </span>
               ) : null;
             },
@@ -271,22 +276,22 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
       <Section
         title={
           <span className="flex flex-wrap items-center gap-2">
-            Supplier bookings <SupplyBadge supply={data?.supply} />
+            {t("Supplier bookings")} <SupplyBadge supply={data?.supply} />
           </span>
         }
         description={
           data?.trip_case.channel === "b2b"
-            ? "Each booking of an on-request line answers the agency: Confirm accepts the line, Declined declines it. No uploaded documents for B2B trips: keep the supplier's confirmation ref, and the voucher details (time, pick-up) the agency's vouchers print."
-            : "Book every room and service of the approved version with its supplier. The case moves to Supplier confirming on the first request; when every booking is confirmed it shows Confirmed & Booked."
+            ? t("Each booking of an on-request line answers the agency: Confirm accepts the line, Declined declines it. No uploaded documents for B2B trips: keep the supplier's confirmation ref, and the voucher details (time, pick-up) the agency's vouchers print.")
+            : t("Book every room and service of the approved version with its supplier. The case moves to Supplier confirming on the first request; when every booking is confirmed it shows Confirmed & Booked.")
         }
         actions={
           canWrite && sold ? (
             <span className="flex flex-wrap gap-2">
               <Button variant="ghost" onClick={() => setDialog({ kind: "add", item: null })}>
-                <Plus size={14} /> Add booking
+                <Plus size={14} /> {t("Add booking")}
               </Button>
               <Button variant="primary" disabled={generate.isPending || bookable.length === 0} onClick={() => generate.mutate()}>
-                <Sparkles size={14} /> Generate from approved version
+                <Sparkles size={14} /> {t("Generate from approved version")}
               </Button>
             </span>
           ) : null
@@ -301,34 +306,34 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
           loading={q.isLoading}
           error={q.isError ? errorText(q.error) : null}
           onRetry={() => q.refetch()}
-          emptyTitle={sold ? "No supplier booking yet" : "Nothing to book before the trip is confirmed"}
+          emptyTitle={sold ? t("No supplier booking yet") : t("Nothing to book before the trip is confirmed")}
           emptyDescription={
             sold
-              ? "Generate one booking per room and service of the approved version, or add one by hand."
-              : "Supplier bookings start once a proposal version is approved."
+              ? t("Generate one booking per room and service of the approved version, or add one by hand.")
+              : t("Supplier bookings start once a proposal version is approved.")
           }
           tableMinWidth={canWrite ? 1040 : 980}
         />
       </Section>
 
       {data && data.unbooked_items.length > 0 && (
-        <Section title="Items without a live booking" description="Rooms and services of the approved version that no live supplier booking covers.">
+        <Section title={t("Items without a live booking")} description={t("Rooms and services of the approved version that no live supplier booking covers.")}>
           <ul className="flex flex-col divide-y divide-line2 text-[13px]">
             {data.unbooked_items.map((i) => (
               <li key={i.version_item_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="min-w-0">
-                  <span className="font-medium text-ink">Item {i.position}</span> · {i.supply_label ?? i.title}
+                  <span className="font-medium text-ink">{t("Item")} {i.position}</span> · {i.supply_label ?? i.title}
                 </span>
                 {i.bookable ? (
                   canWrite &&
                   sold && (
                     <Button size="sm" variant="ghost" onClick={() => setDialog({ kind: "add", item: i })}>
-                      Book with another supplier
+                      {t("Book with another supplier")}
                     </Button>
                   )
                 ) : (
                   <Pill tone="neutral" dot={false}>
-                    {SKIP_LABEL[i.skip_reason ?? "booked"]}
+                    {tx(SKIP_LABEL[i.skip_reason ?? "booked"])}
                   </Pill>
                 )}
               </li>
@@ -347,11 +352,11 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
       <ReasonDialog
         open={dialog?.kind === "cancel"}
         b={dialog?.kind === "cancel" ? dialog.b : null}
-        title="Cancel supplier booking"
-        label="Why is it cancelled?"
-        confirmLabel="Cancel booking"
+        title={t("Cancel supplier booking")}
+        label={t("Why is it cancelled?")}
+        confirmLabel={t("Cancel booking")}
         danger
-        message="Cancel it with the supplier first if it was already requested or confirmed (fees may apply). The booking stays in the list as cancelled."
+        message={t("Cancel it with the supplier first if it was already requested or confirmed (fees may apply). The booking stays in the list as cancelled.")}
         run={(b, reason) => supplierBookingsApi.cancel(b.id, reason)}
         onClose={close}
         onDone={refresh}
@@ -359,10 +364,10 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
       <ReasonDialog
         open={dialog?.kind === "rerequest"}
         b={dialog?.kind === "rerequest" ? dialog.b : null}
-        title="Change with supplier"
-        label="What changes?"
-        confirmLabel="Back to requested"
-        message="The booking goes back to Requested until the supplier confirms the change. The old confirmation ref is kept in the activity log."
+        title={t("Change with supplier")}
+        label={t("What changes?")}
+        confirmLabel={t("Back to requested")}
+        message={t("The booking goes back to Requested until the supplier confirms the change. The old confirmation ref is kept in the activity log.")}
         run={(b, reason) => supplierBookingsApi.rerequest(b.id, reason)}
         onClose={close}
         onDone={refresh}
@@ -372,6 +377,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
 }
 
 function Files({ b }: { b: SupplierBooking }) {
+  const t = useT(MSG);
   const toast = useToast();
   const open = useMutation({
     mutationFn: (f: OpsFile) => supplierBookingsApi.download(f.id),
@@ -389,10 +395,10 @@ function Files({ b }: { b: SupplierBooking }) {
           onClick={() => open.mutate(f)}
           className="max-w-[180px] overflow-hidden"
           style={{ gap: 4 }}
-          title={`Download ${f.file_name} (link valid 5 minutes)`}
+          title={t("Download {0} (link valid 5 minutes)", f.file_name)}
         >
           <Download size={12} className="shrink-0" />
-          <span className="truncate">{f.kind === "supplier_voucher" ? "Voucher" : "Confirmation"} · {f.file_name}</span>
+          <span className="truncate">{f.kind === "supplier_voucher" ? t("Voucher") : t("Confirmation")} · {f.file_name}</span>
         </LinkButton>
       ))}
     </span>
@@ -400,6 +406,8 @@ function Files({ b }: { b: SupplierBooking }) {
 }
 
 function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking; documents: boolean; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [ref, setRef] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -415,7 +423,7 @@ function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking;
       return supplierBookingsApi.confirm(b.id, ref.trim(), voucher);
     },
     onSuccess: (r) => {
-      toast.success(r.b2b_line ? `${r.code} confirmed; the agency is told the line is confirmed` : `${r.code} confirmed by ${r.supplier.name}`);
+      toast.success(r.b2b_line ? t("{0} confirmed; the agency is told the line is confirmed", r.code) : t("{0} confirmed by {1}", r.code, r.supplier.name));
       onDone();
       onClose();
     },
@@ -424,64 +432,65 @@ function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking;
     <Modal
       open
       onClose={run.isPending ? () => {} : onClose}
-      title={`Confirm ${b.code}`}
+      title={t("Confirm {0}", b.code)}
       width={520}
       footer={
         <>
           <Button onClick={onClose} disabled={run.isPending}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" disabled={run.isPending || !ref.trim()} onClick={() => run.mutate()}>
-            <Send size={14} /> {run.isPending ? "Saving…" : "Confirm booking"}
+            <Send size={14} /> {run.isPending ? t("Saving…") : t("Confirm booking")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3 text-[13px] text-body">
         <p>
-          {b.item_description} with <strong>{b.supplier.name}</strong>
+          {t("{0} with", b.item_description)} <strong>{b.supplier.name}</strong>
           {b.service_date ? (
             <>
-              {" "}
-              on <DateText value={b.service_date} />
+              {t("on")} <DateText value={b.service_date} />
             </>
           ) : null}
-          .{b.b2b_line ? " This also confirms the agency's on-request line." : ""}
+          .{b.b2b_line ? t(" This also confirms the agency's on-request line.") : ""}
         </p>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">
-            Supplier confirmation ref <span className="text-danger">*</span>
+            {t("Supplier confirmation ref")} <span className="text-danger">*</span>
           </span>
-          <Input size="sm" className={fieldCls} value={ref} maxLength={100} onChange={(e) => setRef(e.target.value)} placeholder="e.g. HTL-48213" />
+          <Input size="sm" className={fieldCls} value={ref} maxLength={100} onChange={(e) => setRef(e.target.value)} placeholder={t("e.g. HTL-48213")} />
         </label>
         {documents ? (
           <div className="flex flex-col gap-2 rounded-md border border-line2 p-3">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">
-              <FileUp size={13} /> Document (optional): PDF, or a photo of it, at most 3 MB
+              <FileUp size={13} /> {t("Document (optional): PDF, or a photo of it, at most 3 MB")}
             </span>
             <Select size="sm" className={fieldCls} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-              <option value="supplier_voucher">Voucher</option>
-              <option value="supplier_confirmation">Supplier confirmation</option>
+              <option value="supplier_voucher">{t("Voucher")}</option>
+              <option value="supplier_confirmation">{t("Supplier confirmation")}</option>
             </Select>
             <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-xs" />
-            <span className="text-xs text-muted">Stored privately; staff download it with a link valid 5 minutes.</span>
+            <span className="text-xs text-muted">{t("Stored privately; staff download it with a link valid 5 minutes.")}</span>
           </div>
         ) : (
-          <p className="text-xs text-muted">B2B trip: keep the confirmation ref only. Vouchers go to the agency outside Booking.</p>
+          <p className="text-xs text-muted">{t("B2B trip: keep the confirmation ref only. Vouchers go to the agency outside Booking.")}</p>
         )}
-        {run.isError && <p className="text-danger">{errorText(run.error)}</p>}
+        {run.isError && <p className="text-danger">{tx(errorText(run.error))}</p>}
       </div>
     </Modal>
   );
 }
 
 function DeclineBooking({ b, onClose, onDone }: { b: SupplierBooking; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [code, setCode] = useState<DeclineCode>("supplier_unavailable");
   const run = useMutation({
     mutationFn: () => supplierBookingsApi.decline(b.id, code),
     onSuccess: (r) => {
-      toast.success(r.b2b_line ? `${r.code} declined; the agency is told` : `${r.code} declined: book another supplier for this item`);
+      toast.success(r.b2b_line ? t("{0} declined; the agency is told", r.code) : t("{0} declined: book another supplier for this item", r.code));
       onDone();
       onClose();
     },
@@ -490,32 +499,32 @@ function DeclineBooking({ b, onClose, onDone }: { b: SupplierBooking; onClose: (
     <Modal
       open
       onClose={onClose}
-      title={`Declined by ${b.supplier.name}`}
+      title={t("Declined by {0}", b.supplier.name)}
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="danger" disabled={run.isPending} onClick={() => run.mutate()}>
-            Mark declined
+            {t("Mark declined")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3 text-[13px] text-body">
         <p>
-          {b.item_description} ({b.code}).{" "}
-          {b.b2b_line ? "The agency's line is declined too; a B2B line cannot be booked again." : "You can then book the item with another supplier."}
+          {tx(b.item_description)} ({b.code}).{" "}
+          {b.b2b_line ? t("The agency's line is declined too; a B2B line cannot be booked again.") : t("You can then book the item with another supplier.")}
         </p>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-muted">Reason</span>
+          <span className="text-xs font-semibold text-muted">{t("Reason")}</span>
           <Select size="sm" className={fieldCls} value={code} onChange={(e) => setCode(e.target.value as DeclineCode)}>
             {DECLINE_CODES.map((d) => (
               <option key={d} value={d}>
-                {DECLINE_LABEL[d]}
+                {tx(DECLINE_LABEL[d])}
               </option>
             ))}
           </Select>
         </label>
-        {run.isError && <p className="text-danger">{errorText(run.error)}</p>}
+        {run.isError && <p className="text-danger">{tx(errorText(run.error))}</p>}
       </div>
     </Modal>
   );
@@ -544,11 +553,13 @@ function ReasonDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const m = useMutation({
     mutationFn: (reason: string) => run(b!, reason),
     onSuccess: (r) => {
-      toast.success(`${r.code} updated`);
+      toast.success(t("{0} updated", r.code));
       onDone();
       onClose();
     },
@@ -561,9 +572,9 @@ function ReasonDialog({
         onClose();
       }}
       title={b ? `${title} ${b.code}` : title}
-      message={message}
-      reason={{ label, required: true }}
-      confirmLabel={confirmLabel}
+      message={tx(message)}
+      reason={{ label: tx(label), required: true }}
+      confirmLabel={tx(confirmLabel)}
       danger={danger}
       busy={m.isPending}
       error={m.isError ? errorText(m.error) : null}
@@ -585,6 +596,7 @@ function AddBooking({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const t = useT(MSG);
   const toast = useToast();
   const suppliers = useQuery({ queryKey: ["suppliers", "active-options"], queryFn: () => suppliersApi.list({ status: "active", limit: 100 }) });
   const [form, setForm] = useState<NewSupplierBooking>({
@@ -606,7 +618,7 @@ function AddBooking({
         net_currency: form.net_amount ? (form.net_currency || "USD").toUpperCase() : null,
       }),
     onSuccess: (b) => {
-      toast.success(`${b.code} added for ${b.supplier.name}`);
+      toast.success(t("{0} added for {1}", b.code, b.supplier.name));
       onDone();
       onClose();
     },
@@ -616,8 +628,8 @@ function AddBooking({
     <FormDrawer
       open
       onClose={onClose}
-      title={item ? `Book item ${item.position}` : "Add supplier booking"}
-      submitLabel="Add booking"
+      title={item ? t("Book item {0}", item.position) : t("Add supplier booking")}
+      submitLabel={t("Add booking")}
       busy={run.isPending}
       dirty
       error={run.isError ? errorText(run.error) : null}
@@ -627,10 +639,10 @@ function AddBooking({
       <div className="flex flex-col gap-4 text-[13px]">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">
-            Supplier <span className="text-danger">*</span>
+            {t("Supplier")} <span className="text-danger">*</span>
           </span>
           <Select size="sm" className={fieldCls} value={form.supplier_id} onChange={(e) => set({ supplier_id: e.target.value })} required>
-            <option value="">Choose a supplier…</option>
+            <option value="">{t("Choose a supplier…")}</option>
             {(suppliers.data?.items ?? []).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.company_name} ({s.code})
@@ -639,40 +651,40 @@ function AddBooking({
           </Select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-muted">Item of the approved version</span>
+          <span className="text-xs font-semibold text-muted">{t("Item of the approved version")}</span>
           <Select size="sm" className={fieldCls} value={form.version_item_id ?? ""} onChange={(e) => set({ version_item_id: e.target.value || null })}>
-            <option value="">Extra item (not in the proposal)</option>
+            <option value="">{t("Extra item (not in the proposal)")}</option>
             {bookable.map((i) => (
               <option key={i.version_item_id} value={i.version_item_id}>
-                Item {i.position} · {i.supply_label ?? i.title}
+                {t("Item {0} · {1}", i.position, i.supply_label ?? i.title)}
               </option>
             ))}
           </Select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-muted">What is booked</span>
+          <span className="text-xs font-semibold text-muted">{t("What is booked")}</span>
           <Input size="sm" className={fieldCls} maxLength={500} value={form.item_description ?? ""} onChange={(e) => set({ item_description: e.target.value })} />
         </label>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Service date</span>
+            <span className="text-xs font-semibold text-muted">{t("Service date")}</span>
             <DateField size="sm" className={fieldCls} value={form.service_date ?? ""} onChange={(v) => set({ service_date: v || null })} />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Net amount</span>
+            <span className="text-xs font-semibold text-muted">{t("Net amount")}</span>
             <Input size="sm" inputMode="decimal" className={fieldCls} value={form.net_amount ?? ""} onChange={(e) => set({ net_amount: e.target.value || null })} />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Currency</span>
+            <span className="text-xs font-semibold text-muted">{t("Currency")}</span>
             <Input size="sm" className={fieldCls} maxLength={3} placeholder="USD" value={form.net_currency ?? ""} onChange={(e) => set({ net_currency: e.target.value.toUpperCase() || null })} />
           </label>
         </div>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-muted">Notes</span>
+          <span className="text-xs font-semibold text-muted">{t("Notes")}</span>
           <Textarea className="min-h-[72px] w-full" maxLength={2000} value={form.notes ?? ""} onChange={(e) => set({ notes: e.target.value || null })} />
-          {c.channel === "b2b" && <span className="text-xs text-muted">B2B trip: never write traveller names here.</span>}
+          {c.channel === "b2b" && <span className="text-xs text-muted">{t("B2B trip: never write traveller names here.")}</span>}
         </label>
-        <p className="text-xs text-muted">For an item of the proposal, empty fields take the item&apos;s date, nights, pax and net cost.</p>
+        <p className="text-xs text-muted">{t("For an item of the proposal, empty fields take the item's date, nights, pax and net cost.")}</p>
       </div>
     </FormDrawer>
   );
@@ -681,6 +693,7 @@ function AddBooking({
 
 // AA-1075 (bk-12): the time and points the agency's voucher prints; never traveller names.
 function VoucherDetails({ b, onClose, onDone }: { b: SupplierBooking; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
   const [time, setTime] = useState(b.service_time ?? "");
   const [pickup, setPickup] = useState(b.pickup_point ?? "");
   const [dropoff, setDropoff] = useState(b.dropoff_point ?? "");
@@ -702,24 +715,24 @@ function VoucherDetails({ b, onClose, onDone }: { b: SupplierBooking; onClose: (
     <FormDrawer
       open
       onClose={onClose}
-      title={`Voucher details · ${b.code}`}
+      title={t("Voucher details · {0}", b.code)}
       onSubmit={() => save.mutate()}
       busy={save.isPending}
       dirty
       error={save.isError ? errorText(save.error) : null}
     >
       <div className="flex flex-col gap-4">
-        <p className="text-[13px] text-muted">Printed on the agency&apos;s voucher. Never write traveller names here.</p>
-        <Field label="Time (local)">
+        <p className="text-[13px] text-muted">{t("Printed on the agency's voucher. Never write traveller names here.")}</p>
+        <Field label={t("Time (local)")}>
           <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
         </Field>
-        <Field label="Pick-up point">
-          <Input value={pickup} maxLength={200} onChange={(e) => setPickup(e.target.value)} placeholder="e.g. hotel lobby" />
+        <Field label={t("Pick-up point")}>
+          <Input value={pickup} maxLength={200} onChange={(e) => setPickup(e.target.value)} placeholder={t("e.g. hotel lobby")} />
         </Field>
-        <Field label="Drop-off point">
+        <Field label={t("Drop-off point")}>
           <Input value={dropoff} maxLength={200} onChange={(e) => setDropoff(e.target.value)} />
         </Field>
-        <Field label="Note on the voucher">
+        <Field label={t("Note on the voucher")}>
           <Textarea value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </div>
@@ -729,6 +742,7 @@ function VoucherDetails({ b, onClose, onDone }: { b: SupplierBooking; onClose: (
 
 // AA-1075 (bk-14): what the supplier charges for the cancel; the profit pages count it until its bill is approved.
 function CancelFee({ b, onClose, onDone }: { b: SupplierBooking; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
   const [fee, setFee] = useState(b.supplier_cancel_fee ?? "");
   const [currency, setCurrency] = useState(b.supplier_cancel_fee_currency ?? b.net_currency ?? "USD");
   const save = useMutation({
@@ -742,19 +756,19 @@ function CancelFee({ b, onClose, onDone }: { b: SupplierBooking; onClose: () => 
     <FormDrawer
       open
       onClose={onClose}
-      title={`Supplier's cancellation fee · ${b.code}`}
+      title={t("Supplier's cancellation fee · {0}", b.code)}
       onSubmit={() => save.mutate()}
       busy={save.isPending}
       dirty
       error={save.isError ? errorText(save.error) : null}
     >
       <div className="flex flex-col gap-4">
-        <p className="text-[13px] text-muted">What the supplier charges for this cancel. Leave it empty when it charges nothing.</p>
+        <p className="text-[13px] text-muted">{t("What the supplier charges for this cancel. Leave it empty when it charges nothing.")}</p>
         <div className="grid grid-cols-[1fr_120px] gap-3">
-          <Field label="Fee">
+          <Field label={t("Fee")}>
             <Input inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} />
           </Field>
-          <Field label="Currency">
+          <Field label={t("Currency")}>
             <Input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
           </Field>
         </div>

@@ -8,11 +8,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supplyApi } from "@/lib/api/supply";
 import { ConfirmDialog, useCan, useToast } from "@/ui";
 import { supplyError } from "./supply";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./useRecordStatus.messages";
 
 type Kind = "hotel" | "service";
 type Target = { kind: Kind; code: string; name: string; activate: boolean } | null;
 
 export function useRecordStatus() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("supply.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -43,20 +48,19 @@ export function useRecordStatus() {
       onClose={() => setTarget(null)}
       onConfirm={(reason) => target && run.mutate({ t: target, reason })}
       busy={run.isPending}
-      error={supplyError(run.error)}
+      error={tx(supplyError(run.error))}
       danger={!target?.activate}
-      title={target?.activate ? `Activate ${noun}` : `Deactivate ${noun}`}
-      confirmLabel={target?.activate ? "Activate" : "Deactivate"}
-      reason={target?.activate ? undefined : { label: "Reason (optional)", placeholder: "e.g. closed for renovation" }}
+      title={target?.activate ? tr("Activate {0}", noun) : tr("Deactivate {0}", noun)}
+      confirmLabel={target?.activate ? tr("Activate") : tr("Deactivate")}
+      reason={target?.activate ? undefined : { label: tr("Reason (optional)"), placeholder: tr("e.g. closed for renovation") }}
       message={
         target?.activate ? (
           <>
-            Activate <strong className="text-ink">{target?.name}</strong>? Sales can book it on proposal items again.
+            {tr("Activate")} <strong className="text-ink">{target?.name}</strong>{tr("? Sales can book it on proposal items again.")}
           </>
         ) : (
           <>
-            Deactivate <strong className="text-ink">{target?.name}</strong>? It stays on record with its rates and history, and
-            items that already book it keep it, but it cannot be added to a proposal until it is activated again.
+            {tr("Deactivate")} <strong className="text-ink">{target?.name}</strong>{tr("? It stays on record with its rates and history, and items that already book it keep it, but it cannot be added to a proposal until it is activated again.")}
           </>
         )
       }

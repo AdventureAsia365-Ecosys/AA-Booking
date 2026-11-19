@@ -16,11 +16,13 @@
 // S280 (AA-1096 settings UI audit): Pricing › Policy links here, so the page has the same English / Vietnamese switch
 // (messages.ts, the `bk_lang` cookie); a row takes effect today or later (the API refuses a past day, and an approval
 // once the day has passed: 409 effective_date_passed); the FX "as of" day is the day the rate takes effect.
+// AA-1128 (B0 review): a warning banner lists each approved rule dated later that lowers a margin, floor or RRP value.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { Plus, TriangleAlert } from "lucide-react";
+import { scheduledDrops, type RuleDrop } from "@/ui/booking/ruleDrops";
 import { ApiError } from "@/lib/api/client";
 import { pct } from "@/lib/proposalDraft";
 import {
@@ -37,14 +39,13 @@ import {
   ConfirmDialog,
   DataTable,
   DateText,
-  I18nProvider,
-  LangSwitch,
   PageFrame,
   Pill,
   Section,
-  langStore,
   useCan,
+  formatNumber,
   useFormat,
+  useLang,
   useT,
   useToast,
   useUrlFilters,
@@ -55,9 +56,9 @@ import { NewFxRateDrawer, NewRuleDrawer } from "./PolicyDrawers";
 import { R, type RKey } from "./messages";
 import { TONE, apiErrorText, channelLabel, type RT } from "./rulesText";
 
-function rate(value: string): string {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: 8 }) : value;
+/** An FX rate in the UI language's separators, up to 8 decimals. */
+function rate(value: string, lang: "en" | "vi"): string {
+  return formatNumber(value, lang, 8);
 }
 
 function PolicyStatusBadge({ status }: { status: PolicyStatus }) {
@@ -185,9 +186,10 @@ function useRuleColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>
 
 function useFxColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>) => void): ColumnDef<FxRateRow, unknown>[] {
   const t = useT(R);
+  const lang = useLang();
   return [
     { id: "currency", header: t("colCurrency"), accessorKey: "currency", cell: ({ row }) => <span className="font-mono font-semibold text-ink">{row.original.currency}</span> },
-    { id: "rate", header: t("colRate"), accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{rate(row.original.rate_per_usd)}</span> },
+    { id: "rate", header: t("colRate"), accessorFn: (r) => Number(r.rate_per_usd), cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{rate(row.original.rate_per_usd, lang)}</span> },
     { id: "buffer", header: t("colBuffer"), accessorFn: (r) => Number(r.buffer_pct), cell: ({ row }) => pct(row.original.buffer_pct) },
     { id: "as_of", header: t("colAsOf"), accessorKey: "as_of", cell: ({ row }) => <DateText value={row.original.as_of} className="whitespace-nowrap" /> },
     {
@@ -223,10 +225,11 @@ function useFxColumns(canWrite: boolean, onApprove: (a: NonNullable<Approving>) 
 function ApproveDialog({ approving, busy, error, onClose, onConfirm }: { approving: Approving; busy: boolean; error: string | null; onClose: () => void; onConfirm: () => void }) {
   const t = useT(R);
   const { formatDate } = useFormat();
+  const lang = useLang();
   const body = (): string | null => {
     if (approving?.kind === "fx") {
       const r = approving.row;
-      return t("approveFxBody", r.currency, rate(r.rate_per_usd), pct(r.buffer_pct), formatDate(r.as_of), r.source) as string;
+      return t("approveFxBody", r.currency, rate(r.rate_per_usd, lang), pct(r.buffer_pct), formatDate(r.as_of), r.source) as string;
     }
     if (approving?.kind === "rule") {
       const r = approving.row;
@@ -271,7 +274,6 @@ function PageActions({ canWrite, onNew }: { canWrite: boolean; onNew: (d: "rule"
   const t = useT(R);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <LangSwitch ariaLabel={t("language")} />
       {canWrite && (
         <>
           <Button variant="secondary" size="sm" onClick={() => onNew("fx")}>
@@ -282,6 +284,43 @@ function PageActions({ canWrite, onNew }: { canWrite: boolean; onNew: (d: "rule"
           </Button>
         </>
       )}
+    </div>
+  );
+}
+
+/** AA-1128 (B0 review): approved rules dated later that lower the target margin, the floor margin or the RRP markup of
+ *  their channel (ui/booking/ruleDrops.ts), so a mistaken future row is seen before its day. Shown on both tabs. */
+function ScheduledDropsBanner({ drops }: { drops: RuleDrop[] }) {
+  const t = useT(R);
+  const { formatDate } = useFormat();
+  if (drops.length === 0) return null;
+  return (
+    <div
+      role="status"
+      data-testid="scheduled-rule-drops"
+      className="flex gap-2 rounded-lg border border-warning bg-warning-soft px-4 py-3 text-[13px] text-body"
+    >
+      <TriangleAlert size={15} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+      <div className="min-w-0">
+        <p>
+          <strong className="text-ink">{t("dropsLead")}</strong> {t("dropsIntro", drops.length)}
+        </p>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          {drops.map((d) => (
+            <li key={`${d.id}-${d.field}`} className="break-words">
+              {t(
+                "dropLine",
+                channelLabel(t, d.channel),
+                formatDate(d.valid_from),
+                t(`dropField_${d.field}` as RKey) as string,
+                d.field === "rrp_markup_pct" ? `+${pct(d.from)}` : pct(d.from),
+                d.to === null ? (t("dropNoRrp") as string) : d.field === "rrp_markup_pct" ? `+${pct(d.to)}` : pct(d.to),
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1 text-muted">{t("dropsHint")}</p>
+      </div>
     </div>
   );
 }
@@ -351,6 +390,7 @@ function RulesAndFx() {
   const fxColumns = useFxColumns(canWrite, startApprove);
   const pendingRules = ruleRows.filter((r) => r.status === "pending").length;
   const pendingFx = fxRows.filter((r) => r.status === "pending").length;
+  const drops = useMemo(() => scheduledDrops(ruleRows), [ruleRows]);
 
   return (
     <PageFrame
@@ -361,6 +401,7 @@ function RulesAndFx() {
       <div className="rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
         <strong className="text-ink">{t("bannerLead")}</strong> {t("banner")}
       </div>
+      <ScheduledDropsBanner drops={drops} />
       <SavedTabs
         tabs={[
           { key: "rules", label: t("tabRules") as string, count: pendingRules || undefined },
@@ -386,11 +427,7 @@ function RulesAndFx() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function PricingRulesView() {
-  return (
-    <I18nProvider store={langStore}>
-      <RulesAndFx />
-    </I18nProvider>
-  );
+  return <RulesAndFx />;
 }

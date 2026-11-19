@@ -116,7 +116,6 @@
   "frontend/app/(staff)/hotels/_parts/HotelFormDrawer.tsx::HotelFormDrawer": 41,
   "frontend/app/(staff)/hotels/_parts/HotelsView.tsx::HotelsView": 35,
   "frontend/app/(staff)/hotels/_parts/RoomTypeDrawer.tsx::RoomTypeDrawer": 13,
-  "frontend/app/(staff)/layout.tsx::StaffLayout": 12,
   "frontend/app/(staff)/notifications/page.tsx::NotificationRow": 14,
   "frontend/app/(staff)/notifications/page.tsx::NotificationsPage": 26,
   "frontend/app/(staff)/page.tsx::SalesDashboard": 26,

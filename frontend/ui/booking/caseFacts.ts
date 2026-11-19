@@ -32,25 +32,28 @@ function pick(snapshot: Obj, keys: string[]): unknown {
   return undefined;
 }
 
-function money(amount: number, currency: string | null): string {
-  const n = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 }).format(amount);
+/** AA-1128 (vi): the number in the UI language's separators (the kit core/format.ts locales: en-GB / vi-VN). */
+const BUDGET_LOCALE = { en: "en-GB", vi: "vi-VN" } as const;
+
+function money(amount: number, currency: string | null, lang: "en" | "vi"): string {
+  const n = new Intl.NumberFormat(BUDGET_LOCALE[lang] ?? "en-GB", { maximumFractionDigits: 0 }).format(amount);
   return currency ? `${n} ${currency}` : n;
 }
 
-function budgetText(raw: unknown): string | null {
+function budgetText(raw: unknown, lang: "en" | "vi"): string | null {
   if (typeof raw === "number" || typeof raw === "string") {
     const n = num(raw);
-    return n != null ? money(n, null) : text(raw);
+    return n != null ? money(n, null, lang) : text(raw);
   }
   if (!isObj(raw)) return null;
   const currency = text(raw.currency);
   const amount = num(raw.amount ?? raw.total ?? raw.value);
-  if (amount != null) return `${money(amount, currency)}${raw.per_person ? " per person" : ""}`;
+  if (amount != null) return `${money(amount, currency, lang)}${raw.per_person ? " per person" : ""}`;
   const min = num(raw.min);
   const max = num(raw.max);
-  if (min != null && max != null) return `${money(min, null)} – ${money(max, currency)}`;
-  if (min != null) return `from ${money(min, currency)}`;
-  if (max != null) return `up to ${money(max, currency)}`;
+  if (min != null && max != null) return `${money(min, null, lang)} – ${money(max, currency, lang)}`;
+  if (min != null) return `from ${money(min, currency, lang)}`;
+  if (max != null) return `up to ${money(max, currency, lang)}`;
   return text(raw.label) ?? text(raw.text);
 }
 
@@ -84,12 +87,13 @@ function partyText(snapshot: Obj): string | null {
   return total != null ? `${total} traveller${total === 1 ? "" : "s"}` : null;
 }
 
-/** The customer's own words and preferences from the inquiry, or null when the snapshot carries none of them. */
-export function inquiryPrefs(snapshot: Record<string, unknown> | null | undefined): InquiryPrefs | null {
+/** The customer's own words and preferences from the inquiry, or null when the snapshot carries none of them. The
+ *  budget's numbers use the UI language's separators (`lang`, default English). */
+export function inquiryPrefs(snapshot: Record<string, unknown> | null | undefined, lang: "en" | "vi" = "en"): InquiryPrefs | null {
   if (!isObj(snapshot)) return null;
   const out: InquiryPrefs = {
     message: text(pick(snapshot, ["message", "notes", "comment", "customer_message"])),
-    budget: budgetText(pick(snapshot, ["budget", "estimated_budget"])),
+    budget: budgetText(pick(snapshot, ["budget", "estimated_budget"]), lang),
     travelWindow: windowOf(snapshot),
     travelStyle: text(pick(snapshot, ["travel_style", "trip_style", "style"])),
     party: partyText(snapshot),

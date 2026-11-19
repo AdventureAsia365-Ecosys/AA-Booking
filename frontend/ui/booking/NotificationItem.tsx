@@ -6,7 +6,7 @@
 
 import { NOTIFICATION_TYPE_ICON } from "./notificationIcons";
 import { Bell } from "lucide-react";
-import { localizeIsoDates } from "./dates";
+import { useBookingFormat } from "../local/useBookingFormat";
 
 export function NotificationIcon({ type, read, size = 40 }: { type: string; read: boolean; size?: number }) {
   // AA-996: every staff type has its own icon (notificationIcons.ts); an unknown type gets the bell.
@@ -28,7 +28,9 @@ export function NotificationIcon({ type, read, size = 40 }: { type: string; read
 const CODE_RE = /\b((?:TC|CUS|INV|PMT|BIL|SB)-\d{3,})\b/g;
 
 export function NotificationMessage({ text, className = "" }: { text: string; className?: string }) {
-  // AA-996: the API stores dates in the text as ISO ("next due 2026-11-06"); show them like every other date.
+  // AA-996: the API stores dates in the text as ISO ("next due 2026-11-06"); show them like every other date (AA-1128:
+  // in the UI language).
+  const { localizeIsoDates } = useBookingFormat();
   const parts = localizeIsoDates(text).split(CODE_RE);
   return (
     <span className={className}>

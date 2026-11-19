@@ -11,6 +11,10 @@ import { suppliersApi, type SupplierCategory } from "@/lib/api/suppliers";
 import type { RateUnit, ServiceType, ServiceUnit, SupplierRate } from "@/lib/api/supply";
 import { Select, Code, DataTable, DateText, Pill } from "@/ui";
 import { inputCls } from "./FormField";
+import { formatNumber } from "@/ui/booking/dates";
+import { useLang, useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./supply.messages";
 
 export const SERVICE_TYPE_LABEL: Record<ServiceType, string> = {
   activity: "Activity",
@@ -46,9 +50,10 @@ export const SERVICE_UNIT_OPTIONS: { value: ServiceUnit; label: string }[] = [
 ];
 
 export function Stars({ value }: { value: number | null }) {
+  const t = useT(MSG);
   if (!value) return <span className="text-[13px] text-muted">—</span>;
   return (
-    <span className="inline-flex items-center gap-0.5 text-warning" aria-label={`${value} stars`} title={`${value} stars`}>
+    <span className="inline-flex items-center gap-0.5 text-warning" aria-label={t("{0} stars", value)} title={t("{0} stars", value)}>
       {Array.from({ length: value }, (_, i) => (
         <Star key={i} size={13} fill="currentColor" strokeWidth={0} />
       ))}
@@ -76,6 +81,7 @@ export function SupplierSelect({
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
+  const t = useT(MSG);
   const list = useQuery({
     queryKey: ["suppliers", "list", { status: "active", category }, 100, 0],
     queryFn: () => suppliersApi.list({ status: "active", category, limit: 100 }),
@@ -84,7 +90,7 @@ export function SupplierSelect({
   const items = list.data?.items ?? [];
   return (
     <Select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || list.isLoading}>
-      <option value="">{list.isLoading ? "Loading suppliers…" : items.length ? "Pick a supplier" : "No active supplier with this category"}</option>
+      <option value="">{list.isLoading ? t("Loading suppliers…") : items.length ? t("Pick a supplier") : t("No active supplier with this category")}</option>
       {items.map((s) => (
         <option key={s.id} value={s.id}>
           {s.company_name} ({s.code})
@@ -98,10 +104,9 @@ export function rateTarget(r: SupplierRate): string {
   return r.hotel_room_type_id ? `${r.hotel_name} · ${r.room_type_name}` : (r.service_title ?? "");
 }
 
-export function amountText(amount: string, currency: string): string {
-  const n = Number(amount);
-  const text = Number.isFinite(n) ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : amount;
-  return `${text} ${currency}`;
+/** A supplier rate's net amount in the UI language's separators (`lang`, default English), with its currency code. */
+export function amountText(amount: string, currency: string, lang: "en" | "vi" = "en"): string {
+  return `${formatNumber(amount, lang, 2)} ${currency}`;
 }
 
 function paxText(r: SupplierRate): string {
@@ -117,9 +122,11 @@ const RATE_STATE: Record<string, { label: string; tone: "success" | "neutral" | 
 };
 
 export function RateState({ rate }: { rate: SupplierRate }) {
-  if (rate.in_force) return <Pill tone="success">In force</Pill>;
+  const t = useT(MSG);
+  const tx = useTx();
+  if (rate.in_force) return <Pill tone="success">{t("In force")}</Pill>;
   const meta = RATE_STATE[rate.contract_status] ?? { label: rate.contract_status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 /** Net rates as a table: what (optional), season + validity, meal plan + pax band, net, state and an optional menu.
@@ -153,12 +160,15 @@ export function RatesTable({
   emptyDescription: string;
   tableId: string;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  const lang = useLang();
   const columns: ColumnDef<SupplierRate, unknown>[] = [
     ...(showTarget
       ? [
           {
             id: "target",
-            header: "Room type / service",
+            header: t("Room type / service"),
             accessorFn: (r: SupplierRate) => rateTarget(r),
             cell: ({ row }: { row: { original: SupplierRate } }) => {
               const r = row.original;
@@ -182,11 +192,11 @@ export function RatesTable({
       ? [
           {
             id: "contract",
-            header: "Contract",
+            header: t("Contract"),
             accessorKey: "contract_title",
             cell: ({ row }: { row: { original: SupplierRate } }) => (
-              <span className={`block break-words text-[13px] text-body md:truncate ${compact ? "md:max-w-[90px]" : "md:max-w-[140px]"}`} title={row.original.contract_title}>
-                {row.original.contract_title}
+              <span className={`block break-words text-[13px] text-body md:truncate ${compact ? "md:max-w-[90px]" : "md:max-w-[140px]"}`} title={tx(row.original.contract_title)}>
+                {tx(row.original.contract_title)}
               </span>
             ),
           } as ColumnDef<SupplierRate, unknown>,
@@ -194,7 +204,7 @@ export function RatesTable({
       : []),
     {
       id: "validity",
-      header: "Season / valid",
+      header: t("Season / valid"),
       accessorKey: "valid_from",
       cell: ({ row }) => (
         <span className={`flex min-w-0 flex-col text-[13px] text-body ${compact ? "md:max-w-[120px]" : "md:max-w-[200px]"}`}>
@@ -206,7 +216,7 @@ export function RatesTable({
             {row.original.valid_to ? (
               <DateText value={row.original.valid_to} className="whitespace-nowrap" />
             ) : (
-              <span className="whitespace-nowrap">open-ended</span>
+              <span className="whitespace-nowrap">{t("open-ended")}</span>
             )}
           </span>
         </span>
@@ -214,31 +224,31 @@ export function RatesTable({
     },
     {
       id: "meal",
-      header: "Meal / pax",
+      header: t("Meal / pax"),
       accessorFn: (r) => r.meal_plan ?? "",
       cell: ({ row }) => (
         <span className="flex flex-col whitespace-nowrap text-[13px] text-body">
           {row.original.meal_plan ?? "—"}
-          <span className="text-xs text-muted">{paxText(row.original)} pax</span>
+          <span className="text-xs text-muted">{tx(paxText(row.original))} {t("pax")}</span>
         </span>
       ),
     },
     {
       id: "net",
-      header: "Net",
+      header: t("Net"),
       accessorFn: (r) => Number(r.net_amount),
       cell: ({ row }) => (
         <span className="flex flex-col">
           <span className="bk-tabular whitespace-nowrap text-[13px] font-medium text-ink">
-            {amountText(row.original.net_amount, row.original.currency)}
+            {amountText(row.original.net_amount, row.original.currency, lang)}
           </span>
-          <span className="text-xs text-muted">{UNIT_LABEL[row.original.unit]}</span>
+          <span className="text-xs text-muted">{tx(UNIT_LABEL[row.original.unit])}</span>
         </span>
       ),
     },
-    { id: "state", header: "Status", enableSorting: false, cell: ({ row }) => <RateState rate={row.original} /> },
+    { id: "state", header: t("Status"), enableSorting: false, cell: ({ row }) => <RateState rate={row.original} /> },
     ...(menu
-      ? [{ id: "actions", header: "Actions", enableSorting: false, cell: ({ row }) => menu(row.original) } as ColumnDef<SupplierRate, unknown>]
+      ? [{ id: "actions", header: t("Actions"), enableSorting: false, cell: ({ row }) => menu(row.original) } as ColumnDef<SupplierRate, unknown>]
       : []),
   ];
   return (
@@ -253,8 +263,8 @@ export function RatesTable({
         error={error ?? null}
         onRetry={onRetry}
         pageSizeOptions={[25, 50, 100]}
-        emptyTitle={emptyTitle}
-        emptyDescription={emptyDescription}
+        emptyTitle={tx(emptyTitle)}
+        emptyDescription={tx(emptyDescription)}
         tableMinWidth={showTarget ? 760 : 600}
       />
     </div>

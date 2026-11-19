@@ -6,6 +6,9 @@
 import { Drawer } from "../core/Drawer";
 import { Button } from "../core/primitives";
 import type { FieldError } from "@/lib/api/client";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./FormDrawer.messages";
 
 /** "body.pax" → "pax": the field name of a FastAPI 422 error location. */
 export function fieldName(err: FieldError): string {
@@ -37,24 +40,26 @@ export function FormDrawer({
   fieldErrors?: FieldError[];
   width?: number;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   function requestClose() {
     if (busy) return;
-    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+    if (dirty && !window.confirm(t("Discard your unsaved changes?"))) return;
     onClose();
   }
   return (
     <Drawer
       open={open}
       onClose={requestClose}
-      title={title}
+      title={tx(title)}
       width={width}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={requestClose} disabled={busy}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" onClick={() => !busy && onSubmit()} disabled={busy}>
-            {busy ? "Saving…" : submitLabel}
+            {busy ? t("Saving…") : submitLabel}
           </Button>
         </div>
       }
@@ -69,12 +74,12 @@ export function FormDrawer({
         {children}
         {(error || fieldErrors.length > 0) && (
           <div role="alert" className="rounded-md border border-danger-border bg-danger-soft px-3 py-2 text-[13px] text-danger">
-            {error && <p>{error}</p>}
+            {error && <p>{tx(error)}</p>}
             {fieldErrors.length > 0 && (
               <ul className="mt-1 list-disc pl-4">
                 {fieldErrors.map((f, i) => (
                   <li key={i}>
-                    <span className="font-medium">{fieldName(f) || "form"}</span>: {f.msg}
+                    <span className="font-medium">{fieldName(f) || "form"}</span>: {tx(f.msg)}
                   </li>
                 ))}
               </ul>

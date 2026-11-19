@@ -2232,6 +2232,22 @@ UPDATE guard that refuses unless an erasure is opened for the row's tenant, then
 `agency_payment_guard` (bk-042) gains one branch: inside an opened erasure, on that tenant's payments, `note` -> NULL
 and `reject_reason` -> `[redacted]` only. bk-058 is the next free key.
 
+### `bk-060` (AA-1145 supply model — needs `bk-008`, `bk-010`, `bk-050`)
+
+A **contract** file (MIG-4; the code PR raises readiness to bk-060). `supplier_rates` gains `pax_type` (`adult` |
+`child` | `infant`, default `adult`; child / infant only on a per-person rate), the age band `age_min` / `age_max`
+(0-17, child / infant only) and the two source numbers of a commissionable price, `published_amount` +
+`commission_pct` (both or neither; then `net_amount = round(published x (100 - pct) / 100, 2)`, CHECK). New
+`supplier_contract_terms` (one row per contract: `cancellation_tiers` in the bk-021 tier shape, deposit % + days after
+confirmation, balance days before the service XOR credit days after it, `child_pct`; guard: written while the contract
+is a draft only) and `supply_restrictions` (contract + room type XOR service + inclusive dates; `inventory_kind`
+`allotment` (units, release days) | `free_sale` (optional max pax per booking) | `on_request` | `stop_sale`; the first
+three are contract terms, status `contract`, written under a draft only; a stop-sale is entered `pending` on a
+published contract, never deleted, keeps its facts, and its approval, rejection, withdrawal and end follow the
+season-range CHECKs (two people)). Version 1 of the pricing policy parameter `child_price_pct_by_service_type`
+(100 for every service type = children priced as adults, today's behaviour). DM-7.1 rows for both tables in the root
+data standards. `cis_app` reads none of it.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices

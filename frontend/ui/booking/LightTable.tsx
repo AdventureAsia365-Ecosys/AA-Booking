@@ -8,6 +8,9 @@
 // never scrolls sideways.
 
 import type { ReactNode } from "react";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./LightTable.messages";
 
 export interface LightColumn<T> {
   id: string;
@@ -39,15 +42,17 @@ export function LightTable<T>({
   /** Accessible name of the table. */
   label: string;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const tracks = columns.map((c) => c.width ?? "minmax(0,1fr)").join(" ");
   const align = (c: LightColumn<T>) => (c.numeric ? "justify-self-end text-right" : "text-left");
   return (
     <div className="px-5 py-4" data-testid="light-table">
       {rows.length === 0 ? (
-        <div className="py-3 text-[13px] text-muted">{empty ?? "Nothing yet."}</div>
+        <div className="py-3 text-[13px] text-muted">{empty ?? t("Nothing yet.")}</div>
       ) : (
         <>
-          <div role="table" aria-label={label} className="hidden text-[13px] sm:block">
+          <div role="table" aria-label={tx(label)} className="hidden text-[13px] sm:block">
             <div role="rowgroup">
               <div role="row" className="grid gap-x-4 border-b border-line pb-2.5" style={{ gridTemplateColumns: tracks }}>
                 {columns.map((c) => (
@@ -56,7 +61,7 @@ export function LightTable<T>({
                     role="columnheader"
                     className={`min-w-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted ${align(c)}`}
                   >
-                    {c.header}
+                    {tx(c.header)}
                   </span>
                 ))}
               </div>
@@ -78,7 +83,7 @@ export function LightTable<T>({
               ))}
             </div>
           </div>
-          <ul aria-label={label} className="flex flex-col gap-3 sm:hidden">
+          <ul aria-label={tx(label)} className="flex flex-col gap-3 sm:hidden">
             {rows.map((r) => (
               <li key={rowKey(r)} className="flex flex-col gap-1.5 rounded-md border border-line2 bg-panel px-3 py-2.5 text-[13px]">
                 {columns.map((c) =>
@@ -88,7 +93,7 @@ export function LightTable<T>({
                     </div>
                   ) : (
                     <div key={c.id} className="flex min-w-0 items-baseline justify-between gap-3">
-                      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{c.header}</span>
+                      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{tx(c.header)}</span>
                       <span className="min-w-0 text-right">{c.cell(r)}</span>
                     </div>
                   ),

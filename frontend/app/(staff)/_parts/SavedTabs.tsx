@@ -6,6 +6,7 @@
 // minimum width, so the tabs do not move when the counts arrive (CLS on /cases).
 
 import { Tabs, useUrlFilters } from "@/ui";
+import { useTx } from "@/ui/local/useTx";
 
 export function SavedTabs({
   tabs,
@@ -23,6 +24,7 @@ export function SavedTabs({
   /** The tab list's name for screen readers ("Trip case lists"). */
   ariaLabel?: string;
 }) {
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const active = activeKey ?? (get(param) || tabs[0]?.key) ?? "";
   // The count sits inside the label (not the kit `count`): it keeps a 2-character minimum width, and a pending count
@@ -30,14 +32,14 @@ export function SavedTabs({
   return (
     <Tabs
       variant="underline"
-      ariaLabel={ariaLabel}
+      ariaLabel={tx(ariaLabel)}
       gap={20}
       className="bk-tabstrip bk-tabstrip-line"
       tabs={tabs.map((t) => ({
         key: t.key,
         label: (
           <>
-            {t.label}
+            {tx(t.label)}
             {t.count !== undefined ? (
               <span className="ml-1.5 inline-block min-w-[2ch] text-left text-xs text-muted2">{t.count}</span>
             ) : (

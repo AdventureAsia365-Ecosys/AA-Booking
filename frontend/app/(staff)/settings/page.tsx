@@ -49,7 +49,11 @@ import {
 } from "@/ui";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
-import { formatDay } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useLang, useSetLang, useT } from "@/ui/core/useI18n";
+import { LANGS, LANG_LABEL } from "@/ui/core/i18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const TABS = [
   { key: "general", label: "General" },
@@ -80,10 +84,11 @@ function isForbidden(e: unknown): boolean {
 }
 
 export default function SettingsPage() {
+  const tr = useT(MSG);
   const { get } = useUrlFilters();
   const tab = TABS.find((t) => t.key === get("tab"))?.key ?? "general";
   return (
-    <PageFrame title="Settings" description="Your profile, how Booking looks for you, and what you are notified about.">
+    <PageFrame title={tr("Settings")} description={tr("Your profile, how Booking looks for you, and what you are notified about.")}>
       <SavedTabs tabs={TABS} />
       {tab === "general" ? <GeneralTab /> : tab === "security" ? <SecurityTab /> : <NotificationsTab />}
     </PageFrame>
@@ -92,11 +97,12 @@ export default function SettingsPage() {
 
 /** Figma two-column settings block: title + description left (≈ 300 px), the card right; stacks on phones. */
 function Block({ title, description, actions, children }: { title: string; description: string; actions?: React.ReactNode; children: React.ReactNode }) {
+  const tx = useTx();
   return (
     <section className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-8">
       <div>
-        <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
-        <p className="mt-1 text-[13px] text-muted">{description}</p>
+        <h2 className="text-[15px] font-semibold text-ink">{tx(title)}</h2>
+        <p className="mt-1 text-[13px] text-muted">{tx(description)}</p>
         {actions && <div className="mt-3">{actions}</div>}
       </div>
       <div className="min-w-0 rounded-lg border border-line bg-card p-5 sm:p-6">{children}</div>
@@ -105,17 +111,19 @@ function Block({ title, description, actions, children }: { title: string; descr
 }
 
 function ReadOnlyField({ label, help, children }: { label: string; help?: React.ReactNode; children: React.ReactNode }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   // min-w-0: a grid item defaults to its min-content width, which made the one-line value push the card 40 px past a
   // 390 px phone (layout check, S254); the value truncates instead (full text in the field on wider screens).
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[13px] font-medium text-ink">{label}</span>
+      <span className="text-[13px] font-medium text-ink">{tx(label)}</span>
       <span
         aria-readonly="true"
         className="flex min-h-11 items-center justify-between gap-2 rounded-md border border-line bg-panel px-3 text-[13px] text-body"
       >
         <span className="min-w-0 truncate">{children}</span>
-        <Lock size={14} className="shrink-0 text-muted2" aria-label="Read-only" />
+        <Lock size={14} className="shrink-0 text-muted2" aria-label={tr("Read-only")} />
       </span>
       {help && <span className="text-xs text-muted">{help}</span>}
     </div>
@@ -123,59 +131,74 @@ function ReadOnlyField({ label, help, children }: { label: string; help?: React.
 }
 
 function GeneralTab() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const staff = useStaff();
   const { name, roleLabel } = staffDisplay(staff);
   const [theme, setTheme] = useThemeChoice();
+  const lang = useLang();
+  const setLang = useSetLang();
   // S280: the commercial values come from the pricing policy (pricing_policy.read: every role that prices or bills).
   // A role outside it (content creators) does not see the block, rather than an access error on its own settings.
   const canReadPolicy = useCan("pricing_policy.read");
   return (
     <div className="flex flex-col gap-8">
       <Block
-        title="Profile information"
-        description="You sign in with a code sent to your company e-mail (no password). Your name and e-mail are managed in CIS."
-        actions={<ManagedInCisLink label="Manage in CIS" />}
+        title={tr("Profile information")}
+        description={tr("You sign in with a code sent to your company e-mail (no password). Your name and e-mail are managed in CIS.")}
+        actions={<ManagedInCisLink label={tr("Manage in CIS")} />}
       >
         <div className="grid gap-4 sm:grid-cols-2">
           {/* AA-996: a company sign-in carries no CIS role claim; the field is left out rather than shown empty. */}
           <div className={staff.cis_role ? "" : "sm:col-span-2"}>
-            <ReadOnlyField label="Name">{name}</ReadOnlyField>
+            <ReadOnlyField label={tr("Name")}>{name}</ReadOnlyField>
           </div>
-          {staff.cis_role && <ReadOnlyField label="CIS role">{staff.cis_role}</ReadOnlyField>}
+          {staff.cis_role && <ReadOnlyField label={tr("CIS role")}>{staff.cis_role}</ReadOnlyField>}
           <div className="sm:col-span-2">
-            <ReadOnlyField label="E-mail address" help="Change your e-mail in CIS; Booking copies it at sign-in.">
+            <ReadOnlyField label={tr("E-mail address")} help={tr("Change your e-mail in CIS; Booking copies it at sign-in.")}>
               {staff.email ?? "—"}
             </ReadOnlyField>
           </div>
           <div className="sm:col-span-2">
-            <ReadOnlyField label="Booking role" help="Set by a Booking admin on the Staff page.">
-              {roleLabel}
+            <ReadOnlyField label={tr("Booking role")} help={tr("Set by a Booking admin on the Staff page.")}>
+              {tx(roleLabel)}
             </ReadOnlyField>
           </div>
         </div>
       </Block>
 
-      <Block title="Appearance" description="Applies to this browser only.">
+      <Block title={tr("Appearance")} description={tr("Applies to this browser only.")}>
         <SegmentedControl
           appearance="chips"
-          label="Theme"
+          label={tr("Theme")}
           options={THEMES.map((t) => ({
             value: t.key,
             label: (
               <>
-                {t.icon} {t.label}
+                {t.icon} {tx(t.label)}
               </>
             ),
           }))}
           value={theme}
           onChange={setTheme}
         />
+        {/* AA-1128 (B5): the UI language, the same choice as the top bar switch (cookie bk_lang); the only place to
+            change it on a phone, where the top bar has no room for the switch. */}
+        <div className="mt-4">
+          <SegmentedControl
+            appearance="chips"
+            label={tr("Language")}
+            options={LANGS.map((l) => ({ value: l, label: LANG_LABEL[l].name }))}
+            value={lang}
+            onChange={setLang}
+          />
+        </div>
       </Block>
 
       {canReadPolicy && (
         <Block
-          title="Commercial defaults"
-          description="The values in force today that every quote and agency invoice uses. Read-only here: they change on Pricing › Policy and Agency billing › Settings, with a second person's approval where the page asks for it."
+          title={tr("Commercial defaults")}
+          description={tr("The values in force today that every quote and agency invoice uses. Read-only here: they change on Pricing › Policy and Agency billing › Settings, with a second person's approval where the page asks for it.")}
         >
           <CommercialDefaults />
         </Block>
@@ -201,6 +224,8 @@ function epoch(value: number | null): Date | null {
 }
 
 function SecurityTab() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const staff = useStaff();
   // CIS → Platform → Staff is for admins; other roles would land on a CIS access-denied page.
   const canManageStaff = useCan("staff.admin");
@@ -210,72 +235,69 @@ function SecurityTab() {
   return (
     <div className="flex flex-col gap-8">
       <Block
-        title="Sign-in method"
-        description="Booking never stores a password. Staff sign in with their company e-mail on the Adventure Asia staff sign-in page, which sends a one-time code."
+        title={tr("Sign-in method")}
+        description={tr("Booking never stores a password. Staff sign in with their company e-mail on the Adventure Asia staff sign-in page, which sends a one-time code.")}
       >
         <div className="grid gap-4">
           <ReadOnlyField
-            label="How you sign in"
+            label={tr("How you sign in")}
             help={
               f?.kind === "cis_password"
-                ? "This session still uses the old CIS password bridge. Sign out and choose the company e-mail sign-in."
-                : "Each sign-in sends a fresh code to your company mailbox; there is no Booking password to change or reset."
+                ? tr("This session still uses the old CIS password bridge. Sign out and choose the company e-mail sign-in.")
+                : tr("Each sign-in sends a fresh code to your company mailbox; there is no Booking password to change or reset.")
             }
           >
             {facts.isLoading ? "…" : SIGN_IN_METHOD[f?.kind ?? "none"]}
           </ReadOnlyField>
           <ReadOnlyField
-            label="Extra verification (MFA)"
-            help="Staff sign in with a single code sent to the company mailbox; there is no app-based second factor. Booking never sees the code."
+            label={tr("Extra verification (MFA)")}
+            help={tr("Staff sign in with a single code sent to the company mailbox; there is no app-based second factor. Booking never sees the code.")}
           >
-            None: the one-time e-mail code is the sign-in factor
+            {tr("None: the one-time e-mail code is the sign-in factor")}
           </ReadOnlyField>
         </div>
       </Block>
 
       <Block
-        title="This session"
-        description="Your access renews by itself every few minutes until the session ends; then you sign in again."
+        title={tr("This session")}
+        description={tr("Your access renews by itself every few minutes until the session ends; then you sign in again.")}
         actions={
           <Button variant="ghost" onClick={() => void signOut(router)}>
-            <LogOut size={14} /> Sign out
+            <LogOut size={14} /> {tr("Sign out")}
           </Button>
         }
       >
         {facts.isError ? (
-          <ErrorState message={(facts.error as Error).message} onRetry={() => facts.refetch()} />
+          <ErrorState message={tx((facts.error as Error).message)} onRetry={() => facts.refetch()} />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            <ReadOnlyField label="Signed in">{f ? <DateText value={epoch(f.signed_in_at)} withTime /> : "…"}</ReadOnlyField>
-            <ReadOnlyField label="Session ends">{f ? <DateText value={epoch(f.session_ends_at)} withTime /> : "…"}</ReadOnlyField>
-            <ReadOnlyField label="Last seen in Booking" help="Updated at most every 5 minutes.">
+            <ReadOnlyField label={tr("Signed in")}>{f ? <DateText value={epoch(f.signed_in_at)} withTime /> : "…"}</ReadOnlyField>
+            <ReadOnlyField label={tr("Session ends")}>{f ? <DateText value={epoch(f.session_ends_at)} withTime /> : "…"}</ReadOnlyField>
+            <ReadOnlyField label={tr("Last seen in Booking")} help={tr("Updated at most every 5 minutes.")}>
               <DateText value={staff.last_seen_at} withTime />
             </ReadOnlyField>
             <ReadOnlyField
-              label="Access"
-              help={staff.preview_viewer ? "Preview host: this session can read but not change anything." : undefined}
+              label={tr("Access")}
+              help={staff.preview_viewer ? tr("Preview host: this session can read but not change anything.") : undefined}
             >
-              {staff.preview_viewer ? "Read-only (preview)" : "Full, by your Booking role"}
+              {staff.preview_viewer ? tr("Read-only (preview)") : tr("Full, by your Booking role")}
             </ReadOnlyField>
           </div>
         )}
       </Block>
 
       <Block
-        title="Staff accounts and invites"
-        description="Accounts, invitations, Booking roles and lost access are handled in CIS → Platform → Staff, by an owner or admin."
-        actions={canManageStaff ? <ManagedInCisLink path={CIS_STAFF_PATH} label="Manage staff & invites in CIS" /> : undefined}
+        title={tr("Staff accounts and invites")}
+        description={tr("Accounts, invitations, Booking roles and lost access are handled in CIS → Platform → Staff, by an owner or admin.")}
+        actions={canManageStaff ? <ManagedInCisLink path={CIS_STAFF_PATH} label={tr("Manage staff & invites in CIS")} /> : undefined}
       >
         {canManageStaff ? (
           <p className="text-[13px] text-body">
-            To invite a colleague, give someone a Booking role or take access away, open CIS → Platform → Staff. The person
-            appears on Booking&apos;s Staff page after their first sign-in here. Lost access to your mailbox? Ask an admin to
-            check your account in CIS.
+            {tr("To invite a colleague, give someone a Booking role or take access away, open CIS → Platform → Staff. The person appears on Booking's Staff page after their first sign-in here. Lost access to your mailbox? Ask an admin to check your account in CIS.")}
           </p>
         ) : (
           <p className="text-[13px] text-body">
-            Ask a Booking admin to invite a colleague, change a Booking role or restore access. The person appears on
-            Booking&apos;s Staff page after their first sign-in here.
+            {tr("Ask a Booking admin to invite a colleague, change a Booking role or restore access. The person appears on Booking's Staff page after their first sign-in here.")}
           </p>
         )}
       </Block>
@@ -284,6 +306,8 @@ function SecurityTab() {
 }
 
 function CommercialDefaults() {
+  const tr = useT(MSG);
+  const tx = useTx();
   // S280 (AA-1096 settings UI audit): the values in force, not the retired booking.settings rows (bk-056): quote
   // validity is the pricing policy parameter (Pricing › Policy), deposits come from the agency payment terms.
   const q = useQuery({
@@ -301,13 +325,15 @@ function CommercialDefaults() {
     );
   }
   if (isForbidden(q.error)) {
-    return <EmptyState icon={<Lock size={24} />} title="You do not have access to these values" />;
+    return <EmptyState icon={<Lock size={24} />} title={tr("You do not have access to these values")} />;
   }
-  if (q.isError) return <ErrorState message={(q.error as Error).message} onRetry={() => q.refetch()} />;
+  if (q.isError) return <ErrorState message={tx((q.error as Error).message)} onRetry={() => q.refetch()} />;
   return <PolicyRows items={q.data!.items} />;
 }
 
 function PolicyRows({ items }: { items: PolicyParam[] }) {
+  const tr = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const canBilling = useCan("agency_billing.read");
   const validity = items.find((i) => i.key === "quote_validity_days");
   const festive = items.find((i) => i.key === "quote_validity_festive_days");
@@ -318,43 +344,45 @@ function PolicyRows({ items }: { items: PolicyParam[] }) {
     retry: retryUnlessClientError,
   });
   const defaults = terms.data?.items.find((t) => !t.party_tenant_id);
-  const days = (p: PolicyParam | undefined) => (typeof p?.current?.value === "number" ? `${p.current.value} days` : "Not set");
-  const range = validity?.minimum && validity?.maximum ? ` Allowed ${validity.minimum}–${validity.maximum} days.` : "";
+  const days = (p: PolicyParam | undefined) => (typeof p?.current?.value === "number" ? tr("{0} days", p.current.value) : tr("Not set"));
+  const range = validity?.minimum && validity?.maximum ? tr(" Allowed {0}–{1} days.", validity.minimum, validity.maximum) : "";
   return (
     <div className="grid gap-4">
       <ReadOnlyField
-        label="Quote validity"
+        label={tr("Quote validity")}
         help={
           <>
-            How long a sent quote can be approved at its price; {days(festive)} when it touches a festive period.{range}{" "}
+            {tr("How long a sent quote can be approved at its price; {0} when it touches a festive period.{1}", days(festive), range)}
             <Link href="/pricing/policy?q=quote_validity" className="font-semibold text-accent-deep hover:underline">
-              Change it on Pricing › Policy
+              {tr("Change it on Pricing › Policy")}
             </Link>
           </>
         }
       >
-        {validity?.current ? `${days(validity)} after sending (since ${formatDay(validity.current.effective_from)})` : "No value in force"}
+        {validity?.current ? tr("{0} after sending (since {1})", days(validity), formatDay(validity.current.effective_from)) : tr("No value in force")}
       </ReadOnlyField>
       <ReadOnlyField
-        label="Deposit on confirmation"
+        label={tr("Deposit on confirmation")}
         help={
           <>
-            Each agency&apos;s payment terms, else the default terms (a tour may have its own).{" "}
+            {tr("Each agency's payment terms, else the default terms (a tour may have its own).")}
             {canBilling && (
               <Link href="/agency-billing?tab=settings" className="font-semibold text-accent-deep hover:underline">
-                Agency billing › Settings
+                {tr("Agency billing › Settings")}
               </Link>
             )}
           </>
         }
       >
-        {defaults ? `Default ${Number((Number(defaults.deposit_pct) * 100).toFixed(2))}% of the agency price` : "Set by the agency payment terms"}
+        {defaults ? tr("Default {0}% of the agency price", Number((Number(defaults.deposit_pct) * 100).toFixed(2))) : tr("Set by the agency payment terms")}
       </ReadOnlyField>
     </div>
   );
 }
 
 function NotificationsTab() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const qc = useQueryClient();
   const key = ["staff", "me", "preferences"];
@@ -373,7 +401,7 @@ function NotificationsTab() {
     },
     onSuccess: (data) => {
       qc.setQueryData(key, data);
-      toast.success("Notification preferences saved");
+      toast.success(tr("Notification preferences saved"));
     },
     onError: (e, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
@@ -384,8 +412,8 @@ function NotificationsTab() {
 
   return (
     <Block
-      title="Bell notifications"
-      description="Choose what appears on your bell and on the Notifications page. In-app only: Booking sends no e-mail yet."
+      title={tr("Bell notifications")}
+      description={tr("Choose what appears on your bell and on the Notifications page. In-app only: Booking sends no e-mail yet.")}
     >
       {prefs.isLoading ? (
         <div className="flex flex-col gap-3" aria-busy="true">
@@ -394,11 +422,11 @@ function NotificationsTab() {
           ))}
         </div>
       ) : isForbidden(prefs.error) ? (
-        <EmptyState icon={<Lock size={24} />} title="You do not have access to preferences" />
+        <EmptyState icon={<Lock size={24} />} title={tr("You do not have access to preferences")} />
       ) : prefs.isError ? (
-        <ErrorState message={(prefs.error as Error).message} onRetry={() => prefs.refetch()} />
+        <ErrorState message={tx((prefs.error as Error).message)} onRetry={() => prefs.refetch()} />
       ) : entries.length === 0 ? (
-        <EmptyState title="No notification types yet" description="Booking has no bell notifications to configure." />
+        <EmptyState title={tr("No notification types yet")} description={tr("Booking has no bell notifications to configure.")} />
       ) : (
         <ul className="flex flex-col gap-2">
           {entries.map(([type, on]) => {
@@ -407,10 +435,10 @@ function NotificationsTab() {
               <li key={type} className="flex items-center gap-3 rounded-md bg-panel px-4 py-3">
                 <NotificationIcon type={type} read={!on} size={32} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13.5px] font-medium text-ink">{label}</p>
-                  {TYPE_HELP[type] && <p className="mt-0.5 text-xs text-muted">{TYPE_HELP[type]}</p>}
+                  <p className="text-[13.5px] font-medium text-ink">{tx(label)}</p>
+                  {TYPE_HELP[type] && <p className="mt-0.5 text-xs text-muted">{tx(TYPE_HELP[type])}</p>}
                 </div>
-                <Switch label={label} checked={on} disabled={save.isPending} onChange={(next) => save.mutate({ [type]: next })} />
+                <Switch label={tx(label)} checked={on} disabled={save.isPending} onChange={(next) => save.mutate({ [type]: next })} />
               </li>
             );
           })}

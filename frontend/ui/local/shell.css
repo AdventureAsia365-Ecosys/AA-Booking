@@ -136,6 +136,12 @@
   .aa-topbar-spacer { display: block !important; }
 }
 
+/* AA-1128 (B5): the EN | VI switch leaves the top bar below 480 px (it would push the bell and avatar out of a 390 px
+   phone bar); Settings › Appearance has it there. */
+@media (max-width: 479px) {
+  .aa-topbar-lang { display: none !important; }
+}
+
 
 /* AA-1131 — the kit core PageHeader layout (text beside the actions; a header with a description AND actions gives the
    text a 420 px basis and stacks below 768 px) is the kit's own stylesheet now (ui/core/PageHeaderStyles.tsx

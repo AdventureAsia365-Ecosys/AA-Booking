@@ -37,6 +37,9 @@ import {
 } from "@/ui";
 import { errorText } from "./shared";
 import { TermsSection } from "./TermsSection";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./BillingSettings.messages";
 
 export function BillingSettings() {
   return (
@@ -59,6 +62,7 @@ function useInvalidate() {
 const EMPTY_ENTITY = { code: "", legal_entity: "", tax_code: "", registered_office: "", country_iso2: "", invoice_inbox: "", payment_instructions: "", is_default: true };
 
 function EntitiesSection() {
+  const t = useT(MSG);
   const canEdit = useCan("billing_config.write");
   const toast = useToast();
   const invalidate = useInvalidate();
@@ -77,7 +81,7 @@ function EntitiesSection() {
         is_default: f.is_default,
       }),
     onSuccess: () => {
-      toast.success("Billing entity saved");
+      toast.success(t("Billing entity saved"));
       setForm(null);
       invalidate();
     },
@@ -85,35 +89,35 @@ function EntitiesSection() {
   const setDefault = useMutation({
     mutationFn: (e: BillingEntity) => agencyBillingApi.updateEntity(e.id, { is_default: true }),
     onSuccess: () => {
-      toast.success("Default billing entity changed");
+      toast.success(t("Default billing entity changed"));
       invalidate();
     },
     onError: (e) => toast.error(errorText(e)),
   });
   const columns: ColumnDef<BillingEntity, unknown>[] = [
-    { id: "code", header: "Code", cell: ({ row }) => <span className="font-semibold">{row.original.code}</span> },
-    { id: "legal", header: "Legal entity", cell: ({ row }) => row.original.legal_entity },
-    { id: "tax", header: "Tax code", cell: ({ row }) => row.original.tax_code ?? "—" },
-    { id: "country", header: "Country", cell: ({ row }) => row.original.country_iso2 ?? "—" },
+    { id: "code", header: t("Code"), cell: ({ row }) => <span className="font-semibold">{row.original.code}</span> },
+    { id: "legal", header: t("Legal entity"), cell: ({ row }) => row.original.legal_entity },
+    { id: "tax", header: t("Tax code"), cell: ({ row }) => row.original.tax_code ?? "—" },
+    { id: "country", header: t("Country"), cell: ({ row }) => row.original.country_iso2 ?? "—" },
     {
       id: "state",
       header: "",
       cell: ({ row }) =>
         row.original.is_default ? (
-          <Pill tone="success">Default</Pill>
+          <Pill tone="success">{t("Default")}</Pill>
         ) : canEdit && row.original.active ? (
-          <Button size="sm" variant="ghost" onClick={() => setDefault.mutate(row.original)}>Make default</Button>
+          <Button size="sm" variant="ghost" onClick={() => setDefault.mutate(row.original)}>{t("Make default")}</Button>
         ) : !row.original.active ? (
-          <Pill>Inactive</Pill>
+          <Pill>{t("Inactive")}</Pill>
         ) : null,
     },
   ];
   const f = form;
   return (
     <Section
-      title="Issuing entity"
-      description="The AA legal entity printed on every invoice. The invoice keeps a copy taken when it is issued."
-      actions={canEdit ? <Button onClick={() => setForm({ ...EMPTY_ENTITY })}>Add entity</Button> : undefined}
+      title={t("Issuing entity")}
+      description={t("The AA legal entity printed on every invoice. The invoice keeps a copy taken when it is issued.")}
+      actions={canEdit ? <Button onClick={() => setForm({ ...EMPTY_ENTITY })}>{t("Add entity")}</Button> : undefined}
     >
       <DataTable<BillingEntity>
         searchable={false}
@@ -123,41 +127,41 @@ function EntitiesSection() {
         getRowId={(r) => r.id}
         loading={list.isLoading}
         error={list.isError ? errorText(list.error) : null}
-        emptyTitle="No billing entity yet"
-        emptyDescription="Add the AA legal entity that issues invoices before issuing the first one."
+        emptyTitle={t("No billing entity yet")}
+        emptyDescription={t("Add the AA legal entity that issues invoices before issuing the first one.")}
       />
       <FormDrawer
         open={f !== null}
         onClose={() => setForm(null)}
-        title="Add billing entity"
+        title={t("Add billing entity")}
         onSubmit={() => f && create.mutate(f)}
         busy={create.isPending}
         error={create.isError ? errorText(create.error) : null}
       >
         {f && (
           <div className="flex flex-col gap-3">
-            <Field label="Code" required hint="Capital letters, digits, - or _ (e.g. AA-VN)">
+            <Field label={t("Code")} required hint={t("Capital letters, digits, - or _ (e.g. AA-VN)")}>
               <Input value={f.code} onChange={(e) => setForm({ ...f, code: e.target.value.toUpperCase() })} />
             </Field>
-            <Field label="Legal entity" required>
+            <Field label={t("Legal entity")} required>
               <Input value={f.legal_entity} onChange={(e) => setForm({ ...f, legal_entity: e.target.value })} />
             </Field>
-            <Field label="Tax code">
+            <Field label={t("Tax code")}>
               <Input value={f.tax_code} onChange={(e) => setForm({ ...f, tax_code: e.target.value })} />
             </Field>
-            <Field label="Registered office">
+            <Field label={t("Registered office")}>
               <Textarea value={f.registered_office} onChange={(e) => setForm({ ...f, registered_office: e.target.value })} />
             </Field>
-            <Field label="Country" hint="Two letters (VN)">
+            <Field label={t("Country")} hint={t("Two letters (VN)")}>
               <Input value={f.country_iso2} maxLength={2} onChange={(e) => setForm({ ...f, country_iso2: e.target.value.toUpperCase() })} />
             </Field>
-            <Field label="Invoice inbox">
+            <Field label={t("Invoice inbox")}>
               <Input type="email" value={f.invoice_inbox} onChange={(e) => setForm({ ...f, invoice_inbox: e.target.value })} />
             </Field>
-            <Field label="Payment instructions" hint="Printed on the invoice: where and how the agency pays">
+            <Field label={t("Payment instructions")} hint={t("Printed on the invoice: where and how the agency pays")}>
               <Textarea value={f.payment_instructions} onChange={(e) => setForm({ ...f, payment_instructions: e.target.value })} />
             </Field>
-            <Checkbox label="Default issuing entity" checked={f.is_default} onChange={(e) => setForm({ ...f, is_default: e.target.checked })} />
+            <Checkbox label={t("Default issuing entity")} checked={f.is_default} onChange={(e) => setForm({ ...f, is_default: e.target.checked })} />
           </div>
         )}
       </FormDrawer>
@@ -170,6 +174,8 @@ function EntitiesSection() {
 const EMPTY_RULE = { code: "", invoice_kind: "", recipient_country: "", rate: "0", line_wording: "", footer_wording: "", effective_from: new Date().toISOString().slice(0, 10) };
 
 function TaxRulesSection() {
+  const t = useT(MSG);
+  const tx = useTx();
   const canEdit = useCan("billing_config.write");
   const toast = useToast();
   const invalidate = useInvalidate();
@@ -187,7 +193,7 @@ function TaxRulesSection() {
         effective_from: f.effective_from,
       }),
     onSuccess: () => {
-      toast.success("Tax rule saved");
+      toast.success(t("Tax rule saved"));
       setForm(null);
       invalidate();
     },
@@ -198,32 +204,32 @@ function TaxRulesSection() {
     onError: (e) => toast.error(errorText(e)),
   });
   const columns: ColumnDef<TaxRule, unknown>[] = [
-    { id: "code", header: "Code", cell: ({ row }) => <span className="font-semibold">{row.original.code}</span> },
-    { id: "kind", header: "Invoice kind", cell: ({ row }) => (row.original.invoice_kind ? KIND_LABEL[row.original.invoice_kind] : "Any") },
-    { id: "country", header: "Recipient country", cell: ({ row }) => row.original.recipient_country ?? "Any" },
-    { id: "rate", header: "Rate", cell: ({ row }) => `${(Number(row.original.rate) * 100).toFixed(2)} %` },
-    { id: "wording", header: "Line", cell: ({ row }) => row.original.line_wording },
-    { id: "from", header: "From", cell: ({ row }) => <DateText value={row.original.effective_from} /> },
-    { id: "to", header: "Until", cell: ({ row }) => (row.original.effective_to ? <DateText value={row.original.effective_to} /> : "—") },
+    { id: "code", header: t("Code"), cell: ({ row }) => <span className="font-semibold">{row.original.code}</span> },
+    { id: "kind", header: t("Invoice kind"), cell: ({ row }) => (row.original.invoice_kind ? tx(KIND_LABEL[row.original.invoice_kind]) : t("Any")) },
+    { id: "country", header: t("Recipient country"), cell: ({ row }) => row.original.recipient_country ?? t("Any") },
+    { id: "rate", header: t("Rate"), cell: ({ row }) => `${(Number(row.original.rate) * 100).toFixed(2)} %` },
+    { id: "wording", header: t("Line"), cell: ({ row }) => row.original.line_wording },
+    { id: "from", header: t("From"), cell: ({ row }) => <DateText value={row.original.effective_from} /> },
+    { id: "to", header: t("Until"), cell: ({ row }) => (row.original.effective_to ? <DateText value={row.original.effective_to} /> : "—") },
     {
       id: "active",
       header: "",
       cell: ({ row }) =>
         canEdit ? (
           <Button size="sm" variant="ghost" onClick={() => toggle.mutate(row.original)}>
-            {row.original.active ? "Deactivate" : "Activate"}
+            {row.original.active ? t("Deactivate") : t("Activate")}
           </Button>
         ) : (
-          <Pill tone={row.original.active ? "success" : "neutral"}>{row.original.active ? "Active" : "Inactive"}</Pill>
+          <Pill tone={row.original.active ? "success" : "neutral"}>{row.original.active ? t("Active") : t("Inactive")}</Pill>
         ),
     },
   ];
   const f = form;
   return (
     <Section
-      title="Tax rules"
-      description="The issue picks the active rule in force for the invoice kind and the agency's country, the most specific first. The footer wording is printed on the invoice."
-      actions={canEdit ? <Button onClick={() => setForm({ ...EMPTY_RULE })}>Add tax rule</Button> : undefined}
+      title={t("Tax rules")}
+      description={t("The issue picks the active rule in force for the invoice kind and the agency's country, the most specific first. The footer wording is printed on the invoice.")}
+      actions={canEdit ? <Button onClick={() => setForm({ ...EMPTY_RULE })}>{t("Add tax rule")}</Button> : undefined}
     >
       <DataTable<TaxRule>
         searchable={false}
@@ -233,43 +239,43 @@ function TaxRulesSection() {
         getRowId={(r) => r.id}
         loading={list.isLoading}
         error={list.isError ? errorText(list.error) : null}
-        emptyTitle="No tax rule"
-        emptyDescription="Without a rule an invoice carries no tax line."
+        emptyTitle={t("No tax rule")}
+        emptyDescription={t("Without a rule an invoice carries no tax line.")}
         tableMinWidth={900}
       />
       <FormDrawer
         open={f !== null}
         onClose={() => setForm(null)}
-        title="Add tax rule"
+        title={t("Add tax rule")}
         onSubmit={() => f && create.mutate(f)}
         busy={create.isPending}
         error={create.isError ? errorText(create.error) : null}
       >
         {f && (
           <div className="flex flex-col gap-3">
-            <Field label="Code" required>
+            <Field label={t("Code")} required>
               <Input value={f.code} onChange={(e) => setForm({ ...f, code: e.target.value.toUpperCase() })} />
             </Field>
-            <Field label="Invoice kind">
+            <Field label={t("Invoice kind")}>
               <Select
                 value={f.invoice_kind}
                 onChange={(e) => setForm({ ...f, invoice_kind: e.target.value })}
-                options={[{ value: "", label: "Any" }, { value: "saas", label: KIND_LABEL.saas }, { value: "settlement", label: KIND_LABEL.settlement }]}
+                options={[{ value: "", label: t("Any") }, { value: "saas", label: tx(KIND_LABEL.saas) }, { value: "settlement", label: tx(KIND_LABEL.settlement) }]}
               />
             </Field>
-            <Field label="Recipient country" hint="Two letters; empty = any country">
+            <Field label={t("Recipient country")} hint={t("Two letters; empty = any country")}>
               <Input value={f.recipient_country} maxLength={2} onChange={(e) => setForm({ ...f, recipient_country: e.target.value.toUpperCase() })} />
             </Field>
-            <Field label="Rate (%)" required>
+            <Field label={t("Rate (%)")} required>
               <Input type="number" min={0} max={99.99} step="0.01" value={f.rate} onChange={(e) => setForm({ ...f, rate: e.target.value })} />
             </Field>
-            <Field label="Tax line wording" required hint="For example: VAT 10%">
+            <Field label={t("Tax line wording")} required hint={t("For example: VAT 10%")}>
               <Input value={f.line_wording} onChange={(e) => setForm({ ...f, line_wording: e.target.value })} />
             </Field>
-            <Field label="Footer wording">
+            <Field label={t("Footer wording")}>
               <Textarea value={f.footer_wording} onChange={(e) => setForm({ ...f, footer_wording: e.target.value })} />
             </Field>
-            <Field label="In force from" required>
+            <Field label={t("In force from")} required>
               <Input type="date" value={f.effective_from} onChange={(e) => setForm({ ...f, effective_from: e.target.value })} />
             </Field>
           </div>
@@ -284,6 +290,7 @@ function TaxRulesSection() {
 type ClauseForm = { code: string; title: string; body: string; free_cancel_days: string; isNew: boolean };
 
 function TermsClausesSection() {
+  const t = useT(MSG);
   const canEdit = useCan("billing_config.write");
   const canApprove = useCan("terms_clause.approve");
   const me = useStaff();
@@ -300,7 +307,7 @@ function TermsClausesSection() {
         free_cancel_days: f.free_cancel_days.trim() === "" ? null : Number(f.free_cancel_days),
       }),
     onSuccess: () => {
-      toast.success("Clause saved as a draft; it reaches agencies once approved");
+      toast.success(t("Clause saved as a draft; it reaches agencies once approved"));
       setForm(null);
       invalidate();
     },
@@ -308,7 +315,7 @@ function TermsClausesSection() {
   const approve = useMutation({
     mutationFn: (c: TermsClause) => agencyBillingApi.approveClause(c.code, c.version),
     onSuccess: () => {
-      toast.success("Clause approved; agencies now see it");
+      toast.success(t("Clause approved; agencies now see it"));
       setApproving(null);
       invalidate();
     },
@@ -320,9 +327,10 @@ function TermsClausesSection() {
   const columns: ColumnDef<TermsClause, unknown>[] = [
     {
       id: "title",
-      header: "Clause",
+      header: t("Clause"),
       cell: ({ row }) => (
         <div className="flex max-w-[640px] flex-col gap-1">
+          {/* Clause text is data (the wording agencies read), shown exactly as stored, never through the phrasebook. */}
           <span className="font-semibold">{row.original.title}</span>
           <span className="whitespace-pre-line text-[13px] text-body">{row.original.body}</span>
         </div>
@@ -330,17 +338,17 @@ function TermsClausesSection() {
     },
     {
       id: "window",
-      header: "Free-cancel window",
-      cell: ({ row }) => (row.original.free_cancel_days == null ? "—" : `${row.original.free_cancel_days} days`),
+      header: t("Free-cancel window"),
+      cell: ({ row }) => (row.original.free_cancel_days == null ? "—" : t("{0} days", row.original.free_cancel_days)),
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       cell: ({ row }) =>
         row.original.status === "approved" ? (
-          <Pill tone="success">{`Approved v${row.original.version}`}</Pill>
+          <Pill tone="success">{t("Approved v{0}", row.original.version)}</Pill>
         ) : (
-          <Pill tone="warning">{`Draft v${row.original.version}, not shown to agencies`}</Pill>
+          <Pill tone="warning">{t("Draft v{0}, not shown to agencies", row.original.version)}</Pill>
         ),
     },
     {
@@ -355,6 +363,7 @@ function TermsClausesSection() {
               onClick={() =>
                 setForm({
                   code: row.original.code,
+                  // The stored wording, never a translation of it: saving must not change the clause text.
                   title: row.original.title,
                   body: row.original.body,
                   free_cancel_days: row.original.free_cancel_days == null ? "" : String(row.original.free_cancel_days),
@@ -362,11 +371,11 @@ function TermsClausesSection() {
                 })
               }
             >
-              Edit
+              {t("Edit")}
             </Button>
           )}
           {canApprove && row.original.status === "draft" && row.original.updated_by !== me.cis_user_id && (
-            <Button size="sm" variant="primary" onClick={() => setApproving(row.original)}>Approve</Button>
+            <Button size="sm" variant="primary" onClick={() => setApproving(row.original)}>{t("Approve")}</Button>
           )}
         </span>
       ),
@@ -375,9 +384,9 @@ function TermsClausesSection() {
   const f = form;
   return (
     <Section
-      title="Terms clauses"
-      description="Clauses of AA's terms that agencies read with their payment terms (for example how AA corrects a clearly wrong price). A clause is a draft until the business owner approves it; any edit makes it a draft again."
-      actions={canEdit ? <Button onClick={() => setForm({ code: "", title: "", body: "", free_cancel_days: "", isNew: true })}>Add clause</Button> : undefined}
+      title={t("Terms clauses")}
+      description={t("Clauses of AA's terms that agencies read with their payment terms (for example how AA corrects a clearly wrong price). A clause is a draft until the business owner approves it; any edit makes it a draft again.")}
+      actions={canEdit ? <Button onClick={() => setForm({ code: "", title: "", body: "", free_cancel_days: "", isNew: true })}>{t("Add clause")}</Button> : undefined}
     >
       <DataTable<TermsClause>
         searchable={false}
@@ -387,30 +396,30 @@ function TermsClausesSection() {
         getRowId={(r) => r.id}
         loading={list.isLoading}
         error={list.isError ? errorText(list.error) : null}
-        emptyTitle="No terms clause"
-        emptyDescription="Add a clause; agencies see it once it is approved."
+        emptyTitle={t("No terms clause")}
+        emptyDescription={t("Add a clause; agencies see it once it is approved.")}
         tableMinWidth={900}
       />
       <FormDrawer
         open={f !== null}
         onClose={() => setForm(null)}
-        title={f?.isNew ? "Add terms clause" : "Edit terms clause"}
+        title={f?.isNew ? t("Add terms clause") : t("Edit terms clause")}
         onSubmit={() => f && save.mutate(f)}
         busy={save.isPending}
         error={save.isError ? errorText(save.error) : null}
       >
         {f && (
           <div className="flex flex-col gap-3">
-            <Field label="Code" required hint="Lower-case letters, digits or _ (for example price_error)">
+            <Field label={t("Code")} required hint={t("Lower-case letters, digits or _ (for example price_error)")}>
               <Input value={f.code} disabled={!f.isNew} onChange={(e) => setForm({ ...f, code: e.target.value.toLowerCase() })} />
             </Field>
-            <Field label="Title" required>
+            <Field label={t("Title")} required>
               <Input value={f.title} maxLength={120} onChange={(e) => setForm({ ...f, title: e.target.value })} />
             </Field>
-            <Field label="Wording" required hint="Saved as a draft; the business owner approves the wording before agencies see it">
+            <Field label={t("Wording")} required hint={t("Saved as a draft; the business owner approves the wording before agencies see it")}>
               <Textarea value={f.body} rows={8} maxLength={4000} onChange={(e) => setForm({ ...f, body: e.target.value })} />
             </Field>
-            <Field label="Free-cancel window (days)" hint="Days the agency may cancel free of charge after AA's notice; empty when the clause has none">
+            <Field label={t("Free-cancel window (days)")} hint={t("Days the agency may cancel free of charge after AA's notice; empty when the clause has none")}>
               <Input type="number" min={0} max={60} value={f.free_cancel_days} onChange={(e) => setForm({ ...f, free_cancel_days: e.target.value })} />
             </Field>
           </div>
@@ -420,9 +429,9 @@ function TermsClausesSection() {
         open={approving !== null}
         onClose={() => setApproving(null)}
         onConfirm={() => approving && approve.mutate(approving)}
-        title={`Approve "${approving?.title ?? ""}"?`}
-        message="Agencies see this wording in their terms from now on. A later edit makes it a draft again."
-        confirmLabel="Approve"
+        title={t("Approve \"{0}\"?", approving?.title ?? "")}
+        message={t("Agencies see this wording in their terms from now on. A later edit makes it a draft again.")}
+        confirmLabel={t("Approve")}
         busy={approve.isPending}
       />
     </Section>

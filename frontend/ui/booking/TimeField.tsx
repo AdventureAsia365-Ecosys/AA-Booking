@@ -10,6 +10,8 @@
 import { useState } from "react";
 import { Input } from "../core/FormControls";
 import { normalizeTime, parseTimeInput } from "./dates";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./TimeField.messages";
 
 type BaseProps = {
   /** Classes of the text box: pass the page's input class (border, height, width) as for the native input. */
@@ -37,6 +39,7 @@ export function TimeField({
   value: string | null | undefined;
   onChange: (value: string) => void;
 }) {
+  const tr = useT(MSG);
   const [draft, setDraft] = useState<string | null>(null);
   const [seen, setSeen] = useState(value);
   if (seen !== value) {
@@ -70,7 +73,7 @@ export function TimeField({
         placeholder={placeholder}
         disabled={disabled}
         aria-invalid={invalid || undefined}
-        title={invalid ? "Not a valid time: use 24-hour HH:MM" : undefined}
+        title={invalid ? tr("Not a valid time: use 24-hour HH:MM") : undefined}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => commit(true)}
         onKeyDown={(e) => {

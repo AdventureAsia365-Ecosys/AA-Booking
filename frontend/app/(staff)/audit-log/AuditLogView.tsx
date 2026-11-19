@@ -41,12 +41,17 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./AuditLogView.messages";
 
 const PAGE_SIZE = 50;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function AuditLogView() {
+  const t = useT(MSG);
+  const tx = useTx();
   const canRead = useCan("audit.read");
   const { get, set } = useUrlFilters();
   const entityId = get("entity_id");
@@ -89,36 +94,36 @@ export function AuditLogView() {
 
   return (
     <PageFrame
-      title="Audit log"
-      description="Every staff write in Booking, newest first: who did what, when, and the values before and after."
+      title={t("Audit log")}
+      description={t("Every staff write in Booking, newest first: who did what, when, and the values before and after.")}
       actions={
         <Button variant="secondary" onClick={() => exportCsv(items)} disabled={items.length === 0}>
-          <Download size={15} /> Export CSV
+          <Download size={15} /> {t("Export CSV")}
         </Button>
       }
     >
       <Section padded={false}>
         <div className="border-b border-line2 px-4 py-4 sm:px-5">
           <FilterBar
-            search={{ placeholder: "Search description, action, record or staff" }}
+            search={{ placeholder: t("Search description, action, record or staff") }}
             selects={[
               {
                 key: "entity_type",
-                label: "Record type",
-                allLabel: "All record types",
-                options: Object.entries(AUDIT_ENTITY_LABEL).map(([value, label]) => ({ value, label })),
+                label: t("Record type"),
+                allLabel: t("All record types"),
+                options: Object.entries(AUDIT_ENTITY_LABEL).map(([value, label]) => ({ value, label: tx(label) })),
               },
-              { key: "actor", label: "Staff member", allLabel: "All staff", options: staffOptions, width: 180 },
+              { key: "actor", label: t("Staff member"), allLabel: t("All staff"), options: staffOptions, width: 180 },
             ]}
-            dateRange={{ fromKey: "from", toKey: "to", label: "Date" }}
+            dateRange={{ fromKey: "from", toKey: "to", label: t("Date") }}
             extraKeys={["entity_id"]}
           >
             {entityId && (
               <span className="inline-flex h-9 max-w-full items-center gap-1.5 rounded-full border border-accent-border bg-accent-tint px-3 text-[13px] text-accent-deep">
                 <span className="truncate">
-                  {entityIdValid ? <>Record: {entityLabel ?? `${entityId.slice(0, 8)}…`}</> : "Record id not valid (ignored)"}
+                  {entityIdValid ? <>{t("Record:")} {entityLabel ?? `${entityId.slice(0, 8)}…`}</> : t("Record id not valid (ignored)")}
                 </span>
-                <IconButton variant="plain" size="xs" round onClick={() => set("entity_id", null)} label="Show every record">
+                <IconButton variant="plain" size="xs" round onClick={() => set("entity_id", null)} label={t("Show every record")}>
                   <X size={13} />
                 </IconButton>
               </span>
@@ -128,25 +133,25 @@ export function AuditLogView() {
         {forbidden ? (
           <EmptyState
             icon={<Lock size={28} />}
-            title="You do not have access to the audit log"
-            description="Only Booking admins can read the audit log."
+            title={t("You do not have access to the audit log")}
+            description={t("Only Booking admins can read the audit log.")}
           />
         ) : feed.isLoading ? (
           <ListSkeleton />
         ) : feed.isError ? (
-          <ErrorState message={(feed.error as Error).message} onRetry={() => feed.refetch()} />
+          <ErrorState message={tx((feed.error as Error).message)} onRetry={() => feed.refetch()} />
         ) : items.length === 0 ? (
           filtered ? (
-            <EmptyState title="No entries match these filters" description="Change or reset the filters to see more." />
+            <EmptyState title={t("No entries match these filters")} description={t("Change or reset the filters to see more.")} />
           ) : (
             <EmptyState
               icon={<ClipboardList size={28} />}
-              title="No audited actions yet"
-              description="Every change staff make in Booking (cases, proposals, customers, staff) is recorded here."
+              title={t("No audited actions yet")}
+              description={t("Every change staff make in Booking (cases, proposals, customers, staff) is recorded here.")}
             />
           )
         ) : (
-          <ul aria-label="Audit log entries">
+          <ul aria-label={t("Audit log entries")}>
             {items.map((row) => (
               <AuditRow key={row.id} row={row} filteredByEntity={entityIdValid && row.entity_id === entityId} onOnly={(id) => set("entity_id", id)} />
             ))}
@@ -155,12 +160,11 @@ export function AuditLogView() {
         {!forbidden && items.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line2 px-4 py-3 text-[13px] text-muted sm:px-5">
             <span>
-              Showing {items.length} entr{items.length === 1 ? "y" : "ies"}
-              {feed.hasNextPage ? ", newest first" : ""}
+              {t("Showing {0} entr{1}{2}", items.length, items.length === 1 ? "y" : "ies", feed.hasNextPage ? t(", newest first") : "")}
             </span>
             {feed.hasNextPage && (
               <Button variant="secondary" size="sm" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingNextPage}>
-                {feed.isFetchingNextPage ? "Loading…" : "Show older"}
+                {feed.isFetchingNextPage ? t("Loading…") : t("Show older")}
               </Button>
             )}
           </div>
@@ -185,6 +189,8 @@ function AuditRow({
   filteredByEntity: boolean;
   onOnly: (entityId: string) => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [open, setOpen] = useState(false);
   const changes = auditChanges(row.before, row.after);
   const href = auditEntityHref(row);
@@ -194,16 +200,16 @@ function AuditRow({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Pill tone={auditActionTone(row)} dot={false} upper>
-            {auditActionLabel(row)}
+            {tx(auditActionLabel(row))}
           </Pill>
-          <span className="text-[12px] text-muted">{auditEntityLabel(row.entity_type)}</span>
+          <span className="text-[12px] text-muted">{tx(auditEntityLabel(row.entity_type))}</span>
           {label &&
             (href ? (
               <Link href={href} className="min-w-0 hover:underline">
-                <Code wrap>{label}</Code>
+                <Code wrap>{tx(label)}</Code>
               </Link>
             ) : (
-              <Code wrap>{label}</Code>
+              <Code wrap>{tx(label)}</Code>
             ))}
         </div>
         <DateText value={row.at} withTime className="shrink-0 text-xs text-muted" />
@@ -211,33 +217,33 @@ function AuditRow({
       <p className="mt-1 break-words text-[13px] text-ink">{row.summary ?? row.action}</p>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
         <span>
-          By{" "}
+          {t("By")}
           {row.actor.type === "staff" && row.actor.id ? (
             <Link href={`/staff/${encodeURIComponent(row.actor.id)}`} className="font-medium text-body hover:underline">
-              {actorText(row)}
+              {tx(actorText(row))}
             </Link>
           ) : (
-            <span className="font-medium text-body">{actorText(row)}</span>
+            <span className="font-medium text-body">{tx(actorText(row))}</span>
           )}
         </span>
         {row.entity_id && !filteredByEntity && (
           <LinkButton size="sm" onClick={() => onOnly(row.entity_id as string)}>
-            Only this record
+            {t("Only this record")}
           </LinkButton>
         )}
         {changes.length > 0 && (
           <LinkButton size="sm" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-            {open ? "Hide changes" : `Show changes (${changes.length})`}
+            {open ? t("Hide changes") : t("Show changes ({0})", changes.length)}
           </LinkButton>
         )}
       </div>
       {open && (
         // A small before / after grid (not the kit DataTable: no sorting or paging for a handful of fields).
-        <div role="table" aria-label="Changes" className="mt-2 rounded-md bg-panel text-xs">
+        <div role="table" aria-label={t("Changes")} className="mt-2 rounded-md bg-panel text-xs">
           <div role="row" className="grid grid-cols-[minmax(0,28%)_minmax(0,1fr)_minmax(0,1fr)] text-[11px] uppercase tracking-[0.04em] text-muted">
-            <span role="columnheader" className="px-2 py-1.5 font-semibold">Field</span>
-            <span role="columnheader" className="px-2 py-1.5 font-semibold">Before</span>
-            <span role="columnheader" className="px-2 py-1.5 font-semibold">After</span>
+            <span role="columnheader" className="px-2 py-1.5 font-semibold">{t("Field")}</span>
+            <span role="columnheader" className="px-2 py-1.5 font-semibold">{t("Before")}</span>
+            <span role="columnheader" className="px-2 py-1.5 font-semibold">{t("After")}</span>
           </div>
           {changes.map((c) => (
             <div
@@ -284,8 +290,9 @@ function exportCsv(rows: AuditLogItem[]) {
 }
 
 function ListSkeleton() {
+  const t = useT(MSG);
   return (
-    <ul aria-busy="true" aria-label="Loading the audit log">
+    <ul aria-busy="true" aria-label={t("Loading the audit log")}>
       {[0, 1, 2, 3, 4].map((i) => (
         <li key={i} className="flex flex-col gap-2 border-b border-line2 px-5 py-4 last:border-b-0">
           <SkeletonBar w="35%" h={12} />

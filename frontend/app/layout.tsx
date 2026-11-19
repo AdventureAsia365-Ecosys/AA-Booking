@@ -8,7 +8,7 @@
 // admin's). The sidebar script carries a stored Booking `bk_sidebar` choice over to that key once.
 
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import "./globals.css";
 import { BookingQueryProvider } from "@/ui/booking/QueryProvider";
 // Server component: the modules directly, not the "@/ui" barrel.
@@ -16,6 +16,8 @@ import { ToastProvider } from "@/ui/core/Toast";
 import { BRAND } from "@/ui/core/brand";
 import { themeStore } from "@/ui/local/theme";
 import { NONCE_HEADER } from "@/lib/securityHeaders";
+import { langFromCookie } from "@/ui/core/i18n";
+import { langStore } from "@/ui/local/lang";
 
 export const metadata: Metadata = {
   title: { default: "Booking · Adventure Asia", template: "%s · Booking" },
@@ -36,8 +38,11 @@ const SIDEBAR_RESTORE = `(function(){try{var s=localStorage.getItem('cis_sidebar
 // renders every page per request, so no prerendered page is served with an inline script the policy would refuse.
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
+  // AA-1128 (B5): <html lang> follows the staff UI language (cookie bk_lang, English when absent); the language store
+  // sets it again when the user switches.
+  const lang = langFromCookie((await cookies()).get(langStore.cookieName)?.value);
   return (
-    <html lang="en" data-theme="light" suppressHydrationWarning>
+    <html lang={lang} data-theme="light" suppressHydrationWarning>
       <head>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeStore.restoreScript }} />
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: SIDEBAR_RESTORE }} />

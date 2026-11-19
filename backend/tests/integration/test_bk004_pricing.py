@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
 
 import asyncpg
@@ -19,7 +19,7 @@ import pytest_asyncio
 from app.auth.staff import Staff
 from app.db import Database
 from app.main import create_app
-from app.pricing import repository
+from app.pricing import policy, repository
 from app.pricing.engine import Channel
 from app.settings import Settings
 from app.trip_cases import service as cases
@@ -446,3 +446,75 @@ async def test_version_costs_price_send_and_copy(admin: asyncpg.Connection, migr
         [("17780000.00", "VND"), ("0.00", "USD")],
         [("0.00", "USD")],
     ]
+
+
+class _Rollback(Exception):
+    """Raised to roll the tie test's transaction back (it drops the unique indexes inside it)."""
+
+
+async def _tie(admin: asyncpg.Connection, viewer: Staff, day: date, *, last_approved: int) -> None:
+    """Two approved b2b rules and two approved EUR rates dated ``day``; row ``last_approved`` (0 or 1, in insert
+    order) of each pair is approved a day after the other and must be the one in force."""
+    margins, rates = ("0.19", "0.18"), ("0.95", "0.93")
+    rule_ids = [
+        await admin.fetchval(
+            "INSERT INTO booking.pricing_rules (channel, target_margin, floor_margin, valid_from)"
+            " VALUES ('b2b', $1::numeric, 0.10, $2) RETURNING id",
+            m,
+            day,
+        )
+        for m in margins
+    ]
+    fx_ids = [
+        await admin.fetchval(
+            "INSERT INTO booking.fx_rates (currency, rate_per_usd, buffer_pct, as_of, source)"
+            " VALUES ('EUR', $1::numeric, 0.02, $2, 'test') RETURNING id",
+            r,
+            day,
+        )
+        for r in rates
+    ]
+    early, late = datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 10, 2, tzinfo=UTC)
+    for n in (1 - last_approved, last_approved):
+        at = late if n == last_approved else early
+        await admin.execute(
+            "INSERT INTO booking.policy_approvals (entity_type, pricing_rule_id, approved_by, approved_at)"
+            " VALUES ('pricing_rule', $1, 'it-checker', $2)",
+            rule_ids[n],
+            at,
+        )
+        await admin.execute(
+            "INSERT INTO booking.policy_approvals (entity_type, fx_rate_id, approved_by, approved_at)"
+            " VALUES ('fx_rate', $1, 'it-checker', $2)",
+            fx_ids[n],
+            at,
+        )
+    other = 1 - last_approved
+
+    dated = await repository.rule_in_force(admin, Channel.B2B, day)
+    assert dated is not None and dated.rule.target_margin == D(margins[last_approved])
+    in_force = await repository.fx_rates_in_force(admin, ["EUR"], day)
+    assert in_force["EUR"].rate.rate_per_usd == D(rates[last_approved])
+
+    rules = {r["id"]: r["status"] for r in await policy.list_rules(admin, viewer, today=day, channel="b2b")}
+    assert rules[str(rule_ids[last_approved])] == "in_force" and rules[str(rule_ids[other])] == "superseded"
+    fx = {r["id"]: r["status"] for r in await policy.list_fx_rates(admin, viewer, today=day, currency="EUR")}
+    assert fx[str(fx_ids[last_approved])] == "in_force" and fx[str(fx_ids[other])] == "superseded"
+
+
+@pytest.mark.parametrize("last_approved", [0, 1])
+async def test_same_day_rows_take_the_last_approved(admin: asyncpg.Connection, last_approved: int) -> None:
+    """AA-1128 (B0 review): two approved rows of one channel / currency on one day: the one approved last is in force
+    for the pricing engine AND shows as in force on the staff lists (the same tie-break in both queries), whichever
+    of the two was inserted first.
+
+    Today the unique constraints (channel, valid_from) / (currency, as_of) make such a tie impossible; the tie-break
+    keeps the pick deterministic if they are ever relaxed. The test drops them inside a transaction it rolls back."""
+    viewer = Staff(STAFF_ID, None, "Contracts", "contracting", True, "reviewer")
+    with pytest.raises(_Rollback):
+        async with admin.transaction():
+            await admin.execute("SET LOCAL ROLE bk_owner")
+            await admin.execute("ALTER TABLE booking.pricing_rules DROP CONSTRAINT pricing_rules_channel_valid_from_uq")
+            await admin.execute("ALTER TABLE booking.fx_rates DROP CONSTRAINT fx_rates_currency_as_of_uq")
+            await _tie(admin, viewer, SEED_DAY + timedelta(days=40), last_approved=last_approved)
+            raise _Rollback

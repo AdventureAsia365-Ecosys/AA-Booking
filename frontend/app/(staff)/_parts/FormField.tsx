@@ -6,6 +6,7 @@
 
 import type { FieldError } from "@/lib/api/client";
 import { Field, fieldName } from "@/ui";
+import { useTx } from "@/ui/local/useTx";
 
 /** Layout only: the look (40 px, border, focus / disabled states) comes from the kit Input / Select (AA-994 S6d). */
 export const inputCls = "w-full";
@@ -26,8 +27,9 @@ export function FormField({
   error?: string | null;
   children: React.ReactNode;
 }) {
+  const tx = useTx();
   return (
-    <Field label={label} required={required} hint={hint} locked={locked} error={error}>
+    <Field label={tx(label)} required={required} hint={hint} locked={locked} error={tx(error)}>
       {children}
     </Field>
   );

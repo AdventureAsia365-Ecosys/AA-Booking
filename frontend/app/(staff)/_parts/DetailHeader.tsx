@@ -7,6 +7,9 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { PageFrame, Skeleton, SkeletonStyle, Tabs, initialsOf, useUrlFilters } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./DetailHeader.messages";
 
 export interface DetailTab {
   key: string;
@@ -39,6 +42,8 @@ export function DetailHeader({
   activeTab: string;
   onTab: (key: string) => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   return (
     <div className="border-b border-line bg-bg">
       {back && (
@@ -46,14 +51,14 @@ export function DetailHeader({
           <div className="mx-auto flex max-w-[1440px] items-center gap-3 py-3">
             <Link
               href={back.href}
-              aria-label={`Back to ${back.label.toLowerCase()}`}
+              aria-label={tr("Back to {0}", back.label.toLowerCase())}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-card text-muted hover:text-ink"
             >
               <ArrowLeft size={16} />
             </Link>
             <p className="min-w-0 truncate text-[14px] text-muted">
               <Link href={back.href} className="hover:text-ink">
-                {back.label}
+                {tx(back.label)}
               </Link>
               <span className="mx-1.5 text-muted2">/</span>
               <span className="font-medium text-ink">{name}</span>
@@ -65,7 +70,7 @@ export function DetailHeader({
         <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
           <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
             <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full border border-accent-border bg-accent-tint font-display text-lg font-semibold text-accent-deep">
-              {initialsOf(name)}
+              {tx(initialsOf(name))}
             </span>
             <div className="min-w-0 flex-[1_1_220px]">
               <div className="flex flex-wrap items-center gap-2">
@@ -78,11 +83,11 @@ export function DetailHeader({
           </div>
           <Tabs
             variant="underline"
-            ariaLabel={`${name} sections`}
+            ariaLabel={tr("{0} sections", name)}
             className="bk-tabstrip -mb-px"
             tabs={tabs.map((t) => ({
               key: t.key,
-              label: t.label,
+              label: tx(t.label),
               count: t.count !== undefined ? `(${t.count})` : undefined,
             }))}
             active={activeTab}
@@ -110,9 +115,10 @@ export function FactGrid({ children }: { children: React.ReactNode }) {
 }
 
 export function Fact({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
+  const tx = useTx();
   return (
     <div className={`min-w-0 ${wide ? "sm:col-span-2" : ""}`}>
-      <dt className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-muted">{label}</dt>
+      <dt className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-muted">{tx(label)}</dt>
       <dd className="mt-1 break-words text-[14px] text-ink">{children}</dd>
     </div>
   );
@@ -120,10 +126,11 @@ export function Fact({ label, children, wide }: { label: string; children: React
 
 /** Loading state of a person detail page: the header band and two cards as shimmer bars. */
 export function DetailSkeleton({ label }: { label: string }) {
+  const tx = useTx();
   return (
     <PageFrame bleed>
       <SkeletonStyle />
-      <div role="status" aria-busy="true" aria-label={label}>
+      <div role="status" aria-busy="true" aria-label={tx(label)}>
       <div className="border-b border-line bg-bg py-6 md:px-8">
         <div className="mx-auto flex max-w-[1440px] items-center gap-4">
           <Skeleton w={56} h={56} r={28} />

@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import { CIS_MEDIA_URL } from "@/lib/config";
+import { useTx } from "@/ui/local/useTx";
 
 export function cisPhotoUrl(path: string, size: "small" | "large" = "small"): string {
   return `${CIS_MEDIA_URL}${path.startsWith("/") ? "" : "/"}${path}?size=${size}`;
@@ -39,6 +40,7 @@ export function CisPhoto({
   /** Called once when the image fails to load and the neutral tile replaces it. */
   onLoadError?: () => void;
 }) {
+  const tx = useTx();
   // The path that failed to load, so a new path (a re-render with another photo) is tried again without an effect.
   const [failed, setFailed] = useState<string | null>(null);
   if (!path || failed === path) {
@@ -50,14 +52,14 @@ export function CisPhoto({
         data-cis-photo="none"
         className={`grid place-items-center overflow-hidden bg-panel bg-gradient-to-br from-panel to-line/60 text-muted2 ${className}`}
       >
-        {fallbackLabel && <span className="select-none px-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em]">{fallbackLabel}</span>}
+        {fallbackLabel && <span className="select-none px-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em]">{tx(fallbackLabel)}</span>}
       </span>
     );
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- CIS-served, already sized (see header)
     <img
-      src={cisPhotoUrl(path, size)}
+      src={tx(cisPhotoUrl(path, size))}
       alt={alt}
       loading="lazy"
       decoding="async"

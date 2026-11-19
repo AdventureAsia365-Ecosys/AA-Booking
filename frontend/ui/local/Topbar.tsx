@@ -8,6 +8,8 @@
 // AA-883 (S241 admin console, Q1 "every app links across") — a visible "CIS console ↗" link left of
 // the theme switch, so the way back to the CIS console is one click (not only inside the account
 // menu). The label hides below 768 px (ui/local/shell.css), the icon stays.
+// AA-1128 (B5): the kit EN | VI switch left of the theme switch (hidden below 480 px, where Settings › Appearance has
+// it; ui/local/shell.css).
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -20,8 +22,14 @@ import { staffDisplay, useStaff } from "./StaffContext";
 import { NotificationPopover } from "../booking/NotificationPopover";
 import { signOut } from "./signOut";
 import { CIS_CONSOLE_URL } from "@/lib/config";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./Topbar.messages";
+import { LangSwitch } from "../core/LangSwitch";
 
 export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void; onOpenMenu: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const pathname = usePathname();
   const title = pageTitle(pathname);
   const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -48,7 +56,7 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
       <button
         className="aa-topbar-menu"
         onClick={onOpenMenu}
-        aria-label="Open navigation menu"
+        aria-label={t("Open navigation menu")}
         style={{
           display: "none",
           alignItems: "center",
@@ -71,7 +79,7 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
         style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexShrink: 1, overflow: "hidden" }}
       >
         <span className="aa-topbar-crumb-root" style={{ fontSize: 13, color: K.muted2, flexShrink: 0 }}>
-          Booking
+          {t("Booking")}
         </span>
         <span className="aa-topbar-crumb-root" style={{ fontSize: 13, color: K.muted2, flexShrink: 0 }}>
           /
@@ -86,14 +94,14 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
             whiteSpace: "nowrap",
           }}
         >
-          {title}
+          {tx(title)}
         </span>
       </div>
 
       <button
         className="aa-topbar-search"
         onClick={onOpenSearch}
-        aria-label="Open search"
+        aria-label={t("Open search")}
         style={{
           display: "flex",
           alignItems: "center",
@@ -114,7 +122,7 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
       >
         <Search size={15} style={{ flexShrink: 0 }} />
         <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          Search pages, trip cases, customers…
+          {t("Search pages, trip cases, customers…")}
         </span>
         <kbd
           style={{
@@ -127,7 +135,7 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
             flexShrink: 0,
           }}
         >
-          {isMac ? "⌘K" : "Ctrl K"}
+          {isMac ? "⌘K" : t("Ctrl K")}
         </kbd>
       </button>
 
@@ -136,7 +144,7 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
       <button
         className="aa-topbar-search-icon"
         onClick={onOpenSearch}
-        aria-label="Search"
+        aria-label={t("Search")}
         style={{
           display: "none",
           alignItems: "center",
@@ -159,8 +167,8 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
           href={CIS_CONSOLE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          title="CIS console: content, tenants, staff and platform (opens in a new tab)"
-          aria-label="Open the CIS console (new tab)"
+          title={t("CIS console: content, tenants, staff and platform (opens in a new tab)")}
+          aria-label={t("Open the CIS console (new tab)")}
           data-testid="topbar-cis-console"
           style={{
             display: "inline-flex",
@@ -178,8 +186,11 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
           }}
         >
           <ExternalLink size={15} />
-          <span className="aa-topbar-cis-label">CIS console</span>
+          <span className="aa-topbar-cis-label">{t("CIS console")}</span>
         </a>
+        <span className="aa-topbar-lang">
+          <LangSwitch />
+        </span>
         <span className="aa-topbar-theme">
           <ThemeToggle />
         </span>
@@ -204,13 +215,16 @@ export function Topbar({ onOpenSearch, onOpenMenu }: { onOpenSearch: () => void;
   );
 }
 
-const THEME_OPTIONS: { key: ThemeChoice; label: string; icon: React.ReactNode }[] = [
+// The labels are Topbar.messages keys: the title shows them in the UI language (AA-1128), never as English words
+// inside a Vietnamese sentence.
+const THEME_OPTIONS: { key: ThemeChoice; label: "Light" | "Dark" | "System"; icon: React.ReactNode }[] = [
   { key: "light", label: "Light", icon: <Sun size={16} /> },
   { key: "dark", label: "Dark", icon: <Moon size={16} /> },
   { key: "system", label: "System", icon: <Monitor size={16} /> },
 ];
 
 function ThemeToggle() {
+  const t = useT(MSG);
   const [choice, setChoice] = useThemeChoice();
   const i = Math.max(
     0,
@@ -221,8 +235,8 @@ function ThemeToggle() {
   return (
     <button
       onClick={() => setChoice(next.key)}
-      title={`Theme: ${cur.label}. Click for ${next.label}`}
-      aria-label={`Theme: ${cur.label}. Switch to ${next.label}`}
+      title={t("Theme: {0}. Click for {1}", t(cur.label), t(next.label))}
+      aria-label={t("Theme: {0}. Switch to {1}", t(cur.label), t(next.label))}
       style={{
         display: "flex",
         alignItems: "center",
@@ -242,6 +256,8 @@ function ThemeToggle() {
 }
 
 function AccountMenu() {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const staff = useStaff();
   const { name, initials, roleLabel } = staffDisplay(staff);
@@ -268,7 +284,7 @@ function AccountMenu() {
     <div ref={ref} style={{ position: "relative" }}>
       <button
         onClick={() => setOpen((v) => !v)}
-        aria-label="Account menu"
+        aria-label={t("Account menu")}
         aria-expanded={open}
         aria-haspopup="menu"
         style={{
@@ -287,7 +303,7 @@ function AccountMenu() {
           className="aa-topbar-account-name"
           style={{ fontSize: 12.5, fontWeight: 600, color: K.ink3, paddingLeft: 6, whiteSpace: "nowrap" }}
         >
-          {roleLabel}
+          {tx(roleLabel)}
         </span>
         <span
           style={{
@@ -338,13 +354,13 @@ function AccountMenu() {
               {name}
             </div>
             <div style={{ fontSize: 11, color: K.muted }}>
-              {roleLabel}
+              {tx(roleLabel)}
               {staff.email ? ` · ${staff.email}` : ""}
             </div>
           </div>
           <MenuRow
             icon={<Settings size={15} />}
-            label="Settings"
+            label={t("Settings")}
             onClick={() => {
               setOpen(false);
               router.push("/settings");
@@ -360,9 +376,9 @@ function AccountMenu() {
             <span style={{ color: K.muted2, display: "flex" }}>
               <ExternalLink size={15} />
             </span>
-            Open CIS admin
+            {t("Open CIS admin")}
           </a>
-          <MenuRow icon={<LogOut size={15} />} label="Sign out" onClick={() => signOut(router)} />
+          <MenuRow icon={<LogOut size={15} />} label={t("Sign out")} onClick={() => signOut(router)} />
         </div>
       )}
     </div>
@@ -385,10 +401,11 @@ const menuRowStyle: React.CSSProperties = {
 };
 
 function MenuRow({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  const tx = useTx();
   return (
     <button role="menuitem" onClick={onClick} style={menuRowStyle}>
       <span style={{ color: K.muted2, display: "flex" }}>{icon}</span>
-      {label}
+      {tx(label)}
     </button>
   );
 }
