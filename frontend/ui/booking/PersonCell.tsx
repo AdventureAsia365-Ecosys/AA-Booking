@@ -23,25 +23,29 @@ export function PersonCell({
 }) {
   const t = useT(MSG);
   const tx = useTx();
+  // AA-1128: a label kept in English by a helper ("Traveller (B2C history)", "read-only") in the UI language; a real
+  // name comes back unchanged.
+  const shown = tx(name);
+  const subShown = tx(sub);
   return (
     <span className={`flex min-w-0 items-center gap-2.5 ${className}`}>
       <span
         aria-hidden="true"
         className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent-tint text-[11px] font-bold text-accent-deep"
       >
-        {tx(initialsOf(name))}
+        {initialsOf(shown)}
       </span>
       <span className="min-w-0">
         {/* AA-910: the chips wrap under the name when both do not fit, so a capped cell keeps the name readable. */}
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-          <span className="min-w-0 truncate text-[13px] font-medium text-ink" title={name || undefined}>
-            {name || t("Unnamed")}
+          <span className="min-w-0 truncate text-[13px] font-medium text-ink" title={shown || undefined}>
+            {shown || t("Unnamed")}
           </span>
           {chips}
         </span>
-        {sub && (
-          <span className="block truncate text-xs text-muted" title={sub}>
-            {sub}
+        {subShown && (
+          <span className="block truncate text-xs text-muted" title={subShown}>
+            {subShown}
           </span>
         )}
       </span>

@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "read-only": "read-only",
     "Traveller (B2C history)": "Traveller (B2C history)",
     "B2B agency": "B2B agency",
     "No agency on this case": "No agency on this case",
@@ -21,6 +22,7 @@ export const MSG = phrasebook(
     "Approved by the customer": "Approved by the customer",
   },
   {
+    "read-only": "chỉ đọc",
     "Traveller (B2C history)": "Khách lẻ (lịch sử B2C)",
     "B2B agency": "Đại lý B2B",
     "No agency on this case": "Hồ sơ này không có đại lý",
