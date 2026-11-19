@@ -1,0 +1,60 @@
+// app/(staff)/catalog/trip-plans/_parts/PriceChainPanel.messages.ts
+// AA-1128 (B5): the English and Vietnamese text of PriceChainPanel.tsx (kit core/i18n.ts). The keys are the English
+// text; the phrasebook registers the Vietnamese side for text kept in module-level tables (ui/local/phrasebook.ts).
+import { defineMessages } from "@/ui/core/i18n";
+import { phrasebook } from "@/ui/local/phrasebook";
+
+export const MSG = phrasebook(
+  defineMessages(
+  {
+    "staff": "staff",
+    "Prices recomputed: {0} rows from the rates": (...a: unknown[]) => `Prices recomputed: ${a[0]} rows from the rates`,
+    "Prices are up to date": "Prices are up to date",
+    "The prices could not be recomputed. Try again.": "The prices could not be recomputed. Try again.",
+    "The reference could not be marked reviewed.": "The reference could not be marked reviewed.",
+    "Price chain": "Price chain",
+    "From price": "From price",
+    "per person": "per person",
+    "· suggested retail, 2 travellers": "· suggested retail, 2 travellers",
+    "none yet (no b2b price for 2 travellers)": "none yet (no b2b price for 2 travellers)",
+    "Save or discard your matrix edits first": "Save or discard your matrix edits first",
+    "Recompute from rates": "Recompute from rates",
+    "CIS source price:": "CIS source price:",
+    "· reference only": "· reference only",
+    "Reviewed": "Reviewed",
+    "Mark reviewed": "Mark reviewed",
+    "Price history": "Price history",
+    "· {0} · {1} rows in force": (...a: unknown[]) => `· ${a[0]} · ${a[1]} rows in force`,
+    "cost sheet": "cost sheet",
+    "This plan has no bookable components yet: add its hotels and services first.": "This plan has no bookable components yet: add its hotels and services first.",
+    "A component is inactive: replace it before the plan can be priced.": "A component is inactive: replace it before the plan can be priced.",
+    "No pricing rule is in force for the b2b or fixed-departure channel.": "No pricing rule is in force for the b2b or fixed-departure channel.",
+    "No published supplier rate covers this plan's components.": "No published supplier rate covers this plan's components.",
+  },
+  {
+    "staff": "nhân viên",
+    "Prices recomputed: {0} rows from the rates": (...a: unknown[]) => `Đã tính lại giá: ${a[0]} dòng từ giá nhà cung cấp`,
+    "Prices are up to date": "Giá đã được cập nhật",
+    "The prices could not be recomputed. Try again.": "Không tính lại được giá. Hãy thử lại.",
+    "The reference could not be marked reviewed.": "Không đánh dấu được tham chiếu là đã xem.",
+    "Price chain": "Chuỗi giá",
+    "From price": "Giá từ",
+    "per person": "mỗi người",
+    "· suggested retail, 2 travellers": "· giá bán lẻ đề xuất, 2 khách",
+    "none yet (no b2b price for 2 travellers)": "chưa có (không có giá B2B cho 2 khách)",
+    "Save or discard your matrix edits first": "Hãy lưu hoặc bỏ các chỉnh sửa ma trận trước",
+    "Recompute from rates": "Tính lại từ giá nhà cung cấp",
+    "CIS source price:": "Giá nguồn CIS:",
+    "· reference only": "· chỉ để tham khảo",
+    "Reviewed": "Đã xem",
+    "Mark reviewed": "Đánh dấu đã xem",
+    "Price history": "Lịch sử giá",
+    "· {0} · {1} rows in force": (...a: unknown[]) => `· ${a[0]} · ${a[1]} dòng đang áp dụng`,
+    "cost sheet": "bảng chi phí",
+    "This plan has no bookable components yet: add its hotels and services first.": "Kế hoạch này chưa có thành phần đặt được: hãy thêm khách sạn và dịch vụ trước.",
+    "A component is inactive: replace it before the plan can be priced.": "Có thành phần ngưng hoạt động: hãy thay trước khi kế hoạch được tính giá.",
+    "No pricing rule is in force for the b2b or fixed-departure channel.": "Không có quy tắc giá đang áp dụng cho kênh B2B hoặc khởi hành cố định.",
+    "No published supplier rate covers this plan's components.": "Không có giá nhà cung cấp đã công bố cho các thành phần của kế hoạch này.",
+  },
+  ),
+);

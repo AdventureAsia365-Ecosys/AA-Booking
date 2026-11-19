@@ -16,7 +16,6 @@ import { CalendarPlus, Plus, Repeat } from "lucide-react";
 import { ApiError, type FieldError } from "@/lib/api/client";
 import {
   ALLOTMENT_STATE_LABEL,
-  END_REASON_LABEL,
   WEEKDAYS,
   departuresApi,
   minimumLabel,
@@ -40,7 +39,6 @@ import {
   Pill,
   Section,
   Select,
-  formatDay,
   useCan,
   useStaff,
   useToast,
@@ -49,6 +47,11 @@ import {
 import { isPastDay, localToday } from "@/ui/booking/dates";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 import { ChargeFeeModal } from "../../../departures/_parts/ChargeFeeModal";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./DeparturesPanel.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 const STATUS: Record<DepartureStatus, { label: string; tone: "neutral" | "success" | "danger" }> = {
   scheduled: { label: "Scheduled", tone: "neutral" },
@@ -90,12 +93,14 @@ function dayFromToday(days: number): string {
 }
 
 export function DepartureStatusPills({ d }: { d: Pick<Departure, "status" | "at_risk"> & { start_date?: string } }) {
+  const t = useT(MSG);
+  const tx = useTx();
   // AA-1128: a departure that has left is marked, never shown as still open for sale.
   const gone = d.status !== "cancelled" && isPastDay(d.start_date, localToday());
   return (
     <span className="flex flex-wrap gap-1">
-      {gone ? <Pill tone="neutral">Departed</Pill> : <Pill tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Pill>}
-      {d.at_risk && !gone && <Pill tone="warning">At risk</Pill>}
+      {gone ? <Pill tone="neutral">{t("Departed")}</Pill> : <Pill tone={STATUS[d.status].tone}>{tx(STATUS[d.status].label)}</Pill>}
+      {d.at_risk && !gone && <Pill tone="warning">{t("At risk")}</Pill>}
     </span>
   );
 }
@@ -117,11 +122,11 @@ const COLUMNS: ColumnDef<Departure, unknown>[] = [
       return (
         <span className="flex flex-col">
           <span className="bk-tabular text-[13px] text-body">
-            {d.sold} sold · {d.held} held · {d.available} free / {d.capacity}
+            <Phrase text={`${d.sold} sold · ${d.held} held · ${d.available} free / ${d.capacity}`} />
           </span>
           {d.allotted > 0 && (
             <span className="text-xs text-muted">
-              {d.allotted} in agency allotments ({d.allotment_unused} unused)
+              <Phrase text={`${d.allotted} in agency allotments (${d.allotment_unused} unused)`} />
             </span>
           )}
         </span>
@@ -132,7 +137,7 @@ const COLUMNS: ColumnDef<Departure, unknown>[] = [
     id: "minimum",
     header: "Minimum",
     accessorFn: (r) => r.min_to_operate,
-    cell: ({ row }) => <span className="text-[13px] text-body">{minimumLabel(row.original) ?? <span className="text-muted2">None</span>}</span>,
+    cell: ({ row }) => <span className="text-[13px] text-body">{minimumLabel(row.original) ?? <span className="text-muted2"><Phrase text="None" /></span>}</span>,
   },
   {
     id: "sales",
@@ -156,6 +161,7 @@ const COLUMNS: ColumnDef<Departure, unknown>[] = [
 ];
 
 export function DeparturesPanel({ sourceId }: { sourceId: string }) {
+  const t = useT(MSG);
   const canWrite = useCan("trip_plan.write");
   const { get, setMany } = useUrlFilters();
   const [adding, setAdding] = useState(false);
@@ -165,16 +171,16 @@ export function DeparturesPanel({ sourceId }: { sourceId: string }) {
   const current = list.data?.items.find((d) => d.id === open) ?? null;
   return (
     <Section
-      title="Departures"
-      description="Fixed departures agencies can quote and hold. Sales close on the start date minus the cutoff; on the decision date a departure short of its minimum is flagged at risk on the B2B desk."
+      title={t("Departures")}
+      description={t("Fixed departures agencies can quote and hold. Sales close on the start date minus the cutoff; on the decision date a departure short of its minimum is flagged at risk on the B2B desk.")}
       actions={
         canWrite && (
           <span className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setGenerating(true)}>
-              <Repeat size={14} /> Generate departures
+              <Repeat size={14} /> {t("Generate departures")}
             </Button>
             <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
-              <Plus size={14} /> Add departure
+              <Plus size={14} /> {t("Add departure")}
             </Button>
           </span>
         )
@@ -188,10 +194,10 @@ export function DeparturesPanel({ sourceId }: { sourceId: string }) {
         getRowId={(r) => r.id}
         onRowClick={(r) => setMany({ departure: r.id })}
         loading={list.isLoading}
-        error={list.isError ? errorText(list.error, "Could not load the departures") : null}
+        error={list.isError ? errorText(list.error, t("Could not load the departures")) : null}
         onRetry={() => list.refetch()}
-        emptyTitle="No departures yet"
-        emptyDescription={canWrite ? "Add one, or generate a weekly or monthly series." : "Contracting adds the departures of a plan."}
+        emptyTitle={t("No departures yet")}
+        emptyDescription={canWrite ? t("Add one, or generate a weekly or monthly series.") : t("Contracting adds the departures of a plan.")}
         tableMinWidth={820}
       />
       {adding && list.data && (
@@ -214,10 +220,11 @@ function RulesFields({
   onChange: (rules: DepartureRules) => void;
   errors: FieldError[];
 }) {
+  const t = useT(MSG);
   return (
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Seats" required error={errorFor(errors, "capacity")}>
+        <FormField label={t("Seats")} required error={errorFor(errors, "capacity")}>
           <Input
             className={inputCls}
             type="number"
@@ -227,7 +234,7 @@ function RulesFields({
             onChange={(e) => onChange({ ...rules, capacity: toInt(e.target.value) })}
           />
         </FormField>
-        <FormField label="Minimum to operate" hint="Sold seats it needs to run; 0 = no minimum." error={errorFor(errors, "min_to_operate")}>
+        <FormField label={t("Minimum to operate")} hint={t("Sold seats it needs to run; 0 = no minimum.")} error={errorFor(errors, "min_to_operate")}>
           <Input
             className={inputCls}
             type="number"
@@ -237,7 +244,7 @@ function RulesFields({
             onChange={(e) => onChange({ ...rules, min_to_operate: toInt(e.target.value) })}
           />
         </FormField>
-        <FormField label="Sales cutoff (days)" hint="Sales close this many days before the start." error={errorFor(errors, "sales_cutoff_days")}>
+        <FormField label={t("Sales cutoff (days)")} hint={t("Sales close this many days before the start.")} error={errorFor(errors, "sales_cutoff_days")}>
           <Input
             className={inputCls}
             type="number"
@@ -247,7 +254,7 @@ function RulesFields({
             onChange={(e) => onChange({ ...rules, sales_cutoff_days: toInt(e.target.value) })}
           />
         </FormField>
-        <FormField label="Decision (days before)" hint="Go or cancel on this day if the minimum is not met." error={errorFor(errors, "decision_days_before")}>
+        <FormField label={t("Decision (days before)")} hint={t("Go or cancel on this day if the minimum is not met.")} error={errorFor(errors, "decision_days_before")}>
           <Input
             className={inputCls}
             type="number"
@@ -259,7 +266,7 @@ function RulesFields({
         </FormField>
       </div>
       <Checkbox
-        label="Confirm agency bookings at once (otherwise AA ops confirm each line on the B2B desk)"
+        label={t("Confirm agency bookings at once (otherwise AA ops confirm each line on the B2B desk)")}
         checked={rules.auto_confirm}
         onChange={(e) => onChange({ ...rules, auto_confirm: e.target.checked })}
       />
@@ -276,6 +283,8 @@ function NewDepartureDrawer({
   defaults: DepartureDefaults;
   onClose: () => void;
 }) {
+  const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const qc = useQueryClient();
   const toast = useToast();
   const [start, setStart] = useState(dayFromToday(30));
@@ -283,7 +292,7 @@ function NewDepartureDrawer({
   const save = useMutation({
     mutationFn: () => departuresApi.create(sourceId, { start_date: start, ...rules }),
     onSuccess: (d) => {
-      toast.success(`Departure ${formatDay(d.start_date)} added`);
+      toast.success(t("Departure {0} added", formatDay(d.start_date)));
       qc.invalidateQueries({ queryKey: ["departures", sourceId] });
       onClose();
     },
@@ -292,14 +301,14 @@ function NewDepartureDrawer({
     <FormDrawer
       open
       onClose={onClose}
-      title="Add departure"
+      title={t("Add departure")}
       onSubmit={() => save.mutate()}
       busy={save.isPending}
       dirty
       error={save.isError ? errorText(save.error) : null}
       fieldErrors={fieldErrors(save.error)}
     >
-      <FormField label="Start date" required error={errorFor(fieldErrors(save.error), "start_date")}>
+      <FormField label={t("Start date")} required error={errorFor(fieldErrors(save.error), "start_date")}>
         <DateField value={start} onChange={setStart} />
       </FormField>
       <RulesFields rules={rules} onChange={setRules} errors={fieldErrors(save.error)} />
@@ -316,6 +325,9 @@ function GenerateDrawer({
   defaults: DepartureDefaults;
   onClose: () => void;
 }) {
+  const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const [from, setFrom] = useState(dayFromToday(30));
@@ -339,7 +351,7 @@ function GenerateDrawer({
         setPreview(out);
         return;
       }
-      toast.success(`${out.created_count} departures created${out.skipped_count ? `, ${out.skipped_count} dates already had one` : ""}`);
+      toast.success(t("{0} departures created{1}", out.created_count, out.skipped_count ? t(", {0} dates already had one", out.skipped_count) : ""));
       qc.invalidateQueries({ queryKey: ["departures", sourceId] });
       onClose();
     },
@@ -350,17 +362,17 @@ function GenerateDrawer({
     <FormDrawer
       open
       onClose={onClose}
-      title="Generate departures"
+      title={t("Generate departures")}
       width={560}
       onSubmit={() => run.mutate(preview === null)}
-      submitLabel={preview === null ? "Preview dates" : `Create ${preview.created_count} departures`}
+      submitLabel={preview === null ? t("Preview dates") : t("Create {0} departures", preview.created_count)}
       busy={run.isPending}
       dirty
       error={run.isError ? errorText(run.error) : null}
       fieldErrors={errors}
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="From" required error={errorFor(errors, "date_from")}>
+        <FormField label={t("From")} required error={errorFor(errors, "date_from")}>
           <DateField
             value={from}
             onChange={(v) => {
@@ -369,7 +381,7 @@ function GenerateDrawer({
             }}
           />
         </FormField>
-        <FormField label="To" required hint="At most 400 days after From." error={errorFor(errors, "date_to")}>
+        <FormField label={t("To")} required hint={t("At most 400 days after From.")} error={errorFor(errors, "date_to")}>
           <DateField
             value={to}
             onChange={(v) => {
@@ -379,7 +391,7 @@ function GenerateDrawer({
           />
         </FormField>
       </div>
-      <FormField label="Repeat">
+      <FormField label={t("Repeat")}>
         <Select
           className={inputCls}
           value={kind}
@@ -388,16 +400,16 @@ function GenerateDrawer({
             changed();
           }}
         >
-          <option value="weekly">Every week on</option>
-          <option value="monthly">Every month on day</option>
+          <option value="weekly">{t("Every week on")}</option>
+          <option value="monthly">{t("Every month on day")}</option>
         </Select>
       </FormField>
       {kind === "weekly" ? (
-        <fieldset className="flex flex-wrap gap-3" aria-label="Weekdays">
+        <fieldset className="flex flex-wrap gap-3" aria-label={t("Weekdays")}>
           {WEEKDAYS.map((w) => (
             <Checkbox
               key={w.value}
-              label={w.label}
+              label={tx(w.label)}
               checked={weekdays.includes(w.value)}
               onChange={(e) => {
                 setWeekdays(e.target.checked ? [...weekdays, w.value].sort() : weekdays.filter((x) => x !== w.value));
@@ -407,7 +419,7 @@ function GenerateDrawer({
           ))}
         </fieldset>
       ) : (
-        <FormField label="Day of the month" hint="A month without this day is skipped.">
+        <FormField label={t("Day of the month")} hint={t("A month without this day is skipped.")}>
           <Input
             className={inputCls}
             type="number"
@@ -432,10 +444,10 @@ function GenerateDrawer({
       {preview && (
         <div className="rounded-md border border-line2 px-3 py-2 text-[13px]" data-testid="generate-preview">
           <p className="font-medium text-ink">
-            {preview.created_count} new departure{preview.created_count === 1 ? "" : "s"}
-            {preview.skipped_count > 0 && <span className="font-normal text-muted"> · {preview.skipped_count} dates already have one</span>}
+            {t("{0} new departure{1}", preview.created_count, preview.created_count === 1 ? "" : "s")}
+            {preview.skipped_count > 0 && <span className="font-normal text-muted"> {t("· {0} dates already have one", preview.skipped_count)}</span>}
           </p>
-          <p className="mt-1 text-xs text-muted">{preview.created.map((d) => formatDay(d)).join(", ") || "Nothing new to create."}</p>
+          <p className="mt-1 text-xs text-muted">{preview.created.map((d) => formatDay(d)).join(", ") || t("Nothing new to create.")}</p>
         </div>
       )}
     </FormDrawer>
@@ -443,6 +455,9 @@ function GenerateDrawer({
 }
 
 function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departure; sourceId: string; onClose: () => void }) {
+  const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
+  const tx = useTx();
   const canWrite = useCan("trip_plan.write");
   const canDesk = useCan("b2b_desk.read");
   const qc = useQueryClient();
@@ -459,7 +474,7 @@ function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departur
   const save = useMutation({
     mutationFn: () => departuresApi.update(departure.id, { ...rules, status }),
     onSuccess: () => {
-      toast.success("Departure saved");
+      toast.success(t("Departure saved"));
       qc.invalidateQueries({ queryKey: ["departures", sourceId] });
       qc.invalidateQueries({ queryKey: ["allotments", departure.id] });
     },
@@ -469,15 +484,15 @@ function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departur
       open
       onClose={onClose}
       width={600}
-      title={`Departure ${formatDay(departure.start_date)}`}
+      title={t("Departure {0}", formatDay(departure.start_date))}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
-            Close
+            {t("Close")}
           </Button>
           {canWrite && !cancelled && (
             <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? "Saving…" : "Save departure"}
+              {save.isPending ? t("Saving…") : t("Save departure")}
             </Button>
           )}
         </div>
@@ -487,40 +502,38 @@ function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departur
         <div className="flex flex-wrap items-center gap-3 text-[13px] text-body">
           <DepartureStatusPills d={departure} />
           <span className="bk-tabular">
-            {departure.sold} sold · {departure.held} held · {departure.available} free / {departure.capacity}
+            {t("{0} sold · {1} held · {2} free / {3}", departure.sold, departure.held, departure.available, departure.capacity)}
           </span>
           {departure.min_to_operate > 0 && (
             <span className="text-muted">
-              Decision <DateText value={departure.decision_date} /> · sales close <DateText value={departure.sales_close_date} />
+              {t("Decision")} <DateText value={departure.decision_date} /> {t("· sales close")} <DateText value={departure.sales_close_date} />
             </span>
           )}
         </div>
         {departure.at_risk && (
           <p role="status" className="rounded-md border border-line2 bg-warning-soft px-3 py-2 text-[13px] text-body">
-            Short of its minimum on the decision date ({departure.sold} of {departure.min_to_operate} sold). Run it anyway (status Guaranteed) or
-            cancel it; the agencies on it were told it is at risk.
+            {t("Short of its minimum on the decision date ({0} of {1} sold). Run it anyway (status Guaranteed) or cancel it; the agencies on it were told it is at risk.", departure.sold, departure.min_to_operate)}
           </p>
         )}
         {canWrite && !cancelled ? (
           <div className="flex flex-col gap-4">
             <RulesFields rules={rules} onChange={setRules} errors={fieldErrors(save.error)} />
-            <FormField label="Status" hint="Cancelling is final: agencies are told and their allotments end.">
+            <FormField label={t("Status")} hint={t("Cancelling is final: agencies are told and their allotments end.")}>
               <Select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value as DepartureStatus)}>
-                <option value="scheduled">Scheduled</option>
-                <option value="guaranteed">Guaranteed</option>
-                <option value="cancelled">Cancelled</option>
+                <option value="scheduled">{t("Scheduled")}</option>
+                <option value="guaranteed">{t("Guaranteed")}</option>
+                <option value="cancelled">{t("Cancelled")}</option>
               </Select>
             </FormField>
             {save.isError && (
               <p role="alert" className="text-[13px] text-danger">
-                {errorText(save.error)}
+                {tx(errorText(save.error))}
               </p>
             )}
           </div>
         ) : (
           <p className="text-[13px] text-muted">
-            Minimum {departure.min_to_operate || "none"} · cutoff {departure.sales_cutoff_days} days · decision {departure.decision_days_before} days before ·{" "}
-            {departure.auto_confirm ? "instant confirm" : "on request"}
+            {t("Minimum {0} · cutoff {1} days · decision {2} days before · {3}", departure.min_to_operate || "none", departure.sales_cutoff_days, departure.decision_days_before, departure.auto_confirm ? t("instant confirm") : t("on request"))}
           </p>
         )}
         {canDesk && <AllotmentsSection departure={departure} sourceId={sourceId} />}
@@ -530,6 +543,9 @@ function DepartureDrawer({ departure, sourceId, onClose }: { departure: Departur
 }
 
 function AllotmentsSection({ departure, sourceId }: { departure: Departure; sourceId: string }) {
+  const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
+  const tx = useTx();
   const canWrite = useCan("b2b_desk.write");
   const me = useStaff();
   const qc = useQueryClient();
@@ -546,7 +562,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
   const propose = useMutation({
     mutationFn: () => departuresApi.proposeAllotment(departure.id, { partner_id: partner, seats, release_days_before: release }),
     onSuccess: () => {
-      toast.success("Allotment proposed; another person approves it");
+      toast.success(t("Allotment proposed; another person approves it"));
       setPartner("");
       refresh();
     },
@@ -555,7 +571,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
     mutationFn: ({ id, action }: { id: string; action: "approve" | "end" }) =>
       action === "approve" ? departuresApi.approveAllotment(id) : departuresApi.endAllotment(id),
     onSuccess: (a) => {
-      toast.success(a.state === "in_force" ? "Allotment approved" : `Allotment ${a.end_reason ?? "ended"}`);
+      toast.success(a.state === "in_force" ? t("Allotment approved") : t("Allotment {0}", t(`end_${a.end_reason ?? "ended"}`)));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -563,19 +579,19 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
   const items = list.data?.items ?? [];
   const cancelled = departure.status === "cancelled";
   return (
-    <section className="flex flex-col gap-3 border-t border-line2 pt-4" aria-label="Agency allotments">
+    <section className="flex flex-col gap-3 border-t border-line2 pt-4" aria-label={t("Agency allotments")}>
       <div>
-        <h3 className="text-[14px] font-semibold text-ink">Agency allotments</h3>
+        <h3 className="text-[14px] font-semibold text-ink">{t("Agency allotments")}</h3>
         <p className="text-xs text-muted">
-          Seats kept for one agency until the release date; unused seats then go back on sale. A second person approves each one.
+          {t("Seats kept for one agency until the release date; unused seats then go back on sale. A second person approves each one.")}
         </p>
       </div>
       {list.isLoading ? (
-        <p className="text-[13px] text-muted">Loading…</p>
+        <p className="text-[13px] text-muted">{t("Loading…")}</p>
       ) : list.isError ? (
-        <p className="text-[13px] text-danger">{errorText(list.error, "Could not load the allotments")}</p>
+        <p className="text-[13px] text-danger">{tx(errorText(list.error, t("Could not load the allotments")))}</p>
       ) : items.length === 0 ? (
-        <p className="text-[13px] text-muted2">No allotment on this departure.</p>
+        <p className="text-[13px] text-muted2">{t("No allotment on this departure.")}</p>
       ) : (
         <ul className="flex flex-col divide-y divide-line2" data-testid="allotments">
           {items.map((a) => (
@@ -593,9 +609,9 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
       )}
       {canWrite && !cancelled && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-          <FormField label="Agency" error={errorFor(fieldErrors(propose.error), "partner_id")}>
+          <FormField label={t("Agency")} error={errorFor(fieldErrors(propose.error), "partner_id")}>
             <Select className={inputCls} value={partner} onChange={(e) => setPartner(e.target.value)}>
-              <option value="">Choose an agency</option>
+              <option value="">{t("Choose an agency")}</option>
               {(list.data?.partner_options ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.agency_name}
@@ -603,24 +619,24 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
               ))}
             </Select>
           </FormField>
-          <FormField label="Seats" error={errorFor(fieldErrors(propose.error), "seats")}>
+          <FormField label={t("Seats")} error={errorFor(fieldErrors(propose.error), "seats")}>
             <Input className={inputCls} type="number" min={1} max={departure.capacity} value={seats} onChange={(e) => setSeats(toInt(e.target.value))} />
           </FormField>
-          <FormField label="Release (days before)" error={errorFor(fieldErrors(propose.error), "release_days_before")}>
+          <FormField label={t("Release (days before)")} error={errorFor(fieldErrors(propose.error), "release_days_before")}>
             <Input className={inputCls} type="number" min={0} max={365} value={release} onChange={(e) => setRelease(toInt(e.target.value))} />
           </FormField>
           <div className="sm:col-span-3 flex flex-wrap items-center gap-3">
             <Button size="sm" disabled={!partner || propose.isPending} onClick={() => propose.mutate()}>
-              <CalendarPlus size={14} /> Propose allotment
+              <CalendarPlus size={14} /> {t("Propose allotment")}
             </Button>
-            {propose.isError && <span className="text-[13px] text-danger">{errorText(propose.error)}</span>}
+            {propose.isError && <span className="text-[13px] text-danger">{tx(errorText(propose.error))}</span>}
           </div>
         </div>
       )}
       {charging && (
         <ChargeFeeModal
           departureId={departure.id}
-          title={`Departure ${formatDay(departure.start_date)}: allotment of ${charging.seats} seats for ${charging.partner.agency_name}`}
+          title={t("Departure {0}: allotment of {1} seats for {2}", formatDay(departure.start_date), charging.seats, charging.partner.agency_name)}
           reason="allotment_unreleased"
           partnerId={charging.partner.id}
           seats={charging.unused ?? undefined}
@@ -647,35 +663,37 @@ function AllotmentRow({
   /** AA-1073 rest: propose a fee for allotted seats not released (in force or released allotments). */
   onCharge?: () => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const tone = a.state === "in_force" ? "success" : a.state === "pending" ? "warning" : "neutral";
   return (
     <li className="flex flex-wrap items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
       <span className="flex min-w-0 flex-col text-[13px]">
         <span className="font-medium text-ink">
-          {a.partner.agency_name} · {a.seats} seats
+          {t("{0} · {1} seats", a.partner.agency_name, a.seats)}
         </span>
         <span className="text-xs text-muted">
-          Release <DateText value={a.release_date} />
-          {a.state === "in_force" && a.unused !== null && ` · ${a.used ?? 0} used, ${a.unused} kept`}
-          {a.created_by?.name && ` · proposed by ${a.created_by.name}`}
-          {a.end_reason && ` · ${END_REASON_LABEL[a.end_reason]}`}
+          {t("Release")} <DateText value={a.release_date} />
+          {a.state === "in_force" && a.unused !== null && t(" · {0} used, {1} kept", a.used ?? 0, a.unused)}
+          {a.created_by?.name && t(" · proposed by {0}", a.created_by.name)}
+          {a.end_reason && ` · ${t(`end_${a.end_reason}`)}`}
         </span>
       </span>
       <span className="flex flex-wrap items-center gap-2">
-        <Pill tone={tone}>{ALLOTMENT_STATE_LABEL[a.state]}</Pill>
+        <Pill tone={tone}>{tx(ALLOTMENT_STATE_LABEL[a.state])}</Pill>
         {canWrite && a.state === "pending" && (
-          <Button size="sm" variant="primary" disabled={busy || isMaker} title={isMaker ? "You proposed it: another person approves it" : undefined} onClick={() => onAct("approve")}>
-            Approve
+          <Button size="sm" variant="primary" disabled={busy || isMaker} title={isMaker ? t("You proposed it: another person approves it") : undefined} onClick={() => onAct("approve")}>
+            {t("Approve")}
           </Button>
         )}
         {canWrite && (a.state === "pending" || a.state === "in_force") && (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("end")}>
-            {a.state === "pending" ? "Reject" : "Withdraw"}
+            {a.state === "pending" ? t("Reject") : t("Withdraw")}
           </Button>
         )}
         {onCharge && (a.state === "in_force" || a.state === "released") && (
           <Button size="sm" variant="ghost" onClick={onCharge}>
-            Charge fee
+            {t("Charge fee")}
           </Button>
         )}
       </span>

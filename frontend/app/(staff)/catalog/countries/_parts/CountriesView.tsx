@@ -16,8 +16,13 @@ import { geoApi, type CountryItem, type GeoStatus } from "@/lib/api/geo";
 import { Button, CisPhoto, EmptyState, ErrorState, ExportCsvButton, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, PageFrame, Section, SkeletonBar, useCan, useUrlFilters, RowMenu } from "@/ui";
 import { CIS_PLACES_PATH, CountryDrawer, GeoStatusBadge } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CountriesView.messages";
 
 export function CountriesView() {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const { get, setMany } = useUrlFilters();
   const canWrite = useCan("catalog.admin");
@@ -38,25 +43,25 @@ export function CountriesView() {
   const active = everything.filter((c) => c.status === "active").length;
   return (
     <PageFrame
-      title="Countries"
-      description="Countries of the CIS catalog and whether Booking sells trips there. Places, photos and country content come from CIS."
+      title={t("Countries")}
+      description={t("Countries of the CIS catalog and whether Booking sells trips there. Places, photos and country content come from CIS.")}
       actions={
         <>
-          <ManagedInCisLink path={CIS_PLACES_PATH} label="Open CIS places" />
+          <ManagedInCisLink path={CIS_PLACES_PATH} label={t("Open CIS places")} />
           {canWrite && (
             <Button variant="primary" onClick={() => setAdding(true)}>
-              <Plus size={15} /> Add country
+              <Plus size={15} /> {t("Add country")}
             </Button>
           )}
         </>
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiTile label="Countries" value={all.data ? everything.length : undefined} icon={<Globe size={16} />} hint={<FromCisTag />} />
-        <KpiTile label="Active in Booking" value={all.data ? active : undefined} icon={<CheckCircle2 size={16} />} />
-        <KpiTile label="Inactive" value={all.data ? everything.length - active : undefined} icon={<Power size={16} />} />
+        <KpiTile label={t("Countries")} value={all.data ? everything.length : undefined} icon={<Globe size={16} />} hint={<FromCisTag />} />
+        <KpiTile label={t("Active in Booking")} value={all.data ? active : undefined} icon={<CheckCircle2 size={16} />} />
+        <KpiTile label={t("Inactive")} value={all.data ? everything.length - active : undefined} icon={<Power size={16} />} />
         <KpiTile
-          label="CIS places without a country"
+          label={t("CIS places without a country")}
           value={all.data ? all.data.unmapped.reduce((n, u) => n + u.destinations, 0) : undefined}
           icon={<MapPin size={16} />}
           hint={all.data?.unmapped.length ? all.data.unmapped.map((u) => u.name).join(", ") : undefined}
@@ -66,18 +71,18 @@ export function CountriesView() {
       <Section>
         <div className="mb-4">
           <FilterBar
-            search={{ placeholder: "Search countries" }}
+            search={{ placeholder: t("Search countries") }}
             selects={[
               {
                 key: "status",
-                label: "Status",
-                allLabel: "All statuses",
+                label: t("Status"),
+                allLabel: t("All statuses"),
                 options: [
-                  { value: "active", label: "Active" },
-                  { value: "inactive", label: "Inactive" },
+                  { value: "active", label: t("Active") },
+                  { value: "inactive", label: t("Inactive") },
                 ],
               },
-              { key: "area", label: "Area", allLabel: "All areas", options: (all.data?.areas ?? []).map((a) => ({ value: a, label: a })) },
+              { key: "area", label: t("Area"), allLabel: t("All areas"), options: (all.data?.areas ?? []).map((a) => ({ value: a, label: a })) },
             ]}
             tools={<ExportCsvButton rows={items} columns={COUNTRY_CSV} filename="countries.csv" disabled={list.isLoading} />}
           />
@@ -89,11 +94,11 @@ export function CountriesView() {
             ))}
           </div>
         ) : list.isError ? (
-          <ErrorState message={(list.error as Error).message} onRetry={() => list.refetch()} />
+          <ErrorState message={tx((list.error as Error).message)} onRetry={() => list.refetch()} />
         ) : items.length === 0 ? (
           <EmptyState
-            title={filtered ? "No countries match" : "No countries yet"}
-            description={filtered ? "Change the search or the filters." : "Countries appear as soon as CIS publishes a place or a tour there."}
+            title={filtered ? t("No countries match") : t("No countries yet")}
+            description={filtered ? t("Change the search or the filters.") : t("Countries appear as soon as CIS publishes a place or a tour there.")}
           />
         ) : (
           <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -103,15 +108,15 @@ export function CountriesView() {
                 c={c}
                 menu={
                   <RowMenu
-                    label={`Actions for ${c.name}`}
+                    label={t("Actions for {0}", c.name)}
                     items={[
-                      { label: "View details", icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/countries/${c.country_code}`) },
+                      { label: t("View details"), icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/countries/${c.country_code}`) },
                       ...(canWrite && c.booking_reference
                         ? [
-                            { label: "Edit country", icon: <Pencil size={14} />, onSelect: () => setMany({ edit: c.country_code }) },
+                            { label: t("Edit country"), icon: <Pencil size={14} />, onSelect: () => setMany({ edit: c.country_code }) },
                             c.status === "active"
-                              ? { label: "Deactivate", icon: <Power size={14} />, danger: true, divider: true, onSelect: () => status.ask("country", { id: c.country_code, name: c.name }, false) }
-                              : { label: "Activate", icon: <CheckCircle2 size={14} />, divider: true, onSelect: () => status.ask("country", { id: c.country_code, name: c.name }, true) },
+                              ? { label: t("Deactivate"), icon: <Power size={14} />, danger: true, divider: true, onSelect: () => status.ask("country", { id: c.country_code, name: c.name }, false) }
+                              : { label: t("Activate"), icon: <CheckCircle2 size={14} />, divider: true, onSelect: () => status.ask("country", { id: c.country_code, name: c.name }, true) },
                           ]
                         : []),
                     ]}
@@ -139,13 +144,14 @@ export function CountriesView() {
 }
 
 function CountryCard({ c, menu }: { c: CountryItem; menu: React.ReactNode }) {
+  const t = useT(MSG);
   return (
     <li className="flex min-w-0 flex-col rounded-lg border border-line bg-card">
       {/* The cover repeats the title link for the pointer; keyboard and screen readers use the name link below. */}
       <Link href={`/catalog/countries/${c.country_code}`} className="relative block overflow-hidden rounded-t-lg" tabIndex={-1} aria-hidden="true">
         <CisPhoto path={c.cover_photo_path} alt="" fallbackLabel={c.country_code} className="aspect-[16/7] w-full" />
         <span className="bk-tabular absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[11.5px] font-medium text-white">
-          <ImageIcon size={12} /> {c.photos === 1 ? "1 image" : `${c.photos} images`}
+          <ImageIcon size={12} /> {c.photos === 1 ? t("1 image") : t("{0} images", c.photos)}
         </span>
       </Link>
       <div className="flex min-w-0 flex-col gap-3 p-4">
@@ -160,13 +166,13 @@ function CountryCard({ c, menu }: { c: CountryItem; menu: React.ReactNode }) {
           </span>
         </div>
         <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12.5px]">
-          <Count icon={<MapPin size={13} />} label="Destinations" value={c.destinations} />
-          <Count icon={<Globe size={13} />} label="Tours" value={c.tours} />
-          <Count icon={<ImageIcon size={13} />} label="Images" value={c.photos} />
-          <Count icon={<Store size={13} />} label="Suppliers" value={c.active_suppliers} />
+          <Count icon={<MapPin size={13} />} label={t("Destinations")} value={c.destinations} />
+          <Count icon={<Globe size={13} />} label={t("Tours")} value={c.tours} />
+          <Count icon={<ImageIcon size={13} />} label={t("Images")} value={c.photos} />
+          <Count icon={<Store size={13} />} label={t("Suppliers")} value={c.active_suppliers} />
         </dl>
         <p className="truncate text-xs text-muted">
-          {c.area ? `Area: ${c.area}` : "No area"}
+          {c.area ? t("Area: {0}", c.area) : t("No area")}
           {c.status_reason ? ` · ${c.status_reason}` : ""}
         </p>
       </div>
@@ -175,10 +181,11 @@ function CountryCard({ c, menu }: { c: CountryItem; menu: React.ReactNode }) {
 }
 
 function Count({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+  const tx = useTx();
   return (
     <div className="flex items-center justify-between gap-2">
       <dt className="flex items-center gap-1.5 text-muted">
-        {icon} {label}
+        {icon} {tx(label)}
       </dt>
       <dd className="bk-tabular font-medium text-ink">{value}</dd>
     </div>

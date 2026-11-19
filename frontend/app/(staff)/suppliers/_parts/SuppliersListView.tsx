@@ -17,8 +17,13 @@ import { Code, DataTable, DateText, FilterBar, KpiTile, PageFrame, PersonCell, S
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { CATEGORY_LABEL, CategoryChips, SupplierStatusBadge, locationText, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SuppliersListView.messages";
 
 export function SuppliersListView() {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const { get } = useUrlFilters();
   const paging = useOffsetPage();
@@ -40,13 +45,13 @@ export function SuppliersListView() {
   const s = summary.data;
 
   function menuFor(row: Supplier): RowMenuItem[] {
-    const items: RowMenuItem[] = [{ label: "View supplier", icon: <Eye size={15} />, onSelect: () => router.push(supplierHref(row)) }];
+    const items: RowMenuItem[] = [{ label: t("View supplier"), icon: <Eye size={15} />, onSelect: () => router.push(supplierHref(row)) }];
     if (actions.canWrite) {
-      items.push({ label: "Edit profile", icon: <Pencil size={15} />, onSelect: () => router.push(supplierHref(row, "/edit")) });
+      items.push({ label: t("Edit profile"), icon: <Pencil size={15} />, onSelect: () => router.push(supplierHref(row, "/edit")) });
       items.push(
         row.status === "active"
-          ? { label: "Deactivate", icon: <Ban size={15} />, onSelect: () => actions.deactivate(row), danger: true, divider: true }
-          : { label: "Activate", icon: <Power size={15} />, onSelect: () => actions.activate(row), divider: true },
+          ? { label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => actions.deactivate(row), danger: true, divider: true }
+          : { label: t("Activate"), icon: <Power size={15} />, onSelect: () => actions.activate(row), divider: true },
       );
     }
     return items;
@@ -56,37 +61,37 @@ export function SuppliersListView() {
     ...COLUMNS,
     {
       id: "actions",
-      header: "Actions",
+      header: t("Actions"),
       enableSorting: false,
-      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.company_name}`} />,
+      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={t("Actions for {0}", row.original.company_name)} />,
     },
   ];
 
   const filtered = !!(filters.q || filters.status || filters.category || filters.country);
   return (
     <PageFrame
-      title="Suppliers"
-      description="Hotels, transport, guides and other partners Booking buys from, with their contracts."
+      title={t("Suppliers")}
+      description={t("Hotels, transport, guides and other partners Booking buys from, with their contracts.")}
       actions={
         actions.canWrite && (
           <Link
             href="/suppliers/new"
             className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"
           >
-            <Plus size={15} /> Add supplier
+            <Plus size={15} /> {t("Add supplier")}
           </Link>
         )
       }
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiTile label="Total suppliers" value={s?.total} hint={s ? `Across ${s.countries} ${s.countries === 1 ? "country" : "countries"}` : undefined} />
-        <KpiTile label="Active" value={s?.active} hintTone="success" hint={s ? "Can take new contracts" : undefined} />
-        <KpiTile label="Inactive" value={s?.inactive} hint={s ? "Kept on record, no new contracts" : undefined} />
+        <KpiTile label={t("Total suppliers")} value={s?.total} hint={s ? t("Across {0} {1}", s.countries, s.countries === 1 ? t("country") : t("countries")) : undefined} />
+        <KpiTile label={t("Active")} value={s?.active} hintTone="success" hint={s ? t("Can take new contracts") : undefined} />
+        <KpiTile label={t("Inactive")} value={s?.inactive} hint={s ? t("Kept on record, no new contracts") : undefined} />
         <KpiTile
-          label="Contracts ending in 30 days"
+          label={t("Contracts ending in 30 days")}
           value={s?.contracts_ending_30d}
           hintTone={s && s.contracts_ending_30d > 0 ? "warning" : "neutral"}
-          hint={s ? (s.contracts_ending_30d > 0 ? "Renew or plan new terms" : "Nothing ending soon") : undefined}
+          hint={s ? (s.contracts_ending_30d > 0 ? t("Renew or plan new terms") : t("Nothing ending soon")) : undefined}
         />
       </div>
       <Section>
@@ -94,38 +99,38 @@ export function SuppliersListView() {
           <DataTable<Supplier>
             filters={
               <FilterBar
-                search={{ placeholder: "Search name, SUP- code, contact or e-mail" }}
+                search={{ placeholder: t("Search name, SUP- code, contact or e-mail") }}
                 selects={[
                   {
                     key: "status",
-                    label: "Status",
-                    allLabel: "All statuses",
+                    label: t("Status"),
+                    allLabel: t("All statuses"),
                     options: [
-                      { value: "active", label: "Active" },
-                      { value: "inactive", label: "Inactive" },
+                      { value: "active", label: t("Active") },
+                      { value: "inactive", label: t("Inactive") },
                     ],
                   },
                   {
                     key: "category",
-                    label: "Category",
-                    allLabel: "All categories",
-                    options: SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
+                    label: t("Category"),
+                    allLabel: t("All categories"),
+                    options: SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: tx(CATEGORY_LABEL[c]) })),
                   },
                   {
                     key: "country",
-                    label: "Country",
-                    allLabel: "All countries",
+                    label: t("Country"),
+                    allLabel: t("All countries"),
                     options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
                     width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
                   },
                   {
                     key: "sort",
-                    label: "Sort",
-                    allLabel: "Name A–Z",
+                    label: t("Sort"),
+                    allLabel: t("Name A–Z"),
                     options: [
-                      { value: "-updated_at", label: "Recently updated" },
-                      { value: "-created_at", label: "Newest first" },
-                      { value: "-company_name", label: "Name Z–A" },
+                      { value: "-updated_at", label: t("Recently updated") },
+                      { value: "-created_at", label: t("Newest first") },
+                      { value: "-company_name", label: t("Name Z–A") },
                     ],
                   },
                 ]}
@@ -143,13 +148,13 @@ export function SuppliersListView() {
             onRetry={() => list.refetch()}
             pageSizeOptions={PAGE_SIZES}
             serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-            emptyTitle={filtered ? "No suppliers match" : "No suppliers yet"}
+            emptyTitle={filtered ? t("No suppliers match") : t("No suppliers yet")}
             emptyDescription={
               filtered
-                ? "Change the search or the filters, or reset them to see every supplier."
+                ? t("Change the search or the filters, or reset them to see every supplier.")
                 : actions.canWrite
-                  ? "Add the first supplier with Add supplier. Contracts are added on its page."
-                  : "Contracting adds suppliers here; they appear once created."
+                  ? t("Add the first supplier with Add supplier. Contracts are added on its page.")
+                  : t("Contracting adds suppliers here; they appear once created.")
             }
             onRowClick={(r) => router.push(supplierHref(r))}
             tableMinWidth={880}

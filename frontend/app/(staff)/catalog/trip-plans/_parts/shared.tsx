@@ -1,10 +1,13 @@
 // app/(staff)/catalog/trip-plans/_parts/shared.tsx — atoms shared by the trip plan pages (AA-679).
 
 import { Pill } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./shared.messages";
 
 /** UI spec §1.3 "Trip plan": sellable → Sellable (success), otherwise Not for sale (neutral). */
 export function SellableBadge({ sellable }: { sellable: boolean }) {
-  return sellable ? <Pill tone="success">Sellable</Pill> : <Pill tone="neutral">Not for sale</Pill>;
+  const t = useT(MSG);
+  return sellable ? <Pill tone="success">{t("Sellable")}</Pill> : <Pill tone="neutral">{t("Not for sale")}</Pill>;
 }
 
 export function priceBasisLabel(basis: "per_person" | "per_group"): string {

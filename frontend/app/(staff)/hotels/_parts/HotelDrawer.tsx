@@ -18,22 +18,26 @@ import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { HotelFormDrawer } from "./HotelFormDrawer";
 import { RoomTypeDrawer } from "./RoomTypeDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./HotelDrawer.messages";
 
 export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: () => void }) {
+  const tr = useT(MSG);
   const q = useQuery({ queryKey: ["hotel", hotelRef], queryFn: () => supplyApi.hotel(hotelRef) });
   const status = useRecordStatus();
   const [editing, setEditing] = useState(false);
   const h = q.data;
   return (
-    <Drawer open onClose={onClose} title={h ? h.name : "Hotel"} width={880}>
+    <Drawer open onClose={onClose} title={h ? h.name : tr("Hotel")} width={880}>
       {q.isLoading ? (
-        <div className="flex flex-col gap-3" aria-label="Loading hotel">
+        <div className="flex flex-col gap-3" aria-label={tr("Loading hotel")}>
           <Skeleton w="60%" h={18} />
           <Skeleton h={120} />
           <Skeleton h={160} />
         </div>
       ) : q.isError || !h ? (
-        <ErrorState message={supplyError(q.error, "Could not load the hotel.") ?? ""} onRetry={() => q.refetch()} />
+        <ErrorState message={supplyError(q.error, tr("Could not load the hotel.")) ?? ""} onRetry={() => q.refetch()} />
       ) : (
         <div className="flex flex-col gap-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -42,7 +46,7 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
               <Code>{h.code}</Code>
               <Stars value={h.star_rating} />
               <span>
-                via{" "}
+                {tr("via")}
                 <Link href={`/suppliers/${encodeURIComponent(h.supplier_code)}`} className="font-medium text-accent-deep hover:underline">
                   {h.supplier_name}
                 </Link>
@@ -51,17 +55,17 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
             {status.canWrite && (
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => setEditing(true)}>
-                  <Pencil size={13} /> Edit
+                  <Pencil size={13} /> {tr("Edit")}
                 </Button>
                 <Button size="sm" variant={h.status === "active" ? "danger" : "secondary"} onClick={() => status.ask("hotel", { code: h.code, name: h.name }, h.status !== "active")}>
-                  {h.status === "active" ? <Ban size={13} /> : <Power size={13} />} {h.status === "active" ? "Deactivate" : "Activate"}
+                  {h.status === "active" ? <Ban size={13} /> : <Power size={13} />} {h.status === "active" ? tr("Deactivate") : tr("Activate")}
                 </Button>
               </div>
             )}
           </div>
           {h.status === "inactive" && (
             <p role="status" className="rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
-              This hotel is inactive: it stays on record, but proposals cannot newly book its rooms.
+              {tr("This hotel is inactive: it stays on record, but proposals cannot newly book its rooms.")}
             </p>
           )}
           <Facts h={h} />
@@ -79,10 +83,11 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
 }
 
 function Block({ title, actions, children }: { title: string; actions?: React.ReactNode; children: React.ReactNode }) {
+  const tx = useTx();
   return (
     <section className="min-w-0">
       <header className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-[13px] font-semibold uppercase tracking-[0.04em] text-muted">{title}</h3>
+        <h3 className="text-[13px] font-semibold uppercase tracking-[0.04em] text-muted">{tx(title)}</h3>
         {actions}
       </header>
       {children}
@@ -91,35 +96,37 @@ function Block({ title, actions, children }: { title: string; actions?: React.Re
 }
 
 function Facts({ h }: { h: HotelDetail }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const time = (t: string | null) => (t ? t.slice(0, 5) : "—");
   return (
-    <Block title="Facts">
+    <Block title={tr("Facts")}>
       <div className="rounded-lg border border-line bg-card p-4">
         <FactGrid>
-          <Fact label="Style">{h.hotel_style ?? "—"}</Fact>
-          <Fact label="Star rating">
+          <Fact label={tr("Style")}>{h.hotel_style ?? "—"}</Fact>
+          <Fact label={tr("Star rating")}>
             <Stars value={h.star_rating} />
           </Fact>
-          <Fact label="City / place">
+          <Fact label={tr("City / place")}>
             {h.destination ? (
               <span className="inline-flex flex-wrap items-center gap-2">
                 {h.destination.name} <FromCisTag />
               </span>
             ) : h.destination_id ? (
-              <span className="text-muted">Set, but the CIS catalog cannot be read right now</span>
+              <span className="text-muted">{tr("Set, but the CIS catalog cannot be read right now")}</span>
             ) : (
               "—"
             )}
           </Fact>
-          <Fact label="Country">{h.country_name ?? "—"}</Fact>
-          <Fact label="Street address" wide>
+          <Fact label={tr("Country")}>{h.country_name ?? "—"}</Fact>
+          <Fact label={tr("Street address")} wide>
             {h.address ?? "—"}
           </Fact>
-          <Fact label="Geo point">{h.latitude != null ? `${h.latitude}, ${h.longitude}` : "—"}</Fact>
-          <Fact label="Check-in / check-out">
+          <Fact label={tr("Geo point")}>{h.latitude != null ? `${h.latitude}, ${h.longitude}` : "—"}</Fact>
+          <Fact label={tr("Check-in / check-out")}>
             {time(h.check_in_time)} / {time(h.check_out_time)}
           </Fact>
-          <Fact label="Amenities" wide>
+          <Fact label={tr("Amenities")} wide>
             {h.amenities.length ? (
               <span className="inline-flex flex-wrap gap-1">
                 {h.amenities.map((a) => (
@@ -132,12 +139,12 @@ function Facts({ h }: { h: HotelDetail }) {
               "—"
             )}
           </Fact>
-          <Fact label="Staff links" wide>
+          <Fact label={tr("Staff links")} wide>
             {h.links.length ? (
               <span className="flex flex-col gap-1">
                 {h.links.map((l) => (
                   <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="break-all text-accent-deep hover:underline">
-                    {l.label}
+                    {tx(l.label)}
                   </a>
                 ))}
               </span>
@@ -145,11 +152,11 @@ function Facts({ h }: { h: HotelDetail }) {
               "—"
             )}
           </Fact>
-          <Fact label="Internal notes" wide>
-            {h.internal_notes ? <span className="whitespace-pre-line">{h.internal_notes}</span> : <span className="text-muted">None</span>}
+          <Fact label={tr("Internal notes")} wide>
+            {h.internal_notes ? <span className="whitespace-pre-line">{tx(h.internal_notes)}</span> : <span className="text-muted">{tr("None")}</span>}
           </Fact>
-          <Fact label="Description" wide>
-            <span className="text-muted">Written in CIS from these facts and the rights-cleared photos (not in Booking).</span>
+          <Fact label={tr("Description")} wide>
+            <span className="text-muted">{tr("Written in CIS from these facts and the rights-cleared photos (not in Booking).")}</span>
           </Fact>
         </FactGrid>
       </div>
@@ -158,6 +165,7 @@ function Facts({ h }: { h: HotelDetail }) {
 }
 
 function RoomTypes({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
+  const tr = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const [drawer, setDrawer] = useState<{ room?: RoomType } | null>(null);
@@ -168,23 +176,23 @@ function RoomTypes({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
       qc.invalidateQueries({ queryKey: ["hotels"] });
       toast.success(`${r.name} ${r.status === "active" ? "activated" : "deactivated"}.`);
     },
-    onError: (err) => toast.error(supplyError(err) ?? "Could not change the room type."),
+    onError: (err) => toast.error(supplyError(err) ?? tr("Could not change the room type.")),
   });
   return (
     <Block
-      title={`Room types (${h.room_types.length})`}
+      title={tr("Room types ({0})", h.room_types.length)}
       actions={
         canWrite &&
         h.status === "active" && (
           <Button size="sm" variant="primary" onClick={() => setDrawer({})}>
-            <Plus size={13} /> Add room type
+            <Plus size={13} /> {tr("Add room type")}
           </Button>
         )
       }
     >
       {h.room_types.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line px-4 py-5 text-center text-[13px] text-muted">
-          No room types yet.{canWrite ? " Add the rooms this hotel sells; rates are entered per room type." : ""}
+          {tr("No room types yet.{0}", canWrite ? tr(" Add the rooms this hotel sells; rates are entered per room type.") : "")}
         </p>
       ) : (
         <ul className="divide-y divide-line2 rounded-lg border border-line bg-card">
@@ -195,20 +203,19 @@ function RoomTypes({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
                 <span className="min-w-0">
                   <span className="block text-[13.5px] font-medium text-ink">{r.name}</span>
                   <span className="text-xs text-muted">
-                    {r.max_occupancy ? `Up to ${r.max_occupancy}` : "Occupancy not set"}
-                    {r.bed_types.length ? ` · ${r.bed_types.join(", ")}` : ""} · {r.rates_in_force} rate{r.rates_in_force === 1 ? "" : "s"} in force
+                    {tr("{0}{1} · {2} rate{3} in force", r.max_occupancy ? tr("Up to {0}", r.max_occupancy) : tr("Occupancy not set"), r.bed_types.length ? ` · ${r.bed_types.join(", ")}` : "", r.rates_in_force, r.rates_in_force === 1 ? "" : "s")}
                   </span>
                 </span>
               </span>
               <span className="flex items-center gap-2">
-                {r.status === "inactive" && <Pill tone="neutral">Inactive</Pill>}
+                {r.status === "inactive" && <Pill tone="neutral">{tr("Inactive")}</Pill>}
                 {canWrite && (
                   <>
-                    <Button size="sm" variant="ghost" onClick={() => setDrawer({ room: r })} ariaLabel={`Edit ${r.name}`}>
+                    <Button size="sm" variant="ghost" onClick={() => setDrawer({ room: r })} ariaLabel={tr("Edit {0}", r.name)}>
                       <Pencil size={13} />
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => toggle.mutate(r)} disabled={toggle.isPending}>
-                      {r.status === "active" ? "Deactivate" : "Activate"}
+                      {r.status === "active" ? tr("Deactivate") : tr("Activate")}
                     </Button>
                   </>
                 )}
@@ -223,9 +230,10 @@ function RoomTypes({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
 }
 
 function HotelRates({ h }: { h: HotelDetail }) {
+  const tr = useT(MSG);
   const rates = useQuery({ queryKey: ["rates", "hotel", h.code], queryFn: () => supplyApi.hotelRates(h.code) });
   return (
-    <Block title="Net rates">
+    <Block title={tr("Net rates")}>
       <RatesTable
         tableId="hotel-rates"
         rates={rates.data?.items ?? []}
@@ -234,26 +242,28 @@ function HotelRates({ h }: { h: HotelDetail }) {
         onRetry={() => rates.refetch()}
         showContract
         compact
-        emptyTitle="No rates yet"
-        emptyDescription={`Rates are entered under a contract on the supplier page (${h.supplier_name} → Rates).`}
+        emptyTitle={tr("No rates yet")}
+        emptyDescription={tr("Rates are entered under a contract on the supplier page ({0} → Rates).", h.supplier_name)}
       />
     </Block>
   );
 }
 
 function Activity({ h }: { h: HotelDetail }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   return (
-    <Block title="Recent activity">
+    <Block title={tr("Recent activity")}>
       {h.recent_activity.length === 0 ? (
-        <p className="text-[13px] text-muted">Nothing recorded yet.</p>
+        <p className="text-[13px] text-muted">{tr("Nothing recorded yet.")}</p>
       ) : (
         <ol className="flex flex-col">
           {h.recent_activity.map((a) => (
             <li key={a.id} className="border-b border-line2 py-2 text-[13px] last:border-b-0">
               <span className="font-medium text-ink">{a.summary ?? a.action}</span>
-              {(a.entity_type === "hotel_room_type" || a.entity_type === "supplier_rate") && a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}
+              {(a.entity_type === "hotel_room_type" || a.entity_type === "supplier_rate") && a.entity_label && <span className="text-muted"> · {tx(a.entity_label)}</span>}
               <span className="block text-xs text-muted">
-                {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />
+                {a.actor.name ?? (a.actor.id ? tr("Staff") : tr("System"))} · <DateText value={a.at} withTime />
               </span>
             </li>
           ))}

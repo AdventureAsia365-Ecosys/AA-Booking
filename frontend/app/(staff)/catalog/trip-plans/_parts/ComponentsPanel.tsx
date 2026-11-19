@@ -10,47 +10,52 @@ import { Sparkles } from "lucide-react";
 import { priceWorkbenchApi } from "@/lib/api/priceWorkbench";
 import { Button, Pill, Section, useCan } from "@/ui";
 import { ComponentsDrawer } from "../../../pricing/workbench/_parts/ComponentsDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ComponentsPanel.messages";
 
 export function ComponentsPanel({ sourceId, title }: { sourceId: string; title: string | null }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const canEdit = useCan("trip_plan.write");
   const [open, setOpen] = useState(false);
   const list = useQuery({ queryKey: ["plan-components", sourceId], queryFn: () => priceWorkbenchApi.components(sourceId) });
   const items = list.data?.items ?? [];
   return (
     <Section
-      title="Hotels & services"
+      title={t("Hotels & services")}
       actions={
         <Button variant={canEdit ? "primary" : "secondary"} size="sm" onClick={() => setOpen(true)}>
-          <Sparkles size={13} /> {canEdit ? "Suggest from the itinerary" : "See suggestions"}
+          <Sparkles size={13} /> {canEdit ? t("Suggest from the itinerary") : t("See suggestions")}
         </Button>
       }
     >
       <div className="flex min-w-0 flex-col gap-2" data-testid="plan-components">
         <p className="text-[13px] text-muted">
-          The hotels and services an agency quote prices, day by day. Each needs a published supplier rate for the tour to price;{" "}
+          {t("The hotels and services an agency quote prices, day by day. Each needs a published supplier rate for the tour to price;")}
           <Link href="/pricing/workbench" className="font-semibold text-accent-deep hover:underline">
-            Price setup
+            {t("Price setup")}
           </Link>{" "}
-          shows what every tour still needs.
+          {t("shows what every tour still needs.")}
         </p>
-        {list.isLoading && <p className="text-[13px] text-muted">Loading…</p>}
+        {list.isLoading && <p className="text-[13px] text-muted">{t("Loading…")}</p>}
         {list.isError && (
           <p className="text-[13px] text-body" role="alert">
-            {(list.error as Error).message}
+            {tx((list.error as Error).message)}
           </p>
         )}
-        {!list.isLoading && !items.length && <p className="text-[13px] text-muted2">No hotels or services yet.</p>}
+        {!list.isLoading && !items.length && <p className="text-[13px] text-muted2">{t("No hotels or services yet.")}</p>}
         <ul className="flex flex-col gap-1.5">
           {items.map((c) => (
             <li key={`${c.day_no}-${c.component_id}`} className="flex min-w-0 flex-wrap items-center gap-2 text-[13px]">
-              <span className="w-14 shrink-0 text-muted">Day {c.day_no}</span>
-              <span className="min-w-0 break-words text-body">{c.label}</span>
-              {!c.active && <Pill tone="danger">Inactive</Pill>}
+              <span className="w-14 shrink-0 text-muted">{t("Day")} {c.day_no}</span>
+              <span className="min-w-0 break-words text-body">{tx(c.label)}</span>
+              {!c.active && <Pill tone="danger">{t("Inactive")}</Pill>}
             </li>
           ))}
         </ul>
       </div>
-      {open && <ComponentsDrawer sourceId={sourceId} title={title} onClose={() => setOpen(false)} />}
+      {open && <ComponentsDrawer sourceId={sourceId} title={tx(title)} onClose={() => setOpen(false)} />}
     </Section>
   );
 }

@@ -10,6 +10,9 @@ import { MapPin, X } from "lucide-react";
 import { suppliersApi, type CatalogPlace } from "@/lib/api/suppliers";
 import { Input, FromCisTag, IconButton, ListButton } from "@/ui";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./DestinationPicker.messages";
 
 export interface PickedPlace {
   id: string;
@@ -27,6 +30,8 @@ export function DestinationPicker({
   country: string;
   onChange: (place: CatalogPlace | null) => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -56,7 +61,7 @@ export function DestinationPicker({
           </span>
           <FromCisTag />
         </span>
-        <IconButton variant="plain" size="xs" round onClick={() => onChange(null)} label="Clear the place">
+        <IconButton variant="plain" size="xs" round onClick={() => onChange(null)} label={t("Clear the place")}>
           <X size={14} />
         </IconButton>
       </div>
@@ -72,7 +77,7 @@ export function DestinationPicker({
         onChange={(e) => type(e.target.value)}
         onFocus={() => setOpen(true)}
         onBlur={() => window.setTimeout(() => setOpen(false), 150)}
-        placeholder="Type 2+ letters of a city or place"
+        placeholder={t("Type 2+ letters of a city or place")}
         role="combobox"
         aria-expanded={open && q.length >= 2}
         aria-controls="destination-options"
@@ -84,10 +89,10 @@ export function DestinationPicker({
           role="listbox"
           className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-64 overflow-y-auto rounded-md border border-line bg-card py-1 shadow-lg"
         >
-          {places.isLoading && <li className="px-3 py-2 text-[13px] text-muted">Searching…</li>}
-          {places.isError && <li className="px-3 py-2 text-[13px] text-danger">{(places.error as Error).message}</li>}
+          {places.isLoading && <li className="px-3 py-2 text-[13px] text-muted">{t("Searching…")}</li>}
+          {places.isError && <li className="px-3 py-2 text-[13px] text-danger">{tx((places.error as Error).message)}</li>}
           {!places.isLoading && !places.isError && items.length === 0 && (
-            <li className="px-3 py-2 text-[13px] text-muted">No CIS place matches{country ? " in this country" : ""}.</li>
+            <li className="px-3 py-2 text-[13px] text-muted">{t("No CIS place matches{0}.", country ? t(" in this country") : "")}</li>
           )}
           {items.map((p) => (
             <li key={p.destination_id} role="presentation">

@@ -26,6 +26,9 @@ import { CIS_EDITOR_ROLES } from "./shared";
 import { FormField, errorFor, inputCls } from "../../../_parts/FormField";
 import { PriceChainPanel } from "./PriceChainPanel";
 import { countText, daysText } from "@/ui/booking/plural";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CommercialDrawer.messages";
 
 const textareaCls = "min-h-[96px] w-full";
 
@@ -56,6 +59,8 @@ function initial(plan: TripPlanDetail): FormState {
 const AMOUNT_RE = /^\d{1,10}(\.\d{1,2})?$/;
 
 export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onClose: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const me = useStaff();
@@ -105,7 +110,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
       qc.invalidateQueries({ queryKey: ["trip-plans"] });
     },
     onSuccess: ({ out }) => {
-      toast.success(out.changed?.length ? "Commercial details saved" : "Nothing changed");
+      toast.success(out.changed?.length ? t("Commercial details saved") : t("Nothing changed"));
       onClose();
     },
   });
@@ -113,7 +118,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
   function submit() {
     const amount = form.hint_amount.trim();
     if (amount && (!AMOUNT_RE.test(amount) || Number(amount) <= 0)) {
-      setLocalError("Enter the price hint as an amount above 0 with up to 2 decimals, for example 2450 or 2450.50.");
+      setLocalError(t("Enter the price hint as an amount above 0 with up to 2 decimals, for example 2450 or 2450.50."));
       return;
     }
     setLocalError(null);
@@ -128,17 +133,17 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
   const showCurrent = currentSupplier && !supplierOptions.some((s) => s.id === currentSupplier.id);
   const supplierTotal = suppliers.data?.total ?? 0;
   const supplierHint = suppliers.isError
-    ? "The supplier list could not be loaded."
+    ? t("The supplier list could not be loaded.")
     : supplierTotal > supplierOptions.length
-      ? `Showing the first ${supplierOptions.length} of ${supplierTotal} active suppliers; search to find the others.`
+      ? t("Showing the first {0} of {1} active suppliers; search to find the others.", supplierOptions.length, supplierTotal)
       : supplierQ && !supplierOptions.length
-        ? "No active supplier matches the search."
-        : "The main supplier (ground operator) of this plan. Active suppliers only.";
+        ? t("No active supplier matches the search.")
+        : t("The main supplier (ground operator) of this plan. Active suppliers only.");
   return (
     <FormDrawer
       open
       onClose={onClose}
-      title="Commercial details"
+      title={t("Commercial details")}
       onSubmit={submit}
       busy={save.isPending}
       dirty={dirty}
@@ -147,28 +152,27 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
       width={640}
     >
       <p className="text-[13px] text-muted">
-        Booking-owned fields of <span className="font-medium text-ink">{plan.title}</span>. The tour itself (title, days,
-        photos, inclusions) is edited in CIS.
+        {t("Booking-owned fields of")} <span className="font-medium text-ink">{tx(plan.title)}</span>{t(". The tour itself (title, days, photos, inclusions) is edited in CIS.")}
       </p>
       <CisFieldset
-        title="Tour content"
+        title={t("Tour content")}
         editPath={CIS_EDITOR_ROLES.has(me.role) ? `/admin/master-content?tour=${encodeURIComponent(plan.tour_id)}` : null}
-        description={CIS_EDITOR_ROLES.has(me.role) ? undefined : "Ask the content team to change it in CIS."}
+        description={CIS_EDITOR_ROLES.has(me.role) ? undefined : t("Ask the content team to change it in CIS.")}
       >
-        <CisField label="Title" wide>
-          {plan.title}
+        <CisField label={t("Title")} wide>
+          {tx(plan.title)}
         </CisField>
         <CisField label="SKU">{plan.sku}</CisField>
-        <CisField label="Country">{plan.country}</CisField>
-        <CisField label="Duration">{plan.duration_raw || (plan.duration_days ? daysText(plan.duration_days) : null)}</CisField>
-        <CisField label="Days in CIS">{plan.days.length ? `${daysText(plan.days.length)}, ${countText(plan.photos.length, "photo")}` : null}</CisField>
-        <CisField label="Summary" multiline wide>
+        <CisField label={t("Country")}>{plan.country}</CisField>
+        <CisField label={t("Duration")}>{plan.duration_raw || (plan.duration_days ? daysText(plan.duration_days) : null)}</CisField>
+        <CisField label={t("Days in CIS")}>{plan.days.length ? `${daysText(plan.days.length)}, ${countText(plan.photos.length, "photo")}` : null}</CisField>
+        <CisField label={t("Summary")} multiline wide>
           {plan.summary || plan.description}
         </CisField>
-        <CisField label="Included" multiline wide>
+        <CisField label={t("Included")} multiline wide>
           {plan.inclusions}
         </CisField>
-        <CisField label="Not included" multiline wide>
+        <CisField label={t("Not included")} multiline wide>
           {plan.exclusions}
         </CisField>
       </CisFieldset>
@@ -179,23 +183,23 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
           onChange={(e) => setForm({ ...form, sellable: e.target.checked })}
         />
         <span>
-          <span className="block text-[13px] font-medium text-ink">Sellable</span>
-          <span className="block text-xs text-muted">Sales can start trip cases from this plan. Untick to mark it not for sale.</span>
+          <span className="block text-[13px] font-medium text-ink">{t("Sellable")}</span>
+          <span className="block text-xs text-muted">{t("Sales can start trip cases from this plan. Untick to mark it not for sale.")}</span>
         </span>
       </label>
       {canPickSupplier && (
-        <FormField label="Supplier" hint={supplierHint} error={errorFor(fe, "supplier_id")}>
+        <FormField label={t("Supplier")} hint={tx(supplierHint)} error={errorFor(fe, "supplier_id")}>
           <Input
-            aria-label="Search active suppliers"
+            aria-label={t("Search active suppliers")}
             className={inputCls}
-            placeholder="Search by name, code or contact"
+            placeholder={t("Search by name, code or contact")}
             maxLength={200}
             value={supplierSearch}
             onChange={(e) => setSupplierSearch(e.target.value)}
             autoComplete="off"
           />
           <Select
-            aria-label="Supplier"
+            aria-label={t("Supplier")}
             className={inputCls}
             value={form.supplier_id}
             onChange={(e) => {
@@ -206,10 +210,10 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             }}
             disabled={suppliers.isLoading}
           >
-            <option value="">{suppliers.isLoading ? "Loading suppliers…" : "No supplier"}</option>
+            <option value="">{suppliers.isLoading ? t("Loading suppliers…") : t("No supplier")}</option>
             {showCurrent && (
               <option value={currentSupplier.id}>
-                {currentSupplier.company_name ?? currentSupplier.code} {currentSupplier.status === "inactive" ? "(inactive)" : ""}
+                {currentSupplier.company_name ?? currentSupplier.code} {currentSupplier.status === "inactive" ? t("(inactive)") : ""}
               </option>
             )}
             {supplierOptions.map((s) => (
@@ -220,54 +224,54 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
           </Select>
         </FormField>
       )}
-      <FormField label="Trip style" hint="Free text for now, for example Private or Small group." error={errorFor(fe, "trip_style")}>
+      <FormField label={t("Trip style")} hint={t("Free text for now, for example Private or Small group.")} error={errorFor(fe, "trip_style")}>
         <Input className={inputCls} maxLength={60} value={form.trip_style} onChange={(e) => setForm({ ...form, trip_style: e.target.value })} />
       </FormField>
-      <FormField label="Default channel" hint="Suggested for proposals started from this plan." error={errorFor(fe, "default_channel")}>
+      <FormField label={t("Default channel")} hint={t("Suggested for proposals started from this plan.")} error={errorFor(fe, "default_channel")}>
         <Select
           className={inputCls}
           value={form.default_channel}
           onChange={(e) => setForm({ ...form, default_channel: e.target.value as Channel | "" })}
         >
-          <option value="">No default</option>
+          <option value="">{t("No default")}</option>
           {CHANNELS.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {tx(c.label)}
             </option>
           ))}
         </Select>
       </FormField>
       {canPrice &&
         (prices.isLoading ? (
-          <p className="text-[13px] text-muted">Loading the price matrix…</p>
+          <p className="text-[13px] text-muted">{t("Loading the price matrix…")}</p>
         ) : prices.isError ? (
-          <p className="text-[13px] text-danger">The price matrix could not be loaded. Save the other fields, then reopen.</p>
+          <p className="text-[13px] text-danger">{t("The price matrix could not be loaded. Save the other fields, then reopen.")}</p>
         ) : (
           <>
           {prices.data && <PriceChainPanel sourceId={plan.source_id} matrix={prices.data} dirty={false} />}
           <p className="text-[13px] text-body" data-testid="price-versions-link">
-            Prices change through price versions: a draft, a reason, and a second person approves it.{" "}
+            {t("Prices change through price versions: a draft, a reason, and a second person approves it.")}
             <Link
               href={`/pricing/workbench?versions=${encodeURIComponent(plan.source_id)}`}
               className="font-semibold text-accent-deep hover:underline"
             >
-              Open the price versions
+              {t("Open the price versions")}
             </Link>
           </p>
           </>
         ))}
       <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1.5 text-[13px] font-medium text-ink">Price hint</legend>
+        <legend className="mb-1.5 text-[13px] font-medium text-ink">{t("Price hint")}</legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_96px_132px]">
           <Input
-            aria-label="Price hint amount"
+            aria-label={t("Price hint amount")}
             inputMode="decimal"
             className={inputCls}
-            placeholder="from amount"
+            placeholder={t("from amount")}
             value={form.hint_amount}
             onChange={(e) => setForm({ ...form, hint_amount: e.target.value })}
           />
-          <Select aria-label="Price hint currency" className={inputCls} value={form.hint_currency} onChange={(e) => setForm({ ...form, hint_currency: e.target.value })}>
+          <Select aria-label={t("Price hint currency")} className={inputCls} value={form.hint_currency} onChange={(e) => setForm({ ...form, hint_currency: e.target.value })}>
             {SELLING_CURRENCIES.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -275,20 +279,20 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             ))}
           </Select>
           <Select
-            aria-label="Price hint basis"
+            aria-label={t("Price hint basis")}
             className={inputCls}
             value={form.hint_basis}
             onChange={(e) => setForm({ ...form, hint_basis: e.target.value as FormState["hint_basis"] })}
           >
-            <option value="per_person">per person</option>
-            <option value="per_group">per group</option>
+            <option value="per_person">{t("per person")}</option>
+            <option value="per_group">{t("per group")}</option>
           </Select>
         </div>
         <span className="text-xs text-muted">
-          A free guide for sales when the plan has no price matrix; the matrix wins where it has a price. Leave the amount empty for no hint.
+          {t("A free guide for sales when the plan has no price matrix; the matrix wins where it has a price. Leave the amount empty for no hint.")}
         </span>
       </fieldset>
-      <FormField label="Commercial notes" hint="Staff only, never shown to customers." error={errorFor(fe, "commercial_notes")}>
+      <FormField label={t("Commercial notes")} hint={t("Staff only, never shown to customers.")} error={errorFor(fe, "commercial_notes")}>
         <Textarea className={textareaCls} maxLength={5000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </FormField>
     </FormDrawer>

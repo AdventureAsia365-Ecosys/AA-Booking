@@ -46,6 +46,10 @@ import {
   useToast,
   useUrlFilters,
 } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./DeparturesTab.messages";
 
 function errorText(e: unknown, fallback = "Something went wrong"): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -98,6 +102,7 @@ const LIST_COLUMNS: ColumnDef<FinanceDeparture, unknown>[] = [
 ];
 
 export function DeparturesTab() {
+  const tr = useT(MSG);
   const { get, setMany } = useUrlFilters();
   const canProfit = useCan("profit.read");
   const span = periodWindow(get("period") || "next_3", new Date());
@@ -106,11 +111,11 @@ export function DeparturesTab() {
   const open = get("departure");
   return (
     <Section
-      title="Departure costs"
-      description="Costs shared by the whole group of a departure (coach, guide, group entrance), priced from the supplier rate for the seats sold and split to the trip cases by seats."
+      title={tr("Departure costs")}
+      description={tr("Costs shared by the whole group of a departure (coach, guide, group entrance), priced from the supplier rate for the seats sold and split to the trip cases by seats.")}
     >
       <DataTable<FinanceDeparture>
-        filters={<FilterBar selects={[{ key: "period", label: "Travel dates", allLabel: "Next 3 months", options: PERIOD_OPTIONS, width: 170 }]} />}
+        filters={<FilterBar selects={[{ key: "period", label: tr("Travel dates"), allLabel: tr("Next 3 months"), options: PERIOD_OPTIONS, width: 170 }]} />}
         searchable={false}
         enableCsv
         csvFilename="departure-costs.csv"
@@ -120,10 +125,10 @@ export function DeparturesTab() {
         getRowId={(r) => r.id}
         onRowClick={(r) => setMany({ departure: r.id })}
         loading={list.isLoading}
-        error={list.isError ? errorText(list.error, "Could not load the departures") : null}
+        error={list.isError ? errorText(list.error, tr("Could not load the departures")) : null}
         onRetry={() => list.refetch()}
-        emptyTitle="No departure in this period"
-        emptyDescription="Departures are set on the trip plans of the catalog."
+        emptyTitle={tr("No departure in this period")}
+        emptyDescription={tr("Departures are set on the trip plans of the catalog.")}
         tableMinWidth={860}
       />
       <DepartureDrawer departureId={open || null} onClose={() => setMany({ departure: null })} />
@@ -132,6 +137,7 @@ export function DeparturesTab() {
 }
 
 function CostActions({ cost, departureId }: { cost: DepartureCost; departureId: string }) {
+  const tr = useT(MSG);
   const canWrite = useCan("ops.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -140,7 +146,7 @@ function CostActions({ cost, departureId }: { cost: DepartureCost; departureId: 
   const order = useMutation({
     mutationFn: () => financeApi.orderCost(cost.id),
     onSuccess: (c) => {
-      toast.success(`Supplier booking ${c.supplier_booking?.code ?? ""} made`);
+      toast.success(tr("Supplier booking {0} made", c.supplier_booking?.code ?? ""));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -150,22 +156,22 @@ function CostActions({ cost, departureId }: { cost: DepartureCost; departureId: 
     <span className="flex flex-wrap gap-2">
       {cost.actions.order && (
         <Button size="sm" onClick={() => order.mutate()} disabled={order.isPending}>
-          Order
+          {tr("Order")}
         </Button>
       )}
       {cost.actions.remove && (
         <Button size="sm" variant="ghost" onClick={() => setRemoving(true)}>
-          Remove
+          {tr("Remove")}
         </Button>
       )}
       {removing && (
         <ReasonDialog
-          title="Remove this shared cost"
-          confirmLabel="Remove"
+          title={tr("Remove this shared cost")}
+          confirmLabel={tr("Remove")}
           onClose={() => setRemoving(false)}
           onConfirm={async (reason) => {
             await financeApi.removeCost(cost.id, reason);
-            toast.success("Cost removed");
+            toast.success(tr("Cost removed"));
             refresh();
             qc.invalidateQueries({ queryKey: ["finance", "departure", departureId] });
           }}
@@ -186,6 +192,8 @@ export function ReasonDialog({
   onClose: () => void;
   onConfirm: (reason: string) => Promise<void>;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -193,10 +201,10 @@ export function ReasonDialog({
     <Modal
       open
       onClose={onClose}
-      title={title}
+      title={tx(title)}
       footer={
         <div className="flex justify-end gap-2">
-          <Button onClick={onClose}>Back</Button>
+          <Button onClick={onClose}>{tr("Back")}</Button>
           <Button
             variant="danger"
             disabled={!reason.trim() || busy}
@@ -212,12 +220,12 @@ export function ReasonDialog({
               }
             }}
           >
-            {confirmLabel}
+            {tx(confirmLabel)}
           </Button>
         </div>
       }
     >
-      <Field label="Reason" error={error ?? undefined}>
+      <Field label={tr("Reason")} error={error ?? undefined}>
         <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={500} />
       </Field>
     </Modal>
@@ -236,7 +244,7 @@ function costColumns(departureId: string): ColumnDef<DepartureCost, unknown>[] {
           </span>
           <span className="text-xs text-muted">
             {row.original.supplier.name} · {BASIS_LABEL[row.original.basis]} x {row.original.quantity}
-            {row.original.pricing === "rate" ? ` · rate for ${row.original.priced_for_pax} seats` : " · by hand"}
+            <Phrase text={row.original.pricing === "rate" ? ` · rate for ${row.original.priced_for_pax} seats` : " · by hand"} />
           </span>
         </span>
       ),
@@ -261,7 +269,7 @@ function costColumns(departureId: string): ColumnDef<DepartureCost, unknown>[] {
         row.original.billed && row.original.billed_usd ? (
           <Money amount={row.original.billed_usd} currency="USD" className="text-[13px]" />
         ) : (
-          <span className="text-xs text-muted">{row.original.status === "cancelled" ? "Removed" : "Not billed yet"}</span>
+          <span className="text-xs text-muted"><Phrase text={row.original.status === "cancelled" ? "Removed" : "Not billed yet"} /></span>
         ),
     },
     {
@@ -269,7 +277,7 @@ function costColumns(departureId: string): ColumnDef<DepartureCost, unknown>[] {
       header: "Supplier booking",
       cell: ({ row }) => {
         const b = row.original.supplier_booking;
-        if (!b) return <span className="text-xs text-muted">Not ordered</span>;
+        if (!b) return <span className="text-xs text-muted"><Phrase text="Not ordered" /></span>;
         return (
           <span className="flex flex-col text-[13px]">
             <span>
@@ -314,6 +322,8 @@ const CASE_COLUMNS: ColumnDef<DepartureCaseRow, unknown>[] = [
 ];
 
 function DepartureDrawer({ departureId, onClose }: { departureId: string | null; onClose: () => void }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("ops.write");
   const canProfit = useCan("profit.read");
   const qc = useQueryClient();
@@ -327,7 +337,7 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
   const orders = useMutation({
     mutationFn: () => financeApi.createOrders({ departures: [departureId!] }),
     onSuccess: (r) => {
-      toast.success(r.lines ? `${r.lines} booking(s) put on ${r.orders.length} purchase order(s)` : "No pending booking to order");
+      toast.success(r.lines ? tr("{0} booking(s) put on {1} purchase order(s)", r.lines, r.orders.length) : tr("No pending booking to order"));
       qc.invalidateQueries({ queryKey: ["finance"] });
     },
     onError: (e) => toast.error(errorText(e)),
@@ -335,36 +345,36 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
   const d = q.data;
   const t = d?.totals_usd;
   return (
-    <Drawer open={!!departureId} onClose={onClose} width={880} title={d ? `Departure ${d.departure.start_date}` : "Departure"}>
-      {q.isLoading && <p className="text-[13px] text-muted">Loading…</p>}
-      {q.isError && <p className="text-[13px] text-danger">{errorText(q.error, "Could not load the departure")}</p>}
+    <Drawer open={!!departureId} onClose={onClose} width={880} title={d ? tr("Departure {0}", d.departure.start_date) : tr("Departure")}>
+      {q.isLoading && <p className="text-[13px] text-muted">{tr("Loading…")}</p>}
+      {q.isError && <p className="text-[13px] text-danger">{tx(errorText(q.error, tr("Could not load the departure")))}</p>}
       {d && t && (
         <div className="flex flex-col gap-4">
           <p className="text-[13px] text-body">
-            {tourLabel(d.departure.tour_title, d.departure.trip_plan_source_id)} · {d.departure.sold_seats} of {d.departure.capacity} seats sold · {d.departure.status}
+            {tr("{0} · {1} of {2} seats sold · {3}", tourLabel(d.departure.tour_title, d.departure.trip_plan_source_id), d.departure.sold_seats, d.departure.capacity, d.departure.status)}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {canProfit && t.revenue !== null && <KpiTile label="Revenue (USD)" value={<Money amount={t.revenue} currency="USD" />} size="sm" />}
-            <KpiTile label="Shared cost (USD)" value={<Money amount={t.shared_cost} currency="USD" />} hint={`Planned ${t.shared_planned} · billed ${t.shared_billed}`} size="sm" />
+            {canProfit && t.revenue !== null && <KpiTile label={tr("Revenue (USD)")} value={<Money amount={t.revenue} currency="USD" />} size="sm" />}
+            <KpiTile label={tr("Shared cost (USD)")} value={<Money amount={t.shared_cost} currency="USD" />} hint={tr("Planned {0} · billed {1}", t.shared_planned, t.shared_billed)} size="sm" />
             {canProfit && t.profit !== null ? (
               <>
-                <KpiTile label="Profit (USD)" value={<Money amount={t.profit} currency="USD" />} valueTone={Number(t.profit) < 0 ? "danger" : undefined} size="sm" />
-                <KpiTile label="Per seat · margin" value={`${t.profit_per_seat ?? "—"} · ${marginLabel(t.margin)}`} size="sm" />
+                <KpiTile label={tr("Profit (USD)")} value={<Money amount={t.profit} currency="USD" />} valueTone={Number(t.profit) < 0 ? "danger" : undefined} size="sm" />
+                <KpiTile label={tr("Per seat · margin")} value={`${t.profit_per_seat ?? "—"} · ${marginLabel(t.margin)}`} size="sm" />
               </>
             ) : (
-              <KpiTile label="Total cost (USD)" value={<Money amount={t.cost} currency="USD" />} hint={`Own costs of the cases ${t.case_cost}`} size="sm" />
+              <KpiTile label={tr("Total cost (USD)")} value={<Money amount={t.cost} currency="USD" />} hint={tr("Own costs of the cases {0}", t.case_cost)} size="sm" />
             )}
           </div>
           <Section
-            title="Shared costs"
+            title={tr("Shared costs")}
             actions={
               canWrite ? (
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" onClick={() => orders.mutate()} disabled={orders.isPending}>
-                    Create purchase orders
+                    {tr("Create purchase orders")}
                   </Button>
                   <Button size="sm" variant="primary" onClick={() => setAdding(true)} disabled={d.departure.status === "cancelled"}>
-                    Add shared cost
+                    {tr("Add shared cost")}
                   </Button>
                 </div>
               ) : null
@@ -376,24 +386,24 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
               data={d.shared_costs}
               columns={costColumns(d.departure.id)}
               getRowId={(r) => r.id}
-              emptyTitle="No shared cost yet"
-              emptyDescription="Add the coach, guide or group entrance this departure shares."
+              emptyTitle={tr("No shared cost yet")}
+              emptyDescription={tr("Add the coach, guide or group entrance this departure shares.")}
               tableMinWidth={820}
             />
           </Section>
-          <Section title="Trip cases on this departure" description="Each case carries its share of the shared costs by seats.">
+          <Section title={tr("Trip cases on this departure")} description={tr("Each case carries its share of the shared costs by seats.")}>
             <DataTable<DepartureCaseRow>
               searchable={false}
               tableId="finance-departure-cases"
               data={d.cases}
               columns={withoutProfit(CASE_COLUMNS, canProfit)}
               getRowId={(r) => r.trip_case_id}
-              emptyTitle="No trip case sold yet"
+              emptyTitle={tr("No trip case sold yet")}
               tableMinWidth={680}
             />
           </Section>
           {d.bills.length > 0 && (
-            <Section title="Bills of this departure">
+            <Section title={tr("Bills of this departure")}>
               <ul className="flex flex-col gap-1 text-[13px]">
                 {d.bills.map((b) => (
                   <li key={b.id}>
@@ -405,7 +415,7 @@ function DepartureDrawer({ departureId, onClose }: { departureId: string | null;
           )}
           {t.fx_missing && (
             <Pill tone="warning" dot={false}>
-              A currency has no approved FX rate: its USD part is left out
+              {tr("A currency has no approved FX rate: its USD part is left out")}
             </Pill>
           )}
         </div>
@@ -433,6 +443,8 @@ function AddCostModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [pricing, setPricing] = useState<"rate" | "manual">("rate");
   const [serviceId, setServiceId] = useState("");
@@ -460,7 +472,7 @@ function AddCostModal({
         service_date: day,
       }),
     onSuccess: (c) => {
-      toast.success(`Added: ${c.net_amount} ${c.currency}`);
+      toast.success(tr("Added: {0} {1}", c.net_amount, c.currency));
       onSaved();
       onClose();
     },
@@ -470,71 +482,71 @@ function AddCostModal({
     <Modal
       open
       onClose={onClose}
-      title="Add shared cost"
+      title={tr("Add shared cost")}
       width={520}
       footer={
         <div className="flex justify-end gap-2">
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{tr("Cancel")}</Button>
           <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>
-            Add
+            {tr("Add")}
           </Button>
         </div>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Priced">
+        <Field label={tr("Priced")}>
           <Select
             value={pricing}
             onChange={(e) => setPricing(e.target.value as "rate" | "manual")}
             options={[
-              { value: "rate", label: "From the supplier rate for the seats sold" },
-              { value: "manual", label: "By hand" },
+              { value: "rate", label: tr("From the supplier rate for the seats sold") },
+              { value: "manual", label: tr("By hand") },
             ]}
           />
         </Field>
-        <Field label={pricing === "rate" ? "Service" : "Service (optional)"}>
+        <Field label={pricing === "rate" ? tr("Service") : tr("Service (optional)")}>
           <Select
             value={serviceId}
             onChange={(e) => setServiceId(e.target.value)}
-            placeholder="Choose a service…"
+            placeholder={tr("Choose a service…")}
             options={(services.data?.items ?? []).map((s) => ({ value: s.id, label: `${s.label} · ${s.supplier_name}` }))}
           />
         </Field>
         {pricing === "manual" && (
           <>
-            <Field label="Supplier">
+            <Field label={tr("Supplier")}>
               <Select
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
-                placeholder="Choose a supplier…"
+                placeholder={tr("Choose a supplier…")}
                 options={(suppliers.data?.items ?? []).map((s) => ({ value: s.id, label: s.company_name }))}
               />
             </Field>
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Basis">
-                <Select value={basis} onChange={(e) => setBasis(e.target.value as CostBasis)} options={Object.entries(BASIS_LABEL).map(([value, label]) => ({ value, label }))} />
+              <Field label={tr("Basis")}>
+                <Select value={basis} onChange={(e) => setBasis(e.target.value as CostBasis)} options={Object.entries(BASIS_LABEL).map(([value, label]) => ({ value, label: tx(label) }))} />
               </Field>
-              <Field label="Unit amount">
+              <Field label={tr("Unit amount")}>
                 <Input value={unit} onChange={(e) => setUnit(e.target.value)} inputMode="decimal" placeholder="0.00" />
               </Field>
-              <Field label="Currency">
+              <Field label={tr("Currency")}>
                 <Input value={currency} onChange={(e) => setCurrency(e.target.value)} maxLength={3} />
               </Field>
             </div>
           </>
         )}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Quantity">
+          <Field label={tr("Quantity")}>
             <Input value={quantity} onChange={(e) => setQuantity(e.target.value)} inputMode="numeric" />
           </Field>
-          <Field label="Service day">
-            <DateField value={day} onChange={setDay} aria-label="Service day" />
+          <Field label={tr("Service day")}>
+            <DateField value={day} onChange={setDay} aria-label={tr("Service day")} />
           </Field>
         </div>
-        <Field label="Description" hint="Defaults to the service name">
+        <Field label={tr("Description")} hint={tr("Defaults to the service name")}>
           <Input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
         </Field>
-        {error && <p className="text-[13px] text-danger">{error}</p>}
+        {error && <p className="text-[13px] text-danger">{tx(error)}</p>}
       </div>
     </Modal>
   );

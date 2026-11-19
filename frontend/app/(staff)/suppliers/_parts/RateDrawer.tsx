@@ -13,6 +13,9 @@ import { Input, Select, Textarea, FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { UNIT_LABEL, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./RateDrawer.messages";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
 const MEAL_LABEL: Record<MealPlan, string> = { RO: "Room only", BB: "Bed & breakfast", HB: "Half board", FB: "Full board", AI: "All inclusive" };
@@ -28,6 +31,8 @@ export function RateDrawer({
   rate?: SupplierRate;
   onClose: () => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const options = useQuery({
@@ -60,21 +65,21 @@ export function RateDrawer({
       qc.invalidateQueries({ queryKey: ["supplier"] });
       qc.invalidateQueries({ queryKey: ["hotel"] });
       qc.invalidateQueries({ queryKey: ["service"] });
-      toast.success(rate ? "Rate saved." : "Rate added to the draft. Someone else publishes the contract.");
+      toast.success(rate ? t("Rate saved.") : t("Rate added to the draft. Someone else publishes the contract."));
       onClose();
     },
   });
 
   function submit() {
-    if (!rate && !form.target) return setLocalError("Pick the room type or service this rate prices.");
+    if (!rate && !form.target) return setLocalError(t("Pick the room type or service this rate prices."));
     const amount = form.net_amount.trim().replace(/,/g, "");
-    if (!AMOUNT_RE.test(amount)) return setLocalError("Net amount is a number with at most 2 decimals, e.g. 1200000 or 45.50.");
-    if (!form.valid_from) return setLocalError("Pick the first day the rate applies.");
-    if (form.valid_to && form.valid_to < form.valid_from) return setLocalError("“Valid to” is on or after “valid from”.");
+    if (!AMOUNT_RE.test(amount)) return setLocalError(t("Net amount is a number with at most 2 decimals, e.g. 1200000 or 45.50."));
+    if (!form.valid_from) return setLocalError(t("Pick the first day the rate applies."));
+    if (form.valid_to && form.valid_to < form.valid_from) return setLocalError(t("“Valid to” is on or after “valid from”."));
     const lo = form.pax_min ? Number(form.pax_min) : null;
     const hi = form.pax_max ? Number(form.pax_max) : null;
-    if ((lo !== null && !(lo >= 1)) || (hi !== null && !(hi >= 1))) return setLocalError("Pax numbers start at 1.");
-    if (lo !== null && hi !== null && hi < lo) return setLocalError("The pax band ends at or after where it starts.");
+    if ((lo !== null && !(lo >= 1)) || (hi !== null && !(hi >= 1))) return setLocalError(t("Pax numbers start at 1."));
+    if (lo !== null && hi !== null && hi < lo) return setLocalError(t("The pax band ends at or after where it starts."));
     setLocalError(null);
     const body: RateBody = {
       season: form.season.trim() || null,
@@ -100,8 +105,8 @@ export function RateDrawer({
     <FormDrawer
       open
       onClose={onClose}
-      title={rate ? "Edit rate" : "Add rate"}
-      submitLabel={rate ? "Save rate" : "Add rate"}
+      title={rate ? t("Edit rate") : t("Add rate")}
+      submitLabel={rate ? t("Save rate") : t("Add rate")}
       onSubmit={submit}
       busy={save.isPending}
       dirty={JSON.stringify(form) !== JSON.stringify(initial)}
@@ -110,62 +115,61 @@ export function RateDrawer({
       width={520}
     >
       <p className="text-[13px] text-muted">
-        Under <strong className="text-ink">{contract.title}</strong> in <strong className="text-ink">{contract.currency}</strong>. Saving makes you this
-        draft&apos;s maker: another person publishes it, and then its rates are fixed.
+        {t("Under")} <strong className="text-ink">{tx(contract.title)}</strong> {t("in")} <strong className="text-ink">{contract.currency}</strong>{t(". Saving makes you this draft's maker: another person publishes it, and then its rates are fixed.")}
       </p>
       {rate ? (
-        <FormField label="Prices" locked hint="A rate stays on what it prices; add a new rate for something else.">
+        <FormField label={t("Prices")} locked hint={t("A rate stays on what it prices; add a new rate for something else.")}>
           <Input className={inputCls} value={rateTarget(rate)} disabled />
         </FormField>
       ) : (
-        <FormField label="Prices" required hint="Active room types and services of this supplier." error={errorFor(fe, "hotel_room_type_id")}>
+        <FormField label={t("Prices")} required hint={t("Active room types and services of this supplier.")} error={errorFor(fe, "hotel_room_type_id")}>
           <Select className={inputCls} value={form.target} onChange={(e) => set("target")(e.target.value)} disabled={options.isLoading}>
             <option value="">
-              {options.isLoading ? "Loading…" : options.data?.items.length ? "Pick a room type or service" : "This supplier has no active hotel room or service yet"}
+              {options.isLoading ? t("Loading…") : options.data?.items.length ? t("Pick a room type or service") : t("This supplier has no active hotel room or service yet")}
             </option>
             {(options.data?.items ?? []).map((o) => (
               <option key={`${o.kind}:${o.id}`} value={`${o.kind}:${o.id}`}>
-                {o.kind === "room_type" ? "Room · " : "Service · "}
-                {o.label} ({o.code})
+                {o.kind === "room_type" ? t("Room · ") : t("Service · ")}
+                {tx(o.label)} ({o.code})
               </option>
             ))}
           </Select>
         </FormField>
       )}
-      {unit && <p className="-mt-2 text-xs text-muted">Net is {UNIT_LABEL[unit]}.</p>}
+      {unit && <p className="-mt-2 text-xs text-muted">{t("Net is {0}.", UNIT_LABEL[unit])}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Net amount" required hint={`In ${contract.currency}.`} error={errorFor(fe, "net_amount")}>
+        <FormField label={t("Net amount")} required hint={t("In {0}.", contract.currency)} error={errorFor(fe, "net_amount")}>
           <Input className={`${inputCls} bk-tabular`} inputMode="decimal" value={form.net_amount} onChange={(e) => set("net_amount")(e.target.value)} placeholder="1200000" />
         </FormField>
-        <FormField label="Season" hint="A label, e.g. Low, Peak, Christmas." error={errorFor(fe, "season")}>
+        <FormField label={t("Season")} hint={t("A label, e.g. Low, Peak, Christmas.")} error={errorFor(fe, "season")}>
           <Input className={inputCls} maxLength={80} value={form.season} onChange={(e) => set("season")(e.target.value)} />
         </FormField>
-        <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
+        <FormField label={t("Valid from")} required error={errorFor(fe, "valid_from")}>
           <DateField className={inputCls} value={form.valid_from} min={contract.valid_from} max={contract.valid_to ?? undefined} onChange={(v) => set("valid_from")(v)} />
         </FormField>
-        <FormField label="Valid to" hint={contract.valid_to ? "Inside the contract." : "Empty = open-ended."} error={errorFor(fe, "valid_to")}>
+        <FormField label={t("Valid to")} hint={contract.valid_to ? t("Inside the contract.") : t("Empty = open-ended.")} error={errorFor(fe, "valid_to")}>
           <DateField className={inputCls} value={form.valid_to} min={form.valid_from} max={contract.valid_to ?? undefined} onChange={(v) => set("valid_to")(v)} />
         </FormField>
-        <FormField label="Pax from" hint="Empty = any." error={errorFor(fe, "pax_min")}>
+        <FormField label={t("Pax from")} hint={t("Empty = any.")} error={errorFor(fe, "pax_min")}>
           <Input type="number" min={1} max={999} className={inputCls} value={form.pax_min} onChange={(e) => set("pax_min")(e.target.value)} />
         </FormField>
-        <FormField label="Pax to" error={errorFor(fe, "pax_max")}>
+        <FormField label={t("Pax to")} error={errorFor(fe, "pax_max")}>
           <Input type="number" min={1} max={999} className={inputCls} value={form.pax_max} onChange={(e) => set("pax_max")(e.target.value)} />
         </FormField>
       </div>
       {roomRate && (
-        <FormField label="Meal plan" error={errorFor(fe, "meal_plan")}>
+        <FormField label={t("Meal plan")} error={errorFor(fe, "meal_plan")}>
           <Select className={inputCls} value={form.meal_plan} onChange={(e) => set("meal_plan")(e.target.value)}>
-            <option value="">Not stated</option>
+            <option value="">{t("Not stated")}</option>
             {MEAL_PLANS.map((m) => (
               <option key={m} value={m}>
-                {m} · {MEAL_LABEL[m]}
+                {m} · {tx(MEAL_LABEL[m])}
               </option>
             ))}
           </Select>
         </FormField>
       )}
-      <FormField label="Notes" hint="Supplements, child policy… Staff only." error={errorFor(fe, "notes")}>
+      <FormField label={t("Notes")} hint={t("Supplements, child policy… Staff only.")} error={errorFor(fe, "notes")}>
         <Textarea className={textareaCls} maxLength={2000} value={form.notes} onChange={(e) => set("notes")(e.target.value)} />
       </FormField>
     </FormDrawer>

@@ -39,28 +39,19 @@ import {
   Money,
   PayoutStateBadge,
   SupplierBillStatusBadge,
-  formatMoney,
   useCan,
   useToast,
   DateField,
 } from "@/ui";
 import { fromCents, sumCents, toCents } from "./money";
 import { errorText, fieldCls, prepareEvidence, today } from "./evidence";
-import { formatDay } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./BillDrawer.messages";
+import { Fact, Field } from "./BillFields";
 
 const AMOUNT_RE = /^\d{1,14}(\.\d{1,2})?$/;
-
-function Field({ label, required = false, children, hint }: { label: string; required?: boolean; children: React.ReactNode; hint?: string }) {
-  return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-xs font-semibold text-muted">
-        {label} {required && <span className="text-danger">*</span>}
-      </span>
-      {children}
-      {hint && <span className="text-xs text-muted">{hint}</span>}
-    </label>
-  );
-}
 
 async function uploadFor(kind: "bill" | "payout", entityId: string, file: File): Promise<OpsFile> {
   const doc = await prepareEvidence(file);
@@ -79,6 +70,7 @@ function Files({
   canRemove: boolean;
   onChanged: () => void;
 }) {
+  const t = useT(MSG);
   const toast = useToast();
   const open = useMutation({
     mutationFn: (f: OpsFile) => supplierBillsApi.download(f.id),
@@ -90,12 +82,12 @@ function Files({
   const remove = useMutation({
     mutationFn: ({ f, reason }: { f: OpsFile; reason: string }) => supplierBillsApi.removeFile(f.id, reason),
     onSuccess: () => {
-      toast.success("File removed");
+      toast.success(t("File removed"));
       setRemoving(null);
       onChanged();
     },
   });
-  if (files.length === 0) return <p className="text-[13px] text-muted">No file yet.</p>;
+  if (files.length === 0) return <p className="text-[13px] text-muted">{t("No file yet.")}</p>;
   return (
     <>
     <ul className="flex flex-col gap-1">
@@ -105,15 +97,15 @@ function Files({
             weight="regular"
             onClick={() => open.mutate(f)}
             className="min-w-0 overflow-hidden"
-            title="Download (link valid 5 minutes)"
+            title={t("Download (link valid 5 minutes)")}
           >
             <Download size={13} className="shrink-0" />
             <span className="truncate">{f.file_name}</span>
-            {f.id === current && <span className="text-xs text-muted">(current)</span>}
+            {f.id === current && <span className="text-xs text-muted">{t("(current)")}</span>}
           </LinkButton>
           {canRemove && f.id !== current && (
             <LinkButton tone="muted" size="sm" weight="regular" onClick={() => setRemoving(f)} disabled={remove.isPending}>
-              Remove
+              {t("Remove")}
             </LinkButton>
           )}
         </li>
@@ -126,25 +118,27 @@ function Files({
         remove.reset();
       }}
       onConfirm={(reason) => removing && remove.mutate({ f: removing, reason })}
-      title={removing ? `Remove ${removing.file_name}` : "Remove file"}
-      confirmLabel="Remove file"
+      title={removing ? t("Remove {0}", removing.file_name) : t("Remove file")}
+      confirmLabel={t("Remove file")}
       danger
       busy={remove.isPending}
       error={remove.isError ? errorText(remove.error) : null}
-      reason={{ label: "Why is it removed?", required: true, placeholder: "e.g. wrong file, replaced by a clearer scan" }}
-      message="The file leaves this record for good (a removal is final); the reason goes into the audit log."
+      reason={{ label: t("Why is it removed?"), required: true, placeholder: t("e.g. wrong file, replaced by a clearer scan") }}
+      message={t("The file leaves this record for good (a removal is final); the reason goes into the audit log.")}
     />
     </>
   );
 }
 
 function AddFile({ label, onUpload }: { label: string; onUpload: (f: File) => Promise<unknown> }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const add = useMutation({
     mutationFn: (f: File) => onUpload(f),
     onSuccess: () => {
-      toast.success("File added");
+      toast.success(t("File added"));
       setFile(null);
     },
   });
@@ -152,9 +146,9 @@ function AddFile({ label, onUpload }: { label: string; onUpload: (f: File) => Pr
     <div className="flex flex-wrap items-center gap-2">
       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="min-w-0 max-w-full text-xs" />
       <Button size="sm" disabled={!file || add.isPending} onClick={() => file && add.mutate(file)}>
-        <FileUp size={13} /> {add.isPending ? "Uploading…" : label}
+        <FileUp size={13} /> {add.isPending ? t("Uploading…") : label}
       </Button>
-      {add.isError && <span className="text-xs text-danger">{errorText(add.error)}</span>}
+      {add.isError && <span className="text-xs text-danger">{tx(errorText(add.error))}</span>}
     </div>
   );
 }
@@ -171,7 +165,14 @@ function lineColumns(currency: string, canPricing: boolean): ColumnDef<SupplierB
           </span>
           <span className="text-xs text-muted">
             {row.original.code}
-            {row.original.service_date ? ` · ${formatDay(row.original.service_date)}` : ""}
+            {row.original.service_date ? (
+              <>
+                {" · "}
+                <DateText value={row.original.service_date} />
+              </>
+            ) : (
+              ""
+            )}
           </span>
         </span>
       ),
@@ -195,6 +196,9 @@ function lineColumns(currency: string, canPricing: boolean): ColumnDef<SupplierB
 type Dialog = { kind: "approve" } | { kind: "cancel" } | { kind: "pay" } | { kind: "edit" } | { kind: "void"; payout: SupplierPayout } | null;
 
 export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClose: () => void }) {
+  const t = useT(MSG);
+  const { formatDay, formatMoney } = useBookingFormat();
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const canPricing = useCan("pricing.read");
@@ -208,7 +212,7 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
   const approve = useMutation({
     mutationFn: (id: string) => supplierBillsApi.approve(id),
     onSuccess: (r) => {
-      toast.success(`${r.code} approved: an admin can now record the payout`);
+      toast.success(t("{0} approved: an admin can now record the payout", r.code));
       refresh();
       setDialog(null);
     },
@@ -216,7 +220,7 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
   const cancel = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => supplierBillsApi.cancel(id, reason),
     onSuccess: (r) => {
-      toast.success(`${r.code} cancelled`);
+      toast.success(t("{0} cancelled", r.code));
       refresh();
       setDialog(null);
     },
@@ -224,22 +228,22 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
   const voidPayout = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => supplierBillsApi.voidPayout(id, reason),
     onSuccess: (r) => {
-      toast.success(`${r.code} voided: the bill is back to "To pay"`);
+      toast.success(t("{0} voided: the bill is back to \"To pay\"", r.code));
       refresh();
       setDialog(null);
     },
   });
 
   return (
-    <Drawer open={!!billRef} onClose={onClose} title={b ? `${b.code} · ${b.supplier.name}` : "Supplier bill"} width={640}>
-      {q.isLoading && <p className="text-[13px] text-muted">Loading…</p>}
-      {q.isError && <p className="text-[13px] text-danger">{errorText(q.error)}</p>}
+    <Drawer open={!!billRef} onClose={onClose} title={b ? `${b.code} · ${b.supplier.name}` : t("Supplier bill")} width={640}>
+      {q.isLoading && <p className="text-[13px] text-muted">{t("Loading…")}</p>}
+      {q.isError && <p className="text-[13px] text-danger">{tx(errorText(q.error))}</p>}
       {b && (
         <div className="flex flex-col gap-5 text-[13px] text-body">
           <div className="flex flex-wrap items-center gap-2">
             <SupplierBillStatusBadge status={b.status} overdue={b.overdue} />
             <span className="text-muted">
-              Supplier bill <strong className="text-ink">{b.bill_number}</strong>
+              {t("Supplier bill")} <strong className="text-ink">{b.bill_number}</strong>
             </span>
             {b.trip_case && (
               <Link href={`/cases/${encodeURIComponent(b.trip_case.code)}?tab=suppliers`} className="text-accent-deep hover:underline">
@@ -248,67 +252,67 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
             )}
           </div>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-            <Fact label="Amount">
+            <Fact label={t("Amount")}>
               <Money amount={b.amount} currency={b.currency} strong />
             </Fact>
-            <Fact label="Paid out">
+            <Fact label={t("Paid out")}>
               <Money amount={b.paid_amount} currency={b.currency} />
             </Fact>
-            <Fact label="Left to pay">
+            <Fact label={t("Left to pay")}>
               <Money amount={b.balance} currency={b.currency} strong />
             </Fact>
-            <Fact label="Issued">
+            <Fact label={t("Issued")}>
               <DateText value={b.issue_date} />
             </Fact>
-            <Fact label="Due">
+            <Fact label={t("Due")}>
               <DateText value={b.due_date} className={b.overdue ? "font-semibold text-danger" : ""} />
             </Fact>
-            <Fact label="Entered by">{b.created_by?.name ?? b.created_by?.id ?? "—"}</Fact>
+            <Fact label={t("Entered by")}>{b.created_by?.name ?? b.created_by?.id ?? "—"}</Fact>
             {b.facts_edited_by && b.facts_edited_by.id !== b.created_by?.id && (
-              <Fact label="Amounts last changed by">{b.facts_edited_by.name ?? b.facts_edited_by.id}</Fact>
+              <Fact label={t("Amounts last changed by")}>{b.facts_edited_by.name ?? b.facts_edited_by.id}</Fact>
             )}
-            {b.approved_by && <Fact label="Approved by">{b.approved_by.name ?? b.approved_by.id}</Fact>}
-            {b.cancel_reason && <Fact label="Cancelled because">{b.cancel_reason}</Fact>}
+            {b.approved_by && <Fact label={t("Approved by")}>{b.approved_by.name ?? b.approved_by.id}</Fact>}
+            {b.cancel_reason && <Fact label={t("Cancelled because")}>{tx(b.cancel_reason)}</Fact>}
           </dl>
-          {b.notes && <p className="whitespace-pre-wrap rounded-md bg-surface px-3 py-2 text-[13px]">{b.notes}</p>}
+          {b.notes && <p className="whitespace-pre-wrap rounded-md bg-surface px-3 py-2 text-[13px]">{tx(b.notes)}</p>}
 
           <div className="flex flex-wrap gap-2">
             {b.actions.edit && (
               <Button variant="ghost" onClick={() => setDialog({ kind: "edit" })}>
-                <Pencil size={13} /> Edit
+                <Pencil size={13} /> {t("Edit")}
               </Button>
             )}
             {b.status === "received" && (
               <Button variant="primary" disabled={!b.actions.approve} onClick={() => setDialog({ kind: "approve" })}>
-                Approve
+                {t("Approve")}
               </Button>
             )}
             {b.actions.pay && (
               <Button variant="primary" onClick={() => setDialog({ kind: "pay" })}>
-                Record payout
+                {t("Record payout")}
               </Button>
             )}
             {b.actions.cancel && (
               <Button variant="ghost" onClick={() => setDialog({ kind: "cancel" })}>
-                Cancel bill
+                {t("Cancel bill")}
               </Button>
             )}
           </div>
           {b.status === "received" && b.approve_blockers.length > 0 && (
             <ul className="list-disc pl-5 text-xs text-muted">
               {b.approve_blockers.map((k) => (
-                <li key={k}>{APPROVE_BLOCKER_LABEL[k]}</li>
+                <li key={k}>{tx(APPROVE_BLOCKER_LABEL[k])}</li>
               ))}
             </ul>
           )}
           {b.status === "approved" && !b.actions.pay && (
-            <p className="text-xs text-muted">An admin who did not enter this bill or change its amounts records the payout.</p>
+            <p className="text-xs text-muted">{t("An admin who did not enter this bill or change its amounts records the payout.")}</p>
           )}
 
           <section className="flex flex-col gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Lines (confirmed supplier bookings)</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t("Lines (confirmed supplier bookings)")}</h3>
             {b.lines.length === 0 ? (
-              <p className="text-muted">No line yet: edit the bill and pick the bookings it covers.</p>
+              <p className="text-muted">{t("No line yet: edit the bill and pick the bookings it covers.")}</p>
             ) : (
               <DataTable<SupplierBillLine>
                 searchable={false}
@@ -320,25 +324,25 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
               />
             )}
             <p className="text-xs text-muted">
-              Lines total {formatMoney(b.lines_amount, b.currency)} of {formatMoney(b.amount, b.currency)}.
+              {t("Lines total {0} of {1}.", formatMoney(b.lines_amount, b.currency), formatMoney(b.amount, b.currency))}
             </p>
           </section>
 
           <section className="flex flex-col gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Supplier&apos;s document</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t("Supplier's document")}</h3>
             <Files files={b.files} current={b.document_file_id} canRemove={b.actions.attach} onChanged={refresh} />
             {b.actions.attach &&
               (b.trip_case?.channel === "b2b" || b.lines.some((l) => l.trip_case_channel === "b2b") ? (
-                <p className="text-xs text-muted">A bill for a B2B trip keeps no document (traveller names stay in the agency&apos;s CRM).</p>
+                <p className="text-xs text-muted">{t("A bill for a B2B trip keeps no document (traveller names stay in the agency's CRM).")}</p>
               ) : (
-                <AddFile label="Add document" onUpload={async (f) => { await uploadFor("bill", b.id, f); refresh(); }} />
+                <AddFile label={t("Add document")} onUpload={async (f) => { await uploadFor("bill", b.id, f); refresh(); }} />
               ))}
           </section>
 
           <section className="flex flex-col gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Payouts</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t("Payouts")}</h3>
             {b.payouts.length === 0 ? (
-              <p className="text-muted">No payout yet.</p>
+              <p className="text-muted">{t("No payout yet.")}</p>
             ) : (
               <ul className="flex flex-col divide-y divide-line2">
                 {b.payouts.map((p) => (
@@ -347,24 +351,23 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
                       <strong className="text-ink">{p.code}</strong>
                       <Money amount={p.amount} currency={p.currency} strong />
                       <span className="text-muted">
-                        {PAYMENT_METHOD_LABEL[p.method]} · <DateText value={p.paid_on} />
-                        {p.reference ? ` · ref ${p.reference}` : ""}
+                        {tx(PAYMENT_METHOD_LABEL[p.method])} · <DateText value={p.paid_on} />
+                        {p.reference ? t(" · ref {0}", p.reference) : ""}
                       </span>
                       <PayoutStateBadge state={p.state} />
-                      {p.needs_evidence && <span className="text-xs text-warning">No bank slip yet</span>}
+                      {p.needs_evidence && <span className="text-xs text-warning">{t("No bank slip yet")}</span>}
                     </div>
                     <span className="text-xs text-muted">
-                      Recorded by {p.recorded_by?.name ?? p.recorded_by?.id ?? "—"}
-                      {p.void_reason ? ` · voided: ${p.void_reason}` : ""}
+                      {t("Recorded by {0}{1}", p.recorded_by?.name ?? p.recorded_by?.id ?? "—", p.void_reason ? ` · voided: ${p.void_reason}` : "")}
                     </span>
                     <Files files={p.files} current={p.evidence_file_id} canRemove={p.actions.attach} onChanged={refresh} />
                     <div className="flex flex-wrap items-center gap-2">
                       {p.actions.attach && (
-                        <AddFile label="Add bank slip" onUpload={async (f) => { await uploadFor("payout", p.id, f); refresh(); }} />
+                        <AddFile label={t("Add bank slip")} onUpload={async (f) => { await uploadFor("payout", p.id, f); refresh(); }} />
                       )}
                       {p.actions.void && (
                         <Button size="sm" variant="ghost" onClick={() => setDialog({ kind: "void", payout: p })}>
-                          Void payout
+                          {t("Void payout")}
                         </Button>
                       )}
                     </div>
@@ -378,19 +381,16 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
             open={dialog?.kind === "approve"}
             onClose={() => setDialog(null)}
             onConfirm={() => approve.mutate(b.id)}
-            title={`Approve ${b.code}`}
-            confirmLabel="Approve bill"
+            title={t("Approve {0}", b.code)}
+            confirmLabel={t("Approve bill")}
             busy={approve.isPending}
             error={approve.isError ? errorText(approve.error) : null}
             message={
               <>
-                You checked the supplier&apos;s bill <strong>{b.bill_number}</strong> against the confirmed bookings: AA owes{" "}
-                <strong>{formatMoney(b.amount, b.currency)}</strong> to {b.supplier.name}, due {formatDay(b.due_date)}. Entered by{" "}
-                {b.created_by?.name ?? "someone else"}
-                {b.facts_edited_by && b.facts_edited_by.id !== b.created_by?.id
+                {t("You checked the supplier's bill")} <strong>{b.bill_number}</strong> {t("against the confirmed bookings: AA owes")}
+                <strong>{formatMoney(b.amount, b.currency)}</strong> {t("to {0}, due {1}. Entered by {2}{3}.", b.supplier.name, formatDay(b.due_date), b.created_by?.name ?? t("someone else"), b.facts_edited_by && b.facts_edited_by.id !== b.created_by?.id
                   ? `; amounts last changed by ${b.facts_edited_by.name ?? "someone else"}`
-                  : ""}
-                .
+                  : "")}
               </>
             }
           />
@@ -398,29 +398,28 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
             open={dialog?.kind === "cancel"}
             onClose={() => setDialog(null)}
             onConfirm={(reason) => cancel.mutate({ id: b.id, reason })}
-            title={`Cancel ${b.code}`}
-            confirmLabel="Cancel bill"
+            title={t("Cancel {0}", b.code)}
+            confirmLabel={t("Cancel bill")}
             danger
             busy={cancel.isPending}
             error={cancel.isError ? errorText(cancel.error) : null}
-            reason={{ label: "Why is it cancelled?", required: true, placeholder: "e.g. entered twice, the supplier sent a corrected bill" }}
-            message="The bill stays in the list as cancelled; its number can be entered again. A cancel is final."
+            reason={{ label: t("Why is it cancelled?"), required: true, placeholder: t("e.g. entered twice, the supplier sent a corrected bill") }}
+            message={t("The bill stays in the list as cancelled; its number can be entered again. A cancel is final.")}
           />
           <ConfirmDialog
             open={dialog?.kind === "void"}
             onClose={() => setDialog(null)}
             onConfirm={(reason) => dialog?.kind === "void" && voidPayout.mutate({ id: dialog.payout.id, reason })}
-            title={dialog?.kind === "void" ? `Void ${dialog.payout.code}` : "Void payout"}
-            confirmLabel="Void payout"
+            title={dialog?.kind === "void" ? t("Void {0}", dialog.payout.code) : t("Void payout")}
+            confirmLabel={t("Void payout")}
             danger
             busy={voidPayout.isPending}
             error={voidPayout.isError ? errorText(voidPayout.error) : null}
-            reason={{ label: "Why is it voided?", required: true, placeholder: "e.g. recorded twice, the transfer was returned" }}
+            reason={{ label: t("Why is it voided?"), required: true, placeholder: t("e.g. recorded twice, the transfer was returned") }}
             message={
               dialog?.kind === "void" ? (
                 <>
-                  {formatMoney(dialog.payout.amount, dialog.payout.currency)} stops counting on {b.code}; the bill goes back
-                  to To pay. A void is final.
+                  {t("{0} stops counting on {1}; the bill goes back to To pay. A void is final.", formatMoney(dialog.payout.amount, dialog.payout.currency), b.code)}
                 </>
               ) : null
             }
@@ -432,15 +431,6 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
         </div>
       )}
     </Drawer>
-  );
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col">
-      <dt className="text-xs text-muted">{label}</dt>
-      <dd className="truncate text-[13px] text-ink">{children}</dd>
-    </div>
   );
 }
 
@@ -477,6 +467,9 @@ export function BillForm({
   onClose: () => void;
   onSaved: (b: SupplierBillDetail) => void;
 }) {
+  const t = useT(MSG);
+  const { formatDay, formatMoney } = useBookingFormat();
+  const tx = useTx();
   const toast = useToast();
   const editing = !!bill;
   const [key] = useState(() => newIdempotencyKey("bill"));
@@ -575,8 +568,8 @@ export function BillForm({
       return { out, fileError };
     },
     onSuccess: ({ out, fileError }) => {
-      toast.success(editing ? `${out.code} saved` : `${out.code} entered: another person approves it`);
-      if (fileError) toast.error(`The document was not added: ${fileError}. Add it from the bill.`);
+      toast.success(editing ? t("{0} saved", out.code) : t("{0} entered: another person approves it", out.code));
+      if (fileError) toast.error(t("The document was not added: {0}. Add it from the bill.", fileError));
       onSaved(out);
       onClose();
     },
@@ -599,18 +592,18 @@ export function BillForm({
     <FormDrawer
       open={open}
       onClose={onClose}
-      title={editing ? `Edit ${bill.code}` : "Enter a supplier bill"}
+      title={editing ? t("Edit {0}", bill.code) : t("Enter a supplier bill")}
       onSubmit={() => valid && save.mutate()}
-      submitLabel={editing ? "Save" : "Enter bill"}
+      submitLabel={editing ? t("Save") : t("Enter bill")}
       busy={save.isPending}
-      error={error}
+      error={tx(error)}
       fieldErrors={fieldErrors}
       width={600}
     >
       <div className="flex flex-col gap-3 text-[13px] text-body">
-        {locked && <p className="text-xs text-muted">This bill is approved: only its notes change. Cancel it to enter a corrected one.</p>}
+        {locked && <p className="text-xs text-muted">{t("This bill is approved: only its notes change. Cancel it to enter a corrected one.")}</p>}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Supplier" required>
+          <Field label={t("Supplier")} required>
             {supplier || editing ? (
               <Input size="sm" className={fieldCls} value={supplier?.name ?? bill?.supplier.name ?? ""} disabled />
             ) : (
@@ -622,7 +615,7 @@ export function BillForm({
                   setLines({});
                 }}
               >
-                <option value="">Choose a supplier</option>
+                <option value="">{t("Choose a supplier")}</option>
                 {(suppliers.data?.items ?? []).map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.company_name}
@@ -631,7 +624,7 @@ export function BillForm({
               </Select>
             )}
           </Field>
-          <Field label="Trip case" hint="Optional: leave empty for a statement covering several trips.">
+          <Field label={t("Trip case")} hint={t("Optional: leave empty for a statement covering several trips.")}>
             <Input size="sm"
               className={fieldCls}
               value={caseRef}
@@ -643,34 +636,34 @@ export function BillForm({
               }}
             />
           </Field>
-          <Field label="Supplier's bill number" required>
+          <Field label={t("Supplier's bill number")} required>
             <Input size="sm" className={fieldCls} value={number} maxLength={100} disabled={locked} onChange={(e) => setNumber(e.target.value)} />
           </Field>
           <div className="grid grid-cols-[1fr_96px] gap-2">
-            <Field label="Amount" required>
+            <Field label={t("Amount")} required>
               <Input size="sm" className={fieldCls} inputMode="decimal" value={amount} disabled={locked} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
             </Field>
-            <Field label="Currency" required>
+            <Field label={t("Currency")} required>
               <Input size="sm" className={fieldCls} value={currency} maxLength={3} disabled={locked} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
             </Field>
           </div>
-          <Field label="Issue date" required>
+          <Field label={t("Issue date")} required>
             <DateField size="sm" className={fieldCls} value={issue} disabled={locked} onChange={(v) => setIssue(v)} />
           </Field>
-          <Field label="Due date" required>
+          <Field label={t("Due date")} required>
             <DateField size="sm" className={fieldCls} value={due} disabled={locked} onChange={(v) => setDue(v)} />
           </Field>
         </div>
 
         {!locked && (
           <div className="flex flex-col gap-2 rounded-md border border-line2 p-3">
-            <span className="text-xs font-semibold text-muted">Bookings this bill covers (confirmed, this supplier)</span>
+            <span className="text-xs font-semibold text-muted">{t("Bookings this bill covers (confirmed, this supplier)")}</span>
             {!supplierId ? (
-              <p className="text-xs text-muted">Choose the supplier first.</p>
+              <p className="text-xs text-muted">{t("Choose the supplier first.")}</p>
             ) : billable.isLoading ? (
-              <p className="text-xs text-muted">Loading bookings…</p>
+              <p className="text-xs text-muted">{t("Loading bookings…")}</p>
             ) : options.length === 0 ? (
-              <p className="text-xs text-muted">No confirmed booking with this supplier{caseRef ? ` on ${caseRef}` : ""}.</p>
+              <p className="text-xs text-muted">{t("No confirmed booking with this supplier{0}.", caseRef ? ` on ${caseRef}` : "")}</p>
             ) : (
               <ul className="flex flex-col divide-y divide-line2">
                 {options.map((o) => {
@@ -678,7 +671,7 @@ export function BillForm({
                   return (
                     <li key={o.id} className="flex flex-wrap items-center gap-2 py-1.5">
                       <Checkbox
-                        aria-label={`Bill ${o.code}`}
+                        aria-label={t("Bill {0}", o.code)}
                         checked={st.checked}
                         onChange={(e) =>
                           setLines((prev) => ({
@@ -688,14 +681,14 @@ export function BillForm({
                         }
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-ink" title={o.item_description}>
-                          {o.item_description}
+                        <span className="block truncate text-ink" title={tx(o.item_description)}>
+                          {tx(o.item_description)}
                         </span>
                         <span className="text-xs text-muted">
                           {o.code} · {o.trip_case_code}
                           {o.service_date ? ` · ${formatDay(o.service_date)}` : ""}
-                          {o.net_amount ? ` · net ${formatMoney(o.net_amount, o.net_currency)}` : ""}
-                          {o.billed.length ? ` · already billed ${o.billed.map((x) => formatMoney(x.amount, x.currency)).join(" + ")}` : ""}
+                          {o.net_amount ? t(" · net {0}", formatMoney(o.net_amount, o.net_currency)) : ""}
+                          {o.billed.length ? t(" · already billed {0}", o.billed.map((x) => formatMoney(x.amount, x.currency)).join(" + ")) : ""}
                         </span>
                       </span>
                       <Input size="sm"
@@ -703,7 +696,7 @@ export function BillForm({
                         inputMode="decimal"
                         disabled={!st.checked}
                         value={st.amount}
-                        aria-label={`Amount for ${o.code}`}
+                        aria-label={t("Amount for {0}", o.code)}
                         onChange={(e) => setLines((prev) => ({ ...prev, [o.id]: { checked: true, amount: e.target.value } }))}
                       />
                     </li>
@@ -713,18 +706,17 @@ export function BillForm({
             )}
             {picked.length > 0 && (
               <p className={`text-xs ${mismatch ? "text-warning" : "text-muted"}`}>
-                Lines total {linesTotal === null ? "—" : formatMoney(fromCents(linesTotal), currency)}
-                {mismatch ? ` — not the bill amount ${formatMoney(amount, currency)} yet: it can be saved, but not approved.` : "."}
+                {t("Lines total {0}{1}", linesTotal === null ? "—" : formatMoney(fromCents(linesTotal), currency), mismatch ? t(" — not the bill amount {0} yet: it can be saved, but not approved.", formatMoney(amount, currency)) : ".")}
               </p>
             )}
           </div>
         )}
 
-        <Field label="Notes" hint={hasB2b || bill?.trip_case?.channel === "b2b" ? "No traveller names on a B2B trip." : undefined}>
+        <Field label={t("Notes")} hint={hasB2b || bill?.trip_case?.channel === "b2b" ? t("No traveller names on a B2B trip.") : undefined}>
           <Textarea rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         {!locked && !hasB2b && (
-          <Field label="Supplier's document (PDF or a photo, at most 3 MB)" hint="Optional now; the approver checks it. Stored privately.">
+          <Field label={t("Supplier's document (PDF or a photo, at most 3 MB)")} hint={t("Optional now; the approver checks it. Stored privately.")}>
             <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-xs" />
           </Field>
         )}
@@ -737,6 +729,9 @@ export function BillForm({
 
 /** Record money paid to the supplier. One Idempotency-Key per opening: a retry of the same save returns the same payout. */
 export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetail; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const { formatMoney } = useBookingFormat();
+  const tx = useTx();
   const toast = useToast();
   const [key] = useState(() => newIdempotencyKey("spo"));
   const [amount, setAmount] = useState(bill.balance);
@@ -771,8 +766,8 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
       return { p, fileError };
     },
     onSuccess: ({ p, fileError }) => {
-      toast.success(`${p.code} recorded: ${p.bill.status === "paid" ? "the bill is paid" : `${formatMoney(p.bill.balance, p.currency)} left to pay`}`);
-      if (fileError) toast.error(`The bank slip was not added: ${fileError}. Add it from the payout.`);
+      toast.success(t("{0} recorded: {1}", p.code, p.bill.status === "paid" ? t("the bill is paid") : t("{0} left to pay", formatMoney(p.bill.balance, p.currency))));
+      if (fileError) toast.error(t("The bank slip was not added: {0}. Add it from the payout.", fileError));
       onDone();
       onClose();
     },
@@ -780,17 +775,16 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
   const duplicate = run.error instanceof ApiError && run.error.code === "duplicate_reference";
   const valid = AMOUNT_RE.test(amount.trim()) && Number(amount) > 0 && !!paidOn;
   return (
-    <Modal open onClose={onClose} title={`Record a payout on ${bill.code}`} width={560}>
+    <Modal open onClose={onClose} title={t("Record a payout on {0}", bill.code)} width={560}>
       <div className="flex flex-col gap-3 text-[13px] text-body">
         <p className="text-xs text-muted">
-          {bill.supplier.name} · bill {bill.bill_number}. Left to pay: <Money amount={bill.balance} currency={bill.currency} />. The bill
-          reads Paid once the payouts reach its amount.
+          {t("{0} · bill {1}. Left to pay:", bill.supplier.name, bill.bill_number)} <Money amount={bill.balance} currency={bill.currency} />{t(". The bill reads Paid once the payouts reach its amount.")}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={`Amount (${bill.currency})`} required>
+          <Field label={t("Amount ({0})", bill.currency)} required>
             <Input size="sm" className={fieldCls} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
-          <Field label="Method">
+          <Field label={t("Method")}>
             <Select size="sm" className={fieldCls} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
               {Object.entries(PAYMENT_METHOD_LABEL).map(([v, l]) => (
                 <option key={v} value={v}>
@@ -799,40 +793,39 @@ export function PayoutModal({ bill, onClose, onDone }: { bill: SupplierBillDetai
               ))}
             </Select>
           </Field>
-          <Field label="Day the money left" required>
+          <Field label={t("Day the money left")} required>
             <DateField size="sm" className={fieldCls} value={paidOn} onChange={(v) => setPaidOn(v)} />
           </Field>
-          <Field label="Bank reference" hint="Never a card number.">
+          <Field label={t("Bank reference")} hint={t("Never a card number.")}>
             <Input size="sm" className={fieldCls} value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />
           </Field>
         </div>
-        <Field label="Note">
+        <Field label={t("Note")}>
           <Textarea rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
         <div className="flex flex-col gap-2 rounded-md border border-line2 p-3">
           <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">
-            <FileUp size={13} /> Bank slip (PDF or a photo, at most 3 MB)
+            <FileUp size={13} /> {t("Bank slip (PDF or a photo, at most 3 MB)")}
           </span>
           <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-xs" />
-          <span className="text-xs text-muted">Kept with the payout as evidence. Stored privately.</span>
+          <span className="text-xs text-muted">{t("Kept with the payout as evidence. Stored privately.")}</span>
         </div>
         {run.isError && (
           <div className="text-danger">
-            <p>{errorText(run.error)}</p>
+            <p>{tx(errorText(run.error))}</p>
             {duplicate && (
               <label className="mt-1 flex items-center gap-2 text-xs text-body">
-                <Checkbox checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} /> It is another transfer
-                with the same reference: record it anyway
+                <Checkbox checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} /> {t("It is another transfer with the same reference: record it anyway")}
               </label>
             )}
           </div>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={run.isPending}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" disabled={run.isPending || !valid} onClick={() => run.mutate()}>
-            {run.isPending ? "Saving…" : "Record payout"}
+            {run.isPending ? t("Saving…") : t("Record payout")}
           </Button>
         </div>
       </div>

@@ -9,10 +9,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { suppliersApi, type Supplier } from "@/lib/api/suppliers";
 import { ConfirmDialog, useCan, useToast } from "@/ui";
 import { supplierError } from "./shared";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./useSupplierActions.messages";
 
 type Pending = { kind: "deactivate" | "activate"; supplier: Pick<Supplier, "code" | "company_name"> } | null;
 
 export function useSupplierActions() {
+  const t = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("supply.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -41,21 +46,19 @@ export function useSupplierActions() {
       onClose={() => setPending(null)}
       onConfirm={(reason) => pending && run.mutate({ p: pending, reason })}
       busy={run.isPending}
-      error={supplierError(run.error)}
+      error={tx(supplierError(run.error))}
       danger={pending?.kind === "deactivate"}
-      title={pending?.kind === "deactivate" ? "Deactivate supplier" : "Activate supplier"}
-      confirmLabel={pending?.kind === "deactivate" ? "Deactivate" : "Activate"}
-      reason={pending?.kind === "deactivate" ? { label: "Reason (optional)", placeholder: "e.g. closed for renovation" } : undefined}
+      title={pending?.kind === "deactivate" ? t("Deactivate supplier") : t("Activate supplier")}
+      confirmLabel={pending?.kind === "deactivate" ? t("Deactivate") : t("Activate")}
+      reason={pending?.kind === "deactivate" ? { label: t("Reason (optional)"), placeholder: t("e.g. closed for renovation") } : undefined}
       message={
         pending?.kind === "deactivate" ? (
           <>
-            Deactivate <strong className="text-ink">{name}</strong>? It stays on record with its contracts and history, but no
-            new contract can be added until it is activated again. A supplier with a published contract in force or starting
-            later cannot be deactivated.
+            {t("Deactivate")} <strong className="text-ink">{name}</strong>{t("? It stays on record with its contracts and history, but no new contract can be added until it is activated again. A supplier with a published contract in force or starting later cannot be deactivated.")}
           </>
         ) : (
           <>
-            Activate <strong className="text-ink">{name}</strong>? Contracting can add and publish contracts for it again.
+            {t("Activate")} <strong className="text-ink">{name}</strong>{t("? Contracting can add and publish contracts for it again.")}
           </>
         )
       }

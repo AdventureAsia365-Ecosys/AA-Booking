@@ -9,11 +9,15 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import type { CountryDetail, CountryPhoto } from "@/lib/api/geo";
 import { CisPhoto, FromCisTag, IconButton, LinkButton, ManagedInCisLink, Modal, Pressable, Section } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CountryPhotos.messages";
 
 /** CIS admin page of the photo library (per-country Drive folders matched to places and tours). */
 export const CIS_PHOTOS_PATH = "/admin/photos";
 
 export function CountryHero({ c }: { c: CountryDetail }) {
+  const t = useT(MSG);
   // The cover path that failed to load: the caption then says there is no photo instead of naming one not on screen.
   // Kept per path (like CisPhoto), so a new cover after a refetch is described again without an effect.
   const [failedCover, setFailedCover] = useState<string | null>(null);
@@ -24,40 +28,41 @@ export function CountryHero({ c }: { c: CountryDetail }) {
       <CisPhoto
         path={c.cover_photo_path}
         size="large"
-        alt={`${c.name} cover photo`}
+        alt={t("{0} cover photo", c.name)}
         fallbackLabel={c.country_code}
         onLoadError={() => setFailedCover(c.cover_photo_path)}
         className="aspect-[16/5] max-h-[280px] w-full rounded-lg border border-line"
       />
       <figcaption className="text-xs text-muted" data-testid="country-hero-caption">
-        {cover ? `${coverCaption ? `${coverCaption} · ` : ""}Cover from CIS` : `CIS has no photo for ${c.name} yet.`}
+        {cover ? t("{0}Cover from CIS", coverCaption ? `${coverCaption} · ` : "") : t("CIS has no photo for {0} yet.", c.name)}
       </figcaption>
     </figure>
   );
 }
 
 export function CountryGallery({ c, canOpenCis, onPlace }: { c: CountryDetail; canOpenCis: boolean; onPlace: (destinationId: string) => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [open, setOpen] = useState<number | null>(null);
   const items = c.photo_items;
   return (
     <Section
-      title="Photos"
+      title={t("Photos")}
       description={
         items.length < c.photos
-          ? `The first ${items.length} of ${c.photos} CIS photos of its places and tours.`
-          : "CIS photos of its places and tours."
+          ? t("The first {0} of {1} CIS photos of its places and tours.", items.length, c.photos)
+          : t("CIS photos of its places and tours.")
       }
       actions={
         <span className="flex items-center gap-3">
           <FromCisTag />
-          {canOpenCis && <ManagedInCisLink path={CIS_PHOTOS_PATH} label="Open CIS photos" />}
+          {canOpenCis && <ManagedInCisLink path={CIS_PHOTOS_PATH} label={t("Open CIS photos")} />}
         </span>
       }
     >
       {items.length === 0 ? (
         <p className="text-[13px] text-muted2" data-testid="country-photos-empty">
-          No CIS photos for {c.name} yet. Photos are added and matched to places in CIS; they show here as soon as CIS
-          publishes them.
+          {t("No CIS photos for {0} yet. Photos are added and matched to places in CIS; they show here as soon as CIS publishes them.", c.name)}
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-6" data-testid="country-photos">
@@ -66,11 +71,11 @@ export function CountryGallery({ c, canOpenCis, onPlace }: { c: CountryDetail; c
               <Pressable
                 onClick={() => setOpen(i)}
                 className="overflow-hidden rounded-md"
-                aria-label={`Open photo ${i + 1}${p.caption ? `: ${p.caption}` : ""}`}
+                aria-label={t("Open photo {0}{1}", i + 1, p.caption ? `: ${p.caption}` : "")}
               >
                 <CisPhoto path={p.path} alt="" className="aspect-[4/3] w-full transition-transform hover:scale-[1.03]" />
               </Pressable>
-              {p.caption && <p className="mt-1 truncate text-xs text-muted">{p.caption}</p>}
+              {p.caption && <p className="mt-1 truncate text-xs text-muted">{tx(p.caption)}</p>}
             </li>
           ))}
         </ul>
@@ -107,6 +112,7 @@ function Lightbox({
   onClose: () => void;
   onPlace: (destinationId: string) => void;
 }) {
+  const t = useT(MSG);
   const p = items[index];
   const many = items.length > 1;
   const prev = () => onIndex((index - 1 + items.length) % items.length);
@@ -121,34 +127,34 @@ function Lightbox({
     return () => window.removeEventListener("keydown", onKey);
   }, [many, index, items.length, onIndex]);
   return (
-    <Modal open onClose={onClose} width={960} title={`${name} · photo ${index + 1} of ${items.length}`}>
+    <Modal open onClose={onClose} width={960} title={t("{0} · photo {1} of {2}", name, index + 1, items.length)}>
       <div className="flex flex-col gap-3">
         <div className="relative">
           <CisPhoto
             key={p.path}
             path={p.path}
             size="large"
-            alt={p.caption ? `${p.caption}, ${name}` : `${name} photo ${index + 1}`}
-            fallbackLabel="No photo"
+            alt={p.caption ? `${p.caption}, ${name}` : t("{0} photo {1}", name, index + 1)}
+            fallbackLabel={t("No photo")}
             fit="contain"
             className="max-h-[70vh] min-h-[240px] w-full rounded-md"
           />
           {many && (
             <>
-              <NavButton side="left" label="Previous photo" onClick={prev}>
+              <NavButton side="left" label={t("Previous photo")} onClick={prev}>
                 <ChevronLeft size={18} />
               </NavButton>
-              <NavButton side="right" label="Next photo" onClick={next}>
+              <NavButton side="right" label={t("Next photo")} onClick={next}>
                 <ChevronRight size={18} />
               </NavButton>
             </>
           )}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
-          <span className="min-w-0 truncate text-body">{p.caption ?? "Tour photo"}</span>
+          <span className="min-w-0 truncate text-body">{p.caption ?? t("Tour photo")}</span>
           {p.destination_id && (
             <LinkButton onClick={() => onPlace(p.destination_id!)} style={{ gap: 4 }}>
-              <MapPin size={13} /> Open destination
+              <MapPin size={13} /> {t("Open destination")}
             </LinkButton>
           )}
         </div>
@@ -158,11 +164,12 @@ function Lightbox({
 }
 
 function NavButton({ side, label, onClick, children }: { side: "left" | "right"; label: string; onClick: () => void; children: React.ReactNode }) {
+  const tx = useTx();
   return (
     <IconButton
       variant="overlay"
       size="lg"
-      label={label}
+      label={tx(label)}
       title=""
       onClick={onClick}
       className={`absolute top-1/2 -translate-y-1/2 ${side === "left" ? "left-2" : "right-2"}`}

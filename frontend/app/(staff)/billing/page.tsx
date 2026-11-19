@@ -8,13 +8,16 @@
 
 import { EmptyState, PageFrame, useCan } from "@/ui";
 import { SupplierBillKpis, SupplierBillsList } from "./_parts/SupplierBills";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./page.messages";
 
 export default function BillingPage() {
+  const t = useT(MSG);
   const canBills = useCan("bill.read");
   return (
     <PageFrame
-      title="Supplier bills"
-      description="Bills suppliers sent AA, matched to confirmed supplier bookings. Another person approves each bill; an admin records the payouts."
+      title={t("Supplier bills")}
+      description={t("Bills suppliers sent AA, matched to confirmed supplier bookings. Another person approves each bill; an admin records the payouts.")}
     >
       {canBills ? (
         <>
@@ -22,7 +25,7 @@ export default function BillingPage() {
           <SupplierBillsList />
         </>
       ) : (
-        <EmptyState title="No access" description="Supplier bills need the bill reader permission (admin, sales or contracting)." />
+        <EmptyState title={t("No access")} description={t("Supplier bills need the bill reader permission (admin, sales or contracting).")} />
       )}
     </PageFrame>
   );

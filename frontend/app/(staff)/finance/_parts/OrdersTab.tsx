@@ -13,6 +13,10 @@ import { ApiError } from "@/lib/api/client";
 import { ORDER_STATE_LABEL, financeApi, type OrderLine, type OrderState, type SupplierOrder } from "@/lib/api/finance";
 import { Button, DataTable, DateText, Drawer, Field, FilterBar, Input, Modal, Money, Pill, Section, Textarea, useCan, useToast, useUrlFilters } from "@/ui";
 import { ReasonDialog } from "./DeparturesTab";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./OrdersTab.messages";
 
 function errorText(e: unknown, fallback = "Something went wrong"): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -28,9 +32,10 @@ const STATE_TONE: Record<OrderState, "neutral" | "info" | "success" | "warning" 
 };
 
 function StatePill({ state }: { state: OrderState }) {
+  const tx = useTx();
   return (
     <Pill tone={STATE_TONE[state]} dot={false}>
-      {ORDER_STATE_LABEL[state]}
+      {tx(ORDER_STATE_LABEL[state])}
     </Pill>
   );
 }
@@ -61,6 +66,7 @@ const COLUMNS: ColumnDef<SupplierOrder, unknown>[] = [
 ];
 
 export function OrdersTab() {
+  const t = useT(MSG);
   const canWrite = useCan("ops.write");
   const { get, setMany } = useUrlFilters();
   const [creating, setCreating] = useState(false);
@@ -68,12 +74,12 @@ export function OrdersTab() {
   const list = useQuery({ queryKey: ["finance", "orders", q], queryFn: () => financeApi.orders(q) });
   return (
     <Section
-      title="Purchase orders"
-      description="One order per supplier, currency and service month, grouping the pending supplier bookings of trip cases and departures. Sending it asks the supplier for every line at once."
+      title={t("Purchase orders")}
+      description={t("One order per supplier, currency and service month, grouping the pending supplier bookings of trip cases and departures. Sending it asks the supplier for every line at once.")}
       actions={
         canWrite ? (
           <Button variant="primary" onClick={() => setCreating(true)}>
-            Create orders
+            {t("Create orders")}
           </Button>
         ) : null
       }
@@ -84,12 +90,12 @@ export function OrdersTab() {
             selects={[
               {
                 key: "order_status",
-                label: "Status",
-                allLabel: "Open (not cancelled)",
+                label: t("Status"),
+                allLabel: t("Open (not cancelled)"),
                 options: [
-                  { value: "draft", label: "Draft" },
-                  { value: "sent", label: "Sent" },
-                  { value: "cancelled", label: "Cancelled" },
+                  { value: "draft", label: t("Draft") },
+                  { value: "sent", label: t("Sent") },
+                  { value: "cancelled", label: t("Cancelled") },
                 ],
                 width: 190,
               },
@@ -105,10 +111,10 @@ export function OrdersTab() {
         getRowId={(r) => r.id}
         onRowClick={(r) => setMany({ order: r.code })}
         loading={list.isLoading}
-        error={list.isError ? errorText(list.error, "Could not load the purchase orders") : null}
+        error={list.isError ? errorText(list.error, t("Could not load the purchase orders")) : null}
         onRetry={() => list.refetch()}
-        emptyTitle="No purchase order"
-        emptyDescription="Create orders from the pending supplier bookings of sold trip cases."
+        emptyTitle={t("No purchase order")}
+        emptyDescription={t("Create orders from the pending supplier bookings of sold trip cases.")}
         tableMinWidth={760}
       />
       <OrderDrawer orderRef={get("order") || null} onClose={() => setMany({ order: null })} />
@@ -118,6 +124,7 @@ export function OrdersTab() {
 }
 
 function CreateOrdersModal({ onClose, onCreated }: { onClose: () => void; onCreated: (code: string | null) => void }) {
+  const t = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const [cases, setCases] = useState("");
@@ -135,8 +142,8 @@ function CreateOrdersModal({ onClose, onCreated }: { onClose: () => void; onCrea
       const skipped = r.skipped.no_net + r.skipped.no_date;
       toast.success(
         r.lines
-          ? `${r.lines} booking(s) on ${r.orders.length} order(s)${skipped ? `; ${skipped} left out (no net or no day)` : ""}`
-          : "No pending supplier booking to order",
+          ? t("{0} booking(s) on {1} order(s){2}", r.lines, r.orders.length, skipped ? t("; {0} left out (no net or no day)", skipped) : "")
+          : t("No pending supplier booking to order"),
       );
       onCreated(r.orders.length === 1 ? r.orders[0]!.code : null);
       onClose();
@@ -147,22 +154,22 @@ function CreateOrdersModal({ onClose, onCreated }: { onClose: () => void; onCrea
     <Modal
       open
       onClose={onClose}
-      title="Create purchase orders"
+      title={t("Create purchase orders")}
       footer={
         <div className="flex justify-end gap-2">
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t("Cancel")}</Button>
           <Button variant="primary" onClick={() => create.mutate()} disabled={!cases.trim() || create.isPending}>
-            Create
+            {t("Create")}
           </Button>
         </div>
       }
     >
       <Field
-        label="Trip cases"
-        hint="Codes separated by commas or spaces. Departure shared costs are ordered from the departure drawer."
+        label={t("Trip cases")}
+        hint={t("Codes separated by commas or spaces. Departure shared costs are ordered from the departure drawer.")}
         error={error ?? undefined}
       >
-        <Input value={cases} onChange={(e) => setCases(e.target.value)} placeholder="TC-000123, TC-000124" />
+        <Input value={cases} onChange={(e) => setCases(e.target.value)} placeholder={t("TC-000123, TC-000124")} />
       </Field>
     </Modal>
   );
@@ -175,7 +182,7 @@ const LINE_COLUMNS: ColumnDef<OrderLine, unknown>[] = [
     cell: ({ row }) => (
       <span className="flex flex-col">
         <span className="font-semibold">{row.original.code}</span>
-        <span className="text-xs text-muted">{row.original.trip_case_code ?? `Group departure ${row.original.departure_start_date ?? ""}`}</span>
+        <span className="text-xs text-muted">{row.original.trip_case_code ?? <Phrase text={`Group departure ${row.original.departure_start_date ?? ""}`} />}</span>
       </span>
     ),
   },
@@ -200,6 +207,8 @@ const LINE_COLUMNS: ColumnDef<OrderLine, unknown>[] = [
 ];
 
 function OrderDrawer({ orderRef, onClose }: { orderRef: string | null; onClose: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("ops.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -210,7 +219,7 @@ function OrderDrawer({ orderRef, onClose }: { orderRef: string | null; onClose: 
   const send = useMutation({
     mutationFn: () => financeApi.sendOrder(orderRef!, note.trim() || undefined),
     onSuccess: () => {
-      toast.success("Sending: the e-mail goes out within a minute");
+      toast.success(t("Sending: the e-mail goes out within a minute"));
       setSending(false);
       qc.invalidateQueries({ queryKey: ["finance"] });
     },
@@ -218,46 +227,45 @@ function OrderDrawer({ orderRef, onClose }: { orderRef: string | null; onClose: 
   });
   const o = q.data;
   return (
-    <Drawer open={!!orderRef} onClose={onClose} width={760} title={o ? `${o.code} · ${o.supplier.name}` : "Purchase order"}>
-      {q.isLoading && <p className="text-[13px] text-muted">Loading…</p>}
-      {q.isError && <p className="text-[13px] text-danger">{errorText(q.error, "Could not load the order")}</p>}
+    <Drawer open={!!orderRef} onClose={onClose} width={760} title={o ? `${o.code} · ${o.supplier.name}` : t("Purchase order")}>
+      {q.isLoading && <p className="text-[13px] text-muted">{t("Loading…")}</p>}
+      {q.isError && <p className="text-[13px] text-danger">{tx(errorText(q.error, t("Could not load the order")))}</p>}
       {o && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-3 text-[13px] text-body">
             <StatePill state={o.state} />
-            <span>Service month {o.service_month.slice(0, 7)}</span>
+            <span>{t("Service month")} {o.service_month.slice(0, 7)}</span>
             <span>
-              Total <Money amount={o.total_net ?? o.live_net ?? "0"} currency={o.currency} strong />
+              {t("Total")} <Money amount={o.total_net ?? o.live_net ?? "0"} currency={o.currency} strong />
             </span>
             {o.sent_to && (
               <span>
-                To {o.sent_to}
-                {o.redirected ? " (test copy sent to the staff inbox)" : ""}
+                {t("To {0}{1}", o.sent_to, o.redirected ? t(" (test copy sent to the staff inbox)") : "")}
               </span>
             )}
           </div>
           {o.send_error && (
             <Pill tone="danger" dot={false}>
-              Not sent: {o.send_error}
+              {t("Not sent: {0}", o.send_error)}
             </Pill>
           )}
           {!o.supplier.email && o.status === "draft" && (
             <Pill tone="warning" dot={false}>
-              The supplier has no contact e-mail: add one on the supplier page to send
+              {t("The supplier has no contact e-mail: add one on the supplier page to send")}
             </Pill>
           )}
           <div className="flex flex-wrap gap-2">
             <a href={financeApi.documentHref(o.code)} target="_blank" rel="noreferrer" className="text-[13px] font-semibold text-accent-deep hover:underline">
-              Printable order
+              {t("Printable order")}
             </a>
             {canWrite && o.actions.send && (
               <Button size="sm" variant="primary" onClick={() => setSending(true)}>
-                Send to supplier
+                {t("Send to supplier")}
               </Button>
             )}
             {canWrite && o.actions.cancel && (
               <Button size="sm" variant="ghost" onClick={() => setCancelling(true)}>
-                Cancel order
+                {t("Cancel order")}
               </Button>
             )}
           </div>
@@ -267,7 +275,7 @@ function OrderDrawer({ orderRef, onClose }: { orderRef: string | null; onClose: 
             data={o.lines}
             columns={LINE_COLUMNS}
             getRowId={(r) => r.id}
-            emptyTitle="No line"
+            emptyTitle={t("No line")}
             tableMinWidth={680}
           />
         </div>
@@ -276,29 +284,29 @@ function OrderDrawer({ orderRef, onClose }: { orderRef: string | null; onClose: 
         <Modal
           open
           onClose={() => setSending(false)}
-          title={`Send ${o.code}`}
+          title={t("Send {0}", o.code)}
           footer={
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setSending(false)}>Back</Button>
+              <Button onClick={() => setSending(false)}>{t("Back")}</Button>
               <Button variant="primary" onClick={() => send.mutate()} disabled={send.isPending}>
-                Send
+                {t("Send")}
               </Button>
             </div>
           }
         >
-          <Field label="Note to the supplier (optional)" hint="Printed on the order. No traveller or agency names.">
+          <Field label={t("Note to the supplier (optional)")} hint={t("Printed on the order. No traveller or agency names.")}>
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={2000} />
           </Field>
         </Modal>
       )}
       {cancelling && o && (
         <ReasonDialog
-          title={`Cancel ${o.code}`}
-          confirmLabel="Cancel order"
+          title={t("Cancel {0}", o.code)}
+          confirmLabel={t("Cancel order")}
           onClose={() => setCancelling(false)}
           onConfirm={async (reason) => {
             await financeApi.cancelOrder(o.code, reason);
-            toast.success("Order cancelled");
+            toast.success(t("Order cancelled"));
             qc.invalidateQueries({ queryKey: ["finance"] });
           }}
         />

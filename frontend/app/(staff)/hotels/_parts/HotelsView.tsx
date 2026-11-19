@@ -39,8 +39,14 @@ import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { HotelDrawer } from "./HotelDrawer";
 import { HotelFormDrawer } from "./HotelFormDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./HotelsView.messages";
 
 export function HotelsView() {
+  const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const paging = useOffsetPage();
   const countries = useCountries();
@@ -63,13 +69,13 @@ export function HotelsView() {
   const open = get("hotel");
 
   function menuFor(row: Hotel): RowMenuItem[] {
-    const items: RowMenuItem[] = [{ label: "View hotel", icon: <Eye size={15} />, onSelect: () => set("hotel", row.code) }];
+    const items: RowMenuItem[] = [{ label: t("View hotel"), icon: <Eye size={15} />, onSelect: () => set("hotel", row.code) }];
     if (status.canWrite) {
-      items.push({ label: "Edit hotel", icon: <Pencil size={15} />, onSelect: () => setEditRef(row.code) });
+      items.push({ label: t("Edit hotel"), icon: <Pencil size={15} />, onSelect: () => setEditRef(row.code) });
       items.push(
         row.status === "active"
-          ? { label: "Deactivate", icon: <Ban size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, false), danger: true, divider: true }
-          : { label: "Activate", icon: <Power size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, true), divider: true },
+          ? { label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, false), danger: true, divider: true }
+          : { label: t("Activate"), icon: <Power size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, true), divider: true },
       );
     }
     return items;
@@ -79,9 +85,9 @@ export function HotelsView() {
     ...COLUMNS,
     {
       id: "actions",
-      header: "Actions",
+      header: t("Actions"),
       enableSorting: false,
-      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.name}`} />,
+      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={t("Actions for {0}", row.original.name)} />,
     },
   ];
   const filtered = !!(filters.q || filters.status || filters.country || filters.star_rating);
@@ -89,54 +95,54 @@ export function HotelsView() {
   const selects: FilterSelect[] = [
     {
       key: "status",
-      label: "Status",
-      allLabel: "All statuses",
+      label: t("Status"),
+      allLabel: t("All statuses"),
       options: [
-        { value: "active", label: "Active" },
-        { value: "inactive", label: "Inactive" },
+        { value: "active", label: t("Active") },
+        { value: "inactive", label: t("Inactive") },
       ],
     },
     {
       key: "country",
-      label: "Country",
-      allLabel: "All countries",
+      label: t("Country"),
+      allLabel: t("All countries"),
       options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
       width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
     },
     {
       key: "stars",
-      label: "Stars",
-      allLabel: "Any rating",
+      label: t("Stars"),
+      allLabel: t("Any rating"),
       options: [5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} ${n === 1 ? "star" : "stars"}` })),
     },
     {
       key: "sort",
-      label: "Sort",
-      allLabel: "Name A–Z",
+      label: t("Sort"),
+      allLabel: t("Name A–Z"),
       options: [
-        { value: "-updated_at", label: "Recently updated" },
-        { value: "-created_at", label: "Newest first" },
-        { value: "-star_rating", label: "Most stars" },
+        { value: "-updated_at", label: t("Recently updated") },
+        { value: "-created_at", label: t("Newest first") },
+        { value: "-star_rating", label: t("Most stars") },
       ],
     },
   ];
-  const emptyTitle = filtered ? "No hotels match" : "No hotels yet";
+  const emptyTitle = filtered ? t("No hotels match") : t("No hotels yet");
   const emptyDescription = filtered
-    ? "Change the search or the filters, or reset them to see every hotel."
+    ? t("Change the search or the filters, or reset them to see every hotel.")
     : status.canWrite
-      ? "Add the first hotel with Add hotel. It needs a supplier with the Hotel category."
-      : "Contracting adds hotels here; they appear once created.";
+      ? t("Add the first hotel with Add hotel. It needs a supplier with the Hotel category.")
+      : t("Contracting adds hotels here; they appear once created.");
   return (
     <PageFrame
-      title="Hotels"
-      description="Hotels Booking contracts through its suppliers, at places that come from CIS. Facts, rooms and supplier photos here; descriptions and published photos are CIS content."
+      title={t("Hotels")}
+      description={t("Hotels Booking contracts through its suppliers, at places that come from CIS. Facts, rooms and supplier photos here; descriptions and published photos are CIS content.")}
       actions={
         <>
           <span data-testid="hotels-view">
             <Tabs
               tabs={[
-                { key: "grid", label: "Grid" },
-                { key: "table", label: "Table" },
+                { key: "grid", label: t("Grid") },
+                { key: "table", label: t("Table") },
               ]}
               active={view}
               onChange={(k) => set("view", k === "table" ? "table" : null)}
@@ -144,7 +150,7 @@ export function HotelsView() {
           </span>
           {status.canWrite && (
             <Button variant="primary" onClick={() => setForm({})}>
-              <Plus size={15} /> Add hotel
+              <Plus size={15} /> {t("Add hotel")}
             </Button>
           )}
         </>
@@ -166,9 +172,9 @@ export function HotelsView() {
               ))}
             </div>
           ) : list.isError ? (
-            <ErrorState message={(list.error as Error).message} onRetry={() => list.refetch()} />
+            <ErrorState message={tx((list.error as Error).message)} onRetry={() => list.refetch()} />
           ) : (list.data?.items.length ?? 0) === 0 ? (
-            <EmptyState title={emptyTitle} description={emptyDescription} />
+            <EmptyState title={tx(emptyTitle)} description={tx(emptyDescription)} />
           ) : (
             <ul className={GRID} data-testid="hotel-grid">
               {list.data!.items.map((h) => (
@@ -176,7 +182,7 @@ export function HotelsView() {
                   key={h.id}
                   hotel={h}
                   onOpen={() => set("hotel", h.code)}
-                  menu={<RowMenu items={menuFor(h)} label={`Actions for ${h.name}`} />}
+                  menu={<RowMenu items={menuFor(h)} label={t("Actions for {0}", h.name)} />}
                 />
               ))}
             </ul>
@@ -205,8 +211,8 @@ export function HotelsView() {
             onRetry={() => list.refetch()}
             pageSizeOptions={PAGE_SIZES}
             serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-            emptyTitle={emptyTitle}
-            emptyDescription={emptyDescription}
+            emptyTitle={tx(emptyTitle)}
+            emptyDescription={tx(emptyDescription)}
             onRowClick={(r) => set("hotel", r.code)}
             tableMinWidth={860}
           />
@@ -291,7 +297,7 @@ const COLUMNS: ColumnDef<Hotel, unknown>[] = [
         <SupplierStatusBadge status={row.original.status} />
         {/* AA-910: the date never breaks, but it may drop under "Updated" (a row older than 7 days shows the full date, much wider than "3 d ago"). */}
         <span className="text-xs text-muted">
-          Updated <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
+          <Phrase text="Updated" /> <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
         </span>
       </span>
     ),
@@ -323,6 +329,7 @@ const HOTEL_CSV: { header: string; value: (h: Hotel) => unknown }[] = [
 
 /** The first supplier photo (a presigned URL), or the same neutral tile as a CIS photo that is missing. */
 function HotelCover({ url, name }: { url: string | null | undefined; name: string }) {
+  const t = useT(MSG);
   const [failed, setFailed] = useState<string | null>(null);
   if (!url || failed === url) {
     return (
@@ -330,9 +337,9 @@ function HotelCover({ url, name }: { url: string | null | undefined; name: strin
         data-hotel-photo="none"
         className="grid aspect-[16/10] w-full place-items-center bg-panel bg-gradient-to-br from-panel to-line/60 text-muted2"
         role="img"
-        aria-label={`${name}: no photo`}
+        aria-label={t("{0}: no photo", name)}
       >
-        <span className="select-none text-[11px] font-semibold uppercase tracking-[0.08em]">No photo</span>
+        <span className="select-none text-[11px] font-semibold uppercase tracking-[0.08em]">{t("No photo")}</span>
       </span>
     );
   }
@@ -350,6 +357,7 @@ function HotelCover({ url, name }: { url: string | null | undefined; name: strin
 }
 
 function HotelCard({ hotel: h, onOpen, menu }: { hotel: Hotel; onOpen: () => void; menu: React.ReactNode }) {
+  const t = useT(MSG);
   const place = placeText(h);
   const photos = h.photo_count ?? 0;
   return (
@@ -367,7 +375,7 @@ function HotelCard({ hotel: h, onOpen, menu }: { hotel: Hotel; onOpen: () => voi
       >
         <HotelCover url={h.cover_photo_url} name={h.name} />
         <span className="bk-tabular absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[11.5px] font-medium text-white">
-          <ImageIcon size={12} /> {photos === 1 ? "1 photo" : `${photos} photos`}
+          <ImageIcon size={12} /> {photos === 1 ? t("1 photo") : t("{0} photos", photos)}
         </span>
         {place && (
           <span className="absolute right-2 top-2 inline-flex max-w-[75%] items-center gap-1 rounded-full bg-card/90 px-2 py-0.5 text-[11.5px] font-medium text-ink">
@@ -408,12 +416,12 @@ function HotelCard({ hotel: h, onOpen, menu }: { hotel: Hotel; onOpen: () => voi
           </span>
         </div>
         <p className="text-xs text-muted">
-          {h.room_type_count === 1 ? "1 room type" : `${h.room_type_count} room types`} · {h.rates_in_force} rates in force
+          {t("{0} · {1} rates in force", h.room_type_count === 1 ? t("1 room type") : t("{0} room types", h.room_type_count), h.rates_in_force)}
         </p>
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-line2 pt-2">
           <SupplierStatusBadge status={h.status} />
           <span className="text-xs text-muted">
-            Updated <DateText value={h.updated_at} relative className="whitespace-nowrap" />
+            {t("Updated")} <DateText value={h.updated_at} relative className="whitespace-nowrap" />
           </span>
         </div>
       </div>
@@ -433,6 +441,7 @@ function GridPager({
   total: number;
   onChange: (pageIndex: number, pageSize: number) => void;
 }) {
+  const t = useT(MSG);
   if (total === 0) return null;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const from = pageIndex * pageSize + 1;
@@ -440,23 +449,23 @@ function GridPager({
   return (
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted" data-testid="hotel-grid-pager">
       <span className="bk-tabular">
-        {from}–{to} of {total}
+        {t("{0}–{1} of {2}", from, to, total)}
       </span>
       <span className="flex items-center gap-2">
         <Select
           size="sm"
-          aria-label="Hotels per page"
+          aria-label={t("Hotels per page")}
           value={String(pageSize)}
           onChange={(e) => onChange(0, Number(e.target.value))}
-          options={PAGE_SIZES.map((n) => ({ value: String(n), label: `${n} per page` }))}
+          options={PAGE_SIZES.map((n) => ({ value: String(n), label: t("{0} per page", n) }))}
         />
-        <Button size="sm" variant="ghost" ariaLabel="Previous page" disabled={pageIndex === 0} onClick={() => onChange(pageIndex - 1, pageSize)}>
+        <Button size="sm" variant="ghost" ariaLabel={t("Previous page")} disabled={pageIndex === 0} onClick={() => onChange(pageIndex - 1, pageSize)}>
           <ChevronLeft size={14} />
         </Button>
         <span className="bk-tabular">
           {pageIndex + 1} / {pages}
         </span>
-        <Button size="sm" variant="ghost" ariaLabel="Next page" disabled={pageIndex + 1 >= pages} onClick={() => onChange(pageIndex + 1, pageSize)}>
+        <Button size="sm" variant="ghost" ariaLabel={t("Next page")} disabled={pageIndex + 1 >= pages} onClick={() => onChange(pageIndex + 1, pageSize)}>
           <ChevronRight size={14} />
         </Button>
       </span>

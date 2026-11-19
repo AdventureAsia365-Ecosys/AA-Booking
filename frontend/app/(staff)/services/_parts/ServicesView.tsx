@@ -17,10 +17,16 @@ import { SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { ServiceFormDrawer } from "./ServiceFormDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ServicesView.messages";
 
 export const serviceHref = (s: Pick<Service, "code">) => `/services/${encodeURIComponent(s.code)}`;
 
 export function ServicesView() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const { get } = useUrlFilters();
   const paging = useOffsetPage();
@@ -41,12 +47,12 @@ export function ServicesView() {
   });
 
   function menuFor(row: Service): RowMenuItem[] {
-    const items: RowMenuItem[] = [{ label: "View service", icon: <Eye size={15} />, onSelect: () => router.push(serviceHref(row)) }];
+    const items: RowMenuItem[] = [{ label: tr("View service"), icon: <Eye size={15} />, onSelect: () => router.push(serviceHref(row)) }];
     if (status.canWrite) {
       items.push(
         row.status === "active"
-          ? { label: "Deactivate", icon: <Ban size={15} />, onSelect: () => status.ask("service", { code: row.code, name: row.title }, false), danger: true, divider: true }
-          : { label: "Activate", icon: <Power size={15} />, onSelect: () => status.ask("service", { code: row.code, name: row.title }, true), divider: true },
+          ? { label: tr("Deactivate"), icon: <Ban size={15} />, onSelect: () => status.ask("service", { code: row.code, name: row.title }, false), danger: true, divider: true }
+          : { label: tr("Activate"), icon: <Power size={15} />, onSelect: () => status.ask("service", { code: row.code, name: row.title }, true), divider: true },
       );
     }
     return items;
@@ -56,20 +62,20 @@ export function ServicesView() {
     ...COLUMNS,
     {
       id: "actions",
-      header: "Actions",
+      header: tr("Actions"),
       enableSorting: false,
-      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={`Actions for ${row.original.title}`} />,
+      cell: ({ row }) => <RowMenu items={menuFor(row.original)} label={tr("Actions for {0}", row.original.title)} />,
     },
   ];
   const filtered = !!(filters.q || filters.type || filters.status || filters.country);
   return (
     <PageFrame
-      title="Services"
-      description="Activities, transfers, guides, entrances and meals Booking buys, at CIS places. Customer-facing text stays in CIS."
+      title={tr("Services")}
+      description={tr("Activities, transfers, guides, entrances and meals Booking buys, at CIS places. Customer-facing text stays in CIS.")}
       actions={
         status.canWrite && (
           <Button variant="primary" onClick={() => setAdding(true)}>
-            <Plus size={15} /> Add service
+            <Plus size={15} /> {tr("Add service")}
           </Button>
         )
       }
@@ -79,33 +85,33 @@ export function ServicesView() {
           <DataTable<Service>
             filters={
               <FilterBar
-                search={{ placeholder: "Search title, SVC- code or supplier" }}
+                search={{ placeholder: tr("Search title, SVC- code or supplier") }}
                 selects={[
-                  { key: "type", label: "Type", allLabel: "All types", options: SERVICE_TYPES.map((t) => ({ value: t, label: SERVICE_TYPE_LABEL[t] })) },
+                  { key: "type", label: tr("Type"), allLabel: tr("All types"), options: SERVICE_TYPES.map((t) => ({ value: t, label: tx(SERVICE_TYPE_LABEL[t]) })) },
                   {
                     key: "status",
-                    label: "Status",
-                    allLabel: "All statuses",
+                    label: tr("Status"),
+                    allLabel: tr("All statuses"),
                     options: [
-                      { value: "active", label: "Active" },
-                      { value: "inactive", label: "Inactive" },
+                      { value: "active", label: tr("Active") },
+                      { value: "inactive", label: tr("Inactive") },
                     ],
                   },
                   {
                     key: "country",
-                    label: "Country",
-                    allLabel: "All countries",
+                    label: tr("Country"),
+                    allLabel: tr("All countries"),
                     options: (countries.data?.items ?? []).map((c) => ({ value: c.iso2, label: c.name })),
                     width: 170, // the countries load after the page: a fixed width keeps the bar from shifting (CLS)
                   },
                   {
                     key: "sort",
-                    label: "Sort",
-                    allLabel: "Title A–Z",
+                    label: tr("Sort"),
+                    allLabel: tr("Title A–Z"),
                     options: [
-                      { value: "-updated_at", label: "Recently updated" },
-                      { value: "-created_at", label: "Newest first" },
-                      { value: "service_type", label: "Type" },
+                      { value: "-updated_at", label: tr("Recently updated") },
+                      { value: "-created_at", label: tr("Newest first") },
+                      { value: "service_type", label: tr("Type") },
                     ],
                   },
                 ]}
@@ -123,13 +129,13 @@ export function ServicesView() {
             onRetry={() => list.refetch()}
             pageSizeOptions={PAGE_SIZES}
             serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-            emptyTitle={filtered ? "No services match" : "No services yet"}
+            emptyTitle={filtered ? tr("No services match") : tr("No services yet")}
             emptyDescription={
               filtered
-                ? "Change the search or the filters, or reset them to see every service."
+                ? tr("Change the search or the filters, or reset them to see every service.")
                 : status.canWrite
-                  ? "Add the first service with Add service. Its supplier needs the matching category."
-                  : "Contracting adds services here; they appear once created."
+                  ? tr("Add the first service with Add service. Its supplier needs the matching category.")
+                  : tr("Contracting adds services here; they appear once created.")
             }
             onRowClick={(r) => router.push(serviceHref(r))}
             tableMinWidth={860}
@@ -206,7 +212,7 @@ const COLUMNS: ColumnDef<Service, unknown>[] = [
         <SupplierStatusBadge status={row.original.status} />
         {/* AA-910: the date never breaks, but it may drop under "Updated" (a row older than 7 days shows the full date, much wider than "3 d ago"). */}
         <span className="text-xs text-muted">
-          Updated <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
+          <Phrase text="Updated" /> <DateText value={row.original.updated_at} relative className="whitespace-nowrap" />
         </span>
       </span>
     ),

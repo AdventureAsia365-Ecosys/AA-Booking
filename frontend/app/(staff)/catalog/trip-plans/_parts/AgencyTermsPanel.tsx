@@ -14,6 +14,8 @@ import { ApiError } from "@/lib/api/client";
 import { agencyOpsApi, type TourTerms } from "@/lib/api/agencyOps";
 import type { TripPlanDetail } from "@/lib/api/tripPlans";
 import { Button, Field, Input, Section, Select, useCan, useToast } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./AgencyTermsPanel.messages";
 
 function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
@@ -24,13 +26,14 @@ function pctText(fraction: string): string {
 }
 
 export function AgencyTermsPanel({ plan }: { plan: TripPlanDetail }) {
+  const tr = useT(MSG);
   const canAges = useCan("trip_plan.write");
   const canTerms = useCan("agency_billing.read");
   if (!canAges && !canTerms) return null;
   return (
     <Section
-      title="Agency terms"
-      description="Child and infant ages of this tour, and its own deposit and balance terms for agencies."
+      title={tr("Agency terms")}
+      description={tr("Child and infant ages of this tour, and its own deposit and balance terms for agencies.")}
     >
       <div className="flex flex-col gap-6">
         <AgeBands plan={plan} canEdit={canAges} />
@@ -41,6 +44,7 @@ export function AgencyTermsPanel({ plan }: { plan: TripPlanDetail }) {
 }
 
 function AgeBands({ plan, canEdit }: { plan: TripPlanDetail; canEdit: boolean }) {
+  const tr = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const [child, setChild] = useState(plan.child_age_max != null ? String(plan.child_age_max) : "");
@@ -52,24 +56,24 @@ function AgeBands({ plan, canEdit }: { plan: TripPlanDetail; canEdit: boolean })
         infant_age_max: infant.trim() ? Number(infant) : null,
       }),
     onSuccess: () => {
-      toast.success("Age bands saved");
+      toast.success(tr("Age bands saved"));
       qc.invalidateQueries({ queryKey: ["trip-plans"] });
     },
     onError: (e) => toast.error(errorText(e)),
   });
   return (
     <div>
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Age bands</p>
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{tr("Age bands")}</p>
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="Child up to age" hint="Empty = 11">
+        <Field label={tr("Child up to age")} hint={tr("Empty = 11")}>
           <Input type="number" min={2} max={17} value={child} disabled={!canEdit} onChange={(e) => setChild(e.target.value)} style={{ width: 120 }} />
         </Field>
-        <Field label="Infant up to age" hint="Empty = 1">
+        <Field label={tr("Infant up to age")} hint={tr("Empty = 1")}>
           <Input type="number" min={0} max={4} value={infant} disabled={!canEdit} onChange={(e) => setInfant(e.target.value)} style={{ width: 120 }} />
         </Field>
         {canEdit && (
           <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => save.mutate()}>
-            Save ages
+            {tr("Save ages")}
           </Button>
         )}
       </div>
@@ -78,6 +82,7 @@ function AgeBands({ plan, canEdit }: { plan: TripPlanDetail; canEdit: boolean })
 }
 
 function TourTermsList({ sourceId }: { sourceId: string }) {
+  const tr = useT(MSG);
   const canWrite = useCan("billing_config.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -96,7 +101,7 @@ function TourTermsList({ sourceId }: { sourceId: string }) {
         balance_days_before_departure: Number(days),
       }),
     onSuccess: () => {
-      toast.success("Tour terms saved");
+      toast.success(tr("Tour terms saved"));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -104,7 +109,7 @@ function TourTermsList({ sourceId }: { sourceId: string }) {
   const remove = useMutation({
     mutationFn: (t: TourTerms) => agencyOpsApi.deleteTourTerms(sourceId, t.party_tenant_id),
     onSuccess: () => {
-      toast.success("Tour terms removed");
+      toast.success(tr("Tour terms removed"));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -112,21 +117,21 @@ function TourTermsList({ sourceId }: { sourceId: string }) {
   const valid = Number(deposit) >= 0 && Number(deposit) <= 100 && Number(days) >= 0 && Number(days) <= 365 && deposit !== "" && days !== "";
   return (
     <div>
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Deposit and balance</p>
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{tr("Deposit and balance")}</p>
       {q.isError ? (
-        <p className="text-[13px] text-danger">The tour terms could not be loaded.</p>
+        <p className="text-[13px] text-danger">{tr("The tour terms could not be loaded.")}</p>
       ) : !q.data?.items.length ? (
-        <p className="text-[13px] text-muted">No tour terms: the agency&apos;s terms or AA&apos;s default apply.</p>
+        <p className="text-[13px] text-muted">{tr("No tour terms: the agency's terms or AA's default apply.")}</p>
       ) : (
         <ul className="flex flex-col divide-y divide-line2 text-[13px]">
           {q.data.items.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span>
-                <span className="font-medium text-ink">{t.party_tenant_id ? t.agency_name ?? "One agency" : "Every agency"}</span>
-                {" · "}deposit {pctText(t.deposit_pct)}, balance {t.balance_days_before_departure} days before departure
+                <span className="font-medium text-ink">{t.party_tenant_id ? t.agency_name ?? tr("One agency") : tr("Every agency")}</span>
+                {tr("· deposit {0}, balance {1} days before departure", pctText(t.deposit_pct), t.balance_days_before_departure)}
               </span>
               {canWrite && (
-                <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(t)} ariaLabel="Remove these terms">
+                <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(t)} ariaLabel={tr("Remove these terms")}>
                   <Trash2 size={14} />
                 </Button>
               )}
@@ -136,24 +141,24 @@ function TourTermsList({ sourceId }: { sourceId: string }) {
       )}
       {canWrite && (
         <div className="mt-3 flex flex-wrap items-end gap-3">
-          <Field label="For">
+          <Field label={tr("For")}>
             <Select
               value={tenant}
               onChange={(e) => setTenant(e.target.value)}
               options={[
-                { value: "", label: "Every agency" },
+                { value: "", label: tr("Every agency") },
                 ...(agencies.data?.items ?? []).map((a) => ({ value: a.tenant_id, label: a.agency_name })),
               ]}
             />
           </Field>
-          <Field label="Deposit %">
+          <Field label={tr("Deposit %")}>
             <Input inputMode="decimal" value={deposit} onChange={(e) => setDeposit(e.target.value)} style={{ width: 100 }} />
           </Field>
-          <Field label="Balance days before">
+          <Field label={tr("Balance days before")}>
             <Input type="number" min={0} max={365} value={days} onChange={(e) => setDays(e.target.value)} style={{ width: 120 }} />
           </Field>
           <Button size="sm" variant="primary" disabled={!valid || put.isPending} onClick={() => put.mutate()}>
-            Save terms
+            {tr("Save terms")}
           </Button>
         </div>
       )}

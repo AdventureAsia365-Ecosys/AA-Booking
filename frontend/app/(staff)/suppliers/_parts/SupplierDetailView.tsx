@@ -22,21 +22,26 @@ import { SupplierBookingsTab } from "./SupplierBookingsTab";
 import { SupplierBillsList } from "@/app/(staff)/billing/_parts/SupplierBills";
 import { CATEGORY_LABEL, ContractPhaseBadge, SupplierStatusBadge, locationText, supplierError, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SupplierDetailView.messages";
 
 export function SupplierDetailView({ refParam }: { refParam: string }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const ref = decodeURIComponent(refParam);
   const q = useQuery({ queryKey: ["supplier", ref], queryFn: () => suppliersApi.get(ref) });
   const actions = useSupplierActions();
   const tabs = [
-    { key: "profile", label: "Profile" },
-    { key: "contracts", label: "Contracts", count: q.data?.contract_counts.total },
-    { key: "rates", label: "Rates" },
-    { key: "bookings", label: "Bookings" },
-    { key: "bills", label: "Bills" },
+    { key: "profile", label: t("Profile") },
+    { key: "contracts", label: t("Contracts"), count: q.data?.contract_counts.total },
+    { key: "rates", label: t("Rates") },
+    { key: "bookings", label: t("Bookings") },
+    { key: "bills", label: t("Bills") },
   ];
   const [tab, setTab] = useDetailTab(tabs);
 
-  if (q.isLoading) return <DetailSkeleton label="Loading supplier" />;
+  if (q.isLoading) return <DetailSkeleton label={t("Loading supplier")} />;
   if (q.isError || !q.data) {
     const status = q.error instanceof ApiError ? q.error.status : 0;
     return (
@@ -44,14 +49,14 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         {status === 404 ? (
           <EmptyState
             icon={<Store size={30} />}
-            title="Supplier not found"
-            description="The link may be wrong, or the code was mistyped."
-            action={<Link href="/suppliers" className="text-[13px] font-semibold text-accent-deep hover:underline">Back to suppliers</Link>}
+            title={t("Supplier not found")}
+            description={t("The link may be wrong, or the code was mistyped.")}
+            action={<Link href="/suppliers" className="text-[13px] font-semibold text-accent-deep hover:underline">{t("Back to suppliers")}</Link>}
           />
         ) : status === 403 ? (
-          <EmptyState title="You do not have access to suppliers" description="Your Booking role cannot read supplier records." />
+          <EmptyState title={t("You do not have access to suppliers")} description={t("Your Booking role cannot read supplier records.")} />
         ) : (
-          <ErrorState message={(q.error as Error)?.message ?? "Could not load the supplier."} onRetry={() => q.refetch()} />
+          <ErrorState message={(q.error as Error)?.message ?? t("Could not load the supplier.")} onRetry={() => q.refetch()} />
         )}
       </PageFrame>
     );
@@ -62,7 +67,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
   return (
     <PageFrame bleed>
       <DetailHeader
-        back={{ href: "/suppliers", label: "Suppliers" }}
+        back={{ href: "/suppliers", label: t("Suppliers") }}
         name={s.company_name}
         badges={<SupplierStatusBadge status={s.status} />}
         meta={
@@ -70,10 +75,10 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
             <MetaItem icon={<Hash size={14} />}>
               <Code>{s.code}</Code>
             </MetaItem>
-            <MetaItem icon={<Tag size={14} />}>{s.categories.map((c) => CATEGORY_LABEL[c] ?? c).join(", ")}</MetaItem>
+            <MetaItem icon={<Tag size={14} />}>{s.categories.map((c) => tx(CATEGORY_LABEL[c] ?? c)).join(", ")}</MetaItem>
             {where && <MetaItem icon={<MapPin size={14} />}>{where}</MetaItem>}
             <MetaItem icon={<CalendarDays size={14} />}>
-              Added on <DateText value={s.created_at} />
+              {t("Added on")} <DateText value={s.created_at} />
             </MetaItem>
           </>
         }
@@ -84,15 +89,15 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
                 href={supplierHref(s, "/edit")}
                 className="inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-4 py-2 text-[13px] font-semibold text-ink hover:border-accent-border"
               >
-                <Pencil size={14} /> Edit profile
+                <Pencil size={14} /> {t("Edit profile")}
               </Link>
               {s.status === "active" ? (
                 <Button variant="secondary" onClick={() => actions.deactivate(s)}>
-                  <Ban size={14} /> Deactivate
+                  <Ban size={14} /> {t("Deactivate")}
                 </Button>
               ) : (
                 <Button variant="secondary" onClick={() => actions.activate(s)}>
-                  <Power size={14} /> Activate
+                  <Power size={14} /> {t("Activate")}
                 </Button>
               )}
             </>
@@ -105,7 +110,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
       <div className="mx-auto max-w-[1440px] py-6 md:px-8">
         {s.status === "inactive" && (
           <div role="status" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
-            <Ban size={15} /> This supplier is inactive: it stays on record, but no new contract can be added or published.
+            <Ban size={15} /> {t("This supplier is inactive: it stays on record, but no new contract can be added or published.")}
           </div>
         )}
         {tab === "profile" && <Profile s={s} />}
@@ -115,8 +120,8 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         {tab === "bills" && (
           <SupplierBillsList
             supplier={{ id: s.id, name: s.company_name }}
-            title="Bills from this supplier"
-            description="Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin."
+            title={t("Bills from this supplier")}
+            description={t("Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin.")}
           />
         )}
       </div>
@@ -126,13 +131,15 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
 }
 
 function Profile({ s }: { s: SupplierDetail }) {
+  const t = useT(MSG);
+  const tx = useTx();
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div className="flex min-w-0 flex-col gap-5">
-        <Section title="Basic information">
+        <Section title={t("Basic information")}>
           <FactGrid>
-            <Fact label="Categories">{s.categories.map((c) => CATEGORY_LABEL[c] ?? c).join(", ")}</Fact>
-            <Fact label="Website">
+            <Fact label={t("Categories")}>{s.categories.map((c) => tx(CATEGORY_LABEL[c] ?? c)).join(", ")}</Fact>
+            <Fact label={t("Website")}>
               {s.website ? (
                 <a href={s.website} target="_blank" rel="noopener noreferrer" className="break-all text-accent-deep hover:underline">
                   {s.website}
@@ -141,38 +148,38 @@ function Profile({ s }: { s: SupplierDetail }) {
                 "—"
               )}
             </Fact>
-            <Fact label="Internal notes" wide>
-              {s.internal_notes ? <span className="whitespace-pre-line">{s.internal_notes}</span> : <span className="text-muted">None</span>}
+            <Fact label={t("Internal notes")} wide>
+              {s.internal_notes ? <span className="whitespace-pre-line">{tx(s.internal_notes)}</span> : <span className="text-muted">{t("None")}</span>}
             </Fact>
           </FactGrid>
         </Section>
-        <Section title="Location">
+        <Section title={t("Location")}>
           <FactGrid>
-            <Fact label="Street address" wide>
+            <Fact label={t("Street address")} wide>
               {s.address ?? "—"}
             </Fact>
-            <Fact label="City / place">
+            <Fact label={t("City / place")}>
               {s.destination ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
                   {s.destination.name} <FromCisTag />
                 </span>
               ) : s.destination_id ? (
-                <span className="text-muted">Set, but the CIS catalog cannot be read right now</span>
+                <span className="text-muted">{t("Set, but the CIS catalog cannot be read right now")}</span>
               ) : (
                 "—"
               )}
             </Fact>
-            <Fact label="Country">{s.country_name ?? "—"}</Fact>
-            <Fact label="State / province">{s.region ?? "—"}</Fact>
-            <Fact label="Postal code">{s.postal_code ?? "—"}</Fact>
+            <Fact label={t("Country")}>{s.country_name ?? "—"}</Fact>
+            <Fact label={t("State / province")}>{s.region ?? "—"}</Fact>
+            <Fact label={t("Postal code")}>{s.postal_code ?? "—"}</Fact>
           </FactGrid>
         </Section>
       </div>
       <div className="flex min-w-0 flex-col gap-5">
-        <Section title="Contact details">
+        <Section title={t("Contact details")}>
           <FactGrid>
-            <Fact label="Primary contact">{s.contact_name ?? "—"}</Fact>
-            <Fact label="Job title">{s.contact_title ?? "—"}</Fact>
+            <Fact label={t("Primary contact")}>{s.contact_name ?? "—"}</Fact>
+            <Fact label={t("Job title")}>{s.contact_title ?? "—"}</Fact>
             <Fact label="E-mail">
               {s.contact_email ? (
                 <a href={`mailto:${s.contact_email}`} className="break-all text-accent-deep hover:underline">
@@ -182,12 +189,12 @@ function Profile({ s }: { s: SupplierDetail }) {
                 "—"
               )}
             </Fact>
-            <Fact label="Phone">{s.contact_phone ?? "—"}</Fact>
+            <Fact label={t("Phone")}>{s.contact_phone ?? "—"}</Fact>
           </FactGrid>
         </Section>
-        <Section title="Recent activity">
+        <Section title={t("Recent activity")}>
           {s.recent_activity.length === 0 ? (
-            <p className="text-[13px] text-muted">Nothing recorded yet.</p>
+            <p className="text-[13px] text-muted">{t("Nothing recorded yet.")}</p>
           ) : (
             <ol className="flex flex-col">
               {s.recent_activity.map((a) => (
@@ -198,10 +205,10 @@ function Profile({ s }: { s: SupplierDetail }) {
                   <span className="min-w-0">
                     <span className="block text-[13px] font-medium text-ink">
                       {a.summary ?? a.action}
-                      {(a.entity_type === "supplier_contract" || a.entity_type === "supplier_rate") && a.entity_label && <span className="font-normal text-muted"> · {a.entity_label}</span>}
+                      {(a.entity_type === "supplier_contract" || a.entity_type === "supplier_rate") && a.entity_label && <span className="font-normal text-muted"> · {tx(a.entity_label)}</span>}
                     </span>
                     <span className="text-xs text-muted">
-                      {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />
+                      {a.actor.name ?? (a.actor.id ? t("Staff") : t("System"))} · <DateText value={a.at} withTime />
                     </span>
                   </span>
                 </li>
@@ -217,6 +224,8 @@ function Profile({ s }: { s: SupplierDetail }) {
 type Move = { kind: "publish" | "expire"; contract: SupplierContract } | null;
 
 function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -231,7 +240,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     onSuccess: (k, m) => {
       qc.invalidateQueries({ queryKey: ["supplier"] });
       qc.invalidateQueries({ queryKey: ["suppliers"] });
-      toast.success(m.kind === "publish" ? `${k.title} published.` : `${k.title} expired.`);
+      toast.success(m.kind === "publish" ? t("{0} published.", k.title) : t("{0} expired.", k.title));
       setMove(null);
     },
   });
@@ -249,9 +258,9 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     if (k.status === "draft") {
       const own = isMaker(k);
       return [
-        { label: "Edit draft", icon: <Pencil size={15} />, onSelect: () => setDrawer({ contract: k }) },
+        { label: t("Edit draft"), icon: <Pencil size={15} />, onSelect: () => setDrawer({ contract: k }) },
         {
-          label: own ? "Publish (needs a second person)" : "Publish",
+          label: own ? t("Publish (needs a second person)") : t("Publish"),
           icon: <CheckCircle2 size={15} />,
           onSelect: () => ask({ kind: "publish", contract: k }),
           disabled: own || s.status !== "active",
@@ -259,7 +268,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
       ];
     }
     if (k.status === "published") {
-      return [{ label: "Expire", icon: <Ban size={15} />, onSelect: () => ask({ kind: "expire", contract: k }), danger: true }];
+      return [{ label: t("Expire"), icon: <Ban size={15} />, onSelect: () => ask({ kind: "expire", contract: k }), danger: true }];
     }
     return [];
   }
@@ -269,12 +278,12 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const columns: ColumnDef<SupplierContract, unknown>[] = [
     {
       id: "title",
-      header: "Contract",
+      header: t("Contract"),
       accessorKey: "title",
       cell: ({ row }) => (
         <span className="flex min-w-0 max-w-[200px] flex-col">
-          <span className="truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
-            {row.original.title}
+          <span className="truncate text-[13.5px] font-medium text-ink" title={tx(row.original.title)}>
+            {tx(row.original.title)}
           </span>
           {row.original.reference && (
             <span className="truncate text-xs text-muted" title={row.original.reference}>
@@ -286,21 +295,21 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     },
     {
       id: "validity",
-      header: "Validity",
+      header: t("Validity"),
       accessorKey: "valid_from",
       cell: ({ row }) => (
         <span className="flex flex-col whitespace-nowrap text-[13px] text-body">
           <DateText value={row.original.valid_from} />
           <span className="text-xs text-muted">
-            to {row.original.valid_to ? <DateText value={row.original.valid_to} /> : "open-ended"}
+            {t("to")} {row.original.valid_to ? <DateText value={row.original.valid_to} /> : t("open-ended")}
           </span>
         </span>
       ),
     },
-    { id: "currency", header: "Currency", accessorKey: "currency", cell: ({ row }) => <Code>{row.original.currency}</Code> },
+    { id: "currency", header: t("Currency"), accessorKey: "currency", cell: ({ row }) => <Code>{row.original.currency}</Code> },
     {
       id: "terms",
-      header: "Payment terms",
+      header: t("Payment terms"),
       enableSorting: false,
       cell: ({ row }) => (
         <span className="block break-words text-[13px] text-body md:max-w-[120px] md:truncate" title={row.original.payment_terms ?? undefined}>
@@ -308,10 +317,10 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
         </span>
       ),
     },
-    { id: "phase", header: "Status", accessorKey: "phase", cell: ({ row }) => <ContractPhaseBadge phase={row.original.phase} /> },
+    { id: "phase", header: t("Status"), accessorKey: "phase", cell: ({ row }) => <ContractPhaseBadge phase={row.original.phase} /> },
     {
       id: "who",
-      header: "Entered by",
+      header: t("Entered by"),
       enableSorting: false,
       cell: ({ row }) => {
         const entered = row.original.updated_by_name ?? row.original.created_by_name ?? "—";
@@ -322,8 +331,8 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
               {entered}
             </span>
             {published && (
-              <span className="md:truncate" title={`Published by ${published}`}>
-                Published by {published}
+              <span className="md:truncate" title={t("Published by {0}", published)}>
+                {t("Published by {0}", published)}
               </span>
             )}
           </span>
@@ -332,11 +341,11 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("Actions"),
       enableSorting: false,
       cell: ({ row }) => {
         const items = menuFor(row.original);
-        return items.length ? <RowMenu items={items} label={`Actions for ${row.original.title}`} /> : null;
+        return items.length ? <RowMenu items={items} label={t("Actions for {0}", row.original.title)} /> : null;
       },
     },
   ];
@@ -346,17 +355,17 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     <Section
       padded={false}
       className="p-4"
-      title="Contracts"
-      description="Terms per period in the supplier's currency. A draft is published by a second person; published terms never change."
+      title={t("Contracts")}
+      description={t("Terms per period in the supplier's currency. A draft is published by a second person; published terms never change.")}
       actions={
         canWrite &&
         s.status === "active" && (
           <span className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => setImporting(true)}>
-              <FileSpreadsheet size={15} /> Import rate sheet
+              <FileSpreadsheet size={15} /> {t("Import rate sheet")}
             </Button>
             <Button variant="primary" onClick={() => setDrawer({})}>
-              <Plus size={15} /> New contract
+              <Plus size={15} /> {t("New contract")}
             </Button>
           </span>
         )
@@ -373,8 +382,8 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
           error={list.isError ? (list.error as Error).message : null}
           onRetry={() => list.refetch()}
           pageSizeOptions={[25, 50, 100]}
-          emptyTitle="No contracts yet"
-          emptyDescription={canWrite ? "Add the supplier's terms with New contract." : "Contracting adds the supplier's contracts here."}
+          emptyTitle={t("No contracts yet")}
+          emptyDescription={canWrite ? t("Add the supplier's terms with New contract.") : t("Contracting adds the supplier's contracts here.")}
           tableMinWidth={820}
         />
       </div>
@@ -385,20 +394,18 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
         onClose={() => setMove(null)}
         onConfirm={() => move && run.mutate(move)}
         busy={run.isPending}
-        error={supplierError(run.error)}
+        error={tx(supplierError(run.error))}
         danger={move?.kind === "expire"}
-        title={move?.kind === "publish" ? "Publish contract" : "Expire contract"}
-        confirmLabel={move?.kind === "publish" ? "Publish" : "Expire"}
+        title={move?.kind === "publish" ? t("Publish contract") : t("Expire contract")}
+        confirmLabel={move?.kind === "publish" ? t("Publish") : t("Expire")}
         message={
           move?.kind === "publish" ? (
             <>
-              Publish <strong className="text-ink">{k?.title}</strong> ({k?.currency})? You confirm you checked the terms entered by{" "}
-              {k?.updated_by_name ?? k?.created_by_name ?? "another staff member"}. Once published the contract is fixed.
+              {t("Publish")} <strong className="text-ink">{tx(k?.title)}</strong> ({k?.currency}{t(")? You confirm you checked the terms entered by {0}. Once published the contract is fixed.", k?.updated_by_name ?? k?.created_by_name ?? t("another staff member"))}
             </>
           ) : (
             <>
-              Expire <strong className="text-ink">{k?.title}</strong>? It closes for good and stops counting as in force. New terms are a
-              new contract.
+              {t("Expire")} <strong className="text-ink">{tx(k?.title)}</strong>{t("? It closes for good and stops counting as in force. New terms are a new contract.")}
             </>
           )
         }

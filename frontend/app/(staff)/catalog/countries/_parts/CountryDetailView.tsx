@@ -19,6 +19,8 @@ import { CIS_EDITOR_ROLES, SellableBadge } from "@/app/(staff)/catalog/trip-plan
 import { CIS_PLACES_PATH, CountryDrawer, DestinationDrawer, GeoStatusBadge, coords } from "../../_parts/GeoDrawers";
 import { useGeoStatus } from "../../_parts/useGeoStatus";
 import { CountryGallery, CountryHero } from "./CountryPhotos";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./CountryDetailView.messages";
 
 const DEST_COLUMNS: ColumnDef<DestinationItem, unknown>[] = [
   {
@@ -63,6 +65,7 @@ const TOUR_COLUMNS: ColumnDef<CountryTour, unknown>[] = [
 ];
 
 export function CountryDetailView({ iso }: { iso: string }) {
+  const t = useT(MSG);
   const me = useStaff();
   const canWrite = useCan("catalog.admin");
   const status = useGeoStatus();
@@ -70,21 +73,21 @@ export function CountryDetailView({ iso }: { iso: string }) {
   const q = useQuery({ queryKey: ["geo", "country", iso.toUpperCase()], queryFn: () => geoApi.country(iso) });
   const c = q.data;
   const tabs = [
-    { key: "overview", label: "Overview" },
+    { key: "overview", label: t("Overview") },
     // The true counts (the item lists below are capped by the API: first 200 places, first 50 tours).
-    { key: "destinations", label: "Destinations", count: c?.destinations },
-    { key: "tours", label: "Tours", count: c?.tours },
+    { key: "destinations", label: t("Destinations"), count: c?.destinations },
+    { key: "tours", label: t("Tours"), count: c?.tours },
   ];
   const [tab, setTab] = useDetailTab(tabs);
   const place = get("place");
 
   if (q.isLoading) return <PageSkeleton />;
-  if (q.isError || !c) return <PageError error={q.error} onRetry={() => q.refetch()} what="this country" />;
+  if (q.isError || !c) return <PageError error={q.error} onRetry={() => q.refetch()} what={t("this country")} />;
 
   return (
     <PageFrame bleed>
       <DetailHeader
-        back={{ href: "/catalog/countries", label: "Countries" }}
+        back={{ href: "/catalog/countries", label: t("Countries") }}
         name={c.name}
         badges={
           <>
@@ -100,18 +103,18 @@ export function CountryDetailView({ iso }: { iso: string }) {
         }
         actions={
           <>
-            {CIS_EDITOR_ROLES.has(me.role) && <ManagedInCisLink path={CIS_PLACES_PATH} label="Open in CIS" />}
+            {CIS_EDITOR_ROLES.has(me.role) && <ManagedInCisLink path={CIS_PLACES_PATH} label={t("Open in CIS")} />}
             {canWrite && c.booking_reference && (
               <Button
                 variant={c.status === "active" ? "danger" : "secondary"}
                 onClick={() => status.ask("country", { id: c.country_code, name: c.name }, c.status !== "active")}
               >
-                {c.status === "active" ? <Power size={15} /> : <CheckCircle2 size={15} />} {c.status === "active" ? "Deactivate" : "Activate"}
+                {c.status === "active" ? <Power size={15} /> : <CheckCircle2 size={15} />} {c.status === "active" ? t("Deactivate") : t("Activate")}
               </Button>
             )}
             {canWrite && c.booking_reference && (
               <Button variant="primary" onClick={() => setMany({ edit: "1" })}>
-                <Pencil size={15} /> Edit country
+                <Pencil size={15} /> {t("Edit country")}
               </Button>
             )}
           </>
@@ -125,43 +128,42 @@ export function CountryDetailView({ iso }: { iso: string }) {
           <>
             <CountryHero c={c} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <KpiTile label="Destinations" value={c.destinations} icon={<MapPin size={16} />} hint={<FromCisTag />} />
-              <KpiTile label="Tours" value={c.tours} icon={<Globe size={16} />} hint={<FromCisTag />} />
-              <KpiTile label="Images" value={c.photos} icon={<ImageIcon size={16} />} hint="CIS photos of its places and tours" />
-              <KpiTile label="Active suppliers" value={c.active_suppliers} icon={<Store size={16} />} hint="in Booking" />
+              <KpiTile label={t("Destinations")} value={c.destinations} icon={<MapPin size={16} />} hint={<FromCisTag />} />
+              <KpiTile label={t("Tours")} value={c.tours} icon={<Globe size={16} />} hint={<FromCisTag />} />
+              <KpiTile label={t("Images")} value={c.photos} icon={<ImageIcon size={16} />} hint={t("CIS photos of its places and tours")} />
+              <KpiTile label={t("Active suppliers")} value={c.active_suppliers} icon={<Store size={16} />} hint={t("in Booking")} />
             </div>
             <CountryGallery c={c} canOpenCis={CIS_EDITOR_ROLES.has(me.role)} onPlace={(id) => setMany({ place: id })} />
-            <Section title="Booking state" description="Owned by Booking; an admin changes it.">
+            <Section title={t("Booking state")} description={t("Owned by Booking; an admin changes it.")}>
               <FactGrid>
-                <Fact label="Status">
+                <Fact label={t("Status")}>
                   <GeoStatusBadge status={c.status} />
                 </Fact>
-                <Fact label="Area">{c.area ?? "—"}</Fact>
-                <Fact label="Reason">{c.status_reason ?? "—"}</Fact>
-                <Fact label="Updated">
+                <Fact label={t("Area")}>{c.area ?? "—"}</Fact>
+                <Fact label={t("Reason")}>{c.status_reason ?? "—"}</Fact>
+                <Fact label={t("Updated")}>
                   {c.profile_updated_at ? (
                     <>
-                      <DateText value={c.profile_updated_at} withTime /> {c.profile_updated_by_name ? `by ${c.profile_updated_by_name}` : ""}
+                      <DateText value={c.profile_updated_at} withTime /> {c.profile_updated_by_name ? t("by {0}", c.profile_updated_by_name) : ""}
                     </>
                   ) : (
-                    "Never changed (active by default)"
+                    t("Never changed (active by default)")
                   )}
                 </Fact>
-                <Fact label="Internal notes" wide>
+                <Fact label={t("Internal notes")} wide>
                   <span className="whitespace-pre-line">{c.internal_notes ?? "—"}</span>
                 </Fact>
               </FactGrid>
             </Section>
-            <Section title="Country information" actions={<FromCisTag />}>
+            <Section title={t("Country information")} actions={<FromCisTag />}>
               <p className="text-[13px] text-muted">
-                CIS has no country description, FAQ or festival content yet. When CIS publishes it, it shows here
-                read-only; Booking does not write it.
+                {t("CIS has no country description, FAQ or festival content yet. When CIS publishes it, it shows here read-only; Booking does not write it.")}
               </p>
             </Section>
           </>
         )}
         {tab === "destinations" && (
-          <Section padded={false} className="p-4" title="Destinations" actions={<FromCisTag />}>
+          <Section padded={false} className="p-4" title={t("Destinations")} actions={<FromCisTag />}>
             <FirstOf
               shown={c.destination_items.length}
               total={c.destinations}
@@ -174,20 +176,20 @@ export function CountryDetailView({ iso }: { iso: string }) {
               columns={DEST_COLUMNS}
               getRowId={(r) => r.destination_id}
               pageSizeOptions={[25, 50, 100]}
-              emptyTitle="No CIS places in this country"
-              emptyDescription="Places appear here as soon as CIS publishes them."
+              emptyTitle={t("No CIS places in this country")}
+              emptyDescription={t("Places appear here as soon as CIS publishes them.")}
               onRowClick={(r) => setMany({ place: r.destination_id })}
               tableMinWidth={620}
             />
           </Section>
         )}
         {tab === "tours" && (
-          <Section padded={false} className="p-4" title="Tours" actions={<FromCisTag />}>
+          <Section padded={false} className="p-4" title={t("Tours")} actions={<FromCisTag />}>
             <FirstOf
               shown={c.tour_items.length}
               total={c.tours}
               href={`/catalog/trip-plans?country=${encodeURIComponent(c.name)}`}
-              what="trip plans"
+              what={t("trip plans")}
             />
             <DataTable<CountryTour>
               tableId="country-tours"
@@ -195,7 +197,7 @@ export function CountryDetailView({ iso }: { iso: string }) {
               columns={TOUR_COLUMNS}
               getRowId={(r) => r.source_id}
               pageSizeOptions={[25, 50]}
-              emptyTitle="No CIS tours name this country"
+              emptyTitle={t("No CIS tours name this country")}
               tableMinWidth={620}
             />
           </Section>
@@ -211,12 +213,13 @@ export function CountryDetailView({ iso }: { iso: string }) {
 /** The API returns the first N items of a country's places / tours; when there are more, say so and link to the
  * full list (server-paged and filtered by this country). */
 function FirstOf({ shown, total, href, what }: { shown: number; total: number; href: string; what: string }) {
+  const t = useT(MSG);
   if (shown >= total) return null;
   return (
     <p className="mb-3 text-[13px] text-muted" data-testid="country-first-of">
-      Showing the first {shown} of {total}.{" "}
+      {t("Showing the first {0} of {1}.", shown, total)}
       <Link href={href} className="font-medium text-accent-deep hover:underline">
-        See all {total} {what} →
+        {t("See all {0} {1} →", total, what)}
       </Link>
     </p>
   );
