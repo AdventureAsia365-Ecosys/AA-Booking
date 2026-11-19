@@ -584,7 +584,8 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   **Lean staff roles step 1 (AA-1150, S286)**: `finance` also reads trip cases, prices, supply, operations, supplier
   bills and the catalog (`trip_case.read`, `pricing.read`, `supply.read`, `ops.read`, `bill.read`, `catalog.read`; it
   writes none of them and `payout.write` stays admin). Three approval capabilities are split out of the write rights
-  so a maker role can exist without them: `supplier.activate` (`POST /suppliers/{ref}/activate`), `contract.publish`
+  so a maker role can exist without them: `supplier.activate` (`POST /suppliers/{ref}/activate`; a supplier created
+  by a role without it starts `inactive`, a holder's starts `active`), `contract.publish`
   (a contract's `status=published`) and `stop_sale.approve` (approve / reject a pending stop-sale, approve the end of
   one, and the same decisions on a season calendar's stop-sale range); all three = admin, contracting (the built-in
   `contracting` is shown as "Product & operations"), none in the preview cap. The rest of the matrix:

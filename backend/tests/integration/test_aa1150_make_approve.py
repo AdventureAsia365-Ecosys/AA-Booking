@@ -115,13 +115,22 @@ async def test_a_maker_without_the_approval_capabilities_is_refused_and_a_holder
     c, cis = client
     maker, other, checker = _as(cis, MAKER), _as(cis, OTHER_MAKER), _as(cis, CHECKER)
 
-    # Supplier activation: the maker (supply.write, no supplier.activate) is 403 even on a supplier someone else made.
+    # Creating: a holder's new supplier is active at once; the maker's starts inactive (no way around the approval).
+    held = await _ok(
+        await c.post("/suppliers", json={"company_name": "Invented Lagoon Kayaks", "categories": ["activity"]},
+                     headers=checker),
+        201,
+    )  # fmt: skip
+    assert held["status"] == "active"
     sup = await _ok(
         await c.post("/suppliers", json={"company_name": "Invented Reef Boats", "categories": ["activity"]},
                      headers=maker),
         201,
     )  # fmt: skip
-    await _ok(await c.post(f"/suppliers/{sup['id']}/deactivate", json={"reason": "check"}, headers=checker))
+    assert sup["status"] == "inactive"
+    assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "inactive"
+
+    # Supplier activation: the maker (supply.write, no supplier.activate) is 403, and so is another maker.
     _refused(await c.post(f"/suppliers/{sup['id']}/activate", headers=maker))
     _refused(await c.post(f"/suppliers/{sup['code']}/activate", headers=other))
     assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "inactive"

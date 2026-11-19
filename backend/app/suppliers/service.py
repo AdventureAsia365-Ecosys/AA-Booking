@@ -325,13 +325,17 @@ async def get_supplier(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
 
 
 async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str, Any]) -> dict[str, Any]:
+    """A new supplier starts ``active`` only for a holder of ``supplier.activate`` (AA-1150): a maker with
+    ``supply.write`` alone creates it ``inactive``, so activation stays an approval (the column default is ``active``,
+    hence the explicit value)."""
     values = normalize({k: v for k, v in data.items() if k in EDITABLE})
     if "company_name" not in values:
         raise Invalid("company_name_required", "a supplier needs a company name")
     if "categories" not in values:
         raise Invalid("category_required", "a supplier needs at least one category")
     values.update(await check_place(conn, values, set(values)))
-    columns = [k for k in EDITABLE if k in values]
+    values["status"] = "active" if staff.can("supplier.activate") else "inactive"
+    columns = [*(k for k in EDITABLE if k in values), "status"]
     marks = ", ".join(f"${i + 1}" + ("::uuid" if c == "destination_id" else "") for i, c in enumerate(columns))
     try:
         row = await conn.fetchrow(
@@ -351,7 +355,8 @@ async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str
         entity_id=row["id"],
         after={"code": row["code"], **{c: values[c] for c in columns}},
         entity_label=f"{row['code']} {values['company_name']}",
-        summary=f"Created supplier {values['company_name']}",
+        summary=f"Created supplier {values['company_name']}"
+        + ("" if values["status"] == "active" else " (inactive until approved)"),
     )
     return {"id": row["id"], "code": row["code"]}
 
