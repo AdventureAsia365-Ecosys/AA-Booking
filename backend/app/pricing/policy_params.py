@@ -622,7 +622,7 @@ PARAMS: dict[str, Param] = {
             "child_price_pct_by_service_type",
             AMOUNT_MAP,
             "%",
-            "AA-1145",
+            "S285",
             PRICING,
             "Child price per service type",
             "A child pays this % of the adult net of a per-person service when neither the supplier's child rate nor"
