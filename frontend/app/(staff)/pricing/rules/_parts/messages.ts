@@ -41,6 +41,19 @@ export const R = defineMessages(
     status_withdrawn: "Withdrawn",
     help_rejected: "Rejected by a second person; never used for prices.",
     help_withdrawn: "Withdrawn by the person who entered it; never used for prices.",
+    dropsLead: "Scheduled rules lower prices.",
+    dropsIntro: (n: number) =>
+      n === 1
+        ? "An approved rule dated later lowers a value of the rule it takes over from:"
+        : `Approved rules dated later lower ${n} values of the rules they take over from:`,
+    dropLine: (channel: string, day: string, field: string, from: string, to: string) =>
+      `${channel}, from ${day}: ${field} ${from} → ${to}`,
+    dropField_target_margin: "target margin",
+    dropField_floor_margin: "floor margin",
+    dropField_rrp_markup_pct: "RRP markup",
+    dropNoRrp: "no RRP",
+    dropsHint:
+      "Check that each change is intended before its day. An approved row cannot be edited: if one was approved by mistake, ask a pricing admin to close it before it takes effect.",
     seed: "Migration seed",
     backfilled: "Back-filled",
     approve: "Approve",
@@ -192,6 +205,19 @@ export const R = defineMessages(
     status_withdrawn: "Đã rút",
     help_rejected: "Người thứ hai đã từ chối; không bao giờ dùng để tính giá.",
     help_withdrawn: "Người nhập đã rút lại; không bao giờ dùng để tính giá.",
+    dropsLead: "Quy tắc đã lên lịch sẽ hạ giá.",
+    dropsIntro: (n: number) =>
+      n === 1
+        ? "Một quy tắc đã duyệt với ngày sau sẽ hạ một giá trị của quy tắc mà nó thay thế:"
+        : `Các quy tắc đã duyệt với ngày sau sẽ hạ ${n} giá trị của các quy tắc mà chúng thay thế:`,
+    dropLine: (channel: string, day: string, field: string, from: string, to: string) =>
+      `${channel}, từ ${day}: ${field} ${from} → ${to}`,
+    dropField_target_margin: "margin mục tiêu",
+    dropField_floor_margin: "margin sàn",
+    dropField_rrp_markup_pct: "mức cộng RRP",
+    dropNoRrp: "không có RRP",
+    dropsHint:
+      "Hãy kiểm tra từng thay đổi là có chủ ý trước ngày áp dụng. Dòng đã duyệt không sửa được: nếu một dòng được duyệt nhầm, hãy nhờ quản trị viên giá đóng nó trước khi nó có hiệu lực.",
     seed: "Dữ liệu khởi tạo",
     backfilled: "Bổ sung từ dữ liệu cũ",
     approve: "Duyệt",

@@ -3,6 +3,10 @@
 Both tables are append-only (a change is a new row with a later ``valid_from`` / ``as_of``) and a row counts only
 once a second person approved it (``bk-007`` ``policy_approvals``, maker-checker), so "in force" = the newest
 APPROVED row dated on or before the day asked for. A pending row never prices anything.
+
+AA-1128 (B0 review): two approved rows of one channel / currency may share a day; the one approved last wins
+(``approved_at DESC``, then the row id), so the price never depends on the order PostgreSQL happens to read them in.
+The staff lists (``app.pricing.policy``), the B2B FX read and the cancellation policies use the same order.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ SELECT r.channel, r.target_margin, r.floor_margin, r.peak_uplift_pts, r.card_fee
 FROM booking.pricing_rules r
 JOIN booking.policy_approvals a ON a.pricing_rule_id = r.id
 WHERE r.channel = $1 AND r.valid_from <= $2
-ORDER BY r.valid_from DESC
+ORDER BY r.valid_from DESC, a.approved_at DESC, r.id DESC
 LIMIT 1
 """
 
@@ -30,7 +34,7 @@ SELECT DISTINCT ON (f.currency) f.currency, f.rate_per_usd, f.buffer_pct, f.as_o
 FROM booking.fx_rates f
 JOIN booking.policy_approvals a ON a.fx_rate_id = f.id
 WHERE f.currency = ANY($1::text[]) AND f.as_of <= $2
-ORDER BY f.currency, f.as_of DESC
+ORDER BY f.currency, f.as_of DESC, a.approved_at DESC, f.id DESC
 """
 
 
