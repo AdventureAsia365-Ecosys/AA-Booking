@@ -319,3 +319,51 @@ async def test_withdraw_reject_allotment_and_commissionable_rates(
             draft["room"],
             MAKER,
         )
+
+
+async def _as_owner(admin: asyncpg.Connection, sql: str, *args: object) -> None:
+    """Run one statement as bk_owner (the DSAR run-script role); triggers fire for it too."""
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute(sql, *args)
+
+
+async def test_erasure_redacts_staff_text_on_closed_and_published_rows(
+    client: tuple[httpx.AsyncClient, LocalCis, LocalM2M], admin: asyncpg.Connection, draft: dict[str, str]
+) -> None:
+    """DM-6.7: note and the reason columns go to '[redacted]' on any row (bk_owner), nothing else moves with them."""
+    c, cis, _ = client
+    maker, checker = _staff(cis, MAKER), _staff(cis, CHECKER)
+    k, sv = draft["contract"], f"sv:{draft['service']}"
+    term = {"component_id": sv, "inventory_kind": "free_sale", "date_from": "2027-01-01", "date_to": "2027-12-31",
+            "note": "Agreed by phone with the desk"}  # fmt: skip
+    free = await _ok(await c.post(f"/contracts/{k}/restrictions", json=term, headers=maker), 201)
+    await _ok(await c.patch(f"/contracts/{k}", json={"status": "published"}, headers=checker))
+    stop = {"component_id": sv, "date_from": "2027-05-01", "date_to": "2027-05-02", "note": "Boat in dock"}
+    ss = await _ok(await c.post(f"/contracts/{k}/stop-sales", json=stop, headers=maker), 201)
+    await _ok(await c.post(f"/supply/stop-sales/{ss['id']}/decision",
+                           json={"action": "withdraw", "reason": "Wrong dates"}, headers=maker))  # fmt: skip
+
+    upd = "UPDATE booking.supply_restrictions SET {} WHERE id = $1::uuid"
+    # A closed (withdrawn) stop-sale: its note and its reason, together or alone.
+    await _as_owner(admin, upd.format("note = '[redacted]', withdraw_reason = '[redacted]'"), ss["id"])
+    # A term of a published contract: its note.
+    await _as_owner(admin, upd.format("note = '[redacted]', updated_by = 'dsar-run'"), free["id"])
+    rows = {
+        r["id"]: (r["note"], r["withdraw_reason"], r["status"])
+        for r in await admin.fetch(
+            "SELECT id::text AS id, note, withdraw_reason, status FROM booking.supply_restrictions"
+            " WHERE supplier_contract_id = $1::uuid",
+            k,
+        )
+    }
+    assert rows[ss["id"]] == ("[redacted]", "[redacted]", "withdrawn")
+    assert rows[free["id"]] == ("[redacted]", None, "contract")
+
+    # Only the fixed marker, and nothing else in the same update.
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        await _as_owner(admin, upd.format("withdraw_reason = 'Something else'"), ss["id"])
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        await _as_owner(admin, upd.format("note = '[redacted]', max_pax = 4"), free["id"])
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+        await _as_owner(admin, upd.format("note = 'New text'"), free["id"])
