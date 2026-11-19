@@ -567,6 +567,15 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `active` stays a Booking admin switch (suspend); the **role** of a linked row is refused by `PATCH
   /booking/staff/{id}` with 409 `managed_in_directory` (it is managed in CIS → Platform → Staff). `GET /booking/staff*`
   shows `managed_in_directory`.
+- **Administrator MFA (AA-1111 S2, root ADR 0006c, bk-061; `app/auth/admin_mfa.py`).** A WORKFORCE `booking-admin`
+  session (not the Preview client, not a Dev-only E2E identity) must show an authenticator code: the verified access
+  token's Cognito `amr` claim holds `otp` (password + TOTP gives `["pwd", "otp", "mfa"]`, an e-mail code
+  `["email_otp"]`). While the pricing policy parameter `staff_admin_mfa_required` (Pricing > Policy, section "Staff
+  sign-in", boolean, approved by the administrator group, seeded false) is true, a session without it is refused 403
+  `mfa_required` before the staff row is read; false, it is served and logged `staff_admin_mfa_check
+  outcome=would_refuse` (`satisfied` when the code was used; one line per identity and outcome per 10 minutes). The
+  switch is read at most every 30 s per process; no approved version in force reads false (logged). Other roles are
+  never checked. Enrolment and the switch-on order: AA-CIS-Infra `docs/runbooks/staff-admin-mfa.md`.
 - **BRIDGE provisioning** (unchanged): first valid token → `booking.staff_users` row keyed by `sub`: CIS `admin` →
   active Booking `admin`; `reviewer` → `sales`, `content` → `content_creator`, **inactive** (403 `staff_inactive`)
   until a Booking admin activates them. Later bridge tokens only refresh email/name/cis_role/last_seen_at, also on a
@@ -2247,6 +2256,12 @@ published contract, never deleted, keeps its facts, and its approval, rejection,
 season-range CHECKs (two people)). Version 1 of the pricing policy parameter `child_price_pct_by_service_type`
 (100 for every service type = children priced as adults, today's behaviour). DM-7.1 rows for both tables in the root
 data standards. `cis_app` reads none of it.
+
+### `bk-061` (AA-1111 S2 administrator MFA switch — needs `bk-050`)
+
+A **contract** file (MIG-4; the code PR raises readiness to bk-061). Version 1 of the pricing policy parameter
+`staff_admin_mfa_required` = false (made, submitted and approved by the migration, `seed:bk-061`, in force from
+2026-01-01): administrators may still sign in with an e-mail code, today's behaviour. No table, no personal data.
 
 ## Out of scope today
 

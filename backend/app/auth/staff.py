@@ -45,6 +45,11 @@ user may also cancel a synthetic departure (body exactly ``{"status": "cancelled
 checker (``booking-contracting``) run the price steps on synthetic trip plans only; the workbook import checks its
 tours inside the route (``Staff.e2e_writer``).
 
+**Administrator MFA (AA-1111 S2, root ADR 0006c, bk-061; :mod:`app.auth.admin_mfa`).** A WORKFORCE ``booking-admin``
+session (not Preview, not a Dev-only E2E identity) whose access token's ``amr`` lacks ``otp`` (no authenticator code)
+is refused 403 ``mfa_required`` while the pricing policy parameter ``staff_admin_mfa_required`` is on; off, it is only
+logged. Checked before the staff row sync.
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -64,7 +69,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit
-from app.auth import e2e_staff, identity_config
+from app.auth import admin_mfa, e2e_staff, identity_config
 from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
@@ -550,6 +555,11 @@ async def current_staff(
             body = await _json_body(request)
             e2e_staff.check_body(writer, request.method, route, body)
         pool = await get_pool(request)
+        # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
+        # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
+        await admin_mfa.check_session(
+            pool, principal, token, role=role, exempt=preview or writer is not None or is_e2e_test_principal(principal)
+        )
         if writer is not None:
             # AA-1087: an allowed write only on a synthetic agency's record (A10e-2: a synthetic plan, an E2E maker's
             # version of one), before the staff row sync or the route.
