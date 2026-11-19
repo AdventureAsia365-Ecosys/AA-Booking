@@ -107,7 +107,7 @@ function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; take
     <FormDrawer
       open
       onClose={onClose}
-      title={editing.isNew ? tr("Add agency terms") : tr("Terms of {0}", editing.name ?? "this agency")}
+      title={editing.isNew ? tr("Add agency terms") : tr("Terms of {0}", editing.name ?? tr("this agency"))}
       onSubmit={submit}
       submitLabel={tr("Save terms")}
       busy={save.isPending}
@@ -184,7 +184,7 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
         onClose={() => setRemoving(null)}
         onConfirm={() => removing?.party_tenant_id && remove.mutate(removing.party_tenant_id)}
         title={tr("Use the default terms")}
-        message={tr("{0} follows the default terms from now on; its own terms are removed.", removing?.agency_name ?? "This agency")}
+        message={tr("{0} follows the default terms from now on; its own terms are removed.", removing?.agency_name ?? tr("This agency"))}
         confirmLabel={tr("Use the default")}
         busy={remove.isPending}
       />

@@ -7,6 +7,8 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "staff": "staff",
+    " · approved by {0}": (...a: unknown[]) => ` · approved by ${a[0]}`,
     "No confirmed agency booking yet": "No confirmed agency booking yet",
     "The vouchers could not be opened": "The vouchers could not be opened",
     "Preparing…": "Preparing…",
@@ -64,6 +66,8 @@ export const MSG = phrasebook(
     "Something went wrong": "Something went wrong",
   },
   {
+    "staff": "nhân viên",
+    " · approved by {0}": (...a: unknown[]) => ` · ${a[0]} đã duyệt`,
     "No confirmed agency booking yet": "Chưa có đặt chỗ đại lý đã xác nhận",
     "The vouchers could not be opened": "Không mở được voucher",
     "Preparing…": "Đang chuẩn bị…",

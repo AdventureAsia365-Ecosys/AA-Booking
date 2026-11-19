@@ -7,6 +7,8 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    "this agency": "this agency",
+    "This agency": "This agency",
     "deposit {0} %": (...a: unknown[]) => `deposit ${a[0]} %`,
     "balance {0} d before departure": (...a: unknown[]) => `balance ${a[0]} d before departure`,
     "software fee due {0} d": (...a: unknown[]) => `software fee due ${a[0]} d`,
@@ -51,6 +53,8 @@ export const MSG = phrasebook(
     "More than the warning days.": "More than the warning days.",
   },
   {
+    "this agency": "đại lý này",
+    "This agency": "Đại lý này",
     "deposit {0} %": (...a: unknown[]) => `đặt cọc ${a[0]} %`,
     "balance {0} d before departure": (...a: unknown[]) => `phần còn lại ${a[0]} ngày trước khởi hành`,
     "software fee due {0} d": (...a: unknown[]) => `phí phần mềm hạn ${a[0]} ngày`,

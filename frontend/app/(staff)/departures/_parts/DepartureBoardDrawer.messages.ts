@@ -7,6 +7,7 @@ import { phrasebook } from "@/ui/local/phrasebook";
 export const MSG = phrasebook(
   defineMessages(
   {
+    " · {0} kept for allotments": (...a: unknown[]) => ` · ${a[0]} kept for allotments`,
     "Departure {0}": (...a: unknown[]) => `Departure ${a[0]}`,
     "Departure": "Departure",
     "Open on the trip plan": "Open on the trip plan",
@@ -86,6 +87,7 @@ export const MSG = phrasebook(
     "Something went wrong": "Something went wrong",
   },
   {
+    " · {0} kept for allotments": (...a: unknown[]) => ` · ${a[0]} giữ cho allotment`,
     "Departure {0}": (...a: unknown[]) => `Chuyến khởi hành ${a[0]}`,
     "Departure": "Chuyến khởi hành",
     "Open on the trip plan": "Mở trên kế hoạch chuyến đi",

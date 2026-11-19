@@ -212,7 +212,7 @@ function CancellationCard({
             <span>{x.override.fee_pct} %</span>
           </p>
           <p className="mt-1 text-muted">
-            {t("{0} · asked by {1}{2}", x.override.reason, x.override.requested_by.name ?? "staff", x.override.approved_by ? ` · approved by ${x.override.approved_by.name ?? "staff"}` : "")}
+            {t("{0} · asked by {1}{2}", x.override.reason, x.override.requested_by.name ?? t("staff"), x.override.approved_by ? t(" · approved by {0}", x.override.approved_by.name ?? t("staff")) : "")}
           </p>
           {x.can_approve_override && (
             <span className="mt-2 flex gap-2">

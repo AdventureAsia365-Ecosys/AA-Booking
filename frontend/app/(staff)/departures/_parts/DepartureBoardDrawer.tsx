@@ -92,7 +92,7 @@ function Body({ data }: { data: BoardDetail }) {
         <div className="flex flex-wrap items-center gap-3 text-[13px] text-body">
           <DepartureStatus d={d} />
           <span className="bk-tabular">
-            {t("{0} sold · {1} held · {2} free / {3}{4}", d.sold, d.held, d.free, d.capacity, d.allotment_unused ? ` · ${d.allotment_unused} kept for allotments` : "")}
+            {t("{0} sold · {1} held · {2} free / {3}{4}", d.sold, d.held, d.free, d.capacity, d.allotment_unused ? t(" · {0} kept for allotments", d.allotment_unused) : "")}
           </span>
           {d.min_to_operate > 0 && <span className="text-muted">{t("Minimum")} {d.min_to_operate}</span>}
         </div>
