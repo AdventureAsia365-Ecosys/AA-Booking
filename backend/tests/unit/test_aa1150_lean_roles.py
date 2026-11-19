@@ -22,6 +22,7 @@ from app.errors import Forbidden
 from app.main import create_app
 from app.pricing import seasons_admin
 from app.settings import Settings
+from app.suppliers import service as suppliers_service
 from tests.unit.fakes import ScriptedConn
 
 APPROVALS = ("supplier.activate", "contract.publish", "stop_sale.approve")
@@ -179,3 +180,23 @@ async def test_the_range_decision_route_refuses_the_maker_on_a_stop_sale_range(m
         await seasons_admin.decide_range(conn, maker_role, STOP, action, "A reason")
     assert exc.value.code == "forbidden"
     assert not conn.sql("UPDATE booking.season_ranges")
+
+
+# ── Creating a supplier ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("role", "status"), [("admin", "active"), ("contracting", "active"), (MAKER_ROLE, "inactive")])
+async def test_a_new_supplier_is_active_only_for_a_holder_of_supplier_activate(
+    maker_role: Staff, role: str, status: str
+) -> None:
+    """The column default is ``active``: the create writes the status itself, so a maker cannot skip the approval."""
+    staff = maker_role if role == MAKER_ROLE else _role(role)
+    conn = ScriptedConn().on("INSERT INTO booking.suppliers", {"id": CONTRACT, "code": SUPPLIER})
+    out = await suppliers_service.create_supplier(
+        conn, staff, {"company_name": "Invented Cove Boats", "categories": ["activity"]}
+    )
+    assert out == {"id": CONTRACT, "code": SUPPLIER}
+    (sql, args), *_ = [(flat, a) for flat, a in conn.calls if "INSERT INTO booking.suppliers" in flat]
+    columns = sql.split("(", 1)[1].split(")", 1)[0].split(", ")
+    assert dict(zip(columns, args, strict=False))["status"] == status
