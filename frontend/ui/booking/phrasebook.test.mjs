@@ -71,3 +71,8 @@ test("a filler may be currency codes", () => {
   assert.equal(phrase("Missing FX rate: EUR, GBP", "vi"), "Thiếu tỷ giá: EUR, GBP");
   assert.equal(phrase("Missing FX rate: Euro", "vi"), "Missing FX rate: Euro");
 });
+
+test("a filler may be an ISO day", () => {
+  phrasebook({ en: { "Group departure {0}": fn("Group departure {0}") }, vi: { "Group departure {0}": fn("Chuyến khởi hành đoàn {0}") } });
+  assert.equal(phrase("Group departure 2026-12-01", "vi"), "Chuyến khởi hành đoàn 2026-12-01");
+});

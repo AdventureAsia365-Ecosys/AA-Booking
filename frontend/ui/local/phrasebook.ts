@@ -9,7 +9,7 @@
 // (ui/local/useTx.ts) where it is rendered, without a hook at module level:
 //   - a string message is matched exactly ("Pending" → "Chờ duyệt");
 //   - a function message ("{0} days / {1} nights") is matched as a pattern, but only when every part it fills in is a
-//     number, an amount or currency codes ("7", "1,250.00", "$1,250", "VND 1.250.000", "EUR, GBP"), so a tour title or
+//     number, an amount, an ISO day or currency codes ("7", "1,250.00", "$1,250", "VND 1.250.000", "2026-12-01", "EUR, GBP"), so a tour title or
 //     a name that happens to contain the same words is never rewritten.
 // Text that matches nothing (data: names, titles, codes) comes back unchanged.
 //
@@ -33,7 +33,7 @@ const MARK = (i: number) => `\u0001${i}\u0002`;
 const MARK_RE = /\u0001(\d)\u0002/g;
 const MAX_ARGS = 6;
 /** What a pattern may fill in: digits with separators, a sign, %, a currency symbol or a 3-letter code. */
-const FILLER = /^(?:[-+−]?(?:[A-Z]{3}\s?)?[$€£¥₫]?\s?\d[\d\s.,:/'’]*(?:\s?(?:%|[$€£¥₫]|[A-Z]{3}))?|[A-Z]{3}(?:, [A-Z]{3})*)$/;
+const FILLER = /^(?:[-+−]?(?:[A-Z]{3}\s?)?[$€£¥₫]?\s?\d[\d\s.,:/'’-]*(?:\s?(?:%|[$€£¥₫]|[A-Z]{3}))?|[A-Z]{3}(?:, [A-Z]{3})*)$/;
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
