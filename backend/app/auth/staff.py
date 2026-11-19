@@ -555,10 +555,11 @@ async def current_staff(
             body = await _json_body(request)
             e2e_staff.check_body(writer, request.method, route, body)
         pool = await get_pool(request)
-        if role == "admin" and not preview and writer is None and not is_e2e_test_principal(principal):
-            # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
-            # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
-            await admin_mfa.check(pool, principal.iss, principal.sub, token)
+        # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
+        # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
+        await admin_mfa.check_session(
+            pool, principal, token, role=role, exempt=preview or writer is not None or is_e2e_test_principal(principal)
+        )
         if writer is not None:
             # AA-1087: an allowed write only on a synthetic agency's record (A10e-2: a synthetic plan, an E2E maker's
             # version of one), before the staff row sync or the route.

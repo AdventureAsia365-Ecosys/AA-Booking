@@ -7,7 +7,8 @@ enrolled signs in with password + TOTP and Amazon Cognito writes the factors int
 trigger cannot change it) and the verifier already checked the signature of this exact token string, so the claim is
 read here from it (the verifier is a byte copy of AA-CIS-App's and its ``Principal`` carries no ``amr``).
 
-Rule (:func:`check`, called by :func:`app.auth.staff.current_staff` for a WORKFORCE ``booking-admin`` session):
+Rule (:func:`check_session`, called by :func:`app.auth.staff.current_staff` for every WORKFORCE session; it checks only
+role ``admin`` (group ``booking-admin``)):
 
 - MFA is satisfied when ``amr`` holds ``otp`` (:data:`MFA_AMR`);
 - not satisfied and the pricing policy parameter ``staff_admin_mfa_required`` (Pricing > Policy, section "Staff
@@ -42,6 +43,7 @@ PARAM = "staff_admin_mfa_required"
 MFA_REQUIRED = "mfa_required"
 # The Cognito amr value of a TOTP code from an authenticator app (the tech lead chose TOTP, S283).
 MFA_AMR = "otp"
+ADMIN_ROLE = "admin"
 CACHE_S = 30.0  # technical-constant: how long one read of the switch is reused, not a policy value
 LOG_EVERY_S = 600.0  # technical-constant: log throttle of the check line, not a policy value
 LOG_TABLE_SIZE = 1024  # technical-constant: size of the throttle table
@@ -102,6 +104,14 @@ def _log_once(iss: str, sub: str, outcome: str, level: int, amr: tuple[str, ...]
         _logged.clear()
     _logged[key] = now
     log.log(level, "staff_admin_mfa_check outcome=%s sub=%s role=admin amr=%s", outcome, sub, list(amr))
+
+
+async def check_session(pool: asyncpg.Pool, principal: Any, token: str, *, role: str, exempt: bool) -> None:
+    """:func:`check` for a WORKFORCE session whose Booking role is ``admin``, unless ``exempt`` (the Preview client, a
+    Dev-only E2E identity)."""
+    if role != ADMIN_ROLE or exempt:
+        return
+    await check(pool, principal.iss, principal.sub, token)
 
 
 async def check(pool: asyncpg.Pool, iss: str, sub: str, token: str) -> None:

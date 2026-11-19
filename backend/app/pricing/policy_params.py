@@ -42,6 +42,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.pricing import policy_cross_checks as cross
+from app.pricing import policy_params_security
 
 INTEGER = "integer"
 DECIMAL = "decimal"
@@ -688,18 +689,7 @@ PARAMS: dict[str, Param] = {
             minimum=_d("0"),
             maximum=_d("3650"),
         ),
-        # AA-1111 S2 (bk-061, root ADR 0006c): the administrator MFA switch; off until every administrator has TOTP.
-        Param(
-            "staff_admin_mfa_required",
-            BOOLEAN,
-            None,
-            "S285",
-            ADMIN,
-            "Administrators need an authenticator code",
-            "On: a Booking administrator session signed in without an authenticator app code is refused.",
-            "app.auth.admin_mfa",
-            section="security",
-        ),
+        *(Param(**spec) for spec in policy_params_security.SPECS),
     )
 }
 
