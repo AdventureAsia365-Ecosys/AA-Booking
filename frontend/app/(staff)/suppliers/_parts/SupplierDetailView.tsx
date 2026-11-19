@@ -28,6 +28,7 @@ import { MSG } from "./SupplierDetailView.messages";
 
 export function SupplierDetailView({ refParam }: { refParam: string }) {
   const t = useT(MSG);
+  const tx = useTx();
   const ref = decodeURIComponent(refParam);
   const q = useQuery({ queryKey: ["supplier", ref], queryFn: () => suppliersApi.get(ref) });
   const actions = useSupplierActions();
@@ -74,7 +75,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
             <MetaItem icon={<Hash size={14} />}>
               <Code>{s.code}</Code>
             </MetaItem>
-            <MetaItem icon={<Tag size={14} />}>{s.categories.map((c) => CATEGORY_LABEL[c] ?? c).join(", ")}</MetaItem>
+            <MetaItem icon={<Tag size={14} />}>{s.categories.map((c) => tx(CATEGORY_LABEL[c] ?? c)).join(", ")}</MetaItem>
             {where && <MetaItem icon={<MapPin size={14} />}>{where}</MetaItem>}
             <MetaItem icon={<CalendarDays size={14} />}>
               {t("Added on")} <DateText value={s.created_at} />
@@ -137,7 +138,7 @@ function Profile({ s }: { s: SupplierDetail }) {
       <div className="flex min-w-0 flex-col gap-5">
         <Section title={t("Basic information")}>
           <FactGrid>
-            <Fact label={t("Categories")}>{s.categories.map((c) => CATEGORY_LABEL[c] ?? c).join(", ")}</Fact>
+            <Fact label={t("Categories")}>{s.categories.map((c) => tx(CATEGORY_LABEL[c] ?? c)).join(", ")}</Fact>
             <Fact label={t("Website")}>
               {s.website ? (
                 <a href={s.website} target="_blank" rel="noopener noreferrer" className="break-all text-accent-deep hover:underline">

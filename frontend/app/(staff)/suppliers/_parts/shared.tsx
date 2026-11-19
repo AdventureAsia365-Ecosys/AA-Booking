@@ -47,11 +47,12 @@ export function ContractPhaseBadge({ phase }: { phase: ContractPhase | string })
 }
 
 export function CategoryChips({ categories }: { categories: SupplierCategory[] }) {
+  const tx = useTx();
   return (
     <span className="inline-flex flex-wrap gap-1">
       {categories.map((c) => (
         <span key={c} className="rounded-full border border-line bg-panel px-2 py-0.5 text-[11.5px] font-medium text-body">
-          {CATEGORY_LABEL[c] ?? c}
+          {tx(CATEGORY_LABEL[c] ?? c)}
         </span>
       ))}
     </span>
