@@ -19,13 +19,8 @@ const LOCALE = /["'`]en-(GB|US)["'`]|\.toLocale(Date|Time)?String\(\s*\)/;
 /** Files that map a UI language to its locale (the kit copies are checked against CIS byte for byte). */
 const ALLOWED = new Set(["ui/booking/dates.ts", "ui/booking/caseFacts.ts"]);
 const ALLOWED_DIR = "ui/core/";
-/** Pages still on a fixed locale; each later page group removes its own lines from here. */
-const PENDING = new Set([
-  "app/(staff)/cases/[code]/proposals/[n]/page.tsx",
-  "app/(staff)/cases/[code]/proposals/[n]/preview/page.tsx",
-  "app/(staff)/departures/_parts/DepartureBoardView.tsx",
-  "lib/api/agencyBilling.ts",
-]);
+/** Pages still on a fixed locale (none left: keep it empty). */
+const PENDING = new Set([]);
 
 function sourceFiles(path) {
   const abs = join(ROOT, path);

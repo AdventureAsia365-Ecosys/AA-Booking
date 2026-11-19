@@ -13,17 +13,21 @@ import { tripPlansApi, type TripPlanListItem } from "@/lib/api/tripPlans";
 import { Input, CisPhoto, K, LinkButton, ListButton } from "@/ui";
 import { daysNights, planSubtitle } from "@/ui/booking/tripPlans";
 import { inputCls } from "./fields";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./TripPlanPicker.messages";
 
 const PAGE = 8;
 
 function PlanLine({ plan }: { plan: TripPlanListItem }) {
+  const tx = useTx();
   const meta = [plan.country, daysNights(plan.duration_days)].filter(Boolean).join(" · ");
   return (
     <span className="flex min-w-0 items-center gap-3">
       <CisPhoto path={plan.cover_photo_path} alt="" className="h-9 w-12 shrink-0 rounded-md" />
       <span className="min-w-0">
-        <span className="block truncate text-[13px] font-medium text-ink" title={plan.title}>
-          {plan.title}
+        <span className="block truncate text-[13px] font-medium text-ink" title={tx(plan.title)}>
+          {tx(plan.title)}
         </span>
         <span className="block truncate text-xs text-muted">{[meta, planSubtitle(plan)].filter(Boolean).join(" · ")}</span>
       </span>
@@ -40,6 +44,8 @@ export function TripPlanPicker({
   onChange: (plan: TripPlanListItem | null) => void;
   disabled?: boolean;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
@@ -61,7 +67,7 @@ export function TripPlanPicker({
       <div className="flex items-center justify-between gap-3 rounded-md border border-accent-border bg-accent-tint px-3 py-2.5" data-testid="trip-plan-picked">
         <PlanLine plan={value} />
         <LinkButton onClick={() => onChange(null)} disabled={disabled} className="shrink-0">
-          Change
+          {t("Change")}
         </LinkButton>
       </div>
     );
@@ -70,11 +76,11 @@ export function TripPlanPicker({
   return (
     <div className="flex flex-col gap-2">
       <label className="relative">
-        <span className="sr-only">Search sellable trip plans</span>
+        <span className="sr-only">{t("Search sellable trip plans")}</span>
         <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted2" />
         <Input
           className={inputCls} style={{ paddingLeft: 36 }}
-          placeholder="Search sellable trip plans by title, SKU or CIS id"
+          placeholder={t("Search sellable trip plans by title, SKU or CIS id")}
           value={search}
           disabled={disabled}
           onFocus={() => setOpen(true)}
@@ -86,11 +92,11 @@ export function TripPlanPicker({
         />
       </label>
       {open && (
-        <div className="max-h-72 overflow-y-auto rounded-md border border-line" aria-live="polite" role="listbox" aria-label="Sellable trip plans">
+        <div className="max-h-72 overflow-y-auto rounded-md border border-line" aria-live="polite" role="listbox" aria-label={t("Sellable trip plans")}>
           {results.isLoading ? (
-            <p className="px-3 py-3 text-[13px] text-muted">Searching…</p>
+            <p className="px-3 py-3 text-[13px] text-muted">{t("Searching…")}</p>
           ) : results.isError ? (
-            <p className="px-3 py-3 text-[13px] text-danger">{(results.error as Error).message}</p>
+            <p className="px-3 py-3 text-[13px] text-danger">{tx((results.error as Error).message)}</p>
           ) : results.data?.items.length ? (
             results.data.items.map((p, i, all) => (
               <ListButton
@@ -108,7 +114,7 @@ export function TripPlanPicker({
             ))
           ) : (
             <p className="flex items-center gap-2 px-3 py-3 text-[13px] text-muted">
-              <MapIcon size={14} /> No sellable trip plan matches. Mark a plan sellable in Catalog → Trip plans first.
+              <MapIcon size={14} /> {t("No sellable trip plan matches. Mark a plan sellable in Catalog → Trip plans first.")}
             </p>
           )}
         </div>

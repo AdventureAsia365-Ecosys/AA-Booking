@@ -19,12 +19,17 @@ import type { CaseVersion, TripCaseDetail } from "@/lib/api/types";
 import {
   ConfirmDialog, DataTable, DateText, IconButton, Money, Section, VersionBadgePill, csvMoney, useCan, useToast,
 } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ProposalsTab.messages";
 
 const CLOSED = ["completed", "cancelled"];
 
 type RowAction = { kind: "discard"; n: number } | null;
 
 export function ProposalsTab({ c }: { c: TripCaseDetail }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -37,7 +42,7 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
     mutationFn: (n: number) => proposalsApi.remove(c.code, n),
     onSuccess: async (_, n) => {
       await Promise.all([qc.invalidateQueries({ queryKey: ["trip-case", c.code] }), qc.invalidateQueries({ queryKey: ["versions"] })]);
-      toast.success(`Draft V${n} discarded`);
+      toast.success(t("Draft V{0} discarded", n));
       setAction(null);
     },
   });
@@ -45,7 +50,7 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
   const columns: ColumnDef<CaseVersion, unknown>[] = [
     {
       id: "v",
-      header: "Version",
+      header: t("Version"),
       accessorKey: "version_number",
       cell: ({ row }) => (
         <Link
@@ -57,14 +62,14 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         </Link>
       ),
     },
-    { id: "title", header: "Title / notes", accessorFn: (r) => r.title ?? r.notes ?? "", enableSorting: false, cell: ({ row }) => <span className="text-[13px] text-body">{row.original.title ?? row.original.notes ?? "—"}</span> },
-    { id: "badge", header: "Status", accessorKey: "badge", cell: ({ row }) => <VersionBadgePill badge={row.original.badge} /> },
-    { id: "items", header: "Items", accessorKey: "item_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.item_count}</span> },
-    { id: "total", header: "Total", accessorFn: (r) => csvMoney(r.total_price, r.currency), enableSorting: false, cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} /> },
-    { id: "sent", header: "Sent", accessorFn: (r) => r.sent_at ?? "", enableSorting: false, cell: ({ row }) => <DateText value={row.original.sent_at} className="whitespace-nowrap text-[13px] text-muted" /> },
+    { id: "title", header: t("Title / notes"), accessorFn: (r) => r.title ?? r.notes ?? "", enableSorting: false, cell: ({ row }) => <span className="text-[13px] text-body">{row.original.title ?? row.original.notes ?? "—"}</span> },
+    { id: "badge", header: t("Status"), accessorKey: "badge", cell: ({ row }) => <VersionBadgePill badge={row.original.badge} /> },
+    { id: "items", header: t("Items"), accessorKey: "item_count", cell: ({ row }) => <span className="bk-tabular text-[13px]">{row.original.item_count}</span> },
+    { id: "total", header: t("Total"), accessorFn: (r) => csvMoney(r.total_price, r.currency), enableSorting: false, cell: ({ row }) => <Money amount={row.original.total_price} currency={row.original.currency} /> },
+    { id: "sent", header: t("Sent"), accessorFn: (r) => r.sent_at ?? "", enableSorting: false, cell: ({ row }) => <DateText value={row.original.sent_at} className="whitespace-nowrap text-[13px] text-muted" /> },
     {
       id: "updated",
-      header: "Updated",
+      header: t("Updated"),
       accessorFn: (r) => r.updated_at,
       enableSorting: false,
       cell: ({ row }) => <DateText value={row.original.updated_at} relative className="whitespace-nowrap text-[13px] text-muted" />,
@@ -72,7 +77,7 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
     // Row tools: the Booking DataTable leaves the "actions" column out of the CSV (NON_DATA_IDS).
     {
       id: "actions",
-      header: () => <span className="sr-only">Actions</span>,
+      header: () => <span className="sr-only">{t("Actions")}</span>,
       enableSorting: false,
       cell: ({ row }) => {
         const v = row.original;
@@ -83,15 +88,15 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         // Stop the row click so an action never also opens the builder.
         return (
           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()} data-testid="version-actions">
-            <IconButton title="Preview" label={`Preview ${label}`} onClick={() => router.push(`${builderHref(v.version_number)}/preview`)}>
+            <IconButton title={t("Preview")} label={t("Preview {0}", label)} onClick={() => router.push(`${builderHref(v.version_number)}/preview`)}>
               <Eye size={14} />
             </IconButton>
             {canWrite && (
               <>
                 <IconButton
                   tone="danger"
-                  title={!discardable ? "A sent or approved version is kept" : closed ? "The case is closed" : "Discard draft"}
-                  label={`Discard draft ${label}`}
+                  title={!discardable ? t("A sent or approved version is kept") : closed ? t("The case is closed") : t("Discard draft")}
+                  label={t("Discard draft {0}", label)}
                   disabled={!discardable || closed}
                   onClick={() => {
                     discard.reset();
@@ -109,7 +114,7 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
   ];
 
   return (
-    <Section title="Proposal versions" description="Each version is a full itinerary and price. A sent version is locked.">
+    <Section title={t("Proposal versions")} description={t("Each version is a full itinerary and price. A sent version is locked.")}>
       <DataTable<CaseVersion>
         tableId="case-versions"
         enableCsv
@@ -118,25 +123,24 @@ export function ProposalsTab({ c }: { c: TripCaseDetail }) {
         columns={columns}
         getRowId={(r) => r.id}
         onRowClick={(r) => router.push(builderHref(r.version_number))}
-        emptyTitle="No proposal yet"
-        emptyDescription="The first version is built from the trip legs."
+        emptyTitle={t("No proposal yet")}
+        emptyDescription={t("The first version is built from the trip legs.")}
         tableMinWidth={720}
       />
       <ConfirmDialog
         open={action?.kind === "discard"}
         onClose={() => setAction(null)}
         onConfirm={() => action && discard.mutate(action.n)}
-        title="Discard draft version"
+        title={t("Discard draft version")}
         message={
           <>
-            Discard draft <strong>{c.code} V{action?.n}</strong>? It disappears from the case; its number is not reused. Sent and approved
-            versions are kept.
+            {t("Discard draft")} <strong>{c.code} V{action?.n}</strong>{t("? It disappears from the case; its number is not reused. Sent and approved versions are kept.")}
           </>
         }
-        confirmLabel="Discard draft"
+        confirmLabel={t("Discard draft")}
         danger
         busy={discard.isPending}
-        error={discard.error?.message}
+        error={tx(discard.error?.message)}
       />
     </Section>
   );

@@ -21,6 +21,9 @@ import { TRIP_CHECK_CODE_LABEL, tripChecksApi, type CheckChanges, type TripCheck
 import { Input, Select, Textarea, DateText, FormDrawer, Pill, TripCaseStatusBadge, TripCheckStatusBadge, useCan, useToast, DateField } from "@/ui";
 import { Field, inputCls, LockedValue, textareaCls } from "../../cases/_parts/fields";
 import { StaffSelect } from "../../cases/_parts/StaffSelect";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CheckDrawer.messages";
 
 const STATUS_OPTIONS: { value: TripCheckStatus; label: string }[] = [
   { value: "open", label: "Open" },
@@ -81,11 +84,13 @@ function diff(c: TripCheck, f: Form): CheckChanges {
  *  customer or agency, the sales owner, the trip status and dates, and how many of the trip's checks are done, with a
  *  link to the case's Checks tab for the others. */
 function TripContext({ check }: { check: TripCheck }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const t = check.trip_case;
   const p = checkProgress(t.checks);
   const fact = (label: string, value: React.ReactNode) => (
     <div className="min-w-0">
-      <dt className="text-xs text-muted">{label}</dt>
+      <dt className="text-xs text-muted">{tx(label)}</dt>
       <dd className="mt-0.5 truncate text-[13px] text-ink">{value}</dd>
     </div>
   );
@@ -94,9 +99,9 @@ function TripContext({ check }: { check: TripCheck }) {
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
         {fact(t.channel === "b2b" ? "Agency" : "Traveller", casePartyLabel(t))}
         {fact("Sales", t.sales_name ?? "Unassigned")}
-        {fact("Trip status", <TripCaseStatusBadge status={t.status as TripCaseStatus} />)}
+        {fact(tr("Trip status"), <TripCaseStatusBadge status={t.status as TripCaseStatus} />)}
         {fact(
-          "Travel dates",
+          tr("Travel dates"),
           t.start_date ? (
             <>
               <DateText value={t.start_date} />
@@ -108,16 +113,16 @@ function TripContext({ check }: { check: TripCheck }) {
               ) : null}
             </>
           ) : (
-            "Not set"
+            tr("Not set")
           ),
         )}
       </dl>
       {p && (
         <div className="mt-3 border-t border-line2 pt-2.5">
           <div className="flex items-center justify-between gap-2 text-[12px]">
-            <span className="text-body">{p.label}</span>
+            <span className="text-body">{tx(p.label)}</span>
             <Link href={`/cases/${encodeURIComponent(t.code)}?tab=checks`} className="shrink-0 font-semibold text-accent-deep hover:underline">
-              Open Checks tab
+              {tr("Open Checks tab")}
             </Link>
           </div>
           <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-line2" aria-hidden="true">
@@ -161,6 +166,8 @@ function CheckDrawerBody({
   writable: boolean;
   showCase: boolean;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const frozen = isFrozenCase(check.trip_case.channel, B2C_INTAKE_OPEN);
@@ -172,7 +179,7 @@ function CheckDrawerBody({
   const save = useMutation({
     mutationFn: () => tripChecksApi.update(check.id, changes),
     onSuccess: (r) => {
-      toast.success(r.changed.length ? `${checkTitle(r)} saved` : "Nothing changed");
+      toast.success(r.changed.length ? tr("{0} saved", checkTitle(r)) : tr("Nothing changed"));
       qc.invalidateQueries({ queryKey: ["trip-checks"] });
       qc.invalidateQueries({ queryKey: ["trip-case", check.trip_case.code] });
       onClose();
@@ -186,12 +193,12 @@ function CheckDrawerBody({
     <FormDrawer
       open={open}
       onClose={onClose}
-      title={checkTitle(check)}
+      title={tx(checkTitle(check))}
       onSubmit={() => (canWrite && dirty ? save.mutate() : onClose())}
-      submitLabel={canWrite ? "Save check" : "Close"}
+      submitLabel={canWrite ? tr("Save check") : tr("Close")}
       busy={save.isPending}
       dirty={canWrite && dirty}
-      error={err.message}
+      error={tx(err.message)}
       fieldErrors={err.fields}
     >
       <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
@@ -206,7 +213,7 @@ function CheckDrawerBody({
         {check.trip_case.channel === "b2b" && <Pill tone="accent" dot={false}>B2B</Pill>}
         {check.trip_case.start_date && (
           <span>
-            · starts <DateText value={check.trip_case.start_date} />
+            {tr("· starts")} <DateText value={check.trip_case.start_date} />
           </span>
         )}
       </div>
@@ -216,38 +223,38 @@ function CheckDrawerBody({
           {frozen
             ? B2C_READ_ONLY_NOTE
             : writable
-              ? "Read only: changing checks needs the operations role."
-              : "This trip is closed: its checks are read only."}
+              ? tr("Read only: changing checks needs the operations role.")
+              : tr("This trip is closed: its checks are read only.")}
         </p>
       )}
       {check.code === "custom" ? (
-        <Field label="What to check" required>
+        <Field label={tr("What to check")} required>
           <Input className={inputCls} value={form.title} onChange={set("title")} maxLength={200} disabled={!canWrite} />
         </Field>
       ) : (
-        <Field label="Check">
-          <LockedValue value={check.title} hint="A standard check of every sold trip." />
+        <Field label={tr("Check")}>
+          <LockedValue value={check.title} hint={tr("A standard check of every sold trip.")} />
         </Field>
       )}
       <Field
-        label="Status"
-        hint={check.done_by && check.status === "done" ? <>Done by {check.done_by.name ?? check.done_by.id}{check.done_at ? <> · <DateText value={check.done_at} withTime /></> : null}</> : undefined}
+        label={tr("Status")}
+        hint={check.done_by && check.status === "done" ? <>{tr("Done by")} {check.done_by.name ?? check.done_by.id}{check.done_at ? <> · <DateText value={check.done_at} withTime /></> : null}</> : undefined}
       >
         <Select className={inputCls} value={form.status} onChange={set("status")} disabled={!canWrite || (check.code === "emergency_contact" && !check.contact_allowed)}>
           {STATUS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {o.label}
+              {tx(o.label)}
             </option>
           ))}
         </Select>
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Due date" hint={check.standard ? "Moves with the start date while open." : undefined}>
+        <Field label={tr("Due date")} hint={check.standard ? tr("Moves with the start date while open.") : undefined}>
           <DateField className={inputCls} value={form.due_date} onChange={(v) => setForm((f) => ({ ...f, due_date: v }))} disabled={!canWrite} />
         </Field>
-        <Field label="Owner">
+        <Field label={tr("Owner")}>
           {canWrite ? (
-            <StaffSelect value={form.assignee_ref} onChange={(v) => setForm((f) => ({ ...f, assignee_ref: v }))} emptyLabel="Anyone on the case" ariaLabel="Owner" />
+            <StaffSelect value={form.assignee_ref} onChange={(v) => setForm((f) => ({ ...f, assignee_ref: v }))} emptyLabel={tr("Anyone on the case")} ariaLabel={tr("Owner")} />
           ) : (
             <LockedValue value={check.assignee?.name ?? check.assignee?.id ?? "Anyone on the case"} />
           )}
@@ -256,15 +263,15 @@ function CheckDrawerBody({
       {check.code === "emergency_contact" &&
         (contactFields ? (
           <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
-            <legend className="px-1 text-[13px] font-medium text-ink">Emergency contact</legend>
+            <legend className="px-1 text-[13px] font-medium text-ink">{tr("Emergency contact")}</legend>
             <p className="text-xs text-muted">
-              Someone at home to call if something happens on the trip. Needed to mark this check done. Removed automatically 90 days after the trip ends.
+              {tr("Someone at home to call if something happens on the trip. Needed to mark this check done. Removed automatically 90 days after the trip ends.")}
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Name">
+              <Field label={tr("Name")}>
                 <Input className={inputCls} value={form.emergency_contact_name} onChange={set("emergency_contact_name")} maxLength={200} disabled={!canWrite} autoComplete="off" />
               </Field>
-              <Field label="Phone" hint="With the country code, e.g. +84 90 123 4567.">
+              <Field label={tr("Phone")} hint={tr("With the country code, e.g. +84 90 123 4567.")}>
                 <Input
                   className={inputCls}
                   type="tel"
@@ -280,11 +287,11 @@ function CheckDrawerBody({
         ) : (
           <p className="rounded-md border border-line bg-panel px-3 py-2 text-[13px] text-muted">
             {check.cleared_at
-              ? "The emergency contact was removed after the trip (kept 90 days after the end)."
-              : "B2B trip: the agency keeps its travellers' emergency contacts. Nothing is stored in Booking."}
+              ? tr("The emergency contact was removed after the trip (kept 90 days after the end).")
+              : tr("B2B trip: the agency keeps its travellers' emergency contacts. Nothing is stored in Booking.")}
           </p>
         ))}
-      <Field label="Note" hint={check.cleared_at ? "Notes were removed after the trip." : undefined}>
+      <Field label={tr("Note")} hint={check.cleared_at ? tr("Notes were removed after the trip.") : undefined}>
         <Textarea className={textareaCls} value={form.note} onChange={set("note")} maxLength={2000} disabled={!canWrite || !!check.cleared_at} />
       </Field>
     </FormDrawer>
@@ -292,6 +299,8 @@ function CheckDrawerBody({
 }
 
 export function NewCheckDrawer({ caseCode, open, onClose }: { caseCode: string; open: boolean; onClose: () => void }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const [title, setTitle] = useState("");
@@ -302,7 +311,7 @@ export function NewCheckDrawer({ caseCode, open, onClose }: { caseCode: string; 
     mutationFn: () =>
       tripChecksApi.create(caseCode, { title: title.trim(), due_date: due || null, assignee_ref: owner || null, note: note.trim() || null }),
     onSuccess: (r) => {
-      toast.success(`Check "${r.title}" added to ${caseCode}`);
+      toast.success(tr("Check \"{0}\" added to {1}", r.title, caseCode));
       qc.invalidateQueries({ queryKey: ["trip-checks"] });
       qc.invalidateQueries({ queryKey: ["trip-case", caseCode] });
       setTitle("");
@@ -317,26 +326,26 @@ export function NewCheckDrawer({ caseCode, open, onClose }: { caseCode: string; 
     <FormDrawer
       open={open}
       onClose={onClose}
-      title="Add a check"
+      title={tr("Add a check")}
       onSubmit={() => (title.trim() ? add.mutate() : undefined)}
-      submitLabel="Add check"
+      submitLabel={tr("Add check")}
       busy={add.isPending}
       dirty={!!(title || due || owner || note)}
-      error={err.message}
+      error={tx(err.message)}
       fieldErrors={err.fields}
     >
-      <Field label="What to check" required>
-        <Input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="e.g. Visa approval letters received" />
+      <Field label={tr("What to check")} required>
+        <Input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder={tr("e.g. Visa approval letters received")} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Due date">
+        <Field label={tr("Due date")}>
           <DateField className={inputCls} value={due} onChange={(v) => setDue(v)} />
         </Field>
-        <Field label="Owner">
-          <StaffSelect value={owner} onChange={setOwner} emptyLabel="Anyone on the case" ariaLabel="Owner" />
+        <Field label={tr("Owner")}>
+          <StaffSelect value={owner} onChange={setOwner} emptyLabel={tr("Anyone on the case")} ariaLabel={tr("Owner")} />
         </Field>
       </div>
-      <Field label="Note">
+      <Field label={tr("Note")}>
         <Textarea className={textareaCls} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
       </Field>
     </FormDrawer>

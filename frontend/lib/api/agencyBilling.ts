@@ -4,6 +4,7 @@
 // Read agency_billing.read, write agency_billing.write, approve / reject a payment agency_payment.approve (never the
 // person who recorded it), configuration billing_config.write: admin and finance.
 
+import { formatMonth } from "@/ui/booking/dates";
 import { BFF_BASE, ApiError, bkGet, bkSend } from "./client";
 import type { IsoDate, IsoDateTime } from "./types";
 
@@ -303,11 +304,11 @@ export const agencyBillingApi = {
   confirmation: (caseRef: string) => download(`b2b-desk/bookings/${enc(caseRef)}/confirmation`, {}),
 };
 
-/** "2026-11-01" -> "November 2026" (the invoice period is a calendar month). */
-export function periodLabel(start: string): string {
+/** "2026-11-01" -> "November 2026" (vi: "tháng 11 năm 2026"; the invoice period is a calendar month). */
+export function periodLabel(start: string, lang: "en" | "vi" = "en"): string {
   const [y, m] = start.split("-").map(Number);
   if (!y || !m) return start;
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+  return formatMonth(y, m, lang);
 }
 
 /** The overdue amounts of a billing status row as "USD 120.00, VND 1500000" ("—" when nothing is overdue). */

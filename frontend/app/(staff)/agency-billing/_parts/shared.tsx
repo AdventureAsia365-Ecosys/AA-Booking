@@ -4,6 +4,9 @@
 import { ApiError } from "@/lib/api/client";
 import type { AgencyInvoiceStatus, AgencyPaymentStatus, BillingHealth } from "@/lib/api/agencyBilling";
 import { Pill, type BookingTone } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./shared.messages";
 
 const INVOICE_STATUS: Record<AgencyInvoiceStatus, { label: string; tone: BookingTone }> = {
   draft: { label: "Draft", tone: "neutral" },
@@ -23,23 +26,27 @@ const HEALTH: Record<BillingHealth, { label: string; tone: BookingTone; help: st
 };
 
 export function InvoiceStatusPill({ status, overdueDays = 0 }: { status: AgencyInvoiceStatus; overdueDays?: number }) {
+  const t = useT(MSG);
+  const tx = useTx();
   if (status === "issued" && overdueDays > 0) {
-    return <Pill tone="danger">{`Overdue ${overdueDays} d`}</Pill>;
+    return <Pill tone="danger">{t("Overdue {0} d", overdueDays)}</Pill>;
   }
   const m = INVOICE_STATUS[status] ?? { label: status, tone: "neutral" as BookingTone };
-  return <Pill tone={m.tone}>{m.label}</Pill>;
+  return <Pill tone={m.tone}>{tx(m.label)}</Pill>;
 }
 
 export function PaymentStatusPill({ status }: { status: AgencyPaymentStatus }) {
+  const tx = useTx();
   const m = PAYMENT_STATUS[status] ?? { label: status, tone: "neutral" as BookingTone };
-  return <Pill tone={m.tone}>{m.label}</Pill>;
+  return <Pill tone={m.tone}>{tx(m.label)}</Pill>;
 }
 
 export function HealthPill({ status }: { status: BillingHealth }) {
+  const tx = useTx();
   const m = HEALTH[status] ?? { label: status, tone: "neutral" as BookingTone, help: "" };
   return (
-    <Pill tone={m.tone} title={m.help}>
-      {m.label}
+    <Pill tone={m.tone} title={tx(m.help)}>
+      {tx(m.label)}
     </Pill>
   );
 }

@@ -11,6 +11,9 @@ import { Unlink, X } from "lucide-react";
 import { Input, Textarea, FormDrawer, FromCisTag, IconButton, LinkButton } from "@/ui";
 import { MAX_DAY, NOTES_MAX, TITLE_MAX, validateItem, type DraftItem } from "@/lib/proposalDraft";
 import { SupplyPicker } from "./SupplyPicker";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ItemDrawer.messages";
 
 export type ItemDraftFields = Pick<DraftItem, "title" | "day_from" | "day_to" | "notes" | "source_tour_id" | "supply">;
 
@@ -44,6 +47,8 @@ function ItemForm({
   onClose: () => void;
   onApply: (fields: ItemDraftFields) => void;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const [title, setTitle] = useState(initial.title);
   const [from, setFrom] = useState(String(initial.day_from));
   const [to, setTo] = useState(String(initial.day_to));
@@ -66,8 +71,8 @@ function ItemForm({
     <FormDrawer
       open
       onClose={onClose}
-      title={isNew ? "Add item" : "Edit item"}
-      submitLabel={isNew ? "Add item" : "Apply"}
+      title={isNew ? t("Add item") : t("Edit item")}
+      submitLabel={isNew ? t("Add item") : t("Apply")}
       dirty={dirty}
       onSubmit={() => {
         setTouched(true);
@@ -77,31 +82,31 @@ function ItemForm({
     >
       <label className="flex flex-col gap-1.5">
         <span className="text-[13px] font-medium text-ink">
-          Title <span className="text-danger">*</span>
+          {t("Title")} <span className="text-danger">*</span>
         </span>
-        <Input autoFocus value={title} maxLength={TITLE_MAX} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Hanoi city walk and street food evening" className={inputCls} />
-        {touched && errors.title && <span className="text-xs text-danger">{errors.title}</span>}
+        <Input autoFocus value={title} maxLength={TITLE_MAX} onChange={(e) => setTitle(e.target.value)} placeholder={t("e.g. Hanoi city walk and street food evening")} className={inputCls} />
+        {touched && errors.title && <span className="text-xs text-danger">{tx(errors.title)}</span>}
       </label>
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium text-ink">From day</span>
+          <span className="text-[13px] font-medium text-ink">{t("From day")}</span>
           <Input type="number" min={1} max={MAX_DAY} value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium text-ink">To day</span>
+          <span className="text-[13px] font-medium text-ink">{t("To day")}</span>
           <Input type="number" min={1} max={MAX_DAY} value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
         </label>
         {touched && errors.days && <span className="col-span-2 text-xs text-danger">{errors.days}</span>}
-        <span className="col-span-2 text-xs text-muted">An item can span several days, e.g. a 3-day trek on days 4–6.</span>
+        <span className="col-span-2 text-xs text-muted">{t("An item can span several days, e.g. a 3-day trek on days 4–6.")}</span>
       </div>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium text-ink">Note to the customer</span>
+        <span className="text-[13px] font-medium text-ink">{t("Note to the customer")}</span>
         <Textarea
           value={notes}
           rows={5}
           maxLength={NOTES_MAX}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Pick-up time, room note, what is arranged for this customer. Tour descriptions come from CIS."
+          placeholder={t("Pick-up time, room note, what is arranged for this customer. Tour descriptions come from CIS.")}
           className="w-full"
         />
         <span className="text-right text-xs text-muted2">
@@ -109,15 +114,15 @@ function ItemForm({
         </span>
       </label>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium text-ink">Hotel room or service</span>
+        <span className="text-[13px] font-medium text-ink">{t("Hotel room or service")}</span>
         {supply ? (
           <div className="flex items-center justify-between gap-2 rounded-md border border-line bg-panel px-3 py-2">
             <span className="min-w-0 text-[13px] text-body">
-              <span className="font-medium text-ink">{supply.kind === "room_type" ? "Room" : "Service"}</span> · {supply.label}{" "}
+              <span className="font-medium text-ink">{supply.kind === "room_type" ? t("Room") : t("Service")}</span> · {tx(supply.label)}{" "}
               <span className="font-mono text-xs text-muted">{supply.code}</span>
-              {!supply.active && <span className="ml-1 text-xs text-warning">(inactive)</span>}
+              {!supply.active && <span className="ml-1 text-xs text-warning">{t("(inactive)")}</span>}
             </span>
-            <IconButton variant="plain" size="xs" tone="danger" onClick={() => setSupply(null)} label="Remove the room or service">
+            <IconButton variant="plain" size="xs" tone="danger" onClick={() => setSupply(null)} label={t("Remove the room or service")}>
               <X size={14} />
             </IconButton>
           </div>
@@ -125,24 +130,23 @@ function ItemForm({
           <SupplyPicker onPick={(o) => setSupply({ kind: o.kind, id: o.id, code: o.code, label: o.label, active: true })} />
         )}
         <span className="text-xs text-muted">
-          Optional. With no net cost line, saving takes the supplier&apos;s rate in force on the item&apos;s first day.
-          Picking another room or service drops the lines taken from the previous one&apos;s rate.
+          {t("Optional. With no net cost line, saving takes the supplier's rate in force on the item's first day. Picking another room or service drops the lines taken from the previous one's rate.")}
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-medium text-ink">CIS tour</span>
+        <span className="text-[13px] font-medium text-ink">{t("CIS tour")}</span>
         {tour ? (
           <div className="flex items-center justify-between gap-2 rounded-md border border-line bg-panel px-3 py-2">
             <span className="flex min-w-0 items-center gap-2 text-[13px] text-body">
               <FromCisTag /> <span className="truncate font-mono text-xs">{tour}</span>
             </span>
             <LinkButton tone="muted" size="sm" onClick={() => setTour(null)} style={{ gap: 4 }}>
-              <Unlink size={13} /> Detach
+              <Unlink size={13} /> {t("Detach")}
             </LinkButton>
           </div>
         ) : (
           <p className="text-xs text-muted">
-            No CIS tour attached. Picking a tour from the CIS catalog arrives with the catalog endpoint (GET /booking/catalog/tours).
+            {t("No CIS tour attached. Picking a tour from the CIS catalog arrives with the catalog endpoint (GET /booking/catalog/tours).")}
           </p>
         )}
       </div>
