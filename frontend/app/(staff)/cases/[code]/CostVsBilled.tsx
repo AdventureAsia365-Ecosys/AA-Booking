@@ -17,11 +17,12 @@ import { ApiError } from "@/lib/api/client";
 import type { ColumnDef } from "@tanstack/react-table";
 import { supplierBillsApi, type CaseCostLine } from "@/lib/api/supplierBills";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { Button, DataTable, Money, Pill, Section, formatMoney, useCan } from "@/ui";
+import { Button, DataTable, Money, Pill, Section, useCan } from "@/ui";
 import { nativeTotals } from "@/ui/booking/financeLabels";
 import { useT } from "@/ui/core/useI18n";
 import { Phrase } from "@/ui/local/Phrase";
 import { MSG } from "./CostVsBilled.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 function tone(variance: string | null): string {
   if (variance === null) return "text-muted";
@@ -71,7 +72,7 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
         <span className="flex flex-col text-[13px]">
           {l.billed.map((b) => (
             <span key={b.currency} title={b.bills.join(", ")}>
-              {formatMoney(b.amount, b.currency)}
+              <Money amount={b.amount} currency={b.currency} />
             </span>
           ))}
         </span>
@@ -89,7 +90,7 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
             <Phrase text="Other currency" />
           </Pill>
         );
-      return <span className={`text-[13px] ${tone(l.variance)}`}>{l.variance === null ? "—" : formatMoney(l.variance, l.net_currency)}</span>;
+      return <span className={`text-[13px] ${tone(l.variance)}`}>{l.variance === null ? "—" : <Money amount={l.variance} currency={l.net_currency} />}</span>;
     },
   },
   {
@@ -101,8 +102,12 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
       if (!u) return <span className="text-muted">—</span>;
       return (
         <span className="flex flex-col text-[13px]">
-          <span>{u.cost === null ? "—" : formatMoney(u.cost, "USD")}</span>
-          {u.fx_difference !== null && u.fx_difference !== "0.00" && <span className="text-xs text-muted">FX {formatMoney(u.fx_difference, "USD")}</span>}
+          <span>{u.cost === null ? "—" : <Money amount={u.cost} currency="USD" />}</span>
+          {u.fx_difference !== null && u.fx_difference !== "0.00" && (
+            <span className="text-xs text-muted">
+              FX <Money amount={u.fx_difference} currency="USD" />
+            </span>
+          )}
         </span>
       );
     },
@@ -111,6 +116,7 @@ const COLUMNS: ColumnDef<CaseCostLine, unknown>[] = [
 
 export function CostVsBilled({ c }: { c: TripCaseDetail }) {
   const tr = useT(MSG);
+  const { formatMoney } = useBookingFormat();
   const canBills = useCan("bill.read");
   const canPricing = useCan("pricing.read");
   const canWrite = useCan("bill.write");

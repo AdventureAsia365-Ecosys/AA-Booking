@@ -36,7 +36,6 @@ import {
   TRIP_CASE_STATUS_META,
   TripCaseStatusBadge,
   Money,
-  formatDay,
   useCan,
   useUrlFilters,
 } from "@/ui";
@@ -52,9 +51,10 @@ import { NotesCard } from "./NotesCard";
 import { ProposalsTab } from "./ProposalsTab";
 import { StatusActions } from "./StatusActions";
 import { SuppliersTab } from "./SuppliersTab";
-import { useFormat, useT } from "@/ui/core/useI18n";
+import { useFormat, useLang, useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -310,7 +310,8 @@ function Overview({
   const tx = useTx();
   const days = snapshotDays(c.inquiry_snapshot);
   const customDays = snapshotCustomDays(c.inquiry_snapshot);
-  const prefs = c.source_system === "tripplanner" ? inquiryPrefs(c.inquiry_snapshot) : null;
+  const lang = useLang();
+  const prefs = c.source_system === "tripplanner" ? inquiryPrefs(c.inquiry_snapshot, lang) : null;
   const sales = c.assignees.filter((a) => a.role === "sales");
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -423,6 +424,7 @@ function Overview({
 /** The trip facts card (Figma "Trip Information"): two columns of label / value, Edit opens the Edit details drawer. */
 function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean; onEdit: () => void }) {
   const tr = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const { codes, fromLegs } = caseCountries(c);
   const countryNames = useCountryNames(codes);
@@ -496,6 +498,7 @@ function TripFacts({ c, canEdit, onEdit }: { c: TripCaseDetail; canEdit: boolean
 /** Figma USER DETAILS-3 "Client message & preferences": the customer's words quoted, then a two-column fact grid. */
 function InquiryPrefsBlock({ prefs }: { prefs: NonNullable<ReturnType<typeof inquiryPrefs>> }) {
   const tr = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const w = prefs.travelWindow;
   const when = w ? (w.text ?? [w.start ? formatDay(w.start) : null, w.end ? formatDay(w.end) : null].filter(Boolean).join(" – ")) : null;

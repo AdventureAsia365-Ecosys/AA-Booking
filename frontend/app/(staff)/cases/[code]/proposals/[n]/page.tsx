@@ -73,7 +73,6 @@ import {
   Section,
   TripCaseStatusBadge,
   VersionBadgePill,
-  formatMoney,
   useCan,
   useStaff,
   useToast,
@@ -91,6 +90,7 @@ import { casePartyLabel, lockedPriceText } from "@/ui/booking/caseFacts";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 const TERMINAL = ["completed", "cancelled"];
 
@@ -121,15 +121,11 @@ export default function VersionBuilderPage({ params }: { params: Promise<{ code:
   return <Builder key={`${v.id}:${v.is_sent_to_customer}:${v.is_approved}`} c={tripCase.data} v={v} />;
 }
 
-function fullDate(d: Date | null): string | null {
-  if (!d) return null;
-  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(d);
-}
-
 type DrawerState = { mode: "add"; day: number } | { mode: "edit"; key: string } | null;
 
 function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const tr = useT(MSG);
+  const { formatMoney, formatLongDay } = useBookingFormat();
   const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
@@ -278,7 +274,8 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const editing = drawer?.mode === "edit" ? items.find((it) => it.key === drawer.key) : undefined;
   const drawerInitial: ItemDraftFields = editing
     ? {
-        title: tx(editing.title),
+        // The stored title, never its display translation: Apply would save the translation into the proposal.
+        title: editing.title,
         day_from: editing.day_from,
         day_to: editing.day_to,
         notes: editing.notes,
@@ -418,7 +415,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
           {/* ── Day timeline ── */}
           <Section
             title={tr("Itinerary")}
-            description={c.start_date ? tr("Starts {0}", fullDate(dayDate(c.start_date, 1))) : tr("No start date on the case yet: days are numbered only.")}
+            description={c.start_date ? tr("Starts {0}", formatLongDay(dayDate(c.start_date, 1))) : tr("No start date on the case yet: days are numbered only.")}
             actions={
               editable ? (
                 <Button size="sm" variant="secondary" onClick={() => setDrawer({ mode: "add", day: Math.max(1, lastDay) })} disabled={items.length >= MAX_ITEMS}>
@@ -443,7 +440,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
               <ol className="flex flex-col gap-3">
                 {groups.map((g) => {
                   const isCollapsed = collapsed.has(g.day);
-                  const date = fullDate(dayDate(c.start_date, g.day));
+                  const date = formatLongDay(dayDate(c.start_date, g.day));
                   return (
                     <li
                       key={g.day}
@@ -652,7 +649,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
         title={tr("Remove item")}
         message={
           <>
-            {tr("Remove")} <strong>{tx(removing?.title)}</strong> {tr("from V{0}? It leaves the version when you save{1}.", v.version_number, removing?.costs.length ? `, with its ${removing.costs.length} net cost line(s)` : "")}
+            {tr("Remove")} <strong>{tx(removing?.title)}</strong> {tr("from V{0}? It leaves the version when you save{1}.", v.version_number, removing?.costs.length ? tr(", with its {0} net cost line(s)", removing.costs.length) : "")}
           </>
         }
         confirmLabel={tr("Remove item")}
@@ -688,7 +685,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
         busy={approve.isPending}
         error={tx(approve.error?.message)}
       />
-      {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={tx(v.title)} notes={tx(v.notes)} onClose={() => setDetailsOpen(false)} />}
+      {detailsOpen && <DetailsDrawer code={c.code} n={v.version_number} title={v.title} notes={v.notes} onClose={() => setDetailsOpen(false)} />}
     </PageFrame>
   );
 }
@@ -697,6 +694,7 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
  *  instead of the editing empty state "No quote yet". */
 function LockedPrice({ v, channel }: { v: VersionWithItems; channel: string }) {
   const tr = useT(MSG);
+  const { formatMoney } = useBookingFormat();
   const tx = useTx();
   const row = (label: string, value: React.ReactNode) => (
     <>

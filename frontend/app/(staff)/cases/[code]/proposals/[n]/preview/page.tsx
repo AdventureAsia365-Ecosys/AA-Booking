@@ -35,7 +35,6 @@ import {
   Section,
   TripCaseStatusBadge,
   VersionBadgePill,
-  formatDay,
   useCan,
 } from "@/ui";
 import { PageError, PageSkeleton } from "@/ui/booking/PageState";
@@ -48,12 +47,8 @@ import { daysText } from "@/ui/booking/plural";
 import { useFormat, useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
-
-function longDate(d: Date | null): string | null {
-  if (!d) return null;
-  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(d);
-}
 
 /** "Valid for 14 days once sent": the quote validity of the pricing policy in force. */
 function validityText(listing: PolicyListing | undefined): string {
@@ -68,6 +63,7 @@ function depositText(channel: string): string {
 
 export default function VersionPreviewPage({ params }: { params: Promise<{ code: string; n: string }> }) {
   const t = useT(MSG);
+  const { formatDay, formatLongDay } = useBookingFormat();
   const tx = useTx();
   const { formatDate } = useFormat();
   const { code: rawCode, n: rawN } = use(params);
@@ -221,7 +217,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">{t("Day")} {d.day}</p>
                         <h2 className="mt-0.5 break-words text-[17px] font-medium text-ink">{headline}</h2>
                       </div>
-                      {date && <span className="shrink-0 text-[13px] text-muted">{tx(formatDay(date.toISOString().slice(0, 10)))}</span>}
+                      {date && <span className="shrink-0 text-[13px] text-muted">{formatDay(date.toISOString().slice(0, 10))}</span>}
                     </header>
                     <div className="flex gap-4 px-5 py-4">
                       <div className="hidden w-10 shrink-0 text-center sm:block" aria-hidden="true">
@@ -229,7 +225,7 @@ export default function VersionPreviewPage({ params }: { params: Promise<{ code:
                         <p className="text-[11px] uppercase tracking-[0.08em] text-muted">{t("Day")}</p>
                       </div>
                       <div className="flex min-w-0 flex-1 flex-col gap-2">
-                        {date && <p className="text-[13px] text-muted">{longDate(date)}</p>}
+                        {date && <p className="text-[13px] text-muted">{formatLongDay(date)}</p>}
                         {d.items.length === 0 ? (
                           <p className="text-sm text-muted">{t("A free day to explore at your own pace.")}</p>
                         ) : (

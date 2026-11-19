@@ -8,6 +8,7 @@ import { api } from "@/lib/api/client";
 import { TRIP_CASE_STATUS_META, useToast } from "@/ui";
 import type { TripCaseStatus } from "@/lib/api/types";
 import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./useCaseMutations.messages";
 
 export function useCaseRefresh(code: string) {
@@ -21,13 +22,14 @@ export function useCaseRefresh(code: string) {
 
 export function useChangeStatus(code: string) {
   const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const refresh = useCaseRefresh(code);
   return useMutation({
     mutationFn: ({ to, reason }: { to: TripCaseStatus; reason?: string }) => api.tripCases.changeStatus(code, to, reason || undefined),
     onSuccess: async (_, { to }) => {
       await refresh();
-      toast.success(t("Trip case {0} is now {1}", code, TRIP_CASE_STATUS_META[to].label.toLowerCase()));
+      toast.success(t("Trip case {0} is now {1}", code, tx(TRIP_CASE_STATUS_META[to].label).toLowerCase()));
     },
   });
 }

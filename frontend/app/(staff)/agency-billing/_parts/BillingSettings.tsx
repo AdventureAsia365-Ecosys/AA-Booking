@@ -175,6 +175,7 @@ const EMPTY_RULE = { code: "", invoice_kind: "", recipient_country: "", rate: "0
 
 function TaxRulesSection() {
   const t = useT(MSG);
+  const tx = useTx();
   const canEdit = useCan("billing_config.write");
   const toast = useToast();
   const invalidate = useInvalidate();
@@ -204,7 +205,7 @@ function TaxRulesSection() {
   });
   const columns: ColumnDef<TaxRule, unknown>[] = [
     { id: "code", header: t("Code"), cell: ({ row }) => <span className="font-semibold">{row.original.code}</span> },
-    { id: "kind", header: t("Invoice kind"), cell: ({ row }) => (row.original.invoice_kind ? KIND_LABEL[row.original.invoice_kind] : t("Any")) },
+    { id: "kind", header: t("Invoice kind"), cell: ({ row }) => (row.original.invoice_kind ? tx(KIND_LABEL[row.original.invoice_kind]) : t("Any")) },
     { id: "country", header: t("Recipient country"), cell: ({ row }) => row.original.recipient_country ?? t("Any") },
     { id: "rate", header: t("Rate"), cell: ({ row }) => `${(Number(row.original.rate) * 100).toFixed(2)} %` },
     { id: "wording", header: t("Line"), cell: ({ row }) => row.original.line_wording },
@@ -259,7 +260,7 @@ function TaxRulesSection() {
               <Select
                 value={f.invoice_kind}
                 onChange={(e) => setForm({ ...f, invoice_kind: e.target.value })}
-                options={[{ value: "", label: t("Any") }, { value: "saas", label: KIND_LABEL.saas }, { value: "settlement", label: KIND_LABEL.settlement }]}
+                options={[{ value: "", label: t("Any") }, { value: "saas", label: tx(KIND_LABEL.saas) }, { value: "settlement", label: tx(KIND_LABEL.settlement) }]}
               />
             </Field>
             <Field label={t("Recipient country")} hint={t("Two letters; empty = any country")}>
@@ -290,7 +291,6 @@ type ClauseForm = { code: string; title: string; body: string; free_cancel_days:
 
 function TermsClausesSection() {
   const t = useT(MSG);
-  const tx = useTx();
   const canEdit = useCan("billing_config.write");
   const canApprove = useCan("terms_clause.approve");
   const me = useStaff();
@@ -330,8 +330,9 @@ function TermsClausesSection() {
       header: t("Clause"),
       cell: ({ row }) => (
         <div className="flex max-w-[640px] flex-col gap-1">
-          <span className="font-semibold">{tx(row.original.title)}</span>
-          <span className="whitespace-pre-line text-[13px] text-body">{tx(row.original.body)}</span>
+          {/* Clause text is data (the wording agencies read), shown exactly as stored, never through the phrasebook. */}
+          <span className="font-semibold">{row.original.title}</span>
+          <span className="whitespace-pre-line text-[13px] text-body">{row.original.body}</span>
         </div>
       ),
     },
@@ -362,8 +363,9 @@ function TermsClausesSection() {
               onClick={() =>
                 setForm({
                   code: row.original.code,
-                  title: tx(row.original.title),
-                  body: tx(row.original.body),
+                  // The stored wording, never a translation of it: saving must not change the clause text.
+                  title: row.original.title,
+                  body: row.original.body,
                   free_cancel_days: row.original.free_cancel_days == null ? "" : String(row.original.free_cancel_days),
                   isNew: false,
                 })

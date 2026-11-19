@@ -126,7 +126,7 @@ export function StatusActions({ c }: { c: TripCaseDetail }) {
       <ConfirmDialog
         open={dialog?.kind === "move"}
         onClose={close}
-        title={dialog?.kind === "move" ? t("Move to {0}", TRIP_CASE_STATUS_META[dialog.to].label) : t("Change status")}
+        title={dialog?.kind === "move" ? t("Move to {0}", tx(TRIP_CASE_STATUS_META[dialog.to].label)) : t("Change status")}
         message={
           dialog?.kind === "move" ? (
             <>

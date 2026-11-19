@@ -13,6 +13,7 @@ import { Button, Input, Modal, Select, Textarea, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "../../_parts/FormField";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./ChargeFeeModal.messages";
 
 const REASONS: FeeReason[] = ["min_shortfall", "allotment_unreleased", "other"];
@@ -38,6 +39,7 @@ export function ChargeFeeModal({
   onClose: () => void;
 }) {
   const t = useT(MSG);
+  const { formatMoney } = useBookingFormat();
   const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
@@ -128,7 +130,7 @@ export function ChargeFeeModal({
           <Textarea className={inputCls} rows={2} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
         </FormField>
         <p className="bk-tabular text-[13px] font-medium text-ink">
-          {t("Total {0} {1}", total > 0 ? total.toFixed(2) : "0.00", currency || "USD")}
+          {t("Total {0} {1}", formatMoney(total > 0 ? total : 0, null), currency || "USD")}
         </p>
         {propose.isError && !errors.length && (
           <p role="alert" className="text-danger">

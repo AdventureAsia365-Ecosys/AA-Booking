@@ -57,7 +57,7 @@ function ItemForm({
   const [supply, setSupply] = useState(initial.supply ?? null);
   const [touched, setTouched] = useState(false);
 
-  const fields: ItemDraftFields = { title: tx(title), day_from: Number(from), day_to: Number(to), notes, source_tour_id: tour, supply };
+  const fields: ItemDraftFields = { title, day_from: Number(from), day_to: Number(to), notes, source_tour_id: tour, supply };
   const errors = validateItem(fields);
   const dirty =
     title !== initial.title ||
@@ -127,7 +127,7 @@ function ItemForm({
             </IconButton>
           </div>
         ) : (
-          <SupplyPicker onPick={(o) => setSupply({ kind: o.kind, id: o.id, code: o.code, label: tx(o.label), active: true })} />
+          <SupplyPicker onPick={(o) => setSupply({ kind: o.kind, id: o.id, code: o.code, label: o.label, active: true })} />
         )}
         <span className="text-xs text-muted">
           {t("Optional. With no net cost line, saving takes the supplier's rate in force on the item's first day. Picking another room or service drops the lines taken from the previous one's rate.")}

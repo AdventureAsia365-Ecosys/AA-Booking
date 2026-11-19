@@ -41,7 +41,6 @@ import {
   VERSION_BADGE_META,
   VersionBadgePill,
   csvMoney,
-  formatDay,
   useCan,
   useToast,
   useUrlFilters,
@@ -51,6 +50,8 @@ import { casePartyLabel } from "@/ui/booking/caseFacts";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { daysText } from "@/ui/booking/plural";
 
 const CLOSED = ["completed", "cancelled"];
 const builderHref = (r: { trip_case_code: string; version_number: number }) =>
@@ -276,6 +277,7 @@ function CasePicker({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 function CasePickerBody({ onClose }: { onClose: () => void }) {
   const tr = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
@@ -401,6 +403,15 @@ function UpdatedBy({ name }: { name: string }) {
   return <span className="block text-xs">{t("by {0}", name)}</span>;
 }
 
+/** The trip's start day and length ("9 Oct 2026 · 7 days") in the UI language, for the module-level columns. */
+function TripWhen({ start, days }: { start: string | null; days: number | null }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  const { formatDay } = useBookingFormat();
+  const when = [start ? formatDay(start) : null, days ? tx(daysText(days)) : null].filter(Boolean).join(" · ");
+  return <span className={`${CLAMP} text-xs text-muted`}>{when || t("No dates yet")}</span>;
+}
+
 const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
   {
     id: "proposal",
@@ -429,14 +440,13 @@ const COLUMNS: ColumnDef<VersionListItem, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => {
       const { leg_titles: legs, start_date, duration_days } = row.original;
-      const when = [start_date ? formatDay(start_date) : null, duration_days ? `${duration_days} days` : null].filter(Boolean).join(" · ");
       return (
         <FlexCell min={160}>
           <span title={legs.length ? legs.join("\n") : undefined} className="flex min-w-0 text-[13px] text-body">
             <span className="break-words md:line-clamp-1">{legs[0] ?? "Custom"}</span>
             {legs.length > 1 && <span className="shrink-0 pl-1 text-muted">+{legs.length - 1}</span>}
           </span>
-          <span className={`${CLAMP} text-xs text-muted`}>{when || "No dates yet"}</span>
+          <TripWhen start={start_date} days={duration_days} />
         </FlexCell>
       );
     },

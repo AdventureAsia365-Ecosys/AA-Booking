@@ -54,7 +54,7 @@ import {
 import { SavedTabs } from "../../_parts/SavedTabs";
 import { ChargeFeeModal } from "../../departures/_parts/ChargeFeeModal";
 import { AgencyBookingsTab } from "./AgencyBookingsTab";
-import { formatDay } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./B2BDeskView.messages";
@@ -212,9 +212,9 @@ function OnRequestTab() {
             </span>
             <span
               className="text-xs text-muted md:truncate"
-              title={t("{0}{1} · line {2}", KIND_LABEL[l.component.kind] ?? l.component.kind, l.component.supplier ? ` · ${l.component.supplier.name}` : "", l.line_ref)}
+              title={t("{0}{1} · line {2}", tx(KIND_LABEL[l.component.kind]) ?? l.component.kind, l.component.supplier ? ` · ${l.component.supplier.name}` : "", l.line_ref)}
             >
-              {t("{0}{1} · line {2}", KIND_LABEL[l.component.kind] ?? l.component.kind, l.component.supplier ? ` · ${l.component.supplier.name}` : "", l.line_ref)}
+              {t("{0}{1} · line {2}", tx(KIND_LABEL[l.component.kind]) ?? l.component.kind, l.component.supplier ? ` · ${l.component.supplier.name}` : "", l.line_ref)}
             </span>
           </span>
         );
@@ -410,6 +410,7 @@ const DEP_STATUS: Record<DeskDeparture["status"], { label: string; tone: Booking
 
 function DeparturesTab() {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const canWrite = useCan("b2b_desk.write");
   const qc = useQueryClient();

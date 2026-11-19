@@ -42,7 +42,7 @@ import {
   useToast,
 } from "@/ui";
 import { InvoiceStatusPill, PaymentStatusPill, errorText, newKey } from "../../_parts/shared";
-import { useT } from "@/ui/core/useI18n";
+import { useLang, useT } from "@/ui/core/useI18n";
 import { Phrase } from "@/ui/local/Phrase";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./page.messages";
@@ -65,6 +65,7 @@ export default function AgencyInvoicePage() {
 function InvoiceView({ inv }: { inv: AgencyInvoiceDetail }) {
   const t = useT(MSG);
   const tx = useTx();
+  const lang = useLang();
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
@@ -109,7 +110,7 @@ function InvoiceView({ inv }: { inv: AgencyInvoiceDetail }) {
   const draft = inv.status === "draft";
   const lineColumns: ColumnDef<AgencyInvoiceLine, unknown>[] = [
     { id: "no", header: "#", cell: ({ row }) => row.original.line_no },
-    { id: "role", header: t("Type"), cell: ({ row }) => LINE_ROLE_LABEL[row.original.line_role] ?? row.original.line_role },
+    { id: "role", header: t("Type"), cell: ({ row }) => tx(LINE_ROLE_LABEL[row.original.line_role]) ?? row.original.line_role },
     { id: "description", header: t("Description"), cell: ({ row }) => row.original.description },
     { id: "qty", header: t("Qty"), cell: ({ row }) => Number(row.original.quantity) },
     { id: "unit", header: t("Unit price"), cell: ({ row }) => <Money amount={row.original.unit_price} currency={inv.currency} /> },
@@ -123,11 +124,11 @@ function InvoiceView({ inv }: { inv: AgencyInvoiceDetail }) {
         ) : null,
     },
   ];
-  const title = inv.number ?? t("Draft {0}", KIND_LABEL[inv.invoice_kind].toLowerCase());
+  const title = inv.number ?? t("Draft {0}", tx(KIND_LABEL[inv.invoice_kind]).toLowerCase());
   return (
     <PageFrame
       title={tx(title)}
-      description={`${inv.agency_name} · ${KIND_LABEL[inv.invoice_kind]} · ${periodLabel(inv.period_start)}`}
+      description={`${inv.agency_name} · ${tx(KIND_LABEL[inv.invoice_kind])} · ${periodLabel(inv.period_start, lang)}`}
       breadcrumbs={[{ label: t("Settlement"), href: "/agency-billing" }, { label: tx(title) }]}
       actions={
         canWrite ? (
@@ -207,7 +208,7 @@ function InvoiceView({ inv }: { inv: AgencyInvoiceDetail }) {
         open={voidOpen}
         onClose={() => setVoidOpen(false)}
         onConfirm={(reason) => voidIt.mutate(reason)}
-        title={t("Void {0}", inv.number ?? "invoice")}
+        title={t("Void {0}", inv.number ?? t("invoice"))}
         message={t("The number stays used; the billed items can be drafted again. Only an invoice without an approved payment is voided.")}
         confirmLabel={t("Void invoice")}
         destructive
@@ -241,6 +242,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 
 function PaymentsSection({ inv, onChange }: { inv: AgencyInvoiceDetail; onChange: () => void }) {
   const t = useT(MSG);
+  const tx = useTx();
   const me = useStaff();
   const canApprove = useCan("agency_payment.approve");
   const toast = useToast();
@@ -265,7 +267,7 @@ function PaymentsSection({ inv, onChange }: { inv: AgencyInvoiceDetail; onChange
   const columns: ColumnDef<AgencyPayment, unknown>[] = [
     { id: "received", header: t("Received"), cell: ({ row }) => <DateText value={row.original.received_on} /> },
     { id: "amount", header: t("Amount"), cell: ({ row }) => <Money amount={row.original.amount} currency={row.original.currency} strong /> },
-    { id: "method", header: t("Method"), cell: ({ row }) => AGENCY_PAYMENT_METHOD_LABEL[row.original.method] },
+    { id: "method", header: t("Method"), cell: ({ row }) => tx(AGENCY_PAYMENT_METHOD_LABEL[row.original.method]) },
     { id: "reference", header: t("Reference"), cell: ({ row }) => row.original.reference ?? "—" },
     { id: "document", header: t("Evidence"), cell: ({ row }) => row.original.document_ref },
     { id: "by", header: t("Recorded by"), cell: ({ row }) => paymentRecorder(row.original) },

@@ -31,6 +31,7 @@ import { bkGet } from "@/lib/api/client";
 import type { TripCaseDetail } from "@/lib/api/types";
 import { Button, DateText, Field, FormDrawer, Input, Pill, Section, Select, Textarea, useCan, useToast } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./AgencyBookingPanel.messages";
 
@@ -48,8 +49,10 @@ function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
 }
 
-function money(m: { amount: string; currency: string }): string {
-  return `${m.amount} ${m.currency}`;
+/** An amount and its code in the UI language's format ("1,234.00 USD" / "1.234,00 USD"). */
+function useMoneyText(): (m: { amount: string; currency: string }) => string {
+  const { formatMoney } = useBookingFormat();
+  return (m) => formatMoney(m.amount, m.currency);
 }
 
 /** Header button: the vouchers file of a confirmed agency booking (opens in a new tab to print). */
@@ -82,6 +85,8 @@ export function VouchersButton({ code }: { code: string }) {
 
 export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
   const t = useT(MSG);
+  const money = useMoneyText();
+  const tx = useTx();
   const canRead = useCan("b2b_desk.read");
   const canBook = useCan("b2b_desk.book");
   const qc = useQueryClient();
@@ -145,7 +150,7 @@ export function AgencyBookingPanel({ c }: { c: TripCaseDetail }) {
           <ul className="flex flex-col gap-2">
             {reductions.data!.items.map((r, i) => (
               <li key={`${r.line_ref}-${i}`} className="text-[13px] text-body">
-                {t("Line {0}: {1} removed, fee {2}, refundable {3}", r.line_ref, paxText(r.removed), money(r.fee), money(r.refundable_b2b_amount))}
+                {t("Line {0}: {1} removed, fee {2}, refundable {3}", r.line_ref, tx(paxText(r.removed)), money(r.fee), money(r.refundable_b2b_amount))}
                 {r.reduced_at && (
                   <span className="text-xs text-muted">
                     {" "}
@@ -179,6 +184,7 @@ function CancellationCard({
   decide: { mutate: (v: { approve: boolean; pct: string }) => void; isPending: boolean };
 }) {
   const t = useT(MSG);
+  const money = useMoneyText();
   const tx = useTx();
   const pending = x.override?.status === "pending";
   return (
@@ -233,6 +239,7 @@ function CancellationCard({
 
 function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => void; onDone: () => void }) {
   const t = useT(MSG);
+  const money = useMoneyText();
   const tx = useTx();
   const toast = useToast();
   const [key] = useState(() => actionKey("cancel"));
@@ -249,7 +256,7 @@ function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
   const run = useMutation({
     mutationFn: () => agencyOpsApi.cancel(code, body(), key, false),
     onSuccess: (r) => {
-      toast.success(t("{0} cancelled, fee {1}{2}", r.trip_case_code, money(r.fee), lower.trim() ? "; the lower fee waits for approval" : ""));
+      toast.success(t("{0} cancelled, fee {1}{2}", r.trip_case_code, money(r.fee), lower.trim() ? t("; the lower fee waits for approval") : ""));
       onDone();
     },
   });
@@ -298,6 +305,7 @@ function CancelDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
 
 function OverrideDrawer({ code, x, onClose, onDone }: { code: string; x: Cancellation; onClose: () => void; onDone: () => void }) {
   const t = useT(MSG);
+  const money = useMoneyText();
   const [pct, setPct] = useState("0");
   const [why, setWhy] = useState("");
   const save = useMutation({ mutationFn: () => agencyOpsApi.requestOverride(code, { fee_override_pct: pct, waive_reason: why.trim() }), onSuccess: onDone });
@@ -329,6 +337,7 @@ function OverrideDrawer({ code, x, onClose, onDone }: { code: string; x: Cancell
 
 function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => void; onDone: () => void }) {
   const t = useT(MSG);
+  const money = useMoneyText();
   const tx = useTx();
   const toast = useToast();
   const [key] = useState(() => actionKey("reduce"));
@@ -349,7 +358,7 @@ function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
   const run = useMutation({
     mutationFn: () => agencyOpsApi.reduce(code, ref, body(), key, false),
     onSuccess: (r) => {
-      toast.success(t("Line {0}: {1} removed, fee {2}", r.line_ref, paxText(r.removed), money(r.fee)));
+      toast.success(t("Line {0}: {1} removed, fee {2}", r.line_ref, tx(paxText(r.removed)), money(r.fee)));
       onDone();
     },
   });
@@ -375,7 +384,7 @@ function ReduceDrawer({ code, onClose, onDone }: { code: string; onClose: () => 
             value={ref}
             onChange={(e) => { setLineRef(e.target.value); setPreview(null); }}
             placeholder={lines.isLoading ? t("Loading…") : options.length ? undefined : t("No line can be reduced")}
-            options={options.map((l) => ({ value: l.line_ref, label: `${l.title} (${paxText(l.pax)})` }))}
+            options={options.map((l) => ({ value: l.line_ref, label: `${l.title} (${tx(paxText(l.pax))})` }))}
           />
         </Field>
         {current && <p className="text-xs text-muted">{t("Now on the line:")} {tx(paxText(current.pax))}</p>}

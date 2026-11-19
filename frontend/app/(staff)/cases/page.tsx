@@ -23,8 +23,7 @@ import {
   Section,
   TripCaseStatusBadge,
   useUrlFilters,
-  formatDay,
-} from "@/ui";
+  } from "@/ui";
 import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { QueryError, isForbidden } from "./_parts/QueryError";
 import { StatusMultiSelect, parseStatuses } from "./_parts/StatusMultiSelect";
@@ -233,7 +232,7 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       if (!r.start_date) {
         return (
           <span className="text-[13px] text-muted">
-            {r.duration_days ? <span className="whitespace-nowrap">{daysText(r.duration_days)}</span> : "—"}
+            {r.duration_days ? <span className="whitespace-nowrap"><Phrase text={daysText(r.duration_days)} /></span> : "—"}
             {r.duration_days ? <span className="block text-xs"><Phrase text="no date yet" /></span> : null}
             {r.pax ? <span className="block text-xs"><Phrase text={`${r.pax} pax`} /></span> : null}
           </span>
@@ -241,11 +240,11 @@ const CASE_COLUMNS: ColumnDef<TripCaseListItem, unknown>[] = [
       }
       return (
         <span className="text-[13px] text-body">
-          <span className="whitespace-nowrap">{formatDay(r.start_date)}</span>
+          <DateText value={r.start_date} className="whitespace-nowrap" />
           {r.trip_end_date && (
             <>
               {" "}
-              – <span className="whitespace-nowrap">{formatDay(r.trip_end_date)}</span>
+              – <DateText value={r.trip_end_date} className="whitespace-nowrap" />
             </>
           )}
           {sub && <span className="block text-xs text-muted"><Phrase text={sub} /></span>}

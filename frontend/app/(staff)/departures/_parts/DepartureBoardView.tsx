@@ -30,7 +30,6 @@ import {
   Pressable,
   Section,
   SegmentedControl,
-  formatDay,
   useUrlFilters,
 } from "@/ui";
 import { DepartureBoardDrawer } from "./DepartureBoardDrawer";
@@ -39,6 +38,8 @@ import { useLang, useT } from "@/ui/core/useI18n";
 import type { Lang } from "@/ui/core/i18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./DepartureBoardView.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { formatMonth } from "@/ui/booking/dates";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -58,8 +59,8 @@ function useThisMonth(): string | null {
 
 function monthLabel(month: string, lang: Lang = "en"): string {
   const [y, m] = month.split("-").map((x) => Number.parseInt(x, 10));
-  // AA-1128: the month in the UI language (the kit's locales: en-GB / vi-VN).
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(lang === "vi" ? "vi-VN" : "en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+  // AA-1128: the month in the UI language (ui/booking/dates.ts formatMonth, the kit's locales).
+  return formatMonth(y, m, lang);
 }
 
 function tourName(d: BoardDeparture): string {
@@ -309,6 +310,7 @@ function BoardTable({
   onRetry: () => void;
 }) {
   const tr = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const columns: ColumnDef<BoardDeparture, unknown>[] = [
     {
@@ -317,7 +319,7 @@ function BoardTable({
       accessorFn: (r) => r.start_date,
       cell: ({ row }) => (
         <span className="flex min-w-0 flex-col">
-          <span className="text-[13.5px] font-medium text-ink">{tx(formatDay(row.original.start_date))}</span>
+          <span className="text-[13.5px] font-medium text-ink">{formatDay(row.original.start_date)}</span>
           <span className="max-w-[260px] truncate text-xs text-muted" title={tourName(row.original)}>
             {tourName(row.original)}
             {row.original.country ? ` · ${row.original.country}` : ""}

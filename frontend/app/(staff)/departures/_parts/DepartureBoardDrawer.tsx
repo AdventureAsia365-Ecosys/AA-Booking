@@ -22,13 +22,14 @@ import {
   type PriceAdjustment,
   type StaffRole,
 } from "@/lib/api/departureBoard";
-import { Button, DateText, Drawer, Input, Pill, Select, Textarea, TimeField, formatDay, useCan, useStaff, useToast } from "@/ui";
+import { Button, DateText, Drawer, Input, Pill, Select, Textarea, TimeField, useCan, useStaff, useToast } from "@/ui";
 import { FormField, inputCls } from "../../_parts/FormField";
 import { ChargeFeeModal } from "./ChargeFeeModal";
 import { DepartureStatus, SeatsBar } from "./shared";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./DepartureBoardDrawer.messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
@@ -36,6 +37,7 @@ function errorText(e: unknown): string {
 
 export function DepartureBoardDrawer({ departureId, onClose }: { departureId: string; onClose: () => void }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const detail = useQuery({ queryKey: ["departure-board", "detail", departureId], queryFn: () => departureBoardApi.detail(departureId) });
   const d = detail.data?.departure;
@@ -116,6 +118,7 @@ function SectionHead({ title, hint }: { title: string; hint: string }) {
 
 function AgenciesSection({ data }: { data: BoardDetail }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   return (
     <section className="flex flex-col gap-3 border-t border-line2 pt-4" aria-label={t("Seats by agency")}>
       <SectionHead title={t("Seats by agency")} hint={t("Live holds, sold seats and allotments of each agency on this departure.")} />
@@ -130,7 +133,7 @@ function AgenciesSection({ data }: { data: BoardDetail }) {
                 <span className="bk-tabular text-xs text-muted">
                   {t("{0} sold · {1} held", a.sold, a.held)}
                   {a.allotment &&
-                    t(" · allotment {0} ({1} unused, {2})", a.allotment.seats, a.allotment.unused, a.allotment.state === "released" ? "released" : `release ${formatDay(a.allotment.release_date)}`)}
+                    t(" · allotment {0} ({1} unused, {2})", a.allotment.seats, a.allotment.unused, a.allotment.state === "released" ? t("released") : t("release {0}", formatDay(a.allotment.release_date)))}
                 </span>
               </span>
               <span className="flex flex-wrap gap-2">
@@ -276,6 +279,7 @@ function OpsSection({ data }: { data: BoardDetail }) {
 
 function FeesSection({ data }: { data: BoardDetail }) {
   const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const tx = useTx();
   const canPropose = useCan("b2b_desk.write");
   const qc = useQueryClient();
@@ -336,7 +340,7 @@ function FeesSection({ data }: { data: BoardDetail }) {
               size="sm"
               onClick={() => setCharging({ reason: tx(s.reason), partner: s.partner_id ?? undefined, seats: s.seats })}
             >
-              <Coins size={14} /> {t("Charge {0} ({1} seat{2}{3})", FEE_REASON_LABEL[s.reason].toLowerCase(), s.seats, s.seats === 1 ? "" : "s", s.partner_id ? `, ${data.agencies.find((a) => a.partner_id === s.partner_id)?.agency_name ?? "agency"}` : "")}
+              <Coins size={14} /> {t("Charge {0} ({1} seat{2}{3})", tx(FEE_REASON_LABEL[s.reason]).toLowerCase(), s.seats, s.seats === 1 ? "" : "s", s.partner_id ? `, ${data.agencies.find((a) => a.partner_id === s.partner_id)?.agency_name ?? t("agency")}` : "")}
             </Button>
           ))}
           <Button size="sm" variant="ghost" onClick={() => setCharging({ reason: "other" })}>
@@ -391,7 +395,7 @@ function PriceSection({ data }: { data: BoardDetail }) {
     mutationFn: ({ id, action }: { id: string; action: "approve" | "end" }) =>
       action === "approve" ? departureBoardApi.approveAdjustment(id) : departureBoardApi.endAdjustment(id),
     onSuccess: (a: PriceAdjustment) => {
-      toast.success(a.state === "in_force" ? t("Price adjustment in force: new quotes on this departure use it") : t("Price adjustment {0}", a.end_reason ?? "ended"));
+      toast.success(a.state === "in_force" ? t("Price adjustment in force: new quotes on this departure use it") : t("Price adjustment {0}", t(`end_${a.end_reason ?? "ended"}`)));
       refresh();
     },
     onError: (e) => toast.error(errorText(e)),

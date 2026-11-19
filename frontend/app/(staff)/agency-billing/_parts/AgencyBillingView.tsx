@@ -54,8 +54,9 @@ import {
 import { SavedTabs } from "../../_parts/SavedTabs";
 import { BillingSettings } from "./BillingSettings";
 import { HealthPill, InvoiceStatusPill, PaymentStatusPill, errorText, thisMonth } from "./shared";
-import { useT } from "@/ui/core/useI18n";
+import { useLang, useT } from "@/ui/core/useI18n";
 import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./AgencyBillingView.messages";
 
 const TABS = [
@@ -111,19 +112,25 @@ export function AgencyBillingView() {
 
 // ── Invoices ─────────────────────────────────────────────────────────────────
 
+/** The invoice period ("November 2026") in the UI language, for the module-level columns. */
+function PeriodText({ start }: { start: string }) {
+  const lang = useLang();
+  return <span className="whitespace-nowrap">{periodLabel(start, lang)}</span>;
+}
+
 const INVOICE_COLUMNS: ColumnDef<AgencyInvoice, unknown>[] = [
   {
     id: "number",
     header: "Invoice",
     cell: ({ row }) => (
       <Link href={`/agency-billing/invoices/${row.original.number ?? row.original.id}`} className="font-semibold whitespace-nowrap">
-        {row.original.number ?? "Draft"}
+        {row.original.number ?? <Phrase text="Draft" />}
       </Link>
     ),
   },
   { id: "agency", header: "Agency", cell: ({ row }) => row.original.agency_name },
-  { id: "kind", header: "Kind", cell: ({ row }) => KIND_LABEL[row.original.invoice_kind] },
-  { id: "period", header: "Period", cell: ({ row }) => <span className="whitespace-nowrap">{periodLabel(row.original.period_start)}</span> },
+  { id: "kind", header: "Kind", cell: ({ row }) => <Phrase text={KIND_LABEL[row.original.invoice_kind]} /> },
+  { id: "period", header: "Period", cell: ({ row }) => <PeriodText start={row.original.period_start} /> },
   {
     id: "total",
     header: "Total",
@@ -144,6 +151,7 @@ const INVOICE_COLUMNS: ColumnDef<AgencyInvoice, unknown>[] = [
 
 function InvoicesTab() {
   const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const kind = get("kind");
   const status = get("status");
@@ -183,7 +191,7 @@ function InvoicesTab() {
           <Select
             value={kind}
             onChange={(e) => set("kind", e.target.value || null)}
-            options={[{ value: "", label: t("All kinds") }, { value: "saas", label: KIND_LABEL.saas }, { value: "settlement", label: KIND_LABEL.settlement }]}
+            options={[{ value: "", label: t("All kinds") }, { value: "saas", label: tx(KIND_LABEL.saas) }, { value: "settlement", label: tx(KIND_LABEL.settlement) }]}
           />
         </Field>
         <Field label={t("Status")}>
@@ -293,6 +301,7 @@ function ExportModal({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT(MSG);
+  const tx = useTx();
   const toast = useToast();
   const qc = useQueryClient();
   const [kind, setKind] = useState<InvoiceKind>("saas");
@@ -300,7 +309,7 @@ function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void 
   const run = useMutation({
     mutationFn: () => agencyBillingApi.run({ kind, period }),
     onSuccess: (r) => {
-      toast.success(t("{0} drafts for {1} are queued; they appear in a minute", KIND_LABEL[kind], r.period));
+      toast.success(t("{0} drafts for {1} are queued; they appear in a minute", tx(KIND_LABEL[kind]), r.period));
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
       onClose();
     },
@@ -325,7 +334,7 @@ function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void 
           <Select
             value={kind}
             onChange={(e) => setKind(e.target.value as InvoiceKind)}
-            options={[{ value: "saas", label: KIND_LABEL.saas }, { value: "settlement", label: KIND_LABEL.settlement }]}
+            options={[{ value: "saas", label: tx(KIND_LABEL.saas) }, { value: "settlement", label: tx(KIND_LABEL.settlement) }]}
           />
         </Field>
         <Field label={t("Month")} hint={t("YYYY-MM. Drafts are idempotent: running a month again only adds what is missing.")}>
@@ -340,6 +349,7 @@ function RunDraftsModal({ open, onClose }: { open: boolean; onClose: () => void 
 
 function PaymentsTab() {
   const t = useT(MSG);
+  const tx = useTx();
   const { get, set } = useUrlFilters();
   const state = get("state") || "recorded";
   const paging = useOffsetPage();
@@ -382,7 +392,7 @@ function PaymentsTab() {
     { id: "agency", header: t("Agency"), cell: ({ row }) => row.original.agency_name },
     { id: "amount", header: t("Amount"), cell: ({ row }) => <Money amount={row.original.amount} currency={row.original.currency} strong /> },
     { id: "received", header: t("Received"), cell: ({ row }) => <DateText value={row.original.received_on} /> },
-    { id: "method", header: t("Method"), cell: ({ row }) => AGENCY_PAYMENT_METHOD_LABEL[row.original.method] },
+    { id: "method", header: t("Method"), cell: ({ row }) => tx(AGENCY_PAYMENT_METHOD_LABEL[row.original.method]) },
     { id: "document", header: t("Evidence"), cell: ({ row }) => row.original.document_ref },
     { id: "by", header: t("Recorded by"), cell: ({ row }) => paymentRecorder(row.original) },
     { id: "status", header: t("Status"), cell: ({ row }) => <PaymentStatusPill status={row.original.status} /> },
