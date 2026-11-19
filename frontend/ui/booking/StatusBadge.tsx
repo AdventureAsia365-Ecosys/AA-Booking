@@ -8,6 +8,9 @@ import type { SupplierBookingStatus, SupplyState } from "@/lib/api/supplierBooki
 import type { TripCheckStatus } from "@/lib/api/tripChecks";
 import type { PayoutState, SupplierBillStatus } from "@/lib/api/supplierBills";
 import type { ReadinessStatus } from "@/lib/api/priceReadiness";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./StatusBadge.messages";
 
 export type BookingTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "orange";
 
@@ -63,8 +66,9 @@ export const SUPPLIER_BOOKING_STATUS_META: Record<SupplierBookingStatus, { label
 };
 
 export function SupplierBookingStatusBadge({ status }: { status: SupplierBookingStatus | string }) {
+  const tx = useTx();
   const meta = SUPPLIER_BOOKING_STATUS_META[status as SupplierBookingStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 /** AA-682 S2 (bk-027) trip check states; "Overdue" is shown for an open check past its due date. */
@@ -75,27 +79,30 @@ export const TRIP_CHECK_STATUS_META: Record<TripCheckStatus, { label: string; to
 };
 
 export function TripCheckStatusBadge({ status, overdue = false }: { status: TripCheckStatus | string; overdue?: boolean }) {
-  if (status === "open" && overdue) return <Pill tone="danger">Overdue</Pill>;
+  const t = useT(MSG);
+  const tx = useTx();
+  if (status === "open" && overdue) return <Pill tone="danger">{t("Overdue")}</Pill>;
   const meta = TRIP_CHECK_STATUS_META[status as TripCheckStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 /** The computed supply badge of a sold case (design D1): "Confirmed & Booked" when every supplier confirmed, else
  *  "Suppliers n/m". Never a case status; nothing on a case with nothing to book. */
 export function SupplyBadge({ supply }: { supply: SupplyState | null | undefined }) {
+  const t = useT(MSG);
   if (!supply || supply.state === "none") return null;
   if (supply.state === "booked") {
     return (
-      <Pill tone="success" title="Every supplier booking of this trip is confirmed">
-        Confirmed &amp; Booked
+      <Pill tone="success" title={t("Every supplier booking of this trip is confirmed")}>
+        {t("Confirmed & Booked")}
       </Pill>
     );
   }
   const total = Math.max(supply.items_to_book, supply.live);
   const done = Math.min(supply.items_booked, total);
   return (
-    <Pill tone="warning" title={`${supply.waiting} supplier booking(s) waiting, ${supply.declined} declined`}>
-      Suppliers {done}/{total}
+    <Pill tone="warning" title={t("{0} supplier booking(s) waiting, {1} declined", supply.waiting, supply.declined)}>
+      {t("Suppliers {0}/{1}", done, total)}
     </Pill>
   );
 }
@@ -109,9 +116,11 @@ export const SUPPLIER_BILL_STATUS_META: Record<SupplierBillStatus, { label: stri
 };
 
 export function SupplierBillStatusBadge({ status, overdue = false }: { status: SupplierBillStatus | string; overdue?: boolean }) {
-  if (overdue && (status === "received" || status === "approved")) return <Pill tone="danger">Overdue</Pill>;
+  const t = useT(MSG);
+  const tx = useTx();
+  if (overdue && (status === "received" || status === "approved")) return <Pill tone="danger">{t("Overdue")}</Pill>;
   const meta = SUPPLIER_BILL_STATUS_META[status as SupplierBillStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 export const PAYOUT_STATE_META: Record<PayoutState, { label: string; tone: BookingTone }> = {
@@ -120,8 +129,9 @@ export const PAYOUT_STATE_META: Record<PayoutState, { label: string; tone: Booki
 };
 
 export function PayoutStateBadge({ state }: { state: PayoutState | string }) {
+  const tx = useTx();
   const meta = PAYOUT_STATE_META[state as PayoutState] ?? { label: state, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 export const STAFF_STATUS_META = {
@@ -142,9 +152,10 @@ export function Pill({
   children: React.ReactNode;
   title?: string;
 }) {
+  const tx = useTx();
   return (
     <span
-      title={title}
+      title={tx(title)}
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-[3px] text-[11.5px] font-semibold ${
         upper ? "uppercase tracking-[0.04em]" : ""
       } ${TONE_CLASS[tone]}`}
@@ -167,23 +178,27 @@ export const PRICE_READINESS_META: Record<ReadinessStatus, { label: string; tone
 };
 
 export function PriceReadinessBadge({ status }: { status: ReadinessStatus | string }) {
+  const tx = useTx();
   const meta = PRICE_READINESS_META[status as ReadinessStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 export function TripCaseStatusBadge({ status }: { status: TripCaseStatus | string }) {
+  const tx = useTx();
   const meta = TRIP_CASE_STATUS_META[status as TripCaseStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 export function VersionBadgePill({ badge }: { badge: VersionBadge | string }) {
+  const tx = useTx();
   const meta = VERSION_BADGE_META[badge as VersionBadge] ?? { label: badge, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 export function CustomerStatusBadge({ status }: { status: CustomerStatus | string }) {
+  const tx = useTx();
   const meta = CUSTOMER_STATUS_META[status as CustomerStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 /** Generic entry point: `<StatusBadge kind="trip_case" value="building" />`. */
@@ -194,9 +209,10 @@ export function StatusBadge({
   kind: "trip_case" | "version" | "customer" | "staff";
   value: string;
 }) {
+  const tx = useTx();
   if (kind === "trip_case") return <TripCaseStatusBadge status={value} />;
   if (kind === "version") return <VersionBadgePill badge={value} />;
   if (kind === "customer") return <CustomerStatusBadge status={value} />;
   const meta = STAFF_STATUS_META[value as keyof typeof STAFF_STATUS_META] ?? { label: value, tone: "neutral" };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }

@@ -4,16 +4,21 @@
 
 import { ExternalLink } from "lucide-react";
 import { CIS_ADMIN_URL, CIS_CONSOLE_PATH } from "@/lib/config";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./FromCis.messages";
 
 export function FromCisTag() {
+  const t = useT(MSG);
   return (
     <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-neutral-bg px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-neutral-fg">
-      From CIS
+      {t("From CIS")}
     </span>
   );
 }
 
 export function ManagedInCisLink({ path = CIS_CONSOLE_PATH, label = "Edit in CIS" }: { path?: string; label?: string }) {
+  const tx = useTx();
   return (
     <a
       href={`${CIS_ADMIN_URL}${path}`}
@@ -21,7 +26,7 @@ export function ManagedInCisLink({ path = CIS_CONSOLE_PATH, label = "Edit in CIS
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1 text-[12px] font-medium text-accent-deep hover:underline"
     >
-      {label} <ExternalLink size={12} />
+      {tx(label)} <ExternalLink size={12} />
     </a>
   );
 }

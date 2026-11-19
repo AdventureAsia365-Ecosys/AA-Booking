@@ -33,16 +33,12 @@ import {
   Drawer,
   Field,
   FormDrawer,
-  I18nProvider,
   Input,
   KpiTile,
-  LangSwitch,
   PageFrame,
   Pill,
   Section,
   Select,
-  formatDay,
-  langStore,
   useCan,
   useStaff,
   useT,
@@ -51,6 +47,7 @@ import {
 } from "@/ui";
 import { CHANGE_TONE, SEASON_TONE, changeActions, needsReason, personText } from "@/ui/booking/priceVersions";
 import { S, type SeasonMessage } from "./messages";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
 
 function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -234,6 +231,7 @@ function RangeForm({ calendarId, onDone }: { calendarId: string; onDone: () => v
 
 function CalendarDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const t = useT(S);
+  const { formatDay } = useBookingFormat();
   const toast = useToast();
   const qc = useQueryClient();
   const me = useStaff().cis_user_id;
@@ -478,6 +476,7 @@ function NewCalendarDrawer({ onClose, onMade }: { onClose: () => void; onMade: (
 /** AA-1128 B1: what the last catalog sync did with season calendars, so a run that assigns nothing is never silent. */
 function SyncPanel({ sync }: { sync: SeasonSync | null }) {
   const t = useT(S);
+  const { formatDay } = useBookingFormat();
   if (!sync) return <p className="text-[13px] text-muted">{t("syncNone")}</p>;
   const when = sync.finished_at ? formatDay(sync.finished_at.slice(0, 10)) : "—";
   return (
@@ -545,7 +544,6 @@ function Seasons() {
       description={t("description")}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <LangSwitch ariaLabel={t("language")} />
           {canWrite && (
             <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
               <Plus size={13} /> {t("newCalendar")}
@@ -593,11 +591,7 @@ function Seasons() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function SeasonsView() {
-  return (
-    <I18nProvider store={langStore}>
-      <Seasons />
-    </I18nProvider>
-  );
+  return <Seasons />;
 }

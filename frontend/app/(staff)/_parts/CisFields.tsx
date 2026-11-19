@@ -6,6 +6,9 @@
 
 import { Lock } from "lucide-react";
 import { FromCisTag, ManagedInCisLink } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CisFields.messages";
 
 /** A read-only field drawn like a disabled input (label above, lock icon), `aria-readonly`. */
 export function CisField({
@@ -20,12 +23,14 @@ export function CisField({
   multiline?: boolean;
   wide?: boolean;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const empty = children === null || children === undefined || children === "";
   return (
     <div className={`flex min-w-0 flex-col gap-1.5 ${wide ? "sm:col-span-2" : ""}`}>
       <span className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
-        {label}
-        <Lock size={12} className="text-muted2" aria-label="Read-only, from CIS" />
+        {tx(label)}
+        <Lock size={12} className="text-muted2" aria-label={t("Read-only, from CIS")} />
       </span>
       <div
         aria-readonly="true"
@@ -33,7 +38,7 @@ export function CisField({
           multiline ? "max-h-40 overflow-y-auto whitespace-pre-line break-words py-2" : "flex min-h-10 items-center truncate"
         }`}
       >
-        {empty ? <span className="text-muted2">Not set in CIS</span> : children}
+        {empty ? <span className="text-muted2">{t("Not set in CIS")}</span> : children}
       </div>
     </div>
   );
@@ -57,14 +62,16 @@ export function CisFieldset({
   editLabel?: string;
   children?: React.ReactNode;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-line p-4" aria-label={`${title} from CIS`}>
+    <section className="flex flex-col gap-3 rounded-lg border border-line p-4" aria-label={t("{0} from CIS", title)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{title}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{tx(title)}</span>
           <FromCisTag />
         </span>
-        {editPath && <ManagedInCisLink path={editPath} label={editLabel} />}
+        {editPath && <ManagedInCisLink path={editPath} label={tx(editLabel)} />}
       </div>
       {description && <p className="text-xs text-muted">{description}</p>}
       {children && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{children}</div>}

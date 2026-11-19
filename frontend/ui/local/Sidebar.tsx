@@ -26,8 +26,13 @@ import { useMediaQuery } from "../core/useMediaQuery";
 import { staffDisplay, useStaff } from "./StaffContext";
 import { signOut } from "./signOut";
 import { COMPACT_QUERY } from "../booking/DataTable";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./Sidebar.messages";
 
 export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () => void; drawerOpen?: boolean }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const pathname = usePathname();
   // AA-1037: two entries open one page (Agency billing: Partners = its Agencies tab, Settlement = the rest).
@@ -88,8 +93,8 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
         <button
           onClick={() => go("/")}
           data-testid="sidebar-logo"
-          title="Adventure Asia Booking: Dashboard"
-          aria-label="Adventure Asia Booking, go to Dashboard"
+          title={tr("Adventure Asia Booking: Dashboard")}
+          aria-label={tr("Adventure Asia Booking, go to Dashboard")}
           style={{
             display: "flex",
             alignItems: "center",
@@ -134,7 +139,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
                 marginTop: 1,
               }}
             >
-              Booking
+              {tr("Booking")}
             </span>
           </span>
         </button>
@@ -142,7 +147,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
 
       {/* Nav */}
       <nav
-        aria-label="Primary"
+        aria-label={tr("Primary")}
         data-testid="sidebar-nav"
         style={{
           flex: "1 1 auto",
@@ -163,7 +168,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
             <NavGroup
               key={group.label}
               id={id}
-              label={group.label}
+              label={tx(group.label)}
               open={navGroups.isOpen(id)}
               onToggle={() => navGroups.toggle(id)}
               rail={rail}
@@ -227,13 +232,13 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
             >
               {name}
             </span>
-            <span style={{ display: "block", fontSize: 11, color: "var(--aa-side-text2)" }}>{roleLabel}</span>
+            <span style={{ display: "block", fontSize: 11, color: "var(--aa-side-text2)" }}>{tx(roleLabel)}</span>
           </span>
           <button
             className="aa-sidebar-label"
             onClick={() => signOut(router)}
-            title="Sign out"
-            aria-label="Sign out"
+            title={tr("Sign out")}
+            aria-label={tr("Sign out")}
             style={{
               display: "grid",
               placeItems: "center",
@@ -253,8 +258,8 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
         <button
           onClick={() => setCollapsed(!collapsed)}
           data-testid="sidebar-collapse"
-          title={collapsed ? "Expand sidebar ([)" : "Collapse sidebar ([)"}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? tr("Expand sidebar ([)") : tr("Collapse sidebar ([)")}
+          aria-label={collapsed ? tr("Expand sidebar") : tr("Collapse sidebar")}
           style={{
             display: "flex",
             alignItems: "center",
@@ -271,7 +276,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
           }}
         >
           {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
-          <span className="aa-sidebar-label">Collapse</span>
+          <span className="aa-sidebar-label">{tr("Collapse")}</span>
         </button>
       </div>
     </aside>
@@ -279,12 +284,13 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
 }
 
 function NavItem({ entry, active, onClick }: { entry: NavEntry; active: boolean; onClick: () => void }) {
+  const tx = useTx();
   return (
     <button
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      title={entry.label}
-      aria-label={entry.label}
+      title={tx(entry.label)}
+      aria-label={tx(entry.label)}
       style={{
         display: "flex",
         alignItems: "center",
@@ -308,7 +314,7 @@ function NavItem({ entry, active, onClick }: { entry: NavEntry; active: boolean;
         className="aa-sidebar-label"
         style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
       >
-        {entry.label}
+        {tx(entry.label)}
       </span>
     </button>
   );

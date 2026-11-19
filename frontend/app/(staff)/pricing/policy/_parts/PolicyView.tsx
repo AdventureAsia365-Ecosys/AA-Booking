@@ -32,15 +32,12 @@ import {
   ConfirmDialog,
   DataTable,
   Drawer,
-  I18nProvider,
   Input,
   KpiTile,
-  LangSwitch,
   LinkButton,
   PageFrame,
   Pill,
   Section,
-  langStore,
   useCan,
   useFormat,
   useT,
@@ -486,7 +483,7 @@ function Policy() {
   const { get } = useUrlFilters();
   const tab = get("tab") === "cancellation" ? "cancellation" : "parameters";
   return (
-    <PageFrame title={t("title")} description={t("description")} actions={<LangSwitch ariaLabel={t("language")} />}>
+    <PageFrame title={t("title")} description={t("description")}>
       <SavedTabs
         ariaLabel={t("tabsLabel") as string}
         tabs={[
@@ -499,11 +496,7 @@ function Policy() {
   );
 }
 
-/** The page in its own language (English by default; the switch keeps the choice in the `bk_lang` cookie). */
+/** The page; its language is the staff shell's (AA-1128: the switch is in the top bar, ui/local/AdminShell.tsx). */
 export function PolicyView() {
-  return (
-    <I18nProvider store={langStore}>
-      <Policy />
-    </I18nProvider>
-  );
+  return <Policy />;
 }

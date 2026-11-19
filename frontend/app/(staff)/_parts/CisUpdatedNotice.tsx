@@ -8,6 +8,9 @@ import type { ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { DateText } from "@/ui";
 import type { CisUpdateSummary } from "@/ui/booking/cisReadback";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./CisUpdatedNotice.messages";
 
 export function CisUpdatedNotice({
   summary,
@@ -19,8 +22,10 @@ export function CisUpdatedNotice({
   hint: string;
   action?: ReactNode;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   if (summary.count === 0) return null;
-  const titles = summary.count === 1 ? "1 item title differs" : `${summary.count} item titles differ`;
+  const titles = summary.count === 1 ? tr("1 item title differs") : tr("{0} item titles differ", summary.count);
   return (
     <div
       role="status"
@@ -30,24 +35,23 @@ export function CisUpdatedNotice({
       <div className="flex min-w-0 flex-1 gap-2">
         <RefreshCw size={15} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="font-semibold text-ink">CIS has newer text for {summary.tours.length === 1 ? "this tour" : "these tours"}</p>
+          <p className="font-semibold text-ink">{tr("CIS has newer text for")} {summary.tours.length === 1 ? tr("this tour") : tr("these tours")}</p>
           <p className="mt-0.5 break-words">
-            {titles} from what CIS publishes today
+            {tr("{0} from what CIS publishes today", titles)}
             {summary.tours.map((t, i) => (
               <span key={t.source_id}>
                 {i === 0 ? ": " : "; "}
                 <span className="font-medium text-ink">{t.title ?? t.source_id}</span>
                 {t.updated_at && (
                   <>
-                    {" "}
-                    (updated <DateText value={t.updated_at} />)
+                    {tr("(updated")} <DateText value={t.updated_at} />)
                   </>
                 )}
               </span>
             ))}
             .
           </p>
-          <p className="mt-0.5 text-xs text-muted">{hint}</p>
+          <p className="mt-0.5 text-xs text-muted">{tx(hint)}</p>
         </div>
       </div>
       {action && <div className="shrink-0">{action}</div>}

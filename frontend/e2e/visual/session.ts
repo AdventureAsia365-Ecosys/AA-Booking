@@ -11,7 +11,11 @@ export function fakeAccessToken(): string {
   return `${b64({ alg: "none", typ: "JWT" })}.${b64({ token_use: "access", client_id: "layout-mock", sub: "u-layout", exp: 4102444800 })}.layout-mock`;
 }
 
-/** Put the fake session cookie on the page's context for `origin`. */
+/** Put the fake session cookie on the page's context for `origin`. AA-1128: VISUAL_LANG=vi also sets the UI language
+ *  cookie (`bk_lang`, ui/local/lang.ts), so the same run checks every page in Vietnamese (console errors such as a
+ *  hydration mismatch, overflow from longer text, unnamed controls). */
 export async function addFakeSession(page: Page, origin: string): Promise<void> {
-  await page.context().addCookies([{ name: "bk_access", value: fakeAccessToken(), url: origin }]);
+  const cookies = [{ name: "bk_access", value: fakeAccessToken(), url: origin }];
+  if (process.env.VISUAL_LANG === "vi") cookies.push({ name: "bk_lang", value: "vi", url: origin });
+  await page.context().addCookies(cookies);
 }

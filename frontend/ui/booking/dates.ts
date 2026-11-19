@@ -1,6 +1,9 @@
 // ui/booking/dates.ts
 // AA-996 (audit slice 1) — date and time text helpers for the Booking UI. One format everywhere (UI spec §1.2 "Dates",
 // the kit formatDate / formatDateTime): "9 Oct 2026", "9 Oct 2026, 14:05", 24-hour times.
+// AA-1128 (vi): the formatters take the UI language ("en" | "vi", the kit core/i18n.ts Lang written out) and use the kit
+// locale per language (core/format.ts: en-GB / vi-VN, "9 thg 10, 2026"), never the runtime locale. Components get them
+// bound to the current language from `useBookingFormat()` (ui/local/useBookingFormat.ts).
 //
 // Pure and import-free on purpose: the unit tests (dates.test.mjs, `npm run test:unit`) load this file with Node's
 // built-in type stripping, which resolves only relative files with their extension.
@@ -10,6 +13,16 @@
 // formatted in UTC here.
 
 const ISO_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** A kit UI language (core/i18n.ts `Lang`), written out so this file stays import-free. */
+export type UiLang = "en" | "vi";
+
+/** The fixed locale of each UI language (the kit core/format.ts and core/tokens.ts use the same two). */
+export const UI_LOCALE: Readonly<Record<UiLang, string>> = { en: "en-GB", vi: "vi-VN" };
+
+function localeOf(lang: UiLang): string {
+  return UI_LOCALE[lang] ?? "en-GB";
+}
 
 const MONTHS: Record<string, number> = {
   jan: 1, january: 1,
@@ -46,17 +59,17 @@ export function isIsoDay(value: string | null | undefined): value is string {
   return !!m && toIsoDay(Number(m[1]), Number(m[2]), Number(m[3])) === value;
 }
 
-/** "2026-10-09" → "9 Oct 2026" (the kit formatDate output, without the time-zone shift). A full timestamp is shown
- *  as the kit formatDate shows it (the viewer's day); empty or unreadable: "—". */
-export function formatDay(value: string | null | undefined): string {
+/** "2026-10-09" → "9 Oct 2026" (vi: "9 thg 10, 2026"; the kit core/format.ts formatDay output, without the time-zone
+ *  shift). A full timestamp is shown as the kit formatDate shows it (the viewer's day); empty or unreadable: "—". */
+export function formatDay(value: string | null | undefined, lang: UiLang = "en"): string {
   if (!value) return "—";
   if (!isIsoDay(value)) {
     if (ISO_DAY_RE.test(value)) return "—"; // shaped like a day, but not one (2026-02-30)
     const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString(localeOf(lang), { day: "numeric", month: "short", year: "numeric" });
   }
   const [y, m, d] = value.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", {
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(localeOf(lang), {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -113,20 +126,42 @@ export function parseTimeInput(text: string): string | null {
   return `${pad2(h)}:${pad2(min)}`;
 }
 
-/** Instants inside free text ("…next due 2026-11-06", "…at 2026-10-27T09:30:00Z") → en-GB ("6 Nov 2026",
- *  "27 Oct 2026, 16:30" in the viewer's zone). Used for messages the API stored as plain text (notifications). */
-export function localizeIsoDates(text: string): string {
+/** Instants inside free text ("…next due 2026-11-06", "…at 2026-10-27T09:30:00Z") → the UI language's day ("6 Nov
+ *  2026", "27 Oct 2026, 16:30" in the viewer's zone). Used for messages the API stored as plain text (notifications). */
+export function localizeIsoDates(text: string, lang: UiLang = "en"): string {
   return text.replace(
     /\b(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?\b/g,
     (match, day: string, time: string | undefined, zone: string | undefined) => {
       if (!isIsoDay(day)) return match;
-      if (!time) return formatDay(day);
-      if (!zone) return `${formatDay(day)}, ${time}`;
+      if (!time) return formatDay(day, lang);
+      if (!zone) return `${formatDay(day, lang)}, ${time}`;
       const d = new Date(match.replace(" ", "T"));
       if (Number.isNaN(d.getTime())) return match;
-      return d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+      return d.toLocaleString(localeOf(lang), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
     },
   );
+}
+
+/** AA-1128 (vi): "October 2026" / "tháng 10 năm 2026" for a year and month (1-12), in the UI language. */
+export function formatMonth(year: number, month: number, lang: UiLang = "en", style: "long" | "short" = "long"): string {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return "—";
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleString(localeOf(lang), { month: style, year: "numeric", timeZone: "UTC" });
+}
+
+/** AA-1128 (vi): a calendar day with its weekday ("Friday, 9 Oct 2026" / "Thứ Sáu, 9 thg 10, 2026"), read as UTC like
+ *  every calendar day here; null for no day or an unreadable one. */
+export function formatLongDay(value: Date | null | undefined, lang: UiLang = "en"): string | null {
+  if (!value || Number.isNaN(value.getTime())) return null;
+  return new Intl.DateTimeFormat(localeOf(lang), { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(value);
+}
+
+/** AA-1128 (vi): a plain number in the UI language ("1,234.5" / "1.234,5"), at most `maxFractionDigits` decimals. An
+ *  unreadable value comes back as it was (a string) or "—". Amounts with a currency use the kit formatMoney instead. */
+export function formatNumber(value: number | string | null | undefined, lang: UiLang = "en", maxFractionDigits = 2): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return typeof value === "string" ? value : "—";
+  return new Intl.NumberFormat(localeOf(lang), { maximumFractionDigits: maxFractionDigits }).format(n);
 }
 
 /** AA-1128: today's calendar day "YYYY-MM-DD" on the viewer's clock. */

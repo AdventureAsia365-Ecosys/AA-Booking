@@ -30,11 +30,16 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
-import { localizeIsoDates } from "@/ui/booking/dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./page.messages";
 
 const PAGE_SIZE = 20;
 
 export default function NotificationsPage() {
+  const t = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const { get } = useUrlFilters();
@@ -57,7 +62,7 @@ export default function NotificationsPage() {
     mutationFn: () => api.notifications.markRead("all"),
     onSuccess: () => {
       onDone();
-      toast.success("All notifications marked as read");
+      toast.success(t("All notifications marked as read"));
     },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -72,39 +77,39 @@ export default function NotificationsPage() {
 
   return (
     <PageFrame
-      title="Notifications"
+      title={t("Notifications")}
       description={
         q.data
           ? unread
-            ? `${unread} unread. New inquiries, assignments, status changes and approvals that concern you.`
-            : "You are all caught up. New inquiries, assignments, status changes and approvals appear here."
-          : "New inquiries, assignments, status changes and approvals that concern you."
+            ? t("{0} unread. New inquiries, assignments, status changes and approvals that concern you.", unread)
+            : t("You are all caught up. New inquiries, assignments, status changes and approvals appear here.")
+          : t("New inquiries, assignments, status changes and approvals that concern you.")
       }
       actions={
         <Button variant="secondary" onClick={() => markAll.mutate()} disabled={!unread || markAll.isPending}>
-          <CheckCheck size={15} /> Mark all as read
+          <CheckCheck size={15} /> {t("Mark all as read")}
         </Button>
       }
     >
       <Section padded={false}>
         <div className="border-b border-line2 px-4 py-4 sm:px-5">
           <FilterBar
-            search={{ placeholder: "Search notifications" }}
+            search={{ placeholder: t("Search notifications") }}
             selects={[
               {
                 key: "read",
-                label: "Status",
-                allLabel: "All statuses",
+                label: t("Status"),
+                allLabel: t("All statuses"),
                 options: [
-                  { value: "unread", label: "Unread" },
-                  { value: "read", label: "Read" },
+                  { value: "unread", label: t("Unread") },
+                  { value: "read", label: t("Read") },
                 ],
               },
               {
                 key: "type",
-                label: "Type",
-                allLabel: "All types",
-                options: Object.entries(NOTIFICATION_TYPE_LABEL).map(([value, label]) => ({ value, label })),
+                label: t("Type"),
+                allLabel: t("All types"),
+                options: Object.entries(NOTIFICATION_TYPE_LABEL).map(([value, label]) => ({ value, label: tx(label) })),
               },
             ]}
           />
@@ -114,19 +119,19 @@ export default function NotificationsPage() {
         ) : forbidden ? (
           <EmptyState
             icon={<Lock size={28} />}
-            title="You do not have access to notifications"
-            description="Booking refused this request for your role. Ask a Booking admin to check your access."
+            title={t("You do not have access to notifications")}
+            description={t("Booking refused this request for your role. Ask a Booking admin to check your access.")}
           />
         ) : q.isError ? (
-          <ErrorState message={(q.error as Error).message} onRetry={() => q.refetch()} />
+          <ErrorState message={tx((q.error as Error).message)} onRetry={() => q.refetch()} />
         ) : items.length === 0 ? (
           filtered ? (
-            <EmptyState title="No notifications match these filters" description="Change or reset the filters to see more." />
+            <EmptyState title={t("No notifications match these filters")} description={t("Change or reset the filters to see more.")} />
           ) : (
             <EmptyState
               icon={<BellOff size={28} />}
-              title="No notifications yet"
-              description="When something needs you (a new inquiry, a case assigned to you, an approval) it shows up here and on the bell."
+              title={t("No notifications yet")}
+              description={t("When something needs you (a new inquiry, a case assigned to you, an approval) it shows up here and on the bell.")}
             />
           )
         ) : (
@@ -139,12 +144,11 @@ export default function NotificationsPage() {
         {items.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line2 px-4 py-3 text-[13px] text-muted sm:px-5">
             <span>
-              Showing {items.length} notification{items.length === 1 ? "" : "s"}
-              {q.hasNextPage ? ", newest first" : ""}
+              {t("Showing {0} notification{1}{2}", items.length, items.length === 1 ? "" : "s", q.hasNextPage ? t(", newest first") : "")}
             </span>
             {q.hasNextPage && (
               <Button variant="secondary" size="sm" onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage}>
-                {q.isFetchingNextPage ? "Loading…" : "Show older"}
+                {q.isFetchingNextPage ? t("Loading…") : t("Show older")}
               </Button>
             )}
           </div>
@@ -155,6 +159,9 @@ export default function NotificationsPage() {
 }
 
 function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (id: string) => void; busy: boolean }) {
+  const t = useT(MSG);
+  const { localizeIsoDates } = useBookingFormat();
+  const tx = useTx();
   const target = notificationTarget(n);
   const label = NOTIFICATION_TYPE_LABEL[n.type] ?? n.type;
   return (
@@ -168,14 +175,14 @@ function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (i
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className={`text-[14px] text-ink ${n.read ? "font-medium" : "font-semibold"}`}>{n.title ? localizeIsoDates(n.title) : label}</span>
-            {n.title && n.title !== label && <Pill dot={false}>{label}</Pill>}
-            {!n.read && <span className="sr-only">Unread</span>}
+            {n.title && n.title !== label && <Pill dot={false}>{tx(label)}</Pill>}
+            {!n.read && <span className="sr-only">{t("Unread")}</span>}
           </div>
           <span className={`shrink-0 text-xs ${n.read ? "text-muted" : "text-accent-deep"}`}>
             <DateText value={n.created_at} withTime />
           </span>
         </div>
-        {n.message && <NotificationMessage text={n.message} className="mt-1 block text-[13px] text-body" />}
+        {n.message && <NotificationMessage text={tx(n.message)} className="mt-1 block text-[13px] text-body" />}
         {(target || !n.read) && (
           <div className="mt-3 flex flex-wrap gap-2">
             {target && (
@@ -184,12 +191,12 @@ function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (i
                 onClick={() => !n.read && onRead(n.id)}
                 className="inline-flex h-8 items-center rounded-full border border-accent-border px-3.5 text-xs font-semibold text-accent-deep hover:bg-accent-tint"
               >
-                {target.label}
+                {tx(target.label)}
               </Link>
             )}
             {!n.read && (
               <Button size="sm" variant="ghost" onClick={() => onRead(n.id)} disabled={busy}>
-                Mark as read
+                {t("Mark as read")}
               </Button>
             )}
           </div>
@@ -200,8 +207,9 @@ function NotificationRow({ n, onRead, busy }: { n: StaffNotification; onRead: (i
 }
 
 function ListSkeleton() {
+  const t = useT(MSG);
   return (
-    <ul aria-busy="true" aria-label="Loading notifications">
+    <ul aria-busy="true" aria-label={t("Loading notifications")}>
       {[0, 1, 2, 3, 4].map((i) => (
         <li key={i} className="flex items-start gap-4 border-b border-line2 px-5 py-4 last:border-b-0">
           <SkeletonBar w={40} h={40} r={20} />

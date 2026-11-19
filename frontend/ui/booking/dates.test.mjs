@@ -3,7 +3,10 @@
 // TZ is pinned by the npm script (America/Los_Angeles) so a day that would shift west of Greenwich is caught.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatDay, isIsoDay, isPastDay, localToday, localizeIsoDates, normalizeTime, parseDayInput, parseTimeInput } from "./dates.ts";
+import {
+  formatDay, formatLongDay, formatMonth, formatNumber, isIsoDay, isPastDay, localToday, localizeIsoDates, normalizeTime, parseDayInput,
+  parseTimeInput,
+} from "./dates.ts";
 
 test("formatDay shows the en-GB day without a time-zone shift", () => {
   assert.equal(formatDay("2026-10-09"), "9 Oct 2026");
@@ -90,4 +93,22 @@ test("a day before today is past; today, later or unreadable days are not (AA-11
   assert.equal(isPastDay(null, "2026-11-17"), false);
   assert.equal(isPastDay("13 Nov 2026", "2026-11-17"), false);
   assert.equal(localToday(new Date(2026, 10, 7, 23, 59)), "2026-11-07");
+});
+
+test("AA-1128 (vi): the formatters follow the UI language, English by default", () => {
+  assert.equal(formatDay("2026-10-09", "vi"), "9 thg 10, 2026");
+  assert.equal(formatDay("2026-10-09", "en"), "9 Oct 2026");
+  assert.equal(formatDay("2026-02-30", "vi"), "—");
+  assert.equal(localizeIsoDates("next due 2026-11-06", "vi"), "next due 6 thg 11, 2026");
+  assert.equal(formatMonth(2026, 10), "October 2026");
+  assert.equal(formatMonth(2026, 10, "vi"), "tháng 10 năm 2026");
+  assert.equal(formatMonth(2026, 13, "vi"), "—");
+  assert.equal(formatLongDay(new Date(Date.UTC(2026, 9, 9))), "Friday, 9 Oct 2026");
+  assert.equal(formatLongDay(new Date(Date.UTC(2026, 9, 9)), "vi"), "Thứ Sáu, 9 thg 10, 2026");
+  assert.equal(formatLongDay(null, "vi"), null);
+  assert.equal(formatNumber(1234.5), "1,234.5");
+  assert.equal(formatNumber("1234.5", "vi"), "1.234,5");
+  assert.equal(formatNumber("0.123456789", "en", 8), "0.12345679");
+  assert.equal(formatNumber("n/a", "vi"), "n/a");
+  assert.equal(formatNumber(null, "vi"), "—");
 });

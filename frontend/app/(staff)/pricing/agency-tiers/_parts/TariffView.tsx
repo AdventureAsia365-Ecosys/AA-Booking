@@ -17,6 +17,15 @@ import { Button, DataTable, DateText, EmptyState, Money, PageFrame, Section, Sel
 import { daysText } from "@/ui/booking/plural";
 import { currencyOptions } from "@/ui/booking/fxInForce";
 import { useCurrenciesInForce } from "@/ui/booking/fxInForceQuery";
+import { useT } from "@/ui/core/useI18n";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { MSG } from "./TariffView.messages";
+
+/** "3 travellers:" in the UI language (a column cell is outside a component, so it renders this one). */
+function PricedFor({ pax }: { pax: number }) {
+  const t = useT(MSG);
+  return <>{t("{0} traveller{1}:", pax, pax > 1 ? "s" : "")}</>;
+}
 
 function band(min: number, max: number | null): string {
   if (max === null) return `${min}+`;
@@ -67,7 +76,7 @@ const columns: ColumnDef<TariffItem, unknown>[] = [
       <span className="flex flex-col">
         <Money amount={row.original.price_per_person.amount} currency={row.original.price_per_person.currency} strong />
         <span className="whitespace-nowrap text-xs text-muted">
-          {row.original.priced_for_pax} traveller{row.original.priced_for_pax > 1 ? "s" : ""}: <Money amount={row.original.price.amount} currency={row.original.price.currency} />
+          <PricedFor pax={row.original.priced_for_pax} /> <Money amount={row.original.price.amount} currency={row.original.price.currency} />
         </span>
       </span>
     ),
@@ -109,6 +118,8 @@ const unpricedColumns: ColumnDef<UnpricedTariffRow, unknown>[] = [
 ];
 
 export function TariffView() {
+  const t = useT(MSG);
+  const { formatDay } = useBookingFormat();
   const { get, set } = useUrlFilters();
   const toast = useToast();
   const partnerId = get("partner");
@@ -136,7 +147,7 @@ export function TariffView() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "The tariff could not be downloaded.");
+      toast.error(err instanceof Error ? err.message : t("The tariff could not be downloaded."));
     } finally {
       setDownloading(false);
     }
@@ -144,13 +155,13 @@ export function TariffView() {
 
   if (!partnerId) {
     return (
-      <PageFrame title="Agency tariff">
+      <PageFrame title={t("Agency tariff")}>
         <EmptyState
-          title="Pick an agency"
-          description="Open a tariff from the Agencies tab of Agency tiers."
+          title={t("Pick an agency")}
+          description={t("Open a tariff from the Agencies tab of Agency tiers.")}
           action={
             <Link href="/pricing/agency-tiers?tab=agencies" className="text-[13px] font-semibold text-accent-deep hover:underline">
-              Go to Agencies
+              {t("Go to Agencies")}
             </Link>
           }
         />
@@ -161,36 +172,36 @@ export function TariffView() {
   const partner = data?.partner;
   return (
     <PageFrame
-      title={partner ? `Tariff: ${partner.agency_name}` : "Agency tariff"}
+      title={partner ? t("Tariff: {0}", partner.agency_name) : t("Agency tariff")}
       description={
         partner
-          ? `${partner.tier_label} tier. Prices as a B2B quote on ${data?.priced_on ?? "today"} would charge them, per person for the smallest group of each band sharing twin rooms, for a departure on any of the row's travel dates. Prices follow supplier rates, rules and exchange rates; the quote is binding.`
-          : "The agency's own price per tour, season and number of travellers."
+          ? t("{0} tier. Prices as a B2B quote on {1} would charge them, per person for the smallest group of each band sharing twin rooms, for a departure on any of the row's travel dates. Prices follow supplier rates, rules and exchange rates; the quote is binding.", partner.tier_label, data?.priced_on ? formatDay(data.priced_on) : t("today"))
+          : t("The agency's own price per tour, season and number of travellers.")
       }
       actions={
         <div className="bk-no-print flex flex-wrap items-center gap-2">
-          <Select size="sm" aria-label="Currency" value={currency} onChange={(e) => set("currency", e.target.value)}>
+          <Select size="sm" aria-label={t("Currency")} value={currency} onChange={(e) => set("currency", e.target.value)}>
             {currencies.map((c) => (
               <option key={c.code} value={c.code} disabled={!c.usable && c.code !== currency}>
-                {c.usable ? c.code : `${c.code} (no FX rate today)`}
+                {c.usable ? c.code : t("{0} (no FX rate today)", c.code)}
               </option>
             ))}
           </Select>
           <Button variant="secondary" size="sm" onClick={download} disabled={downloading || !items.length}>
-            <Download size={13} /> Download CSV
+            <Download size={13} /> {t("Download CSV")}
           </Button>
           <Button variant="primary" size="sm" onClick={() => window.print()} disabled={!items.length}>
-            <Printer size={13} /> Print
+            <Printer size={13} /> {t("Print")}
           </Button>
         </div>
       }
     >
       {data?.truncated && (
         <div className="rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
-          The tariff is long: only its first rows are shown. Download the CSV per tour or narrow the catalogue.
+          {t("The tariff is long: only its first rows are shown. Download the CSV per tour or narrow the catalogue.")}
         </div>
       )}
-      <Section title="Prices" description={data ? `In ${data.currency}${data.currency !== "USD" ? ` at ${data.fx.rate_per_usd} per USD (${data.fx.rate_date})` : ""}.` : undefined}>
+      <Section title={t("Prices")} description={data ? t("In {0}{1}.", data.currency, data.currency !== "USD" ? ` at ${data.fx.rate_per_usd} per USD (${data.fx.rate_date})` : "") : undefined}>
         <DataTable<TariffItem>
           tableId="agency-tariff"
           data={items}
@@ -200,13 +211,13 @@ export function TariffView() {
           error={tariff.isError ? (tariff.error as Error).message : null}
           onRetry={() => tariff.refetch()}
           paginate={false}
-          emptyTitle="No prices yet"
-          emptyDescription="Sellable tours appear here once their price matrix has rows for agencies (Recompute from rates on the trip plan)."
+          emptyTitle={t("No prices yet")}
+          emptyDescription={t("Sellable tours appear here once their price matrix has rows for agencies (Recompute from rates on the trip plan).")}
         />
       </Section>
       {!!data?.unpriced.length && (
         <div className="bk-no-print">
-          <Section title="Not in the tariff" description="Matrix rows a B2B quote cannot price today. The agency does not see them.">
+          <Section title={t("Not in the tariff")} description={t("Matrix rows a B2B quote cannot price today. The agency does not see them.")}>
             <DataTable<UnpricedTariffRow>
               tableId="agency-tariff-unpriced"
               data={data.unpriced}

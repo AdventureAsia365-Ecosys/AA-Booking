@@ -15,11 +15,17 @@ import type { StaffNotification } from "@/lib/api/types";
 import { DateText } from "../core/DateText";
 import { NOTIFICATION_TYPE_LABEL, notificationTarget } from "./notifications";
 import { NotificationIcon, NotificationMessage } from "./NotificationItem";
-import { localizeIsoDates } from "./dates";
+import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./NotificationPopover.messages";
 
 export const NOTIFICATIONS_KEY = ["notifications", "popover"] as const;
 
 export function NotificationPopover() {
+  const t = useT(MSG);
+  const { localizeIsoDates } = useBookingFormat();
+  const tx = useTx();
   const router = useRouter();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -70,7 +76,7 @@ export function NotificationPopover() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+        aria-label={unread ? t("Notifications, {0} unread", unread) : t("Notifications")}
         aria-expanded={open}
         aria-haspopup="true"
         className="relative grid h-9 w-9 cursor-pointer place-items-center rounded-[10px] border border-line bg-card text-ink3 hover:bg-bg"
@@ -87,7 +93,7 @@ export function NotificationPopover() {
       {open && (
         <div className="absolute right-0 top-full z-50 mt-2 w-[420px] max-w-[calc(100vw-24px)] overflow-hidden rounded-lg border border-line bg-card shadow-kit-lg">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
-            <span className="text-[13px] font-semibold text-ink">Notifications</span>
+            <span className="text-[13px] font-semibold text-ink">{t("Notifications")}</span>
             {unread > 0 && (
               <button
                 type="button"
@@ -95,17 +101,17 @@ export function NotificationPopover() {
                 disabled={markAll.isPending}
                 className="cursor-pointer text-xs font-semibold text-accent hover:text-accent-deep disabled:opacity-50"
               >
-                Mark all as read
+                {t("Mark all as read")}
               </button>
             )}
           </div>
           <div className="max-h-[380px] overflow-y-auto">
             {isError ? (
-              <p className="px-4 py-6 text-center text-xs text-muted">Notifications are not available right now.</p>
+              <p className="px-4 py-6 text-center text-xs text-muted">{t("Notifications are not available right now.")}</p>
             ) : !data ? (
-              <p className="px-4 py-6 text-center text-xs text-muted">Loading…</p>
+              <p className="px-4 py-6 text-center text-xs text-muted">{t("Loading…")}</p>
             ) : data.items.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-muted">You are all caught up.</p>
+              <p className="px-4 py-6 text-center text-xs text-muted">{t("You are all caught up.")}</p>
             ) : (
               data.items.map((n) => (
                 <button
@@ -122,7 +128,7 @@ export function NotificationPopover() {
                       {n.title ? localizeIsoDates(n.title) : NOTIFICATION_TYPE_LABEL[n.type] || n.type}
                     </span>
                     {n.message && (
-                      <NotificationMessage text={n.message} className="mt-0.5 block text-xs text-body line-clamp-2" />
+                      <NotificationMessage text={tx(n.message)} className="mt-0.5 block text-xs text-body line-clamp-2" />
                     )}
                     <span className={`mt-1 block text-[11px] ${n.read ? "text-muted2" : "text-accent-deep"}`}>
                       <DateText value={n.created_at} relative />
@@ -137,7 +143,7 @@ export function NotificationPopover() {
             onClick={() => setOpen(false)}
             className="block border-t border-line px-4 py-2.5 text-center text-xs font-semibold text-accent hover:bg-bg"
           >
-            View all notifications
+            {t("View all notifications")}
           </Link>
         </div>
       )}

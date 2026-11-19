@@ -7,6 +7,9 @@ import { Hourglass } from "lucide-react";
 import { EmptyState } from "../core/primitives";
 import { PageFrame } from "./PageFrame";
 import { Section } from "../core/Section";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./WaveFrame.messages";
 
 export interface WaveFrameProps {
   wave: 2 | 3;
@@ -25,24 +28,28 @@ export interface WaveFrameProps {
 }
 
 function Ghost({ label }: { label: string }) {
+  const tx = useTx();
   return (
     <span className="inline-flex h-9 items-center rounded-md border border-dashed border-line px-3 text-[13px] text-muted2">
-      {label}
+      {tx(label)}
     </span>
   );
 }
 
 function ComingSoon({ wave, purpose }: { wave: 2 | 3; purpose: string }) {
+  const tr = useT(MSG);
   return (
     <EmptyState
       icon={<Hourglass size={28} />}
-      title={`Coming in wave ${wave}`}
+      title={tr("Coming in wave {0}", wave)}
       description={purpose}
     />
   );
 }
 
 export function WaveFrame(p: WaveFrameProps) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const actions = p.actions?.length ? (
     <>
       {p.actions.map((a) => (
@@ -58,7 +65,7 @@ export function WaveFrame(p: WaveFrameProps) {
   ) : undefined;
 
   return (
-    <PageFrame title={p.title} description={p.description} actions={actions} breadcrumbs={p.breadcrumbs}>
+    <PageFrame title={tx(p.title)} description={tx(p.description)} actions={actions} breadcrumbs={p.breadcrumbs}>
       <div data-testid="wave-frame" data-wave={p.wave} className="contents" />
       {p.kpis && (
         <div className="aa-kpi-grid grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -116,7 +123,7 @@ export function WaveFrame(p: WaveFrameProps) {
             <div className="flex flex-col gap-5">
               {p.sections.slice(1).map((s) => (
                 <Section key={s} title={s}>
-                  <p className="text-[13px] text-muted2">Available in wave {p.wave}.</p>
+                  <p className="text-[13px] text-muted2">{tr("Available in wave {0}.", p.wave)}</p>
                 </Section>
               ))}
             </div>

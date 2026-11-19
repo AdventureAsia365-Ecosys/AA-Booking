@@ -9,6 +9,8 @@
 //                  the booking-* group of the company sign-in);
 //   other 403    → "no Booking access" screen;
 //   unavailable  → "Booking API unavailable" screen (network, 5xx, or the endpoint not deployed yet).
+// AA-1128 (B5): the UI language comes from the `bk_lang` cookie (kit core/i18n.ts, English when absent): the notices
+// are translated here on the server, and the shell's provider starts in that language (no English flash).
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -20,64 +22,67 @@ import { SessionNotice } from "./SessionNotice";
 import { AdminShell } from "@/ui/local/AdminShell";
 import { StaffProvider } from "@/ui/local/StaffContext";
 import { withoutB2cWrites } from "@/ui/booking/b2cFrozen";
+import { langFromCookie, translator, type Lang } from "@/ui/core/i18n";
+import { langStore } from "@/ui/local/lang";
+import { MSG } from "./layout.messages";
 
 export const dynamic = "force-dynamic";
 
-export default async function StaffLayout({ children }: { children: React.ReactNode }) {
-  const token = (await cookies()).get(ACCESS_COOKIE)?.value;
-  if (!token) redirect("/login?reason=expired");
+type MeAnswer = Awaited<ReturnType<typeof fetchStaffMe>>;
 
-  const me = await fetchStaffMe(token);
-  if (me.kind === "unauthorized") redirect("/login?reason=expired");
+/** The full-page notice for an answer that does not open the app (null when the staff member gets the shell). */
+function staffNotice(me: MeAnswer, lang: Lang): React.ReactNode {
+  const t = translator(MSG, lang);
   if (me.kind === "inactive") {
-    return (
-      <SessionNotice
-        tone="pending"
-        title="Your Booking access is not active"
-        message="You are signed in, but your Booking profile is not active yet or was suspended. Ask a Booking admin to activate it on the Staff page."
-      />
-    );
+    return <SessionNotice lang={lang} tone="pending" title={t("inactiveTitle")} message={t("inactiveMessage")} />;
   }
   if (me.kind === "forbidden" && me.code === "no_booking_role") {
     return (
       <SessionNotice
+        lang={lang}
         tone="blocked"
-        title="Your account has no Booking role"
-        message="You signed in with your company e-mail, but no Booking role is set for you. Ask an owner to give you a Booking role in CIS → Platform → Staff, then sign in again."
-        link={{ href: CIS_STAFF_URL, label: "Open CIS → Platform → Staff" }}
+        title={t("noRoleTitle")}
+        message={t("noRoleMessage")}
+        link={{ href: CIS_STAFF_URL, label: t("noRoleLink") }}
       />
     );
   }
   if (me.kind === "forbidden") {
     return (
-      <SessionNotice
-        tone="blocked"
-        title="This account cannot use Booking"
-        message={`Booking refused this account (${me.code || "forbidden"}). Ask a Booking admin to check your profile.`}
-      />
+      <SessionNotice lang={lang} tone="blocked" title={t("forbiddenTitle")} message={t("forbiddenMessage", me.code || "forbidden")} />
     );
   }
   if (me.kind === "unavailable") {
     return (
       <SessionNotice
+        lang={lang}
         tone="error"
-        title="The Booking service is not answering"
-        message={
-          me.status === 404
-            ? "The Booking API that this app points to does not have the staff endpoints yet (HTTP 404). They ship with the bk-003 / bk-005 backend."
-            : `The Booking API did not answer${me.status ? ` (HTTP ${me.status})` : ""}. Try again in a moment.`
-        }
+        title={t("downTitle")}
+        message={me.status === 404 ? t("downNoEndpoints") : t("downMessage", me.status ? ` (HTTP ${me.status})` : "")}
         retry
       />
     );
   }
+  return null;
+}
+
+export default async function StaffLayout({ children }: { children: React.ReactNode }) {
+  const jar = await cookies();
+  const token = jar.get(ACCESS_COOKIE)?.value;
+  if (!token) redirect("/login?reason=expired");
+  const lang = langFromCookie(jar.get(langStore.cookieName)?.value);
+
+  const me = await fetchStaffMe(token);
+  if (me.kind === "unauthorized") redirect("/login?reason=expired");
+  const notice = staffNotice(me, lang);
+  if (notice || me.kind !== "ok") return notice;
 
   // AA-1037 (root ADR 0019 d8): while the B2C part is closed no page offers a write on customers, customer invoices or
   // payments (the API answers 410 b2b_only); the pages read these permissions with useCan.
   const staff = { ...me.staff, permissions: withoutB2cWrites(me.staff.permissions, B2C_INTAKE_OPEN) };
   return (
     <StaffProvider staff={staff}>
-      <AdminShell>{children}</AdminShell>
+      <AdminShell initialLang={lang}>{children}</AdminShell>
     </StaffProvider>
   );
 }

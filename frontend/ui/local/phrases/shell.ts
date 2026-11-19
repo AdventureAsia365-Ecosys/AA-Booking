@@ -1,0 +1,54 @@
+// ui/local/phrases/shell.ts — AA-1128 (B5): registers the shell, shared parts, dashboard, pricing and admin message catalogues in the phrasebook
+// (ui/local/phrasebook.ts). The staff shell imports ui/local/phrases (index.ts) once, so the server and the browser
+// hold the SAME catalogues before the first render: `tx()` then gives the same text on both sides (no hydration
+// mismatch), whichever pages the server rendered before. One file per page group, so the PRs of the groups never
+// edit the same lines; ui/booking/phrasebookRegistry.test.mjs checks that every catalogue is listed once.
+import "@/app/(staff)/_parts/CisFields.messages";
+import "@/app/(staff)/_parts/CisUpdatedNotice.messages";
+import "@/app/(staff)/_parts/DetailHeader.messages";
+import "@/app/(staff)/_parts/SupplyContent.messages";
+import "@/app/(staff)/_parts/supply.messages";
+import "@/app/(staff)/_parts/useRecordStatus.messages";
+import "@/app/(staff)/audit-log/AuditLogView.messages";
+import "@/app/(staff)/layout.messages";
+import "@/app/(staff)/notifications/page.messages";
+import "@/app/(staff)/page.messages";
+import "@/app/(staff)/pricing/_shared/closeRow.messages";
+import "@/app/(staff)/pricing/agency-tiers/_parts/AgencyDrawers.messages";
+import "@/app/(staff)/pricing/agency-tiers/_parts/AgencyTiersView.messages";
+import "@/app/(staff)/pricing/agency-tiers/_parts/TariffView.messages";
+import "@/app/(staff)/pricing/calculator/page.messages";
+import "@/app/(staff)/pricing/readiness/_parts/ReadinessView.messages";
+import "@/app/(staff)/pricing/workbench/_parts/versions.messages";
+import "@/app/(staff)/settings/page.messages";
+import "@/app/(staff)/staff/[cisUserId]/page.messages";
+import "@/app/(staff)/staff/_parts/useStaffActions.messages";
+import "@/app/(staff)/staff/page.messages";
+import "@/ui/booking/DataTable.messages";
+import "@/ui/booking/FormDrawer.messages";
+import "@/ui/booking/FromCis.messages";
+import "@/ui/booking/LightTable.messages";
+import "@/ui/booking/NotificationPopover.messages";
+import "@/ui/booking/PageState.messages";
+import "@/ui/booking/PersonCell.messages";
+import "@/ui/booking/PricePanel.messages";
+import "@/ui/booking/StatusBadge.messages";
+import "@/ui/booking/Stepper.messages";
+import "@/ui/booking/TimeField.messages";
+import "@/ui/booking/WaveFrame.messages";
+import "@/ui/booking/agencyFilter.messages";
+import "@/ui/booking/audit.messages";
+import "@/ui/booking/b2cFrozen.messages";
+import "@/ui/booking/caseFacts.messages";
+import "@/ui/booking/deskEntry.messages";
+import "@/ui/booking/earlyBooking.messages";
+import "@/ui/booking/financePeriod.messages";
+import "@/ui/booking/helperPhrases.messages";
+import "@/ui/booking/notifications.messages";
+import "@/ui/booking/tripPlans.messages";
+import "@/ui/local/AdminShell.messages";
+import "@/ui/local/BottomNav.messages";
+import "@/ui/local/CommandPalette.messages";
+import "@/ui/local/Sidebar.messages";
+import "@/ui/local/Topbar.messages";
+import "@/ui/local/nav.messages";

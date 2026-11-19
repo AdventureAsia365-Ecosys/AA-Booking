@@ -17,6 +17,9 @@ import { CIS_ADMIN_URL } from "@/lib/config";
 import { MEDIA_TYPES, supplyApi, type MediaType, type SupplyContent, type SupplyMedia } from "@/lib/api/supply";
 import { AiNotice, aiTextAttrs, showsAiBadge, Button, ConfirmDialog, DateText, FromCisTag, Pill, Skeleton, useToast, type BookingTone } from "@/ui";
 import { supplyError } from "./supply";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SupplyContent.messages";
 
 type Kind = "hotel" | "service";
 
@@ -40,6 +43,8 @@ export function cisEditUrl(path: string | null | undefined): string | null {
 }
 
 export function CisContentPanel({ content }: { content: SupplyContent | null | undefined }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   if (!content) return null;
   const meta = STATUS_META[content.content_status] ?? STATUS_META.none;
   const edit = cisEditUrl(content.edit_url);
@@ -47,28 +52,28 @@ export function CisContentPanel({ content }: { content: SupplyContent | null | u
     <section className="min-w-0" aria-labelledby="cis-content-title">
       <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 id="cis-content-title" className="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-muted">
-          Customer content <FromCisTag />
+          {tr("Customer content")} <FromCisTag />
         </h3>
         {edit && (
           <a href={edit} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[12px] font-medium text-accent-deep hover:underline">
-            Edit in CIS <ExternalLink size={12} />
+            {tr("Edit in CIS")} <ExternalLink size={12} />
           </a>
         )}
       </header>
       <div className="flex flex-col gap-3 rounded-lg border border-line bg-card p-4">
         <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
-          <Pill tone={meta.tone}>{meta.label}</Pill>
-          {content.content_version != null && <span>Version {content.content_version}</span>}
+          <Pill tone={meta.tone}>{tx(meta.label)}</Pill>
+          {content.content_version != null && <span>{tr("Version")} {content.content_version}</span>}
           {/* AA-1040: drafted by the CIS writer model and reviewed in CIS; machine mark on the text below */}
           {showsAiBadge(content.description, content.ai) && <AiNotice form="badge" testId="cis-content-ai-badge" />}
-          <span className="basis-full sm:basis-auto">{meta.hint}</span>
+          <span className="basis-full sm:basis-auto">{tx(meta.hint)}</span>
         </p>
         {content.description && (
           <p
             className="whitespace-pre-line text-[13.5px] leading-relaxed text-body"
             {...aiTextAttrs(content.description, content.ai)}
           >
-            {content.description}
+            {tx(content.description)}
           </p>
         )}
         {content.highlights.length > 0 && (
@@ -85,7 +90,7 @@ export function CisContentPanel({ content }: { content: SupplyContent | null | u
               <img
                 key={url}
                 src={url}
-                alt={`Published photo ${i + 1}`}
+                alt={tr("Published photo {0}", i + 1)}
                 loading="lazy"
                 decoding="async"
                 className="aspect-[4/3] w-full rounded-md bg-panel object-cover"
@@ -165,6 +170,8 @@ export function SupplierPhotos({
   recordActive: boolean;
   canWrite: boolean;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
@@ -188,18 +195,18 @@ export function SupplierPhotos({
     },
     onSuccess: () => {
       refresh();
-      toast.success("Photo added. Confirm its usage rights before CIS can publish it.");
+      toast.success(tr("Photo added. Confirm its usage rights before CIS can publish it."));
     },
-    onError: (err) => toast.error(mediaError(err) ?? "Could not add the photo."),
+    onError: (err) => toast.error(mediaError(err) ?? tr("Could not add the photo.")),
   });
   const update = useMutation({
     mutationFn: ({ id, body }: { id: string; body: { usage_rights?: boolean; status?: "removed" } }) => supplyApi.updateMedia(id, body),
     onSuccess: (m) => {
       refresh();
       setRemoving(null);
-      toast.success(m.status === "removed" ? "Photo removed." : m.usage_rights ? "Usage rights confirmed." : "Usage rights withdrawn.");
+      toast.success(m.status === "removed" ? tr("Photo removed.") : m.usage_rights ? tr("Usage rights confirmed.") : tr("Usage rights withdrawn."));
     },
-    onError: (err) => toast.error(mediaError(err) ?? "Could not change the photo."),
+    onError: (err) => toast.error(mediaError(err) ?? tr("Could not change the photo.")),
   });
 
   const items = q.data?.items ?? [];
@@ -209,7 +216,7 @@ export function SupplierPhotos({
     <section className="min-w-0" aria-labelledby={`${kind}-photos-title`}>
       <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 id={`${kind}-photos-title`} className="text-[13px] font-semibold uppercase tracking-[0.04em] text-muted">
-          Supplier photos ({items.length})
+          {tr("Supplier photos ({0})", items.length)}
         </h3>
         {canWrite && recordActive && (
           <>
@@ -218,31 +225,31 @@ export function SupplierPhotos({
               type="file"
               accept="image/jpeg,image/png,image/webp"
               className="sr-only"
-              aria-label="Choose a photo to upload"
+              aria-label={tr("Choose a photo to upload")}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 e.target.value = "";
                 if (file) upload.mutate(file);
               }}
             />
-            <Button size="sm" variant="primary" disabled={busy || full} onClick={() => input.current?.click()} title={full ? "Remove a photo first" : undefined}>
-              <ImagePlus size={13} /> {busy ? "Uploading…" : "Add photo"}
+            <Button size="sm" variant="primary" disabled={busy || full} onClick={() => input.current?.click()} title={full ? tr("Remove a photo first") : undefined}>
+              <ImagePlus size={13} /> {busy ? tr("Uploading…") : tr("Add photo")}
             </Button>
           </>
         )}
       </header>
       <p className="mb-2 text-xs text-muted">
-        CIS uses a photo for customer content only after its usage rights are confirmed (the supplier allows AA to publish it).
+        {tr("CIS uses a photo for customer content only after its usage rights are confirmed (the supplier allows AA to publish it).")}
       </p>
       {q.isLoading ? (
         <Skeleton h={96} />
       ) : q.isError ? (
         <p role="alert" className="text-[13px] text-danger">
-          {supplyError(q.error, "Could not load the photos.")}
+          {tx(supplyError(q.error, tr("Could not load the photos.")))}
         </p>
       ) : items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line px-4 py-5 text-center text-[13px] text-muted">
-          No photos yet.{canWrite && recordActive ? " Add the photos the supplier sent (JPEG, PNG or WebP)." : ""}
+          {tr("No photos yet.{0}", canWrite && recordActive ? tr(" Add the photos the supplier sent (JPEG, PNG or WebP).") : "")}
         </p>
       ) : (
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -250,17 +257,17 @@ export function SupplierPhotos({
             <li key={m.id} className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-card">
               {m.url ? (
                 // eslint-disable-next-line @next/next/no-img-element -- presigned private S3 URL; next/image would need the bucket host
-                <img src={m.url} alt={`Supplier photo, ${m.width ?? "?"} × ${m.height ?? "?"}`} loading="lazy" className="aspect-[4/3] w-full bg-panel object-cover" />
+                <img src={m.url} alt={tr("Supplier photo, {0} × {1}", m.width ?? "?", m.height ?? "?")} loading="lazy" className="aspect-[4/3] w-full bg-panel object-cover" />
               ) : (
-                <div className="grid aspect-[4/3] w-full place-items-center bg-panel text-xs text-muted">Preview not available</div>
+                <div className="grid aspect-[4/3] w-full place-items-center bg-panel text-xs text-muted">{tr("Preview not available")}</div>
               )}
               <div className="flex flex-col gap-2 p-3 text-xs text-muted">
                 <span className="flex flex-wrap items-center gap-2">
                   {m.usage_rights ? (
-                    <Pill tone="success">Rights confirmed</Pill>
+                    <Pill tone="success">{tr("Rights confirmed")}</Pill>
                   ) : (
-                    <Pill tone="warning" title="CIS will not publish this photo">
-                      Rights not confirmed
+                    <Pill tone="warning" title={tr("CIS will not publish this photo")}>
+                      {tr("Rights not confirmed")}
                     </Pill>
                   )}
                   <span>
@@ -268,7 +275,7 @@ export function SupplierPhotos({
                   </span>
                 </span>
                 <span>
-                  {m.uploaded_by.name ?? "Staff"} · <DateText value={m.created_at} />
+                  {m.uploaded_by.name ?? tr("Staff")} · <DateText value={m.created_at} />
                 </span>
                 {canWrite && (
                   <span className="flex flex-wrap gap-2">
@@ -278,10 +285,10 @@ export function SupplierPhotos({
                       disabled={update.isPending}
                       onClick={() => update.mutate({ id: m.id, body: { usage_rights: !m.usage_rights } })}
                     >
-                      <ShieldCheck size={13} /> {m.usage_rights ? "Withdraw rights" : "Confirm rights"}
+                      <ShieldCheck size={13} /> {m.usage_rights ? tr("Withdraw rights") : tr("Confirm rights")}
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => setRemoving(m)} ariaLabel="Remove photo">
-                      <Trash2 size={13} /> Remove
+                    <Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => setRemoving(m)} ariaLabel={tr("Remove photo")}>
+                      <Trash2 size={13} /> {tr("Remove")}
                     </Button>
                   </span>
                 )}
@@ -297,9 +304,9 @@ export function SupplierPhotos({
         busy={update.isPending}
         error={mediaError(update.error)}
         danger
-        title="Remove photo"
-        confirmLabel="Remove"
-        message="Remove this photo? CIS stops using it. This cannot be undone: to use it again, upload it again."
+        title={tr("Remove photo")}
+        confirmLabel={tr("Remove")}
+        message={tr("Remove this photo? CIS stops using it. This cannot be undone: to use it again, upload it again.")}
       />
     </section>
   );
