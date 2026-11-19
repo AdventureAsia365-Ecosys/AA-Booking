@@ -16,11 +16,13 @@
 // S280 (AA-1096 settings UI audit): Pricing › Policy links here, so the page has the same English / Vietnamese switch
 // (messages.ts, the `bk_lang` cookie); a row takes effect today or later (the API refuses a past day, and an approval
 // once the day has passed: 409 effective_date_passed); the FX "as of" day is the day the rate takes effect.
+// AA-1128 (B0 review): a warning banner lists each approved rule dated later that lowers a margin, floor or RRP value.
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { Plus, TriangleAlert } from "lucide-react";
+import { scheduledDrops, type RuleDrop } from "@/ui/booking/ruleDrops";
 import { ApiError } from "@/lib/api/client";
 import { pct } from "@/lib/proposalDraft";
 import {
@@ -286,6 +288,43 @@ function PageActions({ canWrite, onNew }: { canWrite: boolean; onNew: (d: "rule"
   );
 }
 
+/** AA-1128 (B0 review): approved rules dated later that lower the target margin, the floor margin or the RRP markup of
+ *  their channel (ui/booking/ruleDrops.ts), so a mistaken future row is seen before its day. Shown on both tabs. */
+function ScheduledDropsBanner({ drops }: { drops: RuleDrop[] }) {
+  const t = useT(R);
+  const { formatDate } = useFormat();
+  if (drops.length === 0) return null;
+  return (
+    <div
+      role="status"
+      data-testid="scheduled-rule-drops"
+      className="flex gap-2 rounded-lg border border-warning bg-warning-soft px-4 py-3 text-[13px] text-body"
+    >
+      <TriangleAlert size={15} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+      <div className="min-w-0">
+        <p>
+          <strong className="text-ink">{t("dropsLead")}</strong> {t("dropsIntro", drops.length)}
+        </p>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          {drops.map((d) => (
+            <li key={`${d.id}-${d.field}`} className="break-words">
+              {t(
+                "dropLine",
+                channelLabel(t, d.channel),
+                formatDate(d.valid_from),
+                t(`dropField_${d.field}` as RKey) as string,
+                d.field === "rrp_markup_pct" ? `+${pct(d.from)}` : pct(d.from),
+                d.to === null ? (t("dropNoRrp") as string) : d.field === "rrp_markup_pct" ? `+${pct(d.to)}` : pct(d.to),
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1 text-muted">{t("dropsHint")}</p>
+      </div>
+    </div>
+  );
+}
+
 type ListQuery = { isLoading: boolean; isError: boolean; error: unknown; refetch: () => unknown };
 
 function RulesTab({ q, rows, columns }: { q: ListQuery; rows: PricingRuleRow[]; columns: ColumnDef<PricingRuleRow, unknown>[] }) {
@@ -351,6 +390,7 @@ function RulesAndFx() {
   const fxColumns = useFxColumns(canWrite, startApprove);
   const pendingRules = ruleRows.filter((r) => r.status === "pending").length;
   const pendingFx = fxRows.filter((r) => r.status === "pending").length;
+  const drops = useMemo(() => scheduledDrops(ruleRows), [ruleRows]);
 
   return (
     <PageFrame
@@ -361,6 +401,7 @@ function RulesAndFx() {
       <div className="rounded-lg border border-accent-border bg-accent-tint px-4 py-3 text-[13px] text-body">
         <strong className="text-ink">{t("bannerLead")}</strong> {t("banner")}
       </div>
+      <ScheduledDropsBanner drops={drops} />
       <SavedTabs
         tabs={[
           { key: "rules", label: t("tabRules") as string, count: pendingRules || undefined },
