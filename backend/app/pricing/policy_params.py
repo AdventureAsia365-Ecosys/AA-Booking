@@ -82,6 +82,8 @@ SECTIONS = (
 # The selling currencies a rounding increment is required for (app.pricing.engine.SELLING_CURRENCIES; the engine
 # imports nothing from here, the unit test keeps the two equal).
 ROUNDING_CURRENCIES = ("AUD", "EUR", "GBP", "SGD", "USD")
+# The service types of booking.services (bk-010 services_type_chk), sorted: one child % each (AA-1145, bk-060).
+SERVICE_TYPES = ("activity", "entrance", "guide", "meal", "transfer")
 
 MONTH_DAY_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
 COUNTRY_RE = re.compile(r"^(\*|[A-Z]{2})$")
@@ -615,6 +617,21 @@ PARAMS: dict[str, Param] = {
             minimum=_d("0.01"),
             maximum=_d("1000"),
             choices=ROUNDING_CURRENCIES,
+        ),
+        Param(
+            "child_price_pct_by_service_type",
+            AMOUNT_MAP,
+            "%",
+            "S285",
+            PRICING,
+            "Child price per service type",
+            "A child pays this % of the adult net of a per-person service when neither the supplier's child rate nor"
+            " the contract's child % applies; 100 = the adult price, with an age note on the quote line.",
+            "app.b2b.quotes",
+            section="travellers",
+            minimum=_d("0"),
+            maximum=_d("100"),
+            choices=SERVICE_TYPES,
         ),
         Param(
             "retention_job_succeeded_days",

@@ -1217,6 +1217,47 @@ card-number refusal) stay for supplier bills and agency billing. The case money 
 `invoice_sent` / `payment_pending` / `paid` any more (the drop file makes the guard refuse them), and a kept b2c case left in
 one never moves (`app.ops.track.next_status`).
 
+## Supply model: contract terms, restrictions, stop-sale, child prices (AA-1145, bk-060; S285 advisories T12, B4, B7, B8, T7, T13)
+
+One supply model that tours, activities and hotels share. AA's chain is AA -> supplier (DMC) -> hotel / operator: every
+term here is the term the supplier gives AA under an AA supplier contract, never a hotel's own.
+
+- **Contract terms** (`app/supply/contract_terms.py`, `GET` / `PUT /booking/contracts/{id}/terms`, `supply.read` /
+  `supply.write`): tiered cancellation (`{min_days, fee_pct}`, the B2B tier rules), payment (deposit % + days after
+  confirmation, then the balance days before the service OR credit days after it) and the contract's child %. Written
+  while the contract is a draft; the writer becomes its maker, so a second person publishes the terms with the
+  contract (bk-008). An offer (activity slice) overrides field by field (`contract_terms.effective`). The free-text
+  `payment_terms` / `cancellation_policy` stay as the supplier's wording.
+- **Restrictions** (`app/supply/restrictions.py`, `booking.supply_restrictions`): per contract, component (`rt:` room
+  type or `sv:` service) and inclusive date range, one `inventory_kind`: `allotment` (units per date, release days),
+  `free_sale` (optional max travellers per booking), `on_request`, `stop_sale`. The first three are contract terms
+  (`POST /booking/contracts/{id}/restrictions`, `PATCH` / `DELETE /booking/supply/restrictions/{id}`, draft only,
+  `supply.write`), counted while the contract is published.
+- **Stop-sale** (`POST /booking/contracts/{id}/stop-sales`, `stop_sale.write` = contracting + admin, sales 403): on a
+  published contract, in effect at once (`pending`); a second person approves or rejects it later (`…/stop-sales/{id}/
+  decision`, never its maker: 403 `maker_checker`), its maker may withdraw it; an approved one ends only when a second
+  person approves the end request (`…/end-request`, then `…/end`). Never deleted. The same T13 rule now applies to the
+  stop-sale ranges of season calendars (`app/pricing/seasons.py`): a pending one already counts.
+- **Engine** (`restrictions.evaluate`, one precedence for every caller): stop_sale > allotment (units left, not
+  released) / free_sale (party within the limit) > on_request (also the default with no row). Allotment use = the
+  component's requested or confirmed supplier bookings (one room per booking and night; a service's pax per day).
+  `GET /booking/supply/availability?component_id=…&date_from=…&date_to=…&pax=…&units=…` shows the verdict per date.
+  The B2B quote asks it for every night and component of every line (a `tp:` line for its plan's components): a
+  stop-sale puts an available line `on_request` (`price_note.supply.stop_sale` names the dates). An allotment or
+  free-sale term does not lift a line without a departure above `on_request` yet (the hold cannot confirm such a line
+  at once; the supplier booking slice does).
+- **Rates** (`app/supply/rates.py`): `pax_type` (adult / child / infant; child and infant per person only, with an
+  optional age band). Every lookup asks one pax type (default adult), so a child rate never becomes an adult price; the
+  cost sheet spans count adult rates only. **B7**: `net_amount` is the only price any calculation reads; a
+  commissionable price keeps `published_amount` + `commission_pct` and the net is derived (70 at 20 % -> 56.00). The
+  rate-sheet importer takes optional `Published` + `Commission %` columns (Net then empty or equal to the derived net)
+  and, on service sheets, `Pax type`, `Age min`, `Age max`.
+- **Child price B4** (`app/supply/child_price.py`, on an `sv:` per-person line of a B2B quote): the supplier's child
+  rate, else the contract's child %, else the pricing policy `child_price_pct_by_service_type` (Pricing > Policy,
+  approver group pricing; seeded 100 = adult price), else the adult price with an age note (`price_note.child`).
+  Infants pay the infant rate when there is one, else nothing. A `tp:` line keeps the pricing rule's sell-side child %
+  (AA-1075); rooms keep per-room prices (the hotel child policy is the hotel slice).
+
 ## Supplier bills and payouts (AA-682 S4, bk-030; S252 design §3.4, §4, §5, critic B4, B6)
 
 - A **supplier bill** (`booking.supplier_bills`, `BIL-000123`) is what a supplier asks AA to pay: its own bill number

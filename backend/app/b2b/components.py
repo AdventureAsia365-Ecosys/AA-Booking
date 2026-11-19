@@ -20,6 +20,14 @@ Net cost = the supplier rate in force (bk-010: published contract, both validiti
 - trip plan: each component on ``service_date + day_no - 1``, a room component = one night of the line's room mix, a
   ``day`` service = one day.
 
+**Children on a service line** (AA-1145, bk-060, B4, :mod:`app.supply.child_price`): on an ``sv:`` line whose rate is
+per person, adults pay the adult rate and each child the supplier's child rate, else the contract's child %, else the
+policy's child % of the service type (``child_pct_by_type``), else the adult price with an age note
+(``LineCost.child``); an infant pays the supplier's infant rate when there is one, else nothing. A ``tp:`` line keeps
+the pricing rule's child % on the sell price (``app.b2b.quotes.pax_sell_usd``), so its components price the party
+alike as before. **Supply asks** (``LineCost.supply``): every night and component of the line, for the availability
+engine (:mod:`app.supply.restrictions`, a stop-sale puts the line on request in the quote).
+
 Bounded work (AA-972 review): items, plans and their components are read with one query each for the whole quote,
 every rate with one batched query (``rates_in_force_many``), and a quote needing more than :data:`MAX_RATE_LOOKUPS`
 rate lookups is refused before any is run (422 ``invalid``).
@@ -32,6 +40,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -40,7 +49,9 @@ from typing import Any
 import asyncpg
 
 from app.b2b.errors import B2BError
+from app.supply import child_price
 from app.supply.rates import RateAsk, rates_in_force_many
+from app.supply.restrictions import SupplyAsk
 
 PREFIX_ROOM = "rt"
 PREFIX_SERVICE = "sv"
@@ -94,6 +105,8 @@ class LineCost:
     kind: str
     costs: list[tuple[Decimal, str]] = field(default_factory=list)  # (net amount, currency)
     rate_ids: list[str] = field(default_factory=list)
+    child: dict[str, Any] | None = None  # B4: how a child of an sv: line was priced (the quote's price note)
+    supply: list[SupplyAsk] = field(default_factory=list)  # the availability engine's asks (bk-060)
 
 
 PLANS_SQL = "SELECT id::text AS id, sellable FROM booking.trip_plans WHERE id = ANY($1::uuid[])"
@@ -178,6 +191,7 @@ class _Unit:
     pax: int
     rooms: int = 0  # room count (rooms only)
     days: int = 1  # days of a ``day`` service
+    split: bool = False  # an sv: line with children or infants: their rates are looked up too (B4)
 
 
 class _Budget:
@@ -194,11 +208,25 @@ class _Budget:
             )
 
 
-async def price_lines(conn: asyncpg.Connection, asks: list[LineAsk]) -> list[LineCost]:
+CONTRACT_CHILD_SQL = """
+SELECT supplier_contract_id::text AS contract_id, child_pct FROM booking.supplier_contract_terms
+WHERE supplier_contract_id = ANY($1::uuid[]) AND child_pct IS NOT NULL
+"""
+
+
+async def price_lines(
+    conn: asyncpg.Connection,
+    asks: list[LineAsk],
+    *,
+    child_pct_by_type: Mapping[str, Decimal] | None = None,
+    child_age_max: int | None = None,
+) -> list[LineCost]:
     """The kind and net cost lines of every quote line (same order), or B2BError 422.
 
     A fixed number of queries whatever the request: plans, plan components, room types, services, then one batched
-    rate query. The lookup budget is checked while the lookups are planned, before the rate query runs.
+    rate query (and, only when an sv: line has children whose contract may set a child %, one terms query). The
+    lookup budget is checked while the lookups are planned, before the rate query runs. ``child_pct_by_type`` (the
+    policy's child % per service type) and ``child_age_max`` feed the B4 rule of an sv: line with children.
     """
     parsed: list[tuple[str, str]] = []
     for ask in asks:
@@ -234,12 +262,12 @@ async def price_lines(conn: asyncpg.Connection, asks: list[LineAsk]) -> list[Lin
             for pax, count in mix:
                 units.append(_Unit(no, room_type_id, None, start + timedelta(days=i), pax, rooms=count))
 
-    def service_unit(no: int, ask: LineAsk, service_id: str, *, on: date, days: int) -> str:
+    def service_unit(no: int, ask: LineAsk, service_id: str, *, on: date, days: int, split: bool = False) -> str:
         row = services.get(service_id)
         if row is None or row["status"] != "active" or row["service_type"] not in SERVICE_KINDS:
             raise _no_price(ask.line_ref, "unknown or inactive service")
-        budget.take(1)
-        units.append(_Unit(no, None, service_id, on, ask.party, days=days))
+        budget.take(1 + 2 * int(split))  # B4: a split unit also looks up the child and infant rates
+        units.append(_Unit(no, None, service_id, on, ask.party, days=days, split=split))
         return str(row["service_type"])
 
     for no, (ask, (prefix, ident)) in enumerate(zip(asks, parsed, strict=True)):
@@ -250,7 +278,8 @@ async def price_lines(conn: asyncpg.Connection, asks: list[LineAsk]) -> list[Lin
             room_units(no, ask, ident, start=ask.service_date, nights=nights)
         elif prefix == PREFIX_SERVICE:
             check_room_types(ask, set())
-            out.append(LineCost(kind=service_unit(no, ask, ident, on=ask.service_date, days=nights)))
+            split = ask.child + ask.infant > 0
+            out.append(LineCost(kind=service_unit(no, ask, ident, on=ask.service_date, days=nights, split=split)))
         else:
             plan = plans.get(ident)
             if plan is None or not plan["sellable"]:
@@ -266,16 +295,132 @@ async def price_lines(conn: asyncpg.Connection, asks: list[LineAsk]) -> list[Lin
                 else:
                     service_unit(no, ask, part["service_id"], on=on, days=1)
 
-    rates = await rates_in_force_many(conn, [RateAsk(u.room_type_id, u.service_id, u.on, u.pax) for u in units])
+    rates, by_split, contract_pct = await _lookup(conn, asks, units)
     for unit, rate in zip(units, rates, strict=True):
         ask = asks[unit.line]
         if rate is None:
             who = f" for {unit.pax} per room" if unit.room_type_id else ""
             raise _no_price(ask.line_ref, f"no rate in force on {unit.on.isoformat()}{who}")
-        qty = unit.rooms if unit.room_type_id else _service_quantity(rate["unit"], ask, days=unit.days)
-        out[unit.line].costs.append((Decimal(str(rate["net_amount"])) * qty, rate["currency"]))
-        out[unit.line].rate_ids.append(rate["id"])
+        line = out[unit.line]
+        line.rate_ids.append(rate["id"])
+        line.supply.append(_supply_ask(unit, ask))
+        policy_pct = (child_pct_by_type or {}).get(str(services.get(unit.service_id or "", {}).get("service_type")))
+        line.costs.append(
+            _unit_cost(
+                unit,
+                ask,
+                line,
+                rate,
+                by_split.get(id(unit)),
+                contract_pct=contract_pct.get(rate["contract_id"]),
+                policy_pct=policy_pct,
+                child_age_max=child_age_max,
+            )
+        )
     return out
+
+
+def _unit_cost(
+    unit: _Unit,
+    ask: LineAsk,
+    line: LineCost,
+    rate: dict[str, Any],
+    split: tuple[dict[str, Any] | None, dict[str, Any] | None] | None,
+    *,
+    contract_pct: Decimal | None,
+    policy_pct: Decimal | None,
+    child_age_max: int | None,
+) -> tuple[Decimal, str]:
+    """A room night x its rooms, a service x its unit's quantity (the whole party alike), or, for a per-person service
+    of an sv: line with children or infants, the B4 split (:func:`_split_cost`)."""
+    if split is not None and rate["unit"] == "person":
+        child_rate, infant_rate = split
+        return _split_cost(
+            ask,
+            line,
+            rate,
+            child_rate,
+            infant_rate,
+            contract_pct=contract_pct,
+            policy_pct=policy_pct,
+            child_age_max=child_age_max,
+        )
+    qty = unit.rooms if unit.room_type_id else _service_quantity(rate["unit"], ask, days=unit.days)
+    return Decimal(str(rate["net_amount"])) * qty, rate["currency"]
+
+
+def _supply_ask(unit: _Unit, ask: LineAsk) -> SupplyAsk:
+    """The availability engine's ask of one rate lookup: a room night (its room count) or a service day (the party)."""
+    if unit.room_type_id:
+        return SupplyAsk(unit.room_type_id, None, unit.on, ask.party, units=unit.rooms)
+    return SupplyAsk(None, unit.service_id, unit.on, ask.party, units=max(ask.party, 1))
+
+
+Split = dict[int, tuple[dict[str, Any] | None, dict[str, Any] | None]]
+
+
+async def _lookup(
+    conn: asyncpg.Connection, asks: list[LineAsk], units: list[_Unit]
+) -> tuple[list[dict[str, Any] | None], Split, dict[str, Decimal]]:
+    """One batched rate query for every unit (plus, B4, the child and infant rates of a split unit's service and day,
+    same party band), and the child % of the contracts a child still needs (only when one does)."""
+    lookups = [RateAsk(u.room_type_id, u.service_id, u.on, u.pax) for u in units]
+    split_units = [u for u in units if u.split]
+    for u in split_units:
+        lookups += [
+            RateAsk(None, u.service_id, u.on, u.pax, "child"),
+            RateAsk(None, u.service_id, u.on, u.pax, "infant"),
+        ]
+    found = await rates_in_force_many(conn, lookups)
+    rates, extra = found[: len(units)], iter(found[len(units) :])
+    by_split: Split = {id(u): (next(extra), next(extra)) for u in split_units}
+    need_terms = sorted(
+        {
+            r["contract_id"]
+            for u, r in zip(units, rates, strict=True)
+            if u.split and r is not None and r["unit"] == "person" and asks[u.line].child and by_split[id(u)][0] is None
+        }
+    )
+    if not need_terms:
+        return rates, by_split, {}
+    rows = await conn.fetch(CONTRACT_CHILD_SQL, need_terms)
+    return rates, by_split, {r["contract_id"]: Decimal(str(r["child_pct"])) for r in rows}
+
+
+def _split_cost(
+    ask: LineAsk,
+    line: LineCost,
+    adult: dict[str, Any],
+    child_rate: dict[str, Any] | None,
+    infant_rate: dict[str, Any] | None,
+    *,
+    contract_pct: Decimal | None,
+    policy_pct: Decimal | None,
+    child_age_max: int | None,
+) -> tuple[Decimal, str]:
+    """B4: one per-person service of an sv: line priced by age band (the child / infant rates must be in the adult
+    rate's currency to be used; a contract's rates always are)."""
+    currency = adult["currency"]
+    adult_net = Decimal(str(adult["net_amount"]))
+    total = adult_net * ask.adult
+    if ask.child:
+        rate = child_rate if child_rate is not None and child_rate["currency"] == currency else None
+        priced = child_price.child_net(
+            adult_net,
+            child_rate_net=Decimal(str(rate["net_amount"])) if rate else None,
+            child_rate_age_max=rate.get("age_max") if rate else None,
+            contract_pct=contract_pct,
+            policy_pct=policy_pct,
+            child_age_max=child_age_max,
+        )
+        total += priced.net * ask.child
+        line.child = priced.note()
+        if rate:
+            line.rate_ids.append(rate["id"])
+    if ask.infant and infant_rate is not None and infant_rate["currency"] == currency:
+        total += Decimal(str(infant_rate["net_amount"])) * ask.infant
+        line.rate_ids.append(infant_rate["id"])
+    return total, currency
 
 
 # ── Product listing ──────────────────────────────────────────────────────────

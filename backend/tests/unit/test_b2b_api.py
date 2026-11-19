@@ -59,8 +59,9 @@ def _rate(rid: str, unit: str, amount: str, currency: str) -> dict[str, Any]:
 def _rates(per_ask: Any) -> Any:
     """Script the batched rate query: ``per_ask(room, service, on, pax)`` → a rate dict or None, for each ask."""
 
-    def answer(rooms: list, services: list, days: list, paxes: list) -> list[dict[str, Any]]:
+    def answer(rooms: list, services: list, days: list, paxes: list, pax_types: list) -> list[dict[str, Any]]:
         out = []
+        assert set(pax_types) <= {"adult"}  # bk-060: an adults-only line asks the adult rates only
         for n, ask in enumerate(zip(rooms, services, days, paxes, strict=True), start=1):
             rate = per_ask(*ask)
             out.append({"n": n, **(rate or {"id": None, "unit": None, "net_amount": None, "currency": None})})
@@ -70,9 +71,10 @@ def _rates(per_ask: Any) -> Any:
 
 
 def _rate_asks(conn: ScriptedConn) -> list[tuple[Any, ...]]:
-    """The (room, service, day, pax) asks of the single batched rate query of a request."""
+    """The (room, service, day, pax) asks of the single batched rate query of a request (bk-060: the pax type list
+    comes last)."""
     [call] = conn.sql("FROM booking.supplier_rates x")
-    return list(zip(*call, strict=True))
+    return list(zip(*call[:4], strict=True))
 
 
 def _conn(partner: Any = PARTNER) -> ScriptedConn:

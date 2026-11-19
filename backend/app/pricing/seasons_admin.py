@@ -8,11 +8,12 @@ maker-checker, like the other pricing data.
   person.
 - **Ranges** (``booking.season_ranges``): a season range (low, high, peak, festive) with fixed dates, a festive range
   that names a holiday event (country + event code, days before and after), or a stop-sale range. Each is proposed
-  (pending, with a required reason, the ``note``) and counts once a second person approves it; the maker may
-  withdraw it while pending, with a reason. Removing an approved range is a request with a reason that a second
-  person approves (or rejects, with a reason). Two fixed-date season ranges of one calendar never overlap:
-  a proposal or an approval that would make them is refused (409 ``range_overlaps``), checked under a lock of the
-  calendar row so two approvals cannot both pass.
+  (pending, with a required reason, the ``note``) and counts once a second person approves it, except a stop-sale
+  range, which counts while still pending (AA-1145, T13 review: closed dates must stop selling at once; rejected or
+  withdrawn it stops counting); the maker may withdraw it while pending, with a reason. Removing an approved range
+  is a request with a reason that a second person approves (or rejects, with a reason). Two fixed-date season
+  ranges of one calendar never overlap: a proposal or an approval that would make them is refused (409
+  ``range_overlaps``), checked under a lock of the calendar row so two approvals cannot both pass.
 - **Holiday events** (``booking.holiday_events``): one row per country, event code and year, the same maker-checker
   and reasons.
   No holiday date is ever written in code; a festive range takes its dates from the event row of each year.

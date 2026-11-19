@@ -207,7 +207,7 @@ def db(
                 "FROM booking.season_calendars c WHERE c.id = ANY",
                 lambda ids: [{"id": i, "default_season": "low", "name": "Invented Coast"} for i in ids],
             ),
-            ("WHERE r.calendar_id = ANY($1::uuid[]) AND r.status = 'approved'", lambda *_: list(ranges or [])),
+            ("WHERE r.calendar_id = ANY($1::uuid[]) AND r.ended_at IS NULL", lambda *_: list(ranges or [])),
             ("v.status IN ('published', 'superseded')", lambda *_: [dict(p) for p in live]),
             ("FROM booking.trip_plan_prices pr WHERE pr.trip_plan_id = $1::uuid", lambda *_: list(in_force or [])),
             ("status = 'published' ORDER BY approved_at DESC", latest),

@@ -38,6 +38,7 @@ ServiceType = Literal["activity", "transfer", "guide", "entrance", "meal"]
 ServiceUnit = Literal["person", "group", "vehicle", "day"]
 Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2)]
 Pax = Annotated[int, Field(ge=1, le=999)]
+Age = Annotated[int, Field(ge=0, le=17)]
 
 
 class Link(BaseModel):
@@ -125,12 +126,20 @@ class RateFields(BaseModel):
     pax_max: Pax | None = None
     net_amount: Money | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    # AA-1145 (bk-060, B4): who a per-person rate prices, and a child / infant rate's age band.
+    pax_type: Literal["adult", "child", "infant"] | None = None
+    age_min: Age | None = None
+    age_max: Age | None = None
+    # B7: the two source numbers of a commissionable price; the net is derived from them (published x (1 - pct)).
+    published_amount: Money | None = None
+    commission_pct: Annotated[Decimal, Field(ge=0, lt=100, max_digits=5, decimal_places=2)] | None = None
 
 
 class NewRate(RateFields):
+    """A rate needs ``net_amount``, or ``published_amount`` + ``commission_pct`` (B7: the net is derived)."""
+
     hotel_room_type_id: UUID | None = None
     service_id: UUID | None = None
-    net_amount: Money
 
     @model_validator(mode="after")
     def _one_target(self) -> NewRate:
@@ -445,6 +454,7 @@ async def rate_in_force(
     hotel_room_type_id: UUID | None = None,
     service_id: UUID | None = None,
     pax: Annotated[int | None, Query(ge=1, le=999)] = None,
+    pax_type: Annotated[Literal["adult", "child", "infant"], Query(description="bk-060: whose rate")] = "adult",
 ) -> dict[str, Any]:
     """The rate a version item would take as its default net (``rate`` is null when none is in force)."""
     async with pool.acquire() as conn:
@@ -454,5 +464,6 @@ async def rate_in_force(
             service_id=str(service_id) if service_id else None,
             on=on,
             pax=pax,
+            pax_type=pax_type,
         )
     return {"rate": rate}

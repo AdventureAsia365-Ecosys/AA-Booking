@@ -13,6 +13,10 @@ Template (:func:`template`; ``GET /booking/rate-sheets/template``):
   data from row 2, empty rows skipped. A ``Currency`` column, when present, must equal the contract's. The unit comes
   from the room type (per room night) or the service (its pricing unit); a service must be of the sheet's type.
 - other sheets (instructions) are ignored and reported.
+- AA-1145 (bk-060): optional columns on every rate sheet: ``Published`` + ``Commission %`` (B7: a commissionable
+  supplier price; the net is derived as published x (100 - commission %) / 100, half-up to the cent, and both source
+  numbers are kept on the rate; ``Net`` may then be empty, or must equal the derived net), and on the service sheets
+  ``Pax type`` (adult, child, infant; empty = adult) with ``Age min`` / ``Age max`` (a child or infant band, B4).
 
 Items are matched to the supplier's **existing** hotels (by code, ``HTL-000123``, then the room type name, case and
 spaces ignored) and services (by code, ``SVC-000123``): supply facts are entered and checked in the admin (ADR 0004a),
@@ -75,9 +79,28 @@ HOTEL_COLUMNS = (
     "Pax max",
     "Net",
     "Notes",
+    "Published",
+    "Commission %",
 )
-SERVICE_COLUMNS = ("Service code", "Season", "Valid from", "Valid to", "Pax min", "Pax max", "Net", "Notes")
-REQUIRED = {HOTEL_SHEET: ("Hotel code", "Room type", "Net"), "service": ("Service code", "Net")}
+SERVICE_COLUMNS = (
+    "Service code",
+    "Season",
+    "Valid from",
+    "Valid to",
+    "Pax min",
+    "Pax max",
+    "Net",
+    "Notes",
+    "Pax type",
+    "Age min",
+    "Age max",
+    "Published",
+    "Commission %",
+)
+# A rate row needs a Net or the Published + Commission % pair (B7); the columns themselves are optional.
+REQUIRED = {HOTEL_SHEET: ("Hotel code", "Room type"), "service": ("Service code",)}
+PAX_TYPES = ("adult", "child", "infant")
+AGE_MAX = 17  # technical-constant: the bk-060 CHECK bound (a child or infant is under 18)
 MAX_ERRORS = 200
 
 
@@ -157,6 +180,34 @@ def _amount(value: Any) -> Decimal | None:
     return number
 
 
+def _pct(value: Any) -> Decimal | None:
+    number = _amount(value)
+    if number is not None and number >= 100:
+        raise ValueError("a commission below 100 % is expected")
+    return number
+
+
+def _age(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = Decimal(str(value).strip())
+    except InvalidOperation:
+        raise ValueError("a whole number is expected") from None
+    if number != number.to_integral_value() or not 0 <= number <= AGE_MAX:
+        raise ValueError(f"a whole number from 0 to {AGE_MAX} is expected")
+    return int(number)
+
+
+def _pax_type(value: Any) -> str | None:
+    text = (_text(value) or "").lower()
+    if not text:
+        return None
+    if text not in PAX_TYPES:
+        raise ValueError(f"one of {', '.join(PAX_TYPES)} is expected")
+    return text
+
+
 def _int(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -212,6 +263,13 @@ def _contract(ws: Any, problems: list[Problem]) -> dict[str, Any]:
     return out
 
 
+def _applies(label: str, sheet: str) -> bool:
+    """A meal plan belongs to the hotel sheet, a pax type and age band to the service sheets (bk-060)."""
+    if label == "Meal plan":
+        return sheet == HOTEL_SHEET
+    return sheet != HOTEL_SHEET or label not in ("Pax type", "Age min", "Age max")
+
+
 def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> list[RateRow]:
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
@@ -253,8 +311,13 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
             ("Notes", "notes", _text),
             ("Meal plan", "meal_plan", _text),
             ("Currency", "currency", _text),
+            ("Published", "published_amount", _amount),
+            ("Commission %", "commission_pct", _pct),
+            ("Pax type", "pax_type", _pax_type),
+            ("Age min", "age_min", _age),
+            ("Age max", "age_max", _age),
         ):
-            if label == "Meal plan" and sheet != HOTEL_SHEET:
+            if not _applies(label, sheet):
                 continue
             try:
                 value = conv(cell(row, label))
@@ -269,15 +332,45 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
             (
                 "Net",
                 "net_amount" in rate.values
+                or "published_amount" in rate.values
+                or "commission_pct" in rate.values
                 or any(p.sheet == sheet and p.row == n and p.column == "Net" for p in problems),
             ),
         ):
             if not have:
                 problems.append(Problem(sheet, n, label, "required", f"{label} is required"))
+        _commission(rate, problems)
         if (meal := rate.values.get("meal_plan")) is not None:
             rate.values["meal_plan"] = str(meal).upper()
         out.append(rate)
     return out
+
+
+def _commission(rate: RateRow, problems: list[Problem]) -> None:
+    """B7: Published + Commission % give the net (both or neither; a Net given too must match)."""
+    published, pct = rate.values.get("published_amount"), rate.values.get("commission_pct")
+    if published is None and pct is None:
+        return
+    if published is None or pct is None:
+        column = "Commission %" if pct is None else "Published"
+        problems.append(
+            Problem(rate.sheet, rate.row, column, "commission_pair", "Published and Commission % go together")
+        )
+        return
+    net = rates.net_from_published(published, pct)
+    given = rate.values.get("net_amount")
+    if given is not None and given != net:
+        problems.append(
+            Problem(
+                rate.sheet,
+                rate.row,
+                "Net",
+                "net_mismatch",
+                f"the net of {published} less {pct} % is {net}; leave Net empty or enter {net}",
+            )
+        )
+        return
+    rate.values["net_amount"] = net
 
 
 def parse(data: bytes) -> Sheet:
@@ -400,6 +493,11 @@ def _preview(rate: dict[str, Any]) -> dict[str, Any]:
         "pax_max",
         "net_amount",
         "notes",
+        "pax_type",
+        "age_min",
+        "age_max",
+        "published_amount",
+        "commission_pct",
     )
     return {k: rate.get(k) for k in keys}
 
@@ -427,7 +525,9 @@ async def import_sheet(
         "ignored_sheets": sheet.ignored_sheets,
     }
     if dry_run:
-        out["impact"] = await price_readiness.impact(conn, sheet.contract, matched, on=cost_sheet.today())
+        # A child or infant rate never prices a trip plan component (bk-060): the impact counts adult rates only.
+        adults = [r for r in matched if (r.get("pax_type") or "adult") == "adult"]
+        out["impact"] = await price_readiness.impact(conn, sheet.contract, adults, on=cost_sheet.today())
         return out
     contract = await suppliers.create_contract(
         conn, staff, supplier["id"], {k: v for k, v in sheet.contract.items() if v is not None}

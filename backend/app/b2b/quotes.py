@@ -48,6 +48,14 @@
   one festive line shortens the whole quote); a ``tp:`` line of ``group_on_request_min_pax`` travellers or more
   is ``on_request``, and so is one on a stop-sale date of its plan's calendar (bk-055: stop-sale changes
   availability, never the price). No policy value is a constant here (CI guard ``test_aa1091_policy_guard``).
+- **Supply restrictions** (AA-1145, bk-060, :mod:`app.supply.restrictions`): the one availability engine is asked for
+  every night and component of every line (a ``tp:`` line for each component of its plan on its date). A stop-sale in
+  effect on any of them (pending or approved, not ended: T13) puts an available line ``on_request`` and its
+  ``price_note.supply`` names the stop-sale dates; a sold-out line stays sold out. An allotment or free-sale term
+  does not lift a line without a departure above ``on_request`` yet: the hold cannot confirm such a line at once
+  (the supplier booking slice). **Children on an ``sv:`` line** (B4, :mod:`app.supply.child_price`): the supplier's
+  child rate, else the contract's child %, else the policy's ``child_price_pct_by_service_type``, else the adult
+  price; ``price_note.child`` says which (not hashed: the price is).
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -68,6 +76,7 @@ from app.b2b import agency_pricing, cancellation, departures, price_adjustments,
 from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.pricing import engine, policy_values, repository, seasons
+from app.supply import restrictions
 
 log = logging.getLogger(__name__)
 
@@ -227,6 +236,7 @@ async def _policy(conn: asyncpg.Connection, on: date) -> policy_values.Policy:
     try:
         policy = await policy_values.load(conn, on)
         policy.quote_validity_days, policy.quote_validity_festive_days, policy.group_on_request_min_pax  # noqa: B018
+        policy.child_price_pct_by_service_type  # noqa: B018 — AA-1145 (bk-060): the B4 child % of an sv: line
     except policy_values.PolicyUnavailable as exc:
         log.warning("b2b_policy_unavailable error=%s", exc)
         raise B2BError("unavailable", "pricing policy is not available") from None
@@ -239,6 +249,30 @@ def season_availability(availability: str, component_id: str, day: seasons.Seaso
     if availability == departures.AVAILABLE and _line_plan(component_id) is not None and day is not None:
         return departures.ON_REQUEST if day.stop_sale else availability
     return availability
+
+
+def _child_age_max(policy: policy_values.Policy) -> int | None:
+    """The policy's child age for the age note of a child priced as an adult (B4); None when it has no value (the note
+    then says less, the price is the same)."""
+    try:
+        return policy.age_bands[0]
+    except policy_values.PolicyUnavailable:
+        return None
+
+
+def supply_availability(
+    availability: str, verdicts: list[restrictions.Verdict], days: list[date]
+) -> tuple[str, dict[str, Any] | None]:
+    """AA-1145 (bk-060): an available line with a stop-sale in effect on any of its nights or components is quoted on
+    request (the note names the dates); a sold-out or on-request line keeps its availability. Engine precedence:
+    stop_sale > allotment / free_sale > on_request (:func:`app.supply.restrictions.evaluate`)."""
+    stops = sorted({d.isoformat() for d, v in zip(days, verdicts, strict=True) if v.reason == restrictions.R_STOP})
+    if not stops:
+        return availability, None
+    note = {"stop_sale": stops}
+    if availability == departures.AVAILABLE:
+        return departures.ON_REQUEST, note
+    return availability, note
 
 
 def group_availability(availability: str, component_id: str, adult: int, child: int, min_pax: int) -> str:
@@ -505,7 +539,16 @@ async def quote_in(
 
     # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
     await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
-    costs: list[LineCost] = await price_lines(conn, [line.ask for line in lines])
+    costs: list[LineCost] = await price_lines(
+        conn,
+        [line.ask for line in lines],
+        child_pct_by_type=pricing_policy.child_price_pct_by_service_type,
+        child_age_max=_child_age_max(pricing_policy),
+    )
+    # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip.
+    supply_asks = [a for lc in costs for a in lc.supply]
+    verdicts = iter(await restrictions.availability_many(conn, supply_asks, today=on))
+    supply_by_line = [[next(verdicts) for _ in lc.supply] for lc in costs]
     own_hold = await conn.fetchval(OWN_HOLD_SQL, partner_id, proposal_ref, proposal_version)
     seats = await departures.availability(
         conn,
@@ -544,6 +587,7 @@ async def quote_in(
         ask = line.ask
         plan = _line_plan(ask.component_id)
         season = calendars[plan].season_on(ask.service_date) if plan in calendars else None
+        availability, supply_note = supply_availability(availability, supply_by_line[no - 1], [a.on for a in lc.supply])
         availability = group_availability(
             season_availability(availability, ask.component_id, season),
             ask.component_id,
@@ -575,6 +619,10 @@ async def quote_in(
             log.warning(
                 "b2b_quote_line_below_floor partner=%s line=%s departure=%s", partner_id, ask.line_ref, departure_id
             )
+        if supply_note:
+            note["supply"] = supply_note
+        if lc.child:
+            note["child"] = lc.child
         priced.append(
             {
                 "line_no": no,

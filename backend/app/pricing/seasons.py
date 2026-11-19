@@ -13,7 +13,9 @@ supplier contract. Its approved, not ended ranges (``booking.season_ranges``) gi
 - else the calendar's ``default_season`` (``low`` unless set).
 
 A **stop-sale range** is an overlay: it never changes the season or the price, only availability (a quote line on a
-stop-sale date goes ``on_request``, :mod:`app.b2b.quotes`).
+stop-sale date goes ``on_request``, :mod:`app.b2b.quotes`). It takes effect while still pending a second person's
+review (AA-1145, T13 review): a stop-sale protects AA from selling what the supplier closed, so waiting for the
+approval would sell closed dates.
 
 **Peak.** The pricing rule has one uplift (``peak_uplift_pts``); it applies on ``peak`` and ``festive`` dates
 (:data:`PEAK_CODES`). This replaces the old guess "a season label containing the word peak" in the cost sheet and the
@@ -149,12 +151,15 @@ class _Rows:
 CALENDARS_SQL = """
 SELECT c.id::text AS id, c.default_season, c.name FROM booking.season_calendars c WHERE c.id = ANY($1::uuid[])
 """
-# Approved, not ended ranges of the calendars.
+# Approved, not ended ranges of the calendars; a stop-sale range counts from the moment it is entered (pending), per the
+# T13 review (AA-1145; root docs/audits/2026-11-19-S285-session/advisory-r3-t13-roles.md 2.4): rejected or withdrawn it
+# stops counting, and an approved one ends only through the second-person end request (bk-055 CHECK).
 RANGES_SQL = """
 SELECT r.id::text AS id, r.calendar_id::text AS calendar_id, r.kind, r.season_code, r.date_from, r.date_to,
        r.holiday_country::text AS holiday_country, r.holiday_code, r.days_before, r.days_after
 FROM booking.season_ranges r
-WHERE r.calendar_id = ANY($1::uuid[]) AND r.status = 'approved' AND r.ended_at IS NULL
+WHERE r.calendar_id = ANY($1::uuid[]) AND r.ended_at IS NULL
+  AND (r.status = 'approved' OR (r.kind = 'stop_sale' AND r.status = 'pending'))
 """
 # Approved, not ended holiday event rows (every year) of the events the ranges name.
 EVENTS_SQL = """
