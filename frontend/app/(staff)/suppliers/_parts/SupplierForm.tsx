@@ -20,6 +20,9 @@ import { QueryError } from "@/app/(staff)/cases/_parts/QueryError";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { DestinationPicker, type PickedPlace } from "./DestinationPicker";
 import { CATEGORY_LABEL, supplierError, supplierHref } from "./shared";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SupplierForm.messages";
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const WEBSITE = /^https?:\/\/\S+$/i;
@@ -65,6 +68,8 @@ function errorsOf(t: Text, categories: SupplierCategory[]): Partial<Record<keyof
 }
 
 export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
@@ -107,7 +112,7 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
     onSuccess: (s) => {
       qc.invalidateQueries({ queryKey: ["suppliers"] });
       qc.invalidateQueries({ queryKey: ["supplier"] });
-      toast.success(editing ? `Changes to ${s.company_name} saved.` : `Supplier ${s.company_name} added (${s.code}).`);
+      toast.success(editing ? tr("Changes to {0} saved.", s.company_name) : tr("Supplier {0} added ({1}).", s.company_name, s.code));
       router.push(supplierHref(s));
     },
   });
@@ -119,15 +124,15 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
   }
 
   const back = editing ? supplierHref(supplier) : "/suppliers";
-  const title = editing ? `Edit ${supplier.company_name}` : "Add new supplier";
-  const submitLabel = save.isPending ? "Saving…" : editing ? "Save changes" : "Save supplier";
+  const title = editing ? tr("Edit {0}", supplier.company_name) : tr("Add new supplier");
+  const submitLabel = save.isPending ? tr("Saving…") : editing ? tr("Save changes") : tr("Save supplier");
   const apiError = save.error instanceof ApiError ? save.error : null;
   const show = (k: keyof typeof errors) => (tried ? (errors[k] ?? null) : null);
 
   if (!canWrite) {
     return (
       <PageFrame width="full">
-        <QueryError error={new ApiError("forbidden", 403)} what="editing suppliers" />
+        <QueryError error={new ApiError("forbidden", 403)} what={tr("editing suppliers")} />
       </PageFrame>
     );
   }
@@ -137,17 +142,17 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
       <div className="border-b border-line bg-bg px-4 py-4 sm:px-8">
         <div className="mx-auto flex max-w-[880px] flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Link href={back} aria-label="Back" className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-card text-muted hover:text-ink">
+            <Link href={back} aria-label={tr("Back")} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-card text-muted hover:text-ink">
               <ArrowLeft size={16} />
             </Link>
-            <h1 className="truncate font-display text-xl font-semibold text-ink">{title}</h1>
+            <h1 className="truncate font-display text-xl font-semibold text-ink">{tx(title)}</h1>
           </div>
           <div className="flex items-center gap-2">
             <Link href={back} className="px-3 text-[13px] font-medium text-muted hover:text-ink">
-              Cancel
+              {tr("Cancel")}
             </Link>
             <Button variant="primary" onClick={submit} disabled={save.isPending}>
-              {submitLabel}
+              {tx(submitLabel)}
             </Button>
           </div>
         </div>
@@ -161,14 +166,14 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
         }}
         noValidate
       >
-        <Section title="Basic information">
+        <Section title={tr("Basic information")}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Supplier name" required error={show("company_name")} className="sm:col-span-2">
-              <Input className={inputCls} maxLength={200} value={text.company_name} onChange={(e) => set("company_name")(e.target.value)} placeholder="e.g. Hanoi Emerald Hotel" />
+            <Field label={tr("Supplier name")} required error={show("company_name")} className="sm:col-span-2">
+              <Input className={inputCls} maxLength={200} value={text.company_name} onChange={(e) => set("company_name")(e.target.value)} placeholder={tr("e.g. Hanoi Emerald Hotel")} />
             </Field>
             <fieldset className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
               <legend className="mb-1.5 text-[13px] font-medium text-ink">
-                Categories<span className="text-danger"> *</span>
+                {tr("Categories")}<span className="text-danger"> *</span>
               </legend>
               <div className="flex flex-wrap gap-2">
                 {SUPPLIER_CATEGORIES.map((c) => {
@@ -180,7 +185,7 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
                       selected={on}
                       onClick={() => setCategories((cur) => (on ? cur.filter((x) => x !== c) : SUPPLIER_CATEGORIES.filter((x) => x === c || cur.includes(x))))}
                     >
-                      {CATEGORY_LABEL[c]}
+                      {tx(CATEGORY_LABEL[c])}
                     </ChipButton>
                   );
                 })}
@@ -188,50 +193,50 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
               {show("categories") ? (
                 <span className="text-xs text-danger">{show("categories")}</span>
               ) : (
-                <span className="text-xs text-muted">One or more: what Booking buys from this supplier (rate types).</span>
+                <span className="text-xs text-muted">{tr("One or more: what Booking buys from this supplier (rate types).")}</span>
               )}
             </fieldset>
-            <Field label="Website" hint="Optional." error={show("website")} className="sm:col-span-2">
+            <Field label={tr("Website")} hint={tr("Optional.")} error={show("website")} className="sm:col-span-2">
               <Input className={inputCls} type="url" maxLength={500} value={text.website} onChange={(e) => set("website")(e.target.value)} placeholder="https://" />
             </Field>
-            <Field label="Internal notes" hint="Staff only. Never shown to customers." className="sm:col-span-2">
+            <Field label={tr("Internal notes")} hint={tr("Staff only. Never shown to customers.")} className="sm:col-span-2">
               <Textarea
                 className={textareaCls}
                 maxLength={5000}
                 value={text.internal_notes}
                 onChange={(e) => set("internal_notes")(e.target.value)}
-                placeholder="What they are good at, who to call for what, anything the next person should know."
+                placeholder={tr("What they are good at, who to call for what, anything the next person should know.")}
               />
             </Field>
           </div>
         </Section>
 
-        <Section title="Contact details">
+        <Section title={tr("Contact details")}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Primary contact person">
-              <Input className={inputCls} maxLength={200} value={text.contact_name} onChange={(e) => set("contact_name")(e.target.value)} placeholder="Full name" />
+            <Field label={tr("Primary contact person")}>
+              <Input className={inputCls} maxLength={200} value={text.contact_name} onChange={(e) => set("contact_name")(e.target.value)} placeholder={tr("Full name")} />
             </Field>
-            <Field label="Job title">
-              <Input className={inputCls} maxLength={120} value={text.contact_title} onChange={(e) => set("contact_title")(e.target.value)} placeholder="e.g. Sales Manager" />
+            <Field label={tr("Job title")}>
+              <Input className={inputCls} maxLength={120} value={text.contact_title} onChange={(e) => set("contact_title")(e.target.value)} placeholder={tr("e.g. Sales Manager")} />
             </Field>
-            <Field label="E-mail address" error={show("contact_email")}>
+            <Field label={tr("E-mail address")} error={show("contact_email")}>
               <Input className={inputCls} type="email" maxLength={254} value={text.contact_email} onChange={(e) => set("contact_email")(e.target.value)} placeholder="contact@supplier.com" />
             </Field>
-            <Field label="Phone number">
+            <Field label={tr("Phone number")}>
               <Input className={inputCls} type="tel" maxLength={40} value={text.contact_phone} onChange={(e) => set("contact_phone")(e.target.value)} placeholder="e.g. +84 24 1234 5678" />
             </Field>
           </div>
         </Section>
 
-        <Section title="Location" description="The city is a CIS place, so it matches tours and hotels; the address lines are free text.">
+        <Section title={tr("Location")} description={tr("The city is a CIS place, so it matches tours and hotels; the address lines are free text.")}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Street address" className="sm:col-span-2">
-              <Input className={inputCls} maxLength={500} value={text.address} onChange={(e) => set("address")(e.target.value)} placeholder="Full street address" />
+            <Field label={tr("Street address")} className="sm:col-span-2">
+              <Input className={inputCls} maxLength={500} value={text.address} onChange={(e) => set("address")(e.target.value)} placeholder={tr("Full street address")} />
             </Field>
             <div className="flex min-w-0 flex-col gap-1.5">
-              <span className="text-[13px] font-medium text-ink">City / place</span>
+              <span className="text-[13px] font-medium text-ink">{tr("City / place")}</span>
               <DestinationPicker
-                value={place ?? (placeId ? { id: placeId, name: "Place not readable now", country: "CIS" } : null)}
+                value={place ?? (placeId ? { id: placeId, name: tr("Place not readable now"), country: "CIS" } : null)}
                 country={text.country_code}
                 onChange={(p) => {
                   setPlace(p ? { id: p.destination_id, name: p.name, country: p.country } : null);
@@ -239,11 +244,11 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
                   if (p?.country_code) set("country_code")(p.country_code);
                 }}
               />
-              <span className="text-xs text-muted">Picking a place fills the country.</span>
+              <span className="text-xs text-muted">{tr("Picking a place fills the country.")}</span>
             </div>
-            <Field label="Country">
+            <Field label={tr("Country")}>
               <Select className={inputCls} value={text.country_code} onChange={(e) => set("country_code")(e.target.value)}>
-                <option value="">Not set</option>
+                <option value="">{tr("Not set")}</option>
                 {(countries.data?.items ?? []).map((c) => (
                   <option key={c.iso2} value={c.iso2}>
                     {c.name}
@@ -251,10 +256,10 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
                 ))}
               </Select>
             </Field>
-            <Field label="State / province" hint="Optional.">
+            <Field label={tr("State / province")} hint={tr("Optional.")}>
               <Input className={inputCls} maxLength={120} value={text.region} onChange={(e) => set("region")(e.target.value)} />
             </Field>
-            <Field label="Postal code" hint="Optional.">
+            <Field label={tr("Postal code")} hint={tr("Optional.")}>
               <Input className={inputCls} maxLength={20} value={text.postal_code} onChange={(e) => set("postal_code")(e.target.value)} />
             </Field>
           </div>
@@ -264,22 +269,22 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
           <div role="alert" className="rounded-md border border-danger-border bg-danger-soft px-4 py-3 text-[13px] text-danger">
             {save.isError ? (
               <>
-                <p>{supplierError(save.error)}</p>
+                <p>{tx(supplierError(save.error))}</p>
                 {apiError?.fieldErrors.map((f, i) => (
                   <p key={i}>
-                    {fieldName(f) || "form"}: {f.msg}
+                    {fieldName(f) || "form"}: {tx(f.msg)}
                   </p>
                 ))}
               </>
             ) : (
-              <p>Some fields need attention before the supplier can be saved.</p>
+              <p>{tr("Some fields need attention before the supplier can be saved.")}</p>
             )}
           </div>
         )}
 
         <div className="flex justify-end gap-2 sm:hidden">
           <Button variant="primary" type="submit" disabled={save.isPending}>
-            {submitLabel}
+            {tx(submitLabel)}
           </Button>
         </div>
       </form>

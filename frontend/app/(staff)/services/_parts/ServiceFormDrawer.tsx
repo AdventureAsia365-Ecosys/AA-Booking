@@ -22,6 +22,9 @@ import { CisField, CisFieldset } from "@/app/(staff)/_parts/CisFields";
 import { cisEditUrl } from "@/app/(staff)/_parts/SupplyContent";
 import { CIS_ADMIN_URL } from "@/lib/config";
 import { CIS_EDITOR_ROLES } from "@/app/(staff)/catalog/trip-plans/_parts/shared";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ServiceFormDrawer.messages";
 
 const DEFAULT_UNIT: Record<ServiceType, ServiceUnit> = {
   activity: "person",
@@ -40,6 +43,8 @@ export function ServiceFormDrawer({
   onClose: () => void;
   onSaved?: (s: ServiceDetail) => void;
 }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const countries = useCountries();
@@ -68,19 +73,19 @@ export function ServiceFormDrawer({
     onSuccess: (s) => {
       qc.invalidateQueries({ queryKey: ["services"] });
       qc.invalidateQueries({ queryKey: ["service"] });
-      toast.success(service ? `${s.title} saved.` : `${s.title} added as ${s.code}.`);
+      toast.success(service ? tr("{0} saved.", s.title) : tr("{0} added as {1}.", s.title, s.code));
       onSaved?.(s);
       onClose();
     },
   });
 
   function submit() {
-    if (!service && !form.supplier_id) return setLocalError("Pick the supplier that delivers this service.");
-    if (!form.title.trim()) return setLocalError("Give the service a working title.");
+    if (!service && !form.supplier_id) return setLocalError(tr("Pick the supplier that delivers this service."));
+    if (!form.title.trim()) return setLocalError(tr("Give the service a working title."));
     const group = form.max_group_size ? Number(form.max_group_size) : null;
-    if (group !== null && (!Number.isInteger(group) || group < 1 || group > 999)) return setLocalError("Max group size is a whole number from 1 to 999.");
+    if (group !== null && (!Number.isInteger(group) || group < 1 || group > 999)) return setLocalError(tr("Max group size is a whole number from 1 to 999."));
     const minutes = form.duration ? Number(form.duration) : null;
-    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1)) return setLocalError("Duration is a whole number of minutes.");
+    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1)) return setLocalError(tr("Duration is a whole number of minutes."));
     setLocalError(null);
     const clean = (v: string) => v.trim() || null;
     const body: ServiceBody = {
@@ -104,8 +109,8 @@ export function ServiceFormDrawer({
     <FormDrawer
       open
       onClose={onClose}
-      title={service ? `Edit ${service.title}` : "Add service"}
-      submitLabel={service ? "Save service" : "Add service"}
+      title={service ? tr("Edit {0}", service.title) : tr("Add service")}
+      submitLabel={service ? tr("Save service") : tr("Add service")}
       onSubmit={submit}
       busy={save.isPending}
       dirty={dirty}
@@ -114,11 +119,11 @@ export function ServiceFormDrawer({
       width={560}
     >
       <p className="text-[13px] text-muted">
-        What Booking buys from the supplier. The title is for staff; the text customers read is written in CIS.
+        {tr("What Booking buys from the supplier. The title is for staff; the text customers read is written in CIS.")}
       </p>
       <ServiceCisContent service={service} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Type" required error={errorFor(fe, "service_type")}>
+        <FormField label={tr("Type")} required error={errorFor(fe, "service_type")}>
           <Select
             className={inputCls}
             value={form.service_type}
@@ -129,44 +134,44 @@ export function ServiceFormDrawer({
           >
             {SERVICE_TYPES.map((t) => (
               <option key={t} value={t}>
-                {SERVICE_TYPE_LABEL[t]}
+                {tx(SERVICE_TYPE_LABEL[t])}
               </option>
             ))}
           </Select>
         </FormField>
         <FormField
-          label="Rates are"
+          label={tr("Rates are")}
           required
           locked={unitLocked}
-          hint={unitLocked ? "Fixed: this service already has rates in this unit." : "The unit its net rates are entered in."}
+          hint={unitLocked ? tr("Fixed: this service already has rates in this unit.") : tr("The unit its net rates are entered in.")}
           error={errorFor(fe, "unit")}
         >
           <Select className={inputCls} value={form.unit} onChange={(e) => set("unit")(e.target.value as ServiceUnit)} disabled={unitLocked}>
             {SERVICE_UNIT_OPTIONS.map((u) => (
               <option key={u.value} value={u.value}>
-                {u.label}
+                {tx(u.label)}
               </option>
             ))}
           </Select>
         </FormField>
       </div>
       {service ? (
-        <FormField label="Supplier" locked hint="A service stays with the supplier it was created under (its rates live there).">
+        <FormField label={tr("Supplier")} locked hint={tr("A service stays with the supplier it was created under (its rates live there).")}>
           <Input className={inputCls} value={`${service.supplier_name} (${service.supplier_code})`} disabled />
         </FormField>
       ) : (
-        <FormField label="Supplier" required hint={`Active suppliers with the matching category.`} error={errorFor(fe, "supplier_id")}>
+        <FormField label={tr("Supplier")} required hint={tr("Active suppliers with the matching category.")} error={errorFor(fe, "supplier_id")}>
           <SupplierSelect value={form.supplier_id} category={CATEGORY_FOR[form.service_type]} onChange={(v) => set("supplier_id")(v)} />
         </FormField>
       )}
-      <FormField label="Working title" required error={errorFor(fe, "title")}>
-        <Input className={inputCls} maxLength={200} value={form.title} onChange={(e) => set("title")(e.target.value)} placeholder="e.g. Old Quarter street food walk" />
+      <FormField label={tr("Working title")} required error={errorFor(fe, "title")}>
+        <Input className={inputCls} maxLength={200} value={form.title} onChange={(e) => set("title")(e.target.value)} placeholder={tr("e.g. Old Quarter street food walk")} />
       </FormField>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-medium text-ink">City / place</span>
+          <span className="text-[13px] font-medium text-ink">{tr("City / place")}</span>
           <DestinationPicker
-            value={place ?? (placeId ? { id: placeId, name: "Place not readable now", country: "CIS" } : null)}
+            value={place ?? (placeId ? { id: placeId, name: tr("Place not readable now"), country: "CIS" } : null)}
             country={form.country_code}
             onChange={(p) => {
               setPlace(p ? { id: p.destination_id, name: p.name, country: p.country } : null);
@@ -174,9 +179,9 @@ export function ServiceFormDrawer({
               if (p?.country_code) set("country_code")(p.country_code);
             }}
           />
-          <span className="text-xs text-muted">A CIS place. Picking one fills the country.</span>
+          <span className="text-xs text-muted">{tr("A CIS place. Picking one fills the country.")}</span>
         </div>
-        <FormField label="Country" error={errorFor(fe, "country_code")}>
+        <FormField label={tr("Country")} error={errorFor(fe, "country_code")}>
           <Select className={inputCls} value={form.country_code} onChange={(e) => set("country_code")(e.target.value)}>
             <option value="">—</option>
             {(countries.data?.items ?? []).map((c) => (
@@ -188,20 +193,20 @@ export function ServiceFormDrawer({
         </FormField>
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <FormField label="Max group size" error={errorFor(fe, "max_group_size")}>
+        <FormField label={tr("Max group size")} error={errorFor(fe, "max_group_size")}>
           <Input type="number" min={1} max={999} className={inputCls} value={form.max_group_size} onChange={(e) => set("max_group_size")(e.target.value)} />
         </FormField>
-        <FormField label="Duration (minutes)" error={errorFor(fe, "duration_minutes")}>
+        <FormField label={tr("Duration (minutes)")} error={errorFor(fe, "duration_minutes")}>
           <Input type="number" min={1} className={inputCls} value={form.duration} onChange={(e) => set("duration")(e.target.value)} />
         </FormField>
       </div>
-      <FormField label="Inclusions" hint="Separate with commas, e.g. Guide, Tastings, Water." error={errorFor(fe, "inclusions")}>
+      <FormField label={tr("Inclusions")} hint={tr("Separate with commas, e.g. Guide, Tastings, Water.")} error={errorFor(fe, "inclusions")}>
         <Input className={inputCls} value={form.inclusions} onChange={(e) => set("inclusions")(e.target.value)} />
       </FormField>
-      <FormField label="CIS catalog reference" hint="Optional: the CIS component or tour id this service delivers." error={errorFor(fe, "source_id")}>
+      <FormField label={tr("CIS catalog reference")} hint={tr("Optional: the CIS component or tour id this service delivers.")} error={errorFor(fe, "source_id")}>
         <Input className={`${inputCls} font-mono`} maxLength={120} value={form.source_id} onChange={(e) => set("source_id")(e.target.value)} />
       </FormField>
-      <FormField label="Internal notes" hint="Staff only." error={errorFor(fe, "internal_notes")}>
+      <FormField label={tr("Internal notes")} hint={tr("Staff only.")} error={errorFor(fe, "internal_notes")}>
         <Textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
@@ -219,37 +224,39 @@ const CONTENT_STATUS_LABEL: Record<string, string> = {
 
 /** The customer text of the service, read-only (CIS supply content, AA-835 S4). */
 function ServiceCisContent({ service }: { service?: ServiceDetail }) {
+  const tr = useT(MSG);
+  const tx = useTx();
   const me = useStaff();
   if (!service) {
     return (
       <CisFieldset
-        title="Customer text"
-        description="After you add the service, CIS drafts the description customers read from these facts; it is reviewed and edited in CIS."
+        title={tr("Customer text")}
+        description={tr("After you add the service, CIS drafts the description customers read from these facts; it is reviewed and edited in CIS.")}
       />
     );
   }
   const content = service.content;
   if (!content) {
-    return <CisFieldset title="Customer text" description="CIS content is not readable right now; it is edited in CIS." />;
+    return <CisFieldset title={tr("Customer text")} description={tr("CIS content is not readable right now; it is edited in CIS.")} />;
   }
   const href = cisEditUrl(content.edit_url);
   // "Edit in CIS" only for the roles that edit content in CIS (admin, content creator), as in every other CIS block.
   const editor = CIS_EDITOR_ROLES.has(me.role);
   return (
     <CisFieldset
-      title="Customer text"
+      title={tr("Customer text")}
       editPath={editor && href ? href.slice(CIS_ADMIN_URL.length) : null}
-      description={editor ? undefined : "Ask the content team to change it in CIS."}
+      description={editor ? undefined : tr("Ask the content team to change it in CIS.")}
     >
-      <CisField label="Status">{CONTENT_STATUS_LABEL[content.content_status] ?? content.content_status}</CisField>
-      <CisField label="Highlights">{content.highlights.length ? content.highlights.join(" · ") : null}</CisField>
-      <CisField label="Description" multiline wide>
+      <CisField label={tr("Status")}>{CONTENT_STATUS_LABEL[content.content_status] ?? content.content_status}</CisField>
+      <CisField label={tr("Highlights")}>{content.highlights.length ? content.highlights.join(" · ") : null}</CisField>
+      <CisField label={tr("Description")} multiline wide>
         {content.description ? (
           <>
             {showsAiBadge(content.description, content.ai) && (
               <AiNotice form="badge" testId="service-form-ai-badge" style={{ marginRight: 6 }} />
             )}
-            <span {...aiTextAttrs(content.description, content.ai)}>{content.description}</span>
+            <span {...aiTextAttrs(content.description, content.ai)}>{tx(content.description)}</span>
           </>
         ) : null}
       </CisField>

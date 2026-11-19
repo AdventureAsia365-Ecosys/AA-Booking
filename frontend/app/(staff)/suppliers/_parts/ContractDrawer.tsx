@@ -12,6 +12,8 @@ import { Input, Textarea, FormDrawer, useToast, DateField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
 import { supplierError } from "./shared";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./ContractDrawer.messages";
 
 export function ContractDrawer({
   supplierRef,
@@ -23,6 +25,7 @@ export function ContractDrawer({
   contract?: SupplierContract;
   onClose: () => void;
 }) {
+  const t = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState({
@@ -47,17 +50,17 @@ export function ContractDrawer({
     onSuccess: (k) => {
       qc.invalidateQueries({ queryKey: ["supplier"] });
       qc.invalidateQueries({ queryKey: ["suppliers"] });
-      toast.success(contract ? `Draft ${k.title} saved.` : `Contract ${k.title} saved as a draft. A second person publishes it.`);
+      toast.success(contract ? t("Draft {0} saved.", k.title) : t("Contract {0} saved as a draft. A second person publishes it.", k.title));
       onClose();
     },
   });
 
   function submit() {
     const currency = form.currency.trim().toUpperCase();
-    if (!form.title.trim()) return setLocalError("Give the contract a title, for example “2027 rates”.");
-    if (!form.valid_from) return setLocalError("Pick the first day the contract is valid.");
-    if (form.valid_to && form.valid_to < form.valid_from) return setLocalError("“Valid to” is on or after “valid from”.");
-    if (!/^[A-Z]{3}$/.test(currency)) return setLocalError("Currency is a 3-letter ISO code, e.g. VND, THB, USD.");
+    if (!form.title.trim()) return setLocalError(t("Give the contract a title, for example “2027 rates”."));
+    if (!form.valid_from) return setLocalError(t("Pick the first day the contract is valid."));
+    if (form.valid_to && form.valid_to < form.valid_from) return setLocalError(t("“Valid to” is on or after “valid from”."));
+    if (!/^[A-Z]{3}$/.test(currency)) return setLocalError(t("Currency is a 3-letter ISO code, e.g. VND, THB, USD."));
     setLocalError(null);
     const clean = (v: string) => v.trim() || null;
     save.mutate({
@@ -77,8 +80,8 @@ export function ContractDrawer({
     <FormDrawer
       open
       onClose={onClose}
-      title={contract ? "Edit draft contract" : "New contract"}
-      submitLabel={contract ? "Save draft" : "Save as draft"}
+      title={contract ? t("Edit draft contract") : t("New contract")}
+      submitLabel={contract ? t("Save draft") : t("Save as draft")}
       onSubmit={submit}
       busy={save.isPending}
       dirty={dirty}
@@ -86,23 +89,22 @@ export function ContractDrawer({
       fieldErrors={fe}
     >
       <p className="text-[13px] text-muted">
-        The supplier&apos;s terms for a period. It stays a draft until a second person publishes it; once published it is
-        fixed, so new terms are a new contract.
+        {t("The supplier's terms for a period. It stays a draft until a second person publishes it; once published it is fixed, so new terms are a new contract.")}
       </p>
-      <FormField label="Title" required error={errorFor(fe, "title")}>
-        <Input className={inputCls} maxLength={200} value={form.title} onChange={(e) => set("title")(e.target.value)} placeholder="e.g. 2027 rates" />
+      <FormField label={t("Title")} required error={errorFor(fe, "title")}>
+        <Input className={inputCls} maxLength={200} value={form.title} onChange={(e) => set("title")(e.target.value)} placeholder={t("e.g. 2027 rates")} />
       </FormField>
-      <FormField label="Supplier reference" hint="Their contract number or document name (no upload yet)." error={errorFor(fe, "reference")}>
+      <FormField label={t("Supplier reference")} hint={t("Their contract number or document name (no upload yet).")} error={errorFor(fe, "reference")}>
         <Input className={inputCls} maxLength={120} value={form.reference} onChange={(e) => set("reference")(e.target.value)} />
       </FormField>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <FormField label="Valid from" required error={errorFor(fe, "valid_from")}>
+        <FormField label={t("Valid from")} required error={errorFor(fe, "valid_from")}>
           <DateField className={inputCls} value={form.valid_from} onChange={(v) => set("valid_from")(v)} />
         </FormField>
-        <FormField label="Valid to" hint="Empty = open-ended." error={errorFor(fe, "valid_to")}>
+        <FormField label={t("Valid to")} hint={t("Empty = open-ended.")} error={errorFor(fe, "valid_to")}>
           <DateField className={inputCls} value={form.valid_to} onChange={(v) => set("valid_to")(v)} />
         </FormField>
-        <FormField label="Currency" required hint="The supplier's currency." error={errorFor(fe, "currency")}>
+        <FormField label={t("Currency")} required hint={t("The supplier's currency.")} error={errorFor(fe, "currency")}>
           <Input
             className={`${inputCls} font-mono uppercase`}
             maxLength={3}
@@ -112,13 +114,13 @@ export function ContractDrawer({
           />
         </FormField>
       </div>
-      <FormField label="Payment terms" hint="Deposit, balance due, method." error={errorFor(fe, "payment_terms")}>
-        <Textarea className={textareaCls} maxLength={2000} value={form.payment_terms} onChange={(e) => set("payment_terms")(e.target.value)} placeholder="e.g. 30% deposit on booking, balance 30 days before arrival" />
+      <FormField label={t("Payment terms")} hint={t("Deposit, balance due, method.")} error={errorFor(fe, "payment_terms")}>
+        <Textarea className={textareaCls} maxLength={2000} value={form.payment_terms} onChange={(e) => set("payment_terms")(e.target.value)} placeholder={t("e.g. 30% deposit on booking, balance 30 days before arrival")} />
       </FormField>
-      <FormField label="Cancellation policy" error={errorFor(fe, "cancellation_policy")}>
-        <Textarea className={textareaCls} maxLength={5000} value={form.cancellation_policy} onChange={(e) => set("cancellation_policy")(e.target.value)} placeholder="e.g. free until 30 days, 50% until 7 days, then 100%" />
+      <FormField label={t("Cancellation policy")} error={errorFor(fe, "cancellation_policy")}>
+        <Textarea className={textareaCls} maxLength={5000} value={form.cancellation_policy} onChange={(e) => set("cancellation_policy")(e.target.value)} placeholder={t("e.g. free until 30 days, 50% until 7 days, then 100%")} />
       </FormField>
-      <FormField label="Internal notes" hint="Staff only." error={errorFor(fe, "notes")}>
+      <FormField label={t("Internal notes")} hint={t("Staff only.")} error={errorFor(fe, "notes")}>
         <Textarea className={textareaCls} maxLength={5000} value={form.notes} onChange={(e) => set("notes")(e.target.value)} />
       </FormField>
     </FormDrawer>

@@ -23,12 +23,16 @@ import { CisField, CisFieldset } from "@/app/(staff)/_parts/CisFields";
 import { Fact, FactGrid } from "@/app/(staff)/_parts/DetailHeader";
 import { CIS_EDITOR_ROLES } from "../trip-plans/_parts/shared";
 import { useGeoStatus } from "./useGeoStatus";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./GeoDrawers.messages";
 
 /** CIS admin page where places (and the countries they sit in) are managed. CIS has no per-place deep link. */
 export const CIS_PLACES_PATH = "/admin/places";
 
 export function GeoStatusBadge({ status }: { status: GeoStatus }) {
-  return status === "active" ? <Pill tone="success">Active</Pill> : <Pill tone="neutral">Inactive</Pill>;
+  const t = useT(MSG);
+  return status === "active" ? <Pill tone="success">{t("Active")}</Pill> : <Pill tone="neutral">{t("Inactive")}</Pill>;
 }
 
 /** AA-997: why CIS keeps a place off customer maps; the place and its point are fixed in CIS Places. */
@@ -38,10 +42,12 @@ export const HIDDEN_REASON_LABEL: Record<HiddenReason, string> = {
 };
 
 export function CustomerVisibilityBadge({ reason }: { reason: HiddenReason | null }) {
-  if (!reason) return <Pill tone="success">Shown</Pill>;
+  const t = useT(MSG);
+  const tx = useTx();
+  if (!reason) return <Pill tone="success">{t("Shown")}</Pill>;
   return (
-    <Pill tone="warning" title={HIDDEN_REASON_LABEL[reason]}>
-      Hidden from customers
+    <Pill tone="warning" title={tx(HIDDEN_REASON_LABEL[reason])}>
+      {t("Hidden from customers")}
     </Pill>
   );
 }
@@ -59,14 +65,15 @@ function apiMessage(err: unknown): string | null {
 
 /** A read-only strip of CIS photo thumbnails (first `max`, then a "+N" tile up to `total`). Empty = nothing. */
 export function PhotoStrip({ paths, total, name, max = 6 }: { paths: string[]; total: number; name: string; max?: number }) {
+  const t = useT(MSG);
   if (paths.length === 0) return null;
   const shown = paths.slice(0, max);
   const more = Math.max(total, paths.length) - shown.length;
   return (
-    <ul className="grid grid-cols-6 gap-1.5" aria-label={`${name} photos from CIS`} data-testid="geo-photo-strip">
+    <ul className="grid grid-cols-6 gap-1.5" aria-label={t("{0} photos from CIS", name)} data-testid="geo-photo-strip">
       {shown.map((path, i) => (
         <li key={`${path}-${i}`} className="relative min-w-0">
-          <CisPhoto path={path} alt={`${name} photo ${i + 1}`} className="aspect-square w-full rounded-md" />
+          <CisPhoto path={path} alt={t("{0} photo {1}", name, i + 1)} className="aspect-square w-full rounded-md" />
           {more > 0 && i === shown.length - 1 && (
             <span className="bk-tabular absolute inset-0 grid place-items-center rounded-md bg-black/55 text-[12px] font-semibold text-white">
               +{more}
@@ -98,26 +105,27 @@ function StateFields({
   withArea: boolean;
   fe: ApiError["fieldErrors"];
 }) {
+  const t = useT(MSG);
   return (
-    <section className="flex flex-col gap-4" aria-label="Booking state">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Booking</span>
-      <FormField label="Booking status" hint="Inactive = Booking does not sell trips here. Nothing is deleted." error={errorFor(fe, "status")}>
+    <section className="flex flex-col gap-4" aria-label={t("Booking state")}>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t("Booking")}</span>
+      <FormField label={t("Booking status")} hint={t("Inactive = Booking does not sell trips here. Nothing is deleted.")} error={errorFor(fe, "status")}>
         <Select className={inputCls} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as GeoStatus })}>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
+          <option value="active">{t("Active")}</option>
+          <option value="inactive">{t("Inactive")}</option>
         </Select>
       </FormField>
       {form.status === "inactive" && (
-        <FormField label="Reason" hint="Shown to staff next to the status." error={errorFor(fe, "status_reason")}>
+        <FormField label={t("Reason")} hint={t("Shown to staff next to the status.")} error={errorFor(fe, "status_reason")}>
           <Input className={inputCls} maxLength={500} value={form.status_reason} onChange={(e) => setForm({ ...form, status_reason: e.target.value })} />
         </FormField>
       )}
       {withArea && (
-        <FormField label="Area" hint="Sales grouping, for example Indochina." error={errorFor(fe, "area")}>
+        <FormField label={t("Area")} hint={t("Sales grouping, for example Indochina.")} error={errorFor(fe, "area")}>
           <Input className={inputCls} maxLength={60} value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} />
         </FormField>
       )}
-      <FormField label="Internal notes" hint="Staff only, never shown to customers." error={errorFor(fe, "internal_notes")}>
+      <FormField label={t("Internal notes")} hint={t("Staff only, never shown to customers.")} error={errorFor(fe, "internal_notes")}>
         <Textarea
           className={textareaCls}
           maxLength={5000}
@@ -141,6 +149,7 @@ function stateBody(form: StateForm, withArea: boolean) {
 // ── Destination ─────────────────────────────────────────────────────────────
 
 export function DestinationDrawer({ id, startEditing = false, onClose }: { id: string; startEditing?: boolean; onClose: () => void }) {
+  const t = useT(MSG);
   const canWrite = useCan("catalog.admin");
   const [editing, setEditing] = useState(startEditing && canWrite);
   const status = useGeoStatus();
@@ -153,7 +162,7 @@ export function DestinationDrawer({ id, startEditing = false, onClose }: { id: s
       <Drawer
         open
         onClose={onClose}
-        title={d ? d.name : "Destination"}
+        title={d ? d.name : t("Destination")}
         width={560}
         footer={
           <div className="flex flex-wrap justify-end gap-2">
@@ -162,24 +171,24 @@ export function DestinationDrawer({ id, startEditing = false, onClose }: { id: s
                 variant={d.status === "active" ? "danger" : "secondary"}
                 onClick={() => status.ask("destination", { id: d.destination_id, name: d.name }, d.status !== "active")}
               >
-                {d.status === "active" ? "Deactivate" : "Activate"}
+                {d.status === "active" ? t("Deactivate") : t("Activate")}
               </Button>
             )}
             <Button variant="ghost" onClick={onClose}>
-              Close
+              {t("Close")}
             </Button>
             {canWrite && d && (
               <Button variant="primary" onClick={() => setEditing(true)}>
-                <Pencil size={14} /> Edit destination
+                <Pencil size={14} /> {t("Edit destination")}
               </Button>
             )}
           </div>
         }
       >
         {q.isLoading ? (
-          <p className="text-[13px] text-muted">Loading…</p>
+          <p className="text-[13px] text-muted">{t("Loading…")}</p>
         ) : q.isError || !d ? (
-          <p className="text-[13px] text-danger">{apiMessage(q.error) ?? "This destination could not be loaded."}</p>
+          <p className="text-[13px] text-danger">{apiMessage(q.error) ?? t("This destination could not be loaded.")}</p>
         ) : (
           <DestinationView d={d} />
         )}
@@ -194,37 +203,39 @@ function destinationPaths(d: DestinationDetail): string[] {
 }
 
 function DestinationView({ d }: { d: DestinationDetail }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const me = useStaff();
   const point = coords(d.lat, d.lng);
   const photos = destinationPaths(d);
   return (
     <div className="flex flex-col gap-5">
-      <CisFieldset title="Media" editPath={CIS_EDITOR_ROLES.has(me.role) ? CIS_PLACES_PATH : null} editLabel="Open in CIS">
+      <CisFieldset title={t("Media")} editPath={CIS_EDITOR_ROLES.has(me.role) ? CIS_PLACES_PATH : null} editLabel={t("Open in CIS")}>
         {photos.length === 0 ? (
-          <p className="text-[13px] text-muted2 sm:col-span-2">No photos in CIS for this place yet.</p>
+          <p className="text-[13px] text-muted2 sm:col-span-2">{t("No photos in CIS for this place yet.")}</p>
         ) : (
           photos.slice(0, 6).map((path, i) => (
-            <CisPhoto key={`${path}-${i}`} path={path} alt={`${d.name} photo ${i + 1}`} className="aspect-[4/3] w-full rounded-md" />
+            <CisPhoto key={`${path}-${i}`} path={path} alt={t("{0} photo {1}", d.name, i + 1)} className="aspect-[4/3] w-full rounded-md" />
           ))
         )}
       </CisFieldset>
       <FactGrid>
-        <Fact label="Name">{d.name}</Fact>
-        <Fact label="Country">{d.country ?? "—"}</Fact>
-        <Fact label="Booking status">
+        <Fact label={t("Name")}>{d.name}</Fact>
+        <Fact label={t("Country")}>{d.country ?? "—"}</Fact>
+        <Fact label={t("Booking status")}>
           <span className="inline-flex flex-wrap items-center gap-2">
             <GeoStatusBadge status={d.status} />
-            {d.status_reason && <span className="text-xs text-muted">{d.status_reason}</span>}
+            {d.status_reason && <span className="text-xs text-muted">{tx(d.status_reason)}</span>}
           </span>
         </Fact>
-        <Fact label="Customer maps">
+        <Fact label={t("Customer maps")}>
           <span className="inline-flex flex-wrap items-center gap-2">
-            <CustomerVisibilityBadge reason={d.hidden_reason} />
-            {d.hidden_reason && <span className="text-xs text-muted">{HIDDEN_REASON_LABEL[d.hidden_reason]}</span>}
+            <CustomerVisibilityBadge reason={tx(d.hidden_reason)} />
+            {d.hidden_reason && <span className="text-xs text-muted">{tx(HIDDEN_REASON_LABEL[d.hidden_reason])}</span>}
           </span>
         </Fact>
-        <Fact label="Photos in CIS">{d.photo_count}</Fact>
-        <Fact label="Coordinates">
+        <Fact label={t("Photos in CIS")}>{d.photo_count}</Fact>
+        <Fact label={t("Coordinates")}>
           {point ? (
             <a
               href={`https://www.openstreetmap.org/?mlat=${d.lat}&mlon=${d.lng}#map=12/${d.lat}/${d.lng}`}
@@ -238,25 +249,25 @@ function DestinationView({ d }: { d: DestinationDetail }) {
             "—"
           )}
         </Fact>
-        <Fact label="Booking state updated">
+        <Fact label={t("Booking state updated")}>
           {d.profile_updated_at ? (
             <>
-              <DateText value={d.profile_updated_at} withTime /> {d.profile_updated_by_name ? `by ${d.profile_updated_by_name}` : ""}
+              <DateText value={d.profile_updated_at} withTime /> {d.profile_updated_by_name ? t("by {0}", d.profile_updated_by_name) : ""}
             </>
           ) : (
-            "Never changed (active by default)"
+            t("Never changed (active by default)")
           )}
         </Fact>
       </FactGrid>
-      <section className="grid grid-cols-3 gap-3" aria-label="Booking supply at this place">
-        <SupplyCount icon={<Store size={15} />} label="Suppliers" value={d.active_suppliers} />
-        <SupplyCount icon={<Building2 size={15} />} label="Hotels" value={d.active_hotels} />
-        <SupplyCount icon={<Truck size={15} />} label="Services" value={d.active_services} />
+      <section className="grid grid-cols-3 gap-3" aria-label={t("Booking supply at this place")}>
+        <SupplyCount icon={<Store size={15} />} label={t("Suppliers")} value={d.active_suppliers} />
+        <SupplyCount icon={<Building2 size={15} />} label={t("Hotels")} value={d.active_hotels} />
+        <SupplyCount icon={<Truck size={15} />} label={t("Services")} value={d.active_services} />
       </section>
       {d.internal_notes && (
         <section>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Internal notes</span>
-          <p className="mt-1 whitespace-pre-line text-[13px] text-body">{d.internal_notes}</p>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{t("Internal notes")}</span>
+          <p className="mt-1 whitespace-pre-line text-[13px] text-body">{tx(d.internal_notes)}</p>
         </section>
       )}
     </div>
@@ -264,18 +275,21 @@ function DestinationView({ d }: { d: DestinationDetail }) {
 }
 
 function SupplyCount({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+  const t = useT(MSG);
+  const tx = useTx();
   return (
     <div className="rounded-md border border-line bg-panel px-3 py-2.5">
       <span className="flex items-center gap-1.5 text-xs text-muted">
-        {icon} {label}
+        {icon} {tx(label)}
       </span>
       <span className="bk-tabular text-[17px] font-semibold text-ink">{value}</span>
-      <span className="block text-[11px] text-muted2">active in Booking</span>
+      <span className="block text-[11px] text-muted2">{t("active in Booking")}</span>
     </div>
   );
 }
 
 function DestinationForm({ d, onClose }: { d: DestinationDetail; onClose: () => void }) {
+  const t = useT(MSG);
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -291,7 +305,7 @@ function DestinationForm({ d, onClose }: { d: DestinationDetail; onClose: () => 
     onSuccess: (out) => {
       qc.setQueryData(["geo", "destination", d.destination_id], out);
       qc.invalidateQueries({ queryKey: ["geo"] });
-      toast.success(out.changed?.length ? `${d.name} saved.` : "Nothing changed");
+      toast.success(out.changed?.length ? t("{0} saved.", d.name) : t("Nothing changed"));
       onClose();
     },
   });
@@ -300,8 +314,8 @@ function DestinationForm({ d, onClose }: { d: DestinationDetail; onClose: () => 
     <FormDrawer
       open
       onClose={onClose}
-      title={`Edit ${d.name}`}
-      submitLabel="Save changes"
+      title={t("Edit {0}", d.name)}
+      submitLabel={t("Save changes")}
       onSubmit={() => save.mutate()}
       busy={save.isPending}
       dirty={JSON.stringify(form) !== JSON.stringify(start)}
@@ -310,16 +324,16 @@ function DestinationForm({ d, onClose }: { d: DestinationDetail; onClose: () => 
       width={560}
     >
       <CisFieldset
-        title="Destination"
+        title={t("Destination")}
         editPath={CIS_EDITOR_ROLES.has(me.role) ? CIS_PLACES_PATH : null}
-        description="Name, country, coordinates and photos come from CIS places. New places are created in CIS."
+        description={t("Name, country, coordinates and photos come from CIS places. New places are created in CIS.")}
       >
-        <CisField label="Destination name">{d.name}</CisField>
-        <CisField label="Country">{d.country}</CisField>
-        <CisField label="Latitude">{d.lat != null ? d.lat.toFixed(4) : null}</CisField>
-        <CisField label="Longitude">{d.lng != null ? d.lng.toFixed(4) : null}</CisField>
-        <CisField label="Destination media" wide>
-          {d.photo_count ? `${d.photo_count} photo${d.photo_count === 1 ? "" : "s"} in CIS` : null}
+        <CisField label={t("Destination name")}>{d.name}</CisField>
+        <CisField label={t("Country")}>{d.country}</CisField>
+        <CisField label={t("Latitude")}>{d.lat != null ? d.lat.toFixed(4) : null}</CisField>
+        <CisField label={t("Longitude")}>{d.lng != null ? d.lng.toFixed(4) : null}</CisField>
+        <CisField label={t("Destination media")} wide>
+          {d.photo_count ? t("{0} photo{1} in CIS", d.photo_count, d.photo_count === 1 ? "" : "s") : null}
         </CisField>
         <div className="sm:col-span-2">
           <PhotoStrip paths={destinationPaths(d)} total={d.photo_count} name={d.name} />
@@ -334,6 +348,7 @@ function DestinationForm({ d, onClose }: { d: DestinationDetail; onClose: () => 
 
 /** Edit a listed country (`iso`), or add Booking state for an ISO country not listed yet (`iso` = null). */
 export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | null; listed?: string[]; onClose: () => void }) {
+  const t = useT(MSG);
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -357,7 +372,7 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
       qc.setQueryData(["geo", "country", picked], out);
       qc.invalidateQueries({ queryKey: ["geo"] });
       // Add mode: the API stores the country even when the defaults are kept (it then becomes listed).
-      toast.success(!iso ? `${out.name} added.` : out.changed?.length ? `${out.name} saved.` : "Nothing changed");
+      toast.success(!iso ? t("{0} added.", out.name) : out.changed?.length ? t("{0} saved.", out.name) : t("Nothing changed"));
       onClose();
     },
   });
@@ -367,17 +382,17 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
     <FormDrawer
       open
       onClose={onClose}
-      title={iso ? `Edit ${c?.name ?? iso}` : "Add country"}
-      submitLabel={iso ? "Save changes" : "Save country"}
+      title={iso ? t("Edit {0}", c?.name ?? iso) : t("Add country")}
+      submitLabel={iso ? t("Save changes") : t("Save country")}
       onSubmit={() => current && picked && save.mutate()}
       busy={save.isPending}
       dirty={!!form && JSON.stringify(form) !== JSON.stringify(start)}
-      error={!picked && save.isError ? "Pick a country first." : fe.length ? null : apiMessage(save.error)}
+      error={!picked && save.isError ? t("Pick a country first.") : fe.length ? null : apiMessage(save.error)}
       fieldErrors={fe}
       width={560}
     >
       {!iso && (
-        <FormField label="Country name" required hint="Countries with a CIS place or tour are listed already; add Booking state for another ISO country here.">
+        <FormField label={t("Country name")} required hint={t("Countries with a CIS place or tour are listed already; add Booking state for another ISO country here.")}>
           <Select
             className={inputCls}
             value={picked}
@@ -386,7 +401,7 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
               setForm(null);
             }}
           >
-            <option value="">Select a country</option>
+            <option value="">{t("Select a country")}</option>
             {options.map((x) => (
               <option key={x.iso2} value={x.iso2}>
                 {x.name}
@@ -397,14 +412,14 @@ export function CountryDrawer({ iso, listed = [], onClose }: { iso: string | nul
       )}
       {picked && (
         <CisFieldset
-          title="Country"
+          title={t("Country")}
           editPath={CIS_EDITOR_ROLES.has(me.role) ? CIS_PLACES_PATH : null}
-          description="Derived from CIS places and tours. Country descriptions, FAQs and festivals have no CIS source yet, so Booking does not author them."
+          description={t("Derived from CIS places and tours. Country descriptions, FAQs and festivals have no CIS source yet, so Booking does not author them.")}
         >
-          <CisField label="Country">{c ? `${c.name} (${c.country_code})` : detail.isLoading ? "…" : null}</CisField>
-          <CisField label="Destinations">{c ? `${c.destinations} places` : null}</CisField>
-          <CisField label="Tours">{c ? `${c.tours} CIS tours` : null}</CisField>
-          <CisField label="Images">{c ? `${c.photos} CIS photo${c.photos === 1 ? "" : "s"}` : null}</CisField>
+          <CisField label={t("Country")}>{c ? `${c.name} (${c.country_code})` : detail.isLoading ? "…" : null}</CisField>
+          <CisField label={t("Destinations")}>{c ? t("{0} places", c.destinations) : null}</CisField>
+          <CisField label={t("Tours")}>{c ? t("{0} CIS tours", c.tours) : null}</CisField>
+          <CisField label={t("Images")}>{c ? t("{0} CIS photo{1}", c.photos, c.photos === 1 ? "" : "s") : null}</CisField>
           {c && c.photo_items.length > 0 && (
             <div className="sm:col-span-2">
               <PhotoStrip paths={c.photo_items.map((p) => p.path)} total={c.photos} name={c.name} />

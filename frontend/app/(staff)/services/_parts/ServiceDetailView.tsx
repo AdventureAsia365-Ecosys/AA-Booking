@@ -19,19 +19,24 @@ import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { ServiceFormDrawer } from "./ServiceFormDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ServiceDetailView.messages";
 
 export function ServiceDetailView({ refParam }: { refParam: string }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const ref = decodeURIComponent(refParam);
   const q = useQuery({ queryKey: ["service", ref], queryFn: () => supplyApi.service(ref) });
   const status = useRecordStatus();
   const [editing, setEditing] = useState(false);
   const tabs = [
-    { key: "overview", label: "Overview" },
-    { key: "rates", label: "Rates", count: q.data?.rates_in_force },
+    { key: "overview", label: t("Overview") },
+    { key: "rates", label: t("Rates"), count: q.data?.rates_in_force },
   ];
   const [tab, setTab] = useDetailTab(tabs);
 
-  if (q.isLoading) return <DetailSkeleton label="Loading service" />;
+  if (q.isLoading) return <DetailSkeleton label={t("Loading service")} />;
   if (q.isError || !q.data) {
     const code = q.error instanceof ApiError ? q.error.status : 0;
     return (
@@ -39,14 +44,14 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
         {code === 404 ? (
           <EmptyState
             icon={<ActivityIcon size={30} />}
-            title="Service not found"
-            description="The link may be wrong, or the code was mistyped."
-            action={<Link href="/services" className="text-[13px] font-semibold text-accent-deep hover:underline">Back to services</Link>}
+            title={t("Service not found")}
+            description={t("The link may be wrong, or the code was mistyped.")}
+            action={<Link href="/services" className="text-[13px] font-semibold text-accent-deep hover:underline">{t("Back to services")}</Link>}
           />
         ) : code === 403 ? (
-          <EmptyState title="You do not have access to services" description="Your Booking role cannot read supply records." />
+          <EmptyState title={t("You do not have access to services")} description={t("Your Booking role cannot read supply records.")} />
         ) : (
-          <ErrorState message={(q.error as Error)?.message ?? "Could not load the service."} onRetry={() => q.refetch()} />
+          <ErrorState message={(q.error as Error)?.message ?? t("Could not load the service.")} onRetry={() => q.refetch()} />
         )}
       </PageFrame>
     );
@@ -56,7 +61,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
   return (
     <PageFrame bleed>
       <DetailHeader
-        back={{ href: "/services", label: "Services" }}
+        back={{ href: "/services", label: t("Services") }}
         name={s.title}
         badges={<SupplierStatusBadge status={s.status} />}
         meta={
@@ -65,13 +70,13 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
               <Code>{s.code}</Code>
             </MetaItem>
             <MetaItem icon={<Tag size={14} />}>
-              {SERVICE_TYPE_LABEL[s.service_type]} · {UNIT_LABEL[s.unit]}
+              {tx(SERVICE_TYPE_LABEL[s.service_type])} · {tx(UNIT_LABEL[s.unit])}
             </MetaItem>
             {(s.destination || s.country_name) && (
               <MetaItem icon={<MapPin size={14} />}>{s.destination ? `${s.destination.name}, ${s.country_name ?? s.destination.country}` : s.country_name}</MetaItem>
             )}
             <MetaItem icon={<CalendarDays size={14} />}>
-              Added on <DateText value={s.created_at} />
+              {t("Added on")} <DateText value={s.created_at} />
             </MetaItem>
           </>
         }
@@ -79,10 +84,10 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
           status.canWrite && (
             <>
               <Button variant="secondary" onClick={() => setEditing(true)}>
-                <Pencil size={14} /> Edit service
+                <Pencil size={14} /> {t("Edit service")}
               </Button>
               <Button variant="secondary" onClick={() => status.ask("service", { code: s.code, name: s.title }, s.status !== "active")}>
-                {s.status === "active" ? <Ban size={14} /> : <Power size={14} />} {s.status === "active" ? "Deactivate" : "Activate"}
+                {s.status === "active" ? <Ban size={14} /> : <Power size={14} />} {s.status === "active" ? t("Deactivate") : t("Activate")}
               </Button>
             </>
           )
@@ -94,7 +99,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
       <div className="mx-auto max-w-[1440px] py-6 md:px-8">
         {s.status === "inactive" && (
           <div role="status" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
-            <Ban size={15} /> This service is inactive: it stays on record, but proposals cannot newly book it.
+            <Ban size={15} /> {t("This service is inactive: it stays on record, but proposals cannot newly book it.")}
           </div>
         )}
         {tab === "overview" && <Overview s={s} canWrite={status.canWrite} />}
@@ -107,38 +112,40 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
 }
 
 function Overview({ s, canWrite }: { s: ServiceDetail; canWrite: boolean }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const minutes = s.duration_minutes;
   const duration = minutes == null ? "—" : minutes >= 60 ? `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}` : `${minutes} min`;
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div className="flex min-w-0 flex-col gap-5">
-        <Section title="Overview">
+        <Section title={t("Overview")}>
           <FactGrid>
-            <Fact label="Type">{SERVICE_TYPE_LABEL[s.service_type]}</Fact>
-            <Fact label="Rates are">{UNIT_LABEL[s.unit]}</Fact>
-            <Fact label="City / place">
+            <Fact label={t("Type")}>{tx(SERVICE_TYPE_LABEL[s.service_type])}</Fact>
+            <Fact label={t("Rates are")}>{tx(UNIT_LABEL[s.unit])}</Fact>
+            <Fact label={t("City / place")}>
               {s.destination ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
                   {s.destination.name} <FromCisTag />
                 </span>
               ) : s.destination_id ? (
-                <span className="text-muted">Set, but the CIS catalog cannot be read right now</span>
+                <span className="text-muted">{t("Set, but the CIS catalog cannot be read right now")}</span>
               ) : (
                 "—"
               )}
             </Fact>
-            <Fact label="Country">{s.country_name ?? "—"}</Fact>
-            <Fact label="Max group size">{s.max_group_size ?? "—"}</Fact>
-            <Fact label="Duration">{duration}</Fact>
-            <Fact label="Inclusions" wide>
+            <Fact label={t("Country")}>{s.country_name ?? "—"}</Fact>
+            <Fact label={t("Max group size")}>{s.max_group_size ?? "—"}</Fact>
+            <Fact label={t("Duration")}>{duration}</Fact>
+            <Fact label={t("Inclusions")} wide>
               {s.inclusions.length ? s.inclusions.join(", ") : "—"}
             </Fact>
-            <Fact label="CIS catalog reference">{s.source_id ? <Code>{s.source_id}</Code> : "—"}</Fact>
-            <Fact label="Customer-facing text">
-              <span className="text-muted">Written in CIS (not in Booking).</span>
+            <Fact label={t("CIS catalog reference")}>{s.source_id ? <Code>{s.source_id}</Code> : "—"}</Fact>
+            <Fact label={t("Customer-facing text")}>
+              <span className="text-muted">{t("Written in CIS (not in Booking).")}</span>
             </Fact>
-            <Fact label="Internal notes" wide>
-              {s.internal_notes ? <span className="whitespace-pre-line">{s.internal_notes}</span> : <span className="text-muted">None</span>}
+            <Fact label={t("Internal notes")} wide>
+              {s.internal_notes ? <span className="whitespace-pre-line">{tx(s.internal_notes)}</span> : <span className="text-muted">{t("None")}</span>}
             </Fact>
           </FactGrid>
         </Section>
@@ -146,9 +153,9 @@ function Overview({ s, canWrite }: { s: ServiceDetail; canWrite: boolean }) {
         <SupplierPhotos kind="service" recordRef={s.code} recordActive={s.status === "active"} canWrite={canWrite} />
       </div>
       <div className="flex min-w-0 flex-col gap-5">
-        <Section title="Supplier">
+        <Section title={t("Supplier")}>
           <FactGrid>
-            <Fact label="Supplier" wide>
+            <Fact label={t("Supplier")} wide>
               <Link href={`/suppliers/${encodeURIComponent(s.supplier_code)}`} className="font-medium text-accent-deep hover:underline">
                 {s.supplier_name}
               </Link>{" "}
@@ -156,17 +163,17 @@ function Overview({ s, canWrite }: { s: ServiceDetail; canWrite: boolean }) {
             </Fact>
           </FactGrid>
         </Section>
-        <Section title="Recent activity">
+        <Section title={t("Recent activity")}>
           {s.recent_activity.length === 0 ? (
-            <p className="text-[13px] text-muted">Nothing recorded yet.</p>
+            <p className="text-[13px] text-muted">{t("Nothing recorded yet.")}</p>
           ) : (
             <ol className="flex flex-col">
               {s.recent_activity.map((a) => (
                 <li key={a.id} className="border-b border-line2 py-2 text-[13px] first:pt-0 last:border-b-0">
                   <span className="font-medium text-ink">{a.summary ?? a.action}</span>
-                  {a.entity_type === "supplier_rate" && a.entity_label && <span className="text-muted"> · {a.entity_label}</span>}
+                  {a.entity_type === "supplier_rate" && a.entity_label && <span className="text-muted"> · {tx(a.entity_label)}</span>}
                   <span className="block text-xs text-muted">
-                    {a.actor.name ?? (a.actor.id ? "Staff" : "System")} · <DateText value={a.at} withTime />
+                    {a.actor.name ?? (a.actor.id ? t("Staff") : t("System"))} · <DateText value={a.at} withTime />
                   </span>
                 </li>
               ))}
@@ -179,9 +186,10 @@ function Overview({ s, canWrite }: { s: ServiceDetail; canWrite: boolean }) {
 }
 
 function Rates({ s }: { s: ServiceDetail }) {
+  const t = useT(MSG);
   const rates = useQuery({ queryKey: ["rates", "service", s.code], queryFn: () => supplyApi.serviceRates(s.code) });
   return (
-    <Section padded={false} className="p-4" title="Net rates" description="Entered under the supplier's contracts; fixed once a contract is published.">
+    <Section padded={false} className="p-4" title={t("Net rates")} description={t("Entered under the supplier's contracts; fixed once a contract is published.")}>
       <RatesTable
         tableId="service-rates"
         rates={rates.data?.items ?? []}
@@ -190,8 +198,8 @@ function Rates({ s }: { s: ServiceDetail }) {
         onRetry={() => rates.refetch()}
         showTarget={false}
         showContract
-        emptyTitle="No rates yet"
-        emptyDescription={`Rates are entered under a contract on the supplier page (${s.supplier_name} → Rates).`}
+        emptyTitle={t("No rates yet")}
+        emptyDescription={t("Rates are entered under a contract on the supplier page ({0} → Rates).", s.supplier_name)}
       />
     </Section>
   );

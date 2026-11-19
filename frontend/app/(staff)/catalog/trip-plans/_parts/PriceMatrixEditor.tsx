@@ -16,15 +16,19 @@ import type { PriceRow } from "@/lib/api/tripPlans";
 import { Badge, Input, Select, DateField, IconButton, LinkButton, Money, formatDay } from "@/ui";
 import { marginLabel, newDraft, paxBandLabel, type DraftError, type PriceDraft } from "@/ui/booking/tripPlans";
 import { inputCls } from "../../../_parts/FormField";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./PriceMatrixEditor.messages";
 
 const CHANNEL_SHORT: Record<string, string> = Object.fromEntries(CHANNELS.map((c) => [c.value, c.label]));
 
 function Field({ label, error, children, className = "" }: { label: string; error?: string; children: React.ReactNode; className?: string }) {
+  const tx = useTx();
   return (
     <label className={`flex min-w-0 flex-col gap-1 ${className}`}>
-      <span className="text-[12px] font-medium text-ink">{label}</span>
+      <span className="text-[12px] font-medium text-ink">{tx(label)}</span>
       {children}
-      {error && <span className="text-[11.5px] text-danger">{error}</span>}
+      {error && <span className="text-[11.5px] text-danger">{tx(error)}</span>}
     </label>
   );
 }
@@ -43,21 +47,22 @@ export function PriceMatrixEditor({
   saved: PriceRow[];
   today: string;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const set = (i: number, patch: Partial<PriceDraft>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const errorOf = (i: number, field: DraftError["field"]) => errors.find((e) => e.row === i && e.field === field)?.message;
 
   return (
-    <fieldset className="flex flex-col gap-3" aria-label="Price matrix">
+    <fieldset className="flex flex-col gap-3" aria-label={t("Price matrix")}>
       <legend className="mb-1 flex w-full items-baseline justify-between gap-3">
-        <span className="text-[13px] font-medium text-ink">Price matrix</span>
-        <span className="text-xs text-muted">Per person</span>
+        <span className="text-[13px] font-medium text-ink">{t("Price matrix")}</span>
+        <span className="text-xs text-muted">{t("Per person")}</span>
       </legend>
       <p className="-mt-1 text-xs text-muted">
-        One row per channel, season and pax band. Enter the price per person, or the net cost per person to price it with the channel&apos;s pricing rule and
-        today&apos;s approved FX rate (a price next to a net cost overrides it).
+        {t("One row per channel, season and pax band. Enter the price per person, or the net cost per person to price it with the channel's pricing rule and today's approved FX rate (a price next to a net cost overrides it).")}
       </p>
       {rows.length === 0 && (
-        <p className="rounded-md border border-dashed border-line px-3 py-4 text-center text-[13px] text-muted">No prices yet. Add the first row.</p>
+        <p className="rounded-md border border-dashed border-line px-3 py-4 text-center text-[13px] text-muted">{t("No prices yet. Add the first row.")}</p>
       )}
       {rows.map((r, i) => {
         const last = saved.find((x) => `row-${x.position}` === r.key);
@@ -67,7 +72,7 @@ export function PriceMatrixEditor({
           <div key={r.key} className={`rounded-md border bg-card p-3 ${rowError ? "border-danger-border" : "border-line"}`} data-testid="price-row">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">
-                Row {i + 1}
+                {t("Row {0}", i + 1)}
                 <span className="font-normal text-muted">
                   {" "}
                   · {CHANNEL_SHORT[r.channel]}
@@ -75,7 +80,7 @@ export function PriceMatrixEditor({
                 </span>
                 {r.computed && (
                   <Badge tone={r.amount.trim() ? "warning" : "info"} style={{ marginLeft: 8 }}>
-                    {r.amount.trim() ? "Cost sheet · override" : "Cost sheet"}
+                    {r.amount.trim() ? t("Cost sheet · override") : t("Cost sheet")}
                   </Badge>
                 )}
               </span>
@@ -83,47 +88,47 @@ export function PriceMatrixEditor({
                 variant="plain"
                 size="sm"
                 tone="danger"
-                label={`Remove price row ${i + 1}`}
+                label={t("Remove price row {0}", i + 1)}
                 onClick={() => onChange(rows.filter((_, j) => j !== i))}
               >
                 <Trash2 size={14} />
               </IconButton>
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-4">
-              <Field label="Channel" className="col-span-2">
+              <Field label={t("Channel")} className="col-span-2">
                 <Select className={inputCls} value={r.channel} onChange={(e) => set(i, { channel: e.target.value as Channel })}>
                   {CHANNELS.map((c) => (
                     <option key={c.value} value={c.value}>
-                      {c.label}
+                      {tx(c.label)}
                     </option>
                   ))}
                 </Select>
               </Field>
               {/* AA-1091 (bk-055): the label is for people; the season and the peak uplift come from the tour's season
                   calendar on the row's dates. */}
-              <Field label="Season label" error={errorOf(i, "season")} className="col-span-2">
-                <Input className={inputCls} maxLength={80} placeholder="Green season, Dry season…" value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
+              <Field label={t("Season label")} error={errorOf(i, "season")} className="col-span-2">
+                <Input className={inputCls} maxLength={80} placeholder={t("Green season, Dry season…")} value={r.season} onChange={(e) => set(i, { season: e.target.value })} />
               </Field>
-              <Field label="Valid from" error={errorOf(i, "valid_from")} className="col-span-2 sm:col-span-2">
-                <DateField className={inputCls} value={r.valid_from} onChange={(v) => set(i, { valid_from: v })} aria-label={`Row ${i + 1} valid from`} />
+              <Field label={t("Valid from")} error={errorOf(i, "valid_from")} className="col-span-2 sm:col-span-2">
+                <DateField className={inputCls} value={r.valid_from} onChange={(v) => set(i, { valid_from: v })} aria-label={t("Row {0} valid from", i + 1)} />
               </Field>
-              <Field label="Valid to" error={errorOf(i, "valid_to")} className="col-span-2 sm:col-span-2">
-                <DateField className={inputCls} value={r.valid_to} min={r.valid_from || undefined} onChange={(v) => set(i, { valid_to: v })} aria-label={`Row ${i + 1} valid to`} />
+              <Field label={t("Valid to")} error={errorOf(i, "valid_to")} className="col-span-2 sm:col-span-2">
+                <DateField className={inputCls} value={r.valid_to} min={r.valid_from || undefined} onChange={(v) => set(i, { valid_to: v })} aria-label={t("Row {0} valid to", i + 1)} />
               </Field>
-              <Field label="Pax from" error={errorOf(i, "pax_min")}>
+              <Field label={t("Pax from")} error={errorOf(i, "pax_min")}>
                 <Input className={inputCls} inputMode="numeric" value={r.pax_min} onChange={(e) => set(i, { pax_min: e.target.value })} />
               </Field>
-              <Field label="Pax to" error={errorOf(i, "pax_max")}>
-                <Input className={inputCls} inputMode="numeric" placeholder="and more" value={r.pax_max} onChange={(e) => set(i, { pax_max: e.target.value })} />
+              <Field label={t("Pax to")} error={errorOf(i, "pax_max")}>
+                <Input className={inputCls} inputMode="numeric" placeholder={t("and more")} value={r.pax_max} onChange={(e) => set(i, { pax_max: e.target.value })} />
               </Field>
-              <Field label="Currency">
+              <Field label={t("Currency")}>
                 <Select className={inputCls} value={r.currency} onChange={(e) => set(i, { currency: e.target.value })}>
                   {SELLING_CURRENCIES.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Price / person" error={errorOf(i, "amount")}>
+              <Field label={t("Price / person")} error={errorOf(i, "amount")}>
                 <Input
                   className={inputCls}
                   inputMode="decimal"
@@ -132,10 +137,10 @@ export function PriceMatrixEditor({
                   onChange={(e) => set(i, { amount: e.target.value })}
                 />
               </Field>
-              <Field label="Net cost / person (optional)" error={errorOf(i, "net_amount")} className="col-span-2 sm:col-span-4">
+              <Field label={t("Net cost / person (optional)")} error={errorOf(i, "net_amount")} className="col-span-2 sm:col-span-4">
                 <span className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
-                  <Input className={inputCls} inputMode="decimal" placeholder="net cost to price from" value={r.net_amount} onChange={(e) => set(i, { net_amount: e.target.value })} />
-                  <Select aria-label={`Row ${i + 1} net cost currency`} className={inputCls} value={r.net_currency} onChange={(e) => set(i, { net_currency: e.target.value })}>
+                  <Input className={inputCls} inputMode="decimal" placeholder={t("net cost to price from")} value={r.net_amount} onChange={(e) => set(i, { net_amount: e.target.value })} />
+                  <Select aria-label={t("Row {0} net cost currency", i + 1)} className={inputCls} value={r.net_currency} onChange={(e) => set(i, { net_currency: e.target.value })}>
                     {COST_CURRENCIES.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
@@ -145,22 +150,22 @@ export function PriceMatrixEditor({
             </div>
             {last?.priced && (
               <p className="mt-2 text-xs text-muted">
-                Saved: <Money amount={last.amount} currency={last.currency} /> {last.overridden ? "(override)" : "from the net cost"}
-                {marginLabel(last.effective_margin) && ` · margin ${marginLabel(last.effective_margin)}`}
-                {last.priced_on && ` · priced ${formatDay(last.priced_on)}`}
+                {t("Saved:")} <Money amount={last.amount} currency={last.currency} /> {last.overridden ? t("(override)") : t("from the net cost")}
+                {marginLabel(last.effective_margin) && t(" · margin {0}", marginLabel(last.effective_margin))}
+                {last.priced_on && t(" · priced {0}", formatDay(last.priced_on))}
               </p>
             )}
             {last?.rrp_amount && (
               <p className="mt-1 text-xs text-muted">
-                Suggested retail price: <Money amount={last.rrp_amount} currency={last.currency} /> per person
+                {t("Suggested retail price:")} <Money amount={last.rrp_amount} currency={last.currency} /> {t("per person")}
               </p>
             )}
-            {rowError && <p className="mt-2 text-xs text-danger">{rowError}</p>}
+            {rowError && <p className="mt-2 text-xs text-danger">{tx(rowError)}</p>}
           </div>
         );
       })}
       <LinkButton className="self-start" onClick={() => onChange([...rows, newDraft(rows[rows.length - 1], today)])}>
-        <Plus size={14} /> Add price row
+        <Plus size={14} /> {t("Add price row")}
       </LinkButton>
     </fieldset>
   );

@@ -3,20 +3,23 @@
 
 import type { Metadata } from "next";
 import { WaveFrame } from "@/ui/booking/WaveFrame";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./page.messages";
 
 export const metadata: Metadata = { title: "Rate sheet review" };
 
 export default function SuppliersRateSheetsIdPage() {
+  const t = useT(MSG);
   return (
     <WaveFrame
       wave={2}
-      title="Rate sheet review"
+      title={t("Rate sheet review")}
       layout="detail"
-      description="Check an uploaded rate sheet, then publish it. Publishing needs a second person (maker-checker)."
-      purpose="Validation errors per sheet and row, a preview of the parsed rates, and Publish for someone other than the uploader (ADR 0005 §7–8)."
-      tabs={["Validation", "Preview rows", "History"]}
-      sections={["Rows", "Publish", "Upload"]}
-      breadcrumbs={[{"label": "Suppliers", "href": "/suppliers"}, {"label": "Rate sheet"}]}
+      description={t("Check an uploaded rate sheet, then publish it. Publishing needs a second person (maker-checker).")}
+      purpose={t("Validation errors per sheet and row, a preview of the parsed rates, and Publish for someone other than the uploader (ADR 0005 §7–8).")}
+      tabs={[t("Validation"), t("Preview rows"), t("History")]}
+      sections={[t("Rows"), t("Publish"), t("Upload")]}
+      breadcrumbs={[{"label": t("Suppliers"), "href": "/suppliers"}, {"label": t("Rate sheet")}]}
     />
   );
 }

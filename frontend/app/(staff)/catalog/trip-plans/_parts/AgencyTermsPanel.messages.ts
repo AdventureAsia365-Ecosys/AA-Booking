@@ -1,0 +1,60 @@
+// app/(staff)/catalog/trip-plans/_parts/AgencyTermsPanel.messages.ts
+// AA-1128 (B5): the English and Vietnamese text of AgencyTermsPanel.tsx (kit core/i18n.ts). The keys are the English
+// text; the phrasebook registers the Vietnamese side for text kept in module-level tables (ui/local/phrasebook.ts).
+import { defineMessages } from "@/ui/core/i18n";
+import { phrasebook } from "@/ui/local/phrasebook";
+
+export const MSG = phrasebook(
+  defineMessages(
+  {
+    "Agency terms": "Agency terms",
+    "Child and infant ages of this tour, and its own deposit and balance terms for agencies.": "Child and infant ages of this tour, and its own deposit and balance terms for agencies.",
+    "Age bands saved": "Age bands saved",
+    "Age bands": "Age bands",
+    "Child up to age": "Child up to age",
+    "Empty = 11": "Empty = 11",
+    "Infant up to age": "Infant up to age",
+    "Empty = 1": "Empty = 1",
+    "Save ages": "Save ages",
+    "Tour terms saved": "Tour terms saved",
+    "Tour terms removed": "Tour terms removed",
+    "Deposit and balance": "Deposit and balance",
+    "The tour terms could not be loaded.": "The tour terms could not be loaded.",
+    "No tour terms: the agency's terms or AA's default apply.": "No tour terms: the agency's terms or AA's default apply.",
+    "One agency": "One agency",
+    "Every agency": "Every agency",
+    "· deposit {0}, balance {1} days before departure": (...a: unknown[]) => `· deposit ${a[0]}, balance ${a[1]} days before departure`,
+    "Remove these terms": "Remove these terms",
+    "For": "For",
+    "Deposit %": "Deposit %",
+    "Balance days before": "Balance days before",
+    "Save terms": "Save terms",
+    "Something went wrong": "Something went wrong",
+  },
+  {
+    "Agency terms": "Điều khoản đại lý",
+    "Child and infant ages of this tour, and its own deposit and balance terms for agencies.": "Độ tuổi trẻ em và em bé của tour này, cùng điều khoản đặt cọc và thanh toán phần còn lại riêng cho đại lý.",
+    "Age bands saved": "Đã lưu độ tuổi",
+    "Age bands": "Độ tuổi",
+    "Child up to age": "Trẻ em tới tuổi",
+    "Empty = 11": "Để trống = 11",
+    "Infant up to age": "Em bé tới tuổi",
+    "Empty = 1": "Để trống = 1",
+    "Save ages": "Lưu độ tuổi",
+    "Tour terms saved": "Đã lưu điều khoản tour",
+    "Tour terms removed": "Đã xoá điều khoản tour",
+    "Deposit and balance": "Đặt cọc và phần còn lại",
+    "The tour terms could not be loaded.": "Không tải được điều khoản tour.",
+    "No tour terms: the agency's terms or AA's default apply.": "Tour không có điều khoản riêng: áp dụng điều khoản của đại lý hoặc mặc định của AA.",
+    "One agency": "Một đại lý",
+    "Every agency": "Mọi đại lý",
+    "· deposit {0}, balance {1} days before departure": (...a: unknown[]) => `· đặt cọc ${a[0]}, phần còn lại ${a[1]} ngày trước khởi hành`,
+    "Remove these terms": "Xoá các điều khoản này",
+    "For": "Cho",
+    "Deposit %": "% đặt cọc",
+    "Balance days before": "Số ngày trước hạn phần còn lại",
+    "Save terms": "Lưu điều khoản",
+    "Something went wrong": "Đã có lỗi xảy ra",
+  },
+  ),
+);

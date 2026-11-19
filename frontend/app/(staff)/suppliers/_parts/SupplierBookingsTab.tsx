@@ -15,8 +15,13 @@ import {
   DataTable, DateText, Money, SUPPLIER_BOOKING_STATUS_META, Section, SegmentedControl, SupplierBookingStatusBadge, useCan,
   useUrlFilters,
 } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SupplierBookingsTab.messages";
 
 export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const canRead = useCan("ops.read");
   const { get, set } = useUrlFilters();
   const paging = useOffsetPage();
@@ -31,7 +36,7 @@ export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
   const columns: ColumnDef<SupplierBooking, unknown>[] = [
     {
       id: "case",
-      header: "Trip case",
+      header: t("Trip case"),
       accessorFn: (r) => r.trip_case.code,
       cell: ({ row }) => (
         <Link
@@ -44,12 +49,12 @@ export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
     },
     {
       id: "item",
-      header: "Booking",
+      header: t("Booking"),
       accessorFn: (r) => r.item_description,
       cell: ({ row }) => (
         <span className="flex min-w-0 flex-col md:max-w-[280px]">
-          <span className="truncate text-[13px] text-ink" title={row.original.item_description}>
-            {row.original.item_description}
+          <span className="truncate text-[13px] text-ink" title={tx(row.original.item_description)}>
+            {tx(row.original.item_description)}
           </span>
           <span className="text-xs text-muted">{row.original.code}</span>
         </span>
@@ -57,29 +62,29 @@ export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
     },
     {
       id: "date",
-      header: "Service date",
+      header: t("Service date"),
       accessorFn: (r) => r.service_date ?? "",
       cell: ({ row }) =>
         row.original.service_date ? <DateText value={row.original.service_date} className="text-[13px]" /> : <span className="text-muted">—</span>,
     },
     {
       id: "net",
-      header: "Net",
+      header: t("Net"),
       cell: ({ row }) =>
         row.original.net_amount ? <Money amount={row.original.net_amount} currency={row.original.net_currency} /> : <span className="text-muted">—</span>,
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       accessorFn: (r) => r.status,
       cell: ({ row }) => (
         <span className="flex flex-col gap-1">
           <SupplierBookingStatusBadge status={row.original.status} />
-          {row.original.confirmation_ref && <span className="text-xs text-muted">Ref {row.original.confirmation_ref}</span>}
-          {row.original.decline_code && <span className="text-xs text-muted">{DECLINE_LABEL[row.original.decline_code]}</span>}
+          {row.original.confirmation_ref && <span className="text-xs text-muted">{t("Ref")} {row.original.confirmation_ref}</span>}
+          {row.original.decline_code && <span className="text-xs text-muted">{tx(DECLINE_LABEL[row.original.decline_code])}</span>}
           {row.original.status === "requested" && row.original.requested_at && (
             <span className="text-xs text-muted">
-              asked <DateText value={row.original.requested_at} relative />
+              {t("asked")} <DateText value={row.original.requested_at} relative />
             </span>
           )}
         </span>
@@ -88,15 +93,15 @@ export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
   ];
 
   return (
-    <Section title="Bookings with this supplier" description="Supplier bookings of sold trips. Request, confirm or decline them on the trip case's Suppliers tab.">
+    <Section title={t("Bookings with this supplier")} description={t("Supplier bookings of sold trips. Request, confirm or decline them on the trip case's Suppliers tab.")}>
       <SegmentedControl
         appearance="chips"
         size="sm"
-        label="Booking status"
+        label={t("Booking status")}
         className="mb-3"
         options={(["live", ...SUPPLIER_BOOKING_STATUSES] as const).map((k) => ({
           value: k,
-          label: k === "live" ? "Live" : SUPPLIER_BOOKING_STATUS_META[k].label,
+          label: k === "live" ? t("Live") : SUPPLIER_BOOKING_STATUS_META[k].label,
         }))}
         value={status}
         onChange={(k) => set("sb_status", k === "live" ? null : k)}
@@ -108,12 +113,12 @@ export function SupplierBookingsTab({ s }: { s: SupplierDetail }) {
         columns={columns}
         getRowId={(r) => r.id}
         loading={list.isLoading}
-        error={list.isError ? (list.error instanceof ApiError ? list.error.message : "Could not load bookings") : null}
+        error={list.isError ? (list.error instanceof ApiError ? list.error.message : t("Could not load bookings")) : null}
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-        emptyTitle={canRead ? "No booking here yet" : "Bookings need the operations role"}
-        emptyDescription={`Bookings appear when a trip case books ${s.company_name}.`}
+        emptyTitle={canRead ? t("No booking here yet") : t("Bookings need the operations role")}
+        emptyDescription={t("Bookings appear when a trip case books {0}.", s.company_name)}
         tableMinWidth={760}
       />
     </Section>

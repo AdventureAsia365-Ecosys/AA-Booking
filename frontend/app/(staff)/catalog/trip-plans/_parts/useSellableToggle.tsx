@@ -11,6 +11,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import { tripPlansApi, type TripPlanDetail } from "@/lib/api/tripPlans";
 import { ConfirmDialog, useCan, useToast } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./useSellableToggle.messages";
 
 type Target = { sourceId: string; title: string; sellable: boolean } | null;
 
@@ -26,6 +29,8 @@ export function commercialWith(plan: TripPlanDetail, sellable: boolean) {
 }
 
 export function useSellableToggle() {
+  const tr = useT(MSG);
+  const tx = useTx();
   const canWrite = useCan("trip_plan.write");
   const qc = useQueryClient();
   const toast = useToast();
@@ -42,7 +47,7 @@ export function useSellableToggle() {
     },
     onSuccess: (_res, t) => {
       qc.invalidateQueries({ queryKey: ["trip-plans"] });
-      toast.success(`${t.title} is ${t.sellable ? "no longer sellable" : "now sellable"}.`);
+      toast.success(tr("{0} is {1}.", t.title, t.sellable ? "no longer sellable" : "now sellable"));
       setTarget(null);
     },
   });
@@ -52,7 +57,7 @@ export function useSellableToggle() {
     setTarget({ sourceId: plan.source_id, title: plan.title ?? plan.source_id, sellable: plan.sellable });
   }
 
-  const making = target?.sellable ? "not sellable" : "sellable";
+  const making = target?.sellable ? tr("not sellable") : tr("sellable");
   const dialogs = (
     <ConfirmDialog
       open={target !== null}
@@ -61,18 +66,16 @@ export function useSellableToggle() {
       busy={run.isPending}
       error={run.error instanceof ApiError || run.error instanceof Error ? run.error.message : null}
       danger={!!target?.sellable}
-      title={target?.sellable ? "Make not sellable" : "Make sellable"}
-      confirmLabel={target?.sellable ? "Make not sellable" : "Make sellable"}
+      title={target?.sellable ? tr("Make not sellable") : tr("Make sellable")}
+      confirmLabel={target?.sellable ? tr("Make not sellable") : tr("Make sellable")}
       message={
         target?.sellable ? (
           <>
-            Stop selling <strong className="text-ink">{target?.title}</strong>? The tour stays in CIS and on this list, and trip
-            cases already started from it keep their proposals, but it cannot start a new trip case until it is made sellable
-            again.
+            {tr("Stop selling")} <strong className="text-ink">{tx(target?.title)}</strong>{tr("? The tour stays in CIS and on this list, and trip cases already started from it keep their proposals, but it cannot start a new trip case until it is made sellable again.")}
           </>
         ) : (
           <>
-            Make <strong className="text-ink">{target?.title}</strong> {making}? Sales can then start trip cases from it.
+            {tr("Make")} <strong className="text-ink">{tx(target?.title)}</strong> {tr("{0}? Sales can then start trip cases from it.", making)}
           </>
         )
       }

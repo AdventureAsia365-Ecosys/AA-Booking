@@ -11,8 +11,11 @@ import { Input, Textarea, FormDrawer, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
 import { textareaCls } from "@/app/(staff)/cases/_parts/fields";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./RoomTypeDrawer.messages";
 
 export function RoomTypeDrawer({ hotelRef, room, onClose }: { hotelRef: string; room?: RoomType; onClose: () => void }) {
+  const t = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const initial = {
@@ -30,15 +33,15 @@ export function RoomTypeDrawer({ hotelRef, room, onClose }: { hotelRef: string; 
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["hotel"] });
       qc.invalidateQueries({ queryKey: ["hotels"] });
-      toast.success(room ? `${r.name} saved.` : `Room type ${r.name} added.`);
+      toast.success(room ? t("{0} saved.", r.name) : t("Room type {0} added.", r.name));
       onClose();
     },
   });
 
   function submit() {
-    if (!form.name.trim()) return setLocalError("Give the room type a name, e.g. Deluxe Double.");
+    if (!form.name.trim()) return setLocalError(t("Give the room type a name, e.g. Deluxe Double."));
     const occ = form.max_occupancy ? Number(form.max_occupancy) : null;
-    if (occ !== null && (!Number.isInteger(occ) || occ < 1 || occ > 20)) return setLocalError("Max occupancy is a whole number from 1 to 20.");
+    if (occ !== null && (!Number.isInteger(occ) || occ < 1 || occ > 20)) return setLocalError(t("Max occupancy is a whole number from 1 to 20."));
     setLocalError(null);
     save.mutate({
       name: form.name.trim(),
@@ -53,26 +56,26 @@ export function RoomTypeDrawer({ hotelRef, room, onClose }: { hotelRef: string; 
     <FormDrawer
       open
       onClose={onClose}
-      title={room ? `Edit ${room.name}` : "Add room type"}
-      submitLabel={room ? "Save room type" : "Add room type"}
+      title={room ? t("Edit {0}", room.name) : t("Add room type")}
+      submitLabel={room ? t("Save room type") : t("Add room type")}
       onSubmit={submit}
       busy={save.isPending}
       dirty={JSON.stringify(form) !== JSON.stringify(initial)}
       error={localError ?? (fe.length ? null : supplyError(save.error))}
       fieldErrors={fe}
     >
-      <FormField label="Name" required error={errorFor(fe, "name")}>
-        <Input autoFocus className={inputCls} maxLength={120} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="e.g. Deluxe Double" />
+      <FormField label={t("Name")} required error={errorFor(fe, "name")}>
+        <Input autoFocus className={inputCls} maxLength={120} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder={t("e.g. Deluxe Double")} />
       </FormField>
       <div className="grid grid-cols-2 gap-4">
-        <FormField label="Max occupancy" error={errorFor(fe, "max_occupancy")}>
+        <FormField label={t("Max occupancy")} error={errorFor(fe, "max_occupancy")}>
           <Input type="number" min={1} max={20} className={inputCls} value={form.max_occupancy} onChange={(e) => set("max_occupancy")(e.target.value)} />
         </FormField>
-        <FormField label="Bed types" hint="Comma separated." error={errorFor(fe, "bed_types")}>
-          <Input className={inputCls} value={form.bed_types} onChange={(e) => set("bed_types")(e.target.value)} placeholder="Queen, Twin" />
+        <FormField label={t("Bed types")} hint={t("Comma separated.")} error={errorFor(fe, "bed_types")}>
+          <Input className={inputCls} value={form.bed_types} onChange={(e) => set("bed_types")(e.target.value)} placeholder={t("Queen, Twin")} />
         </FormField>
       </div>
-      <FormField label="Internal notes" hint="Staff only." error={errorFor(fe, "internal_notes")}>
+      <FormField label={t("Internal notes")} hint={t("Staff only.")} error={errorFor(fe, "internal_notes")}>
         <Textarea className={textareaCls} maxLength={2000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>

@@ -29,6 +29,9 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { BillDrawer, BillForm } from "./BillDrawer";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./SupplierBills.messages";
 
 function kpiValue(k: BillKpi | undefined): React.ReactNode {
   if (!k) return undefined;
@@ -37,20 +40,21 @@ function kpiValue(k: BillKpi | undefined): React.ReactNode {
 }
 
 export function SupplierBillKpis() {
+  const t = useT(MSG);
   const canRead = useCan("bill.read");
   const q = useQuery({ queryKey: ["supplier-bills", "summary"], queryFn: supplierBillsApi.summary, enabled: canRead });
   const s = q.data;
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <KpiTile label="To approve" value={canRead ? kpiValue(s?.to_approve) : null} hint={s ? `${s.to_approve.count} bill(s) received` : undefined} />
-      <KpiTile label="To pay" value={canRead ? kpiValue(s?.to_pay) : null} hint={s ? `${s.to_pay.count} approved bill(s), balance left` : undefined} />
+      <KpiTile label={t("To approve")} value={canRead ? kpiValue(s?.to_approve) : null} hint={s ? t("{0} bill(s) received", s.to_approve.count) : undefined} />
+      <KpiTile label={t("To pay")} value={canRead ? kpiValue(s?.to_pay) : null} hint={s ? t("{0} approved bill(s), balance left", s.to_pay.count) : undefined} />
       <KpiTile
-        label="Overdue"
+        label={t("Overdue")}
         value={canRead ? kpiValue(s?.overdue) : null}
-        hint={s ? `${s.overdue.count} bill(s) past their due date` : undefined}
+        hint={s ? t("{0} bill(s) past their due date", s.overdue.count) : undefined}
         hintTone={s && s.overdue.count ? "danger" : "neutral"}
       />
-      <KpiTile label="Paid out this month" value={canRead ? kpiValue(s?.paid_this_month) : null} hint={s ? `${s.paid_this_month.count} payout(s) since ${formatDay(s.month_start)}` : undefined} />
+      <KpiTile label={t("Paid out this month")} value={canRead ? kpiValue(s?.paid_this_month) : null} hint={s ? t("{0} payout(s) since {1}", s.paid_this_month.count, formatDay(s.month_start)) : undefined} />
     </div>
   );
 }
@@ -64,6 +68,8 @@ export function SupplierBillsList({
   title?: string;
   description?: string;
 }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const canRead = useCan("bill.read");
   const canWrite = useCan("bill.write");
   const qc = useQueryClient();
@@ -89,24 +95,24 @@ export function SupplierBillsList({
   // AA-996 (review fix): the list exports CSV like every Booking list, one column per fact (the Bill cell shows the
   // code and the supplier's own number).
   const csvCols: CsvColumn<SupplierBill>[] = [
-    { header: "Bill", value: (r) => r.code },
-    { header: "Supplier bill number", value: (r) => r.bill_number },
-    ...(supplier ? [] : [{ header: "Supplier", value: (r: SupplierBill) => r.supplier.name }]),
-    { header: "Trip case", value: (r) => r.trip_case?.code ?? "" },
-    { header: "Issued", value: (r) => r.issue_date },
-    { header: "Due", value: (r) => r.due_date },
-    { header: "Amount", value: (r) => r.amount },
-    { header: "Paid", value: (r) => r.paid_amount },
-    { header: "Left to pay", value: (r) => (r.status === "cancelled" ? "" : r.balance) },
-    { header: "Currency", value: (r) => r.currency },
-    { header: "Status", value: (r) => r.status },
-    { header: "Overdue", value: (r) => (r.overdue ? "yes" : "no") },
+    { header: t("Bill"), value: (r) => r.code },
+    { header: t("Supplier bill number"), value: (r) => r.bill_number },
+    ...(supplier ? [] : [{ header: t("Supplier"), value: (r: SupplierBill) => r.supplier.name }]),
+    { header: t("Trip case"), value: (r) => r.trip_case?.code ?? "" },
+    { header: t("Issued"), value: (r) => r.issue_date },
+    { header: t("Due"), value: (r) => r.due_date },
+    { header: t("Amount"), value: (r) => r.amount },
+    { header: t("Paid"), value: (r) => r.paid_amount },
+    { header: t("Left to pay"), value: (r) => (r.status === "cancelled" ? "" : r.balance) },
+    { header: t("Currency"), value: (r) => r.currency },
+    { header: t("Status"), value: (r) => r.status },
+    { header: t("Overdue"), value: (r) => (r.overdue ? "yes" : "no") },
   ];
 
   const columns: ColumnDef<SupplierBill, unknown>[] = [
     {
       id: "code",
-      header: "Bill",
+      header: t("Bill"),
       cell: ({ row }) => (
         <span className="flex flex-col">
           <LinkButton
@@ -128,24 +134,24 @@ export function SupplierBillsList({
       : [
           {
             id: "supplier",
-            header: "Supplier",
+            header: t("Supplier"),
             cell: ({ row }) => <span className="block max-w-[200px] truncate text-[13px] text-body">{row.original.supplier.name}</span>,
           } satisfies ColumnDef<SupplierBill, unknown>,
         ]),
     {
       id: "case",
-      header: "Trip case",
-      cell: ({ row }) => <span className="text-[13px] text-body">{row.original.trip_case?.code ?? "Several / none"}</span>,
+      header: t("Trip case"),
+      cell: ({ row }) => <span className="text-[13px] text-body">{row.original.trip_case?.code ?? t("Several / none")}</span>,
     },
     {
       id: "due",
-      header: "Due",
+      header: t("Due"),
       cell: ({ row }) => <DateText value={row.original.due_date} className={`text-[13px] ${row.original.overdue ? "font-semibold text-danger" : ""}`} />,
     },
-    { id: "amount", header: "Amount", cell: ({ row }) => <Money amount={row.original.amount} currency={row.original.currency} className="text-[13px]" /> },
+    { id: "amount", header: t("Amount"), cell: ({ row }) => <Money amount={row.original.amount} currency={row.original.currency} className="text-[13px]" /> },
     {
       id: "balance",
-      header: "Left to pay",
+      header: t("Left to pay"),
       cell: ({ row }) =>
         row.original.status === "cancelled" ? (
           <span className="text-muted">—</span>
@@ -155,19 +161,19 @@ export function SupplierBillsList({
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status"),
       cell: ({ row }) => <SupplierBillStatusBadge status={row.original.status} overdue={row.original.overdue} />,
     },
   ];
 
   return (
     <Section
-      title={title}
-      description={description}
+      title={tx(title)}
+      description={tx(description)}
       actions={
         canWrite ? (
           <Button variant="primary" onClick={() => setEntering(true)}>
-            <Plus size={14} /> Enter bill
+            <Plus size={14} /> {t("Enter bill")}
           </Button>
         ) : null
       }
@@ -175,10 +181,10 @@ export function SupplierBillsList({
       {caseFilter && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px] text-body">
           <span>
-            Bills of trip case <strong className="text-ink">{caseFilter}</strong> (its own bills and bills with a line of it)
+            {t("Bills of trip case")} <strong className="text-ink">{caseFilter}</strong> {t("(its own bills and bills with a line of it)")}
           </span>
           <LinkButton size="sm" onClick={() => setMany({ case: null })}>
-            Show all
+            {t("Show all")}
           </LinkButton>
         </div>
       )}
@@ -186,22 +192,22 @@ export function SupplierBillsList({
         filters={
           <FilterBar
             extraKeys={["case"]}
-            search={{ placeholder: supplier ? "Search bill or trip case" : "Search bill, supplier or trip case" }}
+            search={{ placeholder: supplier ? t("Search bill or trip case") : t("Search bill, supplier or trip case") }}
             selects={[
               {
                 key: "bill_status",
-                label: "Status",
-                allLabel: "All statuses",
+                label: t("Status"),
+                allLabel: t("All statuses"),
                 options: [
-                  { value: "open", label: "Open (to approve, to pay)" },
-                  { value: "received", label: "To approve" },
-                  { value: "approved", label: "To pay" },
-                  { value: "paid", label: "Paid" },
-                  { value: "cancelled", label: "Cancelled" },
+                  { value: "open", label: t("Open (to approve, to pay)") },
+                  { value: "received", label: t("To approve") },
+                  { value: "approved", label: t("To pay") },
+                  { value: "paid", label: t("Paid") },
+                  { value: "cancelled", label: t("Cancelled") },
                 ],
                 width: 200,
               },
-              { key: "bill_due", label: "Due", allLabel: "Any", options: [{ value: "overdue", label: "Overdue" }], width: 120 },
+              { key: "bill_due", label: t("Due"), allLabel: t("Any"), options: [{ value: "overdue", label: t("Overdue") }], width: 120 },
             ]}
           />
         }
@@ -215,15 +221,15 @@ export function SupplierBillsList({
         getRowId={(r) => r.id}
         onRowClick={(r) => showBill(r.code)}
         loading={list.isLoading}
-        error={list.isError ? (list.error instanceof ApiError ? list.error.message : "Could not load the supplier bills") : null}
+        error={list.isError ? (list.error instanceof ApiError ? list.error.message : t("Could not load the supplier bills")) : null}
         onRetry={() => list.refetch()}
         pageSizeOptions={PAGE_SIZES}
         serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
-        emptyTitle={canRead ? "No supplier bill matches" : "Supplier bills need the admin, contracting or sales role"}
+        emptyTitle={canRead ? t("No supplier bill matches") : t("Supplier bills need the admin, contracting or sales role")}
         emptyDescription={
           supplier
-            ? `Enter a bill when ${supplier.name} sends one; it is matched to its confirmed bookings.`
-            : "Enter a bill when a supplier sends one; it is matched to confirmed supplier bookings."
+            ? t("Enter a bill when {0} sends one; it is matched to its confirmed bookings.", supplier.name)
+            : t("Enter a bill when a supplier sends one; it is matched to confirmed supplier bookings.")
         }
         tableMinWidth={supplier ? 760 : 940}
       />

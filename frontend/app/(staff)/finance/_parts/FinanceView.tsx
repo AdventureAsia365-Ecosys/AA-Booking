@@ -11,29 +11,32 @@ import { SavedTabs } from "../../_parts/SavedTabs";
 import { DeparturesTab } from "./DeparturesTab";
 import { OrdersTab } from "./OrdersTab";
 import { ProfitTab } from "./ProfitTab";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./FinanceView.messages";
 
 export function FinanceView() {
+  const tr = useT(MSG);
   const { get } = useUrlFilters();
   const canProfit = useCan("profit.read");
   const canPricing = useCan("pricing.read");
   const canCosts = useCan("bill.read") && canPricing;
   const canOrders = useCan("ops.read") && canPricing;
   const tabs = [
-    ...(canProfit ? [{ key: "profit", label: "Profit" }] : []),
-    ...(canCosts ? [{ key: "departures", label: "Departure costs" }] : []),
-    ...(canOrders ? [{ key: "orders", label: "Purchase orders" }] : []),
+    ...(canProfit ? [{ key: "profit", label: tr("Profit") }] : []),
+    ...(canCosts ? [{ key: "departures", label: tr("Departure costs") }] : []),
+    ...(canOrders ? [{ key: "orders", label: tr("Purchase orders") }] : []),
   ];
   const tab = tabs.some((t) => t.key === get("tab")) ? get("tab") : (tabs[0]?.key ?? "");
   return (
     <PageFrame
-      title="Costs & profit"
-      description="Supplier costs normalised to USD at the approved rates, shared costs of each departure, purchase orders to suppliers and the profit of every trip case, departure and agency."
+      title={tr("Costs & profit")}
+      description={tr("Supplier costs normalised to USD at the approved rates, shared costs of each departure, purchase orders to suppliers and the profit of every trip case, departure and agency.")}
     >
       {tabs.length === 0 ? (
-        <EmptyState title="No access" description="Costs need the pricing reader permission; profit needs the finance or admin role." />
+        <EmptyState title={tr("No access")} description={tr("Costs need the pricing reader permission; profit needs the finance or admin role.")} />
       ) : (
         <>
-          <SavedTabs tabs={tabs} active={tab} ariaLabel="Costs and profit" />
+          <SavedTabs tabs={tabs} active={tab} ariaLabel={tr("Costs and profit")} />
           {tab === "profit" && <ProfitTab />}
           {tab === "departures" && <DeparturesTab />}
           {tab === "orders" && <OrdersTab />}

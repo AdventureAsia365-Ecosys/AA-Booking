@@ -8,11 +8,14 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { geoApi } from "@/lib/api/geo";
 import { ConfirmDialog, useCan, useToast } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { MSG } from "./useGeoStatus.messages";
 
 type Kind = "country" | "destination";
 type Target = { kind: Kind; id: string; name: string; activate: boolean } | null;
 
 export function useGeoStatus() {
+  const tr = useT(MSG);
   const canWrite = useCan("catalog.admin");
   const qc = useQueryClient();
   const toast = useToast();
@@ -25,7 +28,7 @@ export function useGeoStatus() {
     },
     onSuccess: (_res, { t }) => {
       qc.invalidateQueries({ queryKey: ["geo"] });
-      toast.success(`${t.name} ${t.activate ? "activated" : "deactivated"} in Booking.`);
+      toast.success(tr("{0} {1} in Booking.", t.name, t.activate ? "activated" : "deactivated"));
       setTarget(null);
     },
   });
@@ -44,18 +47,17 @@ export function useGeoStatus() {
       busy={run.isPending}
       error={run.error ? (run.error as Error).message : null}
       danger={!target?.activate}
-      title={target?.activate ? `Activate ${noun}` : `Deactivate ${noun}`}
-      confirmLabel={target?.activate ? `Activate ${noun}` : `Deactivate ${noun}`}
-      reason={target?.activate ? undefined : { label: "Reason (optional)", placeholder: "e.g. no guides this season", maxLength: 500 }}
+      title={target?.activate ? tr("Activate {0}", noun) : tr("Deactivate {0}", noun)}
+      confirmLabel={target?.activate ? tr("Activate {0}", noun) : tr("Deactivate {0}", noun)}
+      reason={target?.activate ? undefined : { label: tr("Reason (optional)"), placeholder: tr("e.g. no guides this season"), maxLength: 500 }}
       message={
         target?.activate ? (
           <>
-            Activate <strong className="text-ink">{target?.name}</strong> in Booking? Staff see it as a place Booking sells again.
+            {tr("Activate")} <strong className="text-ink">{target?.name}</strong> {tr("in Booking? Staff see it as a place Booking sells again.")}
           </>
         ) : (
           <>
-            Deactivate <strong className="text-ink">{target?.name}</strong> in Booking? Nothing is deleted: its content stays in CIS,
-            trip cases and suppliers there are kept, and it shows as inactive until it is activated again.
+            {tr("Deactivate")} <strong className="text-ink">{target?.name}</strong> {tr("in Booking? Nothing is deleted: its content stays in CIS, trip cases and suppliers there are kept, and it shows as inactive until it is activated again.")}
           </>
         )
       }

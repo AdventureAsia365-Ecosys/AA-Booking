@@ -15,8 +15,13 @@ import { RatesTable, amountText, rateTarget, supplyError } from "@/app/(staff)/_
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { RateDrawer } from "./RateDrawer";
 import { ContractPhaseBadge } from "./shared";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./RatesTab.messages";
 
 export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
+  const t = useT(MSG);
+  const tx = useTx();
   const qc = useQueryClient();
   const toast = useToast();
   const contracts = useQuery({ queryKey: ["supplier", s.code, "contracts"], queryFn: () => suppliersApi.contracts(s.code) });
@@ -35,7 +40,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
     mutationFn: (r: SupplierRate) => supplyApi.deleteRate(r.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["rates"] });
-      toast.success("Rate removed from the draft.");
+      toast.success(t("Rate removed from the draft."));
       setRemoving(null);
     },
   });
@@ -43,7 +48,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
   if (!contracts.isLoading && items.length === 0) {
     return (
       <Section>
-        <EmptyState title="No contract yet" description="Rates are entered under a contract. Add one on the Contracts tab first." />
+        <EmptyState title={t("No contract yet")} description={t("Rates are entered under a contract. Add one on the Contracts tab first.")} />
       </Section>
     );
   }
@@ -52,28 +57,28 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
     <Section
       padded={false}
       className="p-4"
-      title="Net rates"
+      title={t("Net rates")}
       description={
         editable
-          ? "This contract is a draft: add and correct its rates here. Whoever writes a rate cannot publish the contract."
-          : "Rates of a published contract are fixed. New prices are a new contract."
+          ? t("This contract is a draft: add and correct its rates here. Whoever writes a rate cannot publish the contract.")
+          : t("Rates of a published contract are fixed. New prices are a new contract.")
       }
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="rates-contract">
-            Contract
+            {t("Contract")}
           </label>
           <Select size="sm" id="rates-contract" className={`${inputCls} w-auto min-w-[220px]`} value={contract?.id ?? ""} onChange={(e) => setPicked(e.target.value)}>
             {items.map((k) => (
               <option key={k.id} value={k.id}>
-                {k.title} · {k.currency} · {k.phase.replace("_", " ")}
+                {tx(k.title)} · {k.currency} · {k.phase.replace("_", " ")}
               </option>
             ))}
           </Select>
           {contract && <ContractPhaseBadge phase={contract.phase} />}
           {editable && s.status === "active" && (
             <Button variant="primary" onClick={() => setDrawer({})}>
-              <Plus size={15} /> Add rate
+              <Plus size={15} /> {t("Add rate")}
             </Button>
           )}
         </div>
@@ -85,16 +90,16 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
         loading={contracts.isLoading || rates.isLoading}
         error={rates.isError ? (rates.error as Error).message : null}
         onRetry={() => rates.refetch()}
-        emptyTitle="No rates in this contract"
-        emptyDescription={editable ? "Add the net price of each room type or service with Add rate." : "This contract has no rates."}
+        emptyTitle={t("No rates in this contract")}
+        emptyDescription={editable ? t("Add the net price of each room type or service with Add rate.") : t("This contract has no rates.")}
         menu={
           editable
             ? (r) => (
                 <RowMenu
-                  label={`Actions for ${rateTarget(r)}`}
+                  label={t("Actions for {0}", rateTarget(r))}
                   items={[
-                    { label: "Edit rate", icon: <Pencil size={15} />, onSelect: () => setDrawer({ rate: r }) },
-                    { label: "Remove", icon: <Trash2 size={15} />, onSelect: () => {
+                    { label: t("Edit rate"), icon: <Pencil size={15} />, onSelect: () => setDrawer({ rate: r }) },
+                    { label: t("Remove"), icon: <Trash2 size={15} />, onSelect: () => {
                         remove.reset();
                         setRemoving(r);
                       },
@@ -113,14 +118,14 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
         onClose={() => setRemoving(null)}
         onConfirm={() => removing && remove.mutate(removing)}
         busy={remove.isPending}
-        error={supplyError(remove.error)}
+        error={tx(supplyError(remove.error))}
         danger
-        title="Remove rate"
-        confirmLabel="Remove"
+        title={t("Remove rate")}
+        confirmLabel={t("Remove")}
         message={
           <>
-            Remove the {removing ? amountText(removing.net_amount, removing.currency) : ""} rate for{" "}
-            <strong className="text-ink">{removing ? rateTarget(removing) : ""}</strong> from this draft?
+            {t("Remove the {0} rate for", removing ? amountText(removing.net_amount, removing.currency) : "")}
+            <strong className="text-ink">{removing ? rateTarget(removing) : ""}</strong> {t("from this draft?")}
           </>
         }
       />

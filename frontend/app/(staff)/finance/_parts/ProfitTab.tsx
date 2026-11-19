@@ -18,6 +18,10 @@ import {
 import { tourLabel } from "@/ui/booking/financeLabels";
 import Link from "next/link";
 import { DataTable, DateText, FilterBar, KpiTile, Money, PERIOD_OPTIONS, Pill, Section, periodWindow, useUrlFilters } from "@/ui";
+import { useT } from "@/ui/core/useI18n";
+import { Phrase } from "@/ui/local/Phrase";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./ProfitTab.messages";
 
 function errorText(e: unknown, fallback: string): string | null {
   if (!e) return null;
@@ -25,20 +29,21 @@ function errorText(e: unknown, fallback: string): string | null {
 }
 
 function Totals({ totals }: { totals: ProfitTotals | undefined }) {
+  const t = useT(MSG);
   const loading = totals ? null : undefined;
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <KpiTile label="Revenue (USD)" value={totals ? <Money amount={totals.revenue_usd} currency="USD" /> : loading} />
-      <KpiTile label="Cost (USD)" value={totals ? <Money amount={totals.cost_usd} currency="USD" /> : loading} />
+      <KpiTile label={t("Revenue (USD)")} value={totals ? <Money amount={totals.revenue_usd} currency="USD" /> : loading} />
+      <KpiTile label={t("Cost (USD)")} value={totals ? <Money amount={totals.cost_usd} currency="USD" /> : loading} />
       <KpiTile
-        label="Profit (USD)"
+        label={t("Profit (USD)")}
         value={totals ? <Money amount={totals.profit_usd} currency="USD" /> : loading}
         valueTone={totals && Number(totals.profit_usd) < 0 ? "danger" : undefined}
       />
       <KpiTile
-        label="Margin"
+        label={t("Margin")}
         value={totals ? marginLabel(totals.margin) : loading}
-        hint={totals?.fx_missing ? "A currency has no approved FX rate: its USD part is left out" : undefined}
+        hint={totals?.fx_missing ? t("A currency has no approved FX rate: its USD part is left out") : undefined}
         hintTone={totals?.fx_missing ? "danger" : "neutral"}
       />
     </div>
@@ -73,7 +78,7 @@ const CASE_COLUMNS: ColumnDef<CaseProfit, unknown>[] = [
         {row.original.currency !== "USD" && <Money amount={row.original.revenue} currency={row.original.currency} className="text-xs text-muted" />}
         {row.original.cancelled && (
           <Pill tone="warning" dot={false}>
-            Cancellation fee
+            <Phrase text="Cancellation fee" />
           </Pill>
         )}
       </span>
@@ -88,7 +93,7 @@ const CASE_COLUMNS: ColumnDef<CaseProfit, unknown>[] = [
       <span className="flex flex-col text-[13px]">
         <Money amount={row.original.cost_usd} currency="USD" />
         <span className="text-xs text-muted">
-          {row.original.cost_basis === "quote" ? "From the quote" : row.original.unbilled_bookings ? `${row.original.unbilled_bookings} not billed yet` : "Bookings"}
+          <Phrase text={row.original.cost_basis === "quote" ? "From the quote" : row.original.unbilled_bookings ? `${row.original.unbilled_bookings} not billed yet` : "Bookings"} />
         </span>
       </span>
     ),
@@ -123,7 +128,7 @@ const AGENCY_COLUMNS: ColumnDef<AgencyProfitMonth, unknown>[] = [
   {
     id: "cases",
     header: "Trip cases",
-    cell: ({ row }) => `${row.original.cases}${row.original.cancelled_cases ? ` (${row.original.cancelled_cases} cancelled)` : ""}`,
+    cell: ({ row }) => <Phrase text={`${row.original.cases}${row.original.cancelled_cases ? ` (${row.original.cancelled_cases} cancelled)` : ""}`} />,
   },
   { id: "revenue", header: "Revenue", cell: ({ row }) => <Money amount={row.original.revenue_usd} currency="USD" className="text-[13px]" /> },
   { id: "cost", header: "Cost", cell: ({ row }) => <Money amount={row.original.cost_usd} currency="USD" className="text-[13px]" /> },
@@ -132,6 +137,8 @@ const AGENCY_COLUMNS: ColumnDef<AgencyProfitMonth, unknown>[] = [
 ];
 
 export function ProfitTab() {
+  const t = useT(MSG);
+  const tx = useTx();
   const { get } = useUrlFilters();
   const view = get("view") || "cases";
   const span = periodWindow(get("period") || "next_3", new Date());
@@ -145,22 +152,22 @@ export function ProfitTab() {
       selects={[
         {
           key: "view",
-          label: "Per",
-          allLabel: "Trip case",
+          label: t("Per"),
+          allLabel: t("Trip case"),
           options: [
-            { value: "departures", label: "Departure" },
-            { value: "agencies", label: "Agency and month" },
+            { value: "departures", label: t("Departure") },
+            { value: "agencies", label: t("Agency and month") },
           ],
           width: 170,
         },
-        { key: "period", label: "Travel dates", allLabel: "Next 3 months", options: PERIOD_OPTIONS, width: 170 },
+        { key: "period", label: t("Travel dates"), allLabel: t("Next 3 months"), options: PERIOD_OPTIONS, width: 170 },
       ]}
     />
   );
   return (
     <Section
-      title="Profit"
-      description="Revenue of the confirmed quote (or the cancellation fee) less the supplier cost: billed where a bill is approved, else planned, else the quote while nothing is booked yet. In USD at the approved FX rates."
+      title={t("Profit")}
+      description={t("Revenue of the confirmed quote (or the cancellation fee) less the supplier cost: billed where a bill is approved, else planned, else the quote while nothing is booked yet. In USD at the approved FX rates.")}
     >
       <div className="flex flex-col gap-4">
         <Totals totals={totals} />
@@ -175,10 +182,10 @@ export function ProfitTab() {
             columns={CASE_COLUMNS}
             getRowId={(r) => r.trip_case_id}
             loading={cases.isLoading}
-            error={errorText(cases.error, "Could not load the profit")}
+            error={tx(errorText(cases.error, t("Could not load the profit")))}
             onRetry={() => cases.refetch()}
-            emptyTitle="No sold trip case in this period"
-            emptyDescription="A trip case shows here once its agency confirms a hold."
+            emptyTitle={t("No sold trip case in this period")}
+            emptyDescription={t("A trip case shows here once its agency confirms a hold.")}
             tableMinWidth={980}
           />
         )}
@@ -193,9 +200,9 @@ export function ProfitTab() {
             columns={DEPARTURE_COLUMNS}
             getRowId={(r) => r.departure_id}
             loading={deps.isLoading}
-            error={errorText(deps.error, "Could not load the profit")}
+            error={tx(errorText(deps.error, t("Could not load the profit")))}
             onRetry={() => deps.refetch()}
-            emptyTitle="No departure with a sale or a shared cost in this period"
+            emptyTitle={t("No departure with a sale or a shared cost in this period")}
             tableMinWidth={980}
           />
         )}
@@ -210,9 +217,9 @@ export function ProfitTab() {
             columns={AGENCY_COLUMNS}
             getRowId={(r) => `${r.partner_id}-${r.travel_month}`}
             loading={agencies.isLoading}
-            error={errorText(agencies.error, "Could not load the profit")}
+            error={tx(errorText(agencies.error, t("Could not load the profit")))}
             onRetry={() => agencies.refetch()}
-            emptyTitle="No agency sale in this period"
+            emptyTitle={t("No agency sale in this period")}
             tableMinWidth={820}
           />
         )}

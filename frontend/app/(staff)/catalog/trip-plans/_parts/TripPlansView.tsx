@@ -20,6 +20,9 @@ import { CisPhoto, DataTable, FilterBar, FromCisTag, KpiTile, ManagedInCisLink, 
 import { OrphanedPlansTable } from "./OrphanedPlans";
 import { CIS_EDITOR_ROLES, SellableBadge, priceBasisLabel } from "./shared";
 import { useSellableToggle } from "./useSellableToggle";
+import { useT } from "@/ui/core/useI18n";
+import { useTx } from "@/ui/local/useTx";
+import { MSG } from "./TripPlansView.messages";
 
 // The API opens sellable first (sort=sellable, then title): that is the "all" option of the Sort select.
 const SORTS = [
@@ -32,6 +35,8 @@ const SORTS = [
 ];
 
 export function TripPlansView() {
+  const t = useT(MSG);
+  const tx = useTx();
   const router = useRouter();
   const { get } = useUrlFilters();
   const paging = useOffsetPage();
@@ -63,26 +68,26 @@ export function TripPlansView() {
   const columns: ColumnDef<TripPlanListItem, unknown>[] = [
     {
       id: "tour",
-      header: "Tour",
+      header: t("Tour"),
       accessorFn: (r) => r.title,
       cell: ({ row }) => (
         <span className="flex min-w-0 items-center gap-3">
           <CisPhoto path={row.original.cover_photo_path} alt="" className="h-10 w-14 shrink-0 rounded-md" />
           <span className="min-w-0">
-            <span className="block max-w-[236px] truncate text-[13.5px] font-medium text-ink" title={row.original.title}>
-              {row.original.title}
+            <span className="block max-w-[236px] truncate text-[13.5px] font-medium text-ink" title={tx(row.original.title)}>
+              {tx(row.original.title)}
             </span>
-            <span className="block max-w-[236px] truncate text-xs text-muted" title={planSubtitle(row.original)}>
-              {planSubtitle(row.original)}
+            <span className="block max-w-[236px] truncate text-xs text-muted" title={tx(planSubtitle(row.original))}>
+              {tx(planSubtitle(row.original))}
             </span>
           </span>
         </span>
       ),
     },
-    { id: "country", header: "Country", accessorFn: (r) => r.country ?? "", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.country ?? "—"}</span> },
+    { id: "country", header: t("Country"), accessorFn: (r) => r.country ?? "", cell: ({ row }) => <span className="text-[13px] text-body">{row.original.country ?? "—"}</span> },
     {
       id: "days",
-      header: "Duration",
+      header: t("Duration"),
       accessorFn: (r) => r.duration_days ?? 0,
       // "15 days / 14 nights" on two lines, so the column stays narrow (the table must fit 1400 without scrolling).
       cell: ({ row }) => {
@@ -95,10 +100,10 @@ export function TripPlansView() {
         );
       },
     },
-    { id: "status", header: "Status", accessorFn: (r) => (r.sellable ? 1 : 0), cell: ({ row }) => <SellableBadge sellable={row.original.sellable} /> },
+    { id: "status", header: t("Status"), accessorFn: (r) => (r.sellable ? 1 : 0), cell: ({ row }) => <SellableBadge sellable={row.original.sellable} /> },
     {
       id: "style",
-      header: "Trip style",
+      header: t("Trip style"),
       meta: { compact: "drawer" }, // AA-996: with the price hint, in the details drawer below 1200 px
       accessorFn: (r) => r.trip_style ?? "",
       cell: ({ row }) => (
@@ -111,19 +116,19 @@ export function TripPlansView() {
       ? [
           {
             id: "hint",
-            header: "Price from",
+            header: t("Price from"),
             meta: { compact: "drawer" as const },
             accessorFn: (r: TripPlanListItem) => Number(r.from_price?.amount ?? r.price_hint?.amount ?? 0),
             cell: ({ row }: { row: { original: TripPlanListItem } }) =>
               row.original.from_price ? (
-                <span className="text-[13px]" title="Per person, from the price matrix">
+                <span className="text-[13px]" title={t("Per person, from the price matrix")}>
                   <Money amount={row.original.from_price.amount} currency={row.original.from_price.currency} />
-                  <span className="block text-xs text-muted">per person</span>
+                  <span className="block text-xs text-muted">{t("per person")}</span>
                 </span>
               ) : row.original.price_hint ? (
-                <span className="text-[13px]" title="Price hint (no price matrix yet)">
+                <span className="text-[13px]" title={t("Price hint (no price matrix yet)")}>
                   <Money amount={row.original.price_hint.amount} currency={row.original.price_hint.currency} />
-                  <span className="block text-xs text-muted">{priceBasisLabel(row.original.price_hint.basis)} · hint</span>
+                  <span className="block text-xs text-muted">{tx(priceBasisLabel(row.original.price_hint.basis))} {t("· hint")}</span>
                 </span>
               ) : (
                 <span className="text-[13px] text-muted2">—</span>
@@ -137,13 +142,13 @@ export function TripPlansView() {
       enableSorting: false,
       cell: ({ row }) => (
         <RowMenu
-          label={`Actions for ${row.original.title}`}
+          label={t("Actions for {0}", row.original.title)}
           items={[
-            { label: "View details", icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}`) },
+            { label: t("View details"), icon: <Eye size={14} />, onSelect: () => router.push(`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}`) },
             ...(canEditCommercial
               ? [
                   {
-                    label: "Edit commercial",
+                    label: t("Edit commercial"),
                     icon: <Pencil size={14} />,
                     onSelect: () => router.push(`/catalog/trip-plans/${encodeURIComponent(row.original.source_id)}/commercial`),
                   },
@@ -152,7 +157,7 @@ export function TripPlansView() {
             ...(canEditInCis
               ? [
                   {
-                    label: "Edit in CIS ↗",
+                    label: t("Edit in CIS ↗"),
                     icon: <ExternalLink size={14} />,
                     onSelect: () =>
                       window.open(`${CIS_ADMIN_URL}/admin/master-content?tour=${encodeURIComponent(row.original.tour_id)}`, "_blank", "noopener,noreferrer"),
@@ -162,8 +167,8 @@ export function TripPlansView() {
             ...(sellableToggle.canWrite
               ? [
                   row.original.sellable
-                    ? { label: "Make not sellable", icon: <EyeOff size={14} />, danger: true, divider: true, onSelect: () => sellableToggle.ask(row.original) }
-                    : { label: "Make sellable", icon: <Store size={14} />, divider: true, onSelect: () => sellableToggle.ask(row.original) },
+                    ? { label: t("Make not sellable"), icon: <EyeOff size={14} />, danger: true, divider: true, onSelect: () => sellableToggle.ask(row.original) }
+                    : { label: t("Make sellable"), icon: <Store size={14} />, divider: true, onSelect: () => sellableToggle.ask(row.original) },
                 ]
               : []),
           ]}
@@ -176,25 +181,25 @@ export function TripPlansView() {
   const filtered = !!(query.q || query.country || query.sellable !== undefined || query.trip_style);
   return (
     <PageFrame
-      title="Trip plans"
-      description="CIS tours, and which of them Booking sells. Tour content is read-only here: edit it in CIS."
-      actions={<ManagedInCisLink path="/admin/master-content" label="Open CIS content" />}
+      title={t("Trip plans")}
+      description={t("CIS tours, and which of them Booking sells. Tour content is read-only here: edit it in CIS.")}
+      actions={<ManagedInCisLink path="/admin/master-content" label={t("Open CIS content")} />}
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiTile label="CIS tours" value={f?.total} icon={<CalendarDays size={16} />} hint={<FromCisTag />} />
+        <KpiTile label={t("CIS tours")} value={f?.total} icon={<CalendarDays size={16} />} hint={<FromCisTag />} />
         <KpiTile
-          label="Sellable"
+          label={t("Sellable")}
           value={f?.sellable}
           icon={<Store size={16} />}
-          hint={f ? `${f.total - f.sellable} not for sale` : undefined}
+          hint={f ? t("{0} not for sale", f.total - f.sellable) : undefined}
           hintTone="neutral"
         />
-        <KpiTile label="Countries" value={f?.countries.length} icon={<Globe size={16} />} />
+        <KpiTile label={t("Countries")} value={f?.countries.length} icon={<Globe size={16} />} />
         <KpiTile
-          label="Orphaned plans"
+          label={t("Orphaned plans")}
           value={f?.orphaned}
           icon={<Unlink size={16} />}
-          hint={f ? (f.orphaned ? "Tour left the CIS catalog" : "None") : undefined}
+          hint={f ? (f.orphaned ? t("Tour left the CIS catalog") : t("None")) : undefined}
           hintTone={f?.orphaned ? "warning" : "neutral"}
         />
       </div>
@@ -204,13 +209,13 @@ export function TripPlansView() {
             <OrphanedPlansTable
               filters={
                 <FilterBar
-                  search={{ placeholder: "Exact CIS source id" }}
+                  search={{ placeholder: t("Exact CIS source id") }}
                   selects={[
                     {
                       key: "show",
-                      label: "Show",
-                      allLabel: "CIS catalog tours",
-                      options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                      label: t("Show"),
+                      allLabel: t("CIS catalog tours"),
+                      options: [{ value: "orphaned", label: t("Orphaned plans ({0})", f?.orphaned ?? 0) }],
                       width: 190, // the facet counts load after the page (CLS)
                     },
                   ]}
@@ -223,41 +228,41 @@ export function TripPlansView() {
             <DataTable<TripPlanListItem>
               filters={
                 <FilterBar
-                  search={{ placeholder: "Search title, SKU or CIS source id" }}
+                  search={{ placeholder: t("Search title, SKU or CIS source id") }}
                   selects={[
                     {
                       key: "show",
-                      label: "Show",
-                      allLabel: "CIS catalog tours",
-                      options: [{ value: "orphaned", label: `Orphaned plans (${f?.orphaned ?? 0})` }],
+                      label: t("Show"),
+                      allLabel: t("CIS catalog tours"),
+                      options: [{ value: "orphaned", label: t("Orphaned plans ({0})", f?.orphaned ?? 0) }],
                       // The facet counts load after the page (CLS). AA-996: the widths let every filter fit one row at 1440.
                       width: 160,
                     },
                     {
                       key: "country",
-                      label: "Country",
-                      allLabel: "All countries",
+                      label: t("Country"),
+                      allLabel: t("All countries"),
                       options: (f?.countries ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.tours})` })),
                       width: 140,
                     },
                     {
                       key: "sellable",
-                      label: "Status",
-                      allLabel: "Any status",
+                      label: t("Status"),
+                      allLabel: t("Any status"),
                       options: [
-                        { value: "yes", label: "Sellable" },
-                        { value: "no", label: "Not for sale" },
+                        { value: "yes", label: t("Sellable") },
+                        { value: "no", label: t("Not for sale") },
                       ],
                       width: 120,
                     },
                     {
                       key: "style",
-                      label: "Style",
-                      allLabel: "Any trip style",
+                      label: t("Style"),
+                      allLabel: t("Any trip style"),
                       options: (f?.trip_styles ?? []).map((s) => ({ value: s, label: s })),
                       width: 150,
                     },
-                    { key: "sort", label: "Sort", allLabel: "Sellable first", options: SORTS.slice(1), width: 150 },
+                    { key: "sort", label: t("Sort"), allLabel: t("Sellable first"), options: SORTS.slice(1), width: 150 },
                   ]}
                 />
               }
@@ -273,20 +278,20 @@ export function TripPlansView() {
               serverPagination={{ pageIndex: paging.pageIndex, pageSize: paging.pageSize, total: list.data?.total ?? 0, onChange: paging.onChange }}
               enableCsv
               csvFilename="trip-plans.csv"
-              emptyTitle={filtered ? "No trip plans match" : "No CIS tours yet"}
+              emptyTitle={filtered ? t("No trip plans match") : t("No CIS tours yet")}
               emptyDescription={
                 filtered
-                  ? "Change the search or the filters, or reset them to see every CIS tour."
-                  : "Tours appear here as soon as CIS publishes them to the catalog."
+                  ? t("Change the search or the filters, or reset them to see every CIS tour.")
+                  : t("Tours appear here as soon as CIS publishes them to the catalog.")
               }
               onRowClick={(r) => router.push(`/catalog/trip-plans/${encodeURIComponent(r.source_id)}`)}
               tableMinWidth={canPrice ? 920 : 780}
             />
             <p className="mt-3 text-xs text-muted">
               <Pill tone="neutral" dot={false}>
-                Live
+                {t("Live")}
               </Pill>{" "}
-              Read from the CIS catalog on every visit: a tour CIS unpublishes leaves this list and shows under Orphaned plans.
+              {t("Read from the CIS catalog on every visit: a tour CIS unpublishes leaves this list and shows under Orphaned plans.")}
             </p>
           </>
         )}

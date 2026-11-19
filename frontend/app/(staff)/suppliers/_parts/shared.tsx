@@ -5,6 +5,8 @@
 import { ApiError } from "@/lib/api/client";
 import type { ContractPhase, Supplier, SupplierCategory, SupplierStatus } from "@/lib/api/suppliers";
 import { Pill, type BookingTone } from "@/ui";
+import { useTx } from "@/ui/local/useTx";
+import "./shared.messages";
 
 export const CATEGORY_LABEL: Record<SupplierCategory, string> = {
   hotel: "Hotel",
@@ -29,15 +31,17 @@ export const PHASE_META: Record<ContractPhase, { label: string; tone: BookingTon
 };
 
 export function SupplierStatusBadge({ status }: { status: SupplierStatus | string }) {
+  const tx = useTx();
   const meta = STATUS_META[status as SupplierStatus] ?? { label: status, tone: "neutral" as const };
-  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+  return <Pill tone={meta.tone}>{tx(meta.label)}</Pill>;
 }
 
 export function ContractPhaseBadge({ phase }: { phase: ContractPhase | string }) {
+  const tx = useTx();
   const meta = PHASE_META[phase as ContractPhase] ?? { label: phase, tone: "neutral" as const, help: "" };
   return (
-    <Pill tone={meta.tone} title={meta.help}>
-      {meta.label}
+    <Pill tone={meta.tone} title={tx(meta.help)}>
+      {tx(meta.label)}
     </Pill>
   );
 }

@@ -4,6 +4,7 @@
 
 import { ApiError } from "@/lib/api/client";
 import { prepareUpload } from "../../_parts/SupplyContent";
+import "./evidence.messages";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 export const fieldCls = "w-full min-w-0";
