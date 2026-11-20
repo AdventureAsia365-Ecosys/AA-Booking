@@ -86,9 +86,11 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 <Pencil size={14} /> {t("Edit service")}
               </Button>
-              <Button variant="secondary" onClick={() => status.ask("service", { code: s.code, name: s.title }, s.status !== "active")}>
-                {s.status === "active" ? <Ban size={14} /> : <Power size={14} />} {s.status === "active" ? t("Deactivate") : t("Activate")}
-              </Button>
+              {status.canToggle(s.status === "active") && (
+                <Button variant="secondary" onClick={() => status.ask("service", { code: s.code, name: s.title }, s.status !== "active")}>
+                  {s.status === "active" ? <Ban size={14} /> : <Power size={14} />} {s.status === "active" ? t("Deactivate") : t("Activate")}
+                </Button>
+              )}
             </>
           )
         }

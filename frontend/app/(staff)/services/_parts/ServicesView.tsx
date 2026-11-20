@@ -48,7 +48,7 @@ export function ServicesView() {
 
   function menuFor(row: Service): RowMenuItem[] {
     const items: RowMenuItem[] = [{ label: tr("View service"), icon: <Eye size={15} />, onSelect: () => router.push(serviceHref(row)) }];
-    if (status.canWrite) {
+    if (status.canToggle(row.status === "active")) {
       items.push(
         row.status === "active"
           ? { label: tr("Deactivate"), icon: <Ban size={15} />, onSelect: () => status.ask("service", { code: row.code, name: row.title }, false), danger: true, divider: true }

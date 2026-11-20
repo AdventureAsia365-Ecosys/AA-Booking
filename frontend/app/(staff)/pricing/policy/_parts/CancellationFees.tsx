@@ -2,7 +2,7 @@
 // app/(staff)/pricing/policy/_parts/CancellationFees.tsx — Pricing → Policy, tab "Cancellation fees" (AA-1096, S279
 // thresholds program). The B2B cancellation fee schedules (AA-974, bk-021; the FIT scale of bk-051): the B2B default
 // and any tour's own schedule, each a row valid from a day. A change is a new schedule, pending until a second person
-// with pricing.write approves it (403 own_row for its maker); the API decides, the page shows the buttons it allows
+// with pricing.approve (AA-1155) approves it (403 own_row for its maker); the API decides, the page shows the buttons it allows
 // (can_approve). Text from the page's catalogue (messages.ts, English and Vietnamese).
 
 import { useState } from "react";

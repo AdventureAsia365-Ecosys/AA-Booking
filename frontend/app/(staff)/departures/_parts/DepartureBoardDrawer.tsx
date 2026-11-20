@@ -4,7 +4,8 @@
 // Ops section (meeting point and time, sent to the agencies on the departure; a staff note; guide, tour leader and
 // driver); departure fees (Charge fee, approve / reject by another person); the price adjustment of the departure
 // (propose, approve by another person, withdraw). Reads b2b_desk.read; writes ops.write, b2b_desk.write /
-// b2b_desk.approve, pricing.write (each section hides what the role cannot do).
+// b2b_desk.approve, pricing.write to propose a price adjustment and pricing.approve to approve or end one (AA-1155);
+// each section hides what the role cannot do.
 
 import Link from "next/link";
 import { useState } from "react";
@@ -366,6 +367,7 @@ function PriceSection({ data }: { data: BoardDetail }) {
   const t = useT(MSG);
   const tx = useTx();
   const canPrice = useCan("pricing.write");
+  const canDecide = useCan("pricing.approve"); // AA-1155: approve / reject / withdraw a price adjustment
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -429,7 +431,7 @@ function PriceSection({ data }: { data: BoardDetail }) {
               </span>
               <span className="flex flex-wrap items-center gap-2">
                 <Pill tone={a.state === "in_force" ? "success" : "warning"}>{a.state === "in_force" ? t("In force") : t("Waiting for approval")}</Pill>
-                {canPrice && a.state === "pending" && (
+                {canDecide && a.state === "pending" && (
                   <Button
                     size="sm"
                     variant="primary"
@@ -440,7 +442,7 @@ function PriceSection({ data }: { data: BoardDetail }) {
                     {t("Approve")}
                   </Button>
                 )}
-                {canPrice && (
+                {canDecide && (
                   <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: a.id, action: "end" })}>
                     {a.state === "pending" ? t("Reject") : t("Withdraw")}
                   </Button>

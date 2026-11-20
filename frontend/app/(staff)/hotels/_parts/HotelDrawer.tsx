@@ -58,9 +58,11 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
                 <Button size="sm" onClick={() => setEditing(true)}>
                   <Pencil size={13} /> {tr("Edit")}
                 </Button>
-                <Button size="sm" variant={h.status === "active" ? "danger" : "secondary"} onClick={() => status.ask("hotel", { code: h.code, name: h.name }, h.status !== "active")}>
-                  {h.status === "active" ? <Ban size={13} /> : <Power size={13} />} {h.status === "active" ? tr("Deactivate") : tr("Activate")}
-                </Button>
+                {status.canToggle(h.status === "active") && (
+                  <Button size="sm" variant={h.status === "active" ? "danger" : "secondary"} onClick={() => status.ask("hotel", { code: h.code, name: h.name }, h.status !== "active")}>
+                    {h.status === "active" ? <Ban size={13} /> : <Power size={13} />} {h.status === "active" ? tr("Deactivate") : tr("Activate")}
+                  </Button>
+                )}
               </div>
             )}
           </div>

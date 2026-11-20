@@ -1,7 +1,8 @@
 "use client";
 // app/(staff)/_parts/useRecordStatus.tsx — Deactivate / Activate a hotel or a service (AA-823, bk-010). Supply records
 // are never deleted: an inactive one stays on record with its rates and history, but cannot be newly booked on a
-// proposal item. A record of an inactive supplier cannot be activated (409 supplier_inactive). Needs supply.write.
+// proposal item. A record of an inactive supplier cannot be activated (409 supplier_inactive). Needs supply.write;
+// activating is an approval and also needs supplier.activate (AA-1155), so a maker-only role only sees Deactivate.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +20,7 @@ export function useRecordStatus() {
   const tr = useT(MSG);
   const tx = useTx();
   const canWrite = useCan("supply.write");
+  const canActivate = useCan("supplier.activate") && canWrite;
   const qc = useQueryClient();
   const toast = useToast();
   const [target, setTarget] = useState<Target>(null);
@@ -67,5 +69,8 @@ export function useRecordStatus() {
     />
   );
 
-  return { canWrite, ask, dialogs };
+  /** May this user flip a record that is `active` now? Deactivate = supply.write, Activate = supplier.activate. */
+  const canToggle = (active: boolean) => (active ? canWrite : canActivate);
+
+  return { canWrite, canToggle, ask, dialogs };
 }

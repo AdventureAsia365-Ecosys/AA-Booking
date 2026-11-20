@@ -5,7 +5,8 @@
 // the decision date. "Add departure" makes one; "Generate departures" makes a weekly or monthly series with a preview
 // (dry run) before it saves. A row opens the departure drawer (?departure=<id>): its rules (capacity, minimum, cutoff,
 // decision days, auto-confirm, status) and its agency allotments (propose, approve by another person, reject or
-// withdraw). Writes: trip_plan.write (admin, contracting) for departures, b2b_desk.write for allotments.
+// withdraw). Writes: trip_plan.write (admin, contracting) for departures, b2b_desk.write to propose an allotment and
+// b2b_desk.approve to approve, reject or withdraw one (AA-1155: a decision, admin and contracting).
 // AA-1073 rest (bk-048): an allotment in force or released offers "Charge fee" (allotted seats not released, approved
 // by a second person); the drawer links to the departure board.
 
@@ -547,6 +548,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
   const { formatDay } = useBookingFormat();
   const tx = useTx();
   const canWrite = useCan("b2b_desk.write");
+  const canDecide = useCan("b2b_desk.approve"); // AA-1155: approve / reject / withdraw an allotment
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -598,7 +600,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
             <AllotmentRow
               key={a.id}
               a={a}
-              canWrite={canWrite && !cancelled}
+              canDecide={canDecide && !cancelled}
               isMaker={a.created_by?.id === me.cis_user_id}
               busy={act.isPending}
               onAct={(action) => act.mutate({ id: a.id, action })}
@@ -649,14 +651,15 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
 
 function AllotmentRow({
   a,
-  canWrite,
+  canDecide,
   isMaker,
   busy,
   onAct,
   onCharge,
 }: {
   a: Allotment;
-  canWrite: boolean;
+  /** b2b_desk.approve (AA-1155): approve, reject or withdraw. */
+  canDecide: boolean;
   isMaker: boolean;
   busy: boolean;
   onAct: (action: "approve" | "end") => void;
@@ -681,12 +684,12 @@ function AllotmentRow({
       </span>
       <span className="flex flex-wrap items-center gap-2">
         <Pill tone={tone}>{tx(ALLOTMENT_STATE_LABEL[a.state])}</Pill>
-        {canWrite && a.state === "pending" && (
+        {canDecide && a.state === "pending" && (
           <Button size="sm" variant="primary" disabled={busy || isMaker} title={isMaker ? t("You proposed it: another person approves it") : undefined} onClick={() => onAct("approve")}>
             {t("Approve")}
           </Button>
         )}
-        {canWrite && (a.state === "pending" || a.state === "in_force") && (
+        {canDecide && (a.state === "pending" || a.state === "in_force") && (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("end")}>
             {a.state === "pending" ? t("Reject") : t("Withdraw")}
           </Button>
