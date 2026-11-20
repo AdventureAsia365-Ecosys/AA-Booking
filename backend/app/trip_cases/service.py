@@ -138,6 +138,21 @@ def _sort_clause(sort: str | None) -> str:
     return f"{column} {'DESC' if desc else 'ASC'} NULLS LAST, tc.id"
 
 
+def _assignee(add: Any, where: list[str], assignee: str) -> None:
+    """``none``: no open assignment; otherwise an open assignment of that CIS user id in any role."""
+    if assignee == "none":
+        where.append(
+            "NOT EXISTS (SELECT 1 FROM booking.staff_assignments a"
+            " WHERE a.trip_case_id = tc.id AND a.unassigned_at IS NULL)"
+        )
+        return
+    add(
+        "EXISTS (SELECT 1 FROM booking.staff_assignments a WHERE a.trip_case_id = tc.id"
+        " AND a.unassigned_at IS NULL AND a.staff_user_id = {p})",
+        assignee,
+    )
+
+
 def case_filter(
     *,
     statuses: list[str] | None = None,
@@ -161,17 +176,8 @@ def case_filter(
         if unknown:
             raise Invalid("unknown_status", f"unknown status {', '.join(unknown)}")
         add("tc.status = ANY({p}::text[])", statuses)
-    if assignee == "none":
-        where.append(
-            "NOT EXISTS (SELECT 1 FROM booking.staff_assignments a"
-            " WHERE a.trip_case_id = tc.id AND a.unassigned_at IS NULL)"
-        )
-    elif assignee:
-        add(
-            "EXISTS (SELECT 1 FROM booking.staff_assignments a WHERE a.trip_case_id = tc.id"
-            " AND a.unassigned_at IS NULL AND a.staff_user_id = {p})",
-            assignee,
-        )
+    if assignee:
+        _assignee(add, where, assignee)
     if q and q.strip():
         add("tc.code ILIKE {p}", paging.contains(q))
     if source:

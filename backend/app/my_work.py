@@ -18,7 +18,7 @@ due date among them (``earliest_due``), and the query string of the list page th
 Shown by capability, never by person: a tile is in the answer only when :meth:`Staff.can` grants its capability (so a
 preview or E2E session gets its capped set, and a later custom role gets exactly the tiles of its capabilities). Every
 count runs the WHERE text of its target list (the helper sits next to that list's query and shares it:
-``supplier_bills.bill_filter``, ``trip_cases.service.case_filter``, ``agency_billing.invoices.invoice_filter``,
+``bill_filters.bill_filter``, ``trip_cases.service.case_filter``, ``agency_billing.invoices.invoice_filter``,
 ``agency_billing.payments.payment_filter``, ``trip_checks.COUNT_WHERE`` + ``OVERDUE``, ``b2b.desk.STATE_WHERE``), so a
 tile equals the total its page shows for the same filter. "Due soon" is the ``supplier_bill.due`` reminder's own window
 (policy ``supplier_bill_due_soon_days``); there is no threshold in this module. A tile whose data cannot be read (a
@@ -44,7 +44,7 @@ from app.agency_billing import payments as agency_payments
 from app.auth.staff import Staff
 from app.b2b import desk
 from app.errors import Forbidden, Unavailable
-from app.ops import supplier_bills, trip_checks
+from app.ops import bill_filters, supplier_bills, trip_checks
 from app.trip_cases import service as trip_cases
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ async def _bills_overdue(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
 
 
 async def _bills_due_soon(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    days = await supplier_bills.due_soon_days(conn)
+    days = await bill_filters.due_soon_days(conn)
     return {**await supplier_bills.queue(conn, status="open", due_soon_days=days), "days": days}
 
 

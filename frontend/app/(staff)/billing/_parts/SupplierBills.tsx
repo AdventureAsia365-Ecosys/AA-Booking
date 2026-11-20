@@ -60,6 +60,14 @@ export function SupplierBillKpis() {
   );
 }
 
+/** The "Due" filter as list query flags. AA-1159: "soon" = open bills not overdue yet that fall due within the reminder's
+ *  window (policy supplier_bill_due_soon_days); the My work tile of the dashboard opens this view. */
+function dueQuery(due: string): { overdue?: boolean; due_soon?: boolean } {
+  if (due === "overdue") return { overdue: true };
+  if (due === "soon") return { due_soon: true };
+  return {};
+}
+
 export function SupplierBillsList({
   supplier,
   title,
@@ -81,10 +89,7 @@ export function SupplierBillsList({
   const [entering, setEntering] = useState(false);
   const query = {
     status: get("bill_status") || undefined,
-    overdue: get("bill_due") === "overdue" ? true : undefined,
-    // AA-1159: "Due soon" = open bills not overdue yet that fall due within the reminder's window (policy
-    // supplier_bill_due_soon_days); the My work tile of the dashboard opens this view.
-    due_soon: get("bill_due") === "soon" ? true : undefined,
+    ...dueQuery(get("bill_due")),
     q: get("q") || undefined,
     supplier_id: supplier?.id,
     // ?case=TC-… (from a case's Cost vs billed panel): the bills of that case, or with a line of it.

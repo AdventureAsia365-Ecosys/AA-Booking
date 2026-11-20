@@ -109,13 +109,24 @@ export function MyWorkBand() {
   );
 }
 
+/** undefined: loading (skeleton); null: not available ("—"); else the count. */
+function tileValue(tile: MyWorkTile | undefined): number | null | undefined {
+  if (!tile) return undefined;
+  return tile.available ? tile.count : null;
+}
+
+/** Late work in red, approvals waiting for the viewer in amber, the rest (and nothing waiting) neutral. */
+function tileTone(spec: MyWorkTileSpec, count: number | null | undefined): Tone {
+  if (typeof count !== "number" || count <= 0) return "neutral";
+  if (LATE.has(spec.key)) return "danger";
+  return spec.group === "approve" ? "warning" : "neutral";
+}
+
 function MyWorkTileLink({ spec, tile }: { spec: MyWorkTileSpec; tile: MyWorkTile | undefined }) {
   const tx = useTx();
   const isPhone = useIsPhone();
   const href = tileHref(spec.path, tile?.filter ?? {});
-  const count = tile ? (tile.available ? tile.count : null) : undefined;
-  const busy = typeof count === "number" && count > 0;
-  const tone: Tone = !busy ? "neutral" : LATE.has(spec.key) ? "danger" : spec.group === "approve" ? "warning" : "neutral";
+  const count = tileValue(tile);
   return (
     <Link
       href={href}
@@ -129,7 +140,7 @@ function MyWorkTileLink({ spec, tile }: { spec: MyWorkTileSpec; tile: MyWorkTile
         icon={ICONS[spec.key]}
         value={count}
         hint={tile ? <TileHint spec={spec} tile={tile} /> : undefined}
-        hintTone={tone}
+        hintTone={tileTone(spec, count)}
       />
     </Link>
   );

@@ -2420,7 +2420,7 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   `ops.read`, open on-request lines `b2b_desk.read`, supplier bills overdue / due soon `bill.read`, agency invoices
   overdue `agency_billing.read`; "To approve or pay": supplier bills to approve `bill.approve`, to pay `payout.write`,
   agency payments to approve `agency_payment.approve`). Each tile is a count, the oldest item or the earliest due date,
-  and a link to its list with the filter it was counted with: the count runs that list's own WHERE (`bill_filter`,
+  and a link to its list with the filter it was counted with: the count runs that list's own WHERE (`bill_filters.bill_filter`,
   `case_filter`, `invoice_filter`, `payment_filter`, trip checks `COUNT_WHERE` + `OVERDUE`, desk `STATE_WHERE`), so
   the tile equals the list total. "Due soon" is the `supplier_bill.due` reminder's window (policy
   `supplier_bill_due_soon_days`), also a `due_soon` filter of `GET /supplier-bills` and "Due: Due soon" on /billing.
