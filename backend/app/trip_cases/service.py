@@ -138,6 +138,70 @@ def _sort_clause(sort: str | None) -> str:
     return f"{column} {'DESC' if desc else 'ASC'} NULLS LAST, tc.id"
 
 
+def _assignee(add: Any, where: list[str], assignee: str) -> None:
+    """``none``: no open assignment; otherwise an open assignment of that CIS user id in any role."""
+    if assignee == "none":
+        where.append(
+            "NOT EXISTS (SELECT 1 FROM booking.staff_assignments a"
+            " WHERE a.trip_case_id = tc.id AND a.unassigned_at IS NULL)"
+        )
+        return
+    add(
+        "EXISTS (SELECT 1 FROM booking.staff_assignments a WHERE a.trip_case_id = tc.id"
+        " AND a.unassigned_at IS NULL AND a.staff_user_id = {p})",
+        assignee,
+    )
+
+
+def case_filter(
+    *,
+    statuses: list[str] | None = None,
+    assignee: str | None = None,
+    q: str | None = None,
+    source: str | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+) -> tuple[str, list[Any]]:
+    """The WHERE text and arguments of the trip case list (over ``booking.trip_cases tc``). The /cases list and the My
+    work tile (AA-1159, :mod:`app.my_work`) both use it, so the tile equals the list total for the same filter."""
+    where = ["tc.deleted_at IS NULL"]
+    args: list[Any] = []
+
+    def add(fragment: str, value: Any) -> None:
+        args.append(value)
+        where.append(fragment.replace("{p}", f"${len(args)}"))
+
+    if statuses:
+        unknown = sorted(set(statuses) - set(STATUSES))
+        if unknown:
+            raise Invalid("unknown_status", f"unknown status {', '.join(unknown)}")
+        add("tc.status = ANY({p}::text[])", statuses)
+    if assignee:
+        _assignee(add, where, assignee)
+    if q and q.strip():
+        add("tc.code ILIKE {p}", paging.contains(q))
+    if source:
+        if source not in SOURCES:
+            raise Invalid("unknown_source", f"source must be one of {', '.join(SOURCES)}")
+        add("tc.source_system = {p}", source)
+    if created_from:
+        add("tc.created_at >= {p}", _day_start(created_from))
+    if created_to:
+        add("tc.created_at < {p}", _day_start(created_to + timedelta(days=1)))
+    return " AND ".join(where), args
+
+
+async def case_queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
+    """AA-1159 My work: how many cases the list shows for ``filters`` (:func:`case_filter`) and when the oldest of them
+    was opened."""
+    clause, args = case_filter(**filters)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(tc.created_at) AS oldest_at FROM booking.trip_cases tc WHERE {clause}",  # noqa: S608
+        *args,
+    )
+    return {**dict(row), "earliest_due": None}
+
+
 async def list_cases(
     conn: asyncpg.Connection,
     *,
@@ -155,41 +219,15 @@ async def list_cases(
 
     ``q`` matches the case code. ``created_to`` is inclusive. Every channel is listed: the ``b2c`` cases are the kept
     history of the retired B2C half (read-only, AA-1046), told apart by ``channel``."""
-    where = ["tc.deleted_at IS NULL"]
-    args: list[Any] = []
-
-    def add(fragment: str, value: Any) -> None:
-        args.append(value)
-        where.append(fragment.replace("{p}", f"${len(args)}"))
-
-    if statuses:
-        unknown = sorted(set(statuses) - set(STATUSES))
-        if unknown:
-            raise Invalid("unknown_status", f"unknown status {', '.join(unknown)}")
-        add("tc.status = ANY({p}::text[])", statuses)
-    if assignee == "none":
-        where.append(
-            "NOT EXISTS (SELECT 1 FROM booking.staff_assignments a"
-            " WHERE a.trip_case_id = tc.id AND a.unassigned_at IS NULL)"
-        )
-    elif assignee:
-        add(
-            "EXISTS (SELECT 1 FROM booking.staff_assignments a WHERE a.trip_case_id = tc.id"
-            " AND a.unassigned_at IS NULL AND a.staff_user_id = {p})",
-            assignee,
-        )
-    if q and q.strip():
-        add("tc.code ILIKE {p}", paging.contains(q))
-    if source:
-        if source not in SOURCES:
-            raise Invalid("unknown_source", f"source must be one of {', '.join(SOURCES)}")
-        add("tc.source_system = {p}", source)
-    if created_from:
-        add("tc.created_at >= {p}", _day_start(created_from))
-    if created_to:
-        add("tc.created_at < {p}", _day_start(created_to + timedelta(days=1)))
+    clause, args = case_filter(
+        statuses=statuses,
+        assignee=assignee,
+        q=q,
+        source=source,
+        created_from=created_from,
+        created_to=created_to,
+    )
     order = _sort_clause(sort)
-    clause = " AND ".join(where)
     base = "FROM booking.trip_cases tc"
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(

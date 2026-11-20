@@ -128,7 +128,7 @@ async def put_terms(body: TermsBody, contract_id: ContractId, staff: CanWrite, p
 
 @router.get("/supply/restrictions")
 async def list_restrictions(
-    _: CanRead,
+    staff: CanRead,
     pool: Pool,
     contract_id: Annotated[str | None, Query(max_length=64)] = None,
     component_id: Annotated[str | None, Query(max_length=64, description="rt:<id> or sv:<id>")] = None,
@@ -136,11 +136,25 @@ async def list_restrictions(
         str | None, Query(max_length=20, description="allotment | free_sale | on_request | stop_sale")
     ] = None,
     active: Annotated[bool, Query(description="only the rows in effect")] = False,
+    review: Annotated[
+        Literal["waiting", "me"] | None,
+        Query(
+            description="Stop-sales waiting for a second person (waiting), or only those the caller may"
+            " decide, not entered nor asked to end by them (me); the longest waiting first"
+        ),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await restrictions.list_restrictions(
-            conn, contract_id=contract_id, component_id=component_id, kind=kind, active_only=active, limit=limit
+            conn,
+            contract_id=contract_id,
+            component_id=component_id,
+            kind=kind,
+            active_only=active,
+            review=review,
+            reviewer=staff.cis_user_id,
+            limit=limit,
         )
 
 

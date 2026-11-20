@@ -12286,6 +12286,25 @@
             }
           },
           {
+            "description": "me: only the payments the caller did not record",
+            "in": "query",
+            "name": "approvable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "me: only the payments the caller did not record",
+              "title": "Approvable"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -22461,6 +22480,34 @@
         ]
       }
     },
+    "/booking/my-work/summary": {
+      "get": {
+        "operationId": "my_work_summary_booking_my_work_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Work Summary Booking My Work Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Work Summary",
+        "tags": [
+          "my-work"
+        ]
+      }
+    },
     "/booking/notifications": {
       "get": {
         "operationId": "list_notifications_booking_notifications_get",
@@ -26920,6 +26967,43 @@
             }
           },
           {
+            "description": "open bills not overdue that fall due within supplier_bill_due_soon_days",
+            "in": "query",
+            "name": "due_soon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "open bills not overdue that fall due within supplier_bill_due_soon_days",
+              "title": "Due Soon"
+            }
+          },
+          {
+            "description": "me: only the bills the caller may approve or pay, not entered nor last changed by them",
+            "in": "query",
+            "name": "approvable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "me: only the bills the caller may approve or pay, not entered nor last changed by them",
+              "title": "Approvable"
+            }
+          },
+          {
             "description": "bill code, supplier bill number, supplier, case",
             "in": "query",
             "name": "q",
@@ -29745,6 +29829,28 @@
               "description": "only the rows in effect",
               "title": "Active",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Stop-sales waiting for a second person (waiting), or only those the caller may decide, not entered nor asked to end by them (me); the longest waiting first",
+            "in": "query",
+            "name": "review",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "waiting",
+                    "me"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Stop-sales waiting for a second person (waiting), or only those the caller may decide, not entered nor asked to end by them (me); the longest waiting first",
+              "title": "Review"
             }
           },
           {

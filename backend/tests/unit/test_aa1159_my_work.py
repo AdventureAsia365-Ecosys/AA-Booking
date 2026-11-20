@@ -1,0 +1,380 @@
+"""AA-1159 — My work band: tiles by capability, the route's gate, the per-tile fallback and the shared list filters.
+
+The counts themselves against the lists they open run on PostgreSQL in tests/integration/test_aa1159_my_work.py.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import replace
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import my_work
+from app.agency_billing import invoices as agency_invoices
+from app.agency_billing import payments as agency_payments
+from app.auth.staff import PERMISSIONS, Staff, current_staff, get_pool
+from app.b2b import desk
+from app.errors import Unavailable
+from app.main import create_app
+from app.ops import bill_filters, supplier_bills, trip_checks
+from app.settings import Settings
+from app.supply import restrictions
+from app.trip_cases import service as trip_cases
+from tests.unit.fakes import ScriptedConn
+
+ADMIN = Staff("a-1", None, "Admin", "admin", True, "admin")
+SALES = Staff("u-1", None, "Sales One", "sales", True, "reviewer")
+CONTRACTING = Staff("u-5", None, "Product", "contracting", True, "reviewer")
+FINANCE = Staff("u-7", None, "Money", "finance", True, "reviewer")
+CONTENT = Staff("u-9", None, "Writer", "content_creator", True, "content")
+
+FRONTEND_TABLE = Path(__file__).resolve().parents[3] / "frontend" / "lib" / "myWork.ts"
+
+
+def _keys(staff: Staff) -> list[str]:
+    return [t.key for t in my_work.tiles_for(staff)]
+
+
+# ── The tile table ───────────────────────────────────────────────────────────
+
+
+def test_every_tile_capability_is_a_known_permission_and_keys_are_unique() -> None:
+    keys = [t.key for t in my_work.TILES]
+    assert len(keys) == len(set(keys))
+    for tile in my_work.TILES:
+        assert tile.capability in PERMISSIONS, tile.key
+        assert tile.group in my_work.GROUPS, tile.key
+        assert all(isinstance(v, str) and v for v in tile.filter.values()), tile.key
+
+
+def test_the_frontend_table_lists_the_same_keys_capabilities_and_groups_in_order() -> None:
+    text = FRONTEND_TABLE.read_text(encoding="utf-8")
+    rows = re.findall(r'key: "([a-z0-9_]+)",\s*capability: "([a-z0-9_.]+)",\s*group: "([a-z]+)"', text)
+    assert rows == [(t.key, t.capability, t.group) for t in my_work.TILES]
+
+
+def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
+    assert set(my_work.OPEN_CASE_STATUSES) == set(trip_cases.STATUSES) - {"completed", "cancelled"}
+    tile = next(t for t in my_work.TILES if t.key == "my_open_cases")
+    assert tile.filter == {"tab": "mine", "status": ",".join(my_work.OPEN_CASE_STATUSES)}
+
+
+@pytest.mark.parametrize(
+    ("staff", "expected"),
+    [
+        (
+            ADMIN,
+            [
+                "my_open_cases",
+                "trip_checks_overdue",
+                "b2b_on_request",
+                "supplier_bills_overdue",
+                "supplier_bills_due_soon",
+                "agency_invoices_overdue",
+                "supplier_bills_to_approve",
+                "supplier_bills_to_pay",
+                "agency_payments_to_approve",
+                "stop_sales_to_review",
+            ],
+        ),
+        (
+            CONTRACTING,
+            [
+                "my_open_cases",
+                "trip_checks_overdue",
+                "b2b_on_request",
+                "supplier_bills_overdue",
+                "supplier_bills_due_soon",
+                "supplier_bills_to_approve",
+                "stop_sales_to_review",
+            ],
+        ),
+        (
+            SALES,
+            [
+                "my_open_cases",
+                "trip_checks_overdue",
+                "b2b_on_request",
+                "supplier_bills_overdue",
+                "supplier_bills_due_soon",
+            ],
+        ),
+        (
+            FINANCE,
+            [
+                "my_open_cases",
+                "trip_checks_overdue",
+                "supplier_bills_overdue",
+                "supplier_bills_due_soon",
+                "agency_invoices_overdue",
+                "agency_payments_to_approve",
+            ],
+        ),
+        (CONTENT, []),
+    ],
+    ids=["admin", "contracting", "sales", "finance", "content_creator"],
+)
+def test_tiles_follow_the_capabilities_of_each_built_in_role(staff: Staff, expected: list[str]) -> None:
+    assert _keys(staff) == expected
+
+
+def test_a_capability_decides_a_tile_not_the_role_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A role that loses bill.approve loses the approval tile; one that gains payout.write gains the pay tile.
+    monkeypatch.setitem(PERMISSIONS, "bill.approve", PERMISSIONS["bill.approve"] - {"contracting"})
+    monkeypatch.setitem(PERMISSIONS, "payout.write", PERMISSIONS["payout.write"] | {"contracting"})
+    keys = _keys(CONTRACTING)
+    assert "supplier_bills_to_approve" not in keys and "supplier_bills_to_pay" in keys
+
+
+def test_a_preview_session_gets_only_the_tiles_of_its_capped_reads() -> None:
+    preview = replace(ADMIN, preview=True)
+    assert _keys(preview) == ["my_open_cases", "trip_checks_overdue", "b2b_on_request"]
+
+
+def test_an_inactive_staff_member_has_no_tile() -> None:
+    assert _keys(replace(ADMIN, active=False)) == []
+
+
+# ── The route ────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def make_client():
+    def _make(staff: Staff) -> TestClient:
+        app = create_app(Settings(database_url=None, environment="test"))
+        app.dependency_overrides[current_staff] = lambda: staff
+        app.dependency_overrides[get_pool] = lambda: ScriptedConn()
+        return TestClient(app)
+
+    return _make
+
+
+def _queue(result: dict[str, Any], calls: list[tuple[str, dict[str, Any]]], name: str):
+    async def _fake(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((name, kwargs))
+        return result
+
+    return _fake
+
+
+@pytest.fixture
+def stubbed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    stamp = datetime(2026, 11, 2, 8, 0)
+    monkeypatch.setattr(
+        trip_cases, "case_queue", _queue({"count": 2, "oldest_at": stamp, "earliest_due": None}, calls, "cases")
+    )
+    monkeypatch.setattr(
+        trip_checks,
+        "overdue_queue",
+        _queue({"count": 1, "oldest_at": None, "earliest_due": date(2026, 11, 3)}, calls, "checks"),
+    )
+    monkeypatch.setattr(
+        desk, "on_request_queue", _queue({"count": 0, "oldest_at": None, "earliest_due": None}, calls, "desk")
+    )
+    monkeypatch.setattr(
+        supplier_bills,
+        "queue",
+        _queue({"count": 3, "oldest_at": stamp, "earliest_due": date(2026, 11, 21)}, calls, "bills"),
+    )
+
+    async def _days(_conn: Any) -> int:
+        return 3
+
+    monkeypatch.setattr(bill_filters, "due_soon_days", _days)
+    monkeypatch.setattr(
+        agency_invoices,
+        "queue",
+        _queue({"count": 4, "oldest_at": stamp, "earliest_due": date(2026, 10, 1)}, calls, "invoices"),
+    )
+    monkeypatch.setattr(
+        agency_payments, "queue", _queue({"count": 5, "oldest_at": stamp, "earliest_due": None}, calls, "payments")
+    )
+    monkeypatch.setattr(
+        restrictions,
+        "review_queue",
+        _queue({"count": 6, "oldest_at": stamp, "earliest_due": None}, calls, "stop_sales"),
+    )
+    return calls
+
+
+def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None:
+    body = make_client(ADMIN).get("/booking/my-work/summary").json()
+    tiles = {t["key"]: t for t in body["tiles"]}
+    assert body["role"] == "admin" and list(tiles) == _keys(ADMIN)
+    assert tiles["my_open_cases"]["count"] == 2 and tiles["my_open_cases"]["oldest_at"] == "2026-11-02T08:00:00"
+    assert tiles["trip_checks_overdue"] | {"filter": None} == {
+        "key": "trip_checks_overdue",
+        "capability": "ops.read",
+        "group": "work",
+        "filter": None,
+        "available": True,
+        "count": 1,
+        "oldest_at": None,
+        "earliest_due": "2026-11-03",
+        "days": None,
+    }
+    assert tiles["supplier_bills_due_soon"]["days"] == 3
+    assert tiles["supplier_bills_due_soon"]["filter"] == {"bill_status": "open", "bill_due": "soon"}
+    assert tiles["agency_payments_to_approve"]["filter"] == {"tab": "payments", "approvable": "me"}
+    assert tiles["supplier_bills_to_approve"]["filter"] == {"bill_status": "received", "approvable": "me"}
+    assert tiles["stop_sales_to_review"] | {"oldest_at": None} == {
+        "key": "stop_sales_to_review",
+        "capability": "stop_sale.approve",
+        "group": "approve",
+        "filter": {"review": "me"},
+        "available": True,
+        "count": 6,
+        "oldest_at": None,
+        "earliest_due": None,
+        "days": None,
+    }
+    # Each counter got the list filter of its tile (the caller's own id for "mine").
+    assert [kw for name, kw in stubbed if name == "cases"] == [
+        {"statuses": list(my_work.OPEN_CASE_STATUSES), "assignee": "a-1"}
+    ]
+    bill_calls = [kw for name, kw in stubbed if name == "bills"]
+    assert bill_calls == [
+        {"status": "open", "overdue": True},
+        {"status": "open", "due_soon_days": 3},
+        {"status": "received", "actionable_by": "a-1"},
+        {"status": "approved", "actionable_by": "a-1"},
+    ]
+    assert [kw for name, kw in stubbed if name == "invoices"] == [{"status": "overdue"}]
+    # The approval tiles count only what the caller may act on (maker-checker), the page's approvable / review=me.
+    assert [kw for name, kw in stubbed if name == "payments"] == [{"state": "recorded", "actionable_by": "a-1"}]
+    assert [kw for name, kw in stubbed if name == "stop_sales"] == [{"reviewable_by": "a-1"}]
+
+
+def test_a_role_with_no_tile_capability_is_refused(make_client, stubbed) -> None:
+    r = make_client(CONTENT).get("/booking/my-work/summary")
+    assert r.status_code == 403 and r.json()["detail"] == "forbidden"
+    assert stubbed == []
+
+
+def test_only_the_callers_tiles_are_counted(make_client, stubbed) -> None:
+    body = make_client(SALES).get("/booking/my-work/summary").json()
+    assert [t["key"] for t in body["tiles"]] == _keys(SALES)
+    assert {name for name, _ in stubbed} == {"cases", "checks", "desk", "bills"}
+
+
+def test_a_tile_that_cannot_be_read_says_so_and_the_others_load(make_client, stubbed, monkeypatch) -> None:
+    async def _no_policy(_conn: Any) -> int:
+        raise Unavailable("policy_unavailable", "no value in force")
+
+    monkeypatch.setattr(bill_filters, "due_soon_days", _no_policy)
+    body = make_client(SALES).get("/booking/my-work/summary").json()
+    tiles = {t["key"]: t for t in body["tiles"]}
+    assert tiles["supplier_bills_due_soon"]["available"] is False and tiles["supplier_bills_due_soon"]["count"] is None
+    assert tiles["supplier_bills_overdue"]["available"] is True and tiles["supplier_bills_overdue"]["count"] == 3
+
+
+# ── The shared list filters ──────────────────────────────────────────────────
+
+
+def test_bill_filter_due_soon_is_open_not_overdue_and_within_the_window() -> None:
+    clause, args = bill_filters.bill_filter(status="open", due_soon_days=3)
+    assert "b.status IN ('received', 'approved')" in clause
+    assert "NOT bal.overdue AND b.due_date <= current_date + $1::int" in clause
+    assert args == [3]
+    clause, args = bill_filters.bill_filter(status="received", overdue=True)
+    assert clause == "true AND b.status = $1 AND bal.overdue" and args == ["received"]
+
+
+@pytest.mark.asyncio
+async def test_the_bills_list_reads_the_due_soon_window_from_the_policy() -> None:
+    conn = ScriptedConn().on("SELECT count(*)", 0).on("SELECT (now() AT TIME ZONE 'UTC')::date", date(2026, 11, 20))
+    out = await supplier_bills.list_bills(conn, ADMIN, due_soon=True)
+    assert out["total"] == 0
+    counted = conn.sql("SELECT count(*)")
+    assert counted and isinstance(counted[0][-1], int)
+
+
+def test_case_and_invoice_and_payment_filters_are_the_lists_where() -> None:
+    clause, args = trip_cases.case_filter(statuses=["building"], assignee="u-1")
+    assert clause.startswith("tc.deleted_at IS NULL AND tc.status = ANY($1::text[]) AND EXISTS")
+    assert args == [["building"], "u-1"]
+    clause, args = agency_invoices.invoice_filter(status="overdue")
+    assert "i.due_date < current_date" in clause and args == []
+    clause, args = agency_payments.payment_filter(state="recorded")
+    assert clause == "true AND p.status = $1" and args == ["recorded"]
+    assert "k.due_date < current_date" in trip_checks.OVERDUE
+    assert "{OVERDUE}" not in trip_checks.COUNTS and trip_checks.OVERDUE in trip_checks.COUNTS
+    assert desk.STATE_WHERE["open"] == "l.held_as = 'on_request' AND l.status = 'on_request'"
+
+
+def test_approvable_by_me_leaves_out_what_the_caller_entered_changed_or_recorded() -> None:
+    clause, args = bill_filters.bill_filter(status="received", actionable_by="u-5")
+    assert clause == "true AND b.status = $1 AND b.created_by <> $2 AND b.facts_edited_by IS DISTINCT FROM $2"
+    assert args == ["received", "u-5"]
+    clause, args = agency_payments.payment_filter(state="recorded", actionable_by="u-7")
+    assert clause == "true AND p.recorded_by <> $1 AND p.status = $2" and args == ["u-7", "recorded"]
+
+
+def test_restriction_review_filter_is_the_stop_sales_waiting_for_a_second_person() -> None:
+    clause, args = restrictions.restriction_filter(review="waiting")
+    assert clause == f"true AND ({restrictions.WAITING})" and args == []
+    assert "r.status = 'pending'" in restrictions.WAITING and "r.end_requested_by IS NOT NULL" in restrictions.WAITING
+    clause, args = restrictions.restriction_filter(review="me", reviewer="u-5")
+    assert clause.endswith("(CASE WHEN r.status = 'pending' THEN r.created_by ELSE r.end_requested_by END) <> $1")
+    assert args == ["u-5"]
+    k = "11111111-1111-4111-8111-111111111111"
+    clause, args = restrictions.restriction_filter(contract_id=k, kind="stop_sale", active_only=True)
+    assert "r.supplier_contract_id = $1::uuid" in clause and "r.inventory_kind = $2" in clause
+    assert "k.status = 'published'" in clause and args == [k, "stop_sale"]
+    with pytest.raises(Exception, match="review"):
+        restrictions.restriction_filter(review="lost")
+
+
+@pytest.mark.asyncio
+async def test_the_restriction_list_counts_and_orders_a_review_by_waiting_time() -> None:
+    conn = ScriptedConn().on("SELECT count(*)", 4).on("ORDER BY", [])
+    out = await restrictions.list_restrictions(conn, review="me", reviewer="u-5", limit=10)
+    assert out == {"items": [], "total": 4}
+    listed = [(sql, args) for sql, args in conn.calls if "ORDER BY" in sql]
+    assert f"ORDER BY {restrictions.WAITING_SINCE} ASC" in listed[0][0] and listed[0][1] == ("u-5", 10)
+    stamp = datetime(2026, 11, 2, 8, 0)
+    counted = ScriptedConn().on("count(*)::int AS count", {"count": 1, "oldest_at": stamp})
+    out = await restrictions.review_queue(counted, reviewable_by="u-5")
+    assert out == {"count": 1, "oldest_at": stamp, "earliest_due": None}
+    assert restrictions.WAITING in counted.calls[0][0] and counted.calls[0][1] == ("u-5",)
+
+
+def test_bill_filter_supplier_case_and_search_keep_the_list_rules() -> None:
+    sup = "11111111-1111-4111-8111-111111111111"
+    clause, args = bill_filters.bill_filter(supplier=sup, case="tc-000001", q="ks", due_before=date(2026, 11, 30))
+    assert "b.supplier_id = $1::uuid" in clause and "tc.code = $2" in clause and "b.due_date <= $3" in clause
+    assert args[:3] == [sup, "TC-000001", date(2026, 11, 30)]
+    clause, args = bill_filters.bill_filter(case=sup, overdue=False, status="all")
+    assert "b.trip_case_id = $1::uuid" in clause and "NOT bal.overdue" in clause and args == [sup]
+    with pytest.raises(Exception, match="supplier"):
+        bill_filters.bill_filter(supplier="not-an-id")
+    with pytest.raises(Exception, match="status"):
+        bill_filters.bill_filter(status="lost")
+
+
+@pytest.mark.asyncio
+async def test_each_queue_counts_over_its_lists_from_and_where() -> None:
+    stamp = datetime(2026, 11, 2, 8, 0)
+    row = {"count": 2, "oldest_at": stamp, "earliest_due": date(2026, 11, 3)}
+    conn = ScriptedConn().on("count(*)::int AS count", row)
+    assert (await supplier_bills.queue(conn, status="received"))["count"] == 2
+    assert (await agency_invoices.queue(conn, status="overdue"))["earliest_due"] == date(2026, 11, 3)
+    paid = ScriptedConn().on("count(*)::int AS count", {"count": 1, "oldest_at": stamp})
+    assert await agency_payments.queue(paid, state="recorded") == {"count": 1, "oldest_at": stamp, "earliest_due": None}
+    cases = ScriptedConn().on("count(*)::int AS count", {"count": 3, "oldest_at": stamp})
+    assert (await trip_cases.case_queue(cases, statuses=["building"], assignee="none"))["count"] == 3
+    assert "NOT EXISTS (SELECT 1 FROM booking.staff_assignments" in cases.calls[0][0]
+    checks = ScriptedConn().on("count(*)::int AS count", {"count": 1, "earliest_due": date(2026, 11, 3)})
+    assert (await trip_checks.overdue_queue(checks))["oldest_at"] is None
+    assert trip_checks.OVERDUE in checks.calls[0][0]
+    lines = ScriptedConn().on("count(*)::int AS count", {"count": 0, "oldest_at": None})
+    assert (await desk.on_request_queue(lines))["count"] == 0
+    assert desk.STATE_WHERE["open"] in lines.calls[0][0]
+    with pytest.raises(Exception, match="state"):
+        await desk.on_request_queue(lines, state="lost")

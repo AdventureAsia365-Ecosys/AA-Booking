@@ -60,6 +60,16 @@ export function SupplierBillKpis() {
   );
 }
 
+/** The "Due" and "Entered by" filters as list query flags. AA-1159: "soon" = open bills not overdue yet that fall due
+ *  within the reminder's window (policy supplier_bill_due_soon_days); approvable "me" = only the bills I may approve or
+ *  pay (not entered nor last changed by me). The My work tiles of the dashboard open these views. */
+function flagQuery(due: string, approvable: string): { overdue?: boolean; due_soon?: boolean; approvable?: "me" } {
+  const mine = approvable === "me" ? ({ approvable: "me" } as const) : {};
+  if (due === "overdue") return { overdue: true, ...mine };
+  if (due === "soon") return { due_soon: true, ...mine };
+  return mine;
+}
+
 export function SupplierBillsList({
   supplier,
   title,
@@ -81,7 +91,7 @@ export function SupplierBillsList({
   const [entering, setEntering] = useState(false);
   const query = {
     status: get("bill_status") || undefined,
-    overdue: get("bill_due") === "overdue" ? true : undefined,
+    ...flagQuery(get("bill_due"), get("approvable")),
     q: get("q") || undefined,
     supplier_id: supplier?.id,
     // ?case=TC-… (from a case's Cost vs billed panel): the bills of that case, or with a line of it.
@@ -208,7 +218,23 @@ export function SupplierBillsList({
                 ],
                 width: 200,
               },
-              { key: "bill_due", label: t("Due"), allLabel: t("Any"), options: [{ value: "overdue", label: t("Overdue") }], width: 120 },
+              {
+                key: "bill_due",
+                label: t("Due"),
+                allLabel: t("Any"),
+                options: [
+                  { value: "overdue", label: t("Overdue") },
+                  { value: "soon", label: t("Due soon") },
+                ],
+                width: 130,
+              },
+              {
+                key: "approvable",
+                label: t("Entered by"),
+                allLabel: t("Anyone"),
+                options: [{ value: "me", label: t("Someone else (I can act)") }],
+                width: 190,
+              },
             ]}
           />
         }

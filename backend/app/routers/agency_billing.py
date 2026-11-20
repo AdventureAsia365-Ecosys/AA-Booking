@@ -279,15 +279,21 @@ async def record_agency_payment(
 
 @router.get("/agency-payments")
 async def list_agency_payments(
-    _: CanRead,
+    staff: CanRead,
     pool: Pool,
     state: Annotated[Literal["recorded", "approved", "rejected", "all"] | None, Query()] = None,
     invoice: Annotated[str | None, Query(max_length=64)] = None,
+    approvable: Annotated[
+        Literal["me"] | None, Query(description="me: only the payments the caller did not record")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
+    mine = staff.cis_user_id if approvable == "me" else None
     async with pool.acquire() as conn:
-        return await payments.list_payments(conn, state=state, invoice=invoice, limit=limit, offset=offset)
+        return await payments.list_payments(
+            conn, state=state, invoice=invoice, actionable_by=mine, limit=limit, offset=offset
+        )
 
 
 @router.post("/agency-payments/{payment_id}/approve")

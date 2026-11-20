@@ -9,7 +9,8 @@ payout need an ``Idempotency-Key`` header (8-200 characters): the same key with 
 (200, ``replayed``), another body is 409 ``idempotency_conflict``. No payment provider: payouts are recorded by hand.
 
 - ``GET /supplier-bills`` (``status`` received / approved / paid / cancelled / open / all, ``supplier_id``, ``case``,
-  ``overdue``, ``due_before``, ``q``) · ``GET /supplier-bills/summary`` (KPIs) ·
+  ``overdue``, ``due_before``, ``due_soon`` and ``approvable=me`` (AA-1159), ``q``) ·
+  ``GET /supplier-bills/summary`` (KPIs) ·
   ``GET /supplier-bills/billable?supplier_id=&case=&q=`` (confirmed bookings a bill can name).
 - ``POST /supplier-bills`` · ``GET|PATCH /supplier-bills/{id}`` · ``POST /supplier-bills/{id}/approve | cancel``.
 - ``POST /supplier-bills/{id}/payouts`` · ``POST /supplier-payouts/{id}/void``.
@@ -126,6 +127,14 @@ async def list_bills(
     case: Annotated[str | None, Query(max_length=64, description="trip case code or UUID")] = None,
     overdue: Annotated[bool | None, Query()] = None,
     due_before: Annotated[date | None, Query()] = None,
+    due_soon: Annotated[
+        bool | None,
+        Query(description="open bills not overdue that fall due within supplier_bill_due_soon_days"),
+    ] = None,
+    approvable: Annotated[
+        Literal["me"] | None,
+        Query(description="me: only the bills the caller may approve or pay, not entered nor last changed by them"),
+    ] = None,
     q: Annotated[
         str | None, Query(max_length=100, description="bill code, supplier bill number, supplier, case")
     ] = None,
@@ -141,6 +150,8 @@ async def list_bills(
             case=case,
             overdue=overdue,
             due_before=due_before,
+            due_soon=due_soon,
+            approvable=approvable,
             q=q,
             limit=limit,
             offset=offset,

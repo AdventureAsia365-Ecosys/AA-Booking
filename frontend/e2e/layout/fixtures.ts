@@ -60,6 +60,8 @@ import type { CountryDetail, CountryItem, CountryList, DestinationDetail, Destin
 import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
+import type { MyWorkSummary } from "../../lib/api/myWork";
+import type { StopSale, StopSalePage } from "../../lib/api/stopSales";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
 import type { AgencyProfitMonth, CaseProfit, DepartureCosts, DepartureProfit, FinanceDeparture, OrderLine, SupplierOrder } from "../../lib/api/finance";
 import type {
@@ -2058,6 +2060,55 @@ function financeAnswer(p: string, seg: string[]): FixtureAnswer | null {
   return null;
 }
 
+// AA-1159: the My work band (one tile per queue of the admin fixture's capabilities; invented numbers).
+const MY_WORK: MyWorkSummary = {
+  role: "admin",
+  generated_at: "2026-10-23T01:55:00Z",
+  tiles: [
+    { key: "my_open_cases", capability: "trip_case.read", group: "work", filter: { tab: "mine", status: "discovery,building" }, available: true, count: 4, oldest_at: "2026-09-02T03:00:00Z", earliest_due: null, days: null },
+    { key: "trip_checks_overdue", capability: "ops.read", group: "work", filter: { due: "overdue" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-10-12", days: null },
+    { key: "b2b_on_request", capability: "b2b_desk.read", group: "work", filter: {}, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
+    { key: "supplier_bills_overdue", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "overdue" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-10-01", days: null },
+    { key: "supplier_bills_due_soon", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "soon" }, available: true, count: 3, oldest_at: null, earliest_due: "2026-10-24", days: 3 },
+    { key: "agency_invoices_overdue", capability: "agency_billing.read", group: "work", filter: { status: "overdue" }, available: false, count: null, oldest_at: null, earliest_due: null, days: null },
+    { key: "supplier_bills_to_approve", capability: "bill.approve", group: "approve", filter: { bill_status: "received", approvable: "me" }, available: true, count: 5, oldest_at: "2026-10-15T09:30:00Z", earliest_due: null, days: null },
+    { key: "supplier_bills_to_pay", capability: "payout.write", group: "approve", filter: { bill_status: "approved", approvable: "me" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-05", days: null },
+    { key: "agency_payments_to_approve", capability: "agency_payment.approve", group: "approve", filter: { tab: "payments", approvable: "me" }, available: true, count: 1, oldest_at: "2026-10-21T02:00:00Z", earliest_due: null, days: null },
+    { key: "stop_sales_to_review", capability: "stop_sale.approve", group: "approve", filter: { review: "me" }, available: true, count: 2, oldest_at: "2026-10-20T04:00:00Z", earliest_due: null, days: null },
+  ],
+};
+
+// AA-1159: stop-sales waiting for a second person (invented suppliers, hotels and dates).
+function stopSale(i: number): StopSale {
+  const end = i % 3 === 2;
+  return {
+    id: `5500000${i}-0000-4000-8000-000000000000`,
+    contract_id: `c000000${i}-0000-4000-8000-000000000000`,
+    contract_title: `Contract ${2027 + (i % 2)} rates`,
+    contract_status: "published",
+    supplier_id: `5000000${i}-0000-4000-8000-000000000000`,
+    supplier_code: `SUP-00000${i + 1}`,
+    supplier_name: ["Lotus Bay Travel", "Mekong Riverside Co.", "Highland Trails Ltd"][i % 3],
+    component_id: i % 2 ? `sv:9000000${i}-0000-4000-8000-000000000000` : `rt:8000000${i}-0000-4000-8000-000000000000`,
+    hotel_code: i % 2 ? null : `HTL-00000${i + 1}`,
+    hotel_name: i % 2 ? null : "Bamboo Garden Hotel",
+    room_type_name: i % 2 ? null : "Deluxe Twin",
+    service_code: i % 2 ? `SVC-00000${i + 1}` : null,
+    service_title: i % 2 ? "Sunset river cruise" : null,
+    date_from: `2026-12-0${i + 1}`,
+    date_to: `2026-12-1${i + 1}`,
+    note: "Supplier e-mail: closed for a private event",
+    status: end ? "approved" : "pending",
+    created_by: i === 0 ? "u-layout" : "u-002",
+    created_by_name: i === 0 ? "Layout Admin" : "Mai Tran",
+    created_at: `2026-10-2${i}T04:00:00Z`,
+    end_requested_by: end ? "u-003" : null,
+    end_requested_by_name: end ? "Quang Le" : null,
+    end_requested_at: end ? "2026-10-22T08:00:00Z" : null,
+    end_reason: end ? "The supplier reopened the dates" : null,
+  };
+}
+
 export function answer(method: string, path: string, query: URLSearchParams): FixtureAnswer | null {
   if (method !== "GET") return null;
   const seg = path.split("/").filter(Boolean);
@@ -2153,6 +2204,11 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "trip-checks") return ok({ items: range(ROWS).map(tripCheck), total: 73, limit: ROWS, offset: 0 } satisfies TripCheckPage);
   if (p === "case-lifecycle/runs") return ok({ items: LIFECYCLE_RUNS, scheduled_mode: "live", schedule_utc_hour: 1 });
+  if (p === "my-work/summary") return ok(MY_WORK);
+  if (p === "supply/restrictions" && query.get("kind") === "stop_sale") {
+    const items = range(3).map(stopSale).filter((s) => query.get("review") !== "me" || s.created_by !== "u-layout");
+    return ok({ items, total: items.length } satisfies StopSalePage);
+  }
   if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
   if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));

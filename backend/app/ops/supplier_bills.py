@@ -47,13 +47,13 @@ from app import audit, paging
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
+from app.ops import bill_filters, lifecycle, money
 from app.ops import files as ops_files
-from app.ops import lifecycle, money
 from app.pricing import fx
 
 log = logging.getLogger(__name__)
 
-STATUSES = ("received", "approved", "paid", "cancelled")
+STATUSES = bill_filters.STATUSES
 OPEN_STATUSES = ("received", "approved")
 METHODS = ("bank_transfer", "card_offline", "cash", "other")
 MAX_PAGE = 100
@@ -277,58 +277,24 @@ async def list_bills(
     conn: asyncpg.Connection,
     staff: Staff,
     *,
-    status: str | None = None,
-    supplier: str | None = None,
-    case: str | None = None,
-    overdue: bool | None = None,
-    due_before: date | None = None,
-    q: str | None = None,
+    due_soon: bool | None = None,
+    approvable: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    **filters: Any,
 ) -> dict[str, Any]:
-    """Supplier bills, the most urgent first (open ones by due date, then the rest newest first)."""
-    if status not in (None, "open", "all", *STATUSES):
-        raise Invalid("invalid_filter", "unknown status")
+    """Supplier bills, the most urgent first (open ones by due date, then the rest newest first).
+
+    ``filters``: those of :func:`bill_filters.bill_filter` (status, supplier, case, overdue, due_before, q).
+    ``due_soon``: only the open bills falling due within ``supplier_bill_due_soon_days`` and not overdue yet.
+    ``approvable="me"``: only the bills the caller may approve or pay (not entered nor last changed by them)."""
     if not 1 <= limit <= MAX_PAGE or offset < 0:
         raise Invalid("invalid_page", f"limit is 1..{MAX_PAGE} and offset >= 0")
-    args: list[Any] = []
-    where = ["true"]
-
-    def add(sql: str, value: Any) -> None:
-        args.append(value)
-        where.append(sql.format(p=f"${len(args)}"))
-
-    if status == "open":
-        where.append("b.status IN ('received', 'approved')")
-    elif status and status != "all":
-        add("b.status = {p}", status)
-    if supplier:
-        ident = _uuid(supplier)
-        if ident is None:
-            raise Invalid("invalid_filter", "supplier is a supplier id")
-        add("b.supplier_id = {p}::uuid", ident)
-    if case:
-        ident = _uuid(case)
-        add(
-            "(b.trip_case_id = {p}::uuid OR EXISTS (SELECT 1 FROM booking.supplier_bill_items it JOIN"
-            " booking.supplier_bookings sb ON sb.id = it.supplier_booking_id WHERE it.bill_id = b.id"
-            " AND sb.trip_case_id = {p}::uuid))"
-            if ident
-            else "(tc.code = {p} OR EXISTS (SELECT 1 FROM booking.supplier_bill_items it JOIN"
-            " booking.supplier_bookings sb ON sb.id = it.supplier_booking_id JOIN booking.trip_cases c2"
-            " ON c2.id = sb.trip_case_id WHERE it.bill_id = b.id AND c2.code = {p}))",
-            ident or case.strip().upper(),
-        )
-    if overdue is not None:
-        where.append("bal.overdue" if overdue else "NOT bal.overdue")
-    if due_before:
-        add("b.due_date <= {p}", due_before)
-    if q:
-        add(
-            "(b.code ILIKE {p} OR b.bill_number ILIKE {p} OR s.company_name ILIKE {p} OR tc.code ILIKE {p})",
-            paging.contains(q),
-        )
-    clause = " AND ".join(where)
+    clause, args = bill_filters.bill_filter(
+        **filters,
+        due_soon_days=await bill_filters.due_soon_days(conn) if due_soon else None,
+        actionable_by=staff.cis_user_id if approvable == "me" else None,
+    )
     total = await conn.fetchval(f"SELECT count(*) {BILL_FROM} WHERE {clause}", *args)  # noqa: S608
     args.extend([limit, offset])
     rows = await conn.fetch(
@@ -341,6 +307,18 @@ async def list_bills(
     return jsonable(
         {"items": [bill_out(r, staff) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset}
     )
+
+
+async def queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
+    """AA-1159 My work: how many bills the list shows for ``filters`` (``bill_filters.bill_filter``), when the oldest of
+    them was entered and the earliest due date among them."""
+    clause, args = bill_filters.bill_filter(**filters)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(b.created_at) AS oldest_at, min(b.due_date) AS earliest_due"
+        f" {BILL_FROM} WHERE {clause}",  # noqa: S608 — fixed fragments, bound values
+        *args,
+    )
+    return dict(row)
 
 
 async def summary(conn: asyncpg.Connection) -> dict[str, Any]:

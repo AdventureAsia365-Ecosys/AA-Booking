@@ -241,11 +241,16 @@ ROW_COLUMNS = """
     h.name AS hotel_name, r.service_id::text AS service_id, s.code AS service_code, s.title AS service_title,
     r.inventory_kind, r.date_from, r.date_to, r.units, r.release_days, r.max_pax, r.note, r.status,
     r.created_by, r.created_at, r.updated_by, r.updated_at, r.decided_by, r.decided_at, r.reject_reason,
-    r.withdraw_reason, r.end_requested_by, r.end_requested_at, r.end_reason, r.ended_by, r.ended_at
+    r.withdraw_reason, r.end_requested_by, r.end_requested_at, r.end_reason, r.ended_by, r.ended_at,
+    sp.code AS supplier_code, sp.company_name AS supplier_name, cr.name AS created_by_name,
+    er.name AS end_requested_by_name
 """
 ROW_FROM = """
     booking.supply_restrictions r
     JOIN booking.supplier_contracts k ON k.id = r.supplier_contract_id
+    JOIN booking.suppliers sp ON sp.id = k.supplier_id
+    LEFT JOIN booking.staff_users cr ON cr.cis_user_id = r.created_by
+    LEFT JOIN booking.staff_users er ON er.cis_user_id = r.end_requested_by
     LEFT JOIN booking.hotel_room_types t ON t.id = r.hotel_room_type_id
     LEFT JOIN booking.hotels h ON h.id = t.hotel_id
     LEFT JOIN booking.services s ON s.id = r.service_id
@@ -275,6 +280,66 @@ async def get_restriction(conn: asyncpg.Connection, restriction_id: str, *, lock
     return _out(row)
 
 
+# AA-1159: a stop-sale waits for a second person while pending (approve / reject) or while its end is asked and not
+# decided yet (approve the end). Since when it waits: entered (pending) or end asked.
+WAITING = (
+    "r.inventory_kind = 'stop_sale' AND (r.status = 'pending'"
+    " OR (r.status = 'approved' AND r.end_requested_by IS NOT NULL AND r.ended_at IS NULL))"
+)
+WAITING_SINCE = "CASE WHEN r.status = 'pending' THEN r.created_at ELSE r.end_requested_at END"
+REVIEWS = ("waiting", "me")
+
+
+def _review(add: Any, where: list[str], review: str, reviewer: str | None) -> None:
+    """``waiting``: every stop-sale waiting for a second person; ``me``: those ``reviewer`` may decide (never one they
+    entered or asked to end, the maker-checker rule of :func:`decide_stop_sale` and :func:`approve_end`)."""
+    if review not in REVIEWS:
+        raise Invalid("invalid_filter", "review is waiting or me")
+    where.append(f"({WAITING})")
+    if review == "me":
+        add(
+            "(CASE WHEN r.status = 'pending' THEN r.created_by ELSE r.end_requested_by END) <> {p}",
+            reviewer or "",
+        )
+
+
+def restriction_filter(
+    *,
+    contract_id: str | None = None,
+    component_id: str | None = None,
+    kind: str | None = None,
+    active_only: bool = False,
+    review: str | None = None,
+    reviewer: str | None = None,
+) -> tuple[str, list[Any]]:
+    """The WHERE text and arguments over :data:`ROW_FROM`: the restriction list (``GET /supply/restrictions``) and the
+    My work stop-sale tile (AA-1159, :func:`review_queue`) both use it, so the tile equals the list total."""
+    where: list[str] = ["true"]
+    args: list[Any] = []
+
+    def add(sql: str, value: Any) -> None:
+        args.append(value)
+        where.append(sql.format(p=f"${len(args)}"))
+
+    if contract_id:
+        add("r.supplier_contract_id = {p}::uuid", as_uuid(contract_id, "contract_not_found", "contract"))
+    if component_id:
+        room, service = parse_component(component_id)
+        add(f"{'r.hotel_room_type_id' if room else 'r.service_id'} = {{p}}::uuid", room or service)
+    if kind:
+        if kind not in KINDS:
+            raise Invalid("unknown_inventory_kind", f"inventory kind must be one of {', '.join(KINDS)}")
+        add("r.inventory_kind = {p}", kind)
+    if active_only:
+        where.append(
+            "((r.inventory_kind = 'stop_sale' AND r.status IN ('pending', 'approved') AND r.ended_at IS NULL)"
+            " OR (r.inventory_kind <> 'stop_sale' AND k.status = 'published'))"
+        )
+    if review:
+        _review(add, where, review, reviewer)
+    return " AND ".join(where), args
+
+
 async def list_restrictions(
     conn: asyncpg.Connection,
     *,
@@ -282,35 +347,43 @@ async def list_restrictions(
     component_id: str | None = None,
     kind: str | None = None,
     active_only: bool = False,
+    review: str | None = None,
+    reviewer: str | None = None,
     limit: int = 100,
 ) -> dict[str, Any]:
     """Restrictions of one contract or one component, newest dates first; ``kind`` filters, ``active_only`` keeps the
-    rows in effect (stop-sales pending or approved and not ended, terms of published contracts)."""
-    where, args = ["true"], []
-    if contract_id:
-        args.append(as_uuid(contract_id, "contract_not_found", "contract"))
-        where.append(f"r.supplier_contract_id = ${len(args)}::uuid")
-    if component_id:
-        room, service = parse_component(component_id)
-        args.append(room or service)
-        where.append(f"{'r.hotel_room_type_id' if room else 'r.service_id'} = ${len(args)}::uuid")
-    if kind:
-        if kind not in KINDS:
-            raise Invalid("unknown_inventory_kind", f"inventory kind must be one of {', '.join(KINDS)}")
-        args.append(kind)
-        where.append(f"r.inventory_kind = ${len(args)}")
-    if active_only:
-        where.append(
-            "((r.inventory_kind = 'stop_sale' AND r.status IN ('pending', 'approved') AND r.ended_at IS NULL)"
-            " OR (r.inventory_kind <> 'stop_sale' AND k.status = 'published'))"
-        )
+    rows in effect (stop-sales pending or approved and not ended, terms of published contracts). ``review``
+    (AA-1159): the stop-sales waiting for a second person across every contract (``waiting``), or only those
+    ``reviewer`` may decide (``me``), the longest waiting first. ``total`` counts every match (the page shows
+    ``limit``)."""
+    clause, args = restriction_filter(
+        contract_id=contract_id,
+        component_id=component_id,
+        kind=kind,
+        active_only=active_only,
+        review=review,
+        reviewer=reviewer,
+    )
+    total = await conn.fetchval(f"SELECT count(*) FROM {ROW_FROM} WHERE {clause}", *args)  # noqa: S608
+    order = f"{WAITING_SINCE} ASC, r.id" if review else "r.date_from DESC, r.created_at DESC"
     args.append(limit)
     rows = await conn.fetch(
-        f"SELECT {ROW_COLUMNS} FROM {ROW_FROM} WHERE {' AND '.join(where)}"  # noqa: S608 — constants + placeholders
-        f" ORDER BY r.date_from DESC, r.created_at DESC LIMIT ${len(args)}",
+        f"SELECT {ROW_COLUMNS} FROM {ROW_FROM} WHERE {clause}"  # noqa: S608 — constants + placeholders
+        f" ORDER BY {order} LIMIT ${len(args)}",
         *args,
     )
-    return {"items": [_out(r) for r in rows]}
+    return {"items": [_out(r) for r in rows], "total": int(total or 0)}
+
+
+async def review_queue(conn: asyncpg.Connection, *, reviewable_by: str) -> dict[str, Any]:
+    """AA-1159 My work: how many stop-sales ``reviewable_by`` may decide (the list's ``review=me``) and since when the
+    longest of them waits."""
+    clause, args = restriction_filter(review="me", reviewer=reviewable_by)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min({WAITING_SINCE}) AS oldest_at FROM {ROW_FROM} WHERE {clause}",  # noqa: S608
+        *args,
+    )
+    return {**dict(row), "earliest_due": None}
 
 
 def parse_component(value: str) -> tuple[str | None, str | None]:

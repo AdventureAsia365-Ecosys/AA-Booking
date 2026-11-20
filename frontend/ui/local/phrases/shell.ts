@@ -6,6 +6,7 @@
 import "@/app/(staff)/_parts/CisFields.messages";
 import "@/app/(staff)/_parts/CisUpdatedNotice.messages";
 import "@/app/(staff)/_parts/DetailHeader.messages";
+import "@/app/(staff)/_parts/MyWorkBand.messages";
 import "@/app/(staff)/_parts/SupplyContent.messages";
 import "@/app/(staff)/_parts/supply.messages";
 import "@/app/(staff)/_parts/useRecordStatus.messages";

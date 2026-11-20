@@ -7,6 +7,7 @@
 //              extras G5). `?tenant=<CIS tenant uuid>` (the CIS Tenant 360 "Open in Booking" link) shows one agency's
 //              invoices, with a removable chip naming the agency (ui/booking/agencyFilter.ts).
 //   Payments   GET /agency-payments: payments waiting for the second person (approve / reject; never the recorder).
+//              AA-1159: `?approvable=me` keeps the payments the viewer did not record (the My work tile opens it).
 //   Agencies   GET /agency-billing/status: each agency's billing status (the view CIS reads to warn and suspend).
 //   Settings   the issuing billing entity, tax rules and payment terms (data rows, never code; BO-15..17).
 // Admin and finance only (lib/rbac.ts); write actions show only with the matching permission.
@@ -352,6 +353,8 @@ function PaymentsTab() {
   const tx = useTx();
   const { get, set } = useUrlFilters();
   const state = get("state") || "recorded";
+  // AA-1159: "me" = only the payments I may approve (not recorded by me), the view the My work tile counts.
+  const approvable = get("approvable") === "me" ? "me" : undefined;
   const paging = useOffsetPage();
   const me = useStaff();
   const canApprove = useCan("agency_payment.approve");
@@ -359,8 +362,9 @@ function PaymentsTab() {
   const qc = useQueryClient();
   const [rejecting, setRejecting] = useState<AgencyPayment | null>(null);
   const list = useQuery({
-    queryKey: ["agency-billing", "payments", state, paging.pageIndex, paging.pageSize],
-    queryFn: () => agencyBillingApi.payments({ state, limit: paging.pageSize, offset: paging.pageIndex * paging.pageSize }),
+    queryKey: ["agency-billing", "payments", state, approvable, paging.pageIndex, paging.pageSize],
+    queryFn: () =>
+      agencyBillingApi.payments({ state, approvable, limit: paging.pageSize, offset: paging.pageIndex * paging.pageSize }),
   });
   const approve = useMutation({
     mutationFn: (p: AgencyPayment) => agencyBillingApi.approve(p.id),
@@ -424,6 +428,16 @@ function PaymentsTab() {
               { value: "approved", label: t("Approved") },
               { value: "rejected", label: t("Rejected") },
               { value: "all", label: t("All") },
+            ]}
+          />
+        </Field>
+        <Field label={t("Recorded by")}>
+          <Select
+            value={approvable ?? ""}
+            onChange={(e) => set("approvable", e.target.value)}
+            options={[
+              { value: "", label: t("Anyone") },
+              { value: "me", label: t("Someone else (I can approve)") },
             ]}
           />
         </Field>

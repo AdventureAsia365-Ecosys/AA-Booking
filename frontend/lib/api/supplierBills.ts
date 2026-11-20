@@ -4,7 +4,7 @@
 // bill.approve (admin, contracting; never the person who entered the bill nor the one who last changed its amounts or
 // lines, facts_edited_by); payouts payout.write (admin; never on a bill they entered or last changed). Money is a decimal string, never a float.
 //
-//   GET    /booking/supplier-bills?status&supplier_id&case&overdue&due_before&q&limit&offset
+//   GET    /booking/supplier-bills?status&supplier_id&case&overdue&due_before&due_soon&approvable&q&limit&offset
 //   GET    /booking/supplier-bills/summary                                  KPIs
 //   GET    /booking/supplier-bills/billable?supplier_id&case&q              confirmed bookings a bill can name
 //   POST   /booking/supplier-bills                     (Idempotency-Key)    enter a bill (received)
@@ -224,6 +224,10 @@ export interface BillQuery {
   case?: string;
   overdue?: boolean;
   due_before?: string;
+  /** AA-1159: open bills not overdue that fall due within supplier_bill_due_soon_days. */
+  due_soon?: boolean;
+  /** AA-1159: only the bills the caller may approve or pay (not entered nor last changed by them). */
+  approvable?: "me";
   q?: string;
   limit?: number;
   offset?: number;

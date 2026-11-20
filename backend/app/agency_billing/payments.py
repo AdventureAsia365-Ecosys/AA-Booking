@@ -54,21 +54,50 @@ async def _audit(conn: asyncpg.Connection, actor: str, action: str, payment: dic
     )
 
 
-async def list_payments(conn: asyncpg.Connection, *, state: str | None = None, invoice: str | None = None,
-                        limit: int = 50, offset: int = 0) -> dict[str, Any]:  # fmt: skip
+PAYMENT_FROM = "FROM booking.agency_payment p JOIN booking.agency_invoice i ON i.id = p.invoice_id"
+
+
+def payment_filter(
+    *, state: str | None = None, invoice: str | None = None, actionable_by: str | None = None
+) -> tuple[str, list[Any]]:
+    """The WHERE text and arguments of the payment list (over :data:`PAYMENT_FROM`). The Payments to approve tab and
+    the My work tile (AA-1159, :mod:`app.my_work`) both use it: the tile equals the list total for the same filter.
+    ``actionable_by``: a staff id; only the payments that person did not record (the recorder never approves or
+    rejects their own, 403 ``maker_checker``)."""
     where, args = ["true"], []
+    if actionable_by:
+        args.append(actionable_by)
+        where.append(f"p.recorded_by <> ${len(args)}")
     if state and state != "all":
         args.append(state)
         where.append(f"p.status = ${len(args)}")
     if invoice:
         args.append(invoice)
         where.append(f"(i.number = ${len(args)} OR i.id::text = ${len(args)})")
-    cond = " AND ".join(where)
-    total = await conn.fetchval(
-        "SELECT count(*) FROM booking.agency_payment p JOIN booking.agency_invoice i ON i.id = p.invoice_id"  # noqa: S608
-        f" WHERE {cond}",
+    return " AND ".join(where), args
+
+
+async def queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
+    """AA-1159 My work: how many payments the list shows for ``filters`` and when the oldest of them was recorded."""
+    cond, args = payment_filter(**filters)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(p.recorded_at) AS oldest_at {PAYMENT_FROM} WHERE {cond}",  # noqa: S608
         *args,
     )
+    return {**dict(row), "earliest_due": None}
+
+
+async def list_payments(
+    conn: asyncpg.Connection,
+    *,
+    state: str | None = None,
+    invoice: str | None = None,
+    actionable_by: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    cond, args = payment_filter(state=state, invoice=invoice, actionable_by=actionable_by)
+    total = await conn.fetchval(f"SELECT count(*) {PAYMENT_FROM} WHERE {cond}", *args)  # noqa: S608
     args += [limit, offset]
     rows = await conn.fetch(
         f"{LIST_SQL} WHERE {cond} ORDER BY p.recorded_at DESC, p.id LIMIT ${len(args) - 1} OFFSET ${len(args)}",
