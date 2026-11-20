@@ -24,7 +24,7 @@ import {
 import { CIS_MY_WORK_PATH } from "@/lib/config";
 import { myWorkApi, type MyWorkTile } from "@/lib/api/myWork";
 import { MY_WORK_TILES, hasMyWork, tileHref, tileSpec, type MyWorkGroup, type MyWorkTileSpec } from "@/lib/myWork";
-import { Button, DateText, ErrorState, KpiTile, ManagedInCisLink, Section, useStaff } from "@/ui";
+import { Button, DateText, ErrorState, KpiTile, ManagedInCisLink, Section, useIsPhone, useStaff } from "@/ui";
 import type { Tone } from "@/ui/core/primitives";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 import { useT } from "@/ui/core/useI18n";
@@ -93,7 +93,9 @@ export function MyWorkBand() {
             return (
               <div key={key} className="flex flex-col gap-2" data-testid={`my-work-group-${key}`}>
                 <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-muted">{key === "work" ? tr("To do") : tr("To approve or pay")}</h3>
-                <div className="aa-kpi-grid grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+                {/* One column on a phone: the tile labels are long, two columns of 390 px would cut them (so not the
+                    shell's 2-up aa-kpi-grid). */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                   {inGroup.map(({ spec, tile }) => (
                     <MyWorkTileLink key={spec.key} spec={spec} tile={tile} />
                   ))}
@@ -109,6 +111,7 @@ export function MyWorkBand() {
 
 function MyWorkTileLink({ spec, tile }: { spec: MyWorkTileSpec; tile: MyWorkTile | undefined }) {
   const tx = useTx();
+  const isPhone = useIsPhone();
   const href = tileHref(spec.path, tile?.filter ?? {});
   const count = tile ? (tile.available ? tile.count : null) : undefined;
   const busy = typeof count === "number" && count > 0;
@@ -120,7 +123,14 @@ function MyWorkTileLink({ spec, tile }: { spec: MyWorkTileSpec; tile: MyWorkTile
       data-testid={`my-work-tile-${spec.key}`}
       className="block min-w-0 rounded-lg outline-none [&>div]:h-full transition hover:-translate-y-px hover:shadow-kit-md focus-visible:ring-2 focus-visible:ring-accent-border"
     >
-      <KpiTile label={tx(spec.label)} icon={ICONS[spec.key]} value={count} hint={tile ? <TileHint spec={spec} tile={tile} /> : undefined} hintTone={tone} />
+      <KpiTile
+        size={isPhone ? "sm" : "md"}
+        label={tx(spec.label)}
+        icon={ICONS[spec.key]}
+        value={count}
+        hint={tile ? <TileHint spec={spec} tile={tile} /> : undefined}
+        hintTone={tone}
+      />
     </Link>
   );
 }

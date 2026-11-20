@@ -2062,17 +2062,17 @@ function financeAnswer(p: string, seg: string[]): FixtureAnswer | null {
 // AA-1159: the My work band (one tile per queue of the admin fixture's capabilities; invented numbers).
 const MY_WORK: MyWorkSummary = {
   role: "admin",
-  generated_at: "2026-11-20T08:00:00Z",
+  generated_at: "2026-10-23T01:55:00Z",
   tiles: [
-    { key: "my_open_cases", capability: "trip_case.read", group: "work", filter: { tab: "mine", status: "discovery,building" }, available: true, count: 4, oldest_at: "2026-10-02T03:00:00Z", earliest_due: null, days: null },
-    { key: "trip_checks_overdue", capability: "ops.read", group: "work", filter: { due: "overdue" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-12", days: null },
+    { key: "my_open_cases", capability: "trip_case.read", group: "work", filter: { tab: "mine", status: "discovery,building" }, available: true, count: 4, oldest_at: "2026-09-02T03:00:00Z", earliest_due: null, days: null },
+    { key: "trip_checks_overdue", capability: "ops.read", group: "work", filter: { due: "overdue" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-10-12", days: null },
     { key: "b2b_on_request", capability: "b2b_desk.read", group: "work", filter: {}, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
-    { key: "supplier_bills_overdue", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "overdue" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-11-01", days: null },
-    { key: "supplier_bills_due_soon", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "soon" }, available: true, count: 3, oldest_at: null, earliest_due: "2026-11-21", days: 3 },
+    { key: "supplier_bills_overdue", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "overdue" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-10-01", days: null },
+    { key: "supplier_bills_due_soon", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "soon" }, available: true, count: 3, oldest_at: null, earliest_due: "2026-10-24", days: 3 },
     { key: "agency_invoices_overdue", capability: "agency_billing.read", group: "work", filter: { status: "overdue" }, available: false, count: null, oldest_at: null, earliest_due: null, days: null },
-    { key: "supplier_bills_to_approve", capability: "bill.approve", group: "approve", filter: { bill_status: "received" }, available: true, count: 5, oldest_at: "2026-11-15T09:30:00Z", earliest_due: null, days: null },
-    { key: "supplier_bills_to_pay", capability: "payout.write", group: "approve", filter: { bill_status: "approved" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-25", days: null },
-    { key: "agency_payments_to_approve", capability: "agency_payment.approve", group: "approve", filter: { tab: "payments" }, available: true, count: 1, oldest_at: "2026-11-19T02:00:00Z", earliest_due: null, days: null },
+    { key: "supplier_bills_to_approve", capability: "bill.approve", group: "approve", filter: { bill_status: "received" }, available: true, count: 5, oldest_at: "2026-10-15T09:30:00Z", earliest_due: null, days: null },
+    { key: "supplier_bills_to_pay", capability: "payout.write", group: "approve", filter: { bill_status: "approved" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-05", days: null },
+    { key: "agency_payments_to_approve", capability: "agency_payment.approve", group: "approve", filter: { tab: "payments" }, available: true, count: 1, oldest_at: "2026-10-21T02:00:00Z", earliest_due: null, days: null },
   ],
 };
 
