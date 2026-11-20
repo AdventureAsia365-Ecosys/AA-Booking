@@ -23,7 +23,9 @@ Root spec `.kiro/specs/AA-1155-custom-staff-roles` task T4.1, requirement R4.3, 
   policies, price adjustments) and `can_reject` now test `pricing.approve`; `can_withdraw` keeps `pricing.write`.
 - **Frontend:** the pricing pages already follow the per-row flags. The pages that test a capability themselves now
   test the approval one: departure board price adjustment buttons (`pricing.approve`), trip plan allotment buttons
-  (`b2b_desk.approve`), hotel / service Activate (`supplier.activate`, via `useRecordStatus().canToggle`).
+  (`b2b_desk.approve`), hotel / service Activate (`supplier.activate`, via `useRecordStatus().canToggle`). The
+  hotel drawer and the service page share a new `RecordStatusButton` (the code-health baseline may not grow, and
+  the inline button plus the new condition pushed both over it; HotelDrawer is now under the limit).
   `lib/rbac.ts` holds page rules only (the pages stay open to the same roles), so it is not changed; buttons use
   `useCan()` (me.permissions), as AA-1150 did.
 

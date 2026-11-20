@@ -8,13 +8,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, BedDouble, Pencil, Plus, Power } from "lucide-react";
+import { BedDouble, Pencil, Plus } from "lucide-react";
 import { supplyApi, type HotelDetail, type RoomType } from "@/lib/api/supply";
 import { Button, Code, DateText, Drawer, ErrorState, FromCisTag, Pill, Skeleton, useToast } from "@/ui";
 import { Fact, FactGrid } from "@/app/(staff)/_parts/DetailHeader";
 import { RatesTable, Stars, supplyError } from "@/app/(staff)/_parts/supply";
 import { hotelStyleText } from "@/app/(staff)/_parts/supplyLabels";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
+import { RecordStatusButton } from "@/app/(staff)/_parts/RecordStatusButton";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { HotelFormDrawer } from "./HotelFormDrawer";
@@ -58,11 +59,7 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
                 <Button size="sm" onClick={() => setEditing(true)}>
                   <Pencil size={13} /> {tr("Edit")}
                 </Button>
-                {status.canToggle(h.status === "active") && (
-                  <Button size="sm" variant={h.status === "active" ? "danger" : "secondary"} onClick={() => status.ask("hotel", { code: h.code, name: h.name }, h.status !== "active")}>
-                    {h.status === "active" ? <Ban size={13} /> : <Power size={13} />} {h.status === "active" ? tr("Deactivate") : tr("Activate")}
-                  </Button>
-                )}
+                <RecordStatusButton status={status} kind="hotel" record={{ code: h.code, name: h.name }} active={h.status === "active"} compact />
               </div>
             )}
           </div>

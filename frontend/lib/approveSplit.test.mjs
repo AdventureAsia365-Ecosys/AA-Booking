@@ -31,14 +31,13 @@ test("the allotment decisions need b2b_desk.approve", () => {
 test("activating a hotel or a service needs supplier.activate", () => {
   const hook = read("app/(staff)/_parts/useRecordStatus.tsx");
   assert.match(hook, /useCan\("supplier\.activate"\)/);
-  assert.match(hook, /active \? canWrite : canActivate/);
-  for (const page of [
-    "app/(staff)/hotels/_parts/HotelDrawer.tsx",
-    "app/(staff)/hotels/_parts/HotelsView.tsx",
-    "app/(staff)/services/_parts/ServiceDetailView.tsx",
-    "app/(staff)/services/_parts/ServicesView.tsx",
-  ]) {
-    assert.match(read(page), /status\.canToggle\(/, page);
+  assert.match(hook, /return canWrite && \(active \|\| canActivate\)/);
+  assert.match(read("app/(staff)/_parts/RecordStatusButton.tsx"), /if \(!status\.canToggle\(active\)\) return null/);
+  for (const menu of ["app/(staff)/hotels/_parts/HotelsView.tsx", "app/(staff)/services/_parts/ServicesView.tsx"]) {
+    assert.match(read(menu), /status\.canToggle\(row\.status === "active"\)/, menu);
+  }
+  for (const page of ["app/(staff)/hotels/_parts/HotelDrawer.tsx", "app/(staff)/services/_parts/ServiceDetailView.tsx"]) {
+    assert.match(read(page), /<RecordStatusButton status=\{status\}/, page);
   }
 });
 

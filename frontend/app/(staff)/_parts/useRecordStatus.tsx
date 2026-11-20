@@ -16,11 +16,16 @@ import { MSG } from "./useRecordStatus.messages";
 type Kind = "hotel" | "service";
 type Target = { kind: Kind; code: string; name: string; activate: boolean } | null;
 
+/** Deactivate = supply.write; Activate = supply.write + supplier.activate (AA-1155: an approval, not a write). */
+function toggleAllowed(active: boolean, canWrite: boolean, canActivate: boolean): boolean {
+  return canWrite && (active || canActivate);
+}
+
 export function useRecordStatus() {
   const tr = useT(MSG);
   const tx = useTx();
   const canWrite = useCan("supply.write");
-  const canActivate = useCan("supplier.activate") && canWrite;
+  const canActivate = useCan("supplier.activate");
   const qc = useQueryClient();
   const toast = useToast();
   const [target, setTarget] = useState<Target>(null);
@@ -70,7 +75,7 @@ export function useRecordStatus() {
   );
 
   /** May this user flip a record that is `active` now? Deactivate = supply.write, Activate = supplier.activate. */
-  const canToggle = (active: boolean) => (active ? canWrite : canActivate);
+  const canToggle = (active: boolean) => toggleAllowed(active, canWrite, canActivate);
 
   return { canWrite, canToggle, ask, dialogs };
 }
