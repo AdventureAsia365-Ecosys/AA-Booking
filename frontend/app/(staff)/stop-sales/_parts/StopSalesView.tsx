@@ -31,6 +31,11 @@ import {
 import { useT } from "@/ui/core/useI18n";
 import { MSG } from "./StopSalesView.messages";
 
+/** When the request started waiting: the stop-sale was entered (review) or its end was asked (lifting). */
+function waitingSince(s: StopSale): string {
+  return waitsFor(s) === "review" ? s.created_at : (s.end_requested_at ?? s.created_at);
+}
+
 function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
 }
@@ -102,7 +107,7 @@ function StopSalesList() {
       id: "closes",
       header: t("Closes"),
       cell: ({ row }) => (
-        <span className="block max-w-[220px] truncate text-[13px] text-body" title={componentLabel(row.original)}>
+        <span className="block max-w-[180px] truncate text-[13px] text-body" title={componentLabel(row.original)}>
           {componentLabel(row.original)}
         </span>
       ),
@@ -122,7 +127,7 @@ function StopSalesList() {
       cell: ({ row }) => {
         const why = waitsFor(row.original) === "review" ? row.original.note : row.original.end_reason;
         return (
-          <span className="block max-w-[240px] truncate text-[13px] text-body" title={why ?? ""}>
+          <span className="block max-w-[200px] truncate text-[13px] text-body" title={why ?? ""}>
             {why ?? "—"}
           </span>
         );
@@ -134,12 +139,14 @@ function StopSalesList() {
       cell: ({ row }) =>
         waitsFor(row.original) === "review" ? <Pill tone="warning">{t("Review")}</Pill> : <Pill tone="info">{t("Lifting it")}</Pill>,
     },
-    { id: "by", header: t("Asked by"), cell: ({ row }) => requester(row.original).name },
     {
-      id: "since",
-      header: t("Waiting since"),
+      id: "by",
+      header: t("Asked by"),
       cell: ({ row }) => (
-        <DateText value={waitsFor(row.original) === "review" ? row.original.created_at : (row.original.end_requested_at ?? row.original.created_at)} />
+        <span className="flex min-w-0 flex-col">
+          <span className="block max-w-[140px] truncate text-[13px] text-body">{requester(row.original).name}</span>
+          <DateText className="whitespace-nowrap text-xs text-muted" value={waitingSince(row.original)} />
+        </span>
       ),
     },
     {
@@ -196,7 +203,7 @@ function StopSalesList() {
         onRetry={() => list.refetch()}
         emptyTitle={t("Nothing waits for review")}
         emptyDescription={t("A stop-sale is entered on a published supplier contract; it shows here until a second person decides it.")}
-        tableMinWidth={1100}
+        tableMinWidth={960}
       />
       <ConfirmDialog
         open={rejecting !== null}
