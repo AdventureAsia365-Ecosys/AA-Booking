@@ -179,8 +179,10 @@ async def test_generator_minimum_cutoff_and_allotments(
     too_high = await c.patch(patch, json={"min_to_operate": 7}, headers=maker)
     assert too_high.status_code == 422 and "invalid_min_to_operate" in too_high.text
 
-    # Ending the allotment gives its seats back to everyone.
-    ended = await _ok(await c.post(f"/catalog/allotments/{proposed['id']}/end", headers=sales))
+    # Ending the allotment gives its seats back to everyone. AA-1155 T4.1: ending one in force is b2b_desk.approve.
+    refused = await c.post(f"/catalog/allotments/{proposed['id']}/end", headers=sales)
+    assert refused.status_code == 403 and refused.json()["detail"] == "forbidden"
+    ended = await _ok(await c.post(f"/catalog/allotments/{proposed['id']}/end", headers=maker))
     assert ended["state"] == "ended" and ended["end_reason"] == "withdrawn"
     assert (await _b2b(c, _m2m(m2m)))[DAY1]["available"] == 3  # 6 - its own hold of 3
 

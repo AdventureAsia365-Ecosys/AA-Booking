@@ -36,6 +36,8 @@ ADMIN = Staff("a-1", None, "Admin", "admin", True, "admin")
 CONTRACTING = Staff("c-1", None, "Contracting", "contracting", True, "reviewer")
 SALES = Staff("u-1", None, "Sales One", "sales", True, "reviewer")
 CREATOR = Staff("w-1", None, "Writer", "content_creator", True, "reviewer")
+# AA-1155 T4.1: approving an allotment and ending another person's or one in force need b2b_desk.approve.
+DESK_CHECKER = Staff("c-1", None, "Contracting One", "contracting", True, "reviewer")
 
 ALLOTMENTS_FRAGMENT = "FROM booking.departure_allotments a WHERE a.departure_id = ANY"
 USAGE_FRAGMENT = "FROM booking.b2b_hold_lines l"
@@ -477,16 +479,16 @@ def test_approve_in_force_is_a_no_op_and_ended_is_refused() -> None:
 )
 def test_end(row: dict[str, Any], reason: str) -> None:
     conn = ScriptedConn().on(ROW_FRAGMENT, row)
-    run(allotments.end(conn, SALES, ALLOT))
+    run(allotments.end(conn, DESK_CHECKER, ALLOT))
     [args] = conn.sql("SET ended_at = now(), ended_by = $2, end_reason = $3")
-    assert args == (ALLOT, "u-1", reason)
+    assert args == (ALLOT, "c-1", reason)
     [audit] = conn.sql("INSERT INTO booking.audit_logs")
     assert audit[3] == f"allotment.{reason}"
 
 
 def test_end_of_an_ended_allotment_is_a_no_op() -> None:
     conn = ScriptedConn().on(ROW_FRAGMENT, allot_row(ended_at=NOW, ended_by="a-1", end_reason="rejected"))
-    assert run(allotments.end(conn, SALES, ALLOT))["state"] == "ended"
+    assert run(allotments.end(conn, DESK_CHECKER, ALLOT))["state"] == "ended"
     assert not conn.sql("SET ended_at")
 
 
@@ -701,6 +703,11 @@ def test_allotment_routes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client(ADMIN).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 200
     assert approved.calls[0][0] == (ADMIN, ALLOT) and ended.calls[0][0] == (ADMIN, ALLOT)
     assert client(CREATOR).post(f"/booking/catalog/allotments/{ALLOT}/approve").status_code == 403
+    # AA-1155 T4.1: sales proposes an allotment but never approves one (b2b_desk.approve). The end route takes
+    # b2b_desk.write: sales withdraws its own pending allotment, the service refuses any other end (test_aa1155).
+    assert client(SALES).post(f"/booking/catalog/allotments/{ALLOT}/approve").status_code == 403
+    assert client(SALES).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 200
+    assert client(CREATOR).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 403
 
 
 def test_departure_check_routes(monkeypatch: pytest.MonkeyPatch) -> None:

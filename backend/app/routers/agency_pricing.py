@@ -6,8 +6,8 @@ discounts`` and ``/booking/pricing/partner-rate-cards`` (GET list, POST new pend
 manage the dated discount rows with maker-checker, like the pricing rules (``app.routers.pricing``); a rate card with
 ``discount_pct: null`` is an end card (ends the contract rate of its scope, back to the tier).
 ``/booking/pricing/partner-terms`` lists every B2B partner with its tier and discount today; ``PATCH /{partner_id}``
-moves a partner to another tier (audited). Reads need ``pricing.read``, writes ``pricing.write``. Service:
-``app.b2b.agency_pricing``.
+moves a partner to another tier (audited). Reads need ``pricing.read``, writes ``pricing.write``, approvals
+``pricing.approve`` (AA-1155 T4.1). Service: ``app.b2b.agency_pricing``.
 
 AA-1030 G3: ``GET /booking/pricing/partner-tariffs/{partner_id}`` is one partner's tariff (its own price per tour,
 season and pax band, priced by the quote engine, ``app.b2b.tariff``) as JSON, or as the CSV the agency downloads from
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/booking/pricing", tags=["pricing"])
 
 CanPrice = Annotated[Staff, Depends(require("pricing.read"))]
 CanWritePricing = Annotated[Staff, Depends(require("pricing.write"))]
+CanApprovePricing = Annotated[Staff, Depends(require("pricing.approve"))]  # AA-1155 T4.1
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 
 TierCode = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{1,31}$")]
@@ -134,7 +135,7 @@ async def create_tier_discount(body: TierDiscountCreate, staff: CanWritePricing,
 
 
 @router.post("/partner-tier-discounts/{row_id}/approve")
-async def approve_tier_discount(row_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_tier_discount(row_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await agency_pricing.approve_tier_discount(conn, staff, str(row_id), today=_today())
 
@@ -166,7 +167,7 @@ async def create_rate_card(body: RateCardCreate, staff: CanWritePricing, pool: P
 
 
 @router.post("/partner-rate-cards/{row_id}/approve")
-async def approve_rate_card(row_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_rate_card(row_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await agency_pricing.approve_rate_card(conn, staff, str(row_id), today=_today())
 

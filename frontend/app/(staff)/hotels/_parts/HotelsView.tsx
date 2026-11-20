@@ -73,11 +73,13 @@ export function HotelsView() {
     const items: RowMenuItem[] = [{ label: t("View hotel"), icon: <Eye size={15} />, onSelect: () => set("hotel", row.code) }];
     if (status.canWrite) {
       items.push({ label: t("Edit hotel"), icon: <Pencil size={15} />, onSelect: () => setEditRef(row.code) });
-      items.push(
-        row.status === "active"
-          ? { label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, false), danger: true, divider: true }
-          : { label: t("Activate"), icon: <Power size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, true), divider: true },
-      );
+      if (status.canToggle(row.status === "active")) {
+        items.push(
+          row.status === "active"
+            ? { label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, false), danger: true, divider: true }
+            : { label: t("Activate"), icon: <Power size={15} />, onSelect: () => status.ask("hotel", { code: row.code, name: row.name }, true), divider: true },
+        );
+      }
     }
     return items;
   }

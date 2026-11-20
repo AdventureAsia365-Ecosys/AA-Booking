@@ -9,13 +9,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity as ActivityIcon, Ban, CalendarDays, Hash, MapPin, Pencil, Power, Tag } from "lucide-react";
+import { Activity as ActivityIcon, Ban, CalendarDays, Hash, MapPin, Pencil, Tag } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { supplyApi, type ServiceDetail } from "@/lib/api/supply";
 import { PageFrame, Button, Code, DateText, EmptyState, ErrorState, FromCisTag, Section } from "@/ui";
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { RatesTable, SERVICE_TYPE_LABEL, UNIT_LABEL } from "@/app/(staff)/_parts/supply";
 import { useRecordStatus } from "@/app/(staff)/_parts/useRecordStatus";
+import { RecordStatusButton } from "@/app/(staff)/_parts/RecordStatusButton";
 import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { ServiceFormDrawer } from "./ServiceFormDrawer";
@@ -86,9 +87,7 @@ export function ServiceDetailView({ refParam }: { refParam: string }) {
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 <Pencil size={14} /> {t("Edit service")}
               </Button>
-              <Button variant="secondary" onClick={() => status.ask("service", { code: s.code, name: s.title }, s.status !== "active")}>
-                {s.status === "active" ? <Ban size={14} /> : <Power size={14} />} {s.status === "active" ? t("Deactivate") : t("Activate")}
-              </Button>
+              <RecordStatusButton status={status} kind="service" record={{ code: s.code, name: s.title }} active={s.status === "active"} />
             </>
           )
         }

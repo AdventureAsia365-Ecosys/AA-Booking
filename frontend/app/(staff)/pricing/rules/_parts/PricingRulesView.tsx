@@ -2,9 +2,9 @@
 // app/(staff)/pricing/rules/_parts/PricingRulesView.tsx — Pricing rules & FX (W2, UI spec §3 / §6.3, ADR 0005, Q19).
 // Two tabs over the append-only policy tables: pricing rules (margin policy per channel) and dated FX rates.
 // A new row is PENDING until a second staff member approves it (maker-checker, bk-007); only approved rows
-// price quotes. Rows are never edited: a change is a new row with a later date. Reads need pricing.read; New and
-// Approve need pricing.write (admin, contracting), and the API refuses an approval by the row's creator (403
-// own_row) — the Approve button follows the API's per-row `can_approve`.
+// price quotes. Rows are never edited: a change is a new row with a later date. Reads need pricing.read; New needs
+// pricing.write and Approve / Reject pricing.approve (AA-1155; both admin, contracting), and the API refuses an
+// approval by the row's creator (403 own_row) — the buttons follow the API's per-row `can_approve` / `can_reject`.
 // Layout (AA-683 S239): both tables fit a 1440 px screen without sideways scroll. Target and floor margin share one
 // "Margin" column (target on top, floor under it, so the header stays short), the Approve action sits under the
 // status pill of a pending row (no Actions column that is empty most of the time), and Note is the flexible column:

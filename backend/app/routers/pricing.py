@@ -8,7 +8,8 @@ staff use while building a version. ``POST …/versions/{n}/price`` (routers/tri
 ``/booking/pricing/rules`` and ``/booking/pricing/fx-rates`` (GET list, POST new pending row, POST ``/{id}/approve``;
 S280 bk-058: ``/{id}/reject`` with a reason by a second person, ``/{id}/withdraw`` by its maker)
 manage the policy rows themselves with maker-checker (``app.pricing.policy``, bk-007): reads need ``pricing.read``,
-writes and approvals ``pricing.write`` (admin, contracting), and the creator of a row cannot approve it (403).
+new rows and withdrawing one's own ``pricing.write``, approve and reject ``pricing.approve`` (AA-1155 T4.1; both
+admin, contracting), and the creator of a row cannot approve it (403).
 ``/booking/pricing/cancellation-policies`` (AA-974, bk-021) does the same for the B2B cancellation-fee schedules
 (``app.b2b.cancellation``): a row per trip plan (``source_id``) or the B2B default, in force once approved.
 ``/booking/pricing/policy`` (AA-1091, bk-050, root ADR 0005b d15): the pricing policy parameters (GET every parameter
@@ -42,8 +43,11 @@ MAX_ITEMS = 200
 # Margins and net costs are commercial data (ADR 0005 decision 8): permission ``pricing.read`` in the
 # staff role matrix (admin, sales, contracting; not content_creator).
 CanPrice = Annotated[Staff, Depends(require("pricing.read"))]
-# Entering and approving rules / FX rows: contracting owns rates, admin backs it up (ADR 0005 d8).
+# Entering rules / FX rows and withdrawing one's own pending row: contracting owns rates, admin backs it up
+# (ADR 0005 d8).
 CanWritePricing = Annotated[Staff, Depends(require("pricing.write"))]
+# AA-1155 T4.1: the checker routes (approve, reject) need pricing.approve; the service checks it again first.
+CanApprovePricing = Annotated[Staff, Depends(require("pricing.approve"))]
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
@@ -230,7 +234,7 @@ async def create_rule(body: RuleCreate, staff: CanWritePricing, pool: Pool) -> d
 
 
 @router.post("/rules/{rule_id}/approve")
-async def approve_rule(rule_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_rule(rule_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.approve_rule(conn, staff, str(rule_id), today=_today())
 
@@ -244,7 +248,7 @@ class RowDecision(BaseModel):
 
 
 @router.post("/rules/{rule_id}/reject")
-async def reject_rule(rule_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def reject_rule(rule_id: uuid.UUID, body: RowDecision, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.close_rule(conn, staff, str(rule_id), event="rejected", reason=body.reason, today=_today())
 
@@ -275,13 +279,13 @@ async def create_fx_rate(body: FxRateCreate, staff: CanWritePricing, pool: Pool)
 
 
 @router.post("/fx-rates/{fx_id}/approve")
-async def approve_fx_rate(fx_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_fx_rate(fx_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.approve_fx_rate(conn, staff, str(fx_id), today=_today())
 
 
 @router.post("/fx-rates/{fx_id}/reject")
-async def reject_fx_rate(fx_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def reject_fx_rate(fx_id: uuid.UUID, body: RowDecision, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.close_fx_rate(conn, staff, str(fx_id), event="rejected", reason=body.reason, today=_today())
 
@@ -336,14 +340,14 @@ async def create_cancellation_policy(
 
 
 @router.post("/cancellation-policies/{policy_id}/approve")
-async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await cancellation.approve_policy(conn, staff, str(policy_id), today=_today())
 
 
 @router.post("/cancellation-policies/{policy_id}/reject")
 async def reject_cancellation_policy(
-    policy_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool
+    policy_id: uuid.UUID, body: RowDecision, staff: CanApprovePricing, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await cancellation.close_policy(

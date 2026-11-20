@@ -4,7 +4,7 @@
 // b2b rule with a below-floor warning, and the dated discount rows with maker-checker), Agencies (every B2B partner
 // with its tier, moved with one select; audited) and Rate cards (a partner's contract discount, for every tour or
 // one tour, with maker-checker; an approved card is ended by an end card, from its "End" button). AA-1030 G3: each agency
-// row links to its tariff (../tariff, printable, CSV). Reads need pricing.read; writes and approvals pricing.write, and the API refuses an
+// row links to its tariff (../tariff, printable, CSV). Reads need pricing.read; writes pricing.write and approvals pricing.approve (AA-1155), and the API refuses an
 // approval by the row's creator (403 own_row): the Approve button follows each row's `can_approve`.
 
 import { useMemo, useState } from "react";

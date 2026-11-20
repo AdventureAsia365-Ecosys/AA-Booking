@@ -22,8 +22,9 @@
   ``cancelled`` (bk-005 / bk-026 edges; pending supplier bookings cancelled, requested / confirmed ones notified to
   staff; the status note names the client, reason and fee), an audit row. A
   repeat returns the stored cancellation (idempotent on the booking); another partner's booking is 404.
-- **Staff admin** (``/booking/pricing/cancellation-policies``, ``pricing.read`` / ``pricing.write``): list with the
-  status (pending, in force, scheduled, superseded), create a pending row, approve another person's row.
+- **Staff admin** (``/booking/pricing/cancellation-policies``, ``pricing.read`` / ``pricing.write``; approve and
+  reject ``pricing.approve``, AA-1155 T4.1): list with the status (pending, in force, scheduled, superseded), create a
+  pending row, approve another person's row.
 """
 
 from __future__ import annotations

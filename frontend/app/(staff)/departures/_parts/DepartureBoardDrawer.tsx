@@ -4,13 +4,15 @@
 // Ops section (meeting point and time, sent to the agencies on the departure; a staff note; guide, tour leader and
 // driver); departure fees (Charge fee, approve / reject by another person); the price adjustment of the departure
 // (propose, approve by another person, withdraw). Reads b2b_desk.read; writes ops.write, b2b_desk.write /
-// b2b_desk.approve, pricing.write (each section hides what the role cannot do).
+// b2b_desk.approve, pricing.write to propose a price adjustment (and withdraw one's own while pending) and
+// pricing.approve to approve, reject or withdraw any (AA-1155); each section hides what the role cannot do.
 
 import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Coins, Percent, UserPlus, X } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
+import { endAction } from "@/lib/approveSplit";
 import {
   FEE_REASON_LABEL,
   FEE_STATUS,
@@ -366,7 +368,11 @@ function PriceSection({ data }: { data: BoardDetail }) {
   const t = useT(MSG);
   const tx = useTx();
   const canPrice = useCan("pricing.write");
+  const canDecide = useCan("pricing.approve"); // AA-1155: approve, reject another person's, withdraw one in force
   const me = useStaff();
+  // AA-1155: the maker withdraws its own pending adjustment with pricing.write; every other end is a decision.
+  const endOf = (a: PriceAdjustment) =>
+    endAction(a.state, { canDecide, canWrite: canPrice, isMaker: a.created_by?.id === me.cis_user_id });
   const qc = useQueryClient();
   const toast = useToast();
   const d = data.departure;
@@ -429,7 +435,7 @@ function PriceSection({ data }: { data: BoardDetail }) {
               </span>
               <span className="flex flex-wrap items-center gap-2">
                 <Pill tone={a.state === "in_force" ? "success" : "warning"}>{a.state === "in_force" ? t("In force") : t("Waiting for approval")}</Pill>
-                {canPrice && a.state === "pending" && (
+                {canDecide && a.state === "pending" && (
                   <Button
                     size="sm"
                     variant="primary"
@@ -440,9 +446,9 @@ function PriceSection({ data }: { data: BoardDetail }) {
                     {t("Approve")}
                   </Button>
                 )}
-                {canPrice && (
+                {endOf(a) && (
                   <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ id: a.id, action: "end" })}>
-                    {a.state === "pending" ? t("Reject") : t("Withdraw")}
+                    {endOf(a) === "reject" ? t("Reject") : t("Withdraw")}
                   </Button>
                 )}
               </span>
