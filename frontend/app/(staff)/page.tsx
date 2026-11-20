@@ -8,7 +8,7 @@
 //   GET /booking/staff?active=false (admin only)          → "Inactive staff" tile (spec Q6; AA-1128 wording)
 //
 // Tiles follow the role (Nghiệp S236): New inquiries, In progress, Proposals sent, and a fourth tile that is
-// "Inactive staff" for admins and "My open cases" for sales / contracting. content_creator has no trip
+// "Inactive staff" for admins (AA-1159: "My open cases" is a tile of the My work band now). content_creator has no trip
 // case permission, so it gets the catalog card (CIS) instead. W2/W3 tiles (Active suppliers, Outstanding
 // balance, Rate sheets awaiting publish) are added when their endpoints exist, never as dummies.
 // Every tile's hint describes its own number. The open-case total and the month-over-month delta (spec §4.2 "Open
@@ -18,7 +18,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, Hammer, Hotel, Lock, Send, UserCheck, UserPlus } from "lucide-react";
+import { ArrowRight, Hammer, Hotel, Lock, Send, UserPlus } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
 import { supplierBookingsApi } from "@/lib/api/supplierBookings";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
@@ -47,6 +47,7 @@ import { casePartyLabel, casePartySub } from "@/ui/booking/caseFacts";
 import { useT } from "@/ui/core/useI18n";
 import { Phrase } from "@/ui/local/Phrase";
 import { useTx } from "@/ui/local/useTx";
+import { MyWorkBand } from "./_parts/MyWorkBand";
 import { MSG } from "./page.messages";
 
 /** Worked on by staff, not yet sent to the customer (phase "Inquiry" after triage + "Proposal" building). */
@@ -65,6 +66,8 @@ export default function DashboardPage() {
   const canCases = canSeePage(staff.role, "/cases");
   return (
     <PageFrame title={tr("Dashboard")} description={tr("Welcome back, {0}. Here is what needs your attention today.", name)}>
+      {/* AA-1159: the role's work queues first (by capability; hidden for a role with none). */}
+      <MyWorkBand />
       {canCases ? <SalesDashboard role={staff.role} /> : <CatalogDashboard />}
     </PageFrame>
   );
@@ -191,7 +194,8 @@ function SalesDashboard({ role }: { role: string }) {
             hintTone={s && s.proposals_awaiting > 0 ? "warning" : "neutral"}
           />
         </TileLink>
-        {isAdmin ? (
+        {/* AA-1159: "My open cases" moved to the My work band, where it opens exactly the cases it counts. */}
+        {isAdmin && (
           <TileLink href="/staff" label={tr("Inactive staff: open staff")}>
             <KpiTile
               label={tr("Inactive staff")}
@@ -207,15 +211,6 @@ function SalesDashboard({ role }: { role: string }) {
                       : tr("Nobody waiting")
               }
               hintTone={pendingCount ? "warning" : pending.isError ? "danger" : "neutral"}
-            />
-          </TileLink>
-        ) : (
-          <TileLink href="/cases?tab=mine" label={tr("My open cases: open my cases")}>
-            <KpiTile
-              label={tr("My open cases")}
-              icon={<UserCheck size={16} />}
-              value={v((x) => x.mine)}
-              hint={s ? tr("Open cases with you on them") : undefined}
             />
           </TileLink>
         )}

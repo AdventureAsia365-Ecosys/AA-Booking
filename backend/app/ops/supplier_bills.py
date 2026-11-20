@@ -49,7 +49,7 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
 from app.ops import files as ops_files
 from app.ops import lifecycle, money
-from app.pricing import fx
+from app.pricing import fx, policy_values
 
 log = logging.getLogger(__name__)
 
@@ -273,24 +273,33 @@ async def detail(conn: asyncpg.Connection, staff: Staff, bill_id: str) -> dict[s
     return jsonable(out)
 
 
-async def list_bills(
-    conn: asyncpg.Connection,
-    staff: Staff,
+DUE_SOON_KEY = "supplier_bill_due_soon_days"
+
+
+async def due_soon_days(conn: asyncpg.Connection) -> int:
+    """AA-1159: the "due soon" window of the list, the reminder's own policy value (Pricing > Policy, in force today;
+    none in force is 503 ``policy_unavailable``)."""
+    on = await policy_values.today_utc(conn)
+    return (await policy_values.require_staff(conn, on, DUE_SOON_KEY)).integer(DUE_SOON_KEY)
+
+
+def bill_filter(
     *,
     status: str | None = None,
     supplier: str | None = None,
     case: str | None = None,
     overdue: bool | None = None,
     due_before: date | None = None,
+    due_soon_days: int | None = None,
     q: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> dict[str, Any]:
-    """Supplier bills, the most urgent first (open ones by due date, then the rest newest first)."""
+) -> tuple[str, list[Any]]:
+    """The WHERE text and arguments of the supplier bills list (over :data:`BILL_FROM`). The /billing list and the My
+    work tiles (AA-1159, :mod:`app.my_work`) both use it, so a tile equals the list total for the same filter.
+
+    ``due_soon_days``: open bills not overdue yet that fall due within that many days (the ``supplier_bill.due``
+    reminder's window)."""
     if status not in (None, "open", "all", *STATUSES):
         raise Invalid("invalid_filter", "unknown status")
-    if not 1 <= limit <= MAX_PAGE or offset < 0:
-        raise Invalid("invalid_page", f"limit is 1..{MAX_PAGE} and offset >= 0")
     args: list[Any] = []
     where = ["true"]
 
@@ -323,12 +332,48 @@ async def list_bills(
         where.append("bal.overdue" if overdue else "NOT bal.overdue")
     if due_before:
         add("b.due_date <= {p}", due_before)
+    if due_soon_days is not None:
+        # the view's overdue is "past the due date in the session's day" (current_date): the same clock here
+        add(
+            "b.status IN ('received', 'approved') AND NOT bal.overdue AND b.due_date <= current_date + {p}::int",
+            due_soon_days,
+        )
     if q:
         add(
             "(b.code ILIKE {p} OR b.bill_number ILIKE {p} OR s.company_name ILIKE {p} OR tc.code ILIKE {p})",
             paging.contains(q),
         )
-    clause = " AND ".join(where)
+    return " AND ".join(where), args
+
+
+async def list_bills(
+    conn: asyncpg.Connection,
+    staff: Staff,
+    *,
+    status: str | None = None,
+    supplier: str | None = None,
+    case: str | None = None,
+    overdue: bool | None = None,
+    due_before: date | None = None,
+    due_soon: bool | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Supplier bills, the most urgent first (open ones by due date, then the rest newest first).
+
+    ``due_soon``: only the open bills falling due within ``supplier_bill_due_soon_days`` and not overdue yet."""
+    if not 1 <= limit <= MAX_PAGE or offset < 0:
+        raise Invalid("invalid_page", f"limit is 1..{MAX_PAGE} and offset >= 0")
+    clause, args = bill_filter(
+        status=status,
+        supplier=supplier,
+        case=case,
+        overdue=overdue,
+        due_before=due_before,
+        due_soon_days=await due_soon_days(conn) if due_soon else None,
+        q=q,
+    )
     total = await conn.fetchval(f"SELECT count(*) {BILL_FROM} WHERE {clause}", *args)  # noqa: S608
     args.extend([limit, offset])
     rows = await conn.fetch(
@@ -341,6 +386,18 @@ async def list_bills(
     return jsonable(
         {"items": [bill_out(r, staff) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset}
     )
+
+
+async def queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
+    """AA-1159 My work: how many bills the list shows for ``filters`` (:func:`bill_filter`), when the oldest of them was
+    entered and the earliest due date among them."""
+    clause, args = bill_filter(**filters)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(b.created_at) AS oldest_at, min(b.due_date) AS earliest_due"
+        f" {BILL_FROM} WHERE {clause}",  # noqa: S608 — fixed fragments, bound values
+        *args,
+    )
+    return dict(row)
 
 
 async def summary(conn: asyncpg.Connection) -> dict[str, Any]:

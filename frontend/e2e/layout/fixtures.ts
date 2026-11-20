@@ -60,6 +60,7 @@ import type { CountryDetail, CountryItem, CountryList, DestinationDetail, Destin
 import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
+import type { MyWorkSummary } from "../../lib/api/myWork";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
 import type { AgencyProfitMonth, CaseProfit, DepartureCosts, DepartureProfit, FinanceDeparture, OrderLine, SupplierOrder } from "../../lib/api/finance";
 import type {
@@ -2058,6 +2059,23 @@ function financeAnswer(p: string, seg: string[]): FixtureAnswer | null {
   return null;
 }
 
+// AA-1159: the My work band (one tile per queue of the admin fixture's capabilities; invented numbers).
+const MY_WORK: MyWorkSummary = {
+  role: "admin",
+  generated_at: "2026-11-20T08:00:00Z",
+  tiles: [
+    { key: "my_open_cases", capability: "trip_case.read", group: "work", filter: { tab: "mine", status: "discovery,building" }, available: true, count: 4, oldest_at: "2026-10-02T03:00:00Z", earliest_due: null, days: null },
+    { key: "trip_checks_overdue", capability: "ops.read", group: "work", filter: { due: "overdue" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-12", days: null },
+    { key: "b2b_on_request", capability: "b2b_desk.read", group: "work", filter: {}, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
+    { key: "supplier_bills_overdue", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "overdue" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-11-01", days: null },
+    { key: "supplier_bills_due_soon", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "soon" }, available: true, count: 3, oldest_at: null, earliest_due: "2026-11-21", days: 3 },
+    { key: "agency_invoices_overdue", capability: "agency_billing.read", group: "work", filter: { status: "overdue" }, available: false, count: null, oldest_at: null, earliest_due: null, days: null },
+    { key: "supplier_bills_to_approve", capability: "bill.approve", group: "approve", filter: { bill_status: "received" }, available: true, count: 5, oldest_at: "2026-11-15T09:30:00Z", earliest_due: null, days: null },
+    { key: "supplier_bills_to_pay", capability: "payout.write", group: "approve", filter: { bill_status: "approved" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-25", days: null },
+    { key: "agency_payments_to_approve", capability: "agency_payment.approve", group: "approve", filter: { tab: "payments" }, available: true, count: 1, oldest_at: "2026-11-19T02:00:00Z", earliest_due: null, days: null },
+  ],
+};
+
 export function answer(method: string, path: string, query: URLSearchParams): FixtureAnswer | null {
   if (method !== "GET") return null;
   const seg = path.split("/").filter(Boolean);
@@ -2153,6 +2171,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "trip-checks") return ok({ items: range(ROWS).map(tripCheck), total: 73, limit: ROWS, offset: 0 } satisfies TripCheckPage);
   if (p === "case-lifecycle/runs") return ok({ items: LIFECYCLE_RUNS, scheduled_mode: "live", schedule_utc_hour: 1 });
+  if (p === "my-work/summary") return ok(MY_WORK);
   if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
   if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));

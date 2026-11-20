@@ -111,19 +111,16 @@ def _out(row: Any) -> dict[str, Any]:
     return d
 
 
-async def list_invoices(
-    conn: asyncpg.Connection,
+def invoice_filter(
     *,
     kind: str | None = None,
     status: str | None = None,
     tenant_id: str | None = None,
     q: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
     statuses: Sequence[str] | None = None,
-) -> dict[str, Any]:
-    """A page of invoices, newest first. ``statuses`` limits the page to those statuses whatever ``status`` asks
-    (the agency read passes :data:`AGENCY_STATUSES`, so a draft is never listed to an agency)."""
+) -> tuple[str, list[Any]]:
+    """The WHERE text and arguments of the invoice list (over :data:`INVOICE_FROM`). The /agency-billing list and the
+    My work tile (AA-1159, :mod:`app.my_work`) both use it, so the tile equals the list total for the same filter."""
     where, args = ["true"], []
 
     def arg(v: Any) -> str:
@@ -147,7 +144,40 @@ async def list_invoices(
         where.append(
             f"(i.number ILIKE {arg(like)} OR p.agency_name ILIKE ${len(args)} OR i.e_invoice_no ILIKE ${len(args)})"
         )
-    cond = " AND ".join(where)
+    return " AND ".join(where), args
+
+
+async def queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
+    """AA-1159 My work: how many invoices the list shows for ``filters`` (:func:`invoice_filter`), when the oldest of
+    them was created and the earliest due date among them."""
+    cond, args = invoice_filter(**filters)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(i.created_at) AS oldest_at, min(i.due_date) AS earliest_due"
+        f" {INVOICE_FROM} WHERE {cond}",  # noqa: S608
+        *args,
+    )
+    return dict(row)
+
+
+async def list_invoices(
+    conn: asyncpg.Connection,
+    *,
+    kind: str | None = None,
+    status: str | None = None,
+    tenant_id: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    statuses: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """A page of invoices, newest first. ``statuses`` limits the page to those statuses whatever ``status`` asks
+    (the agency read passes :data:`AGENCY_STATUSES`, so a draft is never listed to an agency)."""
+    cond, args = invoice_filter(kind=kind, status=status, tenant_id=tenant_id, q=q, statuses=statuses)
+
+    def arg(v: Any) -> str:
+        args.append(v)
+        return f"${len(args)}"
+
     total = await conn.fetchval(f"SELECT count(*) {INVOICE_FROM} WHERE {cond}", *args)  # noqa: S608
     rows = await conn.fetch(
         f"SELECT {INVOICE_COLUMNS} {INVOICE_FROM} WHERE {cond}"  # noqa: S608

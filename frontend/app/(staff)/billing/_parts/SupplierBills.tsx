@@ -82,6 +82,9 @@ export function SupplierBillsList({
   const query = {
     status: get("bill_status") || undefined,
     overdue: get("bill_due") === "overdue" ? true : undefined,
+    // AA-1159: "Due soon" = open bills not overdue yet that fall due within the reminder's window (policy
+    // supplier_bill_due_soon_days); the My work tile of the dashboard opens this view.
+    due_soon: get("bill_due") === "soon" ? true : undefined,
     q: get("q") || undefined,
     supplier_id: supplier?.id,
     // ?case=TC-… (from a case's Cost vs billed panel): the bills of that case, or with a line of it.
@@ -208,7 +211,16 @@ export function SupplierBillsList({
                 ],
                 width: 200,
               },
-              { key: "bill_due", label: t("Due"), allLabel: t("Any"), options: [{ value: "overdue", label: t("Overdue") }], width: 120 },
+              {
+                key: "bill_due",
+                label: t("Due"),
+                allLabel: t("Any"),
+                options: [
+                  { value: "overdue", label: t("Overdue") },
+                  { value: "soon", label: t("Due soon") },
+                ],
+                width: 130,
+              },
             ]}
           />
         }

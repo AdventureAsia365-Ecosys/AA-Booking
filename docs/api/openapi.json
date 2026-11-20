@@ -22460,6 +22460,34 @@
         ]
       }
     },
+    "/booking/my-work/summary": {
+      "get": {
+        "operationId": "my_work_summary_booking_my_work_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Work Summary Booking My Work Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Work Summary",
+        "tags": [
+          "my-work"
+        ]
+      }
+    },
     "/booking/notifications": {
       "get": {
         "operationId": "list_notifications_booking_notifications_get",
@@ -26916,6 +26944,24 @@
                 }
               ],
               "title": "Due Before"
+            }
+          },
+          {
+            "description": "open bills not overdue that fall due within supplier_bill_due_soon_days (AA-1159)",
+            "in": "query",
+            "name": "due_soon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "open bills not overdue that fall due within supplier_bill_due_soon_days (AA-1159)",
+              "title": "Due Soon"
             }
           },
           {

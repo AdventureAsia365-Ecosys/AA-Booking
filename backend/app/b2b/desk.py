@@ -292,6 +292,17 @@ async def list_on_request(
     }
 
 
+async def on_request_queue(conn: asyncpg.Connection, *, state: str = "open") -> dict[str, Any]:
+    """AA-1159 My work: how many lines the On request tab lists for ``state`` (its WHERE, :data:`STATE_WHERE`) and when
+    the oldest of their bookings was confirmed."""
+    if state not in STATES:
+        raise Invalid("invalid_state", f"state must be one of {', '.join(STATES)}")
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(h.confirmed_at) AS oldest_at {LINE_FROM} WHERE {STATE_WHERE[state]}"  # noqa: S608
+    )
+    return {**dict(row), "earliest_due": None}
+
+
 async def _line(conn: asyncpg.Connection, hold_id: str, line_ref: str, now: datetime) -> dict[str, Any]:
     row = await conn.fetchrow(
         f"SELECT {LINE_COLUMNS} {LINE_FROM} WHERE l.hold_id = $1::uuid AND l.line_ref = $2",  # noqa: S608

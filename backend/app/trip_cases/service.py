@@ -138,8 +138,7 @@ def _sort_clause(sort: str | None) -> str:
     return f"{column} {'DESC' if desc else 'ASC'} NULLS LAST, tc.id"
 
 
-async def list_cases(
-    conn: asyncpg.Connection,
+def case_filter(
     *,
     statuses: list[str] | None = None,
     assignee: str | None = None,
@@ -147,14 +146,9 @@ async def list_cases(
     source: str | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
-    sort: str | None = None,
-    limit: int = 25,
-    offset: int = 0,
-) -> dict[str, Any]:
-    """``assignee``: a CIS user id (open assignment in any role), or ``none`` for unassigned cases.
-
-    ``q`` matches the case code. ``created_to`` is inclusive. Every channel is listed: the ``b2c`` cases are the kept
-    history of the retired B2C half (read-only, AA-1046), told apart by ``channel``."""
+) -> tuple[str, list[Any]]:
+    """The WHERE text and arguments of the trip case list (over ``booking.trip_cases tc``). The /cases list and the My
+    work tile (AA-1159, :mod:`app.my_work`) both use it, so the tile equals the list total for the same filter."""
     where = ["tc.deleted_at IS NULL"]
     args: list[Any] = []
 
@@ -188,8 +182,46 @@ async def list_cases(
         add("tc.created_at >= {p}", _day_start(created_from))
     if created_to:
         add("tc.created_at < {p}", _day_start(created_to + timedelta(days=1)))
+    return " AND ".join(where), args
+
+
+async def case_queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
+    """AA-1159 My work: how many cases the list shows for ``filters`` (:func:`case_filter`) and when the oldest of them
+    was opened."""
+    clause, args = case_filter(**filters)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(tc.created_at) AS oldest_at FROM booking.trip_cases tc WHERE {clause}",  # noqa: S608
+        *args,
+    )
+    return {**dict(row), "earliest_due": None}
+
+
+async def list_cases(
+    conn: asyncpg.Connection,
+    *,
+    statuses: list[str] | None = None,
+    assignee: str | None = None,
+    q: str | None = None,
+    source: str | None = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+    sort: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """``assignee``: a CIS user id (open assignment in any role), or ``none`` for unassigned cases.
+
+    ``q`` matches the case code. ``created_to`` is inclusive. Every channel is listed: the ``b2c`` cases are the kept
+    history of the retired B2C half (read-only, AA-1046), told apart by ``channel``."""
+    clause, args = case_filter(
+        statuses=statuses,
+        assignee=assignee,
+        q=q,
+        source=source,
+        created_from=created_from,
+        created_to=created_to,
+    )
     order = _sort_clause(sort)
-    clause = " AND ".join(where)
     base = "FROM booking.trip_cases tc"
     total = await conn.fetchval(f"SELECT count(*) {base} WHERE {clause}", *args)  # noqa: S608
     rows = await conn.fetch(

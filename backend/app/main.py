@@ -70,6 +70,7 @@ from app.routers import (
     docs,
     finance,
     health,
+    my_work,
     notifications,
     ops,
     price_versions,
@@ -243,6 +244,7 @@ def create_app(
     app.include_router(supplier_bills.router)
     app.include_router(agency_billing.router)
     app.include_router(finance.router)  # AA-1074: departure costs, purchase orders, profit (bk-045)
+    app.include_router(my_work.router)  # AA-1159: the My work band of the staff dashboard
     return app
 
 

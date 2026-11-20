@@ -277,9 +277,10 @@ CASE_PROGRESS = """
 """
 # Overdue = open with a due date before today, the board's definition (v_trip_check_board.checks_overdue).
 COUNT_KEYS = ("open", "overdue", "done", "not_applicable", "all")
-COUNTS = """
+OVERDUE = "k.status = 'open' AND k.due_date < current_date"
+COUNTS = f"""
     count(*) FILTER (WHERE k.status = 'open') AS open,
-    count(*) FILTER (WHERE k.status = 'open' AND k.due_date < current_date) AS overdue,
+    count(*) FILTER (WHERE {OVERDUE}) AS overdue,
     count(*) FILTER (WHERE k.status = 'done') AS done,
     count(*) FILTER (WHERE k.status = 'not_applicable') AS not_applicable,
     count(*) AS "all"
@@ -291,6 +292,21 @@ COUNT_WHERE = (
     " AND ($4::text IS NULL OR tc.code = upper($4) OR tc.id::text = $4)"
     " AND ($5::text IS NULL OR tc.code ILIKE $5 OR k.title ILIKE $5)"
 )
+
+
+async def overdue_queue(conn: asyncpg.Connection) -> dict[str, Any]:
+    """AA-1159 My work: the Overdue tab of /trip-checks with no other filter (its badge count, :data:`COUNTS`) and the
+    earliest due date among those checks."""
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(k.due_date) AS earliest_due {CHECK_FROM}"  # noqa: S608 — constants only
+        f" WHERE {COUNT_WHERE} AND {OVERDUE}",
+        list(BOARD_STATUSES),
+        None,
+        None,
+        None,
+        None,
+    )
+    return {**dict(row), "oldest_at": None}
 
 
 def list_row_out(row: Any, staff: Staff) -> dict[str, Any]:
