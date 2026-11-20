@@ -17,8 +17,9 @@ An **allotment** reserves ``seats`` on one departure for one agency (``booking.b
 
 Seats are counted in :mod:`app.b2b.departures` (``live_allotments`` / ``reserved_for_others``): an agency's unused
 allotment (seats minus its own held + sold on the departure) is kept from every other agency; its own holds draw on
-it first. Staff endpoints: ``app.routers.catalog`` (``b2b_desk.read`` / ``b2b_desk.write``). Ids, seats and dates
-only: no free text, no traveller data.
+it first. Staff endpoints: ``app.routers.catalog`` (``b2b_desk.read`` / ``b2b_desk.write``; approving and ending an
+allotment need ``b2b_desk.approve``, AA-1155 T4.1, checked here before anything is read: 403 ``forbidden``). Ids, seats
+and dates only: no free text, no traveller data.
 """
 
 from __future__ import annotations
@@ -37,6 +38,15 @@ from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.jobs.queue import Job
 
 log = logging.getLogger(__name__)
+
+APPROVE = "b2b_desk.approve"
+
+
+def require_approve(staff: Staff) -> None:
+    """AA-1155 T4.1: approving or ending an allotment is a decision (``b2b_desk.approve``), not a desk write."""
+    if not staff.can(APPROVE):
+        raise Forbidden("forbidden", "approving or ending an allotment needs b2b_desk.approve (an approval)")
+
 
 KIND = "bk_allotment_release"
 ACTOR = "system:bk_allotment_release"
@@ -250,6 +260,7 @@ async def approve(
 ) -> dict[str, Any]:
     """The checker step (call inside a transaction): another person than the maker puts it in force, ending the one it
     replaces. Approving an allotment in force again returns it unchanged."""
+    require_approve(staff)
     today = today or datetime.now(UTC).date()
     row = await _row(conn, allotment_id, lock=True)
     st = state(row)
@@ -317,6 +328,7 @@ async def approve(
 async def end(conn: asyncpg.Connection, staff: Staff, allotment_id: str) -> dict[str, Any]:
     """End an allotment (call inside a transaction): a pending one is rejected, one in force or released is withdrawn
     (its seats go back to sale at once). Ending an ended one returns it unchanged."""
+    require_approve(staff)
     row = await _row(conn, allotment_id, lock=True)
     st = state(row)
     if st == "ended":

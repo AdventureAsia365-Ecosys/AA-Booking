@@ -15,6 +15,11 @@ Row status, on the pricing day ``today``:
 
 S280: a new row takes effect today or later (422 ``effective_in_past``), and a row whose day has passed is never
 approved (409 ``effective_date_passed``). Approve, reject and withdraw take a per-row advisory lock, so they never race.
+
+AA-1155 T4.1 (make / approve split): approving and rejecting a row is an approval and needs ``pricing.approve`` (admin,
+contracting), checked by :func:`require_approve` before anything is read (403 ``forbidden``); making a row and
+withdrawing one's own stay ``pricing.write``. The agency tier discounts and rate cards (:mod:`app.b2b.agency_pricing`)
+and the cancellation policies (:mod:`app.b2b.cancellation`) go through the same functions.
 """
 
 from __future__ import annotations
@@ -155,6 +160,15 @@ NOT_FOUND = {
 }
 
 
+APPROVE = "pricing.approve"
+
+
+def require_approve(staff: Staff) -> None:
+    """AA-1155 T4.1: approving or rejecting a pricing row is an approval (``pricing.approve``), not a write."""
+    if not staff.can(APPROVE):
+        raise Forbidden("forbidden", "approving or rejecting a pricing row needs pricing.approve (an approval)")
+
+
 def _person(ref: str | None, name: str | None) -> dict[str, Any] | None:
     if ref is None:
         return None
@@ -173,10 +187,7 @@ def _common(row: Any, staff: Staff) -> dict[str, Any]:
         "approved_by": _person(row["approved_by"], row["approved_by_name"]),
         "approved_at": row["approved_at"],
         # Maker-checker, as the approve endpoint decides it (the UI only shows the button).
-        "can_approve": pending
-        and not day_passed
-        and staff.can("pricing.write")
-        and row["created_by"] != staff.cis_user_id,
+        "can_approve": pending and not day_passed and staff.can(APPROVE) and row["created_by"] != staff.cis_user_id,
         "day_passed": day_passed,
     }
 
@@ -188,7 +199,7 @@ def closable(row: Any, staff: Staff) -> dict[str, Any]:
     writer = staff.can("pricing.write")
     mine = row["created_by"] == staff.cis_user_id
     return {
-        "can_reject": pending and writer and not mine,
+        "can_reject": pending and staff.can(APPROVE) and not mine,
         "can_withdraw": pending and writer and mine,
         "closed_by": _person(row["closed_by"], row["closed_by_name"]),
         "closed_at": row["closed_at"],
@@ -415,7 +426,10 @@ async def close_row(
     conn: asyncpg.Connection, staff: Staff, entity_type: str, entity_id: str, *, event: str, reason: str | None
 ) -> None:
     """S280 (bk-058): end a pending row: ``rejected`` by a second person with a reason, ``withdrawn`` by its maker.
-    404 / 409 ``already_approved`` / ``already_decided`` / 403 ``own_row`` / ``not_maker`` / 422 ``reason_required``."""
+    404 / 409 ``already_approved`` / ``already_decided`` / 403 ``own_row`` / ``not_maker`` / 422 ``reason_required``.
+    AA-1155 T4.1: a rejection needs ``pricing.approve`` (403 ``forbidden`` before any read)."""
+    if event == "rejected":
+        require_approve(staff)
     why = _close_reason(event, reason)
     row = await _locked_row(conn, entity_type, entity_id)
     if row["approval_id"] is not None:
@@ -440,7 +454,9 @@ async def approve_row(conn: asyncpg.Connection, staff: Staff, entity_type: str, 
     """Second-person approval of one policy row (``POLICY_SQL`` entity types); 404 / 409 / 403 ``own_row``.
 
     S280: a row whose day has passed is 409 ``effective_date_passed``: approved now it would apply backwards, or be
-    superseded at once by a newer row (the maker enters it again with a later day)."""
+    superseded at once by a newer row (the maker enters it again with a later day). AA-1155 T4.1: needs
+    ``pricing.approve`` (403 ``forbidden`` before any read)."""
+    require_approve(staff)
     row = await _locked_row(conn, entity_type, entity_id)
     if row["approval_id"] is not None:
         raise Conflict("already_approved", "this row is already approved")

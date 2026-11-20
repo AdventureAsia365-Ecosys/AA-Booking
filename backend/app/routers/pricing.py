@@ -44,6 +44,8 @@ MAX_ITEMS = 200
 CanPrice = Annotated[Staff, Depends(require("pricing.read"))]
 # Entering and approving rules / FX rows: contracting owns rates, admin backs it up (ADR 0005 d8).
 CanWritePricing = Annotated[Staff, Depends(require("pricing.write"))]
+# AA-1155 T4.1: the checker routes (approve, reject) need pricing.approve; the service checks it again first.
+CanApprovePricing = Annotated[Staff, Depends(require("pricing.approve"))]
 Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
@@ -230,7 +232,7 @@ async def create_rule(body: RuleCreate, staff: CanWritePricing, pool: Pool) -> d
 
 
 @router.post("/rules/{rule_id}/approve")
-async def approve_rule(rule_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_rule(rule_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.approve_rule(conn, staff, str(rule_id), today=_today())
 
@@ -244,7 +246,7 @@ class RowDecision(BaseModel):
 
 
 @router.post("/rules/{rule_id}/reject")
-async def reject_rule(rule_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def reject_rule(rule_id: uuid.UUID, body: RowDecision, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.close_rule(conn, staff, str(rule_id), event="rejected", reason=body.reason, today=_today())
 
@@ -275,13 +277,13 @@ async def create_fx_rate(body: FxRateCreate, staff: CanWritePricing, pool: Pool)
 
 
 @router.post("/fx-rates/{fx_id}/approve")
-async def approve_fx_rate(fx_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_fx_rate(fx_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.approve_fx_rate(conn, staff, str(fx_id), today=_today())
 
 
 @router.post("/fx-rates/{fx_id}/reject")
-async def reject_fx_rate(fx_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def reject_fx_rate(fx_id: uuid.UUID, body: RowDecision, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await policy.close_fx_rate(conn, staff, str(fx_id), event="rejected", reason=body.reason, today=_today())
 
@@ -336,14 +338,14 @@ async def create_cancellation_policy(
 
 
 @router.post("/cancellation-policies/{policy_id}/approve")
-async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanWritePricing, pool: Pool) -> dict[str, Any]:
+async def approve_cancellation_policy(policy_id: uuid.UUID, staff: CanApprovePricing, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await cancellation.approve_policy(conn, staff, str(policy_id), today=_today())
 
 
 @router.post("/cancellation-policies/{policy_id}/reject")
 async def reject_cancellation_policy(
-    policy_id: uuid.UUID, body: RowDecision, staff: CanWritePricing, pool: Pool
+    policy_id: uuid.UUID, body: RowDecision, staff: CanApprovePricing, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await cancellation.close_policy(

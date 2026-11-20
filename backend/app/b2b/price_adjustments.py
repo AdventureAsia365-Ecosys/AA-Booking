@@ -4,16 +4,17 @@ An **adjustment** changes the price of the tour (``tp:``) lines on one departure
 the line price: -0.10 = 10 % off) or a signed ``amount`` per traveller (adults + children) in one currency, with a
 ``reason``. Rows are append-only facts (``booking.departure_price_adjustments``), like the allotments:
 
-- **Pending → in force** by a second staff member with ``pricing.write`` (maker-checker: the maker never approves; a
-  DB CHECK too). At most one in force and one pending per departure.
+- **Pending → in force** by a second staff member with ``pricing.approve`` (AA-1155 T4.1; maker-checker: the maker
+  never approves; a DB CHECK too). At most one in force and one pending per departure.
 - **A change** is a new pending row naming the one in force it ``replaces``; approving it ends the old one
   (``replaced``) in the same transaction.
-- **End**: a pending row is ``rejected``, one in force is ``withdrawn``.
+- **End**: a pending row is ``rejected``, one in force is ``withdrawn``. Both are decisions on a price and need
+  ``pricing.approve`` (AA-1155 T4.1), checked before anything is read (403 ``forbidden``).
 
 The quote engine (:mod:`app.b2b.quotes`) reads the one in force (:func:`in_force`) and applies it to the ``tp:`` lines
 on that departure after the agency discount; a line that then sells under the rule's floor margin is still sold and the
 line's ``price_note`` says ``below_floor``. Staff endpoints: ``app.routers.b2b_desk`` (read ``b2b_desk.read``, write
-and approve ``pricing.write``).
+``pricing.write``, approve and end ``pricing.approve``).
 """
 
 from __future__ import annotations
@@ -67,6 +68,15 @@ class Adjustment:
         return {"id": self.id, "amount": _text(self.amount or Decimal(0)), "currency": self.currency}
 
 
+APPROVE = "pricing.approve"
+
+
+def require_approve(staff: Staff) -> None:
+    """AA-1155 T4.1: approving or ending a price adjustment is a decision on a price (``pricing.approve``)."""
+    if not staff.can(APPROVE):
+        raise Forbidden("forbidden", "approving or ending a price adjustment needs pricing.approve (an approval)")
+
+
 def _text(value: Decimal) -> str:
     return format(value.normalize(), "f") if value != 0 else "0"
 
@@ -118,10 +128,7 @@ def adjustment_out(row: Any, staff: Staff | None = None) -> dict[str, Any]:
         "ended_at": row["ended_at"],
         "end_reason": row["end_reason"],
         "can_approve": (
-            st == "pending"
-            and staff is not None
-            and staff.can("pricing.write")
-            and row["created_by"] != staff.cis_user_id
+            st == "pending" and staff is not None and staff.can(APPROVE) and row["created_by"] != staff.cis_user_id
         ),
     }
 
@@ -243,6 +250,7 @@ async def create(conn: asyncpg.Connection, staff: Staff, departure_id: str, data
 async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) -> dict[str, Any]:
     """The checker step (call inside a transaction): another person than the maker puts it in force, ending the one in
     force. Approving one in force again returns it unchanged."""
+    require_approve(staff)
     row = await _row(conn, adjustment_id, lock=True)
     st = state(row)
     if st == "in_force":
@@ -283,6 +291,7 @@ async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) ->
 async def end(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) -> dict[str, Any]:
     """End an adjustment (call inside a transaction): a pending one is rejected, one in force is withdrawn (quotes from
     now price without it). Ending an ended one returns it unchanged."""
+    require_approve(staff)
     row = await _row(conn, adjustment_id, lock=True)
     st = state(row)
     if st == "ended":

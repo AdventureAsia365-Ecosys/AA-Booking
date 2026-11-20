@@ -35,8 +35,8 @@ AA-1073 rest (bk-048):
   /departures/{id}/staff`` / ``DELETE /departure-staff/{id}``, ``ops.write``.
 - Departure fees (``app.b2b.departure_fees``): ``GET /departure-fees``, ``POST /departures/{id}/fees``
   (``b2b_desk.write``), ``POST /departure-fees/{id}/approve`` / ``…/reject`` (``b2b_desk.approve``, never the maker).
-- Price adjustments (``app.b2b.price_adjustments``): ``POST /departures/{id}/price-adjustments``, ``POST
-  /price-adjustments/{id}/approve`` (never the maker) and ``…/end``, ``pricing.write``.
+- Price adjustments (``app.b2b.price_adjustments``): ``POST /departures/{id}/price-adjustments`` (``pricing.write``),
+  ``POST /price-adjustments/{id}/approve`` (never the maker) and ``…/end`` (``pricing.approve``, AA-1155 T4.1).
 """
 
 from __future__ import annotations
@@ -79,6 +79,7 @@ CanApprove = Annotated[Staff, Depends(require("b2b_desk.approve"))]
 CanOps = Annotated[Staff, Depends(require("ops.read"))]
 CanOpsWrite = Annotated[Staff, Depends(require("ops.write"))]
 CanPrice = Annotated[Staff, Depends(require("pricing.write"))]
+CanApprovePrice = Annotated[Staff, Depends(require("pricing.approve"))]  # AA-1155 T4.1
 BookingRef = Annotated[str, Path(min_length=1, max_length=64, description="trip case id or code")]
 IdemKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)]
 LineRef = Annotated[str, Path(min_length=1, max_length=64)]
@@ -599,7 +600,7 @@ async def post_price_adjustment(
 
 @router.post("/price-adjustments/{adjustment_id}/approve")
 async def approve_price_adjustment(
-    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanPrice, pool: Pool
+    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanApprovePrice, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await price_adjustments.approve(conn, staff, str(adjustment_id))
@@ -607,7 +608,7 @@ async def approve_price_adjustment(
 
 @router.post("/price-adjustments/{adjustment_id}/end")
 async def end_price_adjustment(
-    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanPrice, pool: Pool
+    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanApprovePrice, pool: Pool
 ) -> dict[str, Any]:
     """A pending adjustment is rejected, one in force withdrawn."""
     async with pool.acquire() as conn, conn.transaction():

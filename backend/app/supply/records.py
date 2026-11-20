@@ -9,6 +9,8 @@ and ``country_code`` follows it. Records are addressed by UUID or by code (``HTL
 - **Supplier.** Set on create, never moved afterwards (rates of the record live under that supplier's contracts). The
   supplier must be active and carry the matching category (hotel; transport for a transfer, otherwise the service type).
 - **Never deleted.** ``deactivate`` / ``activate`` only; a record of an inactive supplier cannot be activated.
+  Activating is an approval (AA-1155 T4.1): it needs ``supplier.activate`` on top of the route's ``supply.write``
+  (403 ``forbidden`` before anything is read); deactivating stays ``supply.write``.
 - **Room types** (hotels only): name, max occupancy, bed types, internal notes, status. Rates hang off a room type.
 - A service's pricing ``unit`` cannot change once it has rates (the rates were entered per that unit).
 - **Read-back** (AA-835 S4): the detail carries ``content``, the customer content CIS published for the record
@@ -29,7 +31,7 @@ import asyncpg
 
 from app import audit, paging
 from app.auth.staff import Staff
-from app.errors import Conflict, Invalid, NotFound
+from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
 from app.supply import content
@@ -491,6 +493,9 @@ async def set_status(
 ) -> dict[str, Any]:
     if target not in STATUSES:
         raise Invalid("unknown_status", f"status must be one of {', '.join(STATUSES)}")
+    if target == "active" and not staff.can("supplier.activate"):
+        # AA-1155 T4.1: activating a hotel or a service is an approval, never implied by supply.write.
+        raise Forbidden("forbidden", f"activating a {kind.entity} needs supplier.activate (an approval, not a write)")
     current = await resolve(conn, kind, ref, lock=True)
     if current["status"] == target:
         return {**current, "changed": []}

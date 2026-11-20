@@ -23,10 +23,10 @@ the RRP (``price.from.v1``, the public "from" price) stays the same for every ag
   (the discount is the contract's); the staff page shows the margin left after each tier's discount under the rule
   in force and flags it below the floor (:func:`margin_after_discount`).
 
-Staff admin (``/booking/pricing/partner-*``, ``app.routers.agency_pricing``): reads ``pricing.read``, writes and
-approvals ``pricing.write``; the creator of a discount or card row cannot approve it (403 ``own_row``, and the bk-043
-trigger). Assigning a partner's tier is audited (``b2b_partner.tier_changed``); it changes no rate, so it needs no
-second person.
+Staff admin (``/booking/pricing/partner-*``, ``app.routers.agency_pricing``): reads ``pricing.read``, writes
+``pricing.write``, approvals ``pricing.approve`` (AA-1155 T4.1; 403 ``forbidden`` before any read); the creator of a
+discount or card row cannot approve it (403 ``own_row``, and the bk-043 trigger). Assigning a partner's tier is audited
+(``b2b_partner.tier_changed``); it changes no rate, so it needs no second person.
 """
 
 from __future__ import annotations
@@ -504,6 +504,7 @@ def _card_label(row: dict[str, Any]) -> str:
 
 
 async def _approve(conn: asyncpg.Connection, staff: Staff, entity_type: str, row_id: str) -> None:
+    pricing_policy.require_approve(staff)  # AA-1155 T4.1: an approval (pricing.approve), checked before any read
     row = await conn.fetchrow(APPROVAL_SQL[entity_type], row_id)
     if row is None:
         raise NotFound(NOT_FOUND[entity_type], f"no {entity_type.replace('_', ' ')} with this id")

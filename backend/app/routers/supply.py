@@ -1,9 +1,11 @@
 """Hotels, room types, services and supplier rates for staff (bk-010, AA-823; ADR 0004a d1, UI spec §6.3).
 
-Permissions: ``supply.read`` (admin, contracting, sales) for every GET; ``supply.write`` (admin, contracting) for every
-write. Facts only: there is no customer-facing description field anywhere here (ADR 0004a d2, Q17). AA-835 S4: the
-detail GETs carry ``content``, the customer content CIS published (read-only, ``app.supply.content``), and supplier
-photos are uploaded here (``…/media``, ``app.supply.media``) with a ``usage_rights`` flag CIS obeys.
+Permissions: ``supply.read`` (admin, contracting, sales, finance) for every GET; ``supply.write`` (admin, contracting)
+for every write. AA-1155 T4.1: activating a hotel or a service also needs ``supplier.activate`` (admin, contracting;
+checked in ``app.supply.records.set_status`` before any read, 403 ``forbidden``). Facts only: there is no
+customer-facing description field anywhere here (ADR 0004a d2, Q17). AA-835 S4: the detail GETs carry ``content``, the
+customer content CIS published (read-only, ``app.supply.content``), and supplier photos are uploaded here (``…/media``,
+``app.supply.media``) with a ``usage_rights`` flag CIS obeys.
 """
 
 from __future__ import annotations
