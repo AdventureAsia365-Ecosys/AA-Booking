@@ -14943,7 +14943,7 @@
     },
     "/booking/b2b-desk/price-adjustments/{adjustment_id}/end": {
       "post": {
-        "description": "A pending adjustment is rejected, one in force withdrawn.",
+        "description": "A pending adjustment is rejected, one in force withdrawn. The maker ends its own pending one with pricing.write;\nany other end needs pricing.approve (AA-1155 T4.1, checked in ``price_adjustments.end``).",
         "operationId": "end_price_adjustment_booking_b2b_desk_price_adjustments__adjustment_id__end_post",
         "parameters": [
           {
@@ -17257,6 +17257,7 @@
     },
     "/booking/catalog/allotments/{allotment_id}/end": {
       "post": {
+        "description": "The maker withdraws its own pending allotment; rejecting another person's or ending one in force needs\nb2b_desk.approve (AA-1155 T4.1, checked in ``allotments.end``).",
         "operationId": "post_allotment_end_booking_catalog_allotments__allotment_id__end_post",
         "parameters": [
           {

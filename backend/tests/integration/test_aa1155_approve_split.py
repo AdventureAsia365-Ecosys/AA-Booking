@@ -1,12 +1,14 @@
 """AA-1155 T4.1 (root spec R4.3) over HTTP on a real PostgreSQL, as role ``booking``.
 
 The approvals a write capability carried until now are their own capabilities: ``pricing.approve`` (approve / reject a
-pricing rule, FX rate or cancellation policy; approve an agency tier discount or rate card; approve or end a departure
-price adjustment), ``b2b_desk.approve`` (approve or end an agency allotment) and ``supplier.activate`` (activate a hotel
-or a service). No built-in role lacks them yet (admin and contracting hold all three), so the first test takes
-``contracting`` out of the three for its duration: a contracting user is then exactly the later custom maker role, who
-makes every row (201) and is refused every decision (403 ``forbidden``), while an admin decides (200). The second test
-keeps the built-in matrix: contracting approves an admin's rows (200), sales still cannot approve or end allotments.
+pricing rule, FX rate or cancellation policy; approve an agency tier discount or rate card; approve a departure price
+adjustment or end another person's / one in force), ``b2b_desk.approve`` (the same for an agency allotment) and
+``supplier.activate`` (activate a hotel or a service). No built-in role lacks them yet (admin and contracting hold all
+three), so the first test takes ``contracting`` out of the three for its duration: a contracting user is then exactly
+the later custom maker role, who makes every row (201), withdraws its own pending ones, creates hotels and services
+``inactive`` and is refused every decision (403 ``forbidden``), while an admin decides (200). The second test keeps the
+built-in matrix: contracting approves an admin's rows (200) and creates active records; sales still cannot approve an
+allotment or end another person's, but withdraws its own pending one.
 """
 
 from __future__ import annotations
@@ -151,6 +153,26 @@ async def _hotel_of(admin: asyncpg.Connection, room: str) -> str:  # noqa: F811
     return await admin.fetchval("SELECT hotel_id::text FROM booking.hotel_room_types WHERE id = $1::uuid", room)
 
 
+async def _supplier_of(admin: asyncpg.Connection, service: str) -> str:  # noqa: F811
+    return await admin.fetchval("SELECT supplier_id::text FROM booking.services WHERE id = $1::uuid", service)
+
+
+def _records(supplier: str, tag: str) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """A new hotel and a new service of ``supplier`` (a hotel and transport supplier), named with ``tag``."""
+    return (
+        ("hotels", {"supplier_id": supplier, "name": f"Invented hotel {tag}"}),
+        ("services", {"supplier_id": supplier, "service_type": "transfer", "title": f"Invented transfer {tag}"}),
+    )
+
+
+async def _propose_and_withdraw(c: httpx.AsyncClient, who: dict[str, str], departure: str, partner: str) -> None:
+    """``who`` proposes an allotment and ends it while it is pending (a withdrawal of its own row, not a decision)."""
+    allot = {"partner_id": partner, "seats": 1, "release_days_before": 10}
+    row = await _ok(await c.post(f"/catalog/departures/{departure}/allotments", json=allot, headers=who), 201)
+    ended = await _ok(await c.post(f"/catalog/allotments/{row['id']}/end", headers=who))
+    assert (ended["state"], ended["end_reason"]) == ("ended", "rejected")
+
+
 async def test_a_maker_without_the_approvals_is_refused_and_an_admin_decides(
     client: Client,  # noqa: F811
     admin: asyncpg.Connection,  # noqa: F811
@@ -180,11 +202,40 @@ async def test_a_maker_without_the_approvals_is_refused_and_an_admin_decides(
         "withdrawn"
     )
 
+    # Its own pending price adjustment and allotment too (the write right), but not another person's pending one nor
+    # one in force (the approval).
+    departure = rows["allotment"]["departure_id"]
+    await _propose_and_withdraw(c, maker, departure, plan["partner"])
+    adjustment = {"adjust_pct": "-0.05", "reason": "Invented shoulder season"}
+    url = f"/b2b-desk/departures/{departure}/price-adjustments"
+    own = await _ok(await c.post(url, json=adjustment, headers=maker), 201)
+    _refused(await c.post(f"/b2b-desk/price-adjustments/{own['id']}/end", headers=other))
+    ended = await _ok(await c.post(f"/b2b-desk/price-adjustments/{own['id']}/end", headers=maker))
+    assert (ended["state"], ended["end_reason"]) == ("ended", "rejected")
+    in_force = await _ok(await c.post(url, json=adjustment, headers=maker), 201)
+    await _ok(await c.post(f"/b2b-desk/price-adjustments/{in_force['id']}/approve", headers=boss))
+    _refused(await c.post(f"/b2b-desk/price-adjustments/{in_force['id']}/end", headers=maker))
+    allot = {"partner_id": plan["partner"], "seats": 1, "release_days_before": 10}
+    approved = await _ok(await c.post(f"/catalog/departures/{departure}/allotments", json=allot, headers=maker), 201)
+    await _ok(await c.post(f"/catalog/allotments/{approved['id']}/approve", headers=boss))
+    _refused(await c.post(f"/catalog/allotments/{approved['id']}/end", headers=maker))
+
     # Hotels and services: the maker deactivates (supply.write) but never activates (supplier.activate).
     for kind, ref in (("hotels", await _hotel_of(admin, plan["room"])), ("services", plan["service"])):
         assert (await _ok(await c.post(f"/{kind}/{ref}/deactivate", headers=maker)))["status"] == "inactive"
         _refused(await c.post(f"/{kind}/{ref}/activate", headers=other))
         assert (await _ok(await c.post(f"/{kind}/{ref}/activate", headers=boss)))["status"] == "active"
+
+    # A hotel or a service the maker creates starts inactive (the column default would make it active): an approver
+    # activates it. An admin's starts active.
+    supplier = await _supplier_of(admin, plan["service"])
+    for kind, body in _records(supplier, "1155 maker"):
+        made = await _ok(await c.post(f"/{kind}", json=body, headers=maker), 201)
+        assert made["status"] == "inactive", made
+        _refused(await c.post(f"/{kind}/{made['id']}/activate", headers=maker))
+        assert (await _ok(await c.post(f"/{kind}/{made['id']}/activate", headers=boss)))["status"] == "active"
+    for kind, body in _records(supplier, "1155 admin"):
+        assert (await _ok(await c.post(f"/{kind}", json=body, headers=boss), 201))["status"] == "active"
 
 
 async def test_built_in_contracting_still_approves_and_sales_does_not_decide_allotments(
@@ -205,6 +256,12 @@ async def test_built_in_contracting_still_approves_and_sales_does_not_decide_all
         await _ok(await c.post(path, json=body, headers=contracting))
     ended = await _ok(await c.get(f"/catalog/departures/{rows['allotment']['departure_id']}/allotments", headers=sales))
     assert [a["state"] for a in ended["items"]] == ["ended"]
+    # Sales still withdraws an allotment it proposed while it is pending (b2b_desk.write, its own row).
+    await _propose_and_withdraw(c, sales, rows["allotment"]["departure_id"], plan["partner"])
+
+    # Built-in contracting holds supplier.activate: what it creates starts active.
+    for kind, body in _records(await _supplier_of(admin, plan["service"]), "1155 contracting"):
+        assert (await _ok(await c.post(f"/{kind}", json=body, headers=contracting), 201))["status"] == "active"
 
     for kind, ref in (("hotels", await _hotel_of(admin, plan["room"])), ("services", plan["service"])):
         await _ok(await c.post(f"/{kind}/{ref}/deactivate", headers=boss))

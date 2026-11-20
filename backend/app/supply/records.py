@@ -10,7 +10,8 @@ and ``country_code`` follows it. Records are addressed by UUID or by code (``HTL
   supplier must be active and carry the matching category (hotel; transport for a transfer, otherwise the service type).
 - **Never deleted.** ``deactivate`` / ``activate`` only; a record of an inactive supplier cannot be activated.
   Activating is an approval (AA-1155 T4.1): it needs ``supplier.activate`` on top of the route's ``supply.write``
-  (403 ``forbidden`` before anything is read); deactivating stays ``supply.write``.
+  (403 ``forbidden`` before anything is read); deactivating stays ``supply.write``. For the same reason a record
+  created by a maker without ``supplier.activate`` starts ``inactive`` (an approver activates it).
 - **Room types** (hotels only): name, max occupancy, bed types, internal notes, status. Rates hang off a room type.
 - A service's pricing ``unit`` cannot change once it has rates (the rates were entered per that unit).
 - **Read-back** (AA-835 S4): the detail carries ``content``, the customer content CIS published for the record
@@ -398,6 +399,9 @@ async def get_record(conn: asyncpg.Connection, kind: Kind, ref: str) -> dict[str
 
 
 async def create_record(conn: asyncpg.Connection, kind: Kind, staff: Staff, data: dict[str, Any]) -> dict[str, Any]:
+    """A new hotel or service starts ``active`` only for a holder of ``supplier.activate`` (AA-1155 T4.1, as AA-1150 did
+    for suppliers): a maker with ``supply.write`` alone creates it ``inactive``, so activation stays an approval (the
+    column default is ``active``, hence the explicit value)."""
     values = normalize(kind, {k: v for k, v in data.items() if k in kind.editable})
     if not values.get(kind.name_field):
         raise Invalid(f"{kind.name_field}_required", f"a {kind.entity} needs a {kind.name_field}")
@@ -406,15 +410,17 @@ async def create_record(conn: asyncpg.Connection, kind: Kind, staff: Staff, data
     supplier = await _supplier_for(conn, kind, str(data.get("supplier_id") or ""), values.get("service_type"))
     _check_geo(values)
     values.update(await suppliers.check_place(conn, values, set(values)))
+    status = "active" if staff.can("supplier.activate") else "inactive"
     db = _db_values(values)
     columns = list(db)
-    marks = ", ".join(f"${i + 3}{_cast(c)}" for i, c in enumerate(columns))
+    marks = ", ".join(f"${i + 4}{_cast(c)}" for i, c in enumerate(columns))
     try:
         row = await conn.fetchrow(
-            f"INSERT INTO {kind.table} (supplier_id, created_by, updated_by, {', '.join(columns)})"  # noqa: S608
-            f" VALUES ($1::uuid, $2, $2, {marks}) RETURNING id::text AS id, code",
+            f"INSERT INTO {kind.table} (supplier_id, created_by, updated_by, status, {', '.join(columns)})"  # noqa: S608
+            f" VALUES ($1::uuid, $2, $2, $3, {marks}) RETURNING id::text AS id, code",
             supplier["id"],
             staff.cis_user_id,
+            status,
             *db.values(),
         )
     except asyncpg.UniqueViolationError as exc:
@@ -426,9 +432,10 @@ async def create_record(conn: asyncpg.Connection, kind: Kind, staff: Staff, data
         action=f"{kind.entity}.created",
         entity_type=kind.entity,
         entity_id=row["id"],
-        after={"code": row["code"], "supplier_id": supplier["id"], **values},
+        after={"code": row["code"], "supplier_id": supplier["id"], "status": status, **values},
         entity_label=f"{row['code']} {values[kind.name_field]}",
-        summary=f"Created {kind.entity} {values[kind.name_field]} ({supplier['code']})",
+        summary=f"Created {kind.entity} {values[kind.name_field]} ({supplier['code']})"
+        + ("" if status == "active" else " (inactive until approved)"),
     )
     return await get_record(conn, kind, row["id"])
 

@@ -1,9 +1,11 @@
 """AA-1155 T4.1 (root spec R4.3): the approvals that a write capability carried until now, without a database.
 
 - ``pricing.approve`` gates the checker routes of pricing rules, FX rates and cancellation policies (approve, reject),
-  agency tier discounts and rate cards (approve) and departure price adjustments (approve, end), which ``pricing.write``
-  gated before; ``b2b_desk.approve`` gates approving and ending an agency allotment (``b2b_desk.write`` before);
-  ``supplier.activate`` gates activating a hotel or a service (``supply.write`` before).
+  agency tier discounts and rate cards (approve) and departure price adjustments (approve; ending another person's
+  pending row or one in force), which ``pricing.write`` gated before; ``b2b_desk.approve`` gates approving an agency
+  allotment and ending another person's pending one or one in force (``b2b_desk.write`` before); ``supplier.activate``
+  gates activating a hotel or a service (``supply.write`` before), and a hotel or service a maker without it creates
+  starts ``inactive``. The maker still withdraws its OWN pending price adjustment or allotment with the write right.
 - Built-in ``admin`` and ``contracting`` hold every one of them. A role that holds every right of contracting except
   the approval class (the later custom maker role, played here by a test role) is refused 403 ``forbidden`` before
   anything is read, at the route and again in the service; it keeps its own writes (make a row, withdraw its own).
@@ -15,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import date
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -102,9 +105,7 @@ GATED: tuple[tuple[str, Any], ...] = (
     (f"/booking/pricing/partner-tier-discounts/{ROW}/approve", None),
     (f"/booking/pricing/partner-rate-cards/{ROW}/approve", None),
     (f"/booking/b2b-desk/price-adjustments/{ROW}/approve", None),
-    (f"/booking/b2b-desk/price-adjustments/{ROW}/end", None),
     (f"/booking/catalog/allotments/{ROW}/approve", None),
-    (f"/booking/catalog/allotments/{ROW}/end", None),
     (f"/booking/hotels/{HOTEL}/activate", None),
     (f"/booking/services/{SERVICE}/activate", None),
 )
@@ -129,7 +130,8 @@ def test_a_holder_passes_the_gate(role: str, path: str, body: Any) -> None:
 
 @pytest.mark.parametrize("path,body", GATED)
 def test_sales_finance_and_content_are_refused(path: str, body: Any) -> None:
-    """Sales held b2b_desk.write (allotment approve and end) before this split; it now proposes only."""
+    """Sales held b2b_desk.write (allotment approve and end) before this split; it now proposes and withdraws its own
+    pending allotment only (the end route is not in GATED)."""
     for role in ("sales", "finance", "content_creator"):
         c, conn = _client(_role(role))
         assert c.post(path, json=body).status_code == 403, role
@@ -144,6 +146,9 @@ def test_sales_finance_and_content_are_refused(path: str, body: Any) -> None:
         ("POST", f"/booking/pricing/cancellation-policies/{ROW}/withdraw", None),
         ("POST", f"/booking/hotels/{HOTEL}/deactivate", None),
         ("POST", f"/booking/services/{SERVICE}/deactivate", None),
+        # Ending a price adjustment / an allotment: the route takes the write right, the service decides (below).
+        ("POST", f"/booking/b2b-desk/price-adjustments/{ROW}/end", None),
+        ("POST", f"/booking/catalog/allotments/{ROW}/end", None),
     ],
 )
 def test_the_maker_keeps_its_own_writes(maker_role: Staff, method: str, path: str, body: Any) -> None:
@@ -166,9 +171,7 @@ SERVICE_CALLS: dict[str, ServiceCall] = {
     "tier_discount_approve": lambda c, s: agency_pricing.approve_tier_discount(c, s, ROW, today=TODAY),
     "rate_card_approve": lambda c, s: agency_pricing.approve_rate_card(c, s, ROW, today=TODAY),
     "adjustment_approve": lambda c, s: price_adjustments.approve(c, s, ROW),
-    "adjustment_end": lambda c, s: price_adjustments.end(c, s, ROW),
     "allotment_approve": lambda c, s: allotments.approve(c, s, ROW, today=TODAY),
-    "allotment_end": lambda c, s: allotments.end(c, s, ROW),
     "hotel_activate": lambda c, s: records.set_status(c, records.HOTEL, s, HOTEL, "active"),
     "service_activate": lambda c, s: records.set_status(c, records.SERVICE, s, SERVICE, "active"),
 }
@@ -232,3 +235,98 @@ def test_price_adjustment_flag_follows_the_approval(maker_role: Staff) -> None:
     }  # fmt: skip
     assert price_adjustments.adjustment_out(row, maker_role)["can_approve"] is False
     assert price_adjustments.adjustment_out(row, _role("contracting"))["can_approve"] is True
+
+
+# ── Ending a price adjustment / an allotment: the maker withdraws its own pending row ──
+
+ADJUSTMENT_FROM = "FROM booking.departure_price_adjustments a"
+ALLOTMENT_FROM = "FROM booking.departure_allotments a"
+
+
+def _adjustment(created_by: str, *, approved: bool = False) -> dict[str, Any]:
+    return {
+        "id": ROW, "departure_id": ROW, "adjust_pct": None, "amount": None, "currency": None, "reason": "Low season",
+        "replaces_id": None, "created_by": created_by, "created_by_name": "Someone", "created_at": None,
+        "approved_by": "checker-1" if approved else None, "approved_by_name": None,
+        "approved_at": TODAY if approved else None, "ended_by": None, "ended_by_name": None, "ended_at": None,
+        "end_reason": None,
+    }  # fmt: skip
+
+
+def _allotment(created_by: str, *, approved: bool = False) -> dict[str, Any]:
+    return {
+        "id": ROW, "departure_id": ROW, "partner_id": ROW, "agency_name": "Invented agency", "seats": 2,
+        "release_days_before": 10, "start_date": TODAY, "replaces_id": None, "created_by": created_by,
+        "created_by_name": "Someone", "created_at": None, "approved_by": "checker-1" if approved else None,
+        "approved_by_name": None, "approved_at": TODAY if approved else None, "released_at": None, "ended_by": None,
+        "ended_by_name": None, "ended_at": None, "end_reason": None,
+    }  # fmt: skip
+
+
+ENDS: dict[str, tuple[str, Callable[..., dict[str, Any]], Callable[[ScriptedConn, Staff], Awaitable[Any]]]] = {
+    "adjustment": (ADJUSTMENT_FROM, _adjustment, lambda c, s: price_adjustments.end(c, s, ROW)),
+    "allotment": (ALLOTMENT_FROM, _allotment, lambda c, s: allotments.end(c, s, ROW)),
+}
+
+
+def test_may_end_follows_maker_state_and_approval(maker_role: Staff) -> None:
+    sales = _role("sales")  # b2b_desk.write, no b2b_desk.approve, no pricing.write
+    for module, row in ((price_adjustments, _adjustment), (allotments, _allotment)):
+        assert module.may_end(row(maker_role.cis_user_id), maker_role) is True  # own pending: a withdrawal
+        assert module.may_end(row("someone-else"), maker_role) is False  # another person's pending: a rejection
+        assert module.may_end(row(maker_role.cis_user_id, approved=True), maker_role) is False  # own, in force
+        for holder in ("admin", "contracting"):
+            assert module.may_end(row("someone-else", approved=True), _role(holder)) is True
+    assert allotments.may_end(_allotment(sales.cis_user_id), sales) is True
+    assert allotments.may_end(_allotment("someone-else"), sales) is False
+    assert price_adjustments.may_end(_adjustment(sales.cis_user_id), sales) is False  # no pricing.write
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", sorted(ENDS))
+async def test_the_maker_withdraws_its_own_pending_row(maker_role: Staff, name: str) -> None:
+    fragment, row, call = ENDS[name]
+    conn = ScriptedConn().on(fragment, row(maker_role.cis_user_id))
+    await call(conn, maker_role)
+    assert conn.sql("SET ended_at = now()") == [(ROW, maker_role.cis_user_id, "rejected")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", sorted(ENDS))
+@pytest.mark.parametrize("approved", [False, True])
+async def test_the_maker_cannot_end_another_persons_or_an_approved_row(
+    maker_role: Staff, name: str, approved: bool
+) -> None:
+    fragment, row, call = ENDS[name]
+    created_by = maker_role.cis_user_id if approved else "someone-else"
+    conn = ScriptedConn().on(fragment, row(created_by, approved=approved))
+    with pytest.raises(Forbidden) as exc:
+        await call(conn, maker_role)
+    assert exc.value.code == "forbidden"
+    assert conn.sql("SET ended_at = now()") == []
+
+
+# ── Creating a hotel or a service: inactive for a maker without supplier.activate ──
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [records.HOTEL, records.SERVICE], ids=["hotel", "service"])
+@pytest.mark.parametrize("role,status", [(MAKER_ROLE, "inactive"), ("contracting", "active"), ("admin", "active")])
+async def test_a_new_record_starts_inactive_without_supplier_activate(
+    maker_role: Staff, kind: records.Kind, role: str, status: str
+) -> None:
+    staff = maker_role if role == MAKER_ROLE else _role(role)
+    category = "hotel" if kind is records.HOTEL else "activity"
+    supplier = {"id": ROW, "code": "SUP-000115", "status": "active", "categories": [category]}
+    conn = ScriptedConn().on(f"INSERT INTO {kind.table}", {"id": ROW, "code": f"{kind.prefix}000115"})
+    data = {"supplier_id": ROW, kind.name_field: "Invented record"}
+    if kind is records.SERVICE:
+        data |= {"service_type": "activity", "unit": "person"}
+    with (
+        patch.object(records.suppliers, "resolve_supplier", AsyncMock(return_value=supplier)),
+        patch.object(records.suppliers, "check_place", AsyncMock(return_value={})),
+        patch.object(records, "get_record", AsyncMock(return_value={"id": ROW})),
+    ):
+        await records.create_record(conn, kind, staff, data)
+    (args,) = conn.sql(f"INSERT INTO {kind.table}")
+    assert args[2] == status

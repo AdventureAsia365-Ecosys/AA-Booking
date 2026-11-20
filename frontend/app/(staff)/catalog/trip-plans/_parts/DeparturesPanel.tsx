@@ -5,8 +5,9 @@
 // the decision date. "Add departure" makes one; "Generate departures" makes a weekly or monthly series with a preview
 // (dry run) before it saves. A row opens the departure drawer (?departure=<id>): its rules (capacity, minimum, cutoff,
 // decision days, auto-confirm, status) and its agency allotments (propose, approve by another person, reject or
-// withdraw). Writes: trip_plan.write (admin, contracting) for departures, b2b_desk.write to propose an allotment and
-// b2b_desk.approve to approve, reject or withdraw one (AA-1155: a decision, admin and contracting).
+// withdraw). Writes: trip_plan.write (admin, contracting) for departures, b2b_desk.write to propose an allotment (and
+// withdraw one's own while pending) and b2b_desk.approve to approve, reject or withdraw any (AA-1155: a decision,
+// admin and contracting).
 // AA-1073 rest (bk-048): an allotment in force or released offers "Charge fee" (allotted seats not released, approved
 // by a second person); the drawer links to the departure board.
 
@@ -15,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { CalendarPlus, Plus, Repeat } from "lucide-react";
 import { ApiError, type FieldError } from "@/lib/api/client";
+import { endAction } from "@/lib/approveSplit";
 import {
   ALLOTMENT_STATE_LABEL,
   WEEKDAYS,
@@ -548,7 +550,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
   const { formatDay } = useBookingFormat();
   const tx = useTx();
   const canWrite = useCan("b2b_desk.write");
-  const canDecide = useCan("b2b_desk.approve"); // AA-1155: approve / reject / withdraw an allotment
+  const canDecide = useCan("b2b_desk.approve"); // AA-1155: approve, reject another person's, withdraw one in force
   const me = useStaff();
   const qc = useQueryClient();
   const toast = useToast();
@@ -601,6 +603,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
               key={a.id}
               a={a}
               canDecide={canDecide && !cancelled}
+              canWithdrawOwn={canWrite && !cancelled}
               isMaker={a.created_by?.id === me.cis_user_id}
               busy={act.isPending}
               onAct={(action) => act.mutate({ id: a.id, action })}
@@ -652,6 +655,7 @@ function AllotmentsSection({ departure, sourceId }: { departure: Departure; sour
 function AllotmentRow({
   a,
   canDecide,
+  canWithdrawOwn,
   isMaker,
   busy,
   onAct,
@@ -660,6 +664,8 @@ function AllotmentRow({
   a: Allotment;
   /** b2b_desk.approve (AA-1155): approve, reject or withdraw. */
   canDecide: boolean;
+  /** b2b_desk.write (AA-1155): the maker withdraws its own allotment while it is pending. */
+  canWithdrawOwn: boolean;
   isMaker: boolean;
   busy: boolean;
   onAct: (action: "approve" | "end") => void;
@@ -669,6 +675,7 @@ function AllotmentRow({
   const t = useT(MSG);
   const tx = useTx();
   const tone = a.state === "in_force" ? "success" : a.state === "pending" ? "warning" : "neutral";
+  const end = endAction(a.state, { canDecide, canWrite: canWithdrawOwn, isMaker });
   return (
     <li className="flex flex-wrap items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
       <span className="flex min-w-0 flex-col text-[13px]">
@@ -689,9 +696,9 @@ function AllotmentRow({
             {t("Approve")}
           </Button>
         )}
-        {canDecide && (a.state === "pending" || a.state === "in_force") && (
+        {end && (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAct("end")}>
-            {a.state === "pending" ? t("Reject") : t("Withdraw")}
+            {end === "reject" ? t("Reject") : t("Withdraw")}
           </Button>
         )}
         {onCharge && (a.state === "in_force" || a.state === "released") && (

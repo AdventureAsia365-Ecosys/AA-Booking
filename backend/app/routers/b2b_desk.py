@@ -36,7 +36,8 @@ AA-1073 rest (bk-048):
 - Departure fees (``app.b2b.departure_fees``): ``GET /departure-fees``, ``POST /departures/{id}/fees``
   (``b2b_desk.write``), ``POST /departure-fees/{id}/approve`` / ``…/reject`` (``b2b_desk.approve``, never the maker).
 - Price adjustments (``app.b2b.price_adjustments``): ``POST /departures/{id}/price-adjustments`` (``pricing.write``),
-  ``POST /price-adjustments/{id}/approve`` (never the maker) and ``…/end`` (``pricing.approve``, AA-1155 T4.1).
+  ``POST /price-adjustments/{id}/approve`` (never the maker; ``pricing.approve``, AA-1155 T4.1) and ``…/end``
+  (``pricing.write`` for the maker's own pending row, ``pricing.approve`` for any other).
 """
 
 from __future__ import annotations
@@ -608,8 +609,9 @@ async def approve_price_adjustment(
 
 @router.post("/price-adjustments/{adjustment_id}/end")
 async def end_price_adjustment(
-    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanApprovePrice, pool: Pool
+    adjustment_id: Annotated[uuid.UUID, Path()], staff: CanPrice, pool: Pool
 ) -> dict[str, Any]:
-    """A pending adjustment is rejected, one in force withdrawn."""
+    """A pending adjustment is rejected, one in force withdrawn. The maker ends its own pending one with pricing.write;
+    any other end needs pricing.approve (AA-1155 T4.1, checked in ``price_adjustments.end``)."""
     async with pool.acquire() as conn, conn.transaction():
         return await price_adjustments.end(conn, staff, str(adjustment_id))

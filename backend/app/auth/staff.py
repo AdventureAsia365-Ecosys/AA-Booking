@@ -42,9 +42,11 @@ prices, supply, operations, supplier bills and the catalog (``trip_case.read``, 
 ``stop_sale.approve`` (review a pending stop-sale, approve or reject the end of one). A role with ``supply.write`` /
 ``stop_sale.write`` alone makes the work and a second person approves it. The built-in ``admin`` and ``contracting``
 roles hold all three. AA-1155 T4.1 (root spec R4.3) splits the rest: ``pricing.approve`` (approve / reject a pricing
-rule, FX rate or cancellation policy, approve an agency tier discount or rate card, approve or end a departure price
-adjustment), ``b2b_desk.approve`` also for approving and ending an agency allotment, and ``supplier.activate`` also for
-activating a hotel or a service. Each is checked in the service before anything is read (403 ``forbidden``).
+rule, FX rate or cancellation policy, approve an agency tier discount or rate card, approve a departure price
+adjustment, reject another person's pending one or withdraw one in force), ``b2b_desk.approve`` the same for an agency
+allotment, and ``supplier.activate`` also for activating a hotel or a service (one a maker without it creates starts
+``inactive``). Each is checked in the service (403 ``forbidden``); the maker still withdraws its own PENDING price
+adjustment or allotment with the write right.
 
 **Dev-only E2E write identities (AA-1087, root ADR 0006a A10e).** Three more WORKFORCE E2E users may write, each only
 its own allow-listed routes, only on Dev and only on a synthetic agency's record (:mod:`app.auth.e2e_staff`): a staff
@@ -132,8 +134,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "pricing.write": frozenset({"admin", "contracting"}),
     # AA-1155 T4.1 (make / approve split, root spec R4.3): the checker side of pricing.write is its own capability.
     # Approving or rejecting a pricing rule, FX rate or cancellation policy, approving an agency tier discount or rate
-    # card, and approving or ending a departure price adjustment need pricing.approve; making and withdrawing one's own
-    # row stay pricing.write. Admin and the built-in contracting hold both (a custom role never holds an approval).
+    # card, approving a departure price adjustment and ending another person's or one in force need pricing.approve;
+    # making a row and withdrawing one's own pending row stay pricing.write. Admin and the built-in contracting hold
+    # both (a custom role never holds an approval).
     "pricing.approve": frozenset({"admin", "contracting"}),
     # Supply (bk-008, ADR 0005 d8): contracting owns suppliers and contracts; sales reads them to quote.
     "supply.read": frozenset({"admin", "sales", "contracting", "finance"}),
@@ -173,8 +176,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # one for it and ask for a lower cancellation fee = admin, sales (who talk to agencies). A price below the floor
     # margin and a lower cancellation fee need a second person with b2b_desk.approve = admin, contracting (who own
     # the pricing), never the one who asked (maker-checker, 403 maker_checker + CHECKs). Not in preview sessions.
-    # AA-1155 T4.1: approving and ending an agency allotment also need b2b_desk.approve (proposing one stays
-    # b2b_desk.write, so sales proposes and a second person with the approval decides).
+    # AA-1155 T4.1: approving an agency allotment and ending another person's or one in force also need
+    # b2b_desk.approve (proposing one and withdrawing one's own pending one stay b2b_desk.write).
     "b2b_desk.book": frozenset({"admin", "sales"}),
     "b2b_desk.approve": frozenset({"admin", "contracting"}),
     # Operations (bk-026, AA-682 S1): supplier bookings of a sold trip and their documents. Every operational role

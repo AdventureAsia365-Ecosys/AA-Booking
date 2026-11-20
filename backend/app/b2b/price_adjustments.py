@@ -8,13 +8,14 @@ the line price: -0.10 = 10 % off) or a signed ``amount`` per traveller (adults +
   never approves; a DB CHECK too). At most one in force and one pending per departure.
 - **A change** is a new pending row naming the one in force it ``replaces``; approving it ends the old one
   (``replaced``) in the same transaction.
-- **End**: a pending row is ``rejected``, one in force is ``withdrawn``. Both are decisions on a price and need
-  ``pricing.approve`` (AA-1155 T4.1), checked before anything is read (403 ``forbidden``).
+- **End**: a pending row is ``rejected``, one in force is ``withdrawn``. Rejecting another person's pending row and
+  withdrawing one in force are decisions on a price and need ``pricing.approve`` (AA-1155 T4.1, 403 ``forbidden``);
+  the maker ends its own pending row with ``pricing.write`` alone, like withdrawing a pending pricing rule.
 
 The quote engine (:mod:`app.b2b.quotes`) reads the one in force (:func:`in_force`) and applies it to the ``tp:`` lines
 on that departure after the agency discount; a line that then sells under the rule's floor margin is still sold and the
 line's ``price_note`` says ``below_floor``. Staff endpoints: ``app.routers.b2b_desk`` (read ``b2b_desk.read``, write
-``pricing.write``, approve and end ``pricing.approve``).
+and end ``pricing.write``, approve ``pricing.approve``; ending is further checked here, see **End**).
 """
 
 from __future__ import annotations
@@ -69,12 +70,21 @@ class Adjustment:
 
 
 APPROVE = "pricing.approve"
+WRITE = "pricing.write"
 
 
 def require_approve(staff: Staff) -> None:
-    """AA-1155 T4.1: approving or ending a price adjustment is a decision on a price (``pricing.approve``)."""
+    """AA-1155 T4.1: approving a price adjustment is a decision on a price (``pricing.approve``)."""
     if not staff.can(APPROVE):
-        raise Forbidden("forbidden", "approving or ending a price adjustment needs pricing.approve (an approval)")
+        raise Forbidden("forbidden", "approving a price adjustment needs pricing.approve (an approval)")
+
+
+def may_end(row: Any, staff: Staff) -> bool:
+    """AA-1155 T4.1: the maker withdraws its own pending row with ``pricing.write``; rejecting another person's pending
+    row or withdrawing one in force needs ``pricing.approve``."""
+    if staff.can(APPROVE):
+        return True
+    return state(row) == "pending" and staff.can(WRITE) and row["created_by"] == staff.cis_user_id
 
 
 def _text(value: Decimal) -> str:
@@ -290,12 +300,16 @@ async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) ->
 
 async def end(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) -> dict[str, Any]:
     """End an adjustment (call inside a transaction): a pending one is rejected, one in force is withdrawn (quotes from
-    now price without it). Ending an ended one returns it unchanged."""
-    require_approve(staff)
+    now price without it). Ending an ended one returns it unchanged. Only an approver ends another person's pending row
+    or one in force (:func:`may_end`)."""
     row = await _row(conn, adjustment_id, lock=True)
     st = state(row)
     if st == "ended":
         return adjustment_out(row, staff)
+    if not may_end(row, staff):
+        raise Forbidden(
+            "forbidden", "ending this price adjustment needs pricing.approve (only its maker withdraws a pending one)"
+        )
     reason = "rejected" if st == "pending" else "withdrawn"
     await conn.execute(
         "UPDATE booking.departure_price_adjustments SET ended_at = now(), ended_by = $2, end_reason = $3"

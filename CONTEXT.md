@@ -287,7 +287,7 @@ backend/
                            POST …/{source_id}/trip-cases (AA-679, bk-009); GET|PUT …/{source_id}/components (AA-972);
                            GET|POST …/{source_id}/departures, PATCH /booking/catalog/departures/{id} (AA-973);
                            POST …/{source_id}/departures:generate, GET|POST /booking/catalog/departures/{id}/allotments,
-                           POST /booking/catalog/allotments/{id}/approve|end (AA-1073; b2b_desk.read / .write, approve|end b2b_desk.approve)
+                           POST /booking/catalog/allotments/{id}/approve|end (AA-1073; b2b_desk.read / .write, approve b2b_desk.approve; end b2b_desk.write for the maker's own pending row, else b2b_desk.approve)
                            GET /booking/catalog/geo/destinations[/{id}], GET /booking/catalog/geo/countries[/{iso}]
                            (catalog.read), PATCH of both (catalog.admin) (AA-996, bk-029)
                            GET /booking/catalog/price-readiness?status=&country=&q=&format=json|csv (pricing.read,
@@ -593,11 +593,12 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `contracting` is shown as "Product & operations"), none in the preview cap. **Approve split (AA-1155 T4.1, root spec
   R4.3)**: the approvals the remaining write rights carried are split the same way, each checked in the service before
   anything is read (403 `forbidden`): `pricing.approve` (approve / reject a pricing rule, FX rate or cancellation
-  policy, approve an agency tier discount or rate card, approve or end a departure price adjustment; making a row and
-  withdrawing one's own stay `pricing.write`), `b2b_desk.approve` also approves and ends an agency allotment (proposing
-  one stays `b2b_desk.write`, so sales proposes and no longer decides), and `supplier.activate` also activates a hotel
-  or a service (deactivating stays `supply.write`). Each = admin, contracting; a custom role never holds one (root spec
-  D4). The rest of the matrix:
+  policy, approve an agency tier discount or rate card, approve a departure price adjustment, reject another person's
+  pending one or withdraw one in force; making a row and withdrawing one's own pending row stay `pricing.write`),
+  `b2b_desk.approve` the same for an agency allotment (proposing one and withdrawing one's own pending one stay
+  `b2b_desk.write`, so sales proposes and no longer decides), and `supplier.activate` also activates a hotel or a
+  service (deactivating stays `supply.write`; a hotel or service created by a role without it starts `inactive`, a
+  holder's starts `active`). Each = admin, contracting; a custom role never holds one (root spec D4). The rest of the matrix:
   read trip cases = admin, sales, contracting, finance; customers read = admin, sales, contracting; write / assign / versions / customers write = admin,
   sales; staff directory (pickers) = admin, sales, contracting; pricing (margins, net costs, FX: `pricing.read`) =
   admin, sales, contracting, finance; new pricing rule / FX rows (`pricing.write`) and their approval (`pricing.approve`) = admin, contracting
@@ -756,7 +757,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   amount, currency) and `bk_settlement_draft` bills it once as a `departure_fee` line (`agency_invoice_line.source_fee_id`);
   the agency invoice API shows that line as `adjustment` until the CRM reads the new role. The draft terms clause
   `departure_fees` reaches `GET /terms` once the business owner approves it. **Price adjustments**
-  (`departure_price_adjustments`, `pricing.write` maker and a different checker with `pricing.approve`, who also ends one): one in force per departure, a
+  (`departure_price_adjustments`, `pricing.write` maker and a different checker with `pricing.approve`, who also ends one; the maker withdraws its own pending one): one in force per departure, a
   fraction or an amount per traveller; the quote engine applies it to `tp:` lines on that departure after the agency
   discount, and a b2b rule with `early_days` / `early_discount_pts` takes the points off the margin when the quote day
   is on or before `start - early_days`; the line's `price_note` records what applied (and `below_floor`: still sold).
@@ -770,7 +771,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   staff decide on the trip plan's Departures tab (run anyway = guaranteed, or cancel). Sold seats only, never held.
   **Allotments** (`booking.departure_allotments`, `app/b2b/allotments.py`): seats of one departure kept for one agency
   until `start_date - release_days_before`; proposed by one staff member (`b2b_desk.write`), approved or ended by
-  another (`b2b_desk.approve`, AA-1155; 403 `maker_checker`), refused when the general free seats would go below zero (409 `allotment_exceeds_free`); a change is
+  another (`b2b_desk.approve`, AA-1155; 403 `maker_checker`; the maker may withdraw its own pending one), refused when the general free seats would go below zero (409 `allotment_exceeds_free`); a change is
   a new row replacing the one in force on approval; pending → rejected, in force → withdrawn, a cancelled departure
   ends them. **Seat count** (counted under the departure lock, never stored): an agency's unused allotment (seats minus
   its own held + sold) is kept from every other agency, so an agency can take `capacity - held - sold - unused

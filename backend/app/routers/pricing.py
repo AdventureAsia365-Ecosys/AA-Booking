@@ -8,7 +8,8 @@ staff use while building a version. ``POST …/versions/{n}/price`` (routers/tri
 ``/booking/pricing/rules`` and ``/booking/pricing/fx-rates`` (GET list, POST new pending row, POST ``/{id}/approve``;
 S280 bk-058: ``/{id}/reject`` with a reason by a second person, ``/{id}/withdraw`` by its maker)
 manage the policy rows themselves with maker-checker (``app.pricing.policy``, bk-007): reads need ``pricing.read``,
-writes and approvals ``pricing.write`` (admin, contracting), and the creator of a row cannot approve it (403).
+new rows and withdrawing one's own ``pricing.write``, approve and reject ``pricing.approve`` (AA-1155 T4.1; both
+admin, contracting), and the creator of a row cannot approve it (403).
 ``/booking/pricing/cancellation-policies`` (AA-974, bk-021) does the same for the B2B cancellation-fee schedules
 (``app.b2b.cancellation``): a row per trip plan (``source_id``) or the B2B default, in force once approved.
 ``/booking/pricing/policy`` (AA-1091, bk-050, root ADR 0005b d15): the pricing policy parameters (GET every parameter
@@ -42,7 +43,8 @@ MAX_ITEMS = 200
 # Margins and net costs are commercial data (ADR 0005 decision 8): permission ``pricing.read`` in the
 # staff role matrix (admin, sales, contracting; not content_creator).
 CanPrice = Annotated[Staff, Depends(require("pricing.read"))]
-# Entering and approving rules / FX rows: contracting owns rates, admin backs it up (ADR 0005 d8).
+# Entering rules / FX rows and withdrawing one's own pending row: contracting owns rates, admin backs it up
+# (ADR 0005 d8).
 CanWritePricing = Annotated[Staff, Depends(require("pricing.write"))]
 # AA-1155 T4.1: the checker routes (approve, reject) need pricing.approve; the service checks it again first.
 CanApprovePricing = Annotated[Staff, Depends(require("pricing.approve"))]

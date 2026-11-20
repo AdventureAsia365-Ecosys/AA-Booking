@@ -81,7 +81,7 @@ CanReadPrices = Annotated[Staff, Depends(require("pricing.read"))]
 CanAdminCatalog = Annotated[Staff, Depends(require("catalog.admin"))]
 CanReadDesk = Annotated[Staff, Depends(require("b2b_desk.read"))]
 CanWriteDesk = Annotated[Staff, Depends(require("b2b_desk.write"))]
-CanApproveDesk = Annotated[Staff, Depends(require("b2b_desk.approve"))]  # AA-1155 T4.1: allotment decisions
+CanApproveDesk = Annotated[Staff, Depends(require("b2b_desk.approve"))]  # AA-1155 T4.1: allotment approve
 IsoCode = Annotated[str, Path(pattern=r"^[A-Za-z]{2}$", description="ISO 3166-1 alpha-2 country code")]
 GeoStatus = Literal["active", "inactive"]
 ReadinessStatus = Literal[
@@ -755,7 +755,9 @@ async def post_allotment_approve(
 
 @router.post("/allotments/{allotment_id}/end")
 async def post_allotment_end(
-    allotment_id: Annotated[uuid.UUID, Path()], staff: CanApproveDesk, pool: Pool
+    allotment_id: Annotated[uuid.UUID, Path()], staff: CanWriteDesk, pool: Pool
 ) -> dict[str, Any]:
+    """The maker withdraws its own pending allotment; rejecting another person's or ending one in force needs
+    b2b_desk.approve (AA-1155 T4.1, checked in ``allotments.end``)."""
     async with pool.acquire() as conn, conn.transaction():
         return await allotments.end(conn, staff, str(allotment_id))

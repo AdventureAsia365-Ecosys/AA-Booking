@@ -36,7 +36,7 @@ ADMIN = Staff("a-1", None, "Admin", "admin", True, "admin")
 CONTRACTING = Staff("c-1", None, "Contracting", "contracting", True, "reviewer")
 SALES = Staff("u-1", None, "Sales One", "sales", True, "reviewer")
 CREATOR = Staff("w-1", None, "Writer", "content_creator", True, "reviewer")
-# AA-1155 T4.1: approving and ending an allotment need b2b_desk.approve (admin, contracting); sales proposes only.
+# AA-1155 T4.1: approving an allotment and ending another person's or one in force need b2b_desk.approve.
 DESK_CHECKER = Staff("c-1", None, "Contracting One", "contracting", True, "reviewer")
 
 ALLOTMENTS_FRAGMENT = "FROM booking.departure_allotments a WHERE a.departure_id = ANY"
@@ -703,9 +703,11 @@ def test_allotment_routes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client(ADMIN).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 200
     assert approved.calls[0][0] == (ADMIN, ALLOT) and ended.calls[0][0] == (ADMIN, ALLOT)
     assert client(CREATOR).post(f"/booking/catalog/allotments/{ALLOT}/approve").status_code == 403
-    # AA-1155 T4.1: sales proposes an allotment but neither approves nor ends one (b2b_desk.approve).
+    # AA-1155 T4.1: sales proposes an allotment but never approves one (b2b_desk.approve). The end route takes
+    # b2b_desk.write: sales withdraws its own pending allotment, the service refuses any other end (test_aa1155).
     assert client(SALES).post(f"/booking/catalog/allotments/{ALLOT}/approve").status_code == 403
-    assert client(SALES).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 403
+    assert client(SALES).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 200
+    assert client(CREATOR).post(f"/booking/catalog/allotments/{ALLOT}/end").status_code == 403
 
 
 def test_departure_check_routes(monkeypatch: pytest.MonkeyPatch) -> None:
