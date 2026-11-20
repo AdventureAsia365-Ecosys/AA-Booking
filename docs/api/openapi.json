@@ -12286,7 +12286,7 @@
             }
           },
           {
-            "description": "me: only the payments the caller did not record (AA-1159)",
+            "description": "me: only the payments the caller did not record",
             "in": "query",
             "name": "approvable",
             "required": false,
@@ -12300,7 +12300,7 @@
                   "type": "null"
                 }
               ],
-              "description": "me: only the payments the caller did not record (AA-1159)",
+              "description": "me: only the payments the caller did not record",
               "title": "Approvable"
             }
           },
@@ -26966,7 +26966,7 @@
             }
           },
           {
-            "description": "open bills not overdue that fall due within supplier_bill_due_soon_days (AA-1159)",
+            "description": "open bills not overdue that fall due within supplier_bill_due_soon_days",
             "in": "query",
             "name": "due_soon",
             "required": false,
@@ -26979,7 +26979,7 @@
                   "type": "null"
                 }
               ],
-              "description": "open bills not overdue that fall due within supplier_bill_due_soon_days (AA-1159)",
+              "description": "open bills not overdue that fall due within supplier_bill_due_soon_days",
               "title": "Due Soon"
             }
           },
@@ -29831,7 +29831,7 @@
             }
           },
           {
-            "description": "AA-1159: stop-sales waiting for a second person (waiting), or only those the caller may decide, not entered nor asked to end by them (me); the longest waiting first",
+            "description": "Stop-sales waiting for a second person (waiting), or only those the caller may decide, not entered nor asked to end by them (me); the longest waiting first",
             "in": "query",
             "name": "review",
             "required": false,
@@ -29848,7 +29848,7 @@
                   "type": "null"
                 }
               ],
-              "description": "AA-1159: stop-sales waiting for a second person (waiting), or only those the caller may decide, not entered nor asked to end by them (me); the longest waiting first",
+              "description": "Stop-sales waiting for a second person (waiting), or only those the caller may decide, not entered nor asked to end by them (me); the longest waiting first",
               "title": "Review"
             }
           },

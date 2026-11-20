@@ -139,7 +139,7 @@ async def list_restrictions(
     review: Annotated[
         Literal["waiting", "me"] | None,
         Query(
-            description="AA-1159: stop-sales waiting for a second person (waiting), or only those the caller may"
+            description="Stop-sales waiting for a second person (waiting), or only those the caller may"
             " decide, not entered nor asked to end by them (me); the longest waiting first"
         ),
     ] = None,

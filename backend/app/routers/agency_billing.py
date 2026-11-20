@@ -284,7 +284,7 @@ async def list_agency_payments(
     state: Annotated[Literal["recorded", "approved", "rejected", "all"] | None, Query()] = None,
     invoice: Annotated[str | None, Query(max_length=64)] = None,
     approvable: Annotated[
-        Literal["me"] | None, Query(description="me: only the payments the caller did not record (AA-1159)")
+        Literal["me"] | None, Query(description="me: only the payments the caller did not record")
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,

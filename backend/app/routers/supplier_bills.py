@@ -129,7 +129,7 @@ async def list_bills(
     due_before: Annotated[date | None, Query()] = None,
     due_soon: Annotated[
         bool | None,
-        Query(description="open bills not overdue that fall due within supplier_bill_due_soon_days (AA-1159)"),
+        Query(description="open bills not overdue that fall due within supplier_bill_due_soon_days"),
     ] = None,
     approvable: Annotated[
         Literal["me"] | None,
