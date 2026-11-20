@@ -45,6 +45,16 @@ export function isStaffRole(value: unknown): value is StaffRole {
   return typeof value === "string" && (STAFF_ROLES as readonly string[]).includes(value);
 }
 
+// AA-1159 (S286 F4): GET /booking/staff/directory needs this permission (backend app/auth/staff.py: admin, sales,
+// contracting). A role without it (finance) never calls the directory: the staff picker shows disabled instead of a
+// 403 and a console error.
+export const STAFF_DIRECTORY_PERMISSION = "staff.directory";
+
+/** May the signed-in staff member list the staff directory (the assignee pickers)? */
+export function canPickStaff(permissions: readonly string[] | null | undefined): boolean {
+  return Array.isArray(permissions) && permissions.includes(STAFF_DIRECTORY_PERMISSION);
+}
+
 const ALL: readonly StaffRole[] = STAFF_ROLES;
 const A: StaffRole = "admin";
 const S: StaffRole = "sales";
