@@ -57,10 +57,17 @@ async def _audit(conn: asyncpg.Connection, actor: str, action: str, payment: dic
 PAYMENT_FROM = "FROM booking.agency_payment p JOIN booking.agency_invoice i ON i.id = p.invoice_id"
 
 
-def payment_filter(*, state: str | None = None, invoice: str | None = None) -> tuple[str, list[Any]]:
+def payment_filter(
+    *, state: str | None = None, invoice: str | None = None, actionable_by: str | None = None
+) -> tuple[str, list[Any]]:
     """The WHERE text and arguments of the payment list (over :data:`PAYMENT_FROM`). The Payments to approve tab and
-    the My work tile (AA-1159, :mod:`app.my_work`) both use it: the tile equals the list total for the same filter."""
+    the My work tile (AA-1159, :mod:`app.my_work`) both use it: the tile equals the list total for the same filter.
+    ``actionable_by``: a staff id; only the payments that person did not record (the recorder never approves or
+    rejects their own, 403 ``maker_checker``)."""
     where, args = ["true"], []
+    if actionable_by:
+        args.append(actionable_by)
+        where.append(f"p.recorded_by <> ${len(args)}")
     if state and state != "all":
         args.append(state)
         where.append(f"p.status = ${len(args)}")
@@ -80,9 +87,16 @@ async def queue(conn: asyncpg.Connection, **filters: Any) -> dict[str, Any]:
     return {**dict(row), "earliest_due": None}
 
 
-async def list_payments(conn: asyncpg.Connection, *, state: str | None = None, invoice: str | None = None,
-                        limit: int = 50, offset: int = 0) -> dict[str, Any]:  # fmt: skip
-    cond, args = payment_filter(state=state, invoice=invoice)
+async def list_payments(
+    conn: asyncpg.Connection,
+    *,
+    state: str | None = None,
+    invoice: str | None = None,
+    actionable_by: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    cond, args = payment_filter(state=state, invoice=invoice, actionable_by=actionable_by)
     total = await conn.fetchval(f"SELECT count(*) {PAYMENT_FROM} WHERE {cond}", *args)  # noqa: S608
     args += [limit, offset]
     rows = await conn.fetch(

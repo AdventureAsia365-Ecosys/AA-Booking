@@ -99,6 +99,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   // season.approve).
   { pattern: "/pricing/seasons", roles: [A, S, C, F] },
   { pattern: "/pricing/holiday-events", roles: [A, S, C, F] },
+  // AA-1159: stop-sales on supplier contracts waiting for a second person (API supply.read; decisions stop_sale.approve).
+  { pattern: "/stop-sales", roles: [A, S, C, F] },
   // Catalog from CIS (W2): everyone reads; admin / contracting edit commercial fields.
   { pattern: "/catalog/trip-plans/:id/commercial", roles: [A, C] },
   { pattern: "/catalog/*", roles: ALL },

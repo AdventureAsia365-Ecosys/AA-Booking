@@ -2,7 +2,8 @@
 // AA-1159 — the My work band of the dashboard, against the same mocked API as layout.spec.ts (fixtures.ts MY_WORK; no
 // real sign-in). Checks: the band shows the two groups with the fixture's tiles; each tile links to its list with the
 // API's filter as the query string; an unavailable tile reads "Not available yet"; "CIS: My work" points at the CIS
-// half; Refresh reloads the summary; Vietnamese labels when VI is picked; the page never scrolls sideways at 390.
+// half; Refresh reloads the summary; Vietnamese labels when VI is picked; the page never scrolls sideways at 390; the
+// stop-sale tile's list (/stop-sales?review=me) leaves out what the viewer entered.
 // Screenshots (1440 light / dark, 390 light / dark) land in $LAYOUT_SHOTS_DIR/my-work-*.png.
 
 import path from "node:path";
@@ -59,7 +60,9 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(tile(page, "my_open_cases")).toHaveAttribute("href", "/cases?tab=mine&status=discovery%2Cbuilding");
       await expect(tile(page, "trip_checks_overdue")).toHaveAttribute("href", "/trip-checks?due=overdue");
       await expect(tile(page, "b2b_on_request")).toHaveAttribute("href", "/b2b-desk");
-      await expect(tile(page, "agency_payments_to_approve")).toHaveAttribute("href", "/agency-billing?tab=payments");
+      await expect(tile(page, "agency_payments_to_approve")).toHaveAttribute("href", "/agency-billing?tab=payments&approvable=me");
+      await expect(tile(page, "supplier_bills_to_approve")).toHaveAttribute("href", "/billing?bill_status=received&approvable=me");
+      await expect(tile(page, "stop_sales_to_review")).toHaveAttribute("href", "/stop-sales?review=me");
       await expect(tile(page, "agency_invoices_overdue")).toContainText("Not available yet");
       await expect(tile(page, "b2b_on_request")).toContainText("Nothing waits for an answer");
       await expect(tile(page, "supplier_bills_due_soon")).toContainText("Within 3 days, first due");
@@ -93,4 +96,20 @@ test("Vietnamese labels when VI is picked", async ({ page, baseURL }) => {
   await expect(band(page)).toContainText("Việc của tôi");
   await expect(tile(page, "supplier_bills_to_approve")).toContainText("HĐ nhà cung cấp cần duyệt");
   await band(page).screenshot({ path: path.join(OUT, "my-work-1440-vi.png") });
+});
+
+test("the stop-sale tile's list: only what the viewer may decide, phone width without sideways scroll", async ({ page, baseURL }) => {
+  const { errors } = await prepare(page, baseURL!);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/stop-sales?review=me", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("2 waiting")).toBeVisible();
+  await expect(page.getByText("Mekong Riverside Co.")).toBeVisible();
+  // The fixture's first stop-sale was entered by the viewer: "Only what I can decide" leaves it out.
+  await expect(page.getByText("Lotus Bay Travel")).toHaveCount(0);
+  await expect(page.getByText("Lifting it")).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, "stop-sales-1440-light.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  expect(errors).toEqual([]);
 });

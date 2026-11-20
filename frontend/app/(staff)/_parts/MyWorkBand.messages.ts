@@ -42,6 +42,9 @@ export const MSG = phrasebook(
     "Nothing to pay": "Nothing to pay",
     "Agency payments to approve": "Agency payments to approve",
     "Agency payments to approve: open the recorded payments": "Agency payments to approve: open the recorded payments",
+    "Stop-sales to review": "Stop-sales to review",
+    "Stop-sales to review: open the stop-sales waiting for a second person": "Stop-sales to review: open the stop-sales waiting for a second person",
+    "Nothing to review": "Nothing to review",
   },
   {
     "My work": "Việc của tôi",
@@ -79,6 +82,9 @@ export const MSG = phrasebook(
     "Nothing to pay": "Không có gì cần chi trả",
     "Agency payments to approve": "Khoản thu đại lý cần duyệt",
     "Agency payments to approve: open the recorded payments": "Khoản thu đại lý cần duyệt: mở các khoản thu đã ghi",
+    "Stop-sales to review": "Ngừng bán cần duyệt",
+    "Stop-sales to review: open the stop-sales waiting for a second person": "Ngừng bán cần duyệt: mở các lệnh ngừng bán chờ người thứ hai",
+    "Nothing to review": "Không có gì cần duyệt",
   },
   ),
 );

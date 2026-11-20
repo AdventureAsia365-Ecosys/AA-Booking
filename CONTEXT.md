@@ -2419,9 +2419,15 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   work queue the caller's capabilities allow, never per person (my open cases `trip_case.read`, overdue trip checks
   `ops.read`, open on-request lines `b2b_desk.read`, supplier bills overdue / due soon `bill.read`, agency invoices
   overdue `agency_billing.read`; "To approve or pay": supplier bills to approve `bill.approve`, to pay `payout.write`,
-  agency payments to approve `agency_payment.approve`). Each tile is a count, the oldest item or the earliest due date,
+  agency payments to approve `agency_payment.approve`, stop-sales to review `stop_sale.approve`). The approval tiles
+  count only what the caller may act on (maker-checker: never a bill they entered or last changed, a payment they
+  recorded, a stop-sale they entered or asked to end), through the same `approvable=me` filter of `GET /supplier-bills`
+  and `GET /agency-payments` ("Entered by" / "Recorded by" on their pages) and `review=me` of
+  `GET /supply/restrictions`, whose `review=waiting|me` lists the stop-sales waiting for a second person across every
+  contract (page **/stop-sales**, Supply group: approve / reject, approve lifting). Each tile is a count, the oldest item or the earliest due date,
   and a link to its list with the filter it was counted with: the count runs that list's own WHERE (`bill_filters.bill_filter`,
-  `case_filter`, `invoice_filter`, `payment_filter`, trip checks `COUNT_WHERE` + `OVERDUE`, desk `STATE_WHERE`), so
+  `case_filter`, `invoice_filter`, `payment_filter`, `restriction_filter`, trip checks `COUNT_WHERE` + `OVERDUE`, desk
+  `STATE_WHERE`), so
   the tile equals the list total. "Due soon" is the `supplier_bill.due` reminder's window (policy
   `supplier_bill_due_soon_days`), also a `due_soon` filter of `GET /supplier-bills` and "Due: Due soon" on /billing.
   A role with no tile capability gets 403 and no band; a tile it cannot read answers `available: false`. The band

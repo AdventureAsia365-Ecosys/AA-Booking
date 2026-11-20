@@ -277,29 +277,23 @@ async def list_bills(
     conn: asyncpg.Connection,
     staff: Staff,
     *,
-    status: str | None = None,
-    supplier: str | None = None,
-    case: str | None = None,
-    overdue: bool | None = None,
-    due_before: date | None = None,
     due_soon: bool | None = None,
-    q: str | None = None,
+    approvable: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    **filters: Any,
 ) -> dict[str, Any]:
     """Supplier bills, the most urgent first (open ones by due date, then the rest newest first).
 
-    ``due_soon``: only the open bills falling due within ``supplier_bill_due_soon_days`` and not overdue yet."""
+    ``filters``: those of :func:`bill_filters.bill_filter` (status, supplier, case, overdue, due_before, q).
+    ``due_soon``: only the open bills falling due within ``supplier_bill_due_soon_days`` and not overdue yet.
+    ``approvable="me"``: only the bills the caller may approve or pay (not entered nor last changed by them)."""
     if not 1 <= limit <= MAX_PAGE or offset < 0:
         raise Invalid("invalid_page", f"limit is 1..{MAX_PAGE} and offset >= 0")
     clause, args = bill_filters.bill_filter(
-        status=status,
-        supplier=supplier,
-        case=case,
-        overdue=overdue,
-        due_before=due_before,
+        **filters,
         due_soon_days=await bill_filters.due_soon_days(conn) if due_soon else None,
-        q=q,
+        actionable_by=staff.cis_user_id if approvable == "me" else None,
     )
     total = await conn.fetchval(f"SELECT count(*) {BILL_FROM} WHERE {clause}", *args)  # noqa: S608
     args.extend([limit, offset])

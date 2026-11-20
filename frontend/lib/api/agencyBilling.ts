@@ -272,7 +272,8 @@ export const agencyBillingApi = {
     body: { amount: string; method: AgencyPaymentMethod; received_on: string; reference?: string; document_ref: string; note?: string },
     idempotencyKey: string,
   ) => bkSend<AgencyPayment>(`agency-invoices/${enc(ref)}/payments`, { body, idempotencyKey }),
-  payments: (q: { state?: string; invoice?: string; limit?: number; offset?: number }) =>
+  /** AA-1159: `approvable: "me"` = only the payments the caller did not record (maker-checker). */
+  payments: (q: { state?: string; invoice?: string; approvable?: "me"; limit?: number; offset?: number }) =>
     bkGet<Page<AgencyPayment>>("agency-payments", q),
   approve: (id: string) => bkSend<AgencyPayment>(`agency-payments/${enc(id)}/approve`),
   reject: (id: string, reason: string) => bkSend<AgencyPayment>(`agency-payments/${enc(id)}/reject`, { body: { reason } }),

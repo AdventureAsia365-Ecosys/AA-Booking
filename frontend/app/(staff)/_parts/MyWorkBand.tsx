@@ -16,6 +16,7 @@ import {
   CalendarClock,
   FileWarning,
   Handshake,
+  OctagonX,
   ReceiptText,
   RefreshCw,
   SquareCheck,
@@ -42,6 +43,7 @@ const ICONS: Record<string, React.ReactNode> = {
   supplier_bills_to_approve: <Stamp size={ICON} />,
   supplier_bills_to_pay: <Banknote size={ICON} />,
   agency_payments_to_approve: <ReceiptText size={ICON} />,
+  stop_sales_to_review: <OctagonX size={ICON} />,
 };
 /** A count above zero on these tiles is late work (red hint); on the approval tiles it waits for the viewer (amber). */
 const LATE = new Set(["trip_checks_overdue", "supplier_bills_overdue", "agency_invoices_overdue"]);

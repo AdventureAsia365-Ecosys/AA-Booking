@@ -6,6 +6,8 @@
   / due soon / to approve / to pay, agency invoices overdue, agency payments to approve.
 - The fixtures make the bill tiles non-zero and different from each other (an overdue, a due-soon and a later bill,
   one of them approved), and give one person an open case.
+- The approval tiles count only what the caller may act on (maker-checker): the maker of every bill sees none to
+  approve, the checker sees them all; stop-sales the caller entered or asked to end are left out too.
 """
 
 from __future__ import annotations
@@ -39,12 +41,35 @@ Client = tuple[httpx.AsyncClient, LocalCis]
 
 WORK_TILES = ("my_open_cases", "trip_checks_overdue", "b2b_on_request", "supplier_bills_overdue",
               "supplier_bills_due_soon", "agency_invoices_overdue")  # fmt: skip
-APPROVE_TILES = ("supplier_bills_to_approve", "supplier_bills_to_pay", "agency_payments_to_approve")
+APPROVE_TILES = (
+    "supplier_bills_to_approve",
+    "supplier_bills_to_pay",
+    "agency_payments_to_approve",
+    "stop_sales_to_review",
+)
+
+
+async def _purge_stop_sales(conn: asyncpg.Connection) -> None:
+    """The contracts and stop-sales of this module's suppliers (stop-sales are never deleted by the app: guard off)."""
+    async with conn.transaction():
+        owner = await conn.fetchval("SELECT nspowner::regrole::text FROM pg_namespace WHERE nspname = 'booking'")
+        if owner != await conn.fetchval("SELECT current_user"):
+            await conn.execute(f'SET LOCAL ROLE "{owner}"')
+        mine = (
+            "SELECT k.id FROM booking.supplier_contracts k JOIN booking.suppliers s ON s.id = k.supplier_id"
+            " WHERE s.company_name LIKE 'it-682 %'"
+        )
+        await conn.execute("ALTER TABLE booking.supply_restrictions DISABLE TRIGGER USER")
+        await conn.execute(f"DELETE FROM booking.supply_restrictions WHERE supplier_contract_id IN ({mine})")  # noqa: S608
+        await conn.execute("ALTER TABLE booking.supply_restrictions ENABLE TRIGGER USER")
+        await conn.execute("DELETE FROM booking.audit_logs WHERE entity_type = 'supply_restriction'")
+        await conn.execute(f"DELETE FROM booking.supplier_contracts WHERE id IN ({mine})")  # noqa: S608
 
 
 @pytest_asyncio.fixture
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
+    await _purge_stop_sales(conn)
     await ops.purge_ops(conn)
     await ops.staff(
         conn,
@@ -57,6 +82,7 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     try:
         yield conn
     finally:
+        await _purge_stop_sales(conn)
         await ops.purge_ops(conn)
         await conn.close()
 
@@ -82,7 +108,7 @@ async def _ok(response: httpx.Response) -> Any:
     return response.json()
 
 
-async def _seed(conn: asyncpg.Connection) -> None:
+async def _seed(conn: asyncpg.Connection) -> dict[str, str]:
     """An open case of MAKER with an overdue check; four bills of one supplier: overdue, due tomorrow, due in a month
     (received) and one approved."""
     case = await ops.b2b_case(conn, tag="1159")
@@ -120,6 +146,36 @@ async def _seed(conn: asyncpg.Connection) -> None:
         lines=((booking, "400.00"),),
     )
     await ops.approve_bill(conn, approved["id"], by=CHECKER)
+    return sup
+
+
+async def _stop_sales(c: httpx.AsyncClient, cis: LocalCis, admin: asyncpg.Connection, sup: dict[str, str]) -> None:
+    """On a published contract of the supplier: a pending stop-sale of MAKER, one of CHECKER, and one of MAKER that
+    CHECKER approved and MAKER asked to end."""
+    k = await admin.fetchval(
+        "INSERT INTO booking.supplier_contracts (supplier_id, title, valid_from, valid_to, currency, status,"
+        " created_by, published_by, published_at) VALUES ($1::uuid, 'Invented 2027 rates', '2027-01-01',"
+        " '2027-12-31', 'USD', 'published', $2, $3, now()) RETURNING id::text",
+        sup["supplier"],
+        MAKER,
+        CHECKER,
+    )
+
+    async def stop(who: str, day: str) -> str:
+        body = {"component_id": f"sv:{sup['service']}", "date_from": day, "date_to": day, "note": "Invented closure"}
+        r = await c.post(f"/contracts/{k}/stop-sales", json=body, headers=_as(cis, who))
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    await stop(MAKER, "2027-03-01")
+    await stop(CHECKER, "2027-03-02")
+    ended = await stop(MAKER, "2027-03-03")
+    await _ok(
+        await c.post(f"/supply/stop-sales/{ended}/decision", json={"action": "approve"}, headers=_as(cis, CHECKER))
+    )
+    await _ok(
+        await c.post(f"/supply/stop-sales/{ended}/end-request", json={"reason": "Reopened"}, headers=_as(cis, MAKER))
+    )
 
 
 def _tiles(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -145,6 +201,8 @@ async def _list_total(c: httpx.AsyncClient, headers: dict[str, str], key: str, t
         return body["total"]
     if key.startswith("supplier_bills_"):
         params: dict[str, Any] = {"status": f["bill_status"], "limit": 1}
+        if "approvable" in f:
+            params["approvable"] = f["approvable"]
         if f.get("bill_due") == "overdue":
             params["overdue"] = "true"
         if f.get("bill_due") == "soon":
@@ -155,15 +213,22 @@ async def _list_total(c: httpx.AsyncClient, headers: dict[str, str], key: str, t
         body = await _ok(await c.get("/agency-invoices", params={"status": f["status"], "limit": 1}, headers=headers))
         return body["total"]
     if key == "agency_payments_to_approve":
-        assert f == {"tab": "payments"}
-        body = await _ok(await c.get("/agency-payments", params={"state": "recorded", "limit": 1}, headers=headers))
+        assert f == {"tab": "payments", "approvable": "me"}
+        params = {"state": "recorded", "approvable": "me", "limit": 1}
+        body = await _ok(await c.get("/agency-payments", params=params, headers=headers))
+        return body["total"]
+    if key == "stop_sales_to_review":
+        assert f == {"review": "me"}
+        params = {"kind": "stop_sale", "review": "me", "limit": 1}
+        body = await _ok(await c.get("/supply/restrictions", params=params, headers=headers))
         return body["total"]
     raise AssertionError(f"no list for tile {key}")
 
 
 async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, admin: asyncpg.Connection) -> None:
     c, cis = client
-    await _seed(admin)
+    sup = await _seed(admin)
+    await _stop_sales(c, cis, admin, sup)
 
     # The administrator holds every tile capability.
     body = await _ok(await c.get("/my-work/summary", headers=_as(cis, ADMIN)))
@@ -181,6 +246,7 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
         "supplier_bills_overdue",
         "supplier_bills_due_soon",
         "supplier_bills_to_approve",
+        "stop_sales_to_review",
     ]
 
     # Finance: reads cases, operations and bills; agency billing and its payment approvals; no bill approval.
@@ -216,5 +282,18 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
     soon = mine["supplier_bills_due_soon"]
     assert soon["count"] == 1 and soon["days"] >= 1
     assert soon["earliest_due"] == (date.today() + timedelta(days=1)).isoformat()
-    assert mine["supplier_bills_to_approve"]["count"] == 3
+    # Maker-checker: MAKER entered the three received bills and can approve none; CHECKER can approve all three.
+    assert mine["supplier_bills_to_approve"]["count"] == 0
+    assert other["supplier_bills_to_approve"]["count"] == 3
     assert _tiles(body)["supplier_bills_to_pay"]["count"] == 1
+    everyone = await _ok(await c.get("/supplier-bills", params={"status": "received"}, headers=_as(cis, MAKER)))
+    assert everyone["total"] == 3  # the list without the filter still shows every bill
+    # Stop-sales: MAKER may decide only CHECKER's pending one; CHECKER may decide MAKER's pending one and the end
+    # MAKER asked for. Three wait in all.
+    assert mine["stop_sales_to_review"]["count"] == 1 and other["stop_sales_to_review"]["count"] == 2
+    assert other["stop_sales_to_review"]["oldest_at"] is not None
+    waiting = await _ok(await c.get("/supply/restrictions", params={"review": "waiting"}, headers=_as(cis, FINANCE)))
+    assert waiting["total"] == 3 and {r["supplier_name"] for r in waiting["items"]} == {"it-682 Kestrel"}
+    assert [r["status"] for r in waiting["items"]].count("approved") == 1
+    asked = next(r for r in waiting["items"] if r["status"] == "approved")
+    assert asked["end_requested_by"] == MAKER and asked["created_by_name"]

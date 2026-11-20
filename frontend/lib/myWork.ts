@@ -102,6 +102,15 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     aria: "Agency payments to approve: open the recorded payments",
     empty: "Nothing to approve",
   },
+  {
+    key: "stop_sales_to_review",
+    capability: "stop_sale.approve",
+    group: "approve",
+    path: "/stop-sales",
+    label: "Stop-sales to review",
+    aria: "Stop-sales to review: open the stop-sales waiting for a second person",
+    empty: "Nothing to review",
+  },
 ];
 
 export const MY_WORK_CAPABILITIES: readonly string[] = [...new Set(MY_WORK_TILES.map((t) => t.capability))];

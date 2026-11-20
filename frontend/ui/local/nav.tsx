@@ -27,6 +27,7 @@ import {
   LayoutGrid,
   Map as MapIcon,
   MapPin,
+  OctagonX,
   Percent,
   PartyPopper,
   Scale,
@@ -132,6 +133,8 @@ export function navGroups(): NavGroup[] {
         // AA-1091 (bk-055): season calendars and holiday events as data, maker-checker.
         { href: "/pricing/seasons", label: "Seasons", icon: <Sun size={ICON} />, wave: 2, shipped: true },
         { href: "/pricing/holiday-events", label: "Holiday events", icon: <PartyPopper size={ICON} />, wave: 2, shipped: true },
+        // AA-1159: stop-sales on supplier contracts waiting for a second person (review, lifting).
+        { href: "/stop-sales", label: "Stop-sales", icon: <OctagonX size={ICON} />, wave: 2, shipped: true },
       ],
     },
     {

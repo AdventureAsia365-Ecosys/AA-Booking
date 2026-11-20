@@ -11,15 +11,21 @@ due date among them (``earliest_due``), and the query string of the list page th
     supplier_bills_overdue      bill.read               work      /billing?bill_status=open&bill_due=overdue
     supplier_bills_due_soon     bill.read               work      /billing?bill_status=open&bill_due=soon
     agency_invoices_overdue     agency_billing.read     work      /agency-billing?status=overdue
-    supplier_bills_to_approve   bill.approve            approve   /billing?bill_status=received
-    supplier_bills_to_pay       payout.write            approve   /billing?bill_status=approved
-    agency_payments_to_approve  agency_payment.approve  approve   /agency-billing?tab=payments (default: recorded)
+    supplier_bills_to_approve   bill.approve            approve   /billing?bill_status=received&approvable=me
+    supplier_bills_to_pay       payout.write            approve   /billing?bill_status=approved&approvable=me
+    agency_payments_to_approve  agency_payment.approve  approve   /agency-billing?tab=payments&approvable=me
+                                                                  (state default: recorded)
+    stop_sales_to_review        stop_sale.approve       approve   /stop-sales?review=me
+
+The approval tiles count only the items the caller may act on (maker-checker: not entered, last changed, recorded or
+asked to end by them), with the same ``approvable=me`` / ``review=me`` filter their page applies.
 
 Shown by capability, never by person: a tile is in the answer only when :meth:`Staff.can` grants its capability (so a
 preview or E2E session gets its capped set, and a later custom role gets exactly the tiles of its capabilities). Every
 count runs the WHERE text of its target list (the helper sits next to that list's query and shares it:
 ``bill_filters.bill_filter``, ``trip_cases.service.case_filter``, ``agency_billing.invoices.invoice_filter``,
-``agency_billing.payments.payment_filter``, ``trip_checks.COUNT_WHERE`` + ``OVERDUE``, ``b2b.desk.STATE_WHERE``), so a
+``agency_billing.payments.payment_filter``, ``trip_checks.COUNT_WHERE`` + ``OVERDUE``, ``b2b.desk.STATE_WHERE``,
+``supply.restrictions.restriction_filter``), so a
 tile equals the total its page shows for the same filter. "Due soon" is the ``supplier_bill.due`` reminder's own window
 (policy ``supplier_bill_due_soon_days``); there is no threshold in this module. A tile whose data cannot be read (a
 table not migrated yet, no policy value in force) answers ``available: false`` and the other tiles still load.
@@ -45,6 +51,7 @@ from app.auth.staff import Staff
 from app.b2b import desk
 from app.errors import Forbidden, Unavailable
 from app.ops import bill_filters, supplier_bills, trip_checks
+from app.supply import restrictions
 from app.trip_cases import service as trip_cases
 
 log = logging.getLogger(__name__)
@@ -84,16 +91,25 @@ async def _agency_invoices_overdue(conn: asyncpg.Connection, _: Staff) -> dict[s
     return await agency_invoices.queue(conn, status="overdue")
 
 
-async def _bills_to_approve(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    return await supplier_bills.queue(conn, status="received")
+# The approval tiles count only what the caller may act on (maker-checker): never a bill they entered or last
+# changed, never a payment they recorded, never a stop-sale they entered or asked to end. The page opens the same
+# subset (``approvable=me`` / ``review=me``), so the tile still equals its list.
 
 
-async def _bills_to_pay(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    return await supplier_bills.queue(conn, status="approved")
+async def _bills_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await supplier_bills.queue(conn, status="received", actionable_by=staff.cis_user_id)
 
 
-async def _agency_payments_to_approve(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    return await agency_payments.queue(conn, state="recorded")
+async def _bills_to_pay(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await supplier_bills.queue(conn, status="approved", actionable_by=staff.cis_user_id)
+
+
+async def _agency_payments_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await agency_payments.queue(conn, state="recorded", actionable_by=staff.cis_user_id)
+
+
+async def _stop_sales_to_review(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await restrictions.review_queue(conn, reviewable_by=staff.cis_user_id)
 
 
 @dataclass(frozen=True)
@@ -120,15 +136,28 @@ TILES: tuple[Tile, ...] = (
     Tile("supplier_bills_overdue", "bill.read", WORK, _bills_overdue, {"bill_status": "open", "bill_due": "overdue"}),
     Tile("supplier_bills_due_soon", "bill.read", WORK, _bills_due_soon, {"bill_status": "open", "bill_due": "soon"}),
     Tile("agency_invoices_overdue", "agency_billing.read", WORK, _agency_invoices_overdue, {"status": "overdue"}),
-    Tile("supplier_bills_to_approve", "bill.approve", APPROVE, _bills_to_approve, {"bill_status": "received"}),
-    Tile("supplier_bills_to_pay", "payout.write", APPROVE, _bills_to_pay, {"bill_status": "approved"}),
+    Tile(
+        "supplier_bills_to_approve",
+        "bill.approve",
+        APPROVE,
+        _bills_to_approve,
+        {"bill_status": "received", "approvable": "me"},
+    ),
+    Tile(
+        "supplier_bills_to_pay",
+        "payout.write",
+        APPROVE,
+        _bills_to_pay,
+        {"bill_status": "approved", "approvable": "me"},
+    ),
     Tile(
         "agency_payments_to_approve",
         "agency_payment.approve",
         APPROVE,
         _agency_payments_to_approve,
-        {"tab": "payments"},
+        {"tab": "payments", "approvable": "me"},
     ),
+    Tile("stop_sales_to_review", "stop_sale.approve", APPROVE, _stop_sales_to_review, {"review": "me"}),
 )
 CAPABILITIES: tuple[str, ...] = tuple(dict.fromkeys(t.capability for t in TILES))
 

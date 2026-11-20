@@ -4,6 +4,10 @@
 ``v_supplier_bill_balance``, ``s`` supplier, ``tc`` trip case). ``supplier_bills.list_bills`` and
 ``supplier_bills.queue`` (``app.my_work``) both call it, so a tile equals the list total for the same filter.
 
+"Approvable by me" (``actionable_by``) = bills the caller may approve or pay: not entered by them and not last
+changed by them (``created_by`` / ``facts_edited_by``), the maker-checker rule ``supplier_bills.approve`` and
+``record_payout`` enforce, so the My work approval tiles never count a bill the viewer would be refused.
+
 "Due soon" = open bills not overdue yet that fall due within ``supplier_bill_due_soon_days``: the window of the
 ``supplier_bill.due`` reminder (Pricing > Policy, maker-checker; :func:`due_soon_days`), never a number in code.
 """
@@ -83,10 +87,12 @@ def bill_filter(
     overdue: bool | None = None,
     due_before: date | None = None,
     due_soon_days: int | None = None,
+    actionable_by: str | None = None,
     q: str | None = None,
 ) -> tuple[str, list[Any]]:
     """The WHERE text and its arguments. ``due_soon_days``: open bills not overdue yet that fall due within that many
-    days (the view's overdue is "past the due date in the session's day", ``current_date``: the same clock here)."""
+    days (the view's overdue is "past the due date in the session's day", ``current_date``: the same clock here).
+    ``actionable_by``: a staff id; only the bills that person neither entered nor last changed (maker-checker)."""
     args: list[Any] = []
     where = ["true"]
 
@@ -108,6 +114,8 @@ def bill_filter(
             "b.status IN ('received', 'approved') AND NOT bal.overdue AND b.due_date <= current_date + {p}::int",
             due_soon_days,
         )
+    if actionable_by:
+        add("b.created_by <> {p} AND b.facts_edited_by IS DISTINCT FROM {p}", actionable_by)
     if q:
         add(
             "(b.code ILIKE {p} OR b.bill_number ILIKE {p} OR s.company_name ILIKE {p} OR tc.code ILIKE {p})",
