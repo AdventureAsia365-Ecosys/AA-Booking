@@ -48,11 +48,12 @@ export function SuppliersListView() {
     const items: RowMenuItem[] = [{ label: t("View supplier"), icon: <Eye size={15} />, onSelect: () => router.push(supplierHref(row)) }];
     if (actions.canWrite) {
       items.push({ label: t("Edit profile"), icon: <Pencil size={15} />, onSelect: () => router.push(supplierHref(row, "/edit")) });
-      items.push(
-        row.status === "active"
-          ? { label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => actions.deactivate(row), danger: true, divider: true }
-          : { label: t("Activate"), icon: <Power size={15} />, onSelect: () => actions.activate(row), divider: true },
-      );
+      if (row.status === "active") {
+        items.push({ label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => actions.deactivate(row), danger: true, divider: true });
+      } else if (actions.canActivate) {
+        // AA-1150: activating a supplier is an approval (supplier.activate).
+        items.push({ label: t("Activate"), icon: <Power size={15} />, onSelect: () => actions.activate(row), divider: true });
+      }
     }
     return items;
   }

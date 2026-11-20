@@ -2,7 +2,8 @@
 // app/(staff)/suppliers/_parts/useSupplierActions.tsx — Deactivate / Activate a supplier (AA-822; UI spec §4 modal
 // "Deactivate supplier", 08 conflict 4). Suppliers are never deleted. The API refuses a deactivation while a
 // published contract is in force or upcoming (409 supplier_has_contracts); the dialog then says to expire it.
-// Shared by the list row menu and the detail header. Needs supply.write (admin, contracting).
+// Shared by the list row menu and the detail header. Needs supply.write (admin, contracting); activating is an
+// approval and also needs supplier.activate (AA-1150), so a maker-only role only sees Deactivate.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +20,7 @@ export function useSupplierActions() {
   const t = useT(MSG);
   const tx = useTx();
   const canWrite = useCan("supply.write");
+  const canActivate = useCan("supplier.activate"); // held only next to supply.write (backend matrix test)
   const qc = useQueryClient();
   const toast = useToast();
   const [pending, setPending] = useState<Pending>(null);
@@ -67,6 +69,7 @@ export function useSupplierActions() {
 
   return {
     canWrite,
+    canActivate,
     deactivate: (s: NonNullable<Pending>["supplier"]) => ask("deactivate", s),
     activate: (s: NonNullable<Pending>["supplier"]) => ask("activate", s),
     dialogs,

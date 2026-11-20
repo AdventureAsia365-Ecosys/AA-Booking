@@ -14,7 +14,8 @@ export type StaffRole = (typeof STAFF_ROLES)[number];
 export const ROLE_LABEL: Record<StaffRole, string> = {
   admin: "Admin",
   sales: "Sales",
-  contracting: "Contracting",
+  // AA-1150 (lean staff roles): the built-in contracting role is shown as "Product & operations".
+  contracting: "Product & operations",
   content_creator: "Content creator",
   finance: "Finance",
 };
@@ -64,10 +65,11 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/settings", roles: ALL },
   // Sales (W1)
   { pattern: "/cases/new", roles: [A, S] },
-  { pattern: "/cases", roles: [A, S, C] },
-  { pattern: "/cases/*", roles: [A, S, C] },
-  { pattern: "/proposals", roles: [A, S, C] },
-  { pattern: "/pricing/calculator", roles: [A, S, C] },
+  // AA-1150 (L7a): finance reads trip cases (API trip_case.read) and prices (pricing.read); it writes neither.
+  { pattern: "/cases", roles: [A, S, C, F] },
+  { pattern: "/cases/*", roles: [A, S, C, F] },
+  { pattern: "/proposals", roles: [A, S, C, F] },
+  { pattern: "/pricing/calculator", roles: [A, S, C, F] },
   // Admin (W1 / W2)
   { pattern: "/staff", roles: [A] },
   { pattern: "/staff/:id", roles: ALL }, // admin, or a staff member reading their own profile (API-enforced)
@@ -76,43 +78,44 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/suppliers/new", roles: [A, C] },
   { pattern: "/suppliers/rate-sheets/*", roles: [A, C] },
   { pattern: "/suppliers/:id/edit", roles: [A, C] },
-  { pattern: "/suppliers", roles: [A, C, S] },
-  { pattern: "/suppliers/*", roles: [A, C, S] },
-  { pattern: "/hotels", roles: [A, C, S] },
-  { pattern: "/services", roles: [A, C, S] },
-  { pattern: "/services/*", roles: [A, C, S] },
+  // AA-1150 (L7a): finance reads supply (API supply.read); the edit pages above stay admin / contracting.
+  { pattern: "/suppliers", roles: [A, C, S, F] },
+  { pattern: "/suppliers/*", roles: [A, C, S, F] },
+  { pattern: "/hotels", roles: [A, C, S, F] },
+  { pattern: "/services", roles: [A, C, S, F] },
+  { pattern: "/services/*", roles: [A, C, S, F] },
   { pattern: "/pricing/rules", roles: [A, C] },
   // AA-1030: agency tiers and rate cards (API pricing.read; writes pricing.write = admin, contracting).
-  { pattern: "/pricing/agency-tiers", roles: [A, S, C] },
+  { pattern: "/pricing/agency-tiers", roles: [A, S, C, F] },
   // AA-1030 G3: one agency's tariff (pricing.read).
-  { pattern: "/pricing/agency-tiers/tariff", roles: [A, S, C] },
+  { pattern: "/pricing/agency-tiers/tariff", roles: [A, S, C, F] },
   // AA-1029: price readiness of the catalog (API pricing.read).
-  { pattern: "/pricing/readiness", roles: [A, S, C] },
+  { pattern: "/pricing/readiness", roles: [A, S, C, F] },
   // AA-1091: the price setup workbench (API pricing.read; actions and the workbook import trip_plan.write).
-  { pattern: "/pricing/workbench", roles: [A, S, C] },
+  { pattern: "/pricing/workbench", roles: [A, S, C, F] },
   // AA-1091: the pricing policy parameters (API pricing_policy.read; changes pricing_policy.write, approvals by group).
   { pattern: "/pricing/policy", roles: [A, S, C, F] },
   // AA-1091 (bk-055): season calendars and holiday events (API pricing.read; changes season.write, approvals
   // season.approve).
-  { pattern: "/pricing/seasons", roles: [A, S, C] },
-  { pattern: "/pricing/holiday-events", roles: [A, S, C] },
+  { pattern: "/pricing/seasons", roles: [A, S, C, F] },
+  { pattern: "/pricing/holiday-events", roles: [A, S, C, F] },
   // Catalog from CIS (W2): everyone reads; admin / contracting edit commercial fields.
   { pattern: "/catalog/trip-plans/:id/commercial", roles: [A, C] },
   { pattern: "/catalog/*", roles: ALL },
   // Operations (W3)
-  // AA-682 S4: /billing is the supplier bills (API bill.read: admin, sales, contracting). AA-1046: the customer
-  // invoices and payments (and their detail pages) are retired; finance works agency billing.
-  { pattern: "/billing", roles: [A, S, C] },
+  // AA-682 S4: /billing is the supplier bills (API bill.read: admin, sales, contracting, finance since AA-1150).
+  // AA-1046: the customer invoices and payments (and their detail pages) are retired; finance works agency billing.
+  { pattern: "/billing", roles: [A, S, C, F] },
   // AA-1037 R4 (root ADR 0019 d9): agency billing, every invoice from AA to an agency (software fee + tour
   // settlement), payments with maker-checker and the billing settings (API agency_billing.*, billing_config.write).
   { pattern: "/agency-billing", roles: [A, F] },
   { pattern: "/agency-billing/*", roles: [A, F] },
   // Trip checks (AA-682 S2): every operational role (API ops.read / ops.write).
-  { pattern: "/trip-checks", roles: [A, S, C] },
+  { pattern: "/trip-checks", roles: [A, S, C, F] },
   // B2B desk (AA-975): on-request lines and departure incidents; every operational role (API b2b_desk.*).
   { pattern: "/b2b-desk", roles: [A, S, C] },
   // AA-1075 (bk-13): the operations manifest of a departure (API ops.read: admin, sales, contracting).
-  { pattern: "/b2b-desk/manifest/:id", roles: [A, S, C] },
+  { pattern: "/b2b-desk/manifest/:id", roles: [A, S, C, F] },
   // AA-1073 rest (bk-048): the departure board across trip plans (API b2b_desk.read: admin, sales, contracting).
   { pattern: "/departures", roles: [A, S, C] },
   // AA-1074 (bk-045): costs & profit. Departure costs and purchase orders for the operational roles (API bill.read /

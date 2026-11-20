@@ -24,9 +24,9 @@ import { MSG } from "./useStaffActions.messages";
 export const ROLE_HELP: Record<StaffRole, string> = {
   admin: "Everything, including staff, customers' block / archive and the audit log.",
   sales: "Trip cases, proposals and customers.",
-  contracting: "Reads trip cases and customers; suppliers, rates and pricing from wave 2.",
+  contracting: "Suppliers, contracts, rates, prices, stop-sales and supplier bookings; activates suppliers and publishes contracts made by someone else.",
   content_creator: "Dashboard and the CIS catalog, read-only; content itself is written in CIS.",
-  finance: "Invoices and payments; verifying a payment stays with an admin. Given on the CIS Staff page.",
+  finance: "Agency invoices and payments; reads supplier bills, prices, supply, operations and trip cases. Supplier payouts stay with an admin. Given on the CIS Staff page.",
 };
 
 export function staffErrorText(err: unknown): string {

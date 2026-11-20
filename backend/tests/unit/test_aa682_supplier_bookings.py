@@ -200,7 +200,8 @@ def test_ops_docs_bucket_setting() -> None:
 
 
 def test_permission_matrix() -> None:
-    assert PERMISSIONS["ops.read"] == PERMISSIONS["ops.write"] == {"admin", "sales", "contracting"}
+    assert PERMISSIONS["ops.write"] == {"admin", "sales", "contracting"}
+    assert PERMISSIONS["ops.read"] == {"admin", "sales", "contracting", "finance"}  # AA-1150 L7a: finance reads
     assert "ops.read" in PREVIEW_PERMISSIONS and "ops.write" not in PREVIEW_PERMISSIONS
 
 

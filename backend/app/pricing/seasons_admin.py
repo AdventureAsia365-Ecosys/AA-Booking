@@ -24,12 +24,14 @@ maker-checker, like the other pricing data.
   second person approves or rejects (:func:`decide_plan_calendar`): the calendar drives the plan's peak uplift,
   festive quote validity and stop-sale, so it gets the maker-checker the ranges have.
 
-Permissions: reads ``pricing.read``; proposals ``season.write``; approvals ``season.approve`` (never one's own
-proposal: 403 ``maker_checker``, and the table CHECKs). A reason (at most 300 characters, ADR 0005b d1, the bk-048
-model) is required on every proposal, withdrawal, removal request and rejection; it is stored on the row when the row
-keeps it (``note``, ``reason``, ``withdraw_reason``, ``end_reason``, ``reject_reason``, ``default_request_reason``,
-``season_calendar_request_reason``) and always in the audit row (a rejected removal or default change clears its
-request). Every write is audited. Makers and checkers are returned as people (``{id, name}``, :mod:`app.auth.people`).
+Permissions: reads ``pricing.read``; proposals ``season.write``; approvals ``season.approve`` (never one's own proposal:
+403 ``maker_checker``, and the table CHECKs). AA-1150: approving or rejecting a stop-sale range, or its removal, also
+needs ``stop_sale.approve`` (the same review a contract stop-sale takes). A reason (at most 300 characters, ADR 0005b
+d1, the bk-048 model) is required on every proposal, withdrawal, removal request and rejection; it is stored on the row
+when the row keeps it (``note``, ``reason``, ``withdraw_reason``, ``end_reason``, ``reject_reason``,
+``default_request_reason``, ``season_calendar_request_reason``) and always in the audit row (a rejected removal or
+default change clears its request). Every write is audited. Makers and checkers are returned as people (``{id, name}``,
+:mod:`app.auth.people`).
 Inputs and outputs use inclusive end dates; the tables keep half-open ranges (d10).
 """
 
@@ -158,6 +160,12 @@ def _approve(staff: Staff, maker: str | None) -> None:
         raise Forbidden("forbidden", "approving seasons or holiday events needs season.approve")
     if maker == staff.cis_user_id:
         raise Forbidden("maker_checker", "a second person approves or rejects it")
+
+
+def _approve_stop(staff: Staff, row: Any) -> None:
+    """AA-1150: a stop-sale range's review (and its removal's) is a stop-sale approval too."""
+    if row["kind"] == "stop_sale" and not staff.can("stop_sale.approve"):
+        raise Forbidden("forbidden", "reviewing a stop-sale range needs stop_sale.approve")
 
 
 def _text(value: str | None, field: str, limit: int, *, required: bool = False) -> str | None:
@@ -408,6 +416,7 @@ async def decide_range(
         if row["status"] != "pending":
             raise Conflict("not_pending", f"the range is {state(row)}")
         _approve(staff, row["created_by"])
+        _approve_stop(staff, row)
         if action == "approve" and row["kind"] == "season" and row["date_from"] is not None:
             await _no_overlap(
                 conn, row["calendar_id"], seasons.Span(row["date_from"], row["date_to"], row["season_code"]), range_id
@@ -419,6 +428,8 @@ async def decide_range(
             raise Conflict("not_withdrawable", "only its maker withdraws a pending range")
         await _decide(conn, table, range_id, staff, action, text)
     else:
+        if action in ("end_approve", "end_reject"):
+            _approve_stop(staff, row)
         await _end(conn, table, row, staff, action, text)
     await _audit(conn, staff, f"season_range.{action}", "season_range", range_id, _decision_audit(row, text))
     return await _range_out(conn, range_id)

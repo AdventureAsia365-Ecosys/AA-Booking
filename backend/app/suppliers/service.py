@@ -325,13 +325,17 @@ async def get_supplier(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
 
 
 async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str, Any]) -> dict[str, Any]:
+    """A new supplier starts ``active`` only for a holder of ``supplier.activate`` (AA-1150): a maker with
+    ``supply.write`` alone creates it ``inactive``, so activation stays an approval (the column default is ``active``,
+    hence the explicit value)."""
     values = normalize({k: v for k, v in data.items() if k in EDITABLE})
     if "company_name" not in values:
         raise Invalid("company_name_required", "a supplier needs a company name")
     if "categories" not in values:
         raise Invalid("category_required", "a supplier needs at least one category")
     values.update(await check_place(conn, values, set(values)))
-    columns = [k for k in EDITABLE if k in values]
+    values["status"] = "active" if staff.can("supplier.activate") else "inactive"
+    columns = [*(k for k in EDITABLE if k in values), "status"]
     marks = ", ".join(f"${i + 1}" + ("::uuid" if c == "destination_id" else "") for i, c in enumerate(columns))
     try:
         row = await conn.fetchrow(
@@ -351,7 +355,8 @@ async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str
         entity_id=row["id"],
         after={"code": row["code"], **{c: values[c] for c in columns}},
         entity_label=f"{row['code']} {values['company_name']}",
-        summary=f"Created supplier {values['company_name']}",
+        summary=f"Created supplier {values['company_name']}"
+        + ("" if values["status"] == "active" else " (inactive until approved)"),
     )
     return {"id": row["id"], "code": row["code"]}
 
@@ -410,9 +415,12 @@ async def update_supplier(conn: asyncpg.Connection, staff: Staff, ref: str, chan
 async def set_status(
     conn: asyncpg.Connection, staff: Staff, ref: str, target: str, reason: str | None = None
 ) -> dict[str, Any]:
-    """``active`` / ``inactive``. Deactivating is refused while a published contract is in force or upcoming."""
+    """``active`` / ``inactive``. Deactivating is refused while a published contract is in force or upcoming.
+    Activating is an approval (AA-1150): it needs ``supplier.activate`` on top of the route's ``supply.write``."""
     if target not in STATUSES:
         raise Invalid("unknown_status", f"status must be one of {', '.join(STATUSES)}")
+    if target == "active" and not staff.can("supplier.activate"):
+        raise Forbidden("forbidden", "activating a supplier needs supplier.activate (an approval, not a write)")
     current = await resolve_supplier(conn, ref, lock=True)
     if current["status"] == target:
         return {**current, "changed": []}
@@ -545,6 +553,9 @@ async def update_contract(
         raise Invalid("not_editable", f"not editable: {', '.join(unknown)}")
     if status is not None and changes:
         raise Invalid("status_with_changes", "change the status on its own, not together with the terms")
+    if status == "published" and not staff.can("contract.publish"):
+        # AA-1150: publishing is the approval of a draft, never implied by supply.write (checked before any read).
+        raise Forbidden("forbidden", "publishing a contract needs contract.publish (an approval, not a write)")
     current = await get_contract(conn, contract_id, lock=True)
     # Lock the supplier too: a deactivation running at the same time (which checks for live contracts under the
     # same lock) then either sees this publish or makes it answer 409 supplier_inactive.

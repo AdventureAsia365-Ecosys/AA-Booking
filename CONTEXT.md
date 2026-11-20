@@ -580,15 +580,23 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   active Booking `admin`; `reviewer` → `sales`, `content` → `content_creator`, **inactive** (403 `staff_inactive`)
   until a Booking admin activates them. Later bridge tokens only refresh email/name/cis_role/last_seen_at, also on a
   linked row. A bridge `sub` starting with `cog:` is 401.
-- Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed):
-  read trip cases / customers = admin, sales, contracting; write / assign / versions / customers write = admin,
+- Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed).
+  **Lean staff roles step 1 (AA-1150, S286)**: `finance` also reads trip cases, prices, supply, operations, supplier
+  bills and the catalog (`trip_case.read`, `pricing.read`, `supply.read`, `ops.read`, `bill.read`, `catalog.read`; it
+  writes none of them and `payout.write` stays admin). Three approval capabilities are split out of the write rights
+  so a maker role can exist without them: `supplier.activate` (`POST /suppliers/{ref}/activate`; a supplier created
+  by a role without it starts `inactive`, a holder's starts `active`), `contract.publish`
+  (a contract's `status=published`) and `stop_sale.approve` (approve / reject a pending stop-sale, approve the end of
+  one, and the same decisions on a season calendar's stop-sale range); all three = admin, contracting (the built-in
+  `contracting` is shown as "Product & operations"), none in the preview cap. The rest of the matrix:
+  read trip cases = admin, sales, contracting, finance; customers read = admin, sales, contracting; write / assign / versions / customers write = admin,
   sales; staff directory (pickers) = admin, sales, contracting; pricing (margins, net costs, FX: `pricing.read`) =
-  admin, sales, contracting; new pricing rule / FX rows and their approval (`pricing.write`) = admin, contracting
+  admin, sales, contracting, finance; new pricing rule / FX rows and their approval (`pricing.write`) = admin, contracting
   (maker-checker: the creator of a row cannot approve it, 403 `own_row`); suppliers and supplier contracts read
-  (`supply.read`) = admin, sales, contracting, write (`supply.write`) = admin, contracting (maker-checker on contract
-  publish: not the draft's last writer, 403 `maker_checker`; hotels, room types, services, supplier rates and supplier
+  (`supply.read`) = admin, sales, contracting, finance, write (`supply.write`) = admin, contracting (contract publish
+  also needs `contract.publish`, and maker-checker: not the draft's last writer, 403 `maker_checker`; hotels, room types, services, supplier rates and supplier
   photos (AA-835) use the same pair, and writing a rate makes you the contract's maker); catalog reads (`catalog.read`) = every role,
-  content_creator included (without the price hint, channel and commercial notes, which need `pricing.read`); the
+  content_creator and finance included (without the price hint, channel and commercial notes, which need `pricing.read`); the
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
   `version.write` (admin, sales); block / archive customers, staff admin, audit log read, retention runs and status
   (`retention.admin`, AA-825), B2B partners (`b2b.admin`, AA-972) = admin; a trip plan's bookable components (AA-972)
@@ -631,14 +639,14 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   propose `season.write`, approve / reject / approve a removal `season.approve` (both admin, contracting), never one's
   own change; the calendar of a trip plan is set with `trip_plan.write`.
   Operations (AA-682 S1, bk-026): supplier bookings and their documents `ops.read` / `ops.write` = admin, sales,
-  contracting (`ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
+  contracting (`ops.read` also finance since AA-1150; `ops.read` is in the preview cap); confirming or declining a booking of an on-request B2B line also
   needs `b2b_desk.write`; net amounts in the responses need `pricing.read`. Trip checks and the lifecycle runs (AA-682
   S2, bk-027) use the same `ops.read` / `ops.write`; the customer name in the check list also needs `customer.read`.
   Billing (AA-682 S3, bk-028): invoices and payments `billing.read` / `billing.write` = admin, sales (contracting sees
   no customer money; the case detail hides its `money` badge without `billing.read`); verifying a payment
   `payment.verify` = admin and never the person who recorded it (403 `maker_checker`); voiding a verified payment needs
   `payment.verify` too. None of the three is in the preview cap (critic note 8: bill-to snapshots, payment refs).
-  Supplier bills (AA-682 S4, bk-030): `bill.read` = admin, sales, contracting; `bill.write` / `bill.approve` = admin,
+  Supplier bills (AA-682 S4, bk-030): `bill.read` = admin, sales, contracting, finance; `bill.write` / `bill.approve` = admin,
   contracting (never approving a bill they entered or whose amounts / lines they last changed, `facts_edited_by`: 403
   `maker_checker`); `payout.write` = admin (never on a bill they entered or last changed). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
   Agency billing (AA-1037, bk-041 / bk-042): `agency_billing.read` / `agency_billing.write` / `agency_payment.approve` /
@@ -1244,8 +1252,8 @@ term here is the term the supplier gives AA under an AA supplier contract, never
   `supply.write`), counted while the contract is published.
 - **Stop-sale** (`POST /booking/contracts/{id}/stop-sales`, `stop_sale.write` = contracting + admin, sales 403): on a
   published contract, in effect at once (`pending`); a second person approves or rejects it later (`…/stop-sales/{id}/
-  decision`, never its maker: 403 `maker_checker`), its maker may withdraw it; an approved one ends only when a second
-  person approves the end request (`…/end-request`, then `…/end`). Never deleted. The same T13 rule now applies to the
+  decision`, needs `stop_sale.approve` (AA-1150), never its maker: 403 `maker_checker`), its maker may withdraw it; an approved one ends only when a second
+  person approves the end request (`…/end-request`, then `…/end`, which needs `stop_sale.approve`). Never deleted. The same T13 rule now applies to the
   stop-sale ranges of season calendars (`app/pricing/seasons.py`): a pending one already counts.
 - **Engine** (`restrictions.evaluate`, one precedence for every caller): stop_sale > allotment (units left, not
   released) / free_sale (party within the limit) > on_request (also the default with no row). Allotment use = the
