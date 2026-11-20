@@ -3,11 +3,13 @@
 // AA-683 (fe-cases) — the spec §5 StaffPicker as a plain select over GET /booking/staff/directory (active
 // staff only, any role: the API lets any active staff hold the sales role on a case). Sales staff are
 // listed first; the signed-in user is marked "(me)".
+// AA-1159 (S286 F4): the directory needs the staff.directory permission (admin, sales, contracting). Without it
+// (finance) the query never runs and the picker shows disabled with the current value, so no 403 reaches the console.
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import type { StaffDirectoryEntry } from "@/lib/api/types";
-import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
+import { ROLE_LABEL, canPickStaff, isStaffRole } from "@/lib/rbac";
 import { Select, useStaff } from "@/ui";
 import { inputCls } from "./fields";
 import { useT } from "@/ui/core/useI18n";
@@ -15,10 +17,12 @@ import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./StaffSelect.messages";
 
 export function useStaffDirectory() {
+  const me = useStaff();
   return useQuery({
     queryKey: ["staff", "directory", "all"],
     queryFn: () => api.staff.directory(),
     staleTime: 5 * 60_000,
+    enabled: canPickStaff(me.permissions),
   });
 }
 
@@ -48,6 +52,7 @@ export function StaffSelect({
   const tx = useTx();
   const me = useStaff();
   const directory = useStaffDirectory();
+  const allowed = canPickStaff(me.permissions);
   const items = sortStaff(directory.data?.items ?? []);
   // Keep a current holder selectable even when the directory no longer lists them (deactivated).
   const known = !value || items.some((s) => s.cis_user_id === value);
@@ -58,7 +63,7 @@ export function StaffSelect({
       className={inputCls}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      disabled={directory.isLoading}
+      disabled={!allowed || directory.isLoading}
     >
       <option value="">{directory.isLoading ? t("Loading staff…") : emptyLabel}</option>
       {!known && <option value={value}>{value} {t("(inactive)")}</option>}

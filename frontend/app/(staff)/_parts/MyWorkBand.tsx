@@ -129,12 +129,15 @@ function MyWorkTileLink({ spec, tile }: { spec: MyWorkTileSpec; tile: MyWorkTile
   const isPhone = useIsPhone();
   const href = tileHref(spec.path, tile?.filter ?? {});
   const count = tileValue(tile);
+  // S286 F5: the kit tile cuts its label to one line with an ellipsis; in the 4-column grid at 1440 px that cut
+  // "Agency payments to approve". The band lets the label wrap instead (an override from outside the kit, which
+  // stays untouched): the label row is the first child of the tile root, its text the span carrying the title.
   return (
     <Link
       href={href}
       aria-label={tx(spec.aria)}
       data-testid={`my-work-tile-${spec.key}`}
-      className="block min-w-0 rounded-lg outline-none [&>div]:h-full transition hover:-translate-y-px hover:shadow-kit-md focus-visible:ring-2 focus-visible:ring-accent-border"
+      className="block min-w-0 rounded-lg outline-none [&>div]:h-full [&>div>div:first-child_span[title]]:whitespace-normal! [&>div>div:first-child_span[title]]:overflow-visible! transition hover:-translate-y-px hover:shadow-kit-md focus-visible:ring-2 focus-visible:ring-accent-border"
     >
       <KpiTile
         size={isPhone ? "sm" : "md"}
