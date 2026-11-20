@@ -161,6 +161,8 @@ ALLOWLIST: dict[str, str] = {
     "v_supply_hotels.address": "a hotel (business) address (bk-023 contract view of hotels.address)",
     "v_supply_services.working_title": "internal working title of a supplier service (bk-023 contract view of "
     "services.title), no customer data",
+    "staff_role.label": "a custom staff role name (bk-062, e.g. Product, ops & accounting), no person",
+    "v_staff_role_capability.label": "a custom staff role name (bk-062 contract view of staff_role.label), no person",
 }
 
 COMMENTS_SQL = """

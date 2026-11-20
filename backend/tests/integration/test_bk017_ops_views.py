@@ -186,6 +186,9 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         ("v_tenant_billing_status", "SELECT"),
         # bk-057 (AA-1093): the tenant.erasure.v1 report view for the CIS erasure job (test_bk057_schema.py).
         ("v_tenant_erasure_report_v1", "SELECT"),
+        # bk-062 (AA-1155): the key-only custom role view (CIS roles matrix); the base tables staff_role and
+        # staff_role_capability stay closed (test_bk062_schema.py).
+        ("v_staff_role_capability", "SELECT"),
     }
     assert await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'USAGE')")
     assert not await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'CREATE')")
