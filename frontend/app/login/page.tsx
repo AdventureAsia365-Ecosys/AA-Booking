@@ -27,6 +27,11 @@ const REASONS: Record<string, { tone: "info" | "error"; text: string }> = {
     tone: "error",
     text: "Your company account has no Booking role yet. Ask an owner to give you one in CIS → Platform → Staff, then sign in again.",
   },
+  // AA-1155 T5: a custom role could not be read (the role list was unreachable): refused until it can be.
+  custom_role_unavailable: {
+    tone: "error",
+    text: "Your Booking role could not be checked just now. Try again in a minute; if it keeps failing, tell a Booking admin.",
+  },
   forbidden: { tone: "error", text: "Booking refused this account. Ask a Booking admin to check your staff profile." },
   signin_failed: { tone: "error", text: "The company sign-in did not complete. Try again." },
   denied: { tone: "error", text: "The company sign-in was cancelled." },

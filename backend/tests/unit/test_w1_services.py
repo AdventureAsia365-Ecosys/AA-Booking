@@ -184,7 +184,9 @@ async def test_feed_filters_and_mark_read() -> None:
 
 async def test_staff_directory_detail_and_preferences() -> None:
     conn = ScriptedConn().on("WHERE active AND", [{"cis_user_id": "u-1", "name": "S", "role": "sales"}])
-    assert await staff_admin.directory(conn, role="sales") == [{"cis_user_id": "u-1", "name": "S", "role": "sales"}]
+    assert await staff_admin.directory(conn, role="sales") == [
+        {"cis_user_id": "u-1", "name": "S", "role": "sales", "role_label": None}  # AA-1155: a built-in role, no label
+    ]
     with pytest.raises(Invalid):
         await staff_admin.directory(conn, role="pilot")
     with pytest.raises(Forbidden):

@@ -27,11 +27,11 @@ export function BottomNav({ onOpenMore }: { onOpenMore: () => void }) {
   const tx = useTx();
   const router = useRouter();
   const pathname = usePathname();
-  const { role } = useStaff();
+  const { permissions } = useStaff();
 
   return (
     <nav className="aa-bottom-nav" data-testid="admin-bottom-nav" aria-label={t("Primary (mobile)")}>
-      {ITEMS.filter((it) => canSeePage(role, it.href)).map((it) => {
+      {ITEMS.filter((it) => canSeePage(permissions, it.href)).map((it) => {
         const Icon = it.icon;
         const active = navActive({ href: it.href }, pathname);
         return (

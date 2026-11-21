@@ -49,6 +49,19 @@ agency payment recorded by one finance user and approved by another (maker-check
   checked by the supplier their body names (:data:`BODY_SUPPLIER`). Paths take a UUID or a code (``SUP-`` / ``HTL-`` /
   ``SVC-`` + digits).
 
+- **The custom-role maker (A10g, AA-1155 T5, root spec R4.3).** The Dev-only address :data:`E2E_CUSTOM_MAKER_EMAIL`
+  (groups exactly ``cis-custom`` + ``booking-custom``) holds the custom role CIS grants it (``app.auth.custom_roles``),
+  so it proves the custom role with a real session: it reads what the role reads, makes a SYNTHETIC supplier (body
+  checked as A10e-3; it starts ``inactive``, the maker holds no ``supplier.activate``) and deactivates it at cleanup,
+  its own supplier only (:attr:`E2EWriter.record_owner`). Its other writes are **approve probes**
+  (:attr:`E2EWriter.approve_probes`): any write whose route gate needs an approve-class capability
+  (:func:`route_permissions`), and the approvals a service checks (:data:`SERVICE_PROBES`: supplier / hotel / service
+  activate, contract publish, stop-sale review). A probe is answered 403 ``forbidden`` from the session's capabilities
+  before any record is read (:func:`check_probe`): the answer the route gives, so no real record is ever touched. A
+  probe the role could pass (never: a custom role holds no approve-class capability) is refused 403
+  ``e2e_read_only`` unless it is also an allow-listed write, which then takes the synthetic-record rule. No
+  route-scoped grant (A10g).
+
 Reads keep the permissions of the identity's Booking role (``sales`` / ``finance`` / ``contracting``), like any member
 of that group.
 Every allowed write runs the route unchanged, so its normal audit row names the identity (``cog:<sub>``) as the actor.
@@ -86,6 +99,9 @@ E2E_FINANCE_CHECKER_EMAIL = "e2e-booking-checker@e2e-mail.lumiguides.it.com"
 # constants as AA-CIS-Infra workforce.E2E_DEV_ONLY_TEST_STAFF / E2E_DEV_ONLY_EXTRA_GROUP_SETS.
 E2E_PRICING_MAKER_EMAIL = "e2e-cis-cs@e2e-mail.lumiguides.it.com"
 E2E_PRICING_CHECKER_EMAIL = "e2e-booking-pricing-checker@e2e-mail.lumiguides.it.com"
+# A10g (AA-1155, S286): the custom-role maker. Same constant as AA-CIS-Infra workforce.E2E_DEV_ONLY_TEST_STAFF and the
+# AA-CIS-App 462 admin_users_email_chk branch.
+E2E_CUSTOM_MAKER_EMAIL = "e2e-custom-maker@e2e-mail.lumiguides.it.com"
 
 DEV_ONLY_ENVIRONMENT = "dev"
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -126,6 +142,12 @@ HOTEL_DEACTIVATE = ("POST", "/booking/hotels/{hotel_ref}/deactivate")
 ROOM_TYPE_CREATE = ("POST", "/booking/hotels/{hotel_ref}/room-types")
 SERVICE_CREATE = ("POST", "/booking/services")
 SERVICE_DEACTIVATE = ("POST", "/booking/services/{service_ref}/deactivate")
+# A10g (AA-1155 T5): approvals a service checks inside a route gated by a write capability (the approve probes of the
+# custom-role maker; app.suppliers.service, app.supply.records, app.supply.restrictions).
+SUPPLIER_ACTIVATE = ("POST", "/booking/suppliers/{supplier_ref}/activate")
+HOTEL_ACTIVATE = ("POST", "/booking/hotels/{hotel_ref}/activate")
+SERVICE_ACTIVATE = ("POST", "/booking/services/{service_ref}/activate")
+STOP_SALE_DECISION = ("POST", "/booking/supply/stop-sales/{restriction_id}/decision")
 # Every supplier, hotel and service name the maker creates starts with this (checked on the create body, and the
 # supplier keeps it: a renamed supplier is no longer synthetic).
 SYNTHETIC_SUPPLY_MARK = "SYNTHETIC"
@@ -227,6 +249,11 @@ class E2EWriter:
     # (method, route template) -> permissions this one request holds on top of the role (A10e-1), granted only after
     # every check passed. Each key is also in ``writes``.
     grants: Mapping[tuple[str, str], frozenset[str]] = field(default_factory=lambda: MappingProxyType({}))
+    # A10g: the identity may send approve probes (answered 403 from its capabilities, never run; see check_probe).
+    approve_probes: bool = False
+    # A10g: the creator of the synthetic supply this identity may touch (its own address); None = the A10e-3 rule
+    # (the pricing maker's supply, SYNTHETIC_SQL_ARGS).
+    record_owner: str | None = None
 
     def grants_for(self, method: str, route: str | None) -> frozenset[str]:
         return self.grants.get((method.upper(), route or ""), frozenset())
@@ -290,6 +317,15 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
             "pricing_checker",
             frozenset({"booking-contracting"}),
             frozenset({PRICE_VERSION_APPROVE, PRICE_VERSION_REJECT, PRICE_VERSION_WITHDRAW, CONTRACT_STATUS}),
+        ),
+        # A10g (AA-1155 T5): the custom-role maker. It makes and cleans up its own synthetic supplier; every approve
+        # probe (route gates and SERVICE_PROBES) is answered 403 from its capabilities before any read.
+        E2E_CUSTOM_MAKER_EMAIL: E2EWriter(
+            "custom_maker",
+            frozenset({"cis-custom", "booking-custom"}),
+            frozenset({SUPPLIER_CREATE, SUPPLIER_DEACTIVATE}),
+            approve_probes=True,
+            record_owner=E2E_CUSTOM_MAKER_EMAIL,
         ),
     }
 )
@@ -451,8 +487,102 @@ NEW_RECORD: frozenset[str] = frozenset({SUPPLIER_CREATE[1]})
 # Writes whose plans only the route knows (a workbook): the route calls check_import on the parsed file before it
 # writes or previews anything (app.routers.catalog.post_price_import).
 CHECKED_IN_ROUTE: frozenset[str] = frozenset({PRICE_IMPORT[1]})
+_SUPPLY_BY_CODE_SQL = (SUPPLIER_BY_CODE_SQL, HOTEL_BY_CODE_SQL, SERVICE_BY_CODE_SQL)
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
 INVOICE_BY_NUMBER_SQL = INVOICE_SYNTHETIC_SQL.replace("WHERE i.id = $1::uuid", "WHERE i.number = $1")
+
+
+# A10g: approvals checked inside a route that a write capability gates, with the body that makes the call an approval
+# (None = any body): (method, route) -> (approve capability, body test).
+def _status_published(body: Any) -> bool:
+    return isinstance(body, dict) and body.get("status") == "published"
+
+
+def _review_action(body: Any) -> bool:
+    return isinstance(body, dict) and body.get("action") in ("approve", "reject")
+
+
+SERVICE_PROBES: Mapping[tuple[str, str], tuple[str, Callable[[Any], bool] | None]] = MappingProxyType(
+    {
+        SUPPLIER_ACTIVATE: ("supplier.activate", None),
+        HOTEL_ACTIVATE: ("supplier.activate", None),
+        SERVICE_ACTIVATE: ("supplier.activate", None),
+        CONTRACT_STATUS: ("contract.publish", _status_published),
+        STOP_SALE_DECISION: ("stop_sale.approve", _review_action),
+    }
+)
+# The approve class (root spec D4; the same rule as app.auth.custom_roles.is_approve_class, kept here so this TEMPORARY
+# module imports nothing of the auth core).
+_APPROVE_SUFFIX = re.compile(r"\.approve(_[a-z0-9_]+)?$")
+_APPROVE_NAMED = frozenset(
+    {
+        "supplier.activate",
+        "contract.publish",
+        "stop_sale.approve",
+        "payout.write",
+        "payment.verify",
+        "billing_config.write",
+        "staff.admin",
+    }
+)
+
+
+def _approve_class(permission: str) -> bool:
+    return bool(_APPROVE_SUFFIX.search(permission)) or permission in _APPROVE_NAMED
+
+
+def route_permissions(route: Any) -> frozenset[str]:
+    """The permissions the route's gates check (``app.auth.staff.require`` marks each dependency), recursively."""
+    found: set[str] = set()
+    stack = [getattr(route, "dependant", None)]
+    while stack:
+        dependant = stack.pop()
+        for dep in getattr(dependant, "dependencies", ()) or ():
+            permission = getattr(dep.call, "permission", None)
+            if isinstance(permission, str):
+                found.add(permission)
+            stack.append(dep)
+    return frozenset(found)
+
+
+def probe_needs(method: str, route: Any, body: Any = None) -> frozenset[str]:
+    """A10g: the approve-class capabilities this write needs (its route gates, plus a :data:`SERVICE_PROBES` approval
+    when the body makes it one); empty for a read or a write that approves nothing."""
+    verb = method.upper()
+    if verb in READ_METHODS:
+        return frozenset()
+    needs = {p for p in route_permissions(route) if _approve_class(p)}
+    probe = SERVICE_PROBES.get((verb, getattr(route, "path", "") or ""))
+    if probe is not None and (probe[1] is None or probe[1](body)):
+        needs.add(probe[0])
+    return frozenset(needs)
+
+
+def is_probe(writer: E2EWriter, method: str, route: Any) -> bool:
+    """A10g, before the body is read: may this write be an approve probe of ``writer``? (A route gate in the approve
+    class, or a :data:`SERVICE_PROBES` route; :func:`check_probe` decides with the body and the capabilities.)"""
+    if not writer.approve_probes or method.upper() in READ_METHODS:
+        return False
+    path = getattr(route, "path", "") or ""
+    return (method.upper(), path) in SERVICE_PROBES or any(_approve_class(p) for p in route_permissions(route))
+
+
+def check_probe(writer: E2EWriter, method: str, route: Any, body: Any, capabilities: frozenset[str]) -> None:
+    """A10g: answer an approve probe from the session's capabilities, before any record is read: 403 ``forbidden`` (the
+    route's own answer) when a needed approval is missing. Any other write of this identity that is not allow-listed
+    (a probe the session could pass, a probe route whose body approves nothing) is 403 ``e2e_read_only``: a probe is
+    never run. An allow-listed write goes on to the synthetic-record rule. No-op for the other identities and reads."""
+    verb = method.upper()
+    if not writer.approve_probes or verb in READ_METHODS:
+        return
+    path = getattr(route, "path", None)
+    needs = probe_needs(verb, route, body)
+    if needs and not needs <= capabilities:
+        log.info("booking_e2e_probe_refused identity=%s route=%s needs=%s", writer.name, path, ",".join(sorted(needs)))
+        raise HTTPException(status_code=403, detail="forbidden")
+    if (verb, path or "") not in writer.writes:
+        log.warning("booking_e2e_writer_refused identity=%s reason=not_allowlisted route=%s", writer.name, path)
+        raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
 
 
 def writer_for(email: Any) -> E2EWriter | None:
@@ -468,8 +598,11 @@ def dev_only_environment() -> bool:
     return os.environ.get("ENVIRONMENT") == DEV_ONLY_ENVIRONMENT
 
 
-def check_session(writer: E2EWriter, groups: tuple[str, ...], method: str, route: str | None, path: str) -> None:
-    """The checks that need no database, in order: environment, exact groups, the write allow-list. Raises 403."""
+def check_session(
+    writer: E2EWriter, groups: tuple[str, ...], method: str, route: str | None, path: str, *, probe: bool = False
+) -> None:
+    """The checks that need no database, in order: environment, exact groups, the write allow-list (an A10g approve
+    probe, ``probe``, passes it: :func:`check_probe` answers it later). Raises 403."""
     if not dev_only_environment():
         log.warning("booking_e2e_writer_refused identity=%s reason=environment", writer.name)
         raise HTTPException(status_code=403, detail=E2E_NOT_ALLOWED_HERE)
@@ -478,6 +611,8 @@ def check_session(writer: E2EWriter, groups: tuple[str, ...], method: str, route
         raise HTTPException(status_code=403, detail=E2E_SCOPE)
     verb = method.upper()
     if verb in READ_METHODS:
+        return
+    if probe:
         return
     if route is None or (verb, route) not in writer.writes:
         log.info(
@@ -490,7 +625,8 @@ def reads_body(method: str, route: str | None) -> bool:
     """True when the guard must read this write's JSON body (a body rule, a body check or plans named in the body)."""
     key = (method.upper(), route or "")
     body_named = key[1] in BODY_SYNTHETIC or key[1] in BODY_SUPPLIER
-    return key in BODY_RULES or key in BODY_CHECKS or (method.upper() not in READ_METHODS and body_named)
+    probe_body = key in SERVICE_PROBES and SERVICE_PROBES[key][1] is not None  # A10g: the body makes it an approval
+    return key in BODY_RULES or key in BODY_CHECKS or probe_body or (method.upper() not in READ_METHODS and body_named)
 
 
 def check_body(writer: E2EWriter, method: str, route: str | None, body: Any) -> None:
@@ -545,16 +681,29 @@ def _lookup(param: str, sql: str, raw: Any) -> tuple[str, str] | None:
     return None
 
 
-async def _fetch_synthetic(conn: asyncpg.Connection | asyncpg.Pool, route: str, sql: str, key: str) -> bool:
+def _sql_args(route: str, sql: str, owner: str | None) -> tuple[str, ...]:
+    """The fixed arguments after the record key; an A10g ``owner`` replaces the creator of synthetic supply."""
+    if owner is not None and (sql in _SUPPLY_SQL or sql in _SUPPLY_BY_CODE_SQL):
+        return (owner,)
+    return SYNTHETIC_SQL_ARGS.get(route, ())
+
+
+async def _fetch_synthetic(
+    conn: asyncpg.Connection | asyncpg.Pool, route: str, sql: str, key: str, owner: str | None = None
+) -> bool:
     try:
-        return (await conn.fetchval(sql, key, *SYNTHETIC_SQL_ARGS.get(route, ()))) is True
+        return (await conn.fetchval(sql, key, *_sql_args(route, sql, owner))) is True
     except (asyncpg.PostgresError, OSError) as exc:
         log.warning("booking_e2e_synthetic_unknown route=%s error_class=%s", route, type(exc).__name__)
         return False
 
 
 async def is_synthetic_record(
-    conn: asyncpg.Connection | asyncpg.Pool, route: str, params: Mapping[str, Any], body: Any = None
+    conn: asyncpg.Connection | asyncpg.Pool,
+    route: str,
+    params: Mapping[str, Any],
+    body: Any = None,
+    owner: str | None = None,
 ) -> bool:
     """True only when the record named by the path (or, for :data:`BODY_SYNTHETIC`, every trip plan the body names;
     for :data:`BODY_SUPPLIER`, the supplier the body names) belongs to an agency CIS marks synthetic, or is a synthetic
@@ -569,12 +718,12 @@ async def is_synthetic_record(
         found = _lookup(
             "supplier_id", SUPPLIER_SYNTHETIC_SQL, body.get(supplier_field) if isinstance(body, dict) else None
         )
-        return found is not None and await _fetch_synthetic(conn, route, *found)
+        return found is not None and await _fetch_synthetic(conn, route, *found, owner)
     spec = SYNTHETIC_SQL.get(route)
     if spec is None:
         return False
     found = _lookup(spec[0], spec[1], params.get(spec[0]))
-    return found is not None and await _fetch_synthetic(conn, route, *found)
+    return found is not None and await _fetch_synthetic(conn, route, *found, owner)
 
 
 async def check_synthetic(
@@ -596,7 +745,7 @@ async def check_synthetic(
     if route in NEW_RECORD:  # A10e-3: the body check (marked name, no contact field) was the whole check
         log.info("booking_e2e_write_allowed identity=%s route=%s new_record=true", writer.name, route)
         return
-    if route is None or not await is_synthetic_record(conn, route, params, body):
+    if route is None or not await is_synthetic_record(conn, route, params, body, writer.record_owner):
         log.warning("booking_e2e_writer_refused identity=%s reason=not_synthetic route=%s", writer.name, route)
         raise HTTPException(status_code=403, detail=E2E_SYNTHETIC_ONLY)
     log.info("booking_e2e_write_allowed identity=%s route=%s", writer.name, route)

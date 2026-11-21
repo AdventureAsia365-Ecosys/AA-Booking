@@ -74,7 +74,6 @@ import {
   TripCaseStatusBadge,
   VersionBadgePill,
   useCan,
-  useStaff,
   useToast,
 } from "@/ui";
 import { B2C_READ_ONLY_NOTE, isFrozenCase } from "@/ui/booking/b2cFrozen";
@@ -130,10 +129,11 @@ function Builder({ c, v }: { c: TripCaseDetail; v: VersionWithItems }) {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
-  const me = useStaff();
   const canWrite = useCan("version.write");
-  const canPrice = ["admin", "sales", "contracting"].includes(me.role);
-  const canManageRules = me.role === "admin" || me.role === "contracting";
+  // AA-1155 R4.5: capabilities, not role names. The Price section is the live quote (pricing.read, the API's own gate
+  // on quote-preview); Apply stays behind `editable` (version.write). The rules link needs pricing.write.
+  const canPrice = useCan("pricing.read");
+  const canManageRules = useCan("pricing.write");
   const locked = v.is_sent_to_customer || v.is_approved;
   const closed = TERMINAL.includes(c.status);
   const editable = canWrite && !locked && !closed;

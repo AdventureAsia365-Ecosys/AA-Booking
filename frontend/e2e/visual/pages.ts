@@ -95,6 +95,7 @@ export const PAGES: VisualPage[] = [
   { slug: "services", route: "/services", path: "/services", auth: "staff" },
   { slug: "service", route: "/services/[id]", path: "/services/SVC-000001", auth: "staff" },
   { slug: "settings", route: "/settings", path: "/settings?tab=security", auth: "staff" },
+  { slug: "roles", route: "/roles", path: "/roles", auth: "staff" },
   { slug: "staff", route: "/staff", path: "/staff", auth: "staff" },
   { slug: "staff-member", route: "/staff/[cisUserId]", path: "/staff/u-001", auth: "staff" },
   { slug: "suppliers", route: "/suppliers", path: "/suppliers", auth: "staff" },

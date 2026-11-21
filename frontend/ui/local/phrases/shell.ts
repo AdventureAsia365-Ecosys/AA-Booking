@@ -21,6 +21,7 @@ import "@/app/(staff)/pricing/agency-tiers/_parts/TariffView.messages";
 import "@/app/(staff)/pricing/calculator/page.messages";
 import "@/app/(staff)/pricing/readiness/_parts/ReadinessView.messages";
 import "@/app/(staff)/pricing/workbench/_parts/versions.messages";
+import "@/app/(staff)/roles/_parts/RolesView.messages";
 import "@/app/(staff)/settings/page.messages";
 import "@/app/(staff)/staff/[cisUserId]/page.messages";
 import "@/app/(staff)/staff/_parts/useStaffActions.messages";

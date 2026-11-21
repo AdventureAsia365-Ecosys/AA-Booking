@@ -29,7 +29,10 @@ export interface StaffProfile {
   cis_user_id: string;
   email: string | null;
   name: string | null;
-  role: StaffRole;
+  /** A built-in role (`StaffRole`) or, for a booking-custom holder, its custom role code (AA-1155, `custom_*`). */
+  role: StaffRole | CustomRoleCode;
+  /** AA-1155: the custom role's label (a booking-custom holder); null or absent for a built-in role. */
+  role_label?: string | null;
   active: boolean;
   cis_role: string | null;
   created_at: IsoDateTime | null;
@@ -38,7 +41,11 @@ export interface StaffProfile {
   managed_in_directory?: boolean;
 }
 
+/** AA-1155: a custom role's code (bk-062 `^custom_[a-z][a-z0-9_]{1,46}$`). */
+export type CustomRoleCode = `custom_${string}`;
+
 export interface StaffMe extends StaffProfile {
+  /** The capabilities the API grants this session: the pages follow them (lib/rbac.ts canSeePage, AA-1155 T7). */
   permissions: string[];
   /** AA-911 D-1: this session came from the Preview-only client and is read-only (permissions already capped). */
   preview_viewer?: boolean;
@@ -47,7 +54,9 @@ export interface StaffMe extends StaffProfile {
 export interface StaffDirectoryEntry {
   cis_user_id: string;
   name: string | null;
-  role: StaffRole;
+  role: StaffRole | CustomRoleCode;
+  /** AA-1155: a custom role's label (null for a built-in role). */
+  role_label?: string | null;
 }
 
 export interface StaffAssignmentRow {

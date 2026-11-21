@@ -456,7 +456,9 @@ async def test_staff_directory_detail_preferences(pool: asyncpg.Pool, admin: asy
         with pytest.raises(Invalid):
             await staff_admin.set_preferences(conn, sam, {"bogus": True})
     assert [s["cis_user_id"] for s in everyone] == ["boss", "sam"]  # active only, no e-mail
-    assert set(everyone[0]) == {"cis_user_id", "name", "role"} and [s["cis_user_id"] for s in sales_only] == ["sam"]
+    assert set(everyone[0]) == {"cis_user_id", "name", "role", "role_label"} and [
+        s["cis_user_id"] for s in sales_only
+    ] == ["sam"]
     assert mine["counts"]["open_assignments"] == 1 and mine["open_assignments"][0]["code"] == case["code"]
     assert other["cis_user_id"] == "sam"
     assert prefs["notify"]["trip_case.status_changed"] is False and prefs["notify"]["proposal.approved"] is True

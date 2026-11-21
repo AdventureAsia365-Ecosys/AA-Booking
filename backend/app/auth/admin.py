@@ -7,14 +7,33 @@ their role follows the booking-* group on every sign-in. Their ``active`` flag i
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Iterable
 from typing import Any
 
 import asyncpg
 
 from app import audit
+from app.auth import custom_roles
 from app.auth.staff import STAFF_COLUMNS, STAFF_ROLES, Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications.service import STAFF_TYPES as STAFF_NOTIFICATION_TYPES
+
+log = logging.getLogger(__name__)
+
+
+async def role_labels(conn: asyncpg.Connection, roles: Iterable[str]) -> dict[str, str]:
+    """AA-1155: the labels of the custom roles among ``roles`` (bk-062). Built-in roles need none (the staff admin names
+    them). Fail soft: when the role table cannot be read, no labels, so the Staff page still opens (root spec R4.2)."""
+    codes = sorted({r for r in roles if custom_roles.CUSTOM_CODE.fullmatch(r)})
+    if not codes:
+        return {}
+    try:
+        rows = await conn.fetch("SELECT code, label FROM booking.staff_role WHERE code = ANY($1::text[])", codes)
+    except asyncpg.PostgresError as exc:
+        log.warning("booking_staff_role_labels_unavailable error_class=%s", type(exc).__name__)
+        return {}
+    return {r["code"]: r["label"] for r in rows}
 
 
 async def list_staff(conn: asyncpg.Connection, *, active: bool | None = None) -> list[dict[str, Any]]:
@@ -23,7 +42,8 @@ async def list_staff(conn: asyncpg.Connection, *, active: bool | None = None) ->
         " WHERE ($1::boolean IS NULL OR active = $1) ORDER BY active DESC, created_at",
         active,
     )
-    return [Staff.from_row(r).public() for r in rows]
+    labels = await role_labels(conn, (r["role"] for r in rows))
+    return [{**Staff.from_row(r).public(), "role_label": labels.get(r["role"])} for r in rows]
 
 
 async def update_staff(
@@ -106,7 +126,8 @@ def _access_verb(before: bool, after: bool) -> str:
 
 
 async def directory(conn: asyncpg.Connection, *, role: str | None = None) -> list[dict[str, Any]]:
-    """Active staff for pickers (D4): id, name and Booking role only — no e-mail, no CIS role."""
+    """Active staff for pickers (D4): id, name and Booking role only — no e-mail, no CIS role (AA-1155: plus a custom
+    role's label)."""
     if role is not None and role not in STAFF_ROLES:
         raise Invalid("unknown_staff_role", f"role must be one of {', '.join(STAFF_ROLES)}")
     rows = await conn.fetch(
@@ -114,7 +135,8 @@ async def directory(conn: asyncpg.Connection, *, role: str | None = None) -> lis
         " WHERE active AND ($1::text IS NULL OR role = $1) ORDER BY lower(coalesce(name, cis_user_id))",
         role,
     )
-    return [dict(r) for r in rows]
+    labels = await role_labels(conn, (r["role"] for r in rows))
+    return [{**dict(r), "role_label": labels.get(r["role"])} for r in rows]
 
 
 async def staff_detail(conn: asyncpg.Connection, viewer: Staff, cis_user_id: str) -> dict[str, Any]:
@@ -141,6 +163,7 @@ async def staff_detail(conn: asyncpg.Connection, viewer: Staff, cis_user_id: str
     open_items = [a for a in items if a["status"] not in ("completed", "cancelled")]
     return {
         **Staff.from_row(row).public(),
+        "role_label": (await role_labels(conn, [row["role"]])).get(row["role"]),
         "updated_at": row["updated_at"],
         "open_assignments": open_items,
         "counts": {"open_assignments": len(open_items), "assignments": len(items)},

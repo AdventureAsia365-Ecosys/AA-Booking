@@ -181,6 +181,7 @@ Figma groups (OVERVIEW / CONTENT & INVENTORY / TRIP OPERATIONS & SALES) put Trip
 | 14 | Catalog (from CIS) | Countries | `Globe` | `/catalog/countries` | all | W2 |
 | 15 | Admin | Staff | `Shield` | `/staff` | admin | W1 |
 | 16 | Admin | Audit Log | `ClipboardList` | `/audit-log` | admin | W2 |
+| 17 | Admin | Roles | `KeyRound` | `/roles` | admin (`staff.admin`; owners change roles) | W3 |
 | — | footer / avatar menu | Settings | `Settings` | `/settings` | all | W1 |
 | — | topbar bell | Notifications | `Bell` | `/notifications` | all | W1 |
 
@@ -226,6 +227,7 @@ App Router under `frontend/app/(staff)/…`, plus `app/login` and the BFF under 
 | `/staff` | Staff list (Booking profiles of CIS users); "Manage staff & invites in CIS ↗" + per-row sign-in / invite link to CIS (AA-996) | ADMINS, USER, BLOCK ADMIN, RESET PASSWORD (bg) (02, 01) | A | W1 |
 | `/staff/[cisUserId]` | Staff detail (tabs Overview / Assigned cases / Activity) | USER DETAILS, Activity Log, Assigned Trips, EDIT PROFILE (02, 01, 03) | A (self: read) | W1 |
 | `/audit-log` | Audit log | AUDIT LOGS (01) | A | W2 (shipped early, S237) |
+| `/roles` | Booking roles: custom roles (clone a built-in role, tick capabilities, archive; owners only, audited) and the built-in roles read-only (AA-1155) | not drawn | A (owner: write) | W3 |
 | `/suppliers` | Supplier list | SUPPLIER MANAGEMENT, -1, -2, DELETE USER-1 (08, 02) | A C, S(r) | W2 |
 | `/suppliers/new`, `/suppliers/[id]/edit` | Supplier form | ADD SUPPLIER, EDIT SUPPLIER (08) | A C | W2 |
 | `/suppliers/[id]` | Supplier detail (tabs Profile / Contracts / Rates / Bookings / Bills) | SUPPLIER  DETAILS (08); tabs not drawn | A C, S(r) | W2 (Bookings: AA-682 S1, read-only list linking to the case; Bills: AA-682 S4, this supplier's bills + Enter bill + the bill drawer, `?bill=BIL-…`) |

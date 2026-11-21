@@ -2,8 +2,8 @@
 // ui/local/nav.tsx (AA-994 S4b: moved from ui/, the Booking shell; not part of the kit core)
 // AA-683 — the Booking navigation model (replaces CIS adminNav.tsx), shared by the Sidebar, the Topbar
 // breadcrumb, the CommandPalette and the BottomNav. Order, groups, labels and icons are UI spec §2.2
-// (Figma regrouped per shell C-1/C-10). An item shows only when the role may open its page
-// (lib/rbac.ts) AND the entry itself is marked `shipped`: later-wave routes exist (spec §3) but stay
+// (Figma regrouped per shell C-1/C-10). An item shows only when the profile's capabilities open its page
+// (lib/rbac.ts, AA-1155 T7) AND the entry itself is marked `shipped`: later-wave routes exist (spec §3) but stay
 // out of the nav until their page is built. The flag is per entry (S237), so one page of a wave can ship
 // without exposing the frames of the rest of its wave.
 
@@ -23,6 +23,7 @@ import {
   Gauge,
   Globe,
   Handshake,
+  KeyRound,
   Landmark,
   LayoutGrid,
   Map as MapIcon,
@@ -149,6 +150,8 @@ export function navGroups(): NavGroup[] {
       label: "Admin",
       items: [
         { href: "/staff", label: "Staff", icon: <Shield size={ICON} />, wave: 1, shipped: true },
+        // AA-1155 T7: custom staff roles (clone a built-in role, tick capabilities; owners change, admins read).
+        { href: "/roles", label: "Roles", icon: <KeyRound size={ICON} />, wave: 3, shipped: true },
         { href: "/audit-log", label: "Audit Log", icon: <ClipboardList size={ICON} />, wave: 2, shipped: true },
       ],
     },
@@ -180,21 +183,23 @@ const ALL_ENTRIES: NavEntry[] = [...NAV_GROUPS.flatMap((g) => g.items), SETTINGS
 
 export { hrefPath, navActive } from "./navMatch";
 
-export function isVisible(entry: NavEntry, role: string | null | undefined): boolean {
-  return entry.shipped && canSeePage(role, hrefPath(entry.href));
+type Permissions = readonly string[] | null | undefined;
+
+export function isVisible(entry: NavEntry, permissions: Permissions): boolean {
+  return entry.shipped && canSeePage(permissions, hrefPath(entry.href));
 }
 
-/** Nav groups filtered for a role (empty groups dropped). */
-export function visibleGroups(role: string | null | undefined): NavGroup[] {
-  return NAV_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => isVisible(i, role)) })).filter(
+/** Nav groups filtered for the profile's capabilities (empty groups dropped). */
+export function visibleGroups(permissions: Permissions): NavGroup[] {
+  return NAV_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => isVisible(i, permissions)) })).filter(
     (g) => g.items.length > 0,
   );
 }
 
 /** Flat list of visible entries plus Notifications and Settings (command palette). */
-export function allEntries(role: string | null | undefined): NavEntry[] {
-  return [...visibleGroups(role).flatMap((g) => g.items), NOTIFICATIONS_ENTRY, SETTINGS_ENTRY].filter((e) =>
-    canSeePage(role, hrefPath(e.href)),
+export function allEntries(permissions: Permissions): NavEntry[] {
+  return [...visibleGroups(permissions).flatMap((g) => g.items), NOTIFICATIONS_ENTRY, SETTINGS_ENTRY].filter((e) =>
+    canSeePage(permissions, hrefPath(e.href)),
   );
 }
 

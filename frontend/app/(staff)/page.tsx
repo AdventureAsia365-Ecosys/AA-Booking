@@ -63,7 +63,7 @@ export default function DashboardPage() {
   const tr = useT(MSG);
   const staff = useStaff();
   const { name } = staffDisplay(staff);
-  const canCases = canSeePage(staff.role, "/cases");
+  const canCases = canSeePage(staff.permissions, "/cases");
   return (
     <PageFrame title={tr("Dashboard")} description={tr("Welcome back, {0}. Here is what needs your attention today.", name)}>
       {/* AA-1159: the role's work queues first (by capability; hidden for a role with none). */}

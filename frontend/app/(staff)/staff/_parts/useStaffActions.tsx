@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
-import { ROLE_LABEL, STAFF_ROLES, cisRoleLabel, type StaffRole } from "@/lib/rbac";
+import { ROLE_LABEL, STAFF_ROLES, cisRoleLabel, isStaffRole, roleName, type StaffRole } from "@/lib/rbac";
 import { Radio, ConfirmDialog, FormDrawer, useStaff, useToast } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
@@ -55,7 +55,7 @@ export function useStaffActions() {
     onSuccess: (updated, { staff, body }) => {
       qc.invalidateQueries({ queryKey: ["staff"] });
       const name = updated.name ?? staff.name ?? staff.email ?? "Staff member";
-      if (body.role !== undefined) toast.success(t("{0} is now {1}.", name, tx(ROLE_LABEL[updated.role]) ?? updated.role));
+      if (body.role !== undefined) toast.success(t("{0} is now {1}.", name, tx(roleName(updated.role, updated.role_label))));
       else toast.success(updated.active ? t("{0} can now use Booking.", name) : t("{0} can no longer use Booking.", name));
       setPending(null);
       setRoleFor(null);
@@ -89,7 +89,7 @@ export function useStaffActions() {
           pending?.kind === "activate" ? (
             <>
               {t("Activate")} <strong className="text-ink">{name}</strong> {t("as")}
-              <strong className="text-ink">{tx(ROLE_LABEL[pending.staff.role] ?? pending.staff.role)}</strong>{t("? They can use Booking with that role from their next page load. Change the role first if it is not right.")}
+              <strong className="text-ink">{tx(roleName(pending.staff.role, pending.staff.role_label))}</strong>{t("? They can use Booking with that role from their next page load. Change the role first if it is not right.")}
             </>
           ) : (
             <>
@@ -148,7 +148,8 @@ function RoleDrawer({
   const t = useT(MSG);
   const tx = useTx();
   const me = useStaff();
-  const [role, setRole] = useState<StaffRole>(staff.role);
+  // AA-1155: a custom role is never changed here (its holder is managed in CIS): the drawer starts on a built-in role.
+  const [role, setRole] = useState<StaffRole>(isStaffRole(staff.role) ? staff.role : "sales");
   const self = staff.cis_user_id === me.cis_user_id;
   return (
     <FormDrawer

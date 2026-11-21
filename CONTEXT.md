@@ -110,7 +110,9 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   access tokens of the `booking-staff` and `breakglass` clients and takes the Booking role from the `booking-*` groups
   (granted in CIS → Platform → Staff). The CIS bridge token (ADR 0004 O1) is no longer accepted: AA-911 (S271) turned
   the bridge issuer off and CIS no longer mints it. Booking keeps only a thin staff profile
-  (`booking.staff_users`) and never reads the CIS staff directory.
+  (`booking.staff_users`) and never reads the CIS staff directory itself: for a `booking-custom` holder and the owner
+  markers it reads the key-only CIS contract view `shared.v_staff_booking_grant` (CIS 462, contract `staff.roles.v1`,
+  AA-1155; see "Custom staff roles").
 - **Publishes** to CIS (AA-858, contract `ops.overview.v1`, root ADR 0008 §5): two aggregate views in its own schema,
   `booking.v_ops_funnel_daily` (per UTC day, metric, source system) and `booking.v_ops_case_status` (cases per current
   status), `bk-017`, SELECT to the CIS runtime role `cis_app` (plus USAGE on schema `booking`); the CIS admin overview
@@ -191,6 +193,7 @@ backend/
   app/routers/health.py    GET /booking/health, GET /booking/health/ready
   app/routers/docs.py      GET /booking/openapi.json, GET /booking/docs (staff.admin outside test/local, AA-876)
   app/routers/staff.py     GET /booking/staff/me, admin GET/PATCH /booking/staff (PATCH `reason`: audit row only, AA-996)
+  app/routers/staff_roles.py  the role editor (AA-1155 T6): GET/POST /booking/staff-roles, PATCH /booking/staff-roles/{code}
   app/routers/trip_cases.py  staff trip case + version endpoints (/booking/trip-cases*, /booking/versions)
   app/routers/notifications.py  /booking/notifications* (staff feed, per-staff read state)
   app/routers/reference.py  /booking/settings, /booking/countries, /booking/audit-logs (admin; `q` text search, AA-996)
@@ -582,6 +585,26 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   active Booking `admin`; `reviewer` → `sales`, `content` → `content_creator`, **inactive** (403 `staff_inactive`)
   until a Booking admin activates them. Later bridge tokens only refresh email/name/cis_role/last_seen_at, also on a
   linked row. A bridge `sub` starting with `cog:` is 401.
+- **Custom staff roles (AA-1155 T5-T7, root spec `.kiro/specs/AA-1155-custom-staff-roles`, root ADR 0006a A14 /
+  A10g; `app/auth/custom_roles.py`, `app/auth/role_editor.py`).** Built-in roles stay in code; `booking.staff_role` /
+  `booking.staff_role_capability` (bk-062) hold custom roles only. A token with the group `booking-custom` and no
+  built-in `booking-*` group (a built-in group always wins, so an administrator never reads the tables) holds the custom
+  role its CIS Staff page grant names: the view row of its `sub` (`booking_role_code` a `custom_*` code), the role
+  (not archived) and its capabilities, narrowed to the ones the code knows and never the approve class (`*.approve`,
+  `*.approve_<x>`, `supplier.activate`, `contract.publish`, `stop_sale.approve`, `payout.write`, `payment.verify`,
+  `billing_config.write`, `staff.admin`). Each read is reused at most 60 s per process (`CACHE_S`, the spec's
+  revocation bound, a technical constant). The staff row's `role` is synced to the code (audited); `Staff.can` answers
+  from the role's capabilities; `/booking/staff/me` adds `role_label`. No grant, a built-in code, an unknown or archived
+  role: 403 `no_booking_role`; the view or the tables unreadable: 403 `custom_role_unavailable` (custom holders only).
+  The Staff list, profile and picker name a custom role by its label, read fail soft (the admin's `/staff` opens with
+  the role table unreadable). **Role editor** (Admin -> Roles, `/roles`): `GET /booking/staff-roles` for `staff.admin`
+  or an owner (the CIS `is_owner` marker, read from the view uncached; unreadable = not an owner); `POST` clones a
+  built-in role (its capabilities without the approve class, or a given set) and `PATCH` relabels, sets the
+  capabilities or archives / restores, owner only (403 `owner_only`), 400 on an approve-class or unknown capability,
+  each change audited before and after (`staff_role.created` / `staff_role.updated`). **A10g** (Dev only, exactly
+  `cis-custom` + `booking-custom`): the custom-role maker creates and deactivates its own SYNTHETIC supplier; every
+  approve-class write it sends (a route gate in the approve class, or supplier / hotel / service activate, contract
+  publish, stop-sale review) is answered 403 `forbidden` from its capabilities before any record is read.
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed).
   **Lean staff roles step 1 (AA-1150, S286)**: `finance` also reads trip cases, prices, supply, operations, supplier
   bills and the catalog (`trip_case.read`, `pricing.read`, `supply.read`, `ops.read`, `bill.read`, `catalog.read`; it
@@ -2345,6 +2368,13 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
 - `/api/booking/<path>` → `<BOOKING_API_URL>/booking/<path>` with the access token as Bearer. Tokens live only in
   httpOnly cookies. Booking roles of company sign-in profiles are read-only on `/staff` (set in CIS → Platform →
   Staff, API 409 `managed_in_directory`); Activate / Deactivate stays.
+- **Pages follow capabilities (AA-1155 T7, root spec R4.5).** `lib/rbac.ts` `PAGE_RULES` name the capabilities that
+  open a page (any of; empty = any signed-in staff member) and `canSeePage(me.permissions, path)` decides the shell,
+  sidebar, command palette, bottom nav and dashboard; never the role name, so a custom role opens exactly the pages its
+  capabilities serve. Each rule is the read capability of the API the page calls; `lib/rbacPermissions.test.mjs`
+  proves every built-in role opens the same pages as the old role lists, with the backend matrix in
+  `lib/rbac.permissions.fixture.json` (kept equal to `app/auth/staff.py` by `tests/unit/test_aa1155_frontend_fixture.py`).
+  A sign-in refused with `custom_role_unavailable` lands on `/login?reason=custom_role_unavailable`.
 - UI kit (AA-994 S4b, root ADR 0016): `frontend/ui/core/` is the kit core, a byte copy of AA-CIS-App
   `frontend/app/_kit/core/` written by the root `tools/kit/kit-sync.sh` and pinned in `frontend/kit.lock.json`; it is
   never edited here (the kit-sync bot opens the sync PR after a CIS core change). It carries the one `--aa-*` token set

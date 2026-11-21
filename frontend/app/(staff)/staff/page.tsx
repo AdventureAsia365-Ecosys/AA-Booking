@@ -14,7 +14,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, CheckCircle2, Eye, KeyRound, Pencil } from "lucide-react";
 import { api } from "@/lib/api/client";
 import type { StaffProfile } from "@/lib/api/types";
-import { ROLE_LABEL, STAFF_ROLES, cisRoleLabel, isStaffRole } from "@/lib/rbac";
+import { ROLE_LABEL, STAFF_ROLES, cisRoleLabel, roleName } from "@/lib/rbac";
 import { CIS_STAFF_PATH, CIS_STAFF_URL } from "@/lib/config";
 import {
   DataTable, DateText, FilterBar, IconButton, KpiTile, ManagedInCisLink, PageFrame, PersonCell, Pill, Section, StatusBadge,
@@ -178,7 +178,7 @@ function IconAction({
 
 const COLUMNS: ColumnDef<StaffProfile, unknown>[] = [
   { id: "name", header: "User", accessorFn: (r) => r.name ?? r.email ?? "", cell: ({ row }) => <PersonCell className="md:max-w-[240px]" name={row.original.name ?? row.original.email} sub={row.original.email} /> },
-  { id: "role", header: "Booking role", accessorKey: "role", cell: ({ row }) => <Pill dot={false}><Phrase text={isStaffRole(row.original.role) ? ROLE_LABEL[row.original.role] : row.original.role} /></Pill> },
+  { id: "role", header: "Booking role", accessorKey: "role", cell: ({ row }) => <Pill dot={false}><Phrase text={roleName(row.original.role, row.original.role_label)} /></Pill> },
   { id: "cis_role", header: "CIS role", accessorFn: (r) => r.cis_role ?? "", cell: ({ row }) => <span className="text-[13px] text-muted">{row.original.cis_role ? <Phrase text={cisRoleLabel(row.original.cis_role)} /> : "—"}</span> },
   { id: "status", header: "Status", accessorFn: (r) => (r.active ? "active" : "inactive"), cell: ({ row }) => <StatusBadge kind="staff" value={row.original.active ? "active" : "inactive"} /> },
   { id: "seen", header: "Last seen", accessorKey: "last_seen_at", cell: ({ row }) => <DateText value={row.original.last_seen_at} relative className="text-[13px] text-muted" /> },

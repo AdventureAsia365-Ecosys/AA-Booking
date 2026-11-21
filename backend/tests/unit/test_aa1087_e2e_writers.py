@@ -31,6 +31,7 @@ MAKER = "e2e-booking-maker@e2e-mail.lumiguides.it.com"
 CHECKER = "e2e-booking-checker@e2e-mail.lumiguides.it.com"
 PRICING_MAKER = "e2e-cis-cs@e2e-mail.lumiguides.it.com"
 PRICING_CHECKER = "e2e-booking-pricing-checker@e2e-mail.lumiguides.it.com"
+CUSTOM_MAKER = "e2e-custom-maker@e2e-mail.lumiguides.it.com"  # A10g (AA-1155)
 GROUPS = {STAFF: ["booking-sales"], MAKER: ["booking-finance"], CHECKER: ["booking-finance"]}
 ROLE = {STAFF: "sales", MAKER: "finance", CHECKER: "finance"}
 RECORD = "6f1d2c3b-4a59-4e8d-9c7b-0a1b2c3d4e5f"
@@ -133,6 +134,16 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                 }
             ),
         ),
+        # A10g (AA-1155 T5): the custom-role maker; its approve probes are tests/unit/test_aa1155_custom_roles.py.
+        CUSTOM_MAKER: (
+            frozenset({"cis-custom", "booking-custom"}),
+            frozenset({e2e_staff.SUPPLIER_CREATE, e2e_staff.SUPPLIER_DEACTIVATE}),
+        ),
+    }
+    # Only the A10g maker sends approve probes, and only its own synthetic supply is its record.
+    assert {email for email, w in e2e_staff.E2E_WRITERS.items() if w.approve_probes} == {CUSTOM_MAKER}
+    assert {email: w.record_owner for email, w in e2e_staff.E2E_WRITERS.items() if w.record_owner} == {
+        CUSTOM_MAKER: CUSTOM_MAKER
     }
     # The maker and the checker never share a write (maker-checker by identity).
     assert not (e2e_staff.E2E_WRITERS[MAKER].writes & e2e_staff.E2E_WRITERS[CHECKER].writes)
@@ -143,6 +154,7 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
         CHECKER: {},
         PRICING_MAKER: {},
         PRICING_CHECKER: {},
+        CUSTOM_MAKER: {},
     }
     assert dict(e2e_staff.BODY_RULES) == {e2e_staff.DEPARTURE_CANCEL: {"status": "cancelled"}}
     assert set(e2e_staff.BODY_CHECKS) == {
