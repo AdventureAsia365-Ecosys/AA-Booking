@@ -567,6 +567,49 @@ async def _json_body(request: Request) -> Any:
         return None
 
 
+async def _custom_role(
+    pool: asyncpg.Pool,
+    principal: Principal,
+    role: str | None,
+    writer: e2e_staff.E2EWriter | None,
+    method: str,
+    route: Any,
+    body: Any,
+) -> tuple[str, custom_roles.CustomRole | None]:
+    """The session's Booking role: the built-in ``role`` from the groups, or (AA-1155 T5) for ``booking-custom`` with no
+    built-in group the custom role the CIS grant names (fail closed, 403). Then the A10g approve probe check (root ADR
+    0006a): a probe of the custom-role maker is answered from its capabilities before any record is read; a probe the
+    role could pass is never run unless allow-listed (the synthetic rule follows)."""
+    custom = None
+    if role is None:
+        custom = await custom_roles.resolve(pool, principal.sub)
+        role = custom.code
+    if writer is not None:
+        held = custom.capabilities if custom is not None else role_permissions(role)
+        e2e_staff.check_probe(writer, method, route, body, held)
+    return role, custom
+
+
+def _session(
+    staff: Staff,
+    *,
+    custom: custom_roles.CustomRole | None,
+    preview: bool,
+    writer: e2e_staff.E2EWriter | None,
+    method: str,
+    route: str | None,
+) -> Staff:
+    """The request's session fields on the synced row (never stored): a custom role's capabilities and label, the
+    Preview cap, an A10e-1 route-scoped grant (every check passed) and the E2E writer's name."""
+    if custom is not None:
+        staff = replace(staff, custom_permissions=custom.capabilities, role_label=custom.label)
+    if preview:
+        staff = replace(staff, preview=True)
+    if writer is not None:
+        staff = replace(staff, e2e_grants=writer.grants_for(method, route), e2e_writer=writer.name)
+    return staff
+
+
 async def get_pool(request: Request) -> asyncpg.Pool:
     db = request.app.state.db
     if not db.configured:
@@ -616,16 +659,7 @@ async def current_staff(
             body = await _json_body(request)
             e2e_staff.check_body(writer, request.method, route, body)
         pool = await get_pool(request)
-        custom: custom_roles.CustomRole | None = None
-        if role is None:
-            # AA-1155 T5: booking-custom and no built-in group. The CIS grant names the role (fail closed, 403).
-            custom = await custom_roles.resolve(pool, principal.sub)
-            role = custom.code
-        if writer is not None:
-            # A10g (root ADR 0006a): an approve probe of the custom-role maker is answered from its capabilities before
-            # any record is read; a probe the role could pass is never run unless allow-listed (synthetic rule below).
-            held = custom.capabilities if custom is not None else role_permissions(role)
-            e2e_staff.check_probe(writer, request.method, route_obj, body, held)
+        role, custom = await _custom_role(pool, principal, role, writer, request.method, route_obj, body)
         # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
         # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
         await admin_mfa.check_session(
@@ -637,15 +671,7 @@ async def current_staff(
             await e2e_staff.check_synthetic(pool, writer, request.method, route, request.path_params, body)
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
-        if custom is not None:
-            staff = replace(staff, custom_permissions=custom.capabilities, role_label=custom.label)
-        if preview:
-            staff = replace(staff, preview=True)
-        if writer is not None and (grants := writer.grants_for(request.method, route)):
-            # A10e-1: the permission this one request needs (every check above passed); never stored.
-            staff = replace(staff, e2e_grants=grants)
-        if writer is not None:
-            staff = replace(staff, e2e_writer=writer.name)
+        staff = _session(staff, custom=custom, preview=preview, writer=writer, method=request.method, route=route)
     elif kind == identity_config.BRIDGE:
         claims = _bridge_claims(principal, token)
         role = ROLE_FROM_CIS.get(claims.cis_role)

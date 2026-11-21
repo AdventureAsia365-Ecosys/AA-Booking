@@ -213,8 +213,7 @@ async def test_an_archived_role_or_no_grant_is_no_booking_role(
 
 async def _audit(admin: asyncpg.Connection, action: str) -> list[asyncpg.Record]:
     return await admin.fetch(
-        "SELECT before, after, summary FROM booking.audit_logs WHERE action = $1 AND entity_label LIKE $2"
-        " ORDER BY created_at",
+        "SELECT before, after, summary FROM booking.audit_logs WHERE action = $1 AND entity_label LIKE $2",
         action,
         f"%({ZZ})",
     )
