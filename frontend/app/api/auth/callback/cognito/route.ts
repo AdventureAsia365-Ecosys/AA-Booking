@@ -48,7 +48,9 @@ export async function GET(request: NextRequest) {
 
   const me = await fetchStaffMe(tokens.accessToken);
   if (me.kind === "unauthorized" || me.kind === "forbidden") {
-    const reason = me.kind === "forbidden" && me.code === "no_booking_role" ? "no_booking_role" : me.kind === "forbidden" ? "forbidden" : "signin_failed";
+    // AA-1155 T5: a custom role holder whose role could not be read (fail closed) gets its own message.
+    const known = ["no_booking_role", "custom_role_unavailable"];
+    const reason = me.kind === "forbidden" ? (known.includes(me.code) ? me.code : "forbidden") : "signin_failed";
     console.warn(`[auth] cognito callback: Booking refused the sign-in (${me.kind === "forbidden" ? me.code : "401"})`);
     if (tokens.refreshToken) await revokeRefreshToken(tokens.refreshToken);
     const response = toLogin(request, reason);
