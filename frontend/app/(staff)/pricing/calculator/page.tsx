@@ -3,12 +3,12 @@
 // Left: net cost lines (amount + supplier currency) and the channel / selling currency / peak / override
 // settings. Right: the priced result. Every number comes from POST /booking/pricing/quote-preview
 // (bk-004, AA-810), called live and debounced; nothing is saved and no case is involved.
-// Route access is admin / sales / contracting (lib/rbac.ts), matching the API's pricing.read permission.
+// Route access is pricing.read (lib/rbac.ts PAGE_RULES), the API's own permission; the rules link needs pricing.write.
 
 import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { quoteRequest, newKey, type CostLine } from "@/lib/proposalDraft";
-import { Button, PageFrame, Section, useStaff } from "@/ui";
+import { Button, PageFrame, Section, useCan } from "@/ui";
 import { CostLinesEditor, FxNotice, PriceSettings, QuoteResult, useQuotePreview, type PriceSettingsValue } from "@/ui/booking/PricePanel";
 import { useT } from "@/ui/core/useI18n";
 import { MSG } from "./page.messages";
@@ -21,8 +21,7 @@ function blankLine(): CostLine {
 
 export default function PricingCalculatorPage() {
   const t = useT(MSG);
-  const me = useStaff();
-  const canManageRules = me.role === "admin" || me.role === "contracting";
+  const canManageRules = useCan("pricing.write");
   const [lines, setLines] = useState<CostLine[]>(() => [blankLine()]);
   const [settings, setSettings] = useState<PriceSettingsValue>(DEFAULT_SETTINGS);
 

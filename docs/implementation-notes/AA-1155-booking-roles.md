@@ -44,6 +44,12 @@ root ADR 0006a A14 / A10g). No migration: bk-062 (tables, view, seed, `staff_use
   holders, status, edit / archive for owners), built-in roles read-only, a FormDrawer with capability checkboxes
   grouped by area; approve-class capabilities are shown disabled. Custom role names show by label on Staff, profile,
   the picker and the avatar (`roleName()`).
+- **In-page action gates (T7, review fix).** The proposal version page and the pricing calculator gated the Price
+  section and the pricing-rules link by role name, so the seeded custom role (pricing.read + pricing.write) never saw
+  them. Now `canPrice = useCan("pricing.read")` (the quote-preview API's own gate; Apply stays behind version.write)
+  and `canManageRules = useCan("pricing.write")`. `lib/rbacNoRoleNameGates.test.mjs` fails on any new
+  `me.role === "<name>"` / `.includes(me.role)` / `.has(me.role)` outside two listed uses (the CIS editor link, which
+  CIS authorises itself, and the convert dialog's default sales rep, a pre-filled value).
 
 ## Changed
 
@@ -65,6 +71,9 @@ root ADR 0006a A14 / A10g). No migration: bk-062 (tables, view, seed, `staff_use
 - Fail closed on a DB error is 403 (`custom_role_unavailable`), not 503: the spec says "refuse"; the detail tells the
   two cases apart in logs and on the sign-in error.
 - Role editor reads for `staff.admin` too (not only owners): admins see what each role may do; only owners change.
+- Finance and the proposal Price section: finance holds pricing.read and already opens the pricing calculator, so it
+  now sees the live quote on a proposal version too (read-only: no version.write, so no Apply). Chosen on purpose over
+  a compound rule that would keep finance out only to copy the old role list.
 
 ## Should know
 
@@ -75,7 +84,7 @@ root ADR 0006a A14 / A10g). No migration: bk-062 (tables, view, seed, `staff_use
   `tests/integration/test_aa1155_custom_roles.py` (seed role over HTTP incl. 200 on suppliers / supplier bills / agency
   invoices, inactive supplier + activate 403, approvals 403; grant revoked on the view and on the tables: holder 403,
   admin 200 on `/booking/staff`; archived / no grant; editor clone / tick / archive with audit; non-owner and
-  unreadable view 403; DB CHECK); frontend `lib/rbacPermissions.test.mjs`, `ui/booking/staffRoles.test.mjs`.
+  unreadable view 403; DB CHECK); frontend `lib/rbacPermissions.test.mjs`, `lib/rbacNoRoleNameGates.test.mjs`, `ui/booking/staffRoles.test.mjs`.
 - Readiness now requires bk-062 (already applied on Dev, `/booking/health/ready` showed bk-062 in S286).
 - Live (after deploy): the A10g maker signs in on Dev (its CIS grant must name `custom_product_ops_accounting`): 200 on
   `/booking/suppliers`, `/booking/supplier-bills`, `/booking/agency-invoices`; 403 `forbidden` on the approve probes.
