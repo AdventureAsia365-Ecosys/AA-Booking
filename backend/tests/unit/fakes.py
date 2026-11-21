@@ -66,6 +66,9 @@ POLICY_SEED: dict[str, str] = {
     ' "transfer": "100"}',
     # AA-1111 S2 (bk-061)
     "staff_admin_mfa_required": "false",
+    # AA-1171 (bk-063)
+    "ops_jobs_stuck_after_s": "900",
+    "ops_jobs_overdue_factor": '"2"',
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
 # The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure

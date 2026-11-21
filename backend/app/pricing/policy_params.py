@@ -42,7 +42,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.pricing import policy_cross_checks as cross
-from app.pricing import policy_params_security
+from app.pricing import policy_params_ops, policy_params_security
 
 INTEGER = "integer"
 DECIMAL = "decimal"
@@ -80,6 +80,7 @@ SECTIONS = (
     "rounding",
     "retention",
     "security",
+    "ops",  # AA-1171: the in-app job check thresholds (policy_params_ops.py)
 )
 # The selling currencies a rounding increment is required for (app.pricing.engine.SELLING_CURRENCIES; the engine
 # imports nothing from here, the unit test keeps the two equal).
@@ -690,6 +691,7 @@ PARAMS: dict[str, Param] = {
             maximum=_d("3650"),
         ),
         *(Param(**spec) for spec in policy_params_security.SPECS),
+        *(Param(**spec) for spec in policy_params_ops.SPECS),
     )
 }
 

@@ -2179,6 +2179,38 @@
         "title": "CheckChanges",
         "type": "object"
       },
+      "CheckRegistry": {
+        "description": "The \"ops check registry v1\" shape (the CIS alerts catalogue reads it; AA-Partner serves the same).",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/RegistryCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "app",
+          "version",
+          "as_of",
+          "checks"
+        ],
+        "title": "CheckRegistry",
+        "type": "object"
+      },
       "CommercialBody": {
         "additionalProperties": false,
         "description": "Every commercial field (PUT): a field left out is cleared, except ``supplier_id`` (left out = kept, AA-996).",
@@ -9159,6 +9191,116 @@
           "reason_code"
         ],
         "title": "ReduceRequest",
+        "type": "object"
+      },
+      "RegistryCheck": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "channel": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Channel",
+            "type": "array"
+          },
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_alert_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Alert At"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "thresholds": {
+            "items": {
+              "$ref": "#/components/schemas/RegistryThreshold"
+            },
+            "title": "Thresholds",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "component",
+          "severity",
+          "kind",
+          "action",
+          "thresholds",
+          "channel",
+          "last_alert_at"
+        ],
+        "title": "RegistryCheck",
+        "type": "object"
+      },
+      "RegistryThreshold": {
+        "properties": {
+          "editable_via": {
+            "title": "Editable Via",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "setting": {
+            "title": "Setting",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "title": "Value"
+          },
+          "where": {
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "required": [
+          "setting",
+          "value",
+          "unit",
+          "editable_via",
+          "where",
+          "label"
+        ],
+        "title": "RegistryThreshold",
         "type": "object"
       },
       "RolePatch": {
@@ -22933,6 +23075,32 @@
         "summary": "Remove File",
         "tags": [
           "operations"
+        ]
+      }
+    },
+    "/booking/ops/checks": {
+      "get": {
+        "operationId": "ops_check_registry_booking_ops_checks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckRegistry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ops Check Registry",
+        "tags": [
+          "ops"
         ]
       }
     },

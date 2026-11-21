@@ -15,12 +15,25 @@ from app.jobs.ops_checks import AlertPublisher, Finding, alert_key, findings, re
 NOW = datetime(2026, 11, 1, 23, 59, tzinfo=UTC)
 
 
-def test_thresholds_are_the_old_alarms() -> None:
-    assert findings(Sample(900.0, 0, 0, 900.0)) == []
-    found = findings(Sample(901.0, 2, 3, 901.0))
+TH = ops_checks.Thresholds(stuck_after_s=900, overdue_factor=2.0)  # the bk-063 seeds (the old alarm values)
+
+
+def test_thresholds_are_the_policy_values() -> None:
+    assert findings(Sample(900.0, 0, 0, 900.0), TH) == []
+    found = findings(Sample(901.0, 2, 3, 901.0), TH)
     assert [f.check for f in found] == ["jobs_stuck", "jobs_overdue"]
-    assert found[0].details == {"oldest_queued_age_s": 901, "running": 3}
-    assert found[1].details == {"overdue_running": 2, "running": 3}
+    assert found[0].details == {"oldest_queued_age_s": 901, "running": 3, "threshold_s": 900}
+    assert found[1].details == {"overdue_running": 2, "running": 3, "overdue_factor": 2.0}
+    # AA-1171 (D3): another value in force changes what fires.
+    assert findings(Sample(901.0, 0, 0, 901.0), ops_checks.Thresholds(1200, 2.0)) == []
+
+
+def test_registry_names_policy_keys_only() -> None:
+    from app.pricing import policy_params
+
+    assert [e["key"] for e in ops_checks.REGISTRY] == ["jobs_stuck", "jobs_overdue"]
+    for e in ops_checks.REGISTRY:
+        assert all(k in policy_params.PARAMS for k in e["thresholds"]) and e["severity"] in ("page", "ticket")
 
 
 def test_alert_key_is_per_check_and_utc_day() -> None:
@@ -29,7 +42,7 @@ def test_alert_key_is_per_check_and_utc_day() -> None:
 
 
 def test_render_subject_is_short_ascii() -> None:
-    subject, text = render(findings(Sample(1200.0, 0, 0, 1200.0))[0], "dev")
+    subject, text = render(findings(Sample(1200.0, 0, 0, 1200.0), TH)[0], "dev")
     assert subject == "[AA-Booking dev] Ops check: Job queue stuck"
     assert len(subject) <= 100 and subject.isascii()
     assert "1200 s" in text and "oldest_queued_age_s: 1200" in text

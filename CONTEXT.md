@@ -1476,6 +1476,13 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
   is a ledger row in `booking.job`: kind `bk_ops_alert`, status `succeeded`, idempotency key
   `bk_ops_alert:<check>:<UTC day>` (`queue.record_alert`; a failed publish deletes it, `queue.forget_alert`). No
   worker claims those rows (never queued). The service being down is the Infra alarm `aa-booking-<env>-no-healthy-task`.
+  **AA-1171 (bk-063):** both thresholds are pricing policy parameters, section "ops" (Job checks), administrator
+  approval: `ops_jobs_stuck_after_s` (seed 900) and `ops_jobs_overdue_factor` (seed "2"), read at every tick
+  (`metrics.read_thresholds`; no value in force = the tick is skipped with one warning and no `ops_metrics_sampled`
+  line, which the Infra alarm `aa-booking-<env>-worker-silent` counts). `GET /booking/ops/checks`
+  (`app/routers/ops_checks.py`) is the check registry the CIS alerts catalogue reads: both checks with the values in
+  force and the last alert from the ledger rows; WORKFORCE token of the booking-staff client (any `booking-*` group) or,
+  on this route only, of the CIS admin client (`COGNITO_CIS_ADMIN_CLIENT_ID`, group `cis-admin`).
 - **Deploy gate (AA-751 B3/B4; meaning changed by AA-993 G5, design D1.4).** `GET /booking/ops/deploy-gate`
   returns `{active, by_status, by_kind, safe_to_deploy, exempt_kinds, blocking_kinds, blocking_running, blocking_due,
   blocked_by}`.

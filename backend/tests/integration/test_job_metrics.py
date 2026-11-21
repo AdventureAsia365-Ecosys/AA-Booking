@@ -60,7 +60,7 @@ async def running(admin: asyncpg.Connection, kind: str, started: str, attempt_st
 
 
 async def test_empty_queue_is_zero(pool: asyncpg.Pool) -> None:
-    s = await read_sample(pool)
+    s = await read_sample(pool, 2.0)
     assert (s.oldest_queued_age_s, s.overdue_running, s.running) == (0.0, 0, 0)
 
 
@@ -69,7 +69,7 @@ async def test_only_due_rows_without_a_cancel_request_age(admin: asyncpg.Connect
     await queued(admin, "bk_x6_probe", "2 hours", cancel=True)  # never claimable, not backlog
     await queued(admin, "bk_x6_probe", "20 minutes")  # unhandled kind: counts
     await queued(admin, "bk_inquiry_process", "1 minute")
-    s = await read_sample(pool)
+    s = await read_sample(pool, 2.0)
     assert 1195 <= s.oldest_queued_age_s <= 1210
     assert (s.overdue_running, s.running) == (0, 0)
 
@@ -80,7 +80,7 @@ async def test_healthy_running_job_zeroes_age_and_overdue_uses_the_attempt_start
     await queued(admin, "bk_inquiry_process", "20 minutes")
     # First attempt started an hour ago, this attempt 10 s ago: healthy (the per-attempt time wins, F18).
     await running(admin, "bk_retention_job", "1 hour", "10 seconds")
-    s = await read_sample(pool)
+    s = await read_sample(pool, 2.0)
     assert (s.oldest_queued_age_s, s.overdue_running, s.running) == (0.0, 0, 1)
     assert s.due_queued_age_s >= 1195
 
@@ -88,7 +88,7 @@ async def test_healthy_running_job_zeroes_age_and_overdue_uses_the_attempt_start
     await queued(admin, "bk_inquiry_process", "20 minutes")
     await running(admin, "bk_ops_reminders", "1 hour", "5 minutes")  # > 2 x 120 s
     await running(admin, "bk_tour_lifecycle_pull", "30 minutes", None)  # no attempt stamp: started_at, > 2 x 120 s
-    s = await read_sample(pool)
+    s = await read_sample(pool, 2.0)
     assert s.overdue_running == 2
     assert s.oldest_queued_age_s >= 1195  # nothing healthy runs, so the queue ages
 
@@ -98,7 +98,7 @@ async def test_claim_stamp_feeds_the_sample(admin: asyncpg.Connection, pool: asy
     await queued(admin, "bk_inquiry_process", "19 minutes")
     job = await queue.claim(pool, "w-1", ["bk_inquiry_process"], 60)
     assert job is not None
-    s = await read_sample(pool)
+    s = await read_sample(pool, 2.0)
     assert (s.oldest_queued_age_s, s.overdue_running, s.running) == (0.0, 0, 1)
 
 
@@ -129,7 +129,7 @@ async def test_sampler_alerts_once_a_day_with_a_ledger_row(admin: asyncpg.Connec
     assert row["idempotency_key"] == ops_checks.alert_key("jobs_stuck")
     # never claimable, never counted as backlog
     assert await queue.claim(pool, "w-1", [ops_checks.OPS_ALERT_KIND], 60) is None
-    assert (await read_sample(pool)).oldest_queued_age_s >= 1195
+    assert (await read_sample(pool, 2.0)).oldest_queued_age_s >= 1195
 
 
 async def test_forget_alert_reopens_the_day(admin: asyncpg.Connection, pool: asyncpg.Pool) -> None:

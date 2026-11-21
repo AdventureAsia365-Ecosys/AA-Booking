@@ -19,42 +19,43 @@ def test_expected_seconds_and_default() -> None:
     assert expected_seconds("bk_tour_lifecycle_pull") == 120
     assert expected_seconds("bk_retention_job") == 900
     assert expected_seconds("bk_unknown") == DEFAULT_EXPECTED_SECONDS == 300
-    assert overdue_after_seconds("bk_ops_reminders") == 240
-    assert overdue_after_seconds("bk_unknown") == 600
+    assert overdue_after_seconds("bk_ops_reminders", 2) == 240
+    assert overdue_after_seconds("bk_unknown", 2) == 600
+    assert overdue_after_seconds("bk_unknown", 1.5) == 450  # AA-1171: the factor is the policy value
     assert all(kind.startswith("bk_") for kind in EXPECTED_SECONDS)
 
 
 def test_nothing_due_nothing_running_is_zero() -> None:
-    assert backlog_sample(None, []) == Sample(0.0, 0, 0, 0.0)
+    assert backlog_sample(None, [], 2.0) == Sample(0.0, 0, 0, 0.0)
 
 
 def test_due_rows_age_when_nothing_runs() -> None:
-    assert backlog_sample(1200.4, []).oldest_queued_age_s == 1200.4
+    assert backlog_sample(1200.4, [], 2.0).oldest_queued_age_s == 1200.4
 
 
 def test_a_healthy_running_job_zeroes_the_queue_age() -> None:
-    s = backlog_sample(1200.0, [("bk_retention_job", 800.0)])  # 800 < 2 x 900
+    s = backlog_sample(1200.0, [("bk_retention_job", 800.0)], 2.0)  # 800 < 2 x 900
     assert (s.oldest_queued_age_s, s.overdue_running, s.running, s.due_queued_age_s) == (0.0, 0, 1, 1200.0)
 
 
 def test_an_overdue_running_job_counts_and_does_not_hide_the_queue() -> None:
-    s = backlog_sample(1000.0, [("bk_ops_reminders", 241.0)])  # > 2 x 120
+    s = backlog_sample(1000.0, [("bk_ops_reminders", 241.0)], 2.0)  # > 2 x 120
     assert (s.oldest_queued_age_s, s.overdue_running) == (1000.0, 1)
 
 
 def test_overdue_threshold_is_strict_and_unknown_kinds_use_the_default() -> None:
-    assert backlog_sample(None, [("bk_ops_reminders", 240.0)]).overdue_running == 0
-    assert backlog_sample(None, [("bk_x6_probe", 600.0), ("bk_x6_probe", 601.0)]).overdue_running == 1
+    assert backlog_sample(None, [("bk_ops_reminders", 240.0)], 2.0).overdue_running == 0
+    assert backlog_sample(None, [("bk_x6_probe", 600.0), ("bk_x6_probe", 601.0)], 2.0).overdue_running == 1
 
 
 def test_one_healthy_job_among_overdue_ones_still_zeroes_the_queue_age() -> None:
     # Rolling deploy: two workers, one stuck, one healthy. The stuck one shows as overdue.
-    s = backlog_sample(950.0, [("bk_tour_lifecycle_pull", 500.0), ("bk_tour_lifecycle_pull", 5.0)])
+    s = backlog_sample(950.0, [("bk_tour_lifecycle_pull", 500.0), ("bk_tour_lifecycle_pull", 5.0)], 2.0)
     assert (s.oldest_queued_age_s, s.overdue_running) == (0.0, 1)
 
 
 def test_unknown_attempt_age_is_healthy_and_negative_ages_clamp() -> None:
-    s = backlog_sample(-3.0, [("bk_tour_lifecycle_pull", None)])
+    s = backlog_sample(-3.0, [("bk_tour_lifecycle_pull", None)], 2.0)
     assert (s.oldest_queued_age_s, s.overdue_running, s.due_queued_age_s) == (0.0, 0, 0.0)
 
 
@@ -110,6 +111,42 @@ async def test_a_healthy_sample_checks_nothing(caplog: pytest.LogCaptureFixture)
     caplog.set_level(logging.INFO, logger="app.jobs.metrics")
     await JobMetricsSampler(_pool(_conn(None, [])), publisher=pub).sample_once()  # type: ignore[arg-type]
     assert pub.calls == [[]] and "checks=ok" in caplog.text
+
+
+def test_the_overdue_factor_is_the_policy_value() -> None:
+    """AA-1171: a 3 x factor keeps a 241 s run of a 120 s kind healthy; 2 x makes it overdue."""
+    assert backlog_sample(None, [("bk_ops_reminders", 241.0)], 2.0).overdue_running == 1
+    assert backlog_sample(None, [("bk_ops_reminders", 241.0)], 3.0).overdue_running == 0
+
+
+@pytest.mark.asyncio
+async def test_a_changed_stuck_threshold_changes_what_fires() -> None:
+    """AA-1171 (D3): the sampler reads ops_jobs_stuck_after_s from the policy in force at every tick."""
+    from tests.unit.fakes import POLICY_FRAGMENT, policy_rows
+
+    pub = FakePublisher()
+    conn = _conn(1000.0, [])
+    conn.rules.insert(0, (POLICY_FRAGMENT, lambda *_: policy_rows(ops_jobs_stuck_after_s="1200")))
+    await JobMetricsSampler(_pool(conn), publisher=pub).sample_once()  # type: ignore[arg-type]
+    assert pub.calls == [[]]
+    conn.rules.insert(0, (POLICY_FRAGMENT, lambda *_: policy_rows(ops_jobs_stuck_after_s="600")))
+    await JobMetricsSampler(_pool(conn), publisher=pub).sample_once()  # type: ignore[arg-type]
+    assert [f.check for f in pub.calls[-1]] == ["jobs_stuck"] and pub.calls[-1][0].details["threshold_s"] == 600
+
+
+@pytest.mark.asyncio
+async def test_no_policy_value_skips_the_tick(caplog: pytest.LogCaptureFixture) -> None:
+    """No fallback in code: a missing value skips the tick with one warning (no ops_metrics_sampled line, so the Infra
+    worker-silent alarm shows it)."""
+    from tests.unit.fakes import POLICY_FRAGMENT, policy_rows
+
+    pub = FakePublisher()
+    conn = _conn(1000.0, [])
+    rows = [r for r in policy_rows() if r["param_key"] != "ops_jobs_stuck_after_s"]
+    conn.rules.insert(0, (POLICY_FRAGMENT, lambda *_: rows))
+    caplog.set_level(logging.INFO, logger="app.jobs.metrics")
+    assert await JobMetricsSampler(_pool(conn), publisher=pub).sample_once() is None  # type: ignore[arg-type]
+    assert pub.calls == [] and "stage=policy" in caplog.text and "ops_metrics_sampled" not in caplog.text
 
 
 @pytest.mark.asyncio

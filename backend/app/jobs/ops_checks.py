@@ -4,9 +4,13 @@ Until S263 the job sampler (:mod:`app.jobs.metrics`) published two custom metric
 alarmed on them (``<booking prefix>-jobs-queue-age``, ``-jobs-overdue-running``, ``-jobs-sampling-stopped``). The
 values are now checked here, from the same database read, at $0:
 
-- ``jobs_stuck``: a due queued row has waited more than :data:`STUCK_AFTER_S` (900 s) while no healthy job runs (the
-  sampler's capacity rule for a serial worker);
-- ``jobs_overdue``: a running row is past 2 x its kind's expected seconds.
+- ``jobs_stuck``: a due queued row has waited more than the pricing policy parameter ``ops_jobs_stuck_after_s``
+  (bk-063, default 900 s) while no healthy job runs (the sampler's capacity rule for a serial worker);
+- ``jobs_overdue``: a running row is past ``ops_jobs_overdue_factor`` (default 2) x its kind's expected seconds.
+
+AA-1171 (S287, tech lead decision D3): both thresholds are admin-editable (Pricing > Policy, section "Job checks",
+administrator approval), read by the sampler on every tick (:class:`Thresholds`). :data:`REGISTRY` describes every check
+for the CIS alerts catalogue (``GET /booking/ops/checks``).
 
 A finding is published to the platform alerts SNS topic (env ``ALERTS_TOPIC_ARN``; the topic the removed alarms used,
 so the recipients are the same) at most **once per check per UTC day**. The dedupe is a ledger row in ``booking.job``:
@@ -37,8 +41,41 @@ from app.jobs import queue
 log = logging.getLogger(__name__)
 
 OPS_ALERT_KIND = "bk_ops_alert"
-STUCK_AFTER_S = 900
 SNS_REGION = "us-west-1"  # acc2, where the alerts topic lives
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """The policy values in force for one sampler tick (:func:`app.jobs.metrics.read_thresholds`)."""
+
+    stuck_after_s: int
+    overdue_factor: float
+
+
+# AA-1171: the check registry (contract "ops check registry v1", read by the CIS alerts catalogue): one entry per check,
+# with the policy keys of its thresholds. Titles and actions are the e-mail's; the values come from the policy in force.
+REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "key": "jobs_stuck",
+        "title": "Job queue stuck",
+        "component": "jobs",
+        "severity": "ticket",
+        "kind": "state",
+        "thresholds": ("ops_jobs_stuck_after_s",),
+        "action": "A due booking.job row waited past the threshold while no healthy job runs. Check that the worker "
+        "runs (WORKER_ENABLED) and read the queued rows and the ECS log.",
+    },
+    {
+        "key": "jobs_overdue",
+        "title": "Job running too long",
+        "component": "jobs",
+        "severity": "ticket",
+        "kind": "state",
+        "thresholds": ("ops_jobs_overdue_factor",),
+        "action": "A running booking.job row is past its kind's expected time times the overdue factor; the serial "
+        "worker waits behind it. Read the running row and the ECS log; cancel it if it hangs.",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -50,10 +87,10 @@ class Finding:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-def findings(sample: Any) -> list[Finding]:
-    """The findings of one backlog sample (:class:`app.jobs.metrics.Sample`). Pure."""
+def findings(sample: Any, thresholds: Thresholds) -> list[Finding]:
+    """The findings of one backlog sample (:class:`app.jobs.metrics.Sample`) against the thresholds in force. Pure."""
     out: list[Finding] = []
-    if sample.oldest_queued_age_s > STUCK_AFTER_S:
+    if sample.oldest_queued_age_s > thresholds.stuck_after_s:
         out.append(
             Finding(
                 "jobs_stuck",
@@ -62,7 +99,11 @@ def findings(sample: Any) -> list[Finding]:
                 " running",
                 "Check that the worker runs (WORKER_ENABLED) and read the queued rows on the staff admin Jobs page and"
                 " the ECS log.",
-                {"oldest_queued_age_s": int(sample.oldest_queued_age_s), "running": sample.running},
+                {
+                    "oldest_queued_age_s": int(sample.oldest_queued_age_s),
+                    "running": sample.running,
+                    "threshold_s": thresholds.stuck_after_s,
+                },
             )
         )
     if sample.overdue_running:
@@ -72,7 +113,11 @@ def findings(sample: Any) -> list[Finding]:
                 "Job running too long",
                 f"{sample.overdue_running} running booking.job row(s) past twice their expected time",
                 "The serial worker is blocked behind it. Read the running row and the ECS log; cancel it if it hangs.",
-                {"overdue_running": sample.overdue_running, "running": sample.running},
+                {
+                    "overdue_running": sample.overdue_running,
+                    "running": sample.running,
+                    "overdue_factor": thresholds.overdue_factor,
+                },
             )
         )
     return out
