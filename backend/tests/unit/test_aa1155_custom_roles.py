@@ -489,3 +489,19 @@ def test_a_probe_the_session_could_pass_is_never_run() -> None:
     with pytest.raises(Exception) as err:
         e2e_staff.check_probe(maker, "POST", route, None, frozenset({"pricing.approve"}))
     assert getattr(err.value, "detail", None) == "e2e_read_only"
+
+
+# ── Staff page labels (fail soft: R4.2 keeps the administrator's /staff page open) ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_role_labels_name_custom_roles_only_and_fail_soft() -> None:
+    from app.auth import admin as staff_admin
+
+    conn = ScriptedConn().on("FROM booking.staff_role WHERE code = ANY", [{"code": CODE, "label": "Ops"}])
+    assert await staff_admin.role_labels(conn, ["admin", CODE, CODE]) == {CODE: "Ops"}
+    assert conn.sql("FROM booking.staff_role") == [([CODE],)]
+    assert await staff_admin.role_labels(conn, ["admin", "sales"]) == {}
+    assert len(conn.sql("FROM booking.staff_role")) == 1  # built-in roles need no read
+    broken = ScriptedConn().on("FROM booking.staff_role", asyncpg.InsufficientPrivilegeError("permission denied"))
+    assert await staff_admin.role_labels(broken, [CODE]) == {}

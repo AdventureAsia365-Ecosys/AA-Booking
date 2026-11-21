@@ -120,6 +120,12 @@ async def test_a_custom_holder_works_with_exactly_its_role(
     assert me.json()["role"] == SEED and me.json()["role_label"] == custom_roles.SEED_LABEL
     assert set(me.json()["permissions"]) == custom_roles.SEED_CAPABILITIES
     assert await admin.fetchval("SELECT role FROM booking.staff_users WHERE cognito_sub = $1", HOLDER) == SEED
+    # The Staff page names the custom role (list and profile).
+    listed = await client.get("/booking/staff", headers=built_in_admin(cis, ADMIN))
+    row = next(r for r in listed.json()["items"] if r["cis_user_id"] == f"cog:{HOLDER}")
+    assert (row["role"], row["role_label"]) == (SEED, custom_roles.SEED_LABEL)
+    profile = await client.get(f"/booking/staff/cog:{HOLDER}", headers=holder(cis))
+    assert profile.status_code == 200 and profile.json()["role_label"] == custom_roles.SEED_LABEL
 
     # The pages of the live check: suppliers, supplier bills (/billing), agency invoices (/agency-billing).
     for path in ("/booking/suppliers", "/booking/supplier-bills", "/booking/agency-invoices"):
