@@ -6,7 +6,7 @@
 
 import { createContext, useContext } from "react";
 import type { StaffMe } from "@/lib/api/types";
-import { ROLE_LABEL, isStaffRole } from "@/lib/rbac";
+import { roleName } from "@/lib/rbac";
 
 const StaffContext = createContext<StaffMe | null>(null);
 
@@ -21,7 +21,7 @@ export function useStaff(): StaffMe {
 }
 
 /** Display helpers: a name that is never empty, initials and the role label. */
-export function staffDisplay(staff: Pick<StaffMe, "name" | "email" | "role">) {
+export function staffDisplay(staff: Pick<StaffMe, "name" | "email" | "role" | "role_label">) {
   const name = staff.name?.trim() || staff.email?.split("@")[0] || "Staff";
   const initials =
     name
@@ -30,7 +30,7 @@ export function staffDisplay(staff: Pick<StaffMe, "name" | "email" | "role">) {
       .slice(0, 2)
       .map((p) => p[0]!.toUpperCase())
       .join("") || "S";
-  const roleLabel = isStaffRole(staff.role) ? ROLE_LABEL[staff.role] : staff.role;
+  const roleLabel = roleName(staff.role, staff.role_label);
   return { name, initials, roleLabel };
 }
 

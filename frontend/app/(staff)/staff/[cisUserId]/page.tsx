@@ -13,7 +13,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, CalendarDays, CheckCircle2, Clock, Lock, Mail, Pencil, ShieldOff, UserRound } from "lucide-react";
 import { api, ApiError } from "@/lib/api/client";
 import type { AuditLogItem, StaffAssignmentRow, StaffDetail } from "@/lib/api/types";
-import { ROLE_LABEL, cisRoleLabel, isStaffRole } from "@/lib/rbac";
+import { cisRoleLabel, roleName } from "@/lib/rbac";
 import { CIS_STAFF_PATH } from "@/lib/config";
 import {
   PageFrame,
@@ -87,7 +87,7 @@ export default function StaffDetailPage({ params }: { params: Promise<{ cisUserI
   const s = q.data;
   const self = actions.isSelf(s);
   const managed = actions.roleManagedInCis(s);
-  const roleLabel = isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role;
+  const roleLabel = roleName(s.role, s.role_label);
   return (
     <PageFrame bleed>
       <DetailHeader

@@ -40,7 +40,7 @@ export function Sidebar({ onNavigate, drawerOpen = false }: { onNavigate?: () =>
   const staff = useStaff();
   const { name, initials, roleLabel } = staffDisplay(staff);
   const [collapsed, setCollapsed] = useSidebarCollapsed();
-  const groups = visibleGroups(staff.role);
+  const groups = visibleGroups(staff.permissions);
   // The icon rail: collapsed, or the compact density window (forced rail, app/globals.css); never the phone drawer.
   const compact = useMediaQuery(COMPACT_QUERY);
   const rail = (collapsed || compact) && !drawerOpen;

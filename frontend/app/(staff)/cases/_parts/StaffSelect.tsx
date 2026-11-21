@@ -9,7 +9,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
 import type { StaffDirectoryEntry } from "@/lib/api/types";
-import { ROLE_LABEL, canPickStaff, isStaffRole } from "@/lib/rbac";
+import { canPickStaff, roleName } from "@/lib/rbac";
 import { Select, useStaff } from "@/ui";
 import { inputCls } from "./fields";
 import { useT } from "@/ui/core/useI18n";
@@ -70,7 +70,7 @@ export function StaffSelect({
       {items.map((s) => (
         <option key={s.cis_user_id} value={s.cis_user_id}>
           {s.name ?? s.cis_user_id}
-          {s.role !== "sales" ? ` · ${tx(isStaffRole(s.role) ? ROLE_LABEL[s.role] : s.role)}` : ""}
+          {s.role !== "sales" ? ` · ${tx(roleName(s.role, s.role_label))}` : ""}
           {s.cis_user_id === me.cis_user_id ? t(" (me)") : ""}
         </option>
       ))}

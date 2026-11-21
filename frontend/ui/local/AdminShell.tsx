@@ -42,8 +42,9 @@ export function AdminShell({ children, initialLang }: { children: React.ReactNod
 function ShellBody({ children }: { children: React.ReactNode }) {
   const t = useT(MSG);
   const pathname = usePathname();
-  const { role } = useStaff();
-  const allowed = canSeePage(role, pathname);
+  // AA-1155 T7: the page rules follow the profile's capabilities (root spec R4.5), never the role name.
+  const { permissions } = useStaff();
+  const allowed = canSeePage(permissions, pathname);
 
   return (
     <ShellFrame

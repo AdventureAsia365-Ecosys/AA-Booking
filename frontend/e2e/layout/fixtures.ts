@@ -63,6 +63,7 @@ import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
 import type { MyWorkSummary } from "../../lib/api/myWork";
 import type { StopSale, StopSalePage } from "../../lib/api/stopSales";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
+import type { StaffRoles } from "../../lib/api/staffRoles";
 import type { AgencyProfitMonth, CaseProfit, DepartureCosts, DepartureProfit, FinanceDeparture, OrderLine, SupplierOrder } from "../../lib/api/finance";
 import type {
   AgencyInvoice,
@@ -328,6 +329,30 @@ const ACTIVITY: SupplierActivity[] = [
   summary,
   actor: { id: "u-002", name: PERSON_NAMES[1] },
 }));
+
+// AA-1155 T7: the role editor (GET /booking/staff-roles). An owner view: two custom roles, one archived.
+const STAFF_ROLE_CAPS = STAFF_ME.permissions;
+const APPROVE_CLASS = (c: string) =>
+  /\.approve(_[a-z0-9_]+)?$/.test(c) ||
+  ["supplier.activate", "contract.publish", "stop_sale.approve", "payout.write", "payment.verify", "billing_config.write", "staff.admin"].includes(c);
+function staffRoles(): StaffRoles {
+  const assignable = STAFF_ROLE_CAPS.filter((c) => !APPROVE_CLASS(c));
+  const custom = (code: string, label: string, caps: string[], archived: boolean, holders: number) => ({
+    code, label, based_on: "contracting", archived, capabilities: caps, holders,
+    created_at: "2026-11-02T08:00:00Z", created_by: "u-001", updated_at: "2026-11-10T08:00:00Z", updated_by: "u-001",
+  });
+  return {
+    builtin: ["admin", "sales", "contracting", "content_creator", "finance"].map((code, i) => ({
+      code, capabilities: code === "admin" ? STAFF_ROLE_CAPS : assignable.slice(0, 6 + i * 3),
+    })),
+    custom: [
+      custom("custom_quay_desk", "Quay desk", assignable.slice(0, 12), false, 2),
+      custom("custom_lagoon_ops", "Lagoon operations", assignable.slice(4, 9), true, 0),
+    ],
+    capabilities: STAFF_ROLE_CAPS.map((name) => ({ name, assignable: !APPROVE_CLASS(name) })),
+    can_edit: true,
+  };
+}
 
 const AUDIT_TYPES = ["supplier_rate", "supplier_contract", "trip_case_version", "fx_rate", "pricing_rule", "hotel_room_type", "customer", "staff_user"];
 function auditLogs(): CursorPage<AuditLogItem> {
@@ -2124,6 +2149,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "notifications") return ok(NOTIFICATIONS);
   if (p === "countries") return ok({ items: [{ iso2: "VN", name: "Vietnam" }, { iso2: "KH", name: "Cambodia" }, { iso2: "LA", name: "Laos" }, { iso2: "TH", name: "Thailand" }] });
   if (p === "audit-logs") return ok(auditLogs());
+  if (p === "staff-roles") return ok(staffRoles());
 
   if (p === "trip-cases/summary") return ok(TRIP_CASE_SUMMARY);
   if (p === "trip-cases") {

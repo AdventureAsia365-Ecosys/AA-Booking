@@ -35,8 +35,8 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   const t = useT(MSG);
   const tx = useTx();
   const router = useRouter();
-  const { role } = useStaff();
-  const canCases = canSeePage(role, "/cases");
+  const { permissions } = useStaff();
+  const canCases = canSeePage(permissions, "/cases");
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [selected, setSelected] = useState(0);
@@ -67,7 +67,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   const groups = useMemo(() => {
     const q = debounced.toLowerCase();
     const pageEntries: NavEntry[] = q
-      ? allEntries(role).filter((e) => e.label.toLowerCase().includes(q))
+      ? allEntries(permissions).filter((e) => e.label.toLowerCase().includes(q))
       : [];
     const pages: Row[] = pageEntries.map((e) => ({
       kind: "page" as const, label: tx(e.label), href: e.href, icon: e.icon,
@@ -82,7 +82,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
       { title: t("Pages"), rows: pages },
       { title: t("Trip cases"), rows: caseRows },
     ].filter((g) => g.rows.length > 0);
-  }, [cases, debounced, role, tx, t]);
+  }, [cases, debounced, permissions, tx, t]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
 

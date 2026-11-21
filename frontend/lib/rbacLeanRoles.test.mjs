@@ -3,10 +3,15 @@
 // trip_case.read, pricing.read, supply.read, ops.read, bill.read) and never an edit page; the built-in contracting
 // role is named "Product & operations".
 // Run: node --test lib/rbacLeanRoles.test.mjs (`npm run test:unit` runs every lib/*.test.mjs).
+// AA-1155 T7: the page rules take the profile's capabilities; a built-in role's are the backend matrix
+// (lib/rbac.permissions.fixture.json, kept equal to app/auth/staff.py by a backend unit test).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const { ROLE_LABEL, canSeePage } = await import(new URL("./rbac.ts", import.meta.url).href);
+const { ROLE_LABEL, canSeePage: canSee } = await import(new URL("./rbac.ts", import.meta.url).href);
+const MATRIX = JSON.parse(readFileSync(new URL("./rbac.permissions.fixture.json", import.meta.url), "utf8"));
+const canSeePage = (role, path) => canSee(MATRIX.builtin[role], path);
 
 const FINANCE_READ_PAGES = [
   "/cases",
