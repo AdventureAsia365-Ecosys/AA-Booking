@@ -40,7 +40,14 @@ class Preferences(BaseModel):
 @router.get("/staff/me")
 async def me(staff: Me) -> dict[str, Any]:
     # preview_viewer (AA-911 D-1): this session came from the Preview-only client and is read-only.
-    return {**staff.public(), "permissions": staff.permissions, "preview_viewer": staff.preview}
+    # role_label (AA-1155 T5): the custom role's label for a booking-custom holder (null for a built-in role, which the
+    # staff admin names itself); the pages follow ``permissions``, never the role name (root spec R4.5).
+    return {
+        **staff.public(),
+        "permissions": staff.permissions,
+        "preview_viewer": staff.preview,
+        "role_label": staff.role_label,
+    }
 
 
 @router.get("/staff/me/preferences")

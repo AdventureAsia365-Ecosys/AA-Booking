@@ -21,6 +21,12 @@ class ServiceError(Exception):
         return {"detail": self.code, "message": self.message, **self.extra}
 
 
+class BadRequest(ServiceError):
+    """A request the rules refuse outright (AA-1155 T6: an approve-class or unknown capability on a custom role)."""
+
+    status_code = 400
+
+
 class Forbidden(ServiceError):
     status_code = 403
 

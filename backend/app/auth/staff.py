@@ -63,6 +63,14 @@ session (not Preview, not a Dev-only E2E identity) whose access token's ``amr`` 
 is refused 403 ``mfa_required`` while the pricing policy parameter ``staff_admin_mfa_required`` is on; off, it is only
 logged. Checked before the staff row sync.
 
+**Custom roles (AA-1155 T5, root spec R4.1-R4.3, root ADR 0006a A14; :mod:`app.auth.custom_roles`).** A WORKFORCE
+token with the group ``booking-custom`` and no built-in ``booking-*`` group holds the custom role the CIS Staff page
+granted, read through the CIS view ``shared.v_staff_booking_grant`` and ``booking.staff_role`` (bk-062), cached at most
+60 s. The staff row's ``role`` is synced to the custom code (audited like any role change) and :meth:`Staff.can` answers
+from that role's capabilities (:attr:`Staff.custom_permissions`), never the approve class. A missing grant, an unknown
+or archived role is 403 ``no_booking_role``; an unreadable view or table 403 ``custom_role_unavailable`` (fail closed
+for custom holders only: built-in holders never read either).
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -82,7 +90,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit
-from app.auth import admin_mfa, e2e_staff, identity_config
+from app.auth import admin_mfa, custom_roles, e2e_staff, identity_config
 from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
@@ -299,6 +307,10 @@ class Staff:
     # Session flag, not a column (AA-1091 A10e-2): the Dev-only E2E writer's name (app.auth.e2e_staff.E2EWriter.name)
     # when this request comes from one, so a route that checks its own records (the workbook import) knows it.
     e2e_writer: str | None = None
+    # Session fields, not columns (AA-1155 T5): a booking-custom holder's capabilities (already narrowed to known,
+    # non-approve capabilities) and its role's label. None for a built-in role: the matrix answers.
+    custom_permissions: frozenset[str] | None = None
+    role_label: str | None = None
 
     @classmethod
     def from_row(cls, row: Any) -> Staff:
@@ -314,6 +326,8 @@ class Staff:
             return False
         if self.active and permission in self.e2e_grants:
             return True
+        if self.custom_permissions is not None:
+            return self.active and permission in self.custom_permissions
         return self.active and self.role in PERMISSIONS.get(permission, frozenset())
 
     @property
@@ -389,6 +403,11 @@ async def provision(conn: asyncpg.Connection, claims: BridgeClaims, role: str) -
             after={**staff.public(), "from_cis_role": claims.cis_role},
         )
     return staff
+
+
+def role_permissions(role: str) -> frozenset[str]:
+    """The built-in matrix row of ``role`` (empty for a custom code: its capabilities come from the custom role)."""
+    return frozenset(p for p, roles in PERMISSIONS.items() if role in roles)
 
 
 def booking_role(groups: tuple[str, ...]) -> str | None:
@@ -513,7 +532,12 @@ async def _sync_row(
             before={"cis_user_id": updated.cis_user_id, "role": before.role},
             after={"cis_user_id": updated.cis_user_id, "role": updated.role},
             entity_label=updated.name or updated.cis_user_id,
-            summary=f"Role {before.role} -> {updated.role} from the booking-* Cognito group",
+            summary=f"Role {before.role} -> {updated.role} from "
+            + (
+                "the CIS Staff page custom role grant (booking-custom)"
+                if custom_roles.CUSTOM_CODE.fullmatch(updated.role)
+                else "the booking-* Cognito group"
+            ),
         )
     return updated
 
@@ -575,12 +599,15 @@ async def current_staff(
             log.info("booking_e2e_write_refused method=%s path=%s", request.method, request.url.path)
             raise HTTPException(status_code=403, detail="e2e_read_only")
         writer = e2e_staff.writer_for(principal.email)
-        route = getattr(request.scope.get("route"), "path", None)
+        route_obj = request.scope.get("route")
+        route = getattr(route_obj, "path", None)
         if writer is not None:
             # AA-1087 (ADR 0006a A10e): Dev only, exact groups, its own allow-listed writes; before any DB access.
-            e2e_staff.check_session(writer, principal.groups, request.method, route, request.url.path)
+            # A10g: an approve probe passes this step and is answered by check_probe below.
+            probe = e2e_staff.is_probe(writer, request.method, route_obj)
+            e2e_staff.check_session(writer, principal.groups, request.method, route, request.url.path, probe=probe)
         role = booking_role(principal.groups)
-        if role is None:
+        if role is None and custom_roles.CUSTOM_GROUP not in principal.groups:
             raise HTTPException(status_code=403, detail="no_booking_role")
         body: Any = None
         if writer is not None and e2e_staff.reads_body(request.method, route):
@@ -589,6 +616,16 @@ async def current_staff(
             body = await _json_body(request)
             e2e_staff.check_body(writer, request.method, route, body)
         pool = await get_pool(request)
+        custom: custom_roles.CustomRole | None = None
+        if role is None:
+            # AA-1155 T5: booking-custom and no built-in group. The CIS grant names the role (fail closed, 403).
+            custom = await custom_roles.resolve(pool, principal.sub)
+            role = custom.code
+        if writer is not None:
+            # A10g (root ADR 0006a): an approve probe of the custom-role maker is answered from its capabilities before
+            # any record is read; a probe the role could pass is never run unless allow-listed (synthetic rule below).
+            held = custom.capabilities if custom is not None else role_permissions(role)
+            e2e_staff.check_probe(writer, request.method, route_obj, body, held)
         # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
         # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
         await admin_mfa.check_session(
@@ -600,6 +637,8 @@ async def current_staff(
             await e2e_staff.check_synthetic(pool, writer, request.method, route, request.path_params, body)
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
+        if custom is not None:
+            staff = replace(staff, custom_permissions=custom.capabilities, role_label=custom.label)
         if preview:
             staff = replace(staff, preview=True)
         if writer is not None and (grants := writer.grants_for(request.method, route)):
@@ -631,4 +670,7 @@ def require(permission: str) -> Callable[..., Awaitable[Staff]]:
             raise HTTPException(status_code=403, detail="forbidden")
         return staff
 
+    # AA-1155 T5: the permission a route gate checks, readable from the route (the A10g probe list is tested against
+    # it: tests/unit/test_aa1155_custom_roles.py).
+    dependency.permission = permission  # type: ignore[attr-defined]
     return dependency
