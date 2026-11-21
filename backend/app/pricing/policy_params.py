@@ -42,7 +42,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.pricing import policy_cross_checks as cross
-from app.pricing import policy_params_security
+from app.pricing import policy_params_ops, policy_params_security
 
 INTEGER = "integer"
 DECIMAL = "decimal"
@@ -80,9 +80,9 @@ SECTIONS = (
     "rounding",
     "retention",
     "security",
+    "ops",  # AA-1171 (policy_params_ops.py)
 )
-# The selling currencies a rounding increment is required for (app.pricing.engine.SELLING_CURRENCIES; the engine
-# imports nothing from here, the unit test keeps the two equal).
+# The selling currencies a rounding increment is required for (= app.pricing.engine.SELLING_CURRENCIES, by a test).
 ROUNDING_CURRENCIES = ("AUD", "EUR", "GBP", "SGD", "USD")
 # The service types of booking.services (bk-010 services_type_chk), sorted: one child % each (AA-1145, bk-060).
 SERVICE_TYPES = ("activity", "entrance", "guide", "meal", "transfer")
@@ -689,7 +689,7 @@ PARAMS: dict[str, Param] = {
             minimum=_d("0"),
             maximum=_d("3650"),
         ),
-        *(Param(**spec) for spec in policy_params_security.SPECS),
+        *(Param(**spec) for spec in (*policy_params_security.SPECS, *policy_params_ops.SPECS)),  # AA-1171: ops
     )
 }
 

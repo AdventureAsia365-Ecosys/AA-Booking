@@ -35,6 +35,7 @@ export const M = defineMessages(
     section_rounding: "Rounding",
     section_retention: "Data retention",
     section_security: "Staff sign-in",
+    section_ops: "Job checks",
     sectionHint_quotes: "How long a quote holds and when a group is quoted on request.",
     sectionHint_prices: "How computed and provisional prices are published and shown.",
     sectionHint_surcharges: "When a confirmed booking may get a surcharge line.",
@@ -48,6 +49,8 @@ export const M = defineMessages(
     sectionHint_rounding: "The step customer-facing prices are rounded up to, per currency.",
     sectionHint_retention: "How long personal data and finished jobs are kept. The administrator approves these.",
     sectionHint_security: "How administrators must sign in. The administrator approves these.",
+    sectionHint_ops:
+      "When the background job checks e-mail the platform alerts: a stuck job queue and a job running too long. The administrator approves these.",
     unit_hours: "hours",
     unit_extensions: "extensions",
     unit_holds: "holds",
@@ -304,6 +307,7 @@ export const M = defineMessages(
     section_rounding: "Làm tròn",
     section_retention: "Lưu trữ dữ liệu",
     section_security: "Đăng nhập nhân viên",
+    section_ops: "Kiểm tra job",
     sectionHint_quotes: "Báo giá có hiệu lực bao lâu và khi nào đoàn được báo giá theo yêu cầu.",
     sectionHint_prices: "Cách công bố và hiển thị giá tính toán và giá tạm tính.",
     sectionHint_surcharges: "Khi nào một booking đã xác nhận được thêm dòng phụ thu.",
@@ -317,6 +321,8 @@ export const M = defineMessages(
     sectionHint_rounding: "Mức làm tròn lên của giá cho khách, theo từng tiền tệ.",
     sectionHint_retention: "Dữ liệu cá nhân và các job đã xong được giữ bao lâu. Quản trị viên duyệt các giá trị này.",
     sectionHint_security: "Quản trị viên phải đăng nhập thế nào. Quản trị viên duyệt các giá trị này.",
+    sectionHint_ops:
+      "Khi nào kiểm tra job nền gửi e-mail cảnh báo nền tảng: hàng đợi job bị kẹt và job chạy quá lâu. Quản trị viên duyệt các giá trị này.",
     unit_hours: "giờ",
     unit_extensions: "lần gia hạn",
     unit_holds: "lần giữ",

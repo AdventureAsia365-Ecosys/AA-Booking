@@ -73,6 +73,7 @@ from app.routers import (
     my_work,
     notifications,
     ops,
+    ops_checks,
     price_versions,
     pricing,
     reference,
@@ -103,6 +104,7 @@ def create_app(
     deploy_verifier: GithubDeployVerifier | None = None,
     m2m_verifier: MultiIssuerVerifier | None = None,
     media_store: media.MediaStore | None = None,
+    ops_reader_verifier: MultiIssuerVerifier | None = None,
     ops_store: ops_files.OpsStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
@@ -110,6 +112,8 @@ def create_app(
     verifier = verifier or identity_config.build_staff_verifier(settings)
     deploy_verifier = deploy_verifier or GithubDeployVerifier.default()
     m2m_verifier = m2m_verifier or m2m.build_m2m_verifier(settings)
+    # AA-1171: the CIS admin client, for GET /booking/ops/checks only (None while COGNITO_CIS_ADMIN_CLIENT_ID is unset).
+    ops_reader_verifier = ops_reader_verifier or identity_config.build_ops_reader_verifier(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -208,6 +212,7 @@ def create_app(
     app.state.staff_verifier = verifier
     app.state.deploy_verifier = deploy_verifier
     app.state.m2m_verifier = m2m_verifier
+    app.state.ops_reader_verifier = ops_reader_verifier
     # AA-835: the supply-media bucket (None without SUPPLY_MEDIA_BUCKET: uploads answer 503). Tests pass a fake.
     app.state.media_store = media_store if media_store is not None else media.store_from_settings(settings)
     # AA-682 S1: the ops-docs bucket (None without OPS_DOCS_BUCKET: uploads / downloads answer 503). Tests pass a fake.
@@ -226,6 +231,7 @@ def create_app(
     app.include_router(docs.router)
     app.include_router(staff.router)
     app.include_router(staff_roles.router)  # AA-1155 T6: the role editor (custom staff roles, bk-062)
+    app.include_router(ops_checks.router)  # AA-1171: GET /booking/ops/checks, the job check registry for CIS
     app.include_router(trip_cases.router)
     app.include_router(notifications.router)
     app.include_router(reference.router)

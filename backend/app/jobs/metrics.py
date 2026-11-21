@@ -11,10 +11,15 @@ two numbers:
   unhealthy one shows as overdue instead. 0 when nothing is due.
 - ``overdue_running``: running rows whose current attempt
   (``coalesce(progress->>'attempt_started_at', started_at)``, written by every claim since AA-751 B2) has run longer
-  than :func:`app.jobs.kinds.overdue_after_seconds` (2 x ``EXPECTED_SECONDS[kind]``, default 300 s).
+  than :func:`app.jobs.kinds.overdue_after_seconds` (``ops_jobs_overdue_factor`` x ``EXPECTED_SECONDS[kind]``).
+
+AA-1171 (bk-063): both thresholds are pricing policy parameters read at every tick (:func:`read_thresholds`); a tick
+whose policy has no value in force is skipped with one warning (no fallback value in code, like every policy read), so
+no ``ops_metrics_sampled`` line is written and the Infra alarm ``<booking prefix>-worker-silent`` shows it.
 
 S263: these were the CloudWatch metrics ``AA/Jobs/Booking`` with three Infra alarms; nothing is published to
-CloudWatch any more. The sample goes to :mod:`app.jobs.ops_checks` (``jobs_stuck`` > 900 s, ``jobs_overdue`` > 0),
+CloudWatch any more. The sample goes to :mod:`app.jobs.ops_checks` (``jobs_stuck`` > ``ops_jobs_stuck_after_s``,
+``jobs_overdue`` > 0),
 which e-mails the platform alerts topic at most once per check per UTC day. The line ``ops_metrics_sampled`` logs the
 values and the check results.
 
@@ -33,6 +38,7 @@ import asyncpg
 
 from app.jobs import ops_checks
 from app.jobs.kinds import overdue_after_seconds
+from app.pricing import policy_values
 
 log = logging.getLogger(__name__)
 
@@ -63,13 +69,15 @@ class Sample:
     due_queued_age_s: float  # raw age of the oldest due queued row, before the "healthy job running" rule
 
 
-def backlog_sample(oldest_due_age_s: float | None, running: Iterable[tuple[str, float | None]]) -> Sample:
+def backlog_sample(
+    oldest_due_age_s: float | None, running: Iterable[tuple[str, float | None]], overdue_factor: float
+) -> Sample:
     """The two metric values from the raw reads (pure; plan §5 "Booking").
 
     ``running`` is ``(kind, attempt age in seconds)`` per running row; an unknown age (no start time at all) counts as
     healthy, never as overdue."""
     rows = list(running)
-    overdue = sum(1 for kind, age in rows if age is not None and age > overdue_after_seconds(kind))
+    overdue = sum(1 for kind, age in rows if age is not None and age > overdue_after_seconds(kind, overdue_factor))
     healthy_running = len(rows) - overdue > 0
     due_age = max(float(oldest_due_age_s or 0.0), 0.0)
     return Sample(
@@ -80,12 +88,25 @@ def backlog_sample(oldest_due_age_s: float | None, running: Iterable[tuple[str, 
     )
 
 
-async def read_sample(pool: asyncpg.Pool) -> Sample:
+async def read_thresholds(pool: asyncpg.Pool) -> ops_checks.Thresholds:
+    """The two job check thresholds in force today (bk-063). Raises :class:`app.pricing.policy_values.PolicyUnavailable`
+    when one has no approved value in force."""
+    async with pool.acquire() as conn:
+        policy = await policy_values.require(
+            conn, await policy_values.today_utc(conn), "ops_jobs_stuck_after_s", "ops_jobs_overdue_factor"
+        )
+    return ops_checks.Thresholds(
+        stuck_after_s=policy.integer("ops_jobs_stuck_after_s"),
+        overdue_factor=float(policy.decimal("ops_jobs_overdue_factor")),
+    )
+
+
+async def read_sample(pool: asyncpg.Pool, overdue_factor: float) -> Sample:
     """Two SELECTs on one connection; the app pool's ``command_timeout`` (5 s, ``app.db``) bounds each."""
     async with pool.acquire() as conn:
         oldest = await conn.fetchval(OLDEST_DUE_QUEUED_SQL)
         rows = await conn.fetch(RUNNING_SQL)
-    return backlog_sample(oldest, [(r["kind"], r["attempt_age_s"]) for r in rows])
+    return backlog_sample(oldest, [(r["kind"], r["attempt_age_s"]) for r in rows], overdue_factor)
 
 
 class JobMetricsSampler:
@@ -105,11 +126,16 @@ class JobMetricsSampler:
         raises."""
         try:
             pool = await self._pool()
-            sample = await read_sample(pool)
+            thresholds = await read_thresholds(pool)
+        except Exception as exc:  # noqa: BLE001 — DB down, bk-063 not applied or no value in force: skip the tick
+            log.warning("ops_metrics_sample_failed stage=policy error=%s", type(exc).__name__)
+            return None
+        try:
+            sample = await read_sample(pool, thresholds.overdue_factor)
         except Exception as exc:  # noqa: BLE001 — DB down or not migrated: nothing to check this tick
             log.warning("ops_metrics_sample_failed stage=read error=%s", type(exc).__name__)
             return None
-        checks = await self._publisher.alert(pool, ops_checks.findings(sample))
+        checks = await self._publisher.alert(pool, ops_checks.findings(sample, thresholds))
         log.info(
             "ops_metrics_sampled oldest_queued_age_s=%.0f overdue_running_jobs=%d running=%d due_queued_age_s=%.0f"
             " checks=%s",

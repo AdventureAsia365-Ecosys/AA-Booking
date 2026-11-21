@@ -106,6 +106,19 @@ def build_staff_verifier(
     return MultiIssuerVerifier(booking_staff_issuers(settings, include_bridge=include_bridge), fetcher)
 
 
+def build_ops_reader_verifier(settings: Settings, fetcher: JwksFetcher | None = None) -> MultiIssuerVerifier | None:
+    """AA-1171: WORKFORCE x {cis-admin}, for GET /booking/ops/checks only (the CIS alerts catalogue relays the staff
+    member's own CIS admin token). None while COGNITO_CIS_ADMIN_CLIENT_ID is unset."""
+    if not settings.cognito_cis_admin_client_id:
+        return None
+    cfg = IssuerConfig(
+        issuer=settings.cognito_workforce_issuer,
+        client_ids=frozenset({settings.cognito_cis_admin_client_id}),
+        name=WORKFORCE,
+    )
+    return MultiIssuerVerifier((cfg,), fetcher)
+
+
 def issuer_kind(verifier: MultiIssuerVerifier, iss: str) -> str | None:
     """:data:`WORKFORCE`, :data:`BRIDGE` (the IssuerConfig name of ``iss``) or None for an issuer it does not hold."""
     for cfg in verifier.issuers:

@@ -135,6 +135,9 @@ class Settings:
     cognito_booking_staff_client_id: str = DEV_BOOKING_STAFF_CLIENT_ID
     cognito_breakglass_client_id: str = DEV_BREAKGLASS_CLIENT_ID
     cognito_booking_staff_preview_client_id: str = DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID
+    # AA-1171: the CIS admin app client of the WORKFORCE pool, accepted only by GET /booking/ops/checks (the CIS alerts
+    # catalogue relays the staff member's own token). Empty = that route takes booking-staff tokens only.
+    cognito_cis_admin_client_id: str = ""
     cognito_m2m_issuer: str = ""
     cognito_m2m_crm_client_id: str = ""
     supply_media_bucket: str = ""
@@ -143,6 +146,18 @@ class Settings:
     ops_docs_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
+
+    def _check_cis_admin_client(self) -> None:
+        """AA-1171: COGNITO_CIS_ADMIN_CLIENT_ID is empty or a client id other than the Booking clients."""
+        cis_admin = self.cognito_cis_admin_client_id
+        if cis_admin and (
+            not cis_admin.isalnum()
+            or cis_admin in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id)
+        ):
+            raise SettingsError(
+                "COGNITO_CIS_ADMIN_CLIENT_ID must be a Cognito app client id (letters and digits) other than the "
+                f"Booking clients, or empty, got {cis_admin!r}"
+            )
 
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
@@ -188,6 +203,7 @@ class Settings:
             if preview in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id):
                 # The same id would cap Production sign-ins too, or (worse, after a later fix) un-cap Preview ones.
                 raise SettingsError("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID must differ from the production clients")
+        self._check_cis_admin_client()
         m2m_issuer, m2m_client = self.cognito_m2m_issuer, self.cognito_m2m_crm_client_id
         if m2m_issuer and (not m2m_issuer.startswith("https://") or m2m_issuer.endswith("/")):
             raise SettingsError(
@@ -262,6 +278,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEV_BREAKGLASS_CLIENT_ID,
         cognito_booking_staff_preview_client_id=(env.get("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID") or "").strip()
         or DEV_BOOKING_STAFF_PREVIEW_CLIENT_ID,
+        cognito_cis_admin_client_id=(env.get("COGNITO_CIS_ADMIN_CLIENT_ID") or "").strip(),
         cognito_m2m_issuer=(env.get("COGNITO_M2M_ISSUER") or "").strip(),
         cognito_m2m_crm_client_id=(env.get("COGNITO_M2M_CRM_CLIENT_ID") or "").strip(),
         supply_media_bucket=(env.get("SUPPLY_MEDIA_BUCKET") or "").strip(),

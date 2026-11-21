@@ -2,7 +2,8 @@
 (plan §3, B3) and the deploy-blocking kinds (AA-993 G5).
 
 A running job counts as **overdue** in the backlog metrics (:mod:`app.jobs.metrics`) once its current attempt has run
-longer than ``OVERDUE_FACTOR`` x its expected seconds. Every kind the worker handles must be listed here (a unit test
+longer than the policy parameter ``ops_jobs_overdue_factor`` x its expected seconds. Every kind the worker handles must
+be listed here (a unit test
 compares this map with the handlers the lifespan registers); an unknown kind falls back to ``DEFAULT_EXPECTED_SECONDS``.
 
 Values are generous upper bounds for a healthy run on Dev, not averages: a pull or a single inquiry is a few queries,
@@ -30,7 +31,6 @@ information only, so a leftover row cannot hold a deploy back.
 from __future__ import annotations
 
 DEFAULT_EXPECTED_SECONDS = 300
-OVERDUE_FACTOR = 2
 
 DEPLOY_GATE_EXEMPT: frozenset[str] = frozenset({"bk_noop_sleep"})
 
@@ -88,6 +88,8 @@ def expected_seconds(kind: str) -> int:
     return EXPECTED_SECONDS.get(kind, DEFAULT_EXPECTED_SECONDS)
 
 
-def overdue_after_seconds(kind: str) -> int:
-    """Seconds after which the current attempt of a running job of ``kind`` counts as overdue."""
-    return OVERDUE_FACTOR * expected_seconds(kind)
+def overdue_after_seconds(kind: str, factor: float) -> float:
+    """Seconds after which the current attempt of a running job of ``kind`` counts as overdue: ``factor`` x its
+    expected seconds. AA-1171: ``factor`` is the pricing policy parameter ``ops_jobs_overdue_factor`` (bk-063, default
+    2), read by the caller (:mod:`app.jobs.metrics`); no constant here."""
+    return float(factor) * expected_seconds(kind)
