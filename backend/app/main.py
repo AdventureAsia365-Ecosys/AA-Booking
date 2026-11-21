@@ -78,6 +78,7 @@ from app.routers import (
     reference,
     retention,
     staff,
+    staff_roles,
     supplier_bills,
     supplier_bookings,
     suppliers,
@@ -224,6 +225,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(docs.router)
     app.include_router(staff.router)
+    app.include_router(staff_roles.router)  # AA-1155 T6: the role editor (custom staff roles, bk-062)
     app.include_router(trip_cases.router)
     app.include_router(notifications.router)
     app.include_router(reference.router)

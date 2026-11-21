@@ -6414,6 +6414,51 @@
         "title": "NewRate",
         "type": "object"
       },
+      "NewRole": {
+        "additionalProperties": false,
+        "properties": {
+          "based_on": {
+            "description": "the built-in role cloned: admin, sales, contracting, ...",
+            "maxLength": 40,
+            "title": "Based On",
+            "type": "string"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the full capability set; omitted = the built-in role's capabilities without the approve class",
+            "title": "Capabilities"
+          },
+          "code": {
+            "description": "custom_ then a lower-case letter and 2-47 letters, digits or _",
+            "maxLength": 60,
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "based_on"
+        ],
+        "title": "NewRole",
+        "type": "object"
+      },
       "NewRoomType": {
         "additionalProperties": false,
         "properties": {
@@ -9114,6 +9159,52 @@
           "reason_code"
         ],
         "title": "ReduceRequest",
+        "type": "object"
+      },
+      "RolePatch": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the full capability set",
+            "title": "Capabilities"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "title": "RolePatch",
         "type": "object"
       },
       "Room": {
@@ -26595,6 +26686,141 @@
           }
         ],
         "summary": "List Staff",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/booking/staff-roles": {
+      "get": {
+        "operationId": "list_roles_booking_staff_roles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Roles Booking Staff Roles Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Roles",
+        "tags": [
+          "staff"
+        ]
+      },
+      "post": {
+        "operationId": "create_role_booking_staff_roles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Role Booking Staff Roles Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Role",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/booking/staff-roles/{code}": {
+      "patch": {
+        "operationId": "update_role_booking_staff_roles__code__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "maxLength": 60,
+              "minLength": 1,
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Role Booking Staff Roles  Code  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Role",
         "tags": [
           "staff"
         ]
