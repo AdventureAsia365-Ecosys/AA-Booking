@@ -147,6 +147,18 @@ class Settings:
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
+    def _check_cis_admin_client(self) -> None:
+        """AA-1171: COGNITO_CIS_ADMIN_CLIENT_ID is empty or a client id other than the Booking clients."""
+        cis_admin = self.cognito_cis_admin_client_id
+        if cis_admin and (
+            not cis_admin.isalnum()
+            or cis_admin in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id)
+        ):
+            raise SettingsError(
+                "COGNITO_CIS_ADMIN_CLIENT_ID must be a Cognito app client id (letters and digits) other than the "
+                f"Booking clients, or empty, got {cis_admin!r}"
+            )
+
     def __post_init__(self) -> None:
         if self.db_ssl not in SSL_MODES:
             raise SettingsError(f"DB_SSL must be one of {sorted(SSL_MODES)}, got {self.db_ssl!r}")
@@ -191,15 +203,7 @@ class Settings:
             if preview in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id):
                 # The same id would cap Production sign-ins too, or (worse, after a later fix) un-cap Preview ones.
                 raise SettingsError("COGNITO_BOOKING_STAFF_PREVIEW_CLIENT_ID must differ from the production clients")
-        cis_admin = self.cognito_cis_admin_client_id
-        if cis_admin and (
-            not cis_admin.isalnum()
-            or cis_admin in (self.cognito_booking_staff_client_id, self.cognito_breakglass_client_id)
-        ):
-            raise SettingsError(
-                "COGNITO_CIS_ADMIN_CLIENT_ID must be a Cognito app client id (letters and digits) other than the "
-                f"Booking clients, or empty, got {cis_admin!r}"
-            )
+        self._check_cis_admin_client()
         m2m_issuer, m2m_client = self.cognito_m2m_issuer, self.cognito_m2m_crm_client_id
         if m2m_issuer and (not m2m_issuer.startswith("https://") or m2m_issuer.endswith("/")):
             raise SettingsError(
