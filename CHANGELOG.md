@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.17.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.16.0...v0.17.0) (2026-11-21)
+
+
+### Features
+
+* bk-060 supply model migration (pax types, contract terms, supply restrictions) ([#281](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/281)) ([494c4b1](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/494c4b1854e54a0522a616c498c1d935f9676b17))
+* bk-062 Booking custom staff roles and the key-only role view for CIS ([#289](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/289)) ([f599899](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f599899a4c0d384575b3186375ede26704e0df98))
+* Booking job check thresholds from the pricing policy and the check registry for the CIS alerts catalogue ([#298](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/298)) ([cac94b2](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/cac94b28dbbafa251ee30ded832c22a57f4ffa12))
+* custom staff roles in Booking: resolver, owner-only role editor, pages by capability ([#294](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/294)) ([d704f32](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/d704f327355c1ea2e6c0ec4feba714e085a6a307))
+* finance reads and a make / approve split for supplier activation, contract publish and stop-sale review ([#288](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/288)) ([f8c8958](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/f8c89580a91fe9e20a8861bfc441124866ceb313))
+* My work band on the Booking staff dashboard, approval tiles by maker-checker and a stop-sales review page ([#291](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/291)) ([b71fca9](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/b71fca9c53f49aa75ab52417e43789f6526ccac5))
+* nonce CSP on every Booking admin response and nosniff/HSTS on the API ([#268](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/268)) ([517adf8](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/517adf8765e92eaed576d03283410ae491dfd725))
+* one supply model: contract terms, supply restrictions, stop-sale and child price rule ([#282](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/282)) ([6512b0b](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/6512b0b2681aa0f9695b4c7825d1693e7b879b99))
+* pricing.approve and the allotment and hotel / service activation approvals split from the write rights ([#290](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/290)) ([cfc49b5](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/cfc49b5ae6b4911b16e06114c20fffcf57989d6a))
+* refuse Booking administrator sessions without an authenticator code behind a policy switch ([#286](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/286)) ([e329c9e](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/e329c9eb7eeec55e7c5721b7b4ed97cae9604990))
+* staff admin in English and Vietnamese: shell, shared parts, dashboard, pricing and admin pages ([#278](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/278)) ([31719fa](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/31719faeecaee5aa7b6ce57c35607119fa6e8a58))
+* the SaaS draft bills seats above a per-seat plan's included seats on an extra-seat line ([#272](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/272)) ([c2da9fa](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c2da9fabfb4fb780a67f16579af84c303c827ac3))
+* Vietnamese for catalog, suppliers, hotels, services, costs and profit, and supplier bills ([#280](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/280)) ([1653769](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/16537694f2e2841b0e4f87ddccbd71cc89305d43))
+* Vietnamese for trip cases, proposals, B2B desk, departures, trip checks and agency billing ([#279](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/279)) ([bb7bab6](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/bb7bab6af6035e1eb39d0e66609c9ab2368fb050))
+
+
+### Bug Fixes
+
+* Booking staff pages show names not ids, clearer copy, catalog state and FX currencies ([#267](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/267)) ([0b68348](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/0b683482dfb07d31442d2437e348a8e0d3af9de9))
+* pinned sidebar footer and the kit PageHeader rules after the kit accessibility sync ([#269](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/269)) ([444f01f](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/444f01f875528bccf61defb442adb47567b3bb2a))
+* pricing reads break same-day ties by approval time; warn on scheduled rule drops ([#277](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/277)) ([eb09335](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/eb093350e1dbdb68764cd9debe3044cadffaae24))
+* season calendar sync assigns calendars and reports a degraded run ([#266](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/266)) ([aabaf34](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/aabaf349e1ad859fe1430707eeacb2f7503cd709))
+* the cases assignee picker skips the staff directory without permission, My work labels wrap ([#292](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/292)) ([a4762df](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/a4762dfae661a1b7c118cee8b40570aa94e2f30a))
+* Vietnamese for the staff admin option lists, role names, channel labels and trip check types ([#283](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/283)) ([8751757](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/8751757b535230910202b983a0d4dd80cb05d8e7))
+
 ## [0.16.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.15.0...v0.16.0) (2026-11-17)
 
 
