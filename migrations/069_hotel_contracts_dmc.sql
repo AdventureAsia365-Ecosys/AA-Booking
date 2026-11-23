@@ -75,9 +75,9 @@
 -- on hotels is a constant default: no rewrite) and the CHECK adds (a short scan of small tables); lock_timeout 5s.
 -- Re-runnable (the Integration Tests replay every file): IF NOT EXISTS, DROP CONSTRAINT IF EXISTS, CREATE OR REPLACE,
 -- ON CONFLICT DO NOTHING.
--- Number: owner main max + 1 at merge (bk-067 and bk-068 are reserved by two other lanes of S289 and ship before it
--- in one Booking batch). If it moves, renumber: file name, this header, the registration, the ids (…b6900…) and the
--- tests that name it (git grep '069_' and 'bk-069').
+-- Number: owner main max + 1 at merge (bk-067 and bk-068 of two other S289 lanes are on main). If it moves,
+-- renumber: file name, this header, the registration, the ids (…b6900…) and the tests that name it (git grep '069_'
+-- and 'bk-069').
 -- Undo (a later bk- file, after the code is reverted): restore the bk-010 / bk-060 guard bodies, DROP the five tables,
 -- the trigger hotels_supplier_link and its function, the new columns and their CHECKs, DELETE the seed:bk-069 policy
 -- events and versions.
