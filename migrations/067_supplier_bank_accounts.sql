@@ -38,17 +38,27 @@
 --      supplier_bank_payout_lock_hours old (a pricing policy parameter; no value in force refuses, fail closed). It
 --      takes a share lock on the supplier row, so it serialises with an approval (the app locks the supplier FOR UPDATE).
 --      A supplier with no bank account on file keeps today's payouts.
---   5. Pricing policy parameter supplier_bank_payout_lock_hours (Pricing > Policy, section security, approver group
---      admin) version 1 = 24 (Q10), seeded like bk-063.
+--   5. Pricing policy parameters (Pricing > Policy, section security, approver group admin), seeded like bk-063:
+--      supplier_bank_payout_lock_hours version 1 = 24 (Q10), and supplier_bank_contact_change_days version 1 = 30 (how
+--      far back the approval of a bank account looks for supplier contact changes: the API refuses the approval when
+--      the person who entered the account changed the supplier's contacts within that many days, and shows anyone
+--      else's change on the approval card, so a planted call-back number never confirms a forged account).
 --   6. supplier_bank.write (entry only, Q10) added to the content + operations role custom_product_ops_accounting.
+--   7. booking.supplier_profile_option: the choices of the supplier profile (contact roles, payment terms bases,
+--      payment methods) as data an administrator edits (label EN / VI, order, active), seeded with today's values. A
+--      code never changes and a row is never deleted (a supplier may still name it); retiring one sets active = false.
+--      The API checks role_contacts[].role, payment_terms.basis and payment_terms.method against the active rows (a
+--      value the supplier already holds stays valid). The basis code deposit_balance keeps its deposit percentage rule
+--      in the code.
 --
--- Class: contract (root ADR 0017 d3: a new table with guards, new triggers on existing tables, a CHECK, config rows).
+-- Class: contract (root ADR 0017 d3: new tables with guards, new triggers on existing tables, a CHECK, config rows).
 -- Migration-only PR first (MIG-4); the code PR raises readiness to bk-067. The running code edits a billing entity's
 -- bank text or default only through an approved change and never writes the new table, so nothing it does changes; the role seed adds a capability the running code does not
--- know (the custom-role resolver drops unknown capabilities).
+-- know (the custom-role resolver drops unknown capabilities); the running code never reads the option table.
 -- DM-6.1: supplier_bank_account holds bank details (pii:payment, as ciphertext; account_last4 pii:payment), staff keys,
 -- free texts (pii:free_text). suppliers.role_contacts is pii:contact (also name). DM-7.1: supplier_bank_account has its
--- row in the root data standards (root PR merged before the Infra copy).
+-- row in the root data standards (root PR merged before the Infra copy); supplier_profile_option too (configuration,
+-- no personal data).
 -- Locks: ACCESS EXCLUSIVE, briefly, on suppliers (ADD COLUMN with constant defaults, a CHECK on tens of rows),
 -- SHARE ROW EXCLUSIVE on billing_entity and supplier_payouts (CREATE TRIGGER); lock_timeout 5s.
 -- Never reads shared.v_staff_booking_grant (bk_owner has no SELECT on it): no row of the new table exists yet.
@@ -57,7 +67,8 @@
 -- Number: owner main max + 1 (bk-066 on main). If it moves, renumber: file name, this header, the registration, the
 -- seed ids (…b67000…) and the tests that name it (git grep '067_' and 'bk-067').
 -- Undo (a later bk- file, after the code is reverted): DROP the triggers billing_entity_guard, supplier_payouts_bank_lock and their functions; DELETE the bk-067 capability row and the seed:bk-067 policy rows; DROP
--- booking.supplier_bank_account (destructive: DRY RUN; it holds the approval evidence) and the four supplier columns.
+-- booking.supplier_profile_option, booking.supplier_bank_account (destructive: DRY RUN; it holds the approval
+-- evidence) and the four supplier columns.
 
 BEGIN;
 
@@ -97,12 +108,12 @@ COMMENT ON COLUMN booking.suppliers.tax_code IS
     'conf:commercial — bk-067 (AA-1158 part 2): the supplier''s tax identification number.';
 COMMENT ON COLUMN booking.suppliers.role_contacts IS
     'pii:contact; also pii:name (bk-067, AA-1158 part 2: contacts by role, a JSON array (at most 12) of '
-    '{role: reservations|accounts|sales|operations|emergency|management, name, email, phone}; the API checks the '
+    '{role, name, email, phone}, role a code of booking.supplier_profile_option kind contact_role; the API checks the '
     'shape).';
 COMMENT ON COLUMN booking.suppliers.payment_terms IS
-    'conf:commercial — bk-067 (AA-1158 part 2): the supplier''s standard payment terms, a JSON object {basis: '
-    'prepayment|deposit_balance|on_arrival|after_service|monthly_statement, deposit_percent, due_days, method: '
-    'bank_transfer|card|cash|other, note}; a contract may state its own (supplier_contracts.payment_terms).';
+    'conf:commercial — bk-067 (AA-1158 part 2): the supplier''s standard payment terms, a JSON object {basis, '
+    'deposit_percent, due_days, method, note}, basis and method codes of booking.supplier_profile_option (kinds '
+    'terms_basis, terms_method); a contract may state its own (supplier_contracts.payment_terms).';
 
 -- ── 2. Billing entity: bank text and default flag only through an approved change (part 1 backstop) ─────────────
 
@@ -396,19 +407,27 @@ INSERT INTO booking.pricing_policy (id, param_key, version_no, value, unit, effe
 VALUES
     ('00000000-0000-4000-8000-0000b6700000', 'supplier_bank_payout_lock_hours', 1, '24'::jsonb, 'hours',
      DATE '2026-01-01',
-     'Tech lead decision Q10: no supplier payout for 24 hours after a bank account change is approved.', 'seed:bk-067')
+     'Tech lead decision Q10: no supplier payout for 24 hours after a bank account change is approved.', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700010', 'supplier_bank_contact_change_days', 1, '30'::jsonb, 'days',
+     DATE '2026-01-01',
+     'Seeded default (proposed, the administrator group may change it): a bank account change is not approved when the '
+     'person who entered it changed the supplier contacts in the last 30 days.', 'seed:bk-067')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO booking.pricing_policy_events (id, policy_id, maker, event, actor)
-SELECT '00000000-0000-4000-8000-0000b6700001'::uuid, p.id, p.created_by, 'submitted', p.created_by
-  FROM booking.pricing_policy p
- WHERE p.id = '00000000-0000-4000-8000-0000b6700000' AND p.created_by = 'seed:bk-067'
+SELECT v.id, p.id, p.created_by, 'submitted', p.created_by
+  FROM (VALUES ('00000000-0000-4000-8000-0000b6700001'::uuid, '00000000-0000-4000-8000-0000b6700000'::uuid),
+               ('00000000-0000-4000-8000-0000b6700011'::uuid, '00000000-0000-4000-8000-0000b6700010'::uuid)) AS v (id, pid)
+  JOIN booking.pricing_policy p ON p.id = v.pid AND p.created_by = 'seed:bk-067'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO booking.pricing_policy_events (id, policy_id, maker, event, actor)
-SELECT '00000000-0000-4000-8000-0000b6700002'::uuid, p.id, p.created_by, 'approved', 'tech lead S285 (Q10 decision)'
-  FROM booking.pricing_policy p
- WHERE p.id = '00000000-0000-4000-8000-0000b6700000' AND p.created_by = 'seed:bk-067'
+SELECT v.id, p.id, p.created_by, 'approved', v.actor
+  FROM (VALUES ('00000000-0000-4000-8000-0000b6700002'::uuid, '00000000-0000-4000-8000-0000b6700000'::uuid,
+                'tech lead S285 (Q10 decision)'),
+               ('00000000-0000-4000-8000-0000b6700012'::uuid, '00000000-0000-4000-8000-0000b6700010'::uuid,
+                'tech lead S279 (thresholds rule: seeded defaults)')) AS v (id, pid, actor)
+  JOIN booking.pricing_policy p ON p.id = v.pid AND p.created_by = 'seed:bk-067'
 ON CONFLICT DO NOTHING;
 
 -- ── 6. supplier_bank.write (entry only) in the content + operations role (Q10) ──────────────────────────────────
@@ -418,6 +437,78 @@ SELECT r.code, 'supplier_bank.write', 'migration:bk-067'
   FROM booking.staff_role r
  WHERE r.code = 'custom_product_ops_accounting'
 ON CONFLICT (role_code, capability) DO NOTHING;
+
+-- ── 7. The choices of the supplier profile, as data an administrator edits ────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS booking.supplier_profile_option (
+    id         uuid        NOT NULL DEFAULT gen_random_uuid(),
+    kind       text        NOT NULL,
+    code       text        NOT NULL,
+    label_en   text        NOT NULL,
+    label_vi   text        NOT NULL,
+    position   smallint    NOT NULL DEFAULT 100,
+    active     boolean     NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    created_by text        NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    updated_by text        NOT NULL,
+    CONSTRAINT supplier_profile_option_pkey PRIMARY KEY (id),
+    CONSTRAINT supplier_profile_option_code_uq UNIQUE (kind, code),
+    CONSTRAINT supplier_profile_option_kind_chk CHECK (kind IN ('contact_role', 'terms_basis', 'terms_method')),
+    CONSTRAINT supplier_profile_option_text_chk CHECK (
+        code ~ '^[a-z][a-z0-9_]{1,39}$'
+        AND char_length(btrim(label_en)) BETWEEN 1 AND 80 AND label_en !~ '[[:cntrl:]]'
+        AND char_length(btrim(label_vi)) BETWEEN 1 AND 80 AND label_vi !~ '[[:cntrl:]]'
+        AND position BETWEEN 1 AND 999
+        AND char_length(created_by) BETWEEN 1 AND 128 AND char_length(updated_by) BETWEEN 1 AND 128),
+    CONSTRAINT supplier_profile_option_time_chk CHECK (updated_at >= created_at)
+);
+
+COMMENT ON TABLE booking.supplier_profile_option IS
+    'bk-067 (AA-1158 part 2): the choices of the supplier profile: contact roles (suppliers.role_contacts[].role), '
+    'payment terms bases and methods (suppliers.payment_terms.basis / method). Edited by an administrator (labels, '
+    'order, active) and audited in booking.audit_logs; a code never changes and a row is never deleted (a supplier may '
+    'still name it): retiring one sets active = false. The API accepts an active code, or the one the supplier already '
+    'holds. The basis deposit_balance carries the deposit percentage rule in the code.';
+COMMENT ON COLUMN booking.supplier_profile_option.code IS
+    'The stored value (in the supplier''s JSON); never changes once created.';
+
+REVOKE ALL ON booking.supplier_profile_option FROM booking;
+GRANT SELECT, INSERT ON booking.supplier_profile_option TO booking;
+GRANT UPDATE (label_en, label_vi, position, active, updated_at, updated_by)
+    ON booking.supplier_profile_option TO booking;
+
+INSERT INTO booking.supplier_profile_option (id, kind, code, label_en, label_vi, position, created_by, updated_by)
+VALUES
+    ('00000000-0000-4000-8000-0000b6700101', 'contact_role', 'reservations', 'Reservations', 'Đặt chỗ', 10,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700102', 'contact_role', 'accounts', 'Accounts', 'Kế toán', 20,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700103', 'contact_role', 'sales', 'Sales', 'Kinh doanh', 30,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700104', 'contact_role', 'operations', 'Operations', 'Điều hành', 40,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700105', 'contact_role', 'emergency', 'Emergency', 'Khẩn cấp', 50,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700106', 'contact_role', 'management', 'Management', 'Ban quản lý', 60,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700111', 'terms_basis', 'prepayment', 'Prepayment before the service',
+     'Trả trước khi sử dụng dịch vụ', 10, 'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700112', 'terms_basis', 'deposit_balance', 'Deposit, then the balance',
+     'Đặt cọc, sau đó trả phần còn lại', 20, 'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700113', 'terms_basis', 'on_arrival', 'On arrival', 'Khi khách đến', 30,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700114', 'terms_basis', 'after_service', 'After the service',
+     'Sau khi sử dụng dịch vụ', 40, 'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700115', 'terms_basis', 'monthly_statement', 'Monthly statement',
+     'Theo bảng kê hằng tháng', 50, 'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700121', 'terms_method', 'bank_transfer', 'Bank transfer', 'Chuyển khoản', 10,
+     'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700122', 'terms_method', 'card', 'Card', 'Thẻ', 20, 'seed:bk-067', 'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700123', 'terms_method', 'cash', 'Cash', 'Tiền mặt', 30, 'seed:bk-067',
+     'seed:bk-067'),
+    ('00000000-0000-4000-8000-0000b6700124', 'terms_method', 'other', 'Other', 'Khác', 40, 'seed:bk-067', 'seed:bk-067')
+ON CONFLICT DO NOTHING;
 
 -- ── Guards: what this file promises (catalog and seeds only; never the CIS view) ─────────────────────────────────
 
@@ -431,7 +522,9 @@ BEGIN
           'suppliers.suppliers_profile_chk', 'supplier_bank_account.supplier_bank_account_status_chk',
           'supplier_bank_account.supplier_bank_account_maker_checker_chk',
           'supplier_bank_account.supplier_bank_account_owner_self_chk',
-          'supplier_bank_account.supplier_bank_account_text_chk', 'supplier_bank_account.supplier_bank_account_time_chk'
+          'supplier_bank_account.supplier_bank_account_text_chk', 'supplier_bank_account.supplier_bank_account_time_chk',
+          'supplier_profile_option.supplier_profile_option_kind_chk',
+          'supplier_profile_option.supplier_profile_option_text_chk'
       ]) AS want
      WHERE NOT EXISTS (
          SELECT 1 FROM pg_constraint c
@@ -465,12 +558,22 @@ BEGIN
        OR NOT has_table_privilege('booking', 'booking.supplier_bank_account', 'INSERT') THEN
         RAISE EXCEPTION 'bk-067: role booking grants on supplier_bank_account differ from this file';
     END IF;
+    IF has_table_privilege('booking', 'booking.supplier_profile_option', 'DELETE')
+       OR has_column_privilege('booking', 'booking.supplier_profile_option', 'code', 'UPDATE')
+       OR has_column_privilege('booking', 'booking.supplier_profile_option', 'kind', 'UPDATE')
+       OR NOT has_column_privilege('booking', 'booking.supplier_profile_option', 'active', 'UPDATE') THEN
+        RAISE EXCEPTION 'bk-067: role booking grants on supplier_profile_option differ from this file';
+    END IF;
+    SELECT count(*) INTO n FROM booking.supplier_profile_option WHERE created_by = 'seed:bk-067';
+    IF n <> 15 THEN
+        RAISE EXCEPTION 'bk-067: % of the 15 seeded supplier profile options exist', n;
+    END IF;
     SELECT count(*) INTO n
       FROM booking.pricing_policy p
       JOIN booking.pricing_policy_events a ON a.policy_id = p.id AND a.event = 'approved'
      WHERE p.created_by = 'seed:bk-067' AND p.version_no = 1;
-    IF n <> 1 THEN
-        RAISE EXCEPTION 'bk-067: % of the 1 new pricing policy parameter has an approved version 1', n
+    IF n <> 2 THEN
+        RAISE EXCEPTION 'bk-067: % of the 2 new pricing policy parameters have an approved version 1', n
             USING HINT = 'A key already had a version 1 made by someone else; the seed must not overwrite it.';
     END IF;
     IF EXISTS (SELECT 1 FROM booking.staff_role WHERE code = 'custom_product_ops_accounting')
@@ -481,7 +584,7 @@ BEGIN
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-067', now(), 'AA-1158 part 2: supplier profile fields, booking.supplier_bank_account (KMS envelope ciphertext, approved by a second person with a call-back, owner self-approval flagged), the payout lock after a bank change (supplier_bank_payout_lock_hours), supplier_bank.write in the content + operations role, the DB backstop on the billing entity bank text / default flag')
+VALUES ('bk-067', now(), 'AA-1158 part 2: supplier profile fields and their admin-edited choices (booking.supplier_profile_option), booking.supplier_bank_account (KMS envelope ciphertext, approved by a second person with a call-back, owner self-approval flagged), the payout lock after a bank change (supplier_bank_payout_lock_hours), the contact change window of a call-back (supplier_bank_contact_change_days), supplier_bank.write in the content + operations role, the DB backstop on the billing entity bank text / default flag')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

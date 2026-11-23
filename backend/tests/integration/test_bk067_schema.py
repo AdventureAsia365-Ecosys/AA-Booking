@@ -8,7 +8,9 @@ no-op, the seeds, grants, and the database rules:
   note (the business owner may approve her own, flagged; a forged flag is refused), one pending and one approved per
   supplier, superseded keeps its approval, the free texts can be redacted alone;
 - the payout lock: no payout while a bank account is pending, nor before the newest approval is
-  ``supplier_bank_payout_lock_hours`` old (aged here as the owner), none when no value is in force.
+  ``supplier_bank_payout_lock_hours`` old (aged here as the owner), none when no value is in force;
+- the choices of the supplier profile (``booking.supplier_profile_option``): seeded, codes fixed, never deleted, labels,
+  order and active editable by the app role.
 
 The business owner is a ``staff_users`` row with a Cognito identity and a ``shared.staff_booking_grant_stub`` row with
 ``is_business_owner``. All names are invented; the "ciphertext" is filler bytes (the database never decrypts)."""
@@ -47,6 +49,12 @@ APPROVE = (
     " WHERE id = $1::uuid"
 )
 LOCK_KEY = "supplier_bank_payout_lock_hours"
+CONTACT_KEY = "supplier_bank_contact_change_days"
+SEEDED_OPTIONS = {
+    "contact_role": ["reservations", "accounts", "sales", "operations", "emergency", "management"],
+    "terms_basis": ["prepayment", "deposit_balance", "on_arrival", "after_service", "monthly_statement"],
+    "terms_method": ["bank_transfer", "card", "cash", "other"],
+}
 
 
 async def _purge(admin: asyncpg.Connection) -> None:
@@ -57,6 +65,7 @@ async def _purge(admin: asyncpg.Connection) -> None:
                             " (SELECT id FROM booking.billing_entity WHERE code LIKE 'IT1158B%')")  # fmt: skip
         await admin.execute("DELETE FROM booking.billing_entity WHERE code LIKE 'IT1158B%'")
         await admin.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-1158b%'")
+        await admin.execute("DELETE FROM booking.supplier_profile_option WHERE created_by LIKE 'it-1158b%'")
     await admin.execute("DELETE FROM shared.staff_booking_grant_stub WHERE cognito_sub = $1", OWNER_SUB)
 
 
@@ -124,13 +133,22 @@ async def test_contract_file_without_a_directive() -> None:
 
 
 async def test_seeds(admin: asyncpg.Connection) -> None:
-    row = await admin.fetchrow(
-        "SELECT p.value::text AS value, p.unit, p.version_no FROM booking.pricing_policy p"
-        " JOIN booking.pricing_policy_events a ON a.policy_id = p.id AND a.event = 'approved'"
-        " WHERE p.param_key = $1 AND p.created_by = 'seed:bk-067'",
-        LOCK_KEY,
+    for key, value, unit in ((LOCK_KEY, "24", "hours"), (CONTACT_KEY, "30", "days")):
+        row = await admin.fetchrow(
+            "SELECT p.value::text AS value, p.unit, p.version_no FROM booking.pricing_policy p"
+            " JOIN booking.pricing_policy_events a ON a.policy_id = p.id AND a.event = 'approved'"
+            " WHERE p.param_key = $1 AND p.created_by = 'seed:bk-067'",
+            key,
+        )
+        assert dict(row) == {"value": value, "unit": unit, "version_no": 1}
+    rows = await admin.fetch(
+        "SELECT kind, code FROM booking.supplier_profile_option WHERE created_by = 'seed:bk-067' AND active"
+        " ORDER BY kind, position"
     )
-    assert dict(row) == {"value": "24", "unit": "hours", "version_no": 1}
+    by_kind: dict[str, list[str]] = {}
+    for r in rows:
+        by_kind.setdefault(r["kind"], []).append(r["code"])
+    assert by_kind == SEEDED_OPTIONS
     caps = {r["capability"] for r in await admin.fetch(
         "SELECT capability FROM booking.staff_role_capability WHERE role_code = 'custom_product_ops_accounting'"
         " AND capability LIKE 'supplier_bank.%'")}  # fmt: skip
@@ -158,6 +176,54 @@ async def test_grants(admin: asyncpg.Connection, column: str, privilege: str, gr
     assert not await admin.fetchval(
         "SELECT has_table_privilege('booking', 'booking.supplier_bank_account', 'DELETE') AS ok"
     )
+
+
+@pytest.mark.parametrize(
+    ("column", "privilege", "granted"),
+    [
+        ("code", "UPDATE", False),
+        ("kind", "UPDATE", False),
+        ("created_by", "UPDATE", False),
+        ("label_en", "UPDATE", True),
+        ("label_vi", "UPDATE", True),
+        ("position", "UPDATE", True),
+        ("active", "UPDATE", True),
+        ("code", "INSERT", True),
+    ],
+)
+async def test_option_grants(admin: asyncpg.Connection, column: str, privilege: str, granted: bool) -> None:
+    has = await admin.fetchval(
+        "SELECT has_column_privilege('booking', 'booking.supplier_profile_option', $1, $2) AS ok", column, privilege
+    )
+    assert has is granted
+    assert not await admin.fetchval(
+        "SELECT has_table_privilege('booking', 'booking.supplier_profile_option', 'DELETE') AS ok"
+    )
+
+
+async def test_option_rows_keep_their_shape(app_conn: asyncpg.Connection) -> None:
+    add = (
+        "INSERT INTO booking.supplier_profile_option (kind, code, label_en, label_vi, position, created_by, updated_by)"
+        " VALUES ($1, $2, $3, 'Nhãn', 70, $4, $4)"
+    )
+    await app_conn.execute(add, "contact_role", "night_desk", "Night desk", CHECKER)
+    await app_conn.execute(
+        "UPDATE booking.supplier_profile_option SET active = false, label_en = 'Night desk (old)',"
+        " updated_at = now(), updated_by = $1 WHERE kind = 'contact_role' AND code = 'night_desk'",
+        CHECKER,
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await app_conn.execute(add, "contact_role", "night_desk", "Again", CHECKER)
+    for kind, code, label in (("vendor_tier", "gold", "Gold"), ("contact_role", "Night", "Night"),
+                              ("contact_role", "x", "X"), ("contact_role", "lantern", "   ")):  # fmt: skip
+        with pytest.raises(asyncpg.CheckViolationError):
+            await app_conn.execute(add, kind, code, label, CHECKER)
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await app_conn.execute("DELETE FROM booking.supplier_profile_option WHERE code = 'night_desk'")
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await app_conn.execute(
+            "UPDATE booking.supplier_profile_option SET code = 'night_shift' WHERE code = 'night_desk'"
+        )
 
 
 # ── Supplier profile ────────────────────────────────────────────────────────────────────
