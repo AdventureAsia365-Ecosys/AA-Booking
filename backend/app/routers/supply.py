@@ -245,7 +245,9 @@ async def list_hotels(
     sort: Annotated[str | None, Query(max_length=30)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
-    reconfirm: Annotated[Literal["due"] | None, Query(description="AA-1153: facts due for a new confirmation")] = None,
+    reconfirm: Annotated[
+        Literal["due"] | None, Query(description="Hotels whose facts are due for a new confirmation")
+    ] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         days = await hotel_master.reconfirm_days(conn) if reconfirm == "due" else None

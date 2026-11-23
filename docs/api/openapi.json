@@ -24639,7 +24639,7 @@
             }
           },
           {
-            "description": "AA-1153: facts due for a new confirmation",
+            "description": "Hotels whose facts are due for a new confirmation",
             "in": "query",
             "name": "reconfirm",
             "required": false,
@@ -24653,7 +24653,7 @@
                   "type": "null"
                 }
               ],
-              "description": "AA-1153: facts due for a new confirmation",
+              "description": "Hotels whose facts are due for a new confirmation",
               "title": "Reconfirm"
             }
           }
