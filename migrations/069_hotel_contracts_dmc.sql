@@ -35,22 +35,23 @@
 --      the rate dates); the importer expands a season label into one rate per range and checks gaps and overlaps.
 --      Written while the contract is a draft only (like rates).
 --   5. booking.hotel_child_policies (new, T12 for hotels): the child price a DMC gives AA for a hotel under one
---      contract: age band, basis sharing | extra_bed, optional board, net per night in the contract currency. Two
---      DMCs may give different child prices for one hotel. Written while the contract is a draft only; the hotel must
+--      contract: age band, basis sharing | extra_bed, optional board, net per night in the contract currency (one
+--      price per contract, hotel, board, basis and band start: a sheet may give a sharing and an extra-bed price for
+--      the same band). Two DMCs may give different child prices for one hotel. Written while the contract is a draft only; the hotel must
 --      be linked to the contract's supplier.
 --   6. booking.rate_sheet_imports (new, append-only): one row per rate-sheet import that created a draft contract:
 --      file hash and name, row count, the business checks (HB cheaper than BB, season gaps, price jumps) and the diff
 --      against the supplier's previous contract as they were at import time. Publishing such a draft asks the second
 --      person to acknowledge the checks (the code reads the checks live; this row is the record).
 --   7. booking.trip_plan_components.meal_plan: the board basis of a tour's hotel night (RO, BB, HB, FB, AI; NULL = the
---      default, bed and breakfast). Rooms only (CHECK).
+--      pricing policy's default board, hotel_default_board, seeded BB). Rooms only (CHECK).
 --   8. booking.supplier_bookings.hotel_confirmation_ref: the hotel's own confirmation number the DMC passes on
 --      (confirmation_ref stays the DMC's reference); 1..100 characters, editable while the booking lives.
 --   9. booking.supplier_rate_guard() and booking.supply_restriction_guard() REPLACED: a room type is accepted under a
 --      contract when its hotel has an ACTIVE link to the contract's supplier (was: hotels.supplier_id = the contract's
 --      supplier). Every other line of both bodies is the one bk-010 / bk-060 wrote. Every hotel is linked to its
 --      hotels.supplier_id by the backfill, so every write the running code makes today is still accepted.
---  10. Six pricing policy parameters (Pricing > Policy, section hotels, approver group pricing), version 1 made,
+--  10. Seven pricing policy parameters (Pricing > Policy, section hotels, approver group pricing), version 1 made,
 --      submitted and approved by the migration ('seed:bk-069', in force from 2026-01-01; the advisory's defaults):
 --        hotel_match_block_pct       85    (% name similarity that blocks a new hotel as a duplicate, with distance)
 --        hotel_match_block_m         300   (metres)
@@ -58,6 +59,8 @@
 --        hotel_match_warn_m          1000  (metres: same place and this close asks too)
 --        hotel_facts_reconfirm_days  180   (days after the last confirmation of a hotel's facts)
 --        rate_sheet_jump_warn_pct    60    (% rise against the previous contract that the import flags)
+--        hotel_default_board         "BB"  (the board a hotel night is priced on when neither the quote line nor the
+--                                           tour night names one; one of RO, BB, HB, FB, AI)
 --
 -- Class: contract (root ADR 0017 d3): columns, CHECKs and a trigger on existing tables, guard functions replaced,
 -- config rows. Migration-only PR first (MIG-4); the code PR raises readiness to bk-069. The running code never names
@@ -240,7 +243,7 @@ CREATE TABLE IF NOT EXISTS booking.hotel_child_policies (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS hotel_child_policies_uq
-    ON booking.hotel_child_policies (supplier_contract_id, hotel_id, coalesce(meal_plan, '*'), age_min);
+    ON booking.hotel_child_policies (supplier_contract_id, hotel_id, coalesce(meal_plan, '*'), basis, age_min);
 CREATE INDEX IF NOT EXISTS hotel_child_policies_hotel_idx ON booking.hotel_child_policies (hotel_id);
 
 COMMENT ON TABLE booking.hotel_child_policies IS
@@ -346,7 +349,7 @@ ALTER TABLE booking.trip_plan_components ADD CONSTRAINT trip_plan_components_mea
     meal_plan IS NULL OR (hotel_room_type_id IS NOT NULL AND meal_plan IN ('RO', 'BB', 'HB', 'FB', 'AI')));
 
 COMMENT ON COLUMN booking.trip_plan_components.meal_plan IS
-    'bk-069 (AA-1153, T9): the board basis of this hotel night (RO, BB, HB, FB, AI); NULL = the default, bed and breakfast. A quote line may ask another.';
+    'bk-069 (AA-1153, T9): the board basis of this hotel night (RO, BB, HB, FB, AI); NULL = the pricing policy default board (hotel_default_board, seeded BB). A quote line may ask another.';
 
 -- ── 8. supplier_bookings.hotel_confirmation_ref: the hotel's own confirmation number ────────────────────────────
 
@@ -520,7 +523,7 @@ COMMENT ON FUNCTION booking.supplier_rate_guard() IS
 COMMENT ON FUNCTION booking.supply_restriction_guard() IS
     'bk-060, bk-069: contract restrictions (allotment, free_sale, on_request) are written under a draft contract only; a stop-sale is entered pending on a published contract, keeps its facts, is never deleted; both name a service of the contract''s supplier or a room type of a hotel linked to it, inside its validity. Erasure (DM-6.7): note, reject_reason, withdraw_reason and end_reason may be set to ''[redacted]'' on any row with nothing else changed (bk_owner, reviewed run-script).';
 
--- ── 10. Pricing policy: the hotel matching, re-confirmation and rate-sheet jump thresholds ──────────────────────
+-- ── 10. Pricing policy: the hotel matching, re-confirmation and rate-sheet jump thresholds, the default board ─────
 
 INSERT INTO booking.pricing_policy (id, param_key, version_no, value, unit, effective_from, reason, created_by)
 VALUES
@@ -535,7 +538,10 @@ VALUES
     ('00000000-0000-4000-8000-0000b6900040', 'hotel_facts_reconfirm_days', 1, '180'::jsonb, 'days', DATE '2026-01-01',
      'AA-1153: the facts of a hotel are confirmed again this many days after the last confirmation.', 'seed:bk-069'),
     ('00000000-0000-4000-8000-0000b6900050', 'rate_sheet_jump_warn_pct', 1, '60'::jsonb, '%', DATE '2026-01-01',
-     'AA-1153: a rate-sheet price this much above the previous contract''s is flagged before approval.', 'seed:bk-069')
+     'AA-1153: a rate-sheet price this much above the previous contract''s is flagged before approval.', 'seed:bk-069'),
+    ('00000000-0000-4000-8000-0000b6900060', 'hotel_default_board', 1, '"BB"'::jsonb, NULL, DATE '2026-01-01',
+     'AA-1153 (T9): a hotel night is priced on this board when neither the quote line nor the tour night names one.',
+     'seed:bk-069')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO booking.pricing_policy_events (id, policy_id, maker, event, actor)
@@ -560,9 +566,9 @@ BEGIN
     JOIN booking.pricing_policy_events a ON a.policy_id = p.id AND a.event = 'approved'
     WHERE p.version_no = 1 AND p.param_key IN ('hotel_match_block_pct', 'hotel_match_block_m', 'hotel_match_warn_pct',
                                                'hotel_match_warn_m', 'hotel_facts_reconfirm_days',
-                                               'rate_sheet_jump_warn_pct');
-    IF n <> 6 THEN
-        RAISE EXCEPTION 'bk-069: % of the 6 seeded hotel parameters have an approved version 1', n;
+                                               'rate_sheet_jump_warn_pct', 'hotel_default_board');
+    IF n <> 7 THEN
+        RAISE EXCEPTION 'bk-069: % of the 7 seeded hotel parameters have an approved version 1', n;
     END IF;
     IF EXISTS (SELECT 1 FROM booking.hotels h WHERE NOT EXISTS (
         SELECT 1 FROM booking.hotel_supplier_links l WHERE l.hotel_id = h.id AND l.supplier_id = h.supplier_id)) THEN

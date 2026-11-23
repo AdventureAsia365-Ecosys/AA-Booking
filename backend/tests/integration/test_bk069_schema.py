@@ -6,6 +6,7 @@ and the facts CHECK on hotels, and the cascades an owner clean-up follows. All n
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
@@ -28,6 +29,7 @@ PARAMS = (
     ("hotel_match_warn_m", 1000),
     ("hotel_facts_reconfirm_days", 180),
     ("rate_sheet_jump_warn_pct", 60),
+    ("hotel_default_board", "BB"),
 )
 GUARD_ERRORS = (
     asyncpg.CheckViolationError,
@@ -131,7 +133,7 @@ async def test_registered_once_and_rerun_is_a_no_op(admin: asyncpg.Connection) -
         " JOIN booking.pricing_policy_events e ON e.policy_id = p.id AND e.event = 'approved'"
         " WHERE p.created_by = 'seed:bk-069' ORDER BY p.id"
     )
-    assert [(r["param_key"], int(r["value"])) for r in seeded] == list(PARAMS)
+    assert [(r["param_key"], json.loads(r["value"])) for r in seeded] == list(PARAMS)
     assert all(r["actor"] != "seed:bk-069" for r in seeded)
 
 
@@ -228,6 +230,10 @@ async def test_seasons_and_child_prices_follow_the_draft(app_conn: asyncpg.Conne
     with pytest.raises(asyncpg.UniqueViolationError):
         await app_conn.fetchval(season, g["ka"], " low ", date(2027, 5, 1), date(2027, 6, 30), MAKER)
     assert await app_conn.fetchval(child, g["ka"], g["hotel"], 6, 11, "sharing", "HB", "15.00", MAKER)
+    # One band may have a sharing and an extra-bed price (the basis is part of the key); the same basis twice may not.
+    assert await app_conn.fetchval(child, g["ka"], g["hotel"], 6, 11, "extra_bed", "HB", "25.00", MAKER)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await app_conn.fetchval(child, g["ka"], g["hotel"], 6, 11, "extra_bed", "HB", "30.00", MAKER)
     with pytest.raises(asyncpg.CheckViolationError):  # DMC B is not linked to the hotel
         await app_conn.fetchval(child, g["kb"], g["hotel"], 6, 11, "sharing", None, "15.00", MAKER)
     for bad in ((12, 11, "sharing", None), (0, 5, "cot", None), (0, 5, "sharing", "XX")):
