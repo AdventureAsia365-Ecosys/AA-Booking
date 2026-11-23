@@ -2867,6 +2867,12 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   too, and the service refuses the draft's maker 403 `maker_checker`). A supply record is synthetic only when its
   supplier was created by the E2E maker and still carries the mark (`SUPPLIER_SYNTHETIC_SQL`; paths by UUID or
   `SUP-` / `HTL-` / `SVC-` code).
+  A10e-4 (AA-1151 S289, the add-on live check): the maker also imports the activity catalogue of that supplier (POST
+  `/booking/suppliers/{ref}/activity-sheets`, DRY RUN and import: services, draft add-on offers, one draft contract);
+  the supplier is checked from the path and the route refuses a file with an activity title not starting `SYNTHETIC`
+  or with inclusions text (`e2e_staff.check_activity_sheet`, 403 `e2e_read_only`). The checker publishes the contract
+  (A10e-3); the A10h E2E owner, who wrote none of it, publishes the offers (the maker's own publish is 403
+  `maker_checker`).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

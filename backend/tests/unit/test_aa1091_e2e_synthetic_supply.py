@@ -20,12 +20,14 @@ The SQL itself runs on PostgreSQL in tests/integration/test_aa1091_e2e_synthetic
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
 
 from app.auth import e2e_staff
+from app.supply import activity_import
 from tests.staff_tokens import BOOKING_STAFF_CLIENT, LocalCis
 from tests.unit.fakes import ScriptedConn
 from tests.unit.test_aa911_preview_cap import IDENTITY_SELECT, auth, cognito_row
@@ -49,12 +51,29 @@ SERVICE_BODY = {
 }
 ROOM_BODY = {"name": "Double", "max_occupancy": 2}
 SHEET_BODY = {"data_base64": "UEsDBA==", "filename": "synthetic.xlsx"}
+# A10e-4 (AA-1151 S289): a marked activity catalogue (invented titles; the guard and the route check need a real file).
+ACTIVITY_CONTRACT = {"Title": "SYNTHETIC excursions (not real)", "Valid from": "2031-01-01", "Valid to": "2031-12-31"}
+
+
+def _activities(*rows: tuple[str, str | None]) -> dict[str, str]:
+    """An upload body of activity rows (title, inclusions)."""
+    values = []
+    for title, inclusions in rows:
+        row = dict.fromkeys(activity_import.COLUMNS)
+        row.update({"Title": title, "Places": PLACE, "Cut-off hours": 24, "Net adult": 30, "Inclusions": inclusions})
+        values.append(tuple(row[c] for c in activity_import.COLUMNS))
+    data = activity_import.build_workbook(ACTIVITY_CONTRACT, values)
+    return {"data_base64": base64.b64encode(data).decode(), "filename": "synthetic-activities.xlsx"}
+
+
+ACTIVITY_BODY = _activities(("SYNTHETIC paddle 1 (not real)", None), ("SYNTHETIC walk 2 (not real)", None))
 
 CREATE_SUPPLIER = ("POST", "/booking/suppliers", SUPPLIER_BODY)
 CREATE_HOTEL = ("POST", "/booking/hotels", HOTEL_BODY)
 CREATE_SERVICE = ("POST", "/booking/services", SERVICE_BODY)
 CREATE_ROOM = ("POST", f"/booking/hotels/{HOTEL}/room-types", ROOM_BODY)
 RATE_SHEET = ("POST", f"/booking/suppliers/{SUPPLIER}/rate-sheets?dry_run=true", SHEET_BODY)
+ACTIVITY_SHEET = ("POST", f"/booking/suppliers/{SUPPLIER}/activity-sheets?dry_run=true", ACTIVITY_BODY)
 PUBLISH = ("PATCH", f"/booking/contracts/{CONTRACT}", {"status": "published"})
 EXPIRE = ("PATCH", f"/booking/contracts/{CONTRACT}", {"status": "expired"})
 OFF_SUPPLIER = ("POST", f"/booking/suppliers/{SUPPLIER}/deactivate", None)
@@ -67,6 +86,7 @@ CHECKED = [
     (CREATE_SERVICE, SUPPLIER),
     (CREATE_ROOM, HOTEL),
     (RATE_SHEET, SUPPLIER),
+    (ACTIVITY_SHEET, SUPPLIER),
     (PUBLISH, CONTRACT),
     (EXPIRE, CONTRACT),
     (OFF_SUPPLIER, SUPPLIER),
@@ -276,6 +296,34 @@ def test_the_supplier_create_reaches_the_route_on_its_body_check_alone() -> None
     assert not isinstance(detail, str) or not detail.startswith("e2e_"), r.text
     assert _guard(conn) == []
     assert len(conn.calls) > len(_staff_calls(conn))  # the route ran
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _activities(("SYNTHETIC paddle 1 (not real)", None), ("Lotus lake paddle", None)),  # one title unmarked
+        _activities(("SYNTHETIC paddle 1 (not real)", "Guide; Water")),  # inclusions are free text
+        _activities((" synthetic lower case", None)),
+    ],
+)
+def test_an_activity_sheet_with_an_unmarked_row_is_refused_before_anything_is_read(body: dict[str, str]) -> None:
+    """A10e-4: the path's supplier is the maker's synthetic one, but the file must hold marked activities only."""
+    cis = LocalCis()
+    conn = ScriptedConn().on(GUARD, True).on(IDENTITY_SELECT, _row(MAKER))
+    with _client(cis, conn) as c:
+        r = c.post(f"/booking/suppliers/{SUPPLIER}/activity-sheets", json=body, headers=auth(_token(cis, MAKER)))
+    assert (r.status_code, r.json()["detail"]) == (403, "e2e_read_only"), r.text
+    assert not [sql for sql, _ in conn.calls if "booking.suppliers" in sql and GUARD not in sql]  # no import read
+
+
+def test_check_activity_sheet_passes_marked_rows_only() -> None:
+    marked = activity_import.parse(base64.b64decode(ACTIVITY_BODY["data_base64"]))
+    e2e_staff.check_activity_sheet("pricing_maker", marked)
+    e2e_staff.check_activity_sheet("pricing_maker", activity_import.parse(activity_import.build_workbook({}, [])))
+    with pytest.raises(HTTPException) as err:
+        e2e_staff.check_activity_sheet("pricing_maker", activity_import.parse(base64.b64decode(
+            _activities(("Market cycle", None))["data_base64"])))  # fmt: skip
+    assert err.value.detail == "e2e_read_only"
 
 
 def test_a_real_contracting_member_is_unaffected() -> None:

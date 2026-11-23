@@ -89,7 +89,8 @@ function ExpiringContracts() {
       <ul className="flex flex-col gap-1.5 text-[13px]" data-testid="contracts-expiring">
         {list.data.items.map((k) => (
           <li key={k.id} className="flex min-w-0 flex-wrap items-center gap-2">
-            <Pill tone={k.days_left <= 14 ? "danger" : "warning"}>{t("{0} days left", k.days_left)}</Pill>
+            {/* One tone: the only threshold is the policy window (contract_expiry_alert_days); no second cut-over in code. */}
+            <Pill tone="warning">{t("{0} days left", k.days_left)}</Pill>
             <Link href={`/suppliers/${k.supplier_code}`} className="font-semibold">
               {k.supplier_name}
             </Link>

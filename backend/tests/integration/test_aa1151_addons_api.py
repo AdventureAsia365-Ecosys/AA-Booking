@@ -209,6 +209,13 @@ async def test_done_when_import_five_publish_view_child_and_expiry(
     own = await c.post(f"/add-ons/{first['id']}/publish", headers=maker)
     assert own.status_code == 403 and own.json()["detail"] == "maker_checker"
     assert (await c.post(f"/add-ons/{first['id']}/publish", headers=editor)).status_code == 403
+    # A draft retired before any publish keeps its makers when another person reopens it (no maker-checker bypass).
+    second = next(o for o in drafts["items"] if o["service_title"] == TITLES[1])
+    await _ok(await c.post(f"/add-ons/{second['id']}/retire", headers=editor))
+    again = await _ok(await c.post(f"/add-ons/{second['id']}/reopen", headers=editor))
+    assert again["status"] == "draft" and again["writers"] == [MAKER, EDITOR]
+    still = await c.post(f"/add-ons/{second['id']}/publish", headers=maker)
+    assert still.status_code == 403 and still.json()["detail"] == "maker_checker"
     mine = await _ok(await c.get("/add-ons?approvable=me", headers=checker))
     assert mine["total"] == 5
     for offer in drafts["items"]:

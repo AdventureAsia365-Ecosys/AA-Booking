@@ -21,7 +21,9 @@ published by a second person, bk-008 / bk-064). A second person publishes the of
 contracting), never one of its writers (DB CHECK + 403 ``maker_checker``), except the business owner, flagged
 ``owner_self_approved`` (:mod:`app.auth.self_approval`). Publishing needs an active service and supplier, at least one
 place and an adult rate in force today or later under a published contract (409 ``no_price``). A published offer is
-fixed: reopen it as a draft to change it (the person who reopens becomes its only writer), or retire it.
+fixed: reopen it as a draft to change it (the person who reopens becomes its only writer), or retire it. A draft
+retired before anyone published it keeps its writers when reopened (the reopener joins them): nobody approved its
+rules, so a second person's reopen never lets its only writer publish it.
 
 **What travellers see (B3).** ``booking.v_place_addons`` (contract ``supply.place_addons.v1``) lists an offer at a
 place only on the days it runs and has an in-force adult rate under a published contract, without a stop-sale;
@@ -625,7 +627,8 @@ async def publish(conn: asyncpg.Connection, staff: Staff, offer_id: str) -> dict
 
 
 async def reopen(conn: asyncpg.Connection, staff: Staff, offer_id: str) -> dict[str, Any]:
-    """Back to a draft (stops selling at once); the caller becomes its only maker, so another person republishes."""
+    """Back to a draft (stops selling at once). After a publish the caller becomes its only maker, so another person
+    republishes; a draft retired unpublished keeps its makers and adds the caller (trigger addon_offers_writers)."""
     current = await _get(conn, offer_id, lock=True)
     if current["status"] == "draft":
         raise Conflict("offer_not_published", "the offer is already a draft")
