@@ -85,6 +85,7 @@ from app.routers import (
     supplier_bank,
     supplier_bills,
     supplier_bookings,
+    supplier_profile_options,
     suppliers,
     supply,
     supply_model,
@@ -247,6 +248,7 @@ def create_app(
     app.include_router(agency_pricing.router)  # AA-1030: agency price tiers and rate cards (bk-043)
     app.include_router(suppliers.router)
     app.include_router(supplier_bank.router)  # AA-1158 part 2: supplier bank accounts (bk-067)
+    app.include_router(supplier_profile_options.router)  # AA-1158 part 2: supplier profile choices (bk-067)
     app.include_router(catalog.router)
     app.include_router(operability.router)  # AA-1149: can-operate check and sale exception (bk-065)
     app.include_router(price_versions.router)  # AA-1091: price list versions, seasons, holiday events (bk-054/055)

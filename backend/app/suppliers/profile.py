@@ -7,13 +7,16 @@ live makes the editor one of its makers (bk-064 ``suppliers_writers``), so the a
 
 - ``legal_entity``: the registered company name AA contracts with and pays (1-300 characters).
 - ``tax_code``: the supplier's tax identification number (1-64).
-- ``role_contacts``: at most :data:`MAX_CONTACTS` of ``{role, name, email, phone}``, ``role`` one of
-  :data:`CONTACT_ROLES`, a name or an e-mail or a phone required. ``pii:contact``.
-- ``payment_terms``: ``{basis, deposit_percent, due_days, method, note}``; ``basis`` one of :data:`TERMS_BASES`;
-  ``deposit_percent`` 1-100 only with ``deposit_balance``; ``due_days`` 0-365 (days before the service for
-  ``prepayment`` / ``deposit_balance``, after it for ``after_service``, after the statement for
-  ``monthly_statement``); ``method`` one of :data:`TERMS_METHODS`; ``note`` up to 300 characters. These describe one
-  supplier's agreement (data), not a rule of the system.
+- ``role_contacts``: at most :data:`MAX_CONTACTS` of ``{role, name, email, phone}``, ``role`` a code, a name or an
+  e-mail or a phone required. ``pii:contact``.
+- ``payment_terms``: ``{basis, deposit_percent, due_days, method, note}``; ``basis`` a code; ``deposit_percent`` 1-100
+  only with :data:`DEPOSIT_BASIS`; ``due_days`` 0-365 (days before or after the service or statement, as the basis
+  says); ``method`` a code or none; ``note`` up to 300 characters.
+
+Which codes exist is data (review S289): ``booking.supplier_profile_option`` (kinds ``contact_role``, ``terms_basis``,
+``terms_method``), edited by an administrator; :func:`app.suppliers.profile_options.check_profile` checks the codes
+against it after this module checked the shapes. Only :data:`DEPOSIT_BASIS` stays in code: its deposit percentage
+rule is tied to that code (seeded by bk-067).
 """
 
 from __future__ import annotations
@@ -27,9 +30,8 @@ from app.errors import Invalid
 
 FIELDS = ("legal_entity", "tax_code", "role_contacts", "payment_terms")
 JSON_FIELDS = ("role_contacts", "payment_terms")
-CONTACT_ROLES = ("reservations", "accounts", "sales", "operations", "emergency", "management")
-TERMS_BASES = ("prepayment", "deposit_balance", "on_arrival", "after_service", "monthly_statement")
-TERMS_METHODS = ("bank_transfer", "card", "cash", "other")
+DEPOSIT_BASIS = "deposit_balance"  # the basis whose deposit percentage rule lives here (bk-067 seed)
+CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")  # = the bk-067 supplier_profile_option code CHECK
 MAX_CONTACTS = 12  # technical-constant: the bk-067 CHECK bound (suppliers_profile_chk)
 MAX_DUE_DAYS = 365  # technical-constant: a shape bound of the stored terms, not a policy
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -45,8 +47,8 @@ def _text(value: Any, limit: int, code: str) -> str | None:
 
 
 def _contact(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict) or raw.get("role") not in CONTACT_ROLES:
-        raise Invalid("invalid_role_contact", f"each contact has a role among {', '.join(CONTACT_ROLES)}")
+    if not isinstance(raw, dict) or not _code(raw.get("role")):
+        raise Invalid("invalid_role_contact", "each contact has a role (Suppliers > Profile choices)")
     out = {
         "role": raw["role"],
         "name": _text(raw.get("name"), 200, "invalid_role_contact"),
@@ -58,6 +60,10 @@ def _contact(raw: Any) -> dict[str, Any]:
     if not (out["name"] or out["email"] or out["phone"]):
         raise Invalid("invalid_role_contact", "a contact needs a name, an e-mail or a phone")
     return out
+
+
+def _code(value: Any) -> bool:
+    return isinstance(value, str) and CODE_RE.fullmatch(value) is not None
 
 
 def contacts(value: Any) -> list[dict[str, Any]]:
@@ -83,17 +89,17 @@ def _percent(value: Any) -> str | None:
 def terms(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or value.get("basis") not in TERMS_BASES:
-        raise Invalid("invalid_payment_terms", f"payment terms have a basis among {', '.join(TERMS_BASES)}")
+    if not isinstance(value, dict) or not _code(value.get("basis")):
+        raise Invalid("invalid_payment_terms", "payment terms have a basis (Suppliers > Profile choices)")
     deposit = _percent(value.get("deposit_percent"))
-    if (deposit is not None) != (value["basis"] == "deposit_balance"):
+    if (deposit is not None) != (value["basis"] == DEPOSIT_BASIS):
         raise Invalid("invalid_payment_terms", "a deposit percentage goes with the deposit + balance basis only")
     due = value.get("due_days")
     if due is not None and (not isinstance(due, int) or isinstance(due, bool) or not 0 <= due <= MAX_DUE_DAYS):
         raise Invalid("invalid_payment_terms", f"due days are a whole number from 0 to {MAX_DUE_DAYS}")
     method = value.get("method")
-    if method is not None and method not in TERMS_METHODS:
-        raise Invalid("invalid_payment_terms", f"the method is one of {', '.join(TERMS_METHODS)}")
+    if method is not None and not _code(method):
+        raise Invalid("invalid_payment_terms", "the method is a payment method code (Suppliers > Profile choices)")
     return {
         "basis": value["basis"],
         "deposit_percent": deposit,

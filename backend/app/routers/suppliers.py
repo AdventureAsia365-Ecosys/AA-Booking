@@ -40,10 +40,15 @@ Country = Annotated[str, Field(pattern=r"^\s*([A-Za-z]{2})?\s*$")]
 Currency = Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")]
 
 
+# The codes are data (booking.supplier_profile_option, GET /booking/supplier-profile-options): the shape here, the
+# active codes in app.suppliers.profile_options.check_profile.
+OptionCode = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{1,39}$")]
+
+
 class SupplierRoleContact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["reservations", "accounts", "sales", "operations", "emergency", "management"]
+    role: OptionCode
     name: str | None = Field(default=None, max_length=200)
     email: str | None = Field(default=None, max_length=254)
     phone: str | None = Field(default=None, max_length=40)
@@ -52,10 +57,10 @@ class SupplierRoleContact(BaseModel):
 class SupplierPaymentTerms(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    basis: Literal["prepayment", "deposit_balance", "on_arrival", "after_service", "monthly_statement"]
+    basis: OptionCode
     deposit_percent: float | None = Field(default=None, ge=1, le=100)
     due_days: int | None = Field(default=None, ge=0, le=365)
-    method: Literal["bank_transfer", "card", "cash", "other"] | None = None
+    method: OptionCode | None = None
     note: str | None = Field(default=None, max_length=300)
 
 

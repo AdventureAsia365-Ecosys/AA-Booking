@@ -40,6 +40,9 @@ export const MSG = phrasebook(
     "Some fields are not valid.": "Some fields are not valid.",
     "Pending approval": "Pending approval",
     "A second person approves this: you made or edited it.": "A second person approves this: you made or edited it.",
+    "The supplier's contacts were changed recently by the person who entered this account or by you. Ask another person to check the contacts against the contract, or wait.": "The supplier's contacts were changed recently by the person who entered this account or by you. Ask another person to check the contacts against the contract, or wait.",
+    "This choice exists already. Turn the retired one on again.": "This choice exists already. Turn the retired one on again.",
+    "A code is 2 to 40 characters: a lower-case letter first, then letters, digits or _.": "A code is 2 to 40 characters: a lower-case letter first, then letters, digits or _.",
   },
   {
     "Hotel": "Khách sạn",
@@ -75,6 +78,9 @@ export const MSG = phrasebook(
     "Some fields are not valid.": "Một số trường không hợp lệ.",
     "Pending approval": "Chờ duyệt",
     "A second person approves this: you made or edited it.": "Người thứ hai sẽ duyệt việc này: bạn đã tạo hoặc sửa nó.",
+    "The supplier's contacts were changed recently by the person who entered this account or by you. Ask another person to check the contacts against the contract, or wait.": "Thông tin liên hệ của nhà cung cấp vừa được người nhập tài khoản này hoặc chính bạn thay đổi. Hãy nhờ người khác đối chiếu liên hệ với hợp đồng, hoặc chờ.",
+    "This choice exists already. Turn the retired one on again.": "Lựa chọn này đã có. Hãy bật lại lựa chọn đã ngừng dùng.",
+    "A code is 2 to 40 characters: a lower-case letter first, then letters, digits or _.": "Mã gồm 2 đến 40 ký tự: bắt đầu bằng chữ thường, sau đó là chữ, số hoặc _.",
   },
   ),
 );

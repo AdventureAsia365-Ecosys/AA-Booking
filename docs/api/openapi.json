@@ -6377,6 +6377,60 @@
         "title": "NewMedia",
         "type": "object"
       },
+      "NewOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "stored value; never changes once created",
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "contact_role",
+              "terms_basis",
+              "terms_method"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label_en": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label En",
+            "type": "string"
+          },
+          "label_vi": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label Vi",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "page order; default: after the last one",
+            "title": "Position"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "label_en",
+          "label_vi"
+        ],
+        "title": "NewOption",
+        "type": "object"
+      },
       "NewPayout": {
         "additionalProperties": false,
         "properties": {
@@ -7336,6 +7390,64 @@
           }
         },
         "title": "OpsIn",
+        "type": "object"
+      },
+      "OptionChange": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "false retires the choice (suppliers holding it keep it)",
+            "title": "Active"
+          },
+          "label_en": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label En"
+          },
+          "label_vi": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Vi"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "title": "OptionChange",
         "type": "object"
       },
       "OrderScope": {
@@ -10697,13 +10809,7 @@
         "additionalProperties": false,
         "properties": {
           "basis": {
-            "enum": [
-              "prepayment",
-              "deposit_balance",
-              "on_arrival",
-              "after_service",
-              "monthly_statement"
-            ],
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
             "title": "Basis",
             "type": "string"
           },
@@ -10736,12 +10842,7 @@
           "method": {
             "anyOf": [
               {
-                "enum": [
-                  "bank_transfer",
-                  "card",
-                  "cash",
-                  "other"
-                ],
+                "pattern": "^[a-z][a-z0-9_]{1,39}$",
                 "type": "string"
               },
               {
@@ -10809,14 +10910,7 @@
             "title": "Phone"
           },
           "role": {
-            "enum": [
-              "reservations",
-              "accounts",
-              "sales",
-              "operations",
-              "emergency",
-              "management"
-            ],
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
             "title": "Role",
             "type": "string"
           }
@@ -30315,6 +30409,154 @@
         "summary": "Void Payout",
         "tags": [
           "supplier-bills"
+        ]
+      }
+    },
+    "/booking/supplier-profile-options": {
+      "get": {
+        "operationId": "list_profile_options_booking_supplier_profile_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Profile Options Booking Supplier Profile Options Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Profile Options",
+        "tags": [
+          "supplier profile choices"
+        ]
+      },
+      "post": {
+        "operationId": "add_profile_option_booking_supplier_profile_options_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOption"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Profile Option Booking Supplier Profile Options Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Profile Option",
+        "tags": [
+          "supplier profile choices"
+        ]
+      }
+    },
+    "/booking/supplier-profile-options/{kind}/{code}": {
+      "patch": {
+        "operationId": "change_profile_option_booking_supplier_profile_options__kind___code__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "contact_role",
+                "terms_basis",
+                "terms_method"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_]{1,39}$",
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Change Profile Option Booking Supplier Profile Options  Kind   Code  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change Profile Option",
+        "tags": [
+          "supplier profile choices"
         ]
       }
     },

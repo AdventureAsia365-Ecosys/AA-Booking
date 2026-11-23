@@ -7,7 +7,10 @@
 - the stored details are ciphertext: neither the number nor the holder appears in the row (checked by counts);
 - finance reads the details (audited, the audit row holds only the last 4); the tech lead never approves his own
   entry (403), the business owner does, flagged;
-- reject / withdraw rules, one pending change per supplier, the profile fields.
+- reject / withdraw rules, one pending change per supplier, the profile fields;
+- review S289: a contact change of the supplier by the person who entered the account (or by the approver) within
+  ``supplier_bank_contact_change_days`` blocks the approval (409 ``contacts_recently_changed``); anyone else's change
+  is listed on the approval card; the profile choices are admin-edited data (a retired code stays valid where held).
 
 KMS is a fake key provider (AES-GCM with a fixed test master key): the database and the API are real. All names,
 numbers and codes are invented."""
@@ -76,6 +79,8 @@ async def _purge(admin: asyncpg.Connection) -> None:
     async with admin.transaction():
         await admin.execute("SET LOCAL ROLE bk_owner")
         await admin.execute("DELETE FROM booking.audit_logs WHERE action LIKE 'supplier_bank_account.%'")
+        await admin.execute("DELETE FROM booking.audit_logs WHERE action LIKE 'supplier_profile_option.%'")
+        await admin.execute("DELETE FROM booking.supplier_profile_option WHERE created_by LIKE 'cog:d1158000-%'")
         await admin.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-1158p2 %'")
     await admin.execute("DELETE FROM shared.staff_booking_grant_stub WHERE cognito_sub LIKE 'd1158000-%'")
     custom_roles.forget()
@@ -340,3 +345,86 @@ async def test_profile_fields(http: tuple[httpx.AsyncClient, LocalCis, FakeKms],
     cleared = await _ok(await c.patch(f"/suppliers/{sid}", json={"payment_terms": None, "role_contacts": []},
                                       headers=lead))  # fmt: skip
     assert cleared["payment_terms"] is None and cleared["role_contacts"] == []
+
+
+async def _enter_and_approve(
+    c: httpx.AsyncClient, sid: str, enterer: dict[str, str], approver: dict[str, str]
+) -> tuple[dict[str, Any], httpx.Response]:
+    entered = await _ok(await c.post(f"/suppliers/{sid}/bank-accounts", json=ACCOUNT, headers=enterer), 201)
+    decision = {"action": "approve", "note": CALLBACK}
+    return entered, await c.post(f"/supplier-bank-accounts/{entered['id']}/decision", json=decision, headers=approver)
+
+
+async def test_a_contact_change_before_the_call_back(
+    http: tuple[httpx.AsyncClient, LocalCis, FakeKms], admin: asyncpg.Connection
+) -> None:
+    c, cis, _ = http
+    lead, owner, holder = admin_of(cis, LEAD_SUB), admin_of(cis, OWNER_SUB), custom(cis)
+    planted = {"contact_phone": "+84 000 999 111", "role_contacts": [{"role": "accounts", "phone": "+84 000 999 111"}]}
+
+    # One person changes the live supplier's contacts, then enters a bank account: the approval is refused.
+    sid = (await ops.supply(admin, "it-1158p2 Planted"))["supplier"]
+    await _ok(await c.patch(f"/suppliers/{sid}", json=planted, headers=holder))
+    entered = await _ok(await c.post(f"/suppliers/{sid}/bank-accounts", json=ACCOUNT, headers=holder), 201)
+    card = await _ok(await c.get(f"/suppliers/{sid}/bank-accounts", headers=lead))
+    assert card["contact_changes"]["days"] == 30
+    assert [(i["by"]["id"], i["fields"]) for i in card["contact_changes"]["items"]] == [
+        (f"cog:{HOLDER_SUB}", ["contact_phone", "role_contacts"])
+    ]
+    assert card["items"][0]["approve_blocked"] == "contacts_recently_changed"
+    assert card["items"][0]["actions"]["approve"] is False and card["items"][0]["actions"]["reject"] is True
+    decision = {"action": "approve", "note": CALLBACK}
+    r = await c.post(f"/supplier-bank-accounts/{entered['id']}/decision", json=decision, headers=lead)
+    assert r.status_code == 409 and r.json()["detail"] == "contacts_recently_changed" and r.json()["until"], r.text
+    _refused(await c.post(f"/supplier-bank-accounts/{entered['id']}/decision", json=decision, headers=owner),
+             409, "contacts_recently_changed")  # fmt: skip
+    reject = {"action": "reject", "note": "Contacts changed by the same person; checking with the contract"}
+    assert (await _ok(await c.post(f"/supplier-bank-accounts/{entered['id']}/decision", json=reject, headers=lead)))[
+        "status"
+    ] == "rejected"
+
+    # The approver changed the contacts: refused too.
+    sid = (await ops.supply(admin, "it-1158p2 Approver"))["supplier"]
+    await _ok(await c.patch(f"/suppliers/{sid}", json=planted, headers=lead))
+    _, r = await _enter_and_approve(c, sid, holder, lead)
+    _refused(r, 409, "contacts_recently_changed")
+
+    # Someone else's change is shown on the card, and the call-back approval goes through.
+    sid = (await ops.supply(admin, "it-1158p2 Third"))["supplier"]
+    await _ok(await c.patch(f"/suppliers/{sid}", json={"contact_email": "desk@third.example.test"}, headers=owner))
+    _, r = await _enter_and_approve(c, sid, holder, lead)
+    assert (await _ok(r))["status"] == "approved"
+    card = await _ok(await c.get(f"/suppliers/{sid}/bank-accounts", headers=lead))
+    assert card["contact_changes"] == {"days": None, "items": []}  # nothing pending: nothing to decide
+
+
+async def test_profile_choices_are_admin_edited_data(
+    http: tuple[httpx.AsyncClient, LocalCis, FakeKms], admin: asyncpg.Connection
+) -> None:
+    c, cis, _ = http
+    lead, holder = admin_of(cis, LEAD_SUB), custom(cis)
+    kinds = (await _ok(await c.get("/supplier-profile-options", headers=holder)))["kinds"]
+    assert [o["code"] for o in kinds["terms_method"]] == ["bank_transfer", "card", "cash", "other"]
+    new = {"kind": "contact_role", "code": "night_desk", "label_en": "Night desk", "label_vi": "Trực đêm"}
+    _refused(await c.post("/supplier-profile-options", json=new, headers=holder), 403, "forbidden")
+    added = await _ok(await c.post("/supplier-profile-options", json=new, headers=lead), 201)
+    assert added["active"] is True and added["position"] == 70
+    _refused(await c.post("/supplier-profile-options", json=new, headers=lead), 409, "option_exists")
+
+    sid = (await ops.supply(admin, f"it-1158p2 Choices {uuid.uuid4().hex[:4]}"))["supplier"]
+    night = {"role_contacts": [{"role": "night_desk", "name": "Hoa Lantern"}]}
+    await _ok(await c.patch(f"/suppliers/{sid}", json=night, headers=lead))
+    retired = await _ok(await c.patch("/supplier-profile-options/contact_role/night_desk", json={"active": False},
+                                      headers=lead))  # fmt: skip
+    assert retired["active"] is False
+    # The supplier that holds the retired role keeps it through an edit; nobody adds it anew.
+    kept = {"role_contacts": [{"role": "night_desk", "name": "Hoa Lantern", "phone": "+84 000 222"}]}
+    await _ok(await c.patch(f"/suppliers/{sid}", json=kept, headers=lead))
+    other = (await ops.supply(admin, f"it-1158p2 Choices {uuid.uuid4().hex[:4]}"))["supplier"]
+    _refused(await c.patch(f"/suppliers/{other}", json=night, headers=lead), 422, "invalid_role_contact")
+    audit = await admin.fetch(
+        "SELECT action FROM booking.audit_logs WHERE entity_type = 'supplier_profile_option' AND entity_id = $1::uuid"
+        " ORDER BY created_at, id",
+        added["id"],
+    )
+    assert [r["action"] for r in audit] == ["supplier_profile_option.created", "supplier_profile_option.updated"]

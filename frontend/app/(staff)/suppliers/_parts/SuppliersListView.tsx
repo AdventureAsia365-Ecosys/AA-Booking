@@ -6,17 +6,19 @@
 // AA-910: fits the 1084 px frame at 1440 px (location under the name, text cells with a max width); the row menu
 // column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Ban, Eye, Pencil, Plus, Power } from "lucide-react";
+import { Ban, Eye, ListChecks, Pencil, Plus, Power } from "lucide-react";
 import { SUPPLIER_CATEGORIES, suppliersApi, type Supplier } from "@/lib/api/suppliers";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
-import { Code, DataTable, DateText, FilterBar, KpiTile, PageFrame, PersonCell, Section, useUrlFilters, RowMenu, type RowMenuItem } from "@/ui";
+import { Button, Code, DataTable, DateText, FilterBar, KpiTile, PageFrame, PersonCell, Section, useCan, useUrlFilters, RowMenu, type RowMenuItem } from "@/ui";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { CATEGORY_LABEL, CategoryChips, SupplierStatusBadge, locationText, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
+import { SupplierProfileChoices } from "./SupplierProfileChoices";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./SuppliersListView.messages";
@@ -29,6 +31,9 @@ export function SuppliersListView() {
   const paging = useOffsetPage();
   const actions = useSupplierActions();
   const countries = useCountries();
+  // AA-1158 part 2 (review S289): contact roles and payment terms choices are an administrator's data.
+  const canEditChoices = useCan("staff.admin");
+  const [choicesOpen, setChoicesOpen] = useState(false);
 
   const filters = {
     q: get("q") || undefined,
@@ -80,14 +85,21 @@ export function SuppliersListView() {
       title={t("Suppliers")}
       description={t("Hotels, transport, guides and other partners Booking buys from, with their contracts.")}
       actions={
-        actions.canWrite && (
+        <>
+          {canEditChoices && (
+            <Button variant="secondary" onClick={() => setChoicesOpen(true)}>
+              <ListChecks size={15} /> {t("Profile choices")}
+            </Button>
+          )}
+          {actions.canWrite && (
           <Link
             href="/suppliers/new"
             className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"
           >
             <Plus size={15} /> {t("Add supplier")}
           </Link>
-        )
+          )}
+        </>
       }
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -170,6 +182,7 @@ export function SuppliersListView() {
         </div>
       </Section>
       {actions.dialogs}
+      {canEditChoices && <SupplierProfileChoices open={choicesOpen} onClose={() => setChoicesOpen(false)} />}
     </PageFrame>
   );
 }

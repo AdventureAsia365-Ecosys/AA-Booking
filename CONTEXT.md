@@ -815,10 +815,21 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
   a supplier with no account on file is not locked; the bill detail carries `payout_lock` and takes `pay` away.
   Routes: `GET|POST /suppliers/{ref}/bank-accounts`, `POST /supplier-bank-accounts/{id}/decision` (`approve` / `reject`
   / `withdraw` + `note`), `POST /supplier-bank-accounts/{id}/reveal`. The supplier page has a Bank accounts tab.
-- **Supplier profile (part 2)**: `legal_entity`, `tax_code`, `role_contacts` (up to 12 `{role, name, email, phone}`,
-  roles reservations / accounts / sales / operations / emergency / management) and `payment_terms` (`{basis, deposit_percent,
-  due_days, method, note}`), edited on the supplier form (`app/suppliers/profile.py`); data of the supplier, so an edit
-  while it is not live makes the editor a writer.
+  **Contact changes before a call-back** (review S289): the supplier's contacts (`contact_name`, `contact_email`,
+  `contact_phone`, `role_contacts`) are edited without approval on a live supplier, so the approval is refused (409
+  `contacts_recently_changed`, `until`) when the person who entered the account or the approver changed them within
+  `supplier_bank_contact_change_days` (Pricing > Policy, security, admin; 30), read from the `supplier.updated` audit
+  rows; the list answer carries `contact_changes` (`days`, the newest changes: when, who, which fields, never the values)
+  and `approve_blocked` per pending row, shown on the Bank accounts tab.
+- **Supplier profile (part 2)**: `legal_entity`, `tax_code`, `role_contacts` (up to 12 `{role, name, email, phone}`)
+  and `payment_terms` (`{basis, deposit_percent, due_days, method, note}`), edited on the supplier form
+  (`app/suppliers/profile.py`); data of the supplier, so an edit while it is not live makes the editor a writer. The
+  contact roles, payment bases and methods are data an administrator edits (review S289;
+  `booking.supplier_profile_option`, `app/suppliers/profile_options.py`): `GET /supplier-profile-options`
+  (`supply.read`), `POST /supplier-profile-options` and `PATCH /supplier-profile-options/{kind}/{code}` (labels EN / VI,
+  order, `active`; `staff.admin`, audited `supplier_profile_option.*`); a code never changes and a row is never deleted.
+  The API accepts an active code or the one the supplier already holds; only `deposit_balance` keeps a rule in code
+  (the deposit percentage). The supplier list has a "Profile choices" drawer for administrators.
 - **DB backstops (part 2)**: `billing_entity_guard` (bk-067) refuses a direct change of `payment_instructions` /
   `is_default` outside the approving transaction. Still API-only: refusing a supplier INSERT other than `pending` with a
   creator (about 30 integration fixtures insert as role `booking` on the `active` default; a fixture pass is a
@@ -2534,9 +2545,12 @@ never changes, decisions dated now, free texts redactable alone). New BEFORE INS
 (no payout while a bank account is pending or within `supplier_bank_payout_lock_hours` of the newest approval; none in
 force refuses). New trigger `billing_entity_guard` (the part 1 backstop: `payment_instructions` / `is_default` change
 only in the transaction that approved a matching `billing_entity_change`). Version 1 of `supplier_bank_payout_lock_hours`
-= 24 (section security, approver admin). `supplier_bank.write` added to `custom_product_ops_accounting` (the test
+= 24 and of `supplier_bank_contact_change_days` = 30 (section security, approver admin). New
+`booking.supplier_profile_option` (kind `contact_role` / `terms_basis` / `terms_method`, code fixed, labels EN / VI,
+order, active; role `booking` may INSERT and UPDATE the labels, order and active only, never DELETE), seeded with 15
+choices. `supplier_bank.write` added to `custom_product_ops_accounting` (the test
 re-runs of bk-062, whose post-check counts its 24 seeds, take later rows out around it: `run_062_keeping_later_caps`).
-DM-7.1 row for `supplier_bank_account` in the root data standards.
+DM-7.1 rows for `supplier_bank_account` and `supplier_profile_option` in the root data standards.
 
 ## Out of scope today
 

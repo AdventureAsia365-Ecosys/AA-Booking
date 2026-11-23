@@ -35,7 +35,7 @@ from app import audit, catalog, paging
 from app.auth import self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
-from app.suppliers import bank_accounts, profile
+from app.suppliers import bank_accounts, profile, profile_options
 
 CATEGORIES = ("hotel", "transport", "guide", "entrance", "activity", "meal")
 STATUSES = ("pending", "active", "inactive")
@@ -410,6 +410,7 @@ async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str
     if "categories" not in values:
         raise Invalid("category_required", "a supplier needs at least one category")
     values.update(await check_place(conn, values, set(values)))
+    await profile_options.check_profile(conn, values)  # contact roles, terms codes: admin-edited data (bk-067)
     values["status"] = "pending"
     columns = [*(k for k in EDITABLE if k in values), "status"]
     marks = ", ".join(f"${i + 1}" + profile.cast(c) for i, c in enumerate(columns))
@@ -446,6 +447,7 @@ async def update_supplier(conn: asyncpg.Connection, staff: Staff, ref: str, chan
         raise Invalid("category_required", "a supplier needs at least one category")
     current = await resolve_supplier(conn, ref, lock=True)
     values = normalize(changes)
+    await profile_options.check_profile(conn, values, current)
     changed = {k: v for k, v in values.items() if current[k] != v}
     if not changed:
         return {**current, "changed": []}
