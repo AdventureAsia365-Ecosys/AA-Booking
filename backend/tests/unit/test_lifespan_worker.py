@@ -91,6 +91,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "bk_supplier_order_send",  # AA-1074: purchase orders e-mailed to suppliers
         "bk_departure_watch",  # AA-1073: guarantee at the minimum, at risk on the decision date
         "bk_allotment_release",  # AA-1073: agency allotments back to sale on their release date
+        "bk_contract_expiry_watch",  # AA-1151: supplier contracts ending within the warning window
     }
     assert list(worker.recurring) == []  # AA-1046: the recurring inquiry pull is retired
     # AA-825 daily retention runs; AA-973 B2B hold expiry when a hold is due; AA-986 L5 the CIS lifecycle outbox pull
@@ -108,6 +109,7 @@ def test_worker_runs_for_the_app_lifetime_when_enabled() -> None:
         "ReminderSchedule",  # AA-1037 G4: the overdue agency invoice reminders, once a day
         "RecomputeSchedule",  # AA-1074: departure shared costs, one run per sold-seats watermark
         "DepartureDailySchedule",  # AA-1073: the departure watch and the allotment release, once a day
+        "ExpiryDailySchedule",  # AA-1151: the supplier contract expiry announcement, once a day
         "OpsDailySchedule",
         "OutboxSequencer",
     ]

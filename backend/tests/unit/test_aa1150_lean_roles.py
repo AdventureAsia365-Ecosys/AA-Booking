@@ -69,7 +69,8 @@ def test_finance_gets_the_six_reads_and_no_new_write() -> None:
     assert all(fin.can(p) for p in FINANCE_READS)
     # AA-1158 (bk-064): finance also approves billing entity changes (bank details, default issuer).
     # AA-1158 part 2 (bk-067): finance enters and reads supplier bank accounts (approval stays admin).
-    assert set(fin.permissions) == FINANCE_BEFORE | set(FINANCE_READS) | {"billing_config.approve"} | {
+    # AA-1151 (bk-068): every role reads the add-on offers (no net shown); finance writes none of them.
+    assert set(fin.permissions) == FINANCE_BEFORE | set(FINANCE_READS) | {"billing_config.approve", "addon.read"} | {
         "supplier_bank.read",
         "supplier_bank.write",
     }

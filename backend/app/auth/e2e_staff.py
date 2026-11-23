@@ -51,6 +51,10 @@ agency payment recorded by one finance user and approved by another (maker-check
   checked by the supplier their body names (:data:`BODY_SUPPLIER`). Paths take a UUID or a code (``SUP-`` / ``HTL-`` /
   ``SVC-`` + digits).
 
+- **Synthetic activities (A10e-4, AA-1151 S289).** The maker also imports its synthetic supplier's activity catalogue
+  (:data:`ACTIVITY_SHEET_IMPORT`, route check :func:`app.auth.e2e_staff_supply.check_activity_sheet`); the E2E owner
+  (A10h) publishes the offers.
+
 - **The custom-role maker (A10g, AA-1155 T5, root spec R4.3).** The Dev-only address :data:`E2E_CUSTOM_MAKER_EMAIL`
   (groups exactly ``cis-custom`` + ``booking-custom``) holds the custom role CIS grants it (``app.auth.custom_roles``),
   so it proves the custom role with a real session: it reads what the role reads, makes a SYNTHETIC supplier (body
@@ -138,6 +142,8 @@ PRICE_VERSION_WITHDRAW = ("POST", f"{_VERSION}/withdraw")
 SUPPLIER_CREATE = ("POST", "/booking/suppliers")
 SUPPLIER_DEACTIVATE = ("POST", "/booking/suppliers/{supplier_ref}/deactivate")
 RATE_SHEET_IMPORT = ("POST", "/booking/suppliers/{supplier_ref}/rate-sheets")
+# A10e-4 (AA-1151 S289): the activity catalogue of the maker's synthetic supplier (+ e2e_staff_supply).
+ACTIVITY_SHEET_IMPORT = ("POST", "/booking/suppliers/{supplier_ref}/activity-sheets")
 CONTRACT_STATUS = ("PATCH", "/booking/contracts/{contract_id}")
 HOTEL_CREATE = ("POST", "/booking/hotels")
 HOTEL_DEACTIVATE = ("POST", "/booking/hotels/{hotel_ref}/deactivate")
@@ -305,6 +311,7 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
                     SUPPLIER_CREATE,
                     SUPPLIER_DEACTIVATE,
                     RATE_SHEET_IMPORT,
+                    ACTIVITY_SHEET_IMPORT,  # A10e-4: marked activities, draft offers (published by the E2E owner)
                     CONTRACT_STATUS,
                     HOTEL_CREATE,
                     HOTEL_DEACTIVATE,
@@ -469,6 +476,7 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         SUPPLIER_DEACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
         SUPPLIER_ACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),  # AA-1158: the pricing checker
         RATE_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
+        ACTIVITY_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),  # A10e-4 (+ e2e_staff_supply)
         CONTRACT_STATUS[1]: ("contract_id", CONTRACT_SYNTHETIC_SQL),
         HOTEL_DEACTIVATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),
         ROOM_TYPE_CREATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),

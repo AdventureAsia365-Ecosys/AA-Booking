@@ -79,6 +79,9 @@ POLICY_SEED: dict[str, str] = {
     # AA-1149 (bk-065)
     "operable_exception_default_days": "14",
     "operable_exception_max_days": "30",
+    # AA-1151 (bk-068)
+    "addon_days_ahead": "365",
+    "contract_expiry_alert_days": "60",
     # AA-1175 (bk-066): v2, the business owner's bands
     "price_pax_bands": "[[1, 1], [2, 2], [3, 3], [4, 4], [5, 7], [8, 10], [11, null]]",
 }

@@ -83,6 +83,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-065",  # AA-1149: tour parts (one supplier booking per component), can-operate check, sale exception; MIG-4
     "bk-066",  # AA-1175: the group-size price bands (price_pax_bands; app.catalog.cost_sheet reads them); MIG-4
     "bk-067",  # AA-1158 part 2: supplier profile, encrypted bank accounts, payout lock after a bank change; MIG-4
+    "bk-068",  # AA-1151: add-on offers, their places, v_place_addons and two policy values (app.supply.addons); MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

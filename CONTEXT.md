@@ -130,6 +130,10 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   cheapest suggested retail price per person for 2 travellers among the b2b rows still valid; no net, agency price or
   margin), SELECT to role `tripplanner` (+ USAGE on schema `booking`) for the TripPlanner tour page, and to `cis_app`
   (bk-040) for the agency Content studio Marketplace (CIS `GET /v1/tours/pool` attaches it to each pool row).
+  **Place add-ons** (AA-1151, bk-068, contract `supply.place_addons.v1`): `booking.v_place_addons` (per published
+  add-on offer, CIS place and day with an in-force price: the `sv:` component id, sale rules, inventory kind; no net,
+  price or supplier), SELECT to `tripplanner` for the day cards of the next slice; agencies quote the component
+  through `booking.b2b.v1`.
   **Agency billing status** (AA-1037, bk-042, root ADR 0019 d9): `booking.v_tenant_billing_status` (per agency: status
   ok | warn | past_due from the oldest overdue issued invoice against its warn / suspend days, oldest overdue days,
   overdue invoices and amount per currency, paid-through day of the software fee, the warn / suspend days), SELECT to
@@ -1485,6 +1489,46 @@ term here is the term the supplier gives AA under an AA supplier contract, never
   Infants pay the infant rate when there is one, else nothing. A `tp:` line keeps the pricing rule's sell-side child %
   (AA-1075); rooms keep per-room prices (the hotel child policy is the hotel slice).
 
+## Add-on offers: optional activities per place and day (AA-1151, bk-068; S285 advisories PR-29 B1, B3, B4, T7)
+
+An add-on offer wraps one Booking service of an AA supplier (never an agency's own supplier) so travellers and agencies
+can add it to a day of a tour without it entering the tour price (`app/supply/addons.py`, `app/routers/addons.py`;
+implementation notes `docs/implementation-notes/AA-1151.md`).
+
+- **Model** (`booking.addon_offers`, one per service; `booking.addon_offer_places`): the CIS places it is sold at
+  (`catalog.v_destination` ids, checked like a supplier's place; `operates` | `pickup`), the T7 sale rules
+  (`min_pax`, `cutoff_hours` before the earliest `start_times` of the day, ISO `operating_weekdays`) and two overrides
+  of the contract terms (`child_pct` for B4, `cancellation_tiers`; `contract_terms.effective`). Inventory stays the rows
+  of `booking.supply_restrictions` of the service (on request by default, `free_sale` up to N, `allotment`,
+  `stop_sale`): one model for activities and hotels.
+- **Who (B1)**: `addon.read` every role (no net shown), `addon.write` admin + contracting + content_creator (drafts,
+  places, display order, reopen, retire), `addon.approve` admin + contracting (approve class) publishes a draft, never
+  one of its writers (`writers` kept by trigger, `addon_offers_maker_checker_chk`, 403 `maker_checker`), except the
+  business owner, flagged `owner_self_approved` (same rule as contracts). Publishing needs an active service and
+  supplier, a place and an adult rate in force today or later under a published contract (409 `no_place` /
+  `no_price` / ...). A published offer is fixed (409 `offer_published`, DB guard) except `sort_order` / `featured`;
+  reopening makes it a draft again with the reopener as its only writer (a draft retired before any publish keeps its
+  writers and adds the reopener: nobody approved its rules). Customer text and photos are written in CIS
+  (`/admin/supply-content`, drafted from the `supply.service.v1` facts like any service).
+- **Import** (`app/supply/activity_import.py`, `POST /booking/suppliers/{ref}/activity-sheets[?dry_run=true]`,
+  `supply.write` + `addon.write`; template `GET /booking/activity-sheets/template`): a Contract sheet (the rate-sheet
+  block) and one Activities row per activity (places by CIS id or exact name, rules, net adult / child, child %) ->
+  per row an activity service, a draft offer and its rates in one draft contract; every problem by row and column,
+  nothing written while one is left; a title the supplier already has at that place is refused.
+- **Read model (B3)**: `booking.v_place_addons` (contract `supply.place_addons.v1`, SELECT to `tripplanner`): one row
+  per published offer, place and day from today (UTC) for the policy value `addon_days_ahead` (seeded 365) on which it
+  runs and has an adult rate in force under a published contract of its active supplier, without a stop-sale in
+  effect; `inventory_kind` free_sale / allotment / on_request. No net, price or supplier. Staff preview:
+  `GET /booking/add-ons/place-days`.
+- **Quotes (T7, B4)**: an `sv:` line whose service has a published offer is 422 `invalid` below `min_pax`, on a day it
+  does not run, or past the cut-off (`app/supply/addon_rules.py`; local start times compared as UTC: the catalog has
+  no place time zone yet). The B4 child order becomes supplier child rate > offer `child_pct` > contract child % >
+  policy % > adult price (`price_note.child.basis` `offer_pct`).
+- **Contracts ending (B3)**: the daily job `bk_contract_expiry_watch` (`app/supply/contract_expiry.py`, 01:00 UTC)
+  announces once per contract and end date every published supplier contract ending within the policy value
+  `contract_expiry_alert_days` (seeded 60): staff notification `contract.expiring`. `GET /booking/contracts/expiring`
+  (`supply.read`) lists them live; the staff page Supply > Add-ons shows them above the offers.
+
 ## Supplier bills and payouts (AA-682 S4, bk-030; S252 design §3.4, §4, §5, critic B4, B6)
 
 - A **supplier bill** (`booking.supplier_bills`, `BIL-000123`) is what a supplier asks AA to pay: its own bill number
@@ -2556,6 +2600,15 @@ choices. `supplier_bank.write` added to `custom_product_ops_accounting` (the tes
 re-runs of bk-062, whose post-check counts its 24 seeds, take later rows out around it: `run_062_keeping_later_caps`).
 DM-7.1 rows for `supplier_bank_account` and `supplier_profile_option` in the root data standards.
 
+### `bk-068` (AA-1151 add-on offers — needs `bk-008`, `bk-010`, `bk-039`, `bk-050`, `bk-060`, `bk-064`)
+
+A **contract** file (a foreign key to `services`, guard functions, config rows; MIG-4, the code PR raises readiness to
+bk-068). `booking.addon_offers` (one per service, draft / published / retired, sale rules and overrides, `writers` by
+trigger, maker-checker and owner self-approval CHECKs, the bk-064 owner guard in mutable mode; no DELETE for role
+`booking`), `booking.addon_offer_places` (draft only; an insert records its writer), the view `booking.v_place_addons`
+(security barrier; SELECT to `booking` and `tripplanner`) and the pricing policy values `addon_days_ahead` (365) and
+`contract_expiry_alert_days` (60), made by `seed:bk-068` and approved. Number: lane A of S289 holds bk-067.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
@@ -2815,6 +2868,12 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   too, and the service refuses the draft's maker 403 `maker_checker`). A supply record is synthetic only when its
   supplier was created by the E2E maker and still carries the mark (`SUPPLIER_SYNTHETIC_SQL`; paths by UUID or
   `SUP-` / `HTL-` / `SVC-` code).
+  A10e-4 (AA-1151 S289, the add-on live check): the maker also imports the activity catalogue of that supplier (POST
+  `/booking/suppliers/{ref}/activity-sheets`, DRY RUN and import: services, draft add-on offers, one draft contract);
+  the supplier is checked from the path and the route refuses a file with an activity title not starting `SYNTHETIC`
+  or with inclusions text (`e2e_staff.check_activity_sheet`, 403 `e2e_read_only`). The checker publishes the contract
+  (A10e-3); the A10h E2E owner, who wrote none of it, publishes the offers (the maker's own publish is 403
+  `maker_checker`).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

@@ -4,11 +4,13 @@ In this order, the first that exists wins:
 
 1. the supplier's **child rate** for the service in force that day (``supplier_rates.pax_type = 'child'``; with
    several age bands, the band reaching the oldest age, since a quote carries no ages);
-2. the **contract's child %** of the adult net (``supplier_contract_terms.child_pct`` of the contract the adult rate
+2. the **add-on offer's child %** (AA-1151, bk-068: ``addon_offers.child_pct`` of the published offer of the service,
+   an offer overrides its contract's terms field by field);
+3. the **contract's child %** of the adult net (``supplier_contract_terms.child_pct`` of the contract the adult rate
    comes from: per supplier, set by contracting on the draft, published by a second person);
-3. the **policy's child % for the service type** (pricing policy ``child_price_pct_by_service_type``, Pricing >
+4. the **policy's child % for the service type** (pricing policy ``child_price_pct_by_service_type``, Pricing >
    Policy, maker-checker; seeded 100 for every type), when it is below 100;
-4. else the **adult net with an age note**: the child pays the adult price and the line's price note says so, with
+5. else the **adult net with an age note**: the child pays the adult price and the line's price note says so, with
    the age up to which a traveller is a child (policy ``b2b_child_age_max``).
 
 Infants pay the supplier's infant rate when there is one, else nothing (as before bk-060). Rooms are priced per room
@@ -23,6 +25,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 BASIS_RATE = "supplier_rate"
+BASIS_OFFER = "offer_pct"
 BASIS_CONTRACT = "contract_pct"
 BASIS_POLICY = "policy_pct"
 BASIS_ADULT = "adult_price"
@@ -52,6 +55,7 @@ def child_net(
     *,
     child_rate_net: Decimal | None = None,
     child_rate_age_max: int | None = None,
+    offer_pct: Decimal | None = None,
     contract_pct: Decimal | None = None,
     policy_pct: Decimal | None = None,
     child_age_max: int | None = None,
@@ -59,6 +63,8 @@ def child_net(
     """The unit net of one child (see the module docstring for the order)."""
     if child_rate_net is not None:
         return ChildNet(child_rate_net, BASIS_RATE, age_max=child_rate_age_max)
+    if offer_pct is not None:
+        return ChildNet(_share(adult_net, offer_pct), BASIS_OFFER, pct=offer_pct)
     if contract_pct is not None:
         return ChildNet(_share(adult_net, contract_pct), BASIS_CONTRACT, pct=contract_pct)
     if policy_pct is not None and policy_pct < HUNDRED:

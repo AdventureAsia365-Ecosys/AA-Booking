@@ -124,6 +124,7 @@ async def _answers(booking: asyncpg.Connection, rows: dict[str, Any]) -> dict[st
     checks = {
         "supplier_id": (e2e_staff.SUPPLIER_DEACTIVATE[1], {"supplier_ref": s["id"]}, None),
         "supplier_code": (e2e_staff.RATE_SHEET_IMPORT[1], {"supplier_ref": s["code"].lower()}, None),
+        "activity_sheet": (e2e_staff.ACTIVITY_SHEET_IMPORT[1], {"supplier_ref": s["code"]}, None),  # A10e-4
         "hotel_id": (e2e_staff.ROOM_TYPE_CREATE[1], {"hotel_ref": h["id"]}, None),
         "hotel_code": (e2e_staff.HOTEL_DEACTIVATE[1], {"hotel_ref": h["code"]}, None),
         "service_code": (e2e_staff.SERVICE_DEACTIVATE[1], {"service_ref": v["code"]}, None),

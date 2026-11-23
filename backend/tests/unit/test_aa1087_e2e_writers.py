@@ -114,6 +114,7 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                     e2e_staff.SUPPLIER_CREATE,
                     e2e_staff.SUPPLIER_DEACTIVATE,
                     e2e_staff.RATE_SHEET_IMPORT,
+                    e2e_staff.ACTIVITY_SHEET_IMPORT,  # A10e-4 (AA-1151 S289): marked activities, draft add-ons
                     e2e_staff.CONTRACT_STATUS,
                     e2e_staff.HOTEL_CREATE,
                     e2e_staff.HOTEL_DEACTIVATE,

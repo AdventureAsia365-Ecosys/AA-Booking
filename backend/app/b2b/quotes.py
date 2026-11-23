@@ -73,11 +73,11 @@ from typing import Any
 import asyncpg
 
 from app.b2b import agency_pricing, cancellation, departures, price_adjustments, quote_parts, served
-from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
+from app.b2b.components import PREFIX_PLAN, PREFIX_SERVICE, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.catalog import operability
 from app.pricing import engine, policy_values, repository, seasons
-from app.supply import restrictions
+from app.supply import addon_rules, restrictions
 
 log = logging.getLogger(__name__)
 
@@ -274,6 +274,26 @@ def supply_availability(
     if availability == departures.AVAILABLE:
         return departures.ON_REQUEST, note
     return availability, note
+
+
+async def check_addon_rules(conn: asyncpg.Connection, asks: list[LineAsk], now: datetime) -> None:
+    """AA-1151 (bk-068, T7): an ``sv:`` line whose service has a published add-on offer follows the offer's sale rules
+    (minimum party, running weekday, cut-off), else 422 ``invalid`` naming the line. One query when the quote has an
+    ``sv:`` line, none otherwise; a service without a published offer is quoted as before."""
+    services: dict[str, str] = {}
+    for ask in asks:
+        try:
+            prefix, ident = parse_component(ask.component_id)
+        except ValueError:
+            continue  # price_lines answers an unknown component id
+        if prefix == PREFIX_SERVICE:
+            services[ask.line_ref] = ident
+    rules = await addon_rules.sale_rules(conn, services.values())
+    for ask in asks:
+        rule = rules.get(services.get(ask.line_ref, ""))
+        problem = addon_rules.line_problem(rule, ask.service_date, ask.party, now) if rule else None
+        if problem:
+            raise B2BError("invalid", f"line {ask.line_ref}: {problem[1]} ({problem[0]})")
 
 
 def group_availability(availability: str, component_id: str, adult: int, child: int, min_pax: int) -> str:
@@ -547,6 +567,7 @@ async def quote_in(
         on=on,
         now=now,
     )
+    await check_addon_rules(conn, [line.ask for line in lines], now)
     costs: list[LineCost] = await price_lines(
         conn,
         [line.ask for line in lines],

@@ -1,6 +1,206 @@
 {
   "components": {
     "schemas": {
+      "AddonPlace": {
+        "additionalProperties": false,
+        "properties": {
+          "destination_id": {
+            "description": "catalog.v_destination id",
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Destination Id",
+            "type": "string"
+          },
+          "role": {
+            "default": "operates",
+            "enum": [
+              "operates",
+              "pickup"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination_id"
+        ],
+        "title": "AddonPlace",
+        "type": "object"
+      },
+      "AddonPlacesBody": {
+        "additionalProperties": false,
+        "properties": {
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/AddonPlace"
+            },
+            "maxItems": 50,
+            "title": "Places",
+            "type": "array"
+          }
+        },
+        "required": [
+          "places"
+        ],
+        "title": "AddonPlacesBody",
+        "type": "object"
+      },
+      "AddonRules": {
+        "additionalProperties": false,
+        "description": "Sale rules and overrides (T7, B4); a field left out is unchanged on PATCH.",
+        "properties": {
+          "cancellation_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AddonTier"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancellation Tiers"
+          },
+          "child_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Pct"
+          },
+          "cutoff_hours": {
+            "anyOf": [
+              {
+                "maximum": 720.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoff Hours"
+          },
+          "featured": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Featured"
+          },
+          "min_pax": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Pax"
+          },
+          "operating_weekdays": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 7.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "maxItems": 7,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operating Weekdays"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": -999.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "start_times": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "time",
+                  "type": "string"
+                },
+                "maxItems": 24,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Times"
+          }
+        },
+        "title": "AddonRules",
+        "type": "object"
+      },
+      "AddonTier": {
+        "additionalProperties": false,
+        "properties": {
+          "fee_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Fee Pct"
+          },
+          "min_days": {
+            "maximum": 730.0,
+            "minimum": 0.0,
+            "title": "Min Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_days",
+          "fee_pct"
+        ],
+        "title": "AddonTier",
+        "type": "object"
+      },
       "AgeBands": {
         "additionalProperties": false,
         "description": "1.7 (AA-1075, bk-15): the oldest age (in whole years on the departure date) at the child and infant prices.",
@@ -5410,6 +5610,142 @@
           "day"
         ],
         "title": "MonthlyPattern",
+        "type": "object"
+      },
+      "NewAddonOffer": {
+        "additionalProperties": false,
+        "properties": {
+          "cancellation_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AddonTier"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancellation Tiers"
+          },
+          "child_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Pct"
+          },
+          "cutoff_hours": {
+            "maximum": 720.0,
+            "minimum": 0.0,
+            "title": "Cutoff Hours",
+            "type": "integer"
+          },
+          "featured": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Featured"
+          },
+          "min_pax": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Pax"
+          },
+          "operating_weekdays": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 7.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "maxItems": 7,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operating Weekdays"
+          },
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/AddonPlace"
+            },
+            "maxItems": 50,
+            "title": "Places",
+            "type": "array"
+          },
+          "service_id": {
+            "description": "service UUID or code (SVC-000123)",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Service Id",
+            "type": "string"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": -999.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "start_times": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "time",
+                  "type": "string"
+                },
+                "maxItems": 24,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Times"
+          }
+        },
+        "required": [
+          "cutoff_hours",
+          "service_id"
+        ],
+        "title": "NewAddonOffer",
         "type": "object"
       },
       "NewBankAccount": {
@@ -12348,6 +12684,723 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/booking/activity-sheets/template": {
+      "get": {
+        "description": "The empty AA activity catalogue workbook (Contract + Activities sheets).",
+        "operationId": "activity_sheet_template_booking_activity_sheets_template_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Activity Sheet Template",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons": {
+      "get": {
+        "operationId": "list_offers_booking_add_ons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "published",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "destination_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "supplier_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Supplier Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "description": "only drafts the caller may publish (wrote none of)",
+            "in": "query",
+            "name": "approvable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "only drafts the caller may publish (wrote none of)",
+              "title": "Approvable"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Offers Booking Add Ons Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Offers",
+        "tags": [
+          "add-ons"
+        ]
+      },
+      "post": {
+        "operationId": "create_offer_booking_add_ons_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewAddonOffer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Offer Booking Add Ons Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Offer",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/place-days": {
+      "get": {
+        "description": "Preview of ``booking.v_place_addons``: the add-ons a traveller at the place is offered, per day.",
+        "operationId": "place_days_booking_add_ons_place_days_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "destination_id",
+            "required": true,
+            "schema": {
+              "maxLength": 36,
+              "minLength": 36,
+              "title": "Destination Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Place Days Booking Add Ons Place Days Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Place Days",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/services": {
+      "get": {
+        "description": "Services an offer can wrap (code, title, type, supplier name; never a net).",
+        "operationId": "service_options_booking_add_ons_services_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Service Options Booking Add Ons Services Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Options",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/{offer_id}": {
+      "get": {
+        "operationId": "get_offer_booking_add_ons__offer_id__get",
+        "parameters": [
+          {
+            "description": "Add-on offer UUID",
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "description": "Add-on offer UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Offer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Offer Booking Add Ons  Offer Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Offer",
+        "tags": [
+          "add-ons"
+        ]
+      },
+      "patch": {
+        "operationId": "update_offer_booking_add_ons__offer_id__patch",
+        "parameters": [
+          {
+            "description": "Add-on offer UUID",
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "description": "Add-on offer UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Offer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddonRules"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Offer Booking Add Ons  Offer Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Offer",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/{offer_id}/places": {
+      "put": {
+        "operationId": "set_places_booking_add_ons__offer_id__places_put",
+        "parameters": [
+          {
+            "description": "Add-on offer UUID",
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "description": "Add-on offer UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Offer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddonPlacesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Places Booking Add Ons  Offer Id  Places Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Places",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/{offer_id}/publish": {
+      "post": {
+        "description": "A second person publishes the draft (never one of its writers, unless the business owner, flagged).",
+        "operationId": "publish_booking_add_ons__offer_id__publish_post",
+        "parameters": [
+          {
+            "description": "Add-on offer UUID",
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "description": "Add-on offer UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Offer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Publish Booking Add Ons  Offer Id  Publish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/{offer_id}/reopen": {
+      "post": {
+        "description": "Back to a draft (stops selling at once); another person publishes it again.",
+        "operationId": "reopen_booking_add_ons__offer_id__reopen_post",
+        "parameters": [
+          {
+            "description": "Add-on offer UUID",
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "description": "Add-on offer UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Offer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reopen Booking Add Ons  Offer Id  Reopen Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reopen",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
+    "/booking/add-ons/{offer_id}/retire": {
+      "post": {
+        "operationId": "retire_booking_add_ons__offer_id__retire_post",
+        "parameters": [
+          {
+            "description": "Add-on offer UUID",
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "description": "Add-on offer UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Offer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retire Booking Add Ons  Offer Id  Retire Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
     "/booking/agency-billing/export.csv": {
       "get": {
         "operationId": "export_agency_billing_booking_agency_billing_export_csv_get",
@@ -21820,6 +22873,35 @@
         ]
       }
     },
+    "/booking/contracts/expiring": {
+      "get": {
+        "description": "Published supplier contracts that end within ``contract_expiry_alert_days`` (Pricing > Policy), soonest first.",
+        "operationId": "expiring_contracts_booking_contracts_expiring_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Expiring Contracts Booking Contracts Expiring Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Expiring Contracts",
+        "tags": [
+          "add-ons"
+        ]
+      }
+    },
     "/booking/contracts/{contract_id}": {
       "get": {
         "operationId": "get_contract_booking_contracts__contract_id__get",
@@ -31008,6 +32090,82 @@
         "summary": "Activate Supplier",
         "tags": [
           "suppliers"
+        ]
+      }
+    },
+    "/booking/suppliers/{supplier_ref}/activity-sheets": {
+      "post": {
+        "description": "Upload a filled activity catalogue: per row an activity service, a draft add-on and its rates in one draft\ncontract, or 422 ``activity_sheet_invalid`` with every problem; second persons publish the contract and the\nadd-ons.",
+        "operationId": "import_activity_sheet_booking_suppliers__supplier_ref__activity_sheets_post",
+        "parameters": [
+          {
+            "description": "Supplier UUID or code",
+            "in": "path",
+            "name": "supplier_ref",
+            "required": true,
+            "schema": {
+              "description": "Supplier UUID or code",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Supplier Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "validate and preview only; nothing is written",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "validate and preview only; nothing is written",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateSheetUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Activity Sheet Booking Suppliers  Supplier Ref  Activity Sheets Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Activity Sheet",
+        "tags": [
+          "add-ons"
         ]
       }
     },
