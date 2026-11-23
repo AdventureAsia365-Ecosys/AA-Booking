@@ -25,9 +25,15 @@ async def purge_supply(conn: asyncpg.Connection) -> None:
             await conn.execute("DELETE FROM booking.ops_files")
             await conn.execute("DELETE FROM booking.supplier_bookings")
         # bk-060 (AA-1145): restrictions (stop-sales are never deleted by the app) and contract terms (draft only).
+        # bk-068 (AA-1151): add-on offers point at services (never deleted by the app) and their places at offers.
         extra = [
             t
-            for t in ("booking.supply_restrictions", "booking.supplier_contract_terms")
+            for t in (
+                "booking.supply_restrictions",
+                "booking.supplier_contract_terms",
+                "booking.addon_offer_places",
+                "booking.addon_offers",
+            )
             if await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", t)
         ]
         for table in (*TRIGGERED, *extra):
