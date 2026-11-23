@@ -4,6 +4,7 @@ capability (``app.catalog.operability``, ``app.catalog.sell_exceptions``). Pure;
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -16,9 +17,10 @@ from app.catalog import operability as op
 from app.catalog import sell_exceptions
 from app.errors import Invalid
 from app.pricing import policy_params
-from tests.unit.fakes import ScriptedConn, operable_plan
+from tests.unit.fakes import SPANS_FRAGMENT, ScriptedConn, operable_plan
 
 NOW = datetime(2026, 11, 23, 9, 0, tzinfo=UTC)
+DAY = date(2027, 3, 2)
 HOTEL_A, HOTEL_B, TRANSFER, GUIDE = "rt-a", "rt-b", "sv-transfer", "sv-guide"
 
 
@@ -143,12 +145,10 @@ async def test_the_quote_gate_skips_departure_lines_and_returns_the_covering_exc
     conn = ScriptedConn()
     operable_plan(conn, "plan-1", "src-1", days=3, components=[(1, HOTEL_A, None, None)])
     with pytest.raises(B2BError) as refused:
-        await op.require_for_quote(conn, [("T", "plan-1", None)], on=date(2026, 11, 23), now=NOW)
+        await op.require_for_quote(conn, [("T", "plan-1", None, DAY)], on=date(2026, 11, 23), now=NOW)
     assert "night 2 has no hotel (N1)" in refused.value.message
-    assert await op.require_for_quote(conn, [("T", "plan-1", "dep-1"), ("R", None, None)], on=NOW.date(), now=NOW) == [
-        None,
-        None,
-    ]
+    lines = [("T", "plan-1", "dep-1", DAY), ("R", None, None, DAY)]
+    assert await op.require_for_quote(conn, lines, on=NOW.date(), now=NOW) == [None, None]
     covered = {
         "id": "ex-9",
         "plan_id": "plan-1",
@@ -161,7 +161,55 @@ async def test_the_quote_gate_skips_departure_lines_and_returns_the_covering_exc
         "created_at": NOW,
     }
     operable_plan(conn, "plan-1", "src-1", days=3, components=[(1, HOTEL_A, None, None)], exception=covered)
-    assert await op.require_for_quote(conn, [("T", "plan-1", None)], on=NOW.date(), now=NOW) == ["ex-9"]
+    assert await op.require_for_quote(conn, [("T", "plan-1", None, DAY)], on=NOW.date(), now=NOW) == ["ex-9"]
+
+
+def _season(conn: ScriptedConn, start: date, stop: date) -> None:
+    """The plan's rates exist only from ``start`` to ``stop`` (both items: a hotel night, a transfer)."""
+    conn.on(
+        SPANS_FRAGMENT,
+        [
+            {"room_type_id": room, "service_id": service, "currency": "USD", "start": start, "stop": stop}
+            for room, service in ((HOTEL_A, None), (None, TRANSFER))
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_n2_at_the_quote_reaches_the_line_dates_past_the_horizon() -> None:
+    """Rates only for a season starting 400 days out: the readiness horizon (365 days) sees none, but a quote line
+    dated in that season is judged on it (window = max(today + 365, service date + days)); a line dated before the
+    season still blocks, and the finding names the window."""
+    on = NOW.date()
+    season = on + timedelta(days=400)
+    conn = ScriptedConn()
+    operable_plan(
+        conn, "plan-1", "src-1", days=2, components=[(1, HOTEL_A, None, None), (1, None, TRANSFER, "transfer")]
+    )
+    _season(conn, season, season + timedelta(days=90))
+    assert await op.require_for_quote(conn, [("T", "plan-1", None, season + timedelta(days=10))], on=on, now=NOW) == [
+        None
+    ]
+    with pytest.raises(B2BError) as refused:
+        await op.require_for_quote(conn, [("T", "plan-1", None, on + timedelta(days=30))], on=on, now=NOW)
+    assert "has no published rate in the next 365 days (N2)" in refused.value.message
+    # A line dated just before the season: the window ends at its last day + 1 and misses the season.
+    early = season - timedelta(days=5)
+    with pytest.raises(B2BError) as refused:
+        await op.require_for_quote(conn, [("T", "plan-1", None, early)], on=on, now=NOW)
+    assert (
+        f"has no published rate from today to {(early + timedelta(days=2)).isoformat()} (N2)" in refused.value.message
+    )
+    # The readiness view keeps the plain 365-day horizon.
+    plans = await op.load_many(conn, ["plan-1"])
+    assert op.evaluate(plans["plan-1"], await op.rated_for(conn, plans.values(), on), NOW).status == op.BLOCKED
+
+
+def test_quote_window_is_the_later_of_the_horizon_and_the_line_dates() -> None:
+    on = date(2026, 11, 23)
+    assert op.quote_window(on, 5, []) is None
+    assert op.quote_window(on, 5, [on + timedelta(days=100)]) is None  # inside the horizon
+    assert op.quote_window(on, 5, [on + timedelta(days=400), on + timedelta(days=380)]) == on + timedelta(days=405)
 
 
 def test_overridable_lists_n1_and_supplier_findings_only() -> None:
@@ -247,11 +295,17 @@ async def test_revoke_needs_a_live_exception_and_nights_stay_inside_the_tour() -
         await sell_exceptions.revoke_exception(conn, _Staff(), "src-1", reason="Hotel signed.")  # type: ignore[arg-type]
     conn.on("UPDATE booking.trip_plan_operable_overrides SET revoked_by", [{"id": "ex-1", "expires_at": NOW}])
     await sell_exceptions.revoke_exception(conn, _Staff(), "src-1", reason="Hotel signed.")  # type: ignore[arg-type]
+    why = "Night 2 is on the overnight train to Sapa."
     with pytest.raises(Exception, match="nights 1 to 2"):
-        await sell_exceptions.set_no_hotel_nights(conn, _Staff(), "src-1", [3])  # type: ignore[arg-type]
-    await sell_exceptions.set_no_hotel_nights(conn, _Staff(), "src-1", [2])  # type: ignore[arg-type]
+        await sell_exceptions.set_no_hotel_nights(conn, _Staff(), "src-1", [3], reason=why)  # type: ignore[arg-type]
+    with pytest.raises(Invalid) as short:
+        await sell_exceptions.set_no_hotel_nights(conn, _Staff(), "src-1", [2], reason="  night train  ")  # type: ignore[arg-type]
+    assert short.value.code == "reason_too_short" and conn.sql("SET no_hotel_nights") == []
+    await sell_exceptions.set_no_hotel_nights(conn, _Staff(), "src-1", [2], reason=f"  {why} ")  # type: ignore[arg-type]
     [update] = conn.sql("SET no_hotel_nights")
-    assert update[1] == [2]
+    assert update[1] == [2] and update[3] == why
+    audit = [args for flat, args in conn.calls if "INSERT INTO booking.audit_logs" in flat][-1]  # the revoke's first
+    assert "trip_plan.no_hotel_nights_set" in audit and why in json.dumps([str(a) for a in audit])
 
 
 @pytest.mark.asyncio

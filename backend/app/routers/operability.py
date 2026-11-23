@@ -9,7 +9,8 @@
   characters, for ``days`` (default and maximum from the pricing policy). A missing rate or an inactive item is never
   overridable (422).
 - ``POST …/sell-exception/revoke`` (same capability): end the live exception now, with a reason.
-- ``PUT …/no-hotel-nights`` (``trip_plan.write``): the nights of the tour that need no hotel.
+- ``PUT …/no-hotel-nights`` (``trip_plan.write``, contracting included): the nights of the tour that need no hotel,
+  with a reason of 20..500 characters (stored on the plan and audited): a marked night lifts rule N1 with no expiry.
 """
 
 from __future__ import annotations
@@ -50,6 +51,11 @@ class NoHotelNightsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nights: list[Annotated[int, Field(ge=1, le=365)]] = Field(max_length=365)
+    reason: str = Field(
+        min_length=sell_exceptions.REASON_MIN,
+        max_length=sell_exceptions.REASON_MAX,
+        description="why these nights need no hotel (a night train, a cruise without a cabin room type)",
+    )
 
 
 @router.get("/trip-plans/{source_id}/operability")
@@ -79,4 +85,4 @@ async def put_no_hotel_nights(
     body: NoHotelNightsIn, source_id: SourceId, staff: CanWritePlans, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
-        return await sell_exceptions.set_no_hotel_nights(conn, staff, source_id, list(body.nights))
+        return await sell_exceptions.set_no_hotel_nights(conn, staff, source_id, list(body.nights), reason=body.reason)

@@ -25,6 +25,16 @@ def item_skip_reason(case: Any, item: Any) -> str | None:
     return None
 
 
+def require_active_supplier(booking: Any) -> None:
+    """A booking is requested only from an active supplier (409 ``supplier_inactive``): one deactivated after Generate
+    (or while it ran) keeps its pending bookings, which staff then cancel or move to another supplier."""
+    if booking["supplier_status"] != "active":
+        raise Conflict(
+            "supplier_inactive",
+            f"supplier {booking['supplier_code']} is {booking['supplier_status']}: choose another supplier first",
+        )
+
+
 def net(item: Any) -> tuple[Decimal | None, str | None]:
     """Sum of the item's cost rows in their one currency (critic note 17); mixed currencies are refused."""
     amounts = list(item["net_amounts"] or [])

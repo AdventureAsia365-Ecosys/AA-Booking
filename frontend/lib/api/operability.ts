@@ -9,7 +9,7 @@
 //   GET  /booking/catalog/trip-plans/{source_id}/operability            (pricing.read)
 //   POST /booking/catalog/trip-plans/{source_id}/sell-exception         (operable_exception.approve: admin)
 //   POST /booking/catalog/trip-plans/{source_id}/sell-exception/revoke  (operable_exception.approve)
-//   PUT  /booking/catalog/trip-plans/{source_id}/no-hotel-nights        (trip_plan.write)
+//   PUT  /booking/catalog/trip-plans/{source_id}/no-hotel-nights        (trip_plan.write; a reason of 20-500 characters)
 
 import { bkGet, bkSend } from "./client";
 import type { IsoDateTime } from "./types";
@@ -54,6 +54,8 @@ export interface Operability extends OperableSummary {
   trip_plan_id: string;
   days: number;
   no_hotel_nights: number[];
+  /** Why the nights were last set (staff text); null until first set. */
+  no_hotel_nights_reason: string | null;
   exception: SellException | null;
   /** The rules an exception can cover now, with their finding keys. */
   overridable: Partial<Record<"N1" | "N3", string[]>>;
@@ -68,6 +70,6 @@ export const operabilityApi = {
     bkSend<Operability>(`catalog/trip-plans/${enc(sourceId)}/sell-exception`, { body }),
   revoke: (sourceId: string, reason: string) =>
     bkSend<Operability>(`catalog/trip-plans/${enc(sourceId)}/sell-exception/revoke`, { body: { reason } }),
-  noHotelNights: (sourceId: string, nights: number[]) =>
-    bkSend<Operability>(`catalog/trip-plans/${enc(sourceId)}/no-hotel-nights`, { method: "PUT", body: { nights } }),
+  noHotelNights: (sourceId: string, nights: number[], reason: string) =>
+    bkSend<Operability>(`catalog/trip-plans/${enc(sourceId)}/no-hotel-nights`, { method: "PUT", body: { nights, reason } }),
 };

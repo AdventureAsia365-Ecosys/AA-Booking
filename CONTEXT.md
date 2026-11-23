@@ -979,8 +979,12 @@ whether every component would have a rate once the draft is published, its statu
 also carries `operable` (the can-operate check: `ready` | `warnings` | `blocked` | `exception`, the first findings,
 the exception's end; filter `operable`, `summary.by_operable`, CSV column `operable`), a separate field from the price
 status: the sellable gate reads price readiness only. The page shows it as "Can operate", with the administrator's
-"Allow sale…" drawer; the components drawer of Price setup shows the check and the "No hotel needed" box per night
-(`PUT …/no-hotel-nights`, `trip_plan.write`). `trip_plans.supplier_id` is shown as "Operations contact" and is never
+"Allow sale…" drawer (its toast follows the returned status: a tour with a missing rate or an inactive item stays
+blocked); the components drawer of Price setup shows the check and the "No hotel needed" box per night
+(`PUT …/no-hotel-nights`, `trip_plan.write`, with a reason of 20..500 characters stored on the plan as
+`no_hotel_nights_reason` and in the audit row). **Decision (AA-1149 review):** contracting staff (`trip_plan.write`),
+not only the administrator, may lift rule N1 this way, with no expiry, unlike the sale exception; the required reason
+and the audit row are the control. Moving the route to `operable_exception.approve` is the tech lead's call. `trip_plans.supplier_id` is shown as "Operations contact" and is never
 used for pricing (each hotel and service has its own supplier).
 
 **Price setup workbench (AA-1091)** — everything the customer-service team needs to make tours sellable, on one
@@ -1215,8 +1219,16 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   the hold line is `confirmed` (an on-request tour line once the desk accepted it: a declined line never leaves
   component bookings) and the line has no departure (a departure's costs are booked per departure). Component bookings
   are never linked to the hold line (the desk answers an on-request tour line). Skip reasons on the tab: `booked`,
-  `waived`, `line_not_confirmed`, `b2b_line_closed`, `supplier_not_active`; a case sold before bk-065 lists its tour
-  lines as `sold_before_split` (add by hand). `POST …/supplier-bookings` with `quote_part_id` books a part by hand
+  `waived`, `line_not_confirmed`, `b2b_line_closed`, `supplier_not_active`, `item_not_active` (the part's room type,
+  hotel or service was deactivated since the sale: booked by description, with the same supplier or another); a case
+  sold before bk-065 lists its tour lines as `sold_before_split` (add by hand). **Fewer travellers after the sale**
+  (an agency partial cancellation, `b2b_line_reductions`): the generated booking takes the line's current pax (sold
+  adults and children minus those removed, the `CURRENT_PAX_SQL` rule of `app/b2b/amendments.py`), never more than the
+  part, and its notes say how many were removed; quantity (rooms, vehicles) and net stay as sold for staff to check
+  with the supplier and edit (the reduction notice reaches only bookings live at the time). The database guard also
+  refuses a booking of a part whose hold line is not `confirmed` or that a waiver closed. `request()` refuses a booking
+  whose supplier is no longer active (409 `supplier_inactive`, any booking: deactivated after Generate or while it
+  ran). `POST …/supplier-bookings` with `quote_part_id` books a part by hand
   (another supplier, a replacement). With another supplier the part's room type / service (the old supplier's) is
   dropped: the booking names the new supplier's room type or service when the body gives one (checked against it,
   422 `supply_not_of_supplier`), else only the description (the body's `item_description`, or the part's); date, pax,
@@ -1286,7 +1298,9 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   booking, the same `quote_in`) refuses a tailor-made `tp:` line (no departure) whose tour cannot be operated, 422
   `invalid` naming the line and the findings, e.g. "line T1: this tour cannot be sold to agencies yet: night 2 has no
   hotel (N1)" (contract code unchanged; a `not_operable` code is part 2). Blocking: N1 a night without a hotel component
-  (unless in `trip_plans.no_hotel_nights`), N2 a component without a published rate in the next 365 days, N3 a supplier
+  (unless in `trip_plans.no_hotel_nights`), N2 a component without a published rate in the next 365 days (at the quote:
+up to `max(today + 365, service date + days)`, so a tour quoted for a season past the horizon is judged on that
+season's rates; the readiness report keeps 365 days), N3 a supplier
   not active or an inactive room type / hotel / service. Warnings only: N4 a hotel destination change with no transfer
   that day, N5 a guide on some days only. A line on a fixed departure is not checked. The admin **sale exception**
   (`trip_plan_operable_overrides`, `operable_exception.approve` = administrator, approve class: never a custom role)

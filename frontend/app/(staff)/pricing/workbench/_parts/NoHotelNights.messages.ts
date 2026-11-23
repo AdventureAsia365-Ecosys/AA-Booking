@@ -8,6 +8,11 @@ export const MSG = phrasebook(
   defineMessages(
   {
     "Could not save": "Could not save",
+    "Saved": "Saved",
+    "Why": "Why",
+    "Why do these nights need no hotel?": "Why do these nights need no hotel?",
+    "{0} / at least {1} characters": (...a: unknown[]) => `${a[0]} / at least ${a[1]} characters`,
+    "Save nights": "Save nights",
     "Can agencies buy it?": "Can agencies buy it?",
     "Night {0}: no hotel needed": (...a: unknown[]) => `Night ${a[0]}: no hotel needed`,
     "A night train or a cruise without a cabin room type needs no hotel; a cruise with a cabin is better added as a hotel room type.": "A night train or a cruise without a cabin room type needs no hotel; a cruise with a cabin is better added as a hotel room type.",
@@ -17,6 +22,11 @@ export const MSG = phrasebook(
   },
   {
     "Could not save": "Không lưu được",
+    "Saved": "Đã lưu",
+    "Why": "Lý do",
+    "Why do these nights need no hotel?": "Vì sao các đêm này không cần khách sạn?",
+    "{0} / at least {1} characters": (...a: unknown[]) => `${a[0]} / tối thiểu ${a[1]} ký tự`,
+    "Save nights": "Lưu các đêm",
     "Can agencies buy it?": "Đại lý mua được không?",
     "Night {0}: no hotel needed": (...a: unknown[]) => `Đêm ${a[0]}: không cần khách sạn`,
     "A night train or a cruise without a cabin room type needs no hotel; a cruise with a cabin is better added as a hotel room type.": "Tàu đêm hoặc du thuyền không có loại phòng cabin thì không cần khách sạn; du thuyền có cabin nên được thêm như một loại phòng khách sạn.",

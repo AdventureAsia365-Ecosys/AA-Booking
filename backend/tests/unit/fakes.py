@@ -208,7 +208,8 @@ def operable_plan(
 ) -> ScriptedConn:
     """Script the can-operate check of one plan: ``components`` = ``(day, room type id, service id, service type)``,
     every item active, of supplier ``SUP-000001`` (``supplier_status``), rated for ever unless ``rated`` is False."""
-    conn.on(OPERABLE_PLANS_FRAGMENT, [{"plan_id": plan_id, "source_id": source_id, "no_hotel_nights": no_hotel_nights}])
+    plan_row = {"plan_id": plan_id, "source_id": source_id, "no_hotel_nights": no_hotel_nights}
+    conn.on(OPERABLE_PLANS_FRAGMENT, [plan_row | {"no_hotel_nights_reason": None}])
     conn.on(PLAN_DAYS_FRAGMENT, [{"id": plan_id, "source_id": source_id, "days": 1}])
     conn.on(TOUR_DAYS_FRAGMENT, [{"source_id": source_id, "duration_days": days}])
     conn.on(OPERABLE_EXCEPTIONS_FRAGMENT, [exception] if exception else [])

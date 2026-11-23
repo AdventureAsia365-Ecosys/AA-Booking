@@ -231,6 +231,39 @@ async def test_a_component_of_a_supplier_no_longer_active_is_booked_with_another
     assert page["supply"]["items_to_book"] == 10 and not page["unbooked_items"]
 
 
+async def test_an_inactive_supplier_is_not_requested_and_an_inactive_item_is_booked_by_description(
+    client: Client,
+    admin: asyncpg.Connection,  # noqa: F811
+    tour: dict[str, str],
+) -> None:
+    """Review r2: the guide's service is deactivated after the sale (Generate skips it, item_not_active; booking it with
+    the same supplier names a description, not the old service), then its supplier is deactivated while that booking
+    is pending: request() refuses it (409 supplier_inactive)."""
+    c, cis, m2m, _ = client
+    sales = _staff(cis, SALES)
+    booking = await _book(c, m2m, "ITEM-1", [_tour(tour["plan"])])
+    case_id = booking["booking_id"]
+    await _accept_if_on_request(c, cis, booking)
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute("UPDATE booking.services SET status = 'inactive' WHERE id = $1::uuid", tour["guide"])
+    made = await _ok(await c.post(f"/trip-cases/{case_id}/supplier-bookings/generate", headers=sales))
+    assert made["created"] == 9
+    [guide_part] = [i for i in made["unbooked_items"] if i["skip_reason"] == "item_not_active"]
+    url = f"/trip-cases/{case_id}/supplier-bookings"
+    body = {"supplier_id": tour["guide_co"], "quote_part_id": guide_part["quote_part_id"]}
+    booked = await _ok(await c.post(url, json=body, headers=sales), 201)
+    assert booked["service_id"] is None and booked["item_description"] == guide_part["supply_label"]
+
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute("UPDATE booking.suppliers SET status = 'inactive' WHERE id = $1::uuid", tour["guide_co"])
+    refused = await c.post(f"/supplier-bookings/{booked['id']}/request", headers=sales)
+    assert refused.status_code == 409 and refused.json()["detail"] == "supplier_inactive", refused.text
+    status = "SELECT status FROM booking.supplier_bookings WHERE id = $1::uuid"
+    assert await admin.fetchval(status, booked["id"]) == "pending"
+
+
 async def test_an_exception_of_the_longest_length_passes_the_table_check(
     client: Client,
     admin: asyncpg.Connection,  # noqa: F811
@@ -301,11 +334,20 @@ async def test_a_night_without_a_hotel_blocks_until_an_exception(
     revoked = await _ok(await c.post(f"{exc_url}/revoke", json={"reason": "Hotel contract signed."}, headers=boss))
     assert revoked["status"] == "blocked" and revoked["exception"] is None
 
-    # A night marked "no hotel needed" is tour data, not an exception.
-    nights = await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/no-hotel-nights", json={"nights": [2]},
-                                   headers=maker))  # fmt: skip
+    # A night marked "no hotel needed" is tour data, not an exception: contracting may set it, with a reason (stored
+    # on the plan and audited), since it lifts N1 with no expiry.
+    nights_url = f"/catalog/trip-plans/{SOURCE_ID}/no-hotel-nights"
+    why = "Night 2 is on the overnight train to Sapa."
+    unexplained = await c.put(nights_url, json={"nights": [2]}, headers=maker)
+    assert unexplained.status_code == 422
+    nights = await _ok(await c.put(nights_url, json={"nights": [2], "reason": why}, headers=maker))
     assert nights["status"] == "warnings" and nights["no_hotel_nights"] == [2]
-    bad = await c.put(f"/catalog/trip-plans/{SOURCE_ID}/no-hotel-nights", json={"nights": [5]}, headers=maker)
+    assert nights["no_hotel_nights_reason"] == why
+    audited = await admin.fetch(
+        "SELECT after->>'reason' AS reason FROM booking.audit_logs WHERE action = 'trip_plan.no_hotel_nights_set'"
+    )
+    assert [r["reason"] for r in audited] == [why]
+    bad = await c.put(nights_url, json={"nights": [5], "reason": why}, headers=maker)
     assert bad.status_code == 422
 
     report = await _ok(await c.get("/catalog/price-readiness?operable=warnings", headers=boss))

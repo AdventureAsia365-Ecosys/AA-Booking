@@ -1,7 +1,6 @@
 """AA-682 S1 (bk-026) supplier-booking flows without a database: the Python branches of ``app.ops.supplier_bookings``
-(not found, conflicts, invalid input, net masking, the case auto-advance, the B2B tie-in, the case cancel cascade)
-driven through :class:`ScriptedConn`. The SQL itself (edges, guards, indexes) is covered on a real PostgreSQL in
-tests/integration/test_bk026_*.py."""
+(not found, conflicts, invalid input, net masking, auto-advance, B2B tie-in, cancel cascade) via :class:`ScriptedConn`.
+The SQL (edges, guards, indexes) is covered on a real PostgreSQL in tests/integration/test_bk026_*.py."""
 
 from __future__ import annotations
 
@@ -81,6 +80,7 @@ def booking_row(**over: Any) -> dict[str, Any]:
         "supplier_id": SUPPLIER,
         "supplier_code": "SUP-000001",
         "supplier_name": "Delta Hotel",
+        "supplier_status": "active",
         "hotel_room_type_id": ROOM,
         "service_id": None,
         "item_description": "Delta Hotel · Deluxe",

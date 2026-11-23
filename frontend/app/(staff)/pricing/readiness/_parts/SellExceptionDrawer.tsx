@@ -5,7 +5,9 @@
 // without a hotel (N1) and a supplier not active (N3). A missing rate or an inactive room type, hotel or service can
 // never be overridden (the server's sentence says so). The exception covers exactly today's findings of the chosen
 // rules: a new gap blocks the tour again. Reason at least 20 characters; length in days, default and maximum from
-// Pricing > Policy (section Operations). Trips sold under it get a trip check to book the gap by hand.
+// Pricing > Policy (section Operations). Trips sold under it get a trip check to book the gap by hand. The toast
+// follows the returned status: a tour with a missing rate or an inactive item stays blocked. The revoke reason is a
+// fixed English sentence (stored and audited the same whatever the viewer's language).
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -14,9 +16,10 @@ import { operabilityApi, type Operability } from "@/lib/api/operability";
 import { Button, Checkbox, DateText, FormDrawer, Input, Textarea, useToast } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
 import { MSG } from "./SellExceptionDrawer.messages";
-import { findingText } from "./operableText";
+import { allowOutcome, findingText } from "./operableText";
 
 const REASON_MIN = 20;
+const REVOKE_REASON = "Revoked by the administrator";
 const RULE_LABEL = { N1: "A night without a hotel (N1)", N3: "A supplier not active (N3)" } as const;
 
 function errorText(e: unknown): string | null {
@@ -54,17 +57,20 @@ function ExceptionBody({
   const [chosen, setChosen] = useState<("N1" | "N3")[]>(rules);
   const [reason, setReason] = useState("");
   const [days, setDays] = useState(String(data.exception_default_days));
-  const done = (message: string) => {
-    toast.success(message);
+  const done = (message: string, tone: "success" | "info" = "success") => {
+    toast[tone](message);
     onChanged();
     onClose();
   };
   const allow = useMutation({
     mutationFn: () => operabilityApi.allow(tourKey, { rules: chosen, reason: reason.trim(), days: Number(days) }),
-    onSuccess: () => done(t("Agencies can buy this tour until the exception ends")),
+    onSuccess: (next: Operability) => {
+      const outcome = allowOutcome(next.status);
+      done(t(outcome.key), outcome.tone);
+    },
   });
   const revoke = useMutation({
-    mutationFn: () => operabilityApi.revoke(tourKey, t("Revoked by the administrator")),
+    mutationFn: () => operabilityApi.revoke(tourKey, REVOKE_REASON),
     onSuccess: () => done(t("Exception revoked")),
   });
   const length = Number(days);

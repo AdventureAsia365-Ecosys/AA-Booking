@@ -8,8 +8,7 @@ change, "re-request"). Edges live in ``booking.ops_transitions`` (the database r
 ``illegal_transition``). **Live** = pending, requested or confirmed: at most one live booking per version item (a
 declined one can be replaced by a booking with another supplier, critic B3).
 
-**Supply state** (``booking.v_trip_case_supply_state``): ``none`` (nothing to book), ``confirming`` or ``booked`` —
-the computed **"Confirmed & Booked"** badge (design D1); never a case status.
+**Supply state** (``booking.v_trip_case_supply_state``): ``none``, ``confirming``, ``booked`` (badge D1; not a status).
 
 **Case auto-advance** (design D2, :func:`advance_case` = :func:`app.ops.track.advance_case`): the first supplier
 booking requested moves a ``confirmed`` case to ``supplier_confirming``; a ``supplier_confirming`` case with no live
@@ -33,8 +32,8 @@ real-world act with fees) and one staff notification asks to cancel them with th
 (:func:`record_cancel_fee`, ``supplier_cancel_fee``: the cost until the supplier's bill is approved). Reopening a
 case is refused while it has a live booking (bk-026 guard; 409 ``live_supplier_bookings``).
 
-Lock order (no deadlock with the B2B cancel, which locks the hold, then the case): the B2B hold of a linked booking,
-then the trip case, then the booking. Every write runs in the caller's transaction and writes one audit row.
+Lock order (no deadlock with the B2B cancel, which locks the hold, then the case): hold, case, booking. Every write
+runs in the caller's transaction with one audit row. Only an active supplier is requested (409 ``supplier_inactive``).
 Permissions: ``ops.read`` / ``ops.write`` (admin, sales, contracting); net amounts only with ``pricing.read``.
 """
 
@@ -53,7 +52,7 @@ from app.auth.staff import Staff
 from app.b2b import desk
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
-from app.ops import component_bookings, track
+from app.ops import component_bookings, item_bookings, track
 from app.ops import files as ops_files
 from app.ops.item_bookings import from_item as _from_item
 from app.ops.item_bookings import item_skip_reason as _item_skip_reason
@@ -99,7 +98,7 @@ BOOKING_COLUMNS = """
     sb.supplier_order_id::text AS supplier_order_id, so.code AS supplier_order_code, so.status AS supplier_order_status,
     sb.fx_rate_per_usd, sb.fx_as_of, sb.service_time, sb.pickup_point, sb.dropoff_point, sb.voucher_note,
     sb.supplier_cancel_fee, sb.supplier_cancel_fee_currency, sb.quote_part_id::text AS quote_part_id, sb.quantity,
-    qp.day_no AS tour_day
+    qp.day_no AS tour_day, s.status AS supplier_status
 """
 BOOKING_FROM = """
 FROM booking.supplier_bookings sb
@@ -689,6 +688,7 @@ async def request(conn: asyncpg.Connection, staff: Staff, booking_id: str) -> di
     if row["status"] == "requested":
         return await _one_out(conn, staff, row["id"])  # the same request again
     _ensure_open_or_departure(case)
+    item_bookings.require_active_supplier(row)
     await _set_status(conn, staff, row, "requested", {"requested_at": _now(), "requested_by": staff.cis_user_id})
     await _audit(
         conn,

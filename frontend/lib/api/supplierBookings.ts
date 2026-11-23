@@ -124,6 +124,7 @@ export interface UnbookedPart {
     | "b2b_line_closed"
     | "line_not_confirmed"
     | "supplier_not_active"
+    | "item_not_active"
     | "sold_before_split"
     | null;
   waive_reason: string | null;

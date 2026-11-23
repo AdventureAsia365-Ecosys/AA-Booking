@@ -542,7 +542,10 @@ async def quote_in(
     await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
     # AA-1149 (B13): a tailor-made tp: line of a tour that cannot be operated is refused (422 invalid, the findings).
     covered_by = await operability.require_for_quote(
-        conn, [(x.ask.line_ref, _line_plan(x.ask.component_id), x.departure_id) for x in lines], on=on, now=now
+        conn,
+        [(x.ask.line_ref, _line_plan(x.ask.component_id), x.departure_id, x.ask.service_date) for x in lines],
+        on=on,
+        now=now,
     )
     costs: list[LineCost] = await price_lines(
         conn,

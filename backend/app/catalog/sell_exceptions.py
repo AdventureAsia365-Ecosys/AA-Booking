@@ -11,8 +11,10 @@ nights that need no hotel. The rules themselves live in :mod:`app.catalog.operab
   ``operable_exception_default_days``; 422 ``expiry_too_long``). A previous unrevoked exception of the tour (live or
   expired) is revoked in the same transaction, under the plan row lock. One audit row each.
 - :func:`revoke_exception` (same capability): ends the live exception now with a reason (409 ``no_exception``).
-- :func:`set_no_hotel_nights` (``trip_plan.write``): the nights 1 .. days - 1 that need no hotel (422
-  ``invalid_night``); tour data, audited.
+- :func:`set_no_hotel_nights` (``trip_plan.write``: contracting may set it, not only the administrator): the nights
+  1 .. days - 1 that need no hotel (422 ``invalid_night``), with a reason of 20..500 characters (422
+  ``reason_too_short`` / ``reason_too_long``) stored on the plan (``trip_plans.no_hotel_nights_reason``) and in the
+  audit row. A marked night lifts rule N1 for good (no expiry, unlike a sale exception), so every change says why.
 """
 
 from __future__ import annotations
@@ -91,6 +93,7 @@ async def operability_of(conn: asyncpg.Connection, source_id: str) -> dict[str, 
         "trip_plan_id": row["id"],
         "days": plan.days,
         "no_hotel_nights": sorted(plan.no_hotel_nights),
+        "no_hotel_nights_reason": plan.no_hotel_nights_reason,
         **verdict.out(limit=None),
         "exception": live.out() if live else None,
         "overridable": overridable(verdict),
@@ -176,8 +179,9 @@ async def revoke_exception(conn: asyncpg.Connection, staff: Staff, source_id: st
 
 
 async def set_no_hotel_nights(
-    conn: asyncpg.Connection, staff: Staff, source_id: str, nights: list[int]
+    conn: asyncpg.Connection, staff: Staff, source_id: str, nights: list[int], *, reason: str
 ) -> dict[str, Any]:
+    text = _reason(reason, field="reason", minimum=REASON_MIN, maximum=REASON_MAX)
     plan = await _plan(conn, source_id, lock=True)
     facts, _ = await _verdict(conn, plan["id"])
     wanted = sorted(set(nights))
@@ -187,18 +191,20 @@ async def set_no_hotel_nights(
     before = sorted(facts.no_hotel_nights)
     if wanted != before:
         await conn.execute(
-            "UPDATE booking.trip_plans SET no_hotel_nights = $2::smallint[], updated_by = $3 WHERE id = $1::uuid",
+            "UPDATE booking.trip_plans SET no_hotel_nights = $2::smallint[], no_hotel_nights_reason = $4,"
+            " updated_by = $3 WHERE id = $1::uuid",
             plan["id"],
             wanted,
             staff.cis_user_id,
+            text,
         )
         await _audit(
             conn,
             staff,
             plan,
             "trip_plan.no_hotel_nights_set",
-            f"Nights with no hotel needed: {', '.join(map(str, wanted)) or 'none'}",
-            before={"no_hotel_nights": before},
-            after={"no_hotel_nights": wanted},
+            f"Nights with no hotel needed: {', '.join(map(str, wanted)) or 'none'}: {text[:200]}",
+            before={"no_hotel_nights": before, "reason": facts.no_hotel_nights_reason},
+            after={"no_hotel_nights": wanted, "reason": text},
         )
     return await operability_of(conn, source_id)

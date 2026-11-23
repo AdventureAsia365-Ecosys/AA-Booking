@@ -7,13 +7,21 @@ part (``quote_part_id``; the database keeps one live booking per part, ``supplie
 part's supplier, room type or service, date, pax, quantity, room mix and net. Editing the tour afterwards changes
 nothing: the parts are the quote's.
 
+**Fewer travellers after the sale** (an agency partial cancellation, ``booking.b2b_line_reductions``,
+:func:`app.b2b.amendments.reduce`): the booking takes the line's current pax (sold adults and children minus those
+removed, the ``CURRENT_PAX_SQL`` rule of :mod:`app.b2b.amendments`), never more than the part's pax, and its notes say
+how many were removed; the quantity (rooms, vehicles) and the net stay as sold, for staff to check with the supplier
+and edit on the booking (the reduction notice reaches only bookings live at the time of the reduction).
+
 **Which parts** (the same set as ``booking.v_trip_case_supply_state``): the parts of the confirmed hold's lines that
 are ``confirmed`` (an on-request line once the desk accepted it: a declined line never leaves component bookings
 behind) and have no departure (a departure's costs are booked once per departure). Skip reasons shown on the tab:
 ``booked`` (a live booking), ``waived`` (closed with a reason, :func:`waive`), ``line_not_confirmed`` (the desk has not
 accepted the on-request line yet), ``b2b_line_closed`` (declined or cancelled), ``supplier_not_active`` (pick another
 supplier with :func:`create_for_part`: the part's room type / service are then dropped, the booking names the new
-supplier's room type or service if given, else only the description). A case sold before bk-065 has no parts: its
+supplier's room type or service if given, else only the description), ``item_not_active`` (the part's room type,
+hotel or service was deactivated since the sale: :func:`create_for_part` drops it the same way, with the same supplier
+or another one). A case sold before bk-065 has no parts: its
 tour lines are listed with ``sold_before_split`` (add the bookings by hand).
 
 Component bookings are never linked to the hold line (the desk answers an on-request tour line itself), so confirming
@@ -45,6 +53,11 @@ SELECT qp.id::text AS id, qp.line_no, qp.part_no, qp.day_no, qp.service_date,
        qp.net_currency::text AS net_currency, ql.line_ref, l.status AS line_status,
        CASE WHEN rt.id IS NOT NULL THEN h.name || ' · ' || rt.name ELSE sv.title END AS supply_label,
        sv.service_type,
+       CASE WHEN rt.id IS NOT NULL THEN rt.status = 'active' AND h.status = 'active'
+            ELSE sv.status = 'active' END AS item_active,
+       ql.pax_adult + ql.pax_child - (SELECT coalesce(sum(r.removed_adults + r.removed_children), 0)
+                                        FROM booking.b2b_line_reductions r
+                                       WHERE r.hold_id = bh.id AND r.line_ref = ql.line_ref) AS line_pax,
        (SELECT b.code FROM booking.supplier_bookings b WHERE b.quote_part_id = qp.id
          AND b.status IN ('pending', 'requested', 'confirmed')) AS live_booking,
        w.reason AS waive_reason
@@ -94,7 +107,16 @@ def skip_reason(part: Any) -> str | None:
         return "line_not_confirmed"
     if part["supplier_status"] != "active":
         return "supplier_not_active"
+    if not part["item_active"]:
+        return "item_not_active"
     return None
+
+
+def booked_pax(part: Any) -> tuple[int, int]:
+    """``(pax to book, travellers removed after the sale)``: the line's current pax (sold minus agency reductions),
+    never more than the part's pax and never below 1 (a fully cancelled line is closed, not booked)."""
+    removed = max(int(part["pax"]) - int(part["line_pax"]), 0)
+    return max(int(part["pax"]) - removed, 1), removed
 
 
 def rooms_text(rooms: Any) -> str:
@@ -109,10 +131,17 @@ def description(part: Any) -> str:
     label = part["supply_label"] or "Tour component"
     if part["hotel_room_type_id"]:
         return f"{label} · {rooms_text(part['rooms'])}, 1 night"[:500]
-    return f"{label} · day {part['day_no']} · {part['pax']} pax"[:500]
+    return f"{label} · day {part['day_no']} · {booked_pax(part)[0]} pax"[:500]
 
 
 def _row(part: Any, *, supplier_id: str | None = None) -> dict[str, Any]:
+    pax, removed = booked_pax(part)
+    note = (
+        f"The agency removed {removed} traveller(s) from line {part['line_ref']} after the sale: check the quantity"
+        " and the net with the supplier."
+        if removed
+        else None
+    )
     return {
         "quote_part_id": part["id"],
         "supplier_id": supplier_id or part["supplier_id"],
@@ -121,11 +150,11 @@ def _row(part: Any, *, supplier_id: str | None = None) -> dict[str, Any]:
         "item_description": description(part),
         "service_date": part["service_date"],
         "nights": 1 if part["hotel_room_type_id"] else None,
-        "pax": part["pax"],
+        "pax": pax,
         "quantity": part["quantity"],
         "net_amount": part["net_amount"],
         "net_currency": part["net_currency"],
-        "notes": None,
+        "notes": note,
     }
 
 
@@ -220,16 +249,17 @@ async def create_for_part(
     part's facts unless the body names others. ``check_supply`` = the supplier / item check of the caller. Returns the
     new booking id.
 
-    The part's room type / service belong to the part's own supplier. With another supplier they are dropped: the
-    booking names the new supplier's room type or service when the body gives one (checked against that supplier),
-    else only the description (the body's ``item_description``, or the part's as sold)."""
+    The part's room type / service belong to the part's own supplier. With another supplier, or when the item was
+    deactivated since the sale (``item_not_active``), they are dropped: the booking names a room type or service when
+    the body gives one (checked against the supplier), else only the description (the body's
+    ``item_description``, or the part's as sold)."""
     part = await _part(conn, case["id"], data["quote_part_id"])
     reason = skip_reason(part)
     if reason in ("booked", "waived", "b2b_line_closed", "line_not_confirmed"):
         raise Conflict("part_not_bookable", f"this tour component is {reason.replace('_', ' ')}", reason=reason)
     supplier = str(data.get("supplier_id") or part["supplier_id"])
     row = _row(part, supplier_id=supplier)
-    if supplier != str(part["supplier_id"]):
+    if supplier != str(part["supplier_id"]) or reason == "item_not_active":
         row["hotel_room_type_id"] = row["service_id"] = None
     for key in ("hotel_room_type_id", "service_id", "item_description", "service_date", "nights", "pax"):
         if data.get(key) is not None:
@@ -242,7 +272,7 @@ async def create_for_part(
         raise Invalid("net_pair", "net amount and currency go together")
     if row["hotel_room_type_id"] and row["service_id"]:
         raise Invalid("one_supply_record", "a booking books a room type or a service, not both")
-    row["notes"] = (data.get("notes") or "").strip() or None
+    row["notes"] = (data.get("notes") or "").strip() or row["notes"]
     await check_supply(conn, supplier, row["hotel_room_type_id"], row["service_id"])
     new_id = await _insert(conn, staff, case["id"], row)
     if new_id is None:  # a concurrent booking of the same part won

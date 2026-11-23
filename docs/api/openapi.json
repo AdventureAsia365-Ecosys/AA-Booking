@@ -7055,10 +7055,18 @@
             "maxItems": 365,
             "title": "Nights",
             "type": "array"
+          },
+          "reason": {
+            "description": "why these nights need no hotel (a night train, a cruise without a cabin room type)",
+            "maxLength": 500,
+            "minLength": 20,
+            "title": "Reason",
+            "type": "string"
           }
         },
         "required": [
-          "nights"
+          "nights",
+          "reason"
         ],
         "title": "NoHotelNightsIn",
         "type": "object"

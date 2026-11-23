@@ -3,8 +3,8 @@
 // A tour sold to an agency is split into its components as priced (one hotel night, one transfer, one guide day…): the
 // "Generate" button makes one supplier booking per component. This part shows the bookings grouped by supplier (how
 // many each, the tour days) and the components still without a live booking with why: booked, no booking needed
-// (waived with a reason), waiting for the desk to accept the agency line, line declined, supplier not active, or a trip
-// sold before tours were split (add its bookings by hand). Staff book a component with its supplier or another one, or
+// (waived with a reason), waiting for the desk to accept the agency line, line declined, supplier not active, room or
+// service no longer active, or a trip sold before tours were split (add its bookings by hand). Staff book a component with its supplier or another one, or
 // close it as "no booking needed" (20-500 characters). Kept out of SuppliersTab.tsx (file size and complexity limits).
 
 import { useState } from "react";
@@ -31,9 +31,10 @@ const SKIP_LABEL: Record<NonNullable<UnbookedPart["skip_reason"]>, string> = {
   b2b_line_closed: "Line declined or cancelled",
   line_not_confirmed: "Waiting for the desk to accept the line",
   supplier_not_active: "Supplier not active",
+  item_not_active: "Room or service no longer active",
   sold_before_split: "Sold before tours were split: add by hand",
 };
-const OPEN = new Set(["supplier_not_active", null]);
+const OPEN = new Set(["supplier_not_active", "item_not_active", null]);
 
 interface Group {
   id: string;
@@ -159,7 +160,7 @@ function PartRow({
         {actionable && (
           <>
             <Button size="sm" variant="ghost" onClick={() => onBook(p)}>
-              {p.bookable ? t("Book") : t("Book with another supplier")}
+              {p.skip_reason === "supplier_not_active" ? t("Book with another supplier") : t("Book")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => onWaive(p)}>
               {t("No booking needed")}
@@ -171,10 +172,18 @@ function PartRow({
   );
 }
 
-// Another supplier: the component's room type or service belongs to the supplier it was sold with, so the booking
-// names only what staff write (the server drops the old supplier's item; a blank text keeps the component's label).
+// Another supplier, or a room / service deactivated since the sale: the booking names only what staff write (the
+// server drops the component's item; a blank text keeps the component's label).
 function isOtherSupplier(part: UnbookedPart, supplier: string): boolean {
-  return !!supplier && supplier !== part.supplier?.id;
+  return !!supplier && (supplier !== part.supplier?.id || part.skip_reason === "item_not_active");
+}
+
+// The active suppliers offered (the first 100), plus the component's own supplier when it is bookable but not in that
+// page (more than 100 active suppliers), so the preselected value always has its option.
+function supplierOptions(items: { id: string; code: string; company_name: string }[], part: UnbookedPart) {
+  const own = part.supplier;
+  if (!part.bookable || !own || items.some((s) => s.id === own.id)) return items;
+  return [{ id: own.id, code: own.code, company_name: own.name }, ...items];
 }
 
 function partBooking(part: UnbookedPart, supplier: string, what: string | null) {
@@ -188,7 +197,7 @@ function OtherSupplierItem({ what, setWhat }: { what: string; setWhat: (v: strin
     <label className="flex flex-col gap-1">
       <span className="text-xs font-semibold text-muted">{t("What is booked")}</span>
       <Input size="sm" className="w-full" maxLength={500} value={what} onChange={(e) => setWhat(e.target.value)} />
-      <span className="text-xs text-muted">{t("Another supplier: the booking names what you write here, not the room or service the tour was sold with.")}</span>
+      <span className="text-xs text-muted">{t("The booking names what you write here, not the room or service the tour was sold with.")}</span>
     </label>
   );
 }
@@ -227,7 +236,7 @@ function BookPart({ c, part, onClose, onDone }: { c: TripCaseDetail; part: Unboo
           </span>
           <Select size="sm" className="w-full" value={supplier} onChange={(e) => setSupplier(e.target.value)} required>
             <option value="">{t("Choose a supplier…")}</option>
-            {(suppliers.data?.items ?? []).map((s) => (
+            {supplierOptions(suppliers.data?.items ?? [], part).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.company_name} ({s.code})
               </option>

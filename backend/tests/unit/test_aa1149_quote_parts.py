@@ -14,6 +14,8 @@ from app.b2b import components, quote_parts
 from app.b2b.components import LineAsk, LineCost, RoomAsk
 from app.errors import Conflict, Invalid
 from app.ops import component_bookings as cb
+from app.ops import supplier_bookings as sb
+from tests.unit.test_aa682_supplier_bookings_flows import AUDIT, SALES, SB_ID, SET_STATUS, booking_row, write_conn
 
 DAY = date(2027, 3, 1)
 ROOM, SERVICE, SUP = "rt-1", "sv-1", "sup-1"
@@ -119,6 +121,8 @@ def part(**kw: Any) -> dict[str, Any]:
         "line_status": "confirmed",
         "supply_label": "Hanoi Emerald · Deluxe",
         "service_type": None,
+        "item_active": True,
+        "line_pax": 3,
         "live_booking": None,
         "waive_reason": None,
     }
@@ -134,6 +138,8 @@ def part(**kw: Any) -> dict[str, Any]:
         ({"line_status": "declined"}, "b2b_line_closed"),
         ({"line_status": "on_request"}, "line_not_confirmed"),
         ({"supplier_status": "pending"}, "supplier_not_active"),
+        ({"item_active": False}, "item_not_active"),
+        ({"item_active": None}, "item_not_active"),
     ],
 )
 def test_skip_reasons(changes: dict[str, Any], reason: str | None) -> None:
@@ -145,6 +151,23 @@ def test_descriptions_name_the_room_mix_or_the_day() -> None:
     service = part(hotel_room_type_id=None, service_id=SERVICE, rooms=None, supply_label="Airport pick-up")
     assert cb.description(service) == "Airport pick-up · day 2 · 3 pax"
     assert cb._row(service)["nights"] is None and cb._row(part())["nights"] == 1
+
+
+def test_a_line_reduced_after_the_sale_books_the_current_pax_and_says_so() -> None:
+    """An agency removed 2 of 3 travellers before Generate: the booking takes 1 pax and a note; the quantity and the
+    net stay as sold for staff to check (amendments CURRENT_PAX_SQL rule)."""
+    assert cb._row(part())["notes"] is None and cb._row(part())["pax"] == 3
+    reduced = part(line_pax=1)
+    row = cb._row(reduced)
+    assert (row["pax"], row["quantity"], row["net_amount"]) == (1, 2, D("170.00"))
+    assert row["notes"] == (
+        "The agency removed 2 traveller(s) from line T after the sale: check the quantity and the net"
+        " with the supplier."
+    )
+    service = part(hotel_room_type_id=None, service_id=SERVICE, rooms=None, supply_label="Guide", line_pax=2)
+    assert cb.description(service) == "Guide · day 2 · 2 pax"
+    assert cb.booked_pax(part(line_pax=0)) == (1, 3)  # never below 1 (a fully cancelled line is closed)
+    assert cb.booked_pax(part(line_pax=5)) == (3, 0)  # never more than the part as sold
 
 
 class _Conn:
@@ -171,7 +194,14 @@ class _Staff:
 
 @pytest.mark.asyncio
 async def test_generate_books_every_bookable_part_once() -> None:
-    conn = _Conn([part(), part(id="qp-2", live_booking="SB-1"), part(id="qp-3", supplier_status="inactive")])
+    conn = _Conn(
+        [
+            part(),
+            part(id="qp-2", live_booking="SB-1"),
+            part(id="qp-3", supplier_status="inactive"),
+            part(id="qp-4", item_active=False),
+        ]
+    )
     created = await cb.generate(conn, _Staff(), "case-1")  # type: ignore[arg-type]
     assert created == ["sb-1"]
     assert conn.inserted[0][:3] == ("case-1", "qp-1", SUP) and conn.inserted[0][9] == 2
@@ -219,9 +249,25 @@ async def test_another_supplier_names_its_own_item_or_a_description() -> None:
     await cb.create_for_part(conn, _Staff(), case, blank, check_supply=check)  # type: ignore[arg-type]
     conn.rows = [part()]
     await cb.create_for_part(conn, _Staff(), case, {"quote_part_id": "qp-1"}, check_supply=check)  # type: ignore[arg-type]
-    assert checked == [("sup-2", None, "sv-9"), ("sup-2", None, None), (SUP, ROOM, None)]
+    # The part's room type was deactivated since the sale: the same supplier books without it (a description only).
+    conn.rows = [part(item_active=False)]
+    await cb.create_for_part(conn, _Staff(), case, {"quote_part_id": "qp-1"}, check_supply=check)  # type: ignore[arg-type]
+    assert checked == [("sup-2", None, "sv-9"), ("sup-2", None, None), (SUP, ROOM, None), (SUP, None, None)]
     assert [row[2:6] for row in conn.inserted] == [
         ("sup-2", None, "sv-9", "Car"),
         ("sup-2", None, None, cb.description(part())),
         (SUP, ROOM, None, cb.description(part())),
+        (SUP, None, None, cb.description(part())),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_supplier_no_longer_active_is_not_requested() -> None:
+    """AA-1149 review: a supplier deactivated after Generate (or while it ran) keeps its pending bookings; request()
+    refuses them (409 supplier_inactive) until staff move the booking to another supplier or cancel it."""
+    for status in ("inactive", "pending"):
+        conn = write_conn(booking_row(supplier_status=status))
+        with pytest.raises(Conflict) as exc:
+            await sb.request(conn, SALES, SB_ID)
+        assert exc.value.code == "supplier_inactive" and status in exc.value.message
+        assert conn.sql(SET_STATUS) == [] and conn.sql(AUDIT) == []

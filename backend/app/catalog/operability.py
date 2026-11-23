@@ -10,7 +10,9 @@ spans of its items and its live sale exception, and gives findings:
 - **N2** (blocks): every component has a published rate covering some day from today to 365 days ahead
   (``app.catalog.rate_horizon.rated_items`` on ``cost_sheet.SPANS_SQL``, so the readiness report and this check agree).
   This is "has a published rate in the next 365 days", not "the price is valid on every date": the quote checks the
-  exact dates and refuses a day with no rate in force. Key ``N2:day:<d>:<code>``; never covered by an exception.
+  exact dates and refuses a day with no rate in force. At the quote gate the window reaches at least the end of each
+  line's dates (``max(today + 365, service date + days)``), so a tour quoted for a season past the horizon is judged
+  on that season's rates. Key ``N2:day:<d>:<code>``; never covered by an exception.
 - **N3** (blocks): every component's supplier is ``active`` (a pending, inactive or any later suspended status
   blocks; key ``N3:supplier:<code>``, the only N3 finding an exception may cover) and its room type, hotel or service is
   active (key ``N3:item:<d>:<code>``; the quote refuses an inactive item whatever an exception says).
@@ -40,7 +42,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -48,7 +50,7 @@ import asyncpg
 from app.b2b import plan_span
 from app.b2b.errors import B2BError
 from app.catalog import cost_sheet
-from app.catalog.rate_horizon import HORIZON_DAYS, rated_items
+from app.catalog.rate_horizon import HORIZON_DAYS, horizon, rated_items
 
 BLOCK = "block"
 WARN = "warn"
@@ -63,7 +65,8 @@ BATCH = 500
 MAX_FINDINGS_OUT = 10  # technical-constant: how many findings a report row shows (the page links to all), not a policy
 
 PLANS_SQL = """
-SELECT id::text AS plan_id, source_id, no_hotel_nights FROM booking.trip_plans WHERE id = ANY($1::uuid[])
+SELECT id::text AS plan_id, source_id, no_hotel_nights_reason, no_hotel_nights FROM booking.trip_plans
+WHERE id = ANY($1::uuid[])
 """
 COMPONENTS_SQL = """
 SELECT c.trip_plan_id::text AS plan_id, c.day_no, c.hotel_room_type_id::text AS room_type_id,
@@ -169,6 +172,8 @@ class PlanFacts:
     no_hotel_nights: frozenset[int] = frozenset()
     components: list[Comp] = field(default_factory=list)
     exception: LiveException | None = None
+    rate_until: date | None = None  # the quote gate's N2 window end when past the horizon (the line's dates)
+    no_hotel_nights_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -215,13 +220,9 @@ def _n1(plan: PlanFacts) -> list[Finding]:
 def _n2(plan: PlanFacts, rated: Mapping[str, Any]) -> list[Finding]:
     if not plan.components:
         return [Finding("N2", BLOCK, "N2:none", "the tour has no bookable components")]
+    window = f"from today to {plan.rate_until.isoformat()}" if plan.rate_until else f"in the next {HORIZON_DAYS} days"
     return [
-        Finding(
-            "N2",
-            BLOCK,
-            f"N2:day:{c.day_no}:{c.code}",
-            f"day {c.day_no}: {c.name} has no published rate in the next {HORIZON_DAYS} days",
-        )  # fmt: skip
+        Finding("N2", BLOCK, f"N2:day:{c.day_no}:{c.code}", f"day {c.day_no}: {c.name} has no published rate {window}")
         for c in plan.components
         if c.item not in rated
     ]
@@ -327,16 +328,28 @@ def _exception(row: Mapping[str, Any]) -> LiveException:
     )
 
 
-async def rated_for(conn: asyncpg.Connection, plans: Iterable[PlanFacts], on: date) -> dict[str, set[str]]:
-    """``{item id: currencies}`` of the plans' items with a published rate in the horizon (batched)."""
+async def _spans(conn: asyncpg.Connection, plans: Iterable[PlanFacts]) -> list[Any]:
+    """The published rate spans of the plans' items (batched)."""
     rooms = sorted({c.room_type_id for p in plans for c in p.components if c.room_type_id})
     services = sorted({c.service_id for p in plans for c in p.components if c.service_id})
-    rated: dict[str, set[str]] = {}
+    out: list[Any] = []
     for start in range(0, max(len(rooms), len(services)), BATCH):
-        spans = await conn.fetch(cost_sheet.SPANS_SQL, rooms[start : start + BATCH], services[start : start + BATCH])
-        for item, currencies in rated_items(spans, on).items():
-            rated.setdefault(item, set()).update(currencies)
-    return rated
+        out.extend(
+            await conn.fetch(cost_sheet.SPANS_SQL, rooms[start : start + BATCH], services[start : start + BATCH])
+        )
+    return out
+
+
+async def rated_for(conn: asyncpg.Connection, plans: Iterable[PlanFacts], on: date) -> dict[str, set[str]]:
+    """``{item id: currencies}`` of the plans' items with a published rate in the horizon."""
+    return rated_items(await _spans(conn, list(plans)), on)
+
+
+def quote_window(on: date, days: int, service_dates: Iterable[date]) -> date | None:
+    """The N2 window end of a quote's lines of one tour: ``max(today + 365, service date + days)``; None when the
+    horizon already covers every line."""
+    end = max((d + timedelta(days=days) for d in service_dates), default=None)
+    return end if end is not None and end > horizon(on) else None
 
 
 async def load_many(
@@ -353,6 +366,7 @@ async def load_many(
         for row in await conn.fetch(PLANS_SQL, batch):
             nights = frozenset(int(n) for n in (row["no_hotel_nights"] or ()))
             out[row["plan_id"]] = PlanFacts(row["plan_id"], row["source_id"], 1, nights)
+            out[row["plan_id"]].no_hotel_nights_reason = row["no_hotel_nights_reason"]
         for row in await conn.fetch(COMPONENTS_SQL, batch):
             out[row["plan_id"]].components.append(_comp(row))
         for row in await conn.fetch(EXCEPTIONS_SQL, batch):
@@ -383,17 +397,27 @@ async def verdicts(
 
 
 async def require_for_quote(
-    conn: asyncpg.Connection, lines: Sequence[tuple[str, str | None, str | None]], *, on: date, now: datetime
+    conn: asyncpg.Connection,
+    lines: Sequence[tuple[str, str | None, str | None, date | None]],
+    *,
+    on: date,
+    now: datetime,
 ) -> list[str | None]:
-    """The gate of a quote: ``lines`` = ``(line_ref, tp: plan id or None, departure id or None)`` per line. A
-    tailor-made tp: line (no departure) of a blocked tour is refused 422 ``invalid``; returns per line the id of the
-    sale exception that covered one of its findings (None otherwise)."""
-    checked = sorted({plan for _, plan, dep in lines if plan is not None and dep is None})
+    """The gate of a quote: ``lines`` = ``(line_ref, tp: plan id or None, departure id or None, service date)`` per
+    line. A tailor-made tp: line (no departure) of a blocked tour is refused 422 ``invalid``; N2 looks for rates up to
+    the end of the tour's quoted dates when that is past the horizon (:func:`quote_window`). Returns per line the id of
+    the sale exception that covered one of its findings (None otherwise)."""
+    checked = sorted({plan for _, plan, dep, _ in lines if plan is not None and dep is None})
     if not checked:
         return [None] * len(lines)
-    found = await verdicts(conn, checked, on=on, now=now)
+    plans = await load_many(conn, checked)
+    for plan_id, plan in plans.items():
+        dates = [d for _, p, dep, d in lines if p == plan_id and dep is None and d is not None]
+        plan.rate_until = quote_window(on, plan.days, dates)
+    spans = await _spans(conn, plans.values())
+    found = {pid: evaluate(plan, rated_items(spans, on, plan.rate_until), now) for pid, plan in plans.items()}
     out: list[str | None] = []
-    for ref, plan, dep in lines:
+    for ref, plan, dep, _ in lines:
         verdict = found.get(plan) if plan is not None and dep is None else None
         if verdict is None:
             out.append(None)
