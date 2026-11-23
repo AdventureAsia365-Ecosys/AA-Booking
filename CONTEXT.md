@@ -1507,7 +1507,8 @@ implementation notes `docs/implementation-notes/AA-1151.md`).
   business owner, flagged `owner_self_approved` (same rule as contracts). Publishing needs an active service and
   supplier, a place and an adult rate in force today or later under a published contract (409 `no_place` /
   `no_price` / ...). A published offer is fixed (409 `offer_published`, DB guard) except `sort_order` / `featured`;
-  reopening makes it a draft again with the reopener as its only writer. Customer text and photos are written in CIS
+  reopening makes it a draft again with the reopener as its only writer (a draft retired before any publish keeps its
+  writers and adds the reopener: nobody approved its rules). Customer text and photos are written in CIS
   (`/admin/supply-content`, drafted from the `supply.service.v1` facts like any service).
 - **Import** (`app/supply/activity_import.py`, `POST /booking/suppliers/{ref}/activity-sheets[?dry_run=true]`,
   `supply.write` + `addon.write`; template `GET /booking/activity-sheets/template`): a Contract sheet (the rate-sheet
