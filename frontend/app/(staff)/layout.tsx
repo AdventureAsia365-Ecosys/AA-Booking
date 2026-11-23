@@ -15,6 +15,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ACCESS_COOKIE } from "@/lib/session";
+import { VIEW_AS_CLEAR, VIEW_AS_COOKIE } from "@/lib/viewAs";
 import { B2C_INTAKE_OPEN, CIS_STAFF_URL } from "@/lib/config";
 import { fetchStaffMe } from "@/lib/api/server";
 import { SessionNotice } from "./SessionNotice";
@@ -72,8 +73,11 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   if (!token) redirect("/login?reason=expired");
   const lang = langFromCookie(jar.get(langStore.cookieName)?.value);
 
-  const me = await fetchStaffMe(token);
+  // AA-1157: inside the owner's read-only "view as a lower role" the profile (role, permissions) is the view's; a view
+  // the API ended clears its cookie (a server component cannot) and returns to the dashboard.
+  const me = await fetchStaffMe(token, jar.get(VIEW_AS_COOKIE)?.value);
   if (me.kind === "unauthorized") redirect("/login?reason=expired");
+  if (me.kind === "view_ended") redirect(VIEW_AS_CLEAR);
   const notice = staffNotice(me, lang);
   if (notice || me.kind !== "ok") return notice;
 

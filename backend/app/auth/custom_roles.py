@@ -24,7 +24,11 @@ The owner marker (``is_owner``) gates the role editor (R4.4, :mod:`app.auth.role
 view, uncached (:func:`is_owner`): an owner change in CIS applies to the next editor write.
 
 The business-owner marker (``is_business_owner``, AA-1158) lets its holder approve her own work, flagged
-(:mod:`app.auth.self_approval`). It is read the same way (:func:`is_business_owner`): uncached, fail closed.
+(:mod:`app.auth.self_approval`). It is read the same way (:func:`is_business_owner`): uncached, fail closed; the
+read runs in a savepoint inside the caller's transaction (:func:`isolated`).
+
+AA-1157: inside an owner's read-only "view as a lower role" session (:mod:`app.auth.view_as`) both markers read False
+(:data:`VIEWING`, set by :func:`app.auth.staff.current_staff` for every request), whichever route asks.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -153,6 +158,10 @@ class CustomRole:
 class Unavailable(Exception):
     """The view or the role tables could not be read."""
 
+
+# AA-1157: True while the request runs inside a view-as session (set per request by current_staff). The owner markers
+# then read False, so no owner or business-owner power is reachable during a view.
+VIEWING: ContextVar[bool] = ContextVar("booking_view_as_viewing", default=False)
 
 _grants: dict[str, tuple[float, Grant | None]] = {}
 _roles: dict[str, tuple[float, CustomRole | None]] = {}
@@ -281,25 +290,35 @@ async def resolve(pool: asyncpg.Pool, sub: str) -> CustomRole:
     return CustomRole(role.code, role.label, role.based_on, role.archived, effective(role))
 
 
-async def is_owner(conn: asyncpg.Connection | asyncpg.Pool, cognito_sub: str | None) -> bool:
-    """The CIS ``is_owner`` marker of this identity, uncached; False when there is no identity, no row or the view
-    cannot be read (fail closed)."""
-    if not cognito_sub:
-        return False
+async def _marker_grant(conn: asyncpg.Connection | asyncpg.Pool, cognito_sub: str | None) -> Grant | None:
+    """The view row behind a marker check, uncached; None (False) inside a view, without an identity, without a row,
+    or when the view cannot be read (fail closed)."""
+    if not cognito_sub or VIEWING.get():
+        return None
     try:
-        grant = await read_grant(conn, cognito_sub)
+        return await read_grant(conn, cognito_sub)
     except Unavailable:
-        return False
+        return None
+
+
+async def is_owner(conn: asyncpg.Connection | asyncpg.Pool, cognito_sub: str | None) -> bool:
+    """The CIS ``is_owner`` marker of this identity, uncached; False when there is no identity, no row, the view
+    cannot be read (fail closed) or the request runs inside a view-as session (AA-1157)."""
+    grant = await _marker_grant(conn, cognito_sub)
     return grant is not None and grant.is_owner
 
 
 async def is_business_owner(conn: asyncpg.Connection | asyncpg.Pool, cognito_sub: str | None) -> bool:
-    """The CIS ``is_business_owner`` marker of this identity (AA-1158), uncached; False when there is no identity, no
-    row or the view cannot be read (fail closed: a self-approval is then refused, a normal approval is untouched)."""
-    if not cognito_sub:
-        return False
-    try:
-        grant = await read_grant(conn, cognito_sub)
-    except Unavailable:
-        return False
+    """The CIS ``is_business_owner`` marker of this identity, uncached, fail closed like :func:`is_owner` (and False
+    inside a view-as session)."""
+    grant = await _marker_grant(conn, cognito_sub)
     return grant is not None and grant.is_business_owner
+
+
+async def markers(conn: asyncpg.Connection | asyncpg.Pool, staff: Any) -> tuple[bool, bool]:
+    """(is_owner, is_business_owner) of a staff member: both False inside a view-as session (``staff.view_as`` or
+    :data:`VIEWING`), one uncached read otherwise."""
+    if getattr(staff, "view_as", None) is not None:
+        return False, False
+    grant = await _marker_grant(conn, getattr(staff, "cognito_sub", None))
+    return (grant is not None and grant.is_owner), (grant is not None and grant.is_business_owner)

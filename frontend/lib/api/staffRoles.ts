@@ -45,6 +45,8 @@ export interface StaffRoles {
   capabilities: Capability[];
   /** The caller is an owner: may create and change custom roles. */
   can_edit: boolean;
+  /** AA-1157: the caller is an owner (not inside a view): may start a read-only view as one of these roles. */
+  can_view_as?: boolean;
 }
 
 export interface NewRole {

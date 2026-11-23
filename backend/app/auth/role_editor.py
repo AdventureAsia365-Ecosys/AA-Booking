@@ -102,12 +102,13 @@ def clone_of(based_on: str) -> frozenset[str]:
 
 
 async def require_owner(conn: asyncpg.Connection | asyncpg.Pool, staff: Staff) -> None:
-    if not await custom_roles.is_owner(conn, staff.cognito_sub):
+    # AA-1157: custom_roles.markers reads False inside a view-as session (never an owner there).
+    if not (await custom_roles.markers(conn, staff))[0]:
         raise Forbidden(OWNER_ONLY, "only an owner (CIS Staff page) changes Booking roles")
 
 
 async def list_roles(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    owner = await custom_roles.is_owner(conn, staff.cognito_sub)
+    owner = (await custom_roles.markers(conn, staff))[0]
     if not owner and not staff.can("staff.admin"):
         raise Forbidden("forbidden", "the role editor is for administrators and owners")
     rows = await conn.fetch(ROLES_SQL + " GROUP BY r.code ORDER BY r.archived, lower(r.label), r.code")  # noqa: S608
@@ -117,6 +118,9 @@ async def list_roles(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
         "custom": [_view(r) for r in rows],
         "capabilities": [{"name": c, "assignable": not custom_roles.is_approve_class(c)} for c in known],
         "can_edit": owner,
+        # AA-1157: an owner (not inside a view) may start a read-only "view as" on any of these roles; the start
+        # re-checks owner and downward.
+        "can_view_as": owner,
     }
 
 
