@@ -246,7 +246,9 @@ async def test_seasons_and_child_prices_follow_the_draft(app_conn: asyncpg.Conne
         with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):  # fixed once published
             await app_conn.fetchval(sql, *args)
     with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
-        await app_conn.execute("DELETE FROM booking.supplier_contract_seasons WHERE supplier_contract_id = $1::uuid", g["ka"])
+        await app_conn.execute(
+            "DELETE FROM booking.supplier_contract_seasons WHERE supplier_contract_id = $1::uuid", g["ka"]
+        )
 
 
 async def test_import_log_is_append_only(app_conn: asyncpg.Connection) -> None:
@@ -302,7 +304,7 @@ async def test_board_hotel_ref_and_facts_checks(app_conn: asyncpg.Connection) ->
     ):
         await app_conn.execute(
             "UPDATE booking.hotels SET facts_source = $2, facts_source_supplier_id = $3::uuid, facts_confirmed_on = $4,"
-            " facts_confirmed_by = $5, external_codes = '{\"lantern\": \"LB-1\"}' WHERE id = $1::uuid",
+            ' facts_confirmed_by = $5, external_codes = \'{"lantern": "LB-1"}\' WHERE id = $1::uuid',
             g["hotel"],
             *facts,
         )
