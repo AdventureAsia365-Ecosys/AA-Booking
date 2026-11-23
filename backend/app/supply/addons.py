@@ -182,39 +182,40 @@ def _pct(value: Any) -> Decimal | None:
     return number.quantize(PCT_PLACES)
 
 
+def _tiers(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        tiers = cancellation.parse_tiers(value)
+    except cancellation.TierError as exc:
+        raise Invalid("invalid_cancellation_tiers", str(exc)) from None
+    return json.dumps(cancellation.tiers_out(tiers))
+
+
+def _flag(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise Invalid("invalid_featured", "featured is true or false")
+    return value
+
+
+PARSERS: dict[str, Any] = {
+    "min_pax": lambda v: _int(v, "min_pax", 1, MIN_PAX_MAX),
+    "cutoff_hours": lambda v: _int(v, "cutoff_hours", 0, CUTOFF_HOURS_MAX),
+    "operating_weekdays": parse_weekdays,
+    "start_times": parse_start_times,
+    "child_pct": _pct,
+    "cancellation_tiers": _tiers,
+    "sort_order": lambda v: _int(v, "sort_order", -SORT_BOUND, SORT_BOUND),
+    "featured": _flag,
+}
+
+
 def normalize_rules(data: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the rule fields present in ``data`` (422 naming the field); unknown fields are 422 ``not_editable``."""
-    unknown = sorted(set(data) - set(RULE_FIELDS))
+    unknown = sorted(set(data) - set(PARSERS))
     if unknown:
         raise Invalid("not_editable", f"not editable: {', '.join(unknown)}")
-    out: dict[str, Any] = {}
-    for key, value in data.items():
-        if key == "min_pax":
-            out[key] = _int(value, key, 1, MIN_PAX_MAX)
-        elif key == "cutoff_hours":
-            out[key] = _int(value, key, 0, CUTOFF_HOURS_MAX)
-        elif key == "operating_weekdays":
-            out[key] = parse_weekdays(value)
-        elif key == "start_times":
-            out[key] = parse_start_times(value)
-        elif key == "child_pct":
-            out[key] = _pct(value)
-        elif key == "cancellation_tiers":
-            if value is None:
-                out[key] = None
-            else:
-                try:
-                    tiers = cancellation.parse_tiers(value)
-                except cancellation.TierError as exc:
-                    raise Invalid("invalid_cancellation_tiers", str(exc)) from None
-                out[key] = json.dumps(cancellation.tiers_out(tiers))
-        elif key == "sort_order":
-            out[key] = _int(value, key, -SORT_BOUND, SORT_BOUND)
-        elif key == "featured":
-            if not isinstance(value, bool):
-                raise Invalid("invalid_featured", "featured is true or false")
-            out[key] = value
-    return out
+    return {key: PARSERS[key](value) for key, value in data.items()}
 
 
 def normalize_places(places: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:

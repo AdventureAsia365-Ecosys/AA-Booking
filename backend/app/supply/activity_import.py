@@ -104,98 +104,121 @@ def _minutes(value: Any) -> int | None:
     return int(number)
 
 
+def _optional(parse: Any) -> Any:
+    """A parser that leaves an empty cell empty."""
+    return lambda v: parse(v) if rate_sheet._text(v) else None
+
+
+# (column, parser, part of the row, key): the cells each activity row reads (Title, Places, Unit, Inclusions apart).
+CELLS: tuple[tuple[str, Any, str, str], ...] = (
+    ("Duration minutes", _minutes, "service", "duration_minutes"),
+    ("Max group size", rate_sheet._int, "service", "max_group_size"),
+    ("Min pax", rate_sheet._int, "rules", "min_pax"),
+    ("Cut-off hours", _hours, "rules", "cutoff_hours"),
+    ("Weekdays", _optional(addons.parse_weekdays), "rules", "operating_weekdays"),
+    ("Start times", _optional(addons.parse_start_times), "rules", "start_times"),
+    ("Child %", addons._pct, "rules", "child_pct"),
+    ("Net adult", rate_sheet._amount, "adult", "net_amount"),
+    ("Season", rate_sheet._text, "adult", "season"),
+    ("Valid from", rate_sheet._date, "adult", "valid_from"),
+    ("Valid to", rate_sheet._date, "adult", "valid_to"),
+    ("Net child", rate_sheet._amount, "child", "net_amount"),
+    ("Child age max", rate_sheet._age, "child", "age_max"),
+)
+
+
+class _Reader:
+    """The cells of one header layout (columns matched by name, any order)."""
+
+    def __init__(self, header: tuple[Any, ...]) -> None:
+        self.columns = {rate_sheet._key(h): i for i, h in enumerate(header) if h is not None}
+
+    def missing(self) -> list[str]:
+        return [c for c in REQUIRED if rate_sheet._key(c) not in self.columns]
+
+    def cell(self, values: tuple[Any, ...], name: str) -> Any:
+        i = self.columns.get(rate_sheet._key(name))
+        return values[i] if i is not None and i < len(values) else None
+
+
+def _take(value: Any, parse: Any, row: int, label: str, problems: list[Problem]) -> Any:
+    try:
+        return parse(value)
+    except (ValueError, ArithmeticError, ServiceError) as exc:
+        message = exc.message if isinstance(exc, ServiceError) else str(exc) or "invalid value"
+        problems.append(Problem(SHEET, row, label, "invalid_value", message))
+        return None
+
+
+def _child(r: Row, child: dict[str, Any], problems: list[Problem]) -> None:
+    """B4: a child rate (per person only) takes the adult rate's season and validity."""
+    if "net_amount" in child:
+        if r.service["unit"] != "person":
+            problems.append(
+                Problem(SHEET, r.row, "Net child", "child_rate_per_person", "a child rate needs unit person")
+            )
+        r.child = {"pax_type": "child", **child, **{k: v for k, v in r.adult.items() if k != "net_amount"}}
+    elif "age_max" in child:
+        problems.append(Problem(SHEET, r.row, "Child age max", "child_rate_missing", "give Net child with its age"))
+
+
+def _required(r: Row, problems: list[Problem]) -> None:
+    have = {
+        "Title": r.title,
+        "Places": r.places,
+        "Cut-off hours": "cutoff_hours" in r.rules,
+        "Net adult": "net_amount" in r.adult,
+    }
+    for label in REQUIRED:
+        if not have[label] and not any(p.row == r.row and p.column == label for p in problems):
+            problems.append(Problem(SHEET, r.row, label, "required", f"{label} is required"))
+
+
+def _row(reader: _Reader, n: int, values: tuple[Any, ...], problems: list[Problem]) -> Row:
+    r = Row(row=n, title=rate_sheet._text(reader.cell(values, "Title")), places=_items(reader.cell(values, "Places")))
+    unit = (rate_sheet._text(reader.cell(values, "Unit")) or "person").lower()
+    if unit not in UNITS:
+        problems.append(Problem(SHEET, n, "Unit", "invalid_value", f"one of {', '.join(UNITS)} is expected"))
+    r.service = {
+        "service_type": "activity",
+        "title": r.title,
+        "unit": unit,
+        "inclusions": _items(reader.cell(values, "Inclusions")),
+    }
+    child: dict[str, Any] = {}
+    parts = {"service": r.service, "rules": r.rules, "adult": r.adult, "child": child}
+    for label, parse, part, key in CELLS:
+        value = _take(reader.cell(values, label), parse, n, label, problems)
+        if value is not None:
+            parts[part][key] = value
+    _child(r, child, problems)
+    _required(r, problems)
+    return r
+
+
+def _blank(values: tuple[Any, ...] | None) -> bool:
+    return values is None or all(v is None or str(v).strip() == "" for v in values)
+
+
 def _rows(ws: Any, problems: list[Problem]) -> list[Row]:
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
     if header is None:
         problems.append(Problem(SHEET, None, None, "no_rows", "the Activities sheet is empty"))
         return []
-    columns = {rate_sheet._key(h): i for i, h in enumerate(header) if h is not None}
-    missing = [c for c in REQUIRED if rate_sheet._key(c) not in columns]
-    if missing:
+    reader = _Reader(header)
+    if missing := reader.missing():
         problems.append(
             Problem(SHEET, 1, ", ".join(missing), "missing_column", f"missing column(s): {', '.join(missing)}")
         )
         return []
-
-    def cell(values: tuple[Any, ...], name: str) -> Any:
-        i = columns.get(rate_sheet._key(name))
-        return values[i] if i is not None and i < len(values) else None
-
     out: list[Row] = []
     for n, values in enumerate(rows, start=2):
-        if values is None or all(v is None or str(v).strip() == "" for v in values):
+        if _blank(values):
             continue
         if len(out) >= MAX_ROWS:
             raise Invalid("activity_sheet_too_many_rows", f"an activity sheet has at most {MAX_ROWS} rows")
-        r = Row(row=n, title=rate_sheet._text(cell(values, "Title")), places=_items(cell(values, "Places")))
-
-        def take(label: str, conv: Any, target: dict[str, Any], key: str, row: Row = r, raw: Any = values) -> None:
-            try:
-                value = conv(cell(raw, label))
-            except (ValueError, ArithmeticError, ServiceError) as exc:
-                message = exc.message if isinstance(exc, ServiceError) else str(exc) or "invalid value"
-                problems.append(Problem(SHEET, row.row, label, "invalid_value", message))
-                return
-            if value is not None:
-                target[key] = value
-
-        unit = (rate_sheet._text(cell(values, "Unit")) or "person").lower()
-        if unit not in UNITS:
-            problems.append(Problem(SHEET, n, "Unit", "invalid_value", f"one of {', '.join(UNITS)} is expected"))
-        r.service = {
-            "service_type": "activity",
-            "title": r.title,
-            "unit": unit,
-            "inclusions": _items(cell(values, "Inclusions")),
-        }
-        take("Duration minutes", _minutes, r.service, "duration_minutes")
-        take("Max group size", rate_sheet._int, r.service, "max_group_size")
-        take("Min pax", rate_sheet._int, r.rules, "min_pax")
-        take("Cut-off hours", _hours, r.rules, "cutoff_hours")
-        take(
-            "Weekdays",
-            lambda v: addons.parse_weekdays(v) if rate_sheet._text(v) else None,
-            r.rules,
-            "operating_weekdays",
-        )
-        take(
-            "Start times",
-            lambda v: addons.parse_start_times(v) if rate_sheet._text(v) else None,
-            r.rules,
-            "start_times",
-        )
-        take("Child %", addons._pct, r.rules, "child_pct")
-        take("Net adult", rate_sheet._amount, r.adult, "net_amount")
-        for label, key in (("Season", "season"),):
-            take(label, rate_sheet._text, r.adult, key)
-        for label, key in (("Valid from", "valid_from"), ("Valid to", "valid_to")):
-            take(label, rate_sheet._date, r.adult, key)
-        child: dict[str, Any] = {}
-        take("Net child", rate_sheet._amount, child, "net_amount")
-        take("Child age max", rate_sheet._age, child, "age_max")
-        if "net_amount" in child:
-            if unit != "person":
-                problems.append(
-                    Problem(SHEET, n, "Net child", "child_rate_per_person", "a child rate needs unit person")
-                )
-            r.child = {
-                "pax_type": "child",
-                **child,
-                **{k: v for k, v in r.adult.items() if k != "net_amount"},
-            }
-        elif "age_max" in child:
-            problems.append(Problem(SHEET, n, "Child age max", "child_rate_missing", "give Net child with its age"))
-        for label in REQUIRED:
-            have = {
-                "Title": r.title,
-                "Places": r.places,
-                "Cut-off hours": "cutoff_hours" in r.rules,
-                "Net adult": "net_amount" in r.adult,
-            }[label]
-            if not have and not any(p.row == n and p.column == label for p in problems):
-                problems.append(Problem(SHEET, n, label, "required", f"{label} is required"))
-        out.append(r)
+        out.append(_row(reader, n, values, problems))
     if not out and not problems:
         problems.append(Problem(SHEET, None, None, "no_rows", "the Activities sheet holds no activity"))
     return out
@@ -260,16 +283,7 @@ async def _place(conn: asyncpg.Connection, token: str) -> tuple[dict[str, Any] |
     return dict(found[0]), None
 
 
-async def _match(conn: asyncpg.Connection, supplier: dict[str, Any], sheet: Sheet) -> None:
-    existing = {
-        (r["title"], r["destination_id"])
-        for r in await conn.fetch(
-            "SELECT lower(btrim(title)) AS title, destination_id::text AS destination_id FROM booking.services"
-            " WHERE supplier_id = $1::uuid AND service_type = 'activity'",
-            supplier["id"],
-        )
-    }
-    seen: set[tuple[str, str | None]] = set()
+async def _resolve_places(conn: asyncpg.Connection, sheet: Sheet) -> None:
     cache: dict[str, tuple[dict[str, Any] | None, str | None]] = {}
     for r in sheet.rows:
         for token in r.places:
@@ -280,6 +294,12 @@ async def _match(conn: asyncpg.Connection, supplier: dict[str, Any], sheet: Shee
                 sheet.problems.append(Problem(SHEET, r.row, "Places", "unknown_place", problem))
             elif place is not None:
                 r.resolved.append(place)
+
+
+def _duplicates(sheet: Sheet, existing: set[tuple[str, str | None]]) -> None:
+    """A title the supplier already has at that place, or twice in the file, is a problem (no silent update)."""
+    seen: set[tuple[str, str | None]] = set()
+    for r in sheet.rows:
         if not r.title or not r.resolved:
             continue
         key = (r.title.strip().lower(), r.resolved[0]["destination_id"])
@@ -292,6 +312,19 @@ async def _match(conn: asyncpg.Connection, supplier: dict[str, Any], sheet: Shee
                 Problem(SHEET, r.row, "Title", "duplicate_row", "the same activity twice in the file")
             )
         seen.add(key)
+
+
+async def _match(conn: asyncpg.Connection, supplier: dict[str, Any], sheet: Sheet) -> None:
+    existing = {
+        (r["title"], r["destination_id"])
+        for r in await conn.fetch(
+            "SELECT lower(btrim(title)) AS title, destination_id::text AS destination_id FROM booking.services"
+            " WHERE supplier_id = $1::uuid AND service_type = 'activity'",
+            supplier["id"],
+        )
+    }
+    await _resolve_places(conn, sheet)
+    _duplicates(sheet, existing)
     if "activity" not in supplier["categories"]:
         sheet.problems.append(
             Problem(
