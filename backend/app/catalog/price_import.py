@@ -21,7 +21,8 @@ importing an unchanged file changes nothing:
 the tour key has a trip plan; codes name an **active** hotel room type (hotel code + room type name, case and spaces
 ignored) or service; a day within the tour's days; no item twice on a day; at most 200 components and 200 price rows
 a tour; prices of one channel and currency do not overlap (dates and pax bands); a selling currency; a departure after
-today with the bk-046 limits; a tour made sellable has components after the import and is in the catalog.
+today with the bk-046 limits; a tour made sellable has components after the import, is in the catalog and has an
+approved price after it (AA-1158 Q9, :mod:`app.catalog.sellable_gate`: ``no_approved_price``).
 
 **Writing** (one transaction, through the services of the single forms, so every rule and audit row is the same):
 ``plan_components.replace_components`` (no write when the set is unchanged), a draft price version per tour with
@@ -58,7 +59,7 @@ from app import audit
 from app.auth.staff import Staff
 from app.b2b import departures, plan_components
 from app.b2b.tariff import FORMULA_START
-from app.catalog import cost_sheet, price_readiness, price_versions, price_workbench, trip_plan_prices
+from app.catalog import cost_sheet, price_readiness, price_versions, sellable_gate, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Forbidden, Invalid
 from app.pricing import engine
@@ -709,6 +710,7 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
     facts = await price_readiness.load(conn, today, [p.id for p in plans.values()])
     before = {r["tour_key"]: r for r in await price_readiness.resolve(conn, facts, facts.rated)}
     after = await status_after(conn, plans, facts, today)
+    await sellable_gate.check_import(conn, sheets, plans, after, today, sheet=TOURS, refuse=_raise)
     tours: list[dict[str, Any]] = []
     for plan in plans.values():
         existing = [dict(r) for r in await conn.fetch(trip_plan_prices.ROWS_SQL, plan.id)]
@@ -766,6 +768,7 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
             async with conn.transaction():
                 await cost_sheet.recompute_plan(conn, plan.id, pricing)
             recomputed += 1
+    await sellable_gate.apply_import(conn, staff, plans, today, sheet=TOURS)
     await audit.record(
         conn,
         actor_type="staff",
@@ -814,10 +817,6 @@ async def _apply(
                     "sales_cutoff_days": d.get("sales_cutoff_days") or 0,
                     "decision_days_before": d.get("decision_days_before"),
                 },
-            )
-        if plan.sellable_after is not None and plan.sellable_after != plan.sellable:
-            await price_workbench.set_sellable(
-                conn, staff, {"id": plan.id, "source_id": plan.key, "sellable": plan.sellable}, plan.sellable_after
             )
     return drafts
 

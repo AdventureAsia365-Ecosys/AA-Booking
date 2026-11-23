@@ -300,3 +300,25 @@ def catalog_read_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[QueryRecorde
             "catalog read parses every itinerary (AA-996 perf guard; key parse-backed views by tour_id):\n"
             + "\n".join(problems)
         )
+
+
+# ── AA-1158 (bk-064): fixture shortcuts past the approval rules the API now enforces ─────────────────────────────────
+# A fixture connection as aa_cis_admin is a member of bk_owner, which the bk-064 shape guards exempt (as DB Migrate
+# run-script): these set up state a test needs, never what the test checks (tests/integration/test_aa1158_* do).
+
+
+async def activate_supplier(conn: asyncpg.Connection, supplier_ref: str) -> None:
+    """Activate a pending supplier as the owner connection (no second person; the rule is tested elsewhere)."""
+    await conn.execute(
+        "UPDATE booking.suppliers SET status = 'active' WHERE id::text = $1 OR code = $1",
+        supplier_ref,
+    )
+
+
+async def make_sellable(conn: asyncpg.Connection, source_id: str, sellable: bool = True) -> None:
+    """Switch a fixture trip plan sellable without the AA-1158 Q9 price gate (the gate is tested elsewhere)."""
+    await conn.execute(
+        "UPDATE booking.trip_plans SET sellable = $2 WHERE source_system = 'cis' AND source_id = $1",
+        source_id,
+        sellable,
+    )

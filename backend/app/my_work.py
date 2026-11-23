@@ -16,6 +16,14 @@ due date among them (``earliest_due``), and the query string of the list page th
     agency_payments_to_approve  agency_payment.approve  approve   /agency-billing?tab=payments&approvable=me
                                                                   (state default: recorded)
     stop_sales_to_review        stop_sale.approve       approve   /stop-sales?review=me
+    suppliers_to_activate       supplier.activate       approve   /suppliers?status=pending&approvable=me
+    billing_changes_to_approve  billing_config.approve  approve   /agency-billing?tab=settings&approvable=me
+    owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&since=<month>
+
+AA-1158: ``owner_self_approvals`` counts the business-owner self-approvals of the current UTC calendar month (audit
+rows with ``owner_self_approved``). It is shown to every ``audit.read`` holder, not only to the marker holder, so the
+oversight never rests with the person it lists. The approval tiles include the business owner's own items when she may
+self-approve (:mod:`app.auth.self_approval`).
 
 The approval tiles count only the items the caller may act on (maker-checker: not entered, last changed, recorded or
 asked to end by them), with the same ``approvable=me`` / ``review=me`` filter their page applies.
@@ -45,12 +53,16 @@ from typing import Any
 
 import asyncpg
 
+from app import audit
+from app.agency_billing import entity_changes
 from app.agency_billing import invoices as agency_invoices
 from app.agency_billing import payments as agency_payments
+from app.auth import self_approval
 from app.auth.staff import Staff
 from app.b2b import desk
 from app.errors import Forbidden, Unavailable
-from app.ops import bill_filters, supplier_bills, trip_checks
+from app.ops import bill_approvals, bill_filters, supplier_bills, trip_checks
+from app.suppliers import service as suppliers
 from app.supply import restrictions
 from app.trip_cases import service as trip_cases
 
@@ -97,15 +109,34 @@ async def _agency_invoices_overdue(conn: asyncpg.Connection, _: Staff) -> dict[s
 
 
 async def _bills_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    return await supplier_bills.queue(conn, status="received", actionable_by=staff.cis_user_id)
+    owner = await bill_approvals.owner_paths(conn, staff)
+    return await supplier_bills.queue(
+        conn, status="received", actionable_by=staff.cis_user_id, owner_approve=owner.approve, owner_pay=owner.pay
+    )
 
 
 async def _bills_to_pay(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    return await supplier_bills.queue(conn, status="approved", actionable_by=staff.cis_user_id)
+    owner = await bill_approvals.owner_paths(conn, staff)
+    return await supplier_bills.queue(
+        conn, status="approved", actionable_by=staff.cis_user_id, owner_approve=owner.approve, owner_pay=owner.pay
+    )
 
 
 async def _agency_payments_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    return await agency_payments.queue(conn, state="recorded", actionable_by=staff.cis_user_id)
+    owner = await self_approval.may_self_approve(conn, staff)
+    return await agency_payments.queue(conn, state="recorded", actionable_by=staff.cis_user_id, owner=owner)
+
+
+async def _suppliers_to_activate(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await suppliers.queue(conn, staff)
+
+
+async def _billing_changes_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await entity_changes.queue(conn, staff)
+
+
+async def _owner_self_approvals(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
+    return await audit.owner_self_approvals_month(conn)
 
 
 async def _stop_sales_to_review(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
@@ -158,6 +189,21 @@ TILES: tuple[Tile, ...] = (
         {"tab": "payments", "approvable": "me"},
     ),
     Tile("stop_sales_to_review", "stop_sale.approve", APPROVE, _stop_sales_to_review, {"review": "me"}),
+    Tile(
+        "suppliers_to_activate",
+        "supplier.activate",
+        APPROVE,
+        _suppliers_to_activate,
+        {"status": "pending", "approvable": "me"},
+    ),
+    Tile(
+        "billing_changes_to_approve",
+        "billing_config.approve",
+        APPROVE,
+        _billing_changes_to_approve,
+        {"tab": "settings", "approvable": "me"},
+    ),
+    Tile("owner_self_approvals", "audit.read", WORK, _owner_self_approvals, {"owner_self_approved": "true"}),
 )
 CAPABILITIES: tuple[str, ...] = tuple(dict.fromkeys(t.capability for t in TILES))
 
@@ -196,6 +242,7 @@ async def _one(conn: asyncpg.Connection, staff: Staff, tile: Tile) -> dict[str, 
         "oldest_at": _iso(got.get("oldest_at")),
         "earliest_due": _iso(got.get("earliest_due")),
         "days": got.get("days"),
+        **({"filter": {**base["filter"], **got["filter"]}} if got.get("filter") else {}),
     }
 
 

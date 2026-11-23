@@ -218,6 +218,26 @@ export interface BillingEntity {
   payment_instructions: string | null;
   is_default: boolean;
   active: boolean;
+  /** AA-1158: the waiting change of the payment details and / or the default flag (applies on approval). */
+  pending_change?: EntityChange | null;
+}
+
+/** AA-1158 (bk-064): a requested change of a billing entity's payment details and / or default flag. */
+export interface EntityChange {
+  id: string;
+  billing_entity_id: string;
+  set_payment_instructions: boolean;
+  payment_instructions: string | null;
+  make_default: boolean;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  requested_by: string;
+  requested_by_name?: string | null;
+  requested_at: IsoDateTime;
+  decided_by: string | null;
+  decided_at: IsoDateTime | null;
+  reject_reason: string | null;
+  owner_self_approved: boolean;
 }
 
 export interface TaxRule {
@@ -285,6 +305,13 @@ export const agencyBillingApi = {
   createEntity: (body: Partial<BillingEntity>) => bkSend<BillingEntity>("billing-entities", { body }),
   updateEntity: (id: string, body: Partial<BillingEntity>) =>
     bkSend<BillingEntity>(`billing-entities/${enc(id)}`, { method: "PATCH", body }),
+  // AA-1158: payment details and the default flag change through a pending change a second person approves.
+  requestEntityChange: (
+    id: string,
+    body: { set_payment_instructions: boolean; payment_instructions?: string | null; make_default: boolean; reason: string },
+  ) => bkSend<EntityChange>(`billing-entities/${enc(id)}/changes`, { body }),
+  decideEntityChange: (changeId: string, action: "approve" | "reject" | "withdraw", reason?: string) =>
+    bkSend<EntityChange>(`billing-entity-changes/${enc(changeId)}/decision`, { body: { action, reason: reason || undefined } }),
   taxRules: () => bkGet<{ items: TaxRule[] }>("tax-rules"),
   createTaxRule: (body: Partial<TaxRule>) => bkSend<TaxRule>("tax-rules", { body }),
   updateTaxRule: (id: string, body: Partial<TaxRule>) =>

@@ -22,6 +22,9 @@ the process cache on every save (:func:`forget`), the other tasks pick a change 
 
 The owner marker (``is_owner``) gates the role editor (R4.4, :mod:`app.auth.role_editor`). It is read from the same
 view, uncached (:func:`is_owner`): an owner change in CIS applies to the next editor write.
+
+The business-owner marker (``is_business_owner``, AA-1158) lets its holder approve her own work, flagged
+(:mod:`app.auth.self_approval`). It is read the same way (:func:`is_business_owner`): uncached, fail closed.
 """
 
 from __future__ import annotations
@@ -270,3 +273,15 @@ async def is_owner(conn: asyncpg.Connection | asyncpg.Pool, cognito_sub: str | N
     except Unavailable:
         return False
     return grant is not None and grant.is_owner
+
+
+async def is_business_owner(conn: asyncpg.Connection | asyncpg.Pool, cognito_sub: str | None) -> bool:
+    """The CIS ``is_business_owner`` marker of this identity (AA-1158), uncached; False when there is no identity, no
+    row or the view cannot be read (fail closed: a self-approval is then refused, a normal approval is untouched)."""
+    if not cognito_sub:
+        return False
+    try:
+        grant = await read_grant(conn, cognito_sub)
+    except Unavailable:
+        return False
+    return grant is not None and grant.is_business_owner

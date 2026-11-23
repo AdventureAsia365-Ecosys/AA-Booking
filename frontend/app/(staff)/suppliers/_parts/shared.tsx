@@ -1,5 +1,5 @@
 // app/(staff)/suppliers/_parts/shared.tsx — labels, badges and error copy shared by the supplier pages (AA-822).
-// Categories are the six rate types of ADR 0005 (Q20); record status active / inactive is UI spec §1.3
+// Categories are the six rate types of ADR 0005 (Q20); record status pending / active / inactive is UI spec §1.3
 // ("Record" row); contract phases are computed by the API on the UTC day.
 
 import { ApiError } from "@/lib/api/client";
@@ -18,6 +18,7 @@ export const CATEGORY_LABEL: Record<SupplierCategory, string> = {
 };
 
 const STATUS_META: Record<SupplierStatus, { label: string; tone: BookingTone }> = {
+  pending: { label: "Pending approval", tone: "warning" },
   active: { label: "Active", tone: "success" },
   inactive: { label: "Inactive", tone: "neutral" },
 };
@@ -78,7 +79,7 @@ const FRIENDLY: Record<string, string> = {
   catalog_unavailable: "The CIS catalog cannot be read right now, so the place cannot be checked. Try again later.",
   supplier_has_contracts: "This supplier has a published contract in force or starting later. Expire it before deactivating.",
   supplier_inactive: "Activate the supplier first.",
-  maker_checker: "A contract is published by someone other than the person who created or last edited it.",
+  maker_checker: "A second person approves this: you made or edited it.",
   contract_locked: "A published contract is fixed. Create a new contract for new terms.",
   contract_not_draft: "Only a draft can be published.",
   contract_not_published: "Only a published contract can be expired.",

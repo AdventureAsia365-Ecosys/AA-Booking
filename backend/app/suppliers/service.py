@@ -3,14 +3,18 @@
 Suppliers
     The master record of a company Booking buys from. All commercial. Addressed by UUID or ``SUP-000123``.
     Never deleted: ``deactivate`` / ``activate`` only, and deactivate is refused (409 ``supplier_has_contracts``)
-    while a published contract is in force or upcoming. ``destination_id`` is a CIS place checked against
-    ``catalog.v_destination`` (``app.catalog``); when it maps to an ISO country the supplier's ``country_code``
-    must agree (it is filled in when empty).
+    while a published contract is in force or upcoming. AA-1158 (R5, bk-064): every new supplier starts
+    ``pending``, whoever creates it; a second person with ``supplier.activate`` activates it (``activated_by`` /
+    ``activated_at``), never its creator (403 ``maker_checker`` + bk-064 CHECK), except the business owner, flagged
+    ``owner_self_approved`` (:mod:`app.auth.self_approval`). Deactivating a pending supplier rejects it.
+    ``destination_id`` is a CIS place checked against ``catalog.v_destination`` (``app.catalog``); when it maps to an
+    ISO country the supplier's ``country_code`` must agree (it is filled in when empty).
 
 Contracts
     Terms of one supplier for a period: validity, the supplier currency, payment terms, cancellation policy.
-    ``draft`` (editable) → ``published`` (fixed; by a second person: maker-checker, ADR 0005 d8 — not the last writer
-    of the terms, see ``maker``) → ``expired``.
+    ``draft`` (editable) → ``published`` (fixed; by a second person: maker-checker, ADR 0005 d8 — AA-1158 R4: by no
+    one in ``writers``, every staff key that wrote the draft, kept by the bk-064 trigger; the business owner may
+    publish her own draft, flagged) → ``expired``.
     New terms are a new contract (ADR 0005 d2 "never overwrite"). The DB enforces the same rules (bk-008 CHECK and
     lock trigger); the API answers first with 403 / 409.
 
@@ -26,11 +30,12 @@ from typing import Any
 import asyncpg
 
 from app import audit, catalog, paging
+from app.auth import self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 
 CATEGORIES = ("hotel", "transport", "guide", "entrance", "activity", "meal")
-STATUSES = ("active", "inactive")
+STATUSES = ("pending", "active", "inactive")
 SORTS = {"company_name": "lower(s.company_name)", "updated_at": "s.updated_at", "created_at": "s.created_at"}
 TEXT_FIELDS = (
     "website",
@@ -78,6 +83,7 @@ SUPPLIER_COLUMNS = f"""
     s.address, s.region, s.postal_code, s.destination_id::text AS destination_id,
     s.country_code::text AS country_code, co.name AS country_name, s.status,
     s.created_by, s.updated_by, s.created_at, s.updated_at,
+    s.activated_by, s.activated_at, s.owner_self_approved,
     (SELECT count(*) FROM booking.supplier_contracts k WHERE k.supplier_id = s.id AND {IN_FORCE})
         AS contracts_in_force
 """  # noqa: S608 — constants only
@@ -95,7 +101,8 @@ CONTRACT_COLUMNS = f"""
     END AS phase,
     k.created_by, cb.name AS created_by_name, k.updated_by, ub.name AS updated_by_name,
     k.published_by, pb.name AS published_by_name, k.published_at,
-    k.expired_by, eb.name AS expired_by_name, k.expired_at, k.created_at, k.updated_at
+    k.expired_by, eb.name AS expired_by_name, k.expired_at, k.created_at, k.updated_at,
+    k.writers, k.owner_self_approved
 """
 CONTRACT_FROM = """
     booking.supplier_contracts k
@@ -215,7 +222,10 @@ async def list_suppliers(
     sort: str | None = None,
     limit: int = 25,
     offset: int = 0,
+    approvable_by: Staff | None = None,
 ) -> dict[str, Any]:
+    """``approvable_by`` (``approvable=me``): pending suppliers that person may activate now (made by someone else,
+    or by them when they may self-approve; empty without ``supplier.activate``)."""
     where: list[str] = []
     args: list[Any] = []
 
@@ -227,6 +237,8 @@ async def list_suppliers(
         if status not in STATUSES:
             raise Invalid("unknown_status", f"status must be one of {', '.join(STATUSES)}")
         add("s.status = {p}", status)
+    if approvable_by is not None:
+        await _approvable(conn, approvable_by, where, add)
     if category:
         if category not in CATEGORIES:
             raise Invalid("unknown_category", f"category must be one of {', '.join(CATEGORIES)}")
@@ -256,20 +268,48 @@ async def list_suppliers(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+async def _approvable(conn: asyncpg.Connection, staff: Staff, where: list[str], add: Any) -> None:
+    """``approvable=me``: pending, and not made by the caller unless they may self-approve (none without the right)."""
+    where.append("s.status = 'pending'")
+    if not staff.can("supplier.activate"):
+        where.append("false")
+    elif not await self_approval.may_self_approve(conn, staff):
+        add("s.created_by IS DISTINCT FROM {p}", staff.cis_user_id)
+
+
+async def queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    """AA-1158 My work: the pending suppliers ``staff`` may activate now (the ``approvable=me`` list) and the oldest."""
+    args: list[Any] = []
+    where = "s.status = 'pending'"
+    if not staff.can("supplier.activate"):
+        where += " AND false"
+    elif not await self_approval.may_self_approve(conn, staff):
+        args.append(staff.cis_user_id)
+        where += " AND s.created_by IS DISTINCT FROM $1"
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(s.created_at) AS oldest_at FROM booking.suppliers s WHERE {where}",  # noqa: S608
+        *args,
+    )
+    return dict(row)
+
+
 async def summary(conn: asyncpg.Connection) -> dict[str, Any]:
-    """KPI strip (module spec 08 conflict 8): total, active, inactive, countries, contracts ending within 30 days."""
+    """KPI strip (module spec 08 conflict 8): total, active, inactive, pending, countries, contracts ending within 30
+    days."""
     row = await conn.fetchrow(
         f"""
         SELECT count(*) AS total,
                count(*) FILTER (WHERE s.status = 'active') AS active,
                count(*) FILTER (WHERE s.status = 'inactive') AS inactive,
+               count(*) FILTER (WHERE s.status = 'pending') AS pending,
                count(DISTINCT s.country_code) AS countries,
                (SELECT count(*) FROM booking.supplier_contracts k
                 WHERE {IN_FORCE} AND k.valid_to IS NOT NULL AND k.valid_to < {TODAY} + 30) AS contracts_ending_30d
         FROM booking.suppliers s
         """  # noqa: S608 — constants only
     )
-    return dict(row) if row else {"total": 0, "active": 0, "inactive": 0, "countries": 0, "contracts_ending_30d": 0}
+    empty = {"total": 0, "active": 0, "inactive": 0, "pending": 0, "countries": 0, "contracts_ending_30d": 0}
+    return dict(row) if row else empty
 
 
 async def resolve_supplier(conn: asyncpg.Connection, ref: str, *, lock: bool = False) -> dict[str, Any]:
@@ -284,8 +324,24 @@ async def resolve_supplier(conn: asyncpg.Connection, ref: str, *, lock: bool = F
     return _row(row)
 
 
-async def get_supplier(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
+async def activation(conn: asyncpg.Connection, staff: Staff | None, supplier: dict[str, Any]) -> dict[str, Any]:
+    """What the caller may do about activating ``supplier`` (the drawer follows it; the write re-checks)."""
+    blockers: list[str] = []
+    self_approval_needed = False
+    if supplier.get("status") == "active":
+        blockers.append("already_active")
+    if staff is None or not staff.can("supplier.activate"):
+        blockers.append("needs_supplier_activate")
+    elif staff.cis_user_id == supplier.get("created_by"):
+        self_approval_needed = True
+        if not await self_approval.may_self_approve(conn, staff):
+            blockers.append("maker_checker")
+    return {"allowed": not blockers, "self_approval": self_approval_needed and not blockers, "blockers": blockers}
+
+
+async def get_supplier(conn: asyncpg.Connection, ref: str, staff: Staff | None = None) -> dict[str, Any]:
     supplier = (await place_names(conn, [await resolve_supplier(conn, ref)]))[0]
+    supplier["actions"] = {"activate": await activation(conn, staff, supplier)}
     counts = await conn.fetchrow(
         f"""
         SELECT count(*) AS total,
@@ -325,16 +381,15 @@ async def get_supplier(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
 
 
 async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str, Any]) -> dict[str, Any]:
-    """A new supplier starts ``active`` only for a holder of ``supplier.activate`` (AA-1150): a maker with
-    ``supply.write`` alone creates it ``inactive``, so activation stays an approval (the column default is ``active``,
-    hence the explicit value)."""
+    """A new supplier starts ``pending`` whoever creates it (AA-1158 R5): activation is a second step by another person
+    (the column default is ``active`` until the part 2 migration, hence the explicit value)."""
     values = normalize({k: v for k, v in data.items() if k in EDITABLE})
     if "company_name" not in values:
         raise Invalid("company_name_required", "a supplier needs a company name")
     if "categories" not in values:
         raise Invalid("category_required", "a supplier needs at least one category")
     values.update(await check_place(conn, values, set(values)))
-    values["status"] = "active" if staff.can("supplier.activate") else "inactive"
+    values["status"] = "pending"
     columns = [*(k for k in EDITABLE if k in values), "status"]
     marks = ", ".join(f"${i + 1}" + ("::uuid" if c == "destination_id" else "") for i, c in enumerate(columns))
     try:
@@ -355,8 +410,7 @@ async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str
         entity_id=row["id"],
         after={"code": row["code"], **{c: values[c] for c in columns}},
         entity_label=f"{row['code']} {values['company_name']}",
-        summary=f"Created supplier {values['company_name']}"
-        + ("" if values["status"] == "active" else " (inactive until approved)"),
+        summary=f"Created supplier {values['company_name']} (pending approval)",
     )
     return {"id": row["id"], "code": row["code"]}
 
@@ -415,61 +469,101 @@ async def update_supplier(conn: asyncpg.Connection, staff: Staff, ref: str, chan
 async def set_status(
     conn: asyncpg.Connection, staff: Staff, ref: str, target: str, reason: str | None = None
 ) -> dict[str, Any]:
-    """``active`` / ``inactive``. Deactivating is refused while a published contract is in force or upcoming.
-    Activating is an approval (AA-1150): it needs ``supplier.activate`` on top of the route's ``supply.write``."""
-    if target not in STATUSES:
-        raise Invalid("unknown_status", f"status must be one of {', '.join(STATUSES)}")
+    """``active`` / ``inactive`` (``pending`` is only where a supplier starts). Deactivating is refused while a
+    published contract is in force or upcoming; deactivating a pending supplier rejects it (its creator withdraws it).
+    Activating is an approval (AA-1150, AA-1158 R5): it needs ``supplier.activate`` on top of the route's
+    ``supply.write``, and never by the supplier's creator (403 ``maker_checker``) unless the business owner, flagged."""
+    if target not in ("active", "inactive"):
+        raise Invalid("unknown_status", "status must be active or inactive (a supplier starts pending)")
     if target == "active" and not staff.can("supplier.activate"):
         raise Forbidden("forbidden", "activating a supplier needs supplier.activate (an approval, not a write)")
     current = await resolve_supplier(conn, ref, lock=True)
     if current["status"] == target:
         return {**current, "changed": []}
-    if target == "inactive":
-        live = await conn.fetch(
-            f"SELECT k.id::text AS id, k.title FROM booking.supplier_contracts k"  # noqa: S608 — constants
-            f" WHERE k.supplier_id = $1::uuid AND {LIVE_CONTRACT} ORDER BY k.valid_from",
-            current["id"],
+    flagged = False
+    if target == "active":
+        flagged = await self_approval.check(
+            conn,
+            staff,
+            [current["created_by"]],
+            message="a supplier is activated by someone other than the person who created it",
         )
-        if live:
-            raise Conflict(
-                "supplier_has_contracts",
-                "a supplier with a published contract in force or upcoming cannot be deactivated; expire it first",
-                contracts=[{"id": r["id"], "title": r["title"]} for r in live],
-            )
-    await conn.execute(
-        "UPDATE booking.suppliers SET status = $2, updated_by = $3 WHERE id = $1::uuid",
-        current["id"],
-        target,
-        staff.cis_user_id,
-    )
+        sql = (
+            "UPDATE booking.suppliers SET status = 'active', activated_by = $2, activated_at = now(),"
+            " owner_self_approved = $3, updated_by = $2 WHERE id = $1::uuid"
+        )
+        args: tuple[Any, ...] = (current["id"], staff.cis_user_id, flagged)
+        action = "supplier.activated"
+    else:
+        await _no_live_contract(conn, current["id"])
+        sql = "UPDATE booking.suppliers SET status = 'inactive', updated_by = $2 WHERE id = $1::uuid"
+        args = (current["id"], staff.cis_user_id)
+        action = "supplier.deactivated"
+        if current["status"] == "pending":
+            action = "supplier.withdrawn" if staff.cis_user_id == current["created_by"] else "supplier.rejected"
+    try:
+        await conn.execute(sql, *args)
+    except asyncpg.CheckViolationError as exc:  # the DB backstop of the maker-checker rule (bk-064)
+        raise Forbidden("maker_checker", "a supplier is activated by a second person") from exc
     note = (reason or "").strip() or None
+    after: dict[str, Any] = {"status": target, **({"reason": note} if note else {})}
+    if flagged:
+        after["owner_self_approved"] = True
     await audit.record(
         conn,
         actor_type="staff",
         actor_ref=staff.cis_user_id,
-        action="supplier.deactivated" if target == "inactive" else "supplier.activated",
+        action=action,
         entity_type="supplier",
         entity_id=current["id"],
         before={"status": current["status"]},
-        after={"status": target, **({"reason": note} if note else {})},
+        after=after,
         entity_label=_label(current),
-        summary=("Deactivated" if target == "inactive" else "Activated") + (f": {note}" if note else ""),
+        summary=STATUS_SUMMARY[action]
+        + (" (business-owner self-approval)" if flagged else "")
+        + (f": {note}" if note else ""),
     )
     updated = await resolve_supplier(conn, current["id"])
     return {**updated, "changed": ["status"]}
 
 
+STATUS_SUMMARY = {
+    "supplier.activated": "Activated",
+    "supplier.deactivated": "Deactivated",
+    "supplier.rejected": "Rejected",
+    "supplier.withdrawn": "Withdrawn",
+}
+
+
+async def _no_live_contract(conn: asyncpg.Connection, supplier_id: str) -> None:
+    live = await conn.fetch(
+        f"SELECT k.id::text AS id, k.title FROM booking.supplier_contracts k"  # noqa: S608 — constants
+        f" WHERE k.supplier_id = $1::uuid AND {LIVE_CONTRACT} ORDER BY k.valid_from",
+        supplier_id,
+    )
+    if live:
+        raise Conflict(
+            "supplier_has_contracts",
+            "a supplier with a published contract in force or upcoming cannot be deactivated; expire it first",
+            contracts=[{"id": r["id"], "title": r["title"]} for r in live],
+        )
+
+
 # ── Contracts ────────────────────────────────────────────────────────────────
 
 
-async def list_contracts(conn: asyncpg.Connection, ref: str) -> dict[str, Any]:
+async def list_contracts(conn: asyncpg.Connection, ref: str, staff: Staff | None = None) -> dict[str, Any]:
     supplier = await resolve_supplier(conn, ref)
     rows = await conn.fetch(
         f"SELECT {CONTRACT_COLUMNS} FROM {CONTRACT_FROM}"  # noqa: S608 — constants
         " WHERE k.supplier_id = $1::uuid ORDER BY k.valid_from DESC, k.created_at DESC",
         supplier["id"],
     )
-    return {"items": [dict(r) for r in rows]}
+    items = [dict(r) for r in rows]
+    for item in items:
+        if item["status"] == "draft":
+            item["actions"] = {"publish": await publication(conn, staff, item)}
+    return {"items": items}
 
 
 async def get_contract(conn: asyncpg.Connection, contract_id: str, *, lock: bool = False) -> dict[str, Any]:
@@ -502,9 +596,33 @@ def _check_validity(valid_from: date, valid_to: date | None) -> None:
         raise Invalid("invalid_validity", "valid_to must be on or after valid_from")
 
 
-def maker(contract: dict[str, Any]) -> str:
-    """The maker of a draft: its last editor, or its creator while nobody edited it (bk-008 maker-checker CHECK)."""
-    return contract["updated_by"] or contract["created_by"]
+def writers(contract: dict[str, Any]) -> list[str]:
+    """Every staff key that wrote the draft (bk-064 trigger; a contract published before bk-064 has none stored, so
+    its last writer stands in)."""
+    stored = list(contract.get("writers") or [])
+    return stored or [w for w in (contract.get("updated_by"), contract.get("created_by")) if w]
+
+
+async def publication(conn: asyncpg.Connection, staff: Staff | None, contract: dict[str, Any]) -> dict[str, Any]:
+    """What the caller may do about publishing ``contract`` (the drawer follows it; the write re-checks)."""
+    blockers: list[str] = []
+    self_approval_needed = False
+    if contract.get("status") != "draft":
+        blockers.append("not_draft")
+    if staff is None or not staff.can("contract.publish"):
+        blockers.append("needs_contract_publish")
+    elif staff.cis_user_id in writers(contract):
+        self_approval_needed = True
+        if not await self_approval.may_self_approve(conn, staff):
+            blockers.append("maker_checker")
+    return {"allowed": not blockers, "self_approval": self_approval_needed and not blockers, "blockers": blockers}
+
+
+PUBLISH = (
+    "UPDATE booking.supplier_contracts SET status = 'published', published_by = $2, published_at = now(),"
+    " owner_self_approved = false"
+)
+PUBLISH_FLAGGED = PUBLISH.replace("owner_self_approved = false", "owner_self_approved = true")
 
 
 def _contract_label(supplier: dict[str, Any], title: str) -> str:
@@ -514,7 +632,7 @@ def _contract_label(supplier: dict[str, Any], title: str) -> str:
 async def create_contract(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[str, Any]) -> dict[str, Any]:
     supplier = await resolve_supplier(conn, ref, lock=True)
     if supplier["status"] != "active":
-        raise Conflict("supplier_inactive", "activate the supplier before adding a contract")
+        raise Conflict("supplier_inactive", "activate the supplier before adding a contract (a second person)")
     values = _normalize_contract({k: v for k, v in data.items() if k in CONTRACT_EDITABLE})
     missing = [k for k in CONTRACT_REQUIRED if values.get(k) is None]
     if missing:
@@ -605,13 +723,15 @@ async def _move(
             raise Conflict("contract_not_draft", f"only a draft can be published (this one is {current['status']})")
         if supplier["status"] != "active":
             raise Conflict("supplier_inactive", "activate the supplier before publishing its contract")
-        if staff.cis_user_id == maker(current):
-            raise Forbidden(
-                "maker_checker",
-                "a contract is published by someone other than the person who last wrote its terms",
-            )
-        sql = "UPDATE booking.supplier_contracts SET status = 'published', published_by = $2, published_at = now()"
+        flagged = await self_approval.check(
+            conn,
+            staff,
+            writers(current),
+            message="a contract is published by someone who wrote none of its terms",
+        )
+        sql = PUBLISH_FLAGGED if flagged else PUBLISH
     else:
+        flagged = False
         if current["status"] != "published":
             raise Conflict(
                 "contract_not_published", f"only a published contract can expire (this one is {current['status']})"
@@ -629,8 +749,10 @@ async def _move(
         entity_type="supplier_contract",
         entity_id=current["id"],
         before={"status": current["status"]},
-        after={"status": status},
+        after={"status": status, **({"owner_self_approved": True} if flagged else {})},
         entity_label=_contract_label(supplier, current["title"]),
-        summary=("Published" if status == "published" else "Expired") + f" contract {current['title']}",
+        summary=("Published" if status == "published" else "Expired")
+        + f" contract {current['title']}"
+        + (" (business-owner self-approval)" if flagged else ""),
     )
     return {**(await get_contract(conn, current["id"])), "changed": ["status"]}

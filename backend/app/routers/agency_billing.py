@@ -14,6 +14,10 @@ of bk-038). Not in preview sessions; the E2E session stays read-only (global rul
 - ``GET /agency-billing/status`` (the billing status of every agency, ``booking.v_tenant_billing_status``)
 - ``POST /agency-billing/runs`` (queue a draft job) · ``GET /agency-billing/runs``
 - ``GET|POST /billing-entities``, ``PATCH /billing-entities/{id}`` · ``GET|POST /tax-rules``, ``PATCH /tax-rules/{id}``
+- AA-1158: ``POST /billing-entities/{id}/changes`` (new payment details and / or default flag, pending) ·
+  ``POST /billing-entity-changes/{id}/decision`` (``approve`` / ``reject`` with ``billing_config.approve``, never the
+  requester unless the business owner, flagged; ``withdraw`` by the requester). A create or PATCH that sends
+  ``payment_instructions`` or ``is_default`` answers with ``pending_change`` instead of applying them.
 - ``GET /billing-terms`` · ``PUT /billing-terms/default`` · ``PUT|DELETE /billing-terms/agencies/{tenant_id}``
 - ``GET|PUT|DELETE /tour-terms/{source_id}`` (AA-1075 bk-18): a tour's deposit % and balance days, for every agency
   or one (``tenant_id``); writes ``billing_config.write``
@@ -33,8 +37,10 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agency_billing import clauses, config, drafts, export, invoices, payments
+from app.agency_billing import clauses, config, drafts, entity_changes, export, invoices, payments
+from app.auth import self_approval
 from app.auth.staff import Staff, get_pool, require
+from app.errors import Forbidden
 
 router = APIRouter(prefix="/booking", tags=["agency-billing"])
 
@@ -116,6 +122,8 @@ class BillingEntityIn(BaseModel):
     invoice_inbox: str | None = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+$")
     payment_instructions: Text | None = None
     is_default: bool = False
+    # AA-1158: why the payment details / default flag change (they become a pending change a second person approves).
+    change_reason: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class BillingEntityChanges(BaseModel):
@@ -129,6 +137,25 @@ class BillingEntityChanges(BaseModel):
     payment_instructions: Text | None = None
     is_default: bool | None = None
     active: bool | None = None
+    change_reason: str | None = Field(default=None, min_length=1, max_length=300)
+
+
+class EntityChangeIn(BaseModel):
+    """AA-1158: ask for new payment details and / or the default flag (pending until a second person approves)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    set_payment_instructions: bool = False
+    payment_instructions: Text | None = None
+    make_default: bool = False
+    reason: str = Field(min_length=1, max_length=300)
+
+
+class EntityChangeDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["approve", "reject", "withdraw"]
+    reason: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class TaxRuleIn(BaseModel):
@@ -291,15 +318,16 @@ async def list_agency_payments(
 ) -> dict[str, Any]:
     mine = staff.cis_user_id if approvable == "me" else None
     async with pool.acquire() as conn:
+        owner = bool(mine) and await self_approval.may_self_approve(conn, staff)
         return await payments.list_payments(
-            conn, state=state, invoice=invoice, actionable_by=mine, limit=limit, offset=offset
+            conn, state=state, invoice=invoice, actionable_by=mine, limit=limit, offset=offset, owner=owner
         )
 
 
 @router.post("/agency-payments/{payment_id}/approve")
 async def approve_agency_payment(payment_id: UUID, staff: CanApprove, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await payments.approve(conn, str(payment_id), staff.cis_user_id)
+        return await payments.approve(conn, str(payment_id), staff)
 
 
 @router.post("/agency-payments/{payment_id}/reject")
@@ -307,7 +335,7 @@ async def reject_agency_payment(
     payment_id: UUID, body: AgencyReasonIn, staff: CanApprove, pool: Pool
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await payments.reject(conn, str(payment_id), body.reason, staff.cis_user_id)
+        return await payments.reject(conn, str(payment_id), body.reason, staff)
 
 
 # ── Status and runs ──────────────────────────────────────────────────────────
@@ -362,6 +390,33 @@ async def update_billing_entity(entity_id: UUID, body: BillingEntityChanges, sta
                                 ) -> dict[str, Any]:  # fmt: skip
     async with pool.acquire() as conn:
         return await config.update_entity(conn, str(entity_id), body.model_dump(exclude_unset=True), staff.cis_user_id)
+
+
+@router.post("/billing-entities/{entity_id}/changes", status_code=201)
+async def request_billing_entity_change(
+    entity_id: UUID, body: EntityChangeIn, staff: CanConfigure, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        return await entity_changes.request(
+            conn,
+            staff.cis_user_id,
+            str(entity_id),
+            set_payment_instructions=body.set_payment_instructions,
+            payment_instructions=body.payment_instructions,
+            make_default=body.make_default,
+            reason=body.reason,
+        )
+
+
+@router.post("/billing-entity-changes/{change_id}/decision")
+async def decide_billing_entity_change(
+    change_id: UUID, body: EntityChangeDecision, staff: CanRead, pool: Pool
+) -> dict[str, Any]:
+    """Approve / reject (``billing_config.approve``) or withdraw (the requester, ``billing_config.write``)."""
+    if body.action == "withdraw" and not staff.can("billing_config.write"):
+        raise Forbidden("forbidden", "withdrawing a billing entity change needs billing_config.write")
+    async with pool.acquire() as conn:
+        return await entity_changes.decide(conn, staff, str(change_id), body.action, body.reason)
 
 
 @router.get("/tax-rules")

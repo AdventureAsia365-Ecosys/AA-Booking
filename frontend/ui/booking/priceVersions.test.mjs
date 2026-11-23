@@ -58,3 +58,14 @@ test("every decision but an approval needs a reason", () => {
   );
   assert.equal(needsReason("approve_plan_calendar"), false);
 });
+
+test("AA-1158: the business owner approves her own pending work, never rejects it", () => {
+  const pending = { status: "pending", created_by: who("owner") };
+  assert.deepEqual(versionActions(pending, "owner", true, true, true), ["approve", "withdraw"]);
+  assert.deepEqual(versionActions(pending, "owner", true, true, false), ["withdraw"]);
+  assert.deepEqual(versionActions({ status: "published", created_by: who("owner") }, "owner", true, true, true), []);
+  const range = { state: "pending", created_by: who("owner"), end_requested_by: null };
+  assert.deepEqual(changeActions(range, "owner", true, true, true), ["approve", "withdraw"]);
+  const ending = { state: "ending", created_by: who("x"), end_requested_by: who("owner") };
+  assert.deepEqual(changeActions(ending, "owner", true, true, true), []);
+});

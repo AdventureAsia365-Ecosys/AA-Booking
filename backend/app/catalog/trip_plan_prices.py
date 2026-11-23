@@ -29,6 +29,11 @@ band covers 2 and that is still valid today, USD first: the same choice as the c
 
 Prices and net costs are commercial data: only staff with ``pricing.read`` read them (admin, sales, contracting);
 ``trip_plan.write`` (admin, contracting) replaces them.
+
+**Price-ready** (:func:`price_ready`, AA-1158 Q9): a plan has a matrix row still valid today, computed (the cost sheet)
+or hand (since bk-054 hand rows come only from published price versions), the same counts the readiness report's
+``priced`` / ``hand_priced`` read (``app.catalog.price_readiness``). Making a plan sellable needs it: the commercial
+save, the price workbench and the workbook import all ask here.
 """
 
 from __future__ import annotations
@@ -536,3 +541,38 @@ async def review_reference(conn: asyncpg.Connection, staff: Staff, source_id: st
         entity_label=source_id[:80],
         summary="Reviewed the CIS source price (reference only)",
     )
+
+
+# AA-1158 Q9: the readiness report's computed_rows > 0 OR hand_rows > 0 (app.catalog.price_readiness._COUNTS).
+PRICE_READY_SQL = """
+SELECT DISTINCT r.trip_plan_id::text AS plan_id FROM booking.trip_plan_prices r
+WHERE r.trip_plan_id = ANY($1::uuid[]) AND r.valid_to >= $2
+"""
+NO_APPROVED_PRICE = "no_approved_price"
+
+
+async def price_ready(conn: asyncpg.Connection, plan_ids: list[str], on: date) -> set[str]:
+    """The plans of ``plan_ids`` with a matrix row still valid on ``on`` (computed or from a published version)."""
+    if not plan_ids:
+        return set()
+    return {r["plan_id"] for r in await conn.fetch(PRICE_READY_SQL, plan_ids, on)}
+
+
+async def check_commercial(
+    conn: asyncpg.Connection, new: dict[str, Any], before: dict[str, Any] | None, plan_id: str | None
+) -> None:
+    """The checks of a commercial save (``app.catalog.trip_plans.save_commercial``): a supplier set or changed must
+    exist and be active (an unchanged one may have been deactivated); AA-1158 Q9: false -> true ``sellable`` needs an
+    approved price (:func:`price_ready`, 409 ``no_approved_price``)."""
+    if new["supplier_id"] is not None and (before is None or before["supplier_id"] != new["supplier_id"]):
+        status = await conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", new["supplier_id"])
+        if status is None:
+            raise Invalid("supplier_not_found", "the supplier does not exist")
+        if status != "active":
+            raise Invalid("supplier_inactive", "pick an active supplier")
+    if new["sellable"] and not (before and before["sellable"]):
+        today = await conn.fetchval("SELECT (now() AT TIME ZONE 'UTC')::date")
+        if plan_id is None or plan_id not in await price_ready(conn, [plan_id], today):
+            raise Conflict(
+                NO_APPROVED_PRICE, "approve a price version or let the cost sheet price the tour before selling it"
+            )

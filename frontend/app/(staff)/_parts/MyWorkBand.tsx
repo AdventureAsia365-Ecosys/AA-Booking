@@ -16,11 +16,14 @@ import {
   CalendarClock,
   FileWarning,
   Handshake,
+  Landmark,
   OctagonX,
+  Power,
   ReceiptText,
   RefreshCw,
   SquareCheck,
   Stamp,
+  UserCheck,
 } from "lucide-react";
 import { CIS_MY_WORK_PATH } from "@/lib/config";
 import { myWorkApi, type MyWorkTile } from "@/lib/api/myWork";
@@ -44,6 +47,9 @@ const ICONS: Record<string, React.ReactNode> = {
   supplier_bills_to_pay: <Banknote size={ICON} />,
   agency_payments_to_approve: <ReceiptText size={ICON} />,
   stop_sales_to_review: <OctagonX size={ICON} />,
+  suppliers_to_activate: <Power size={ICON} />, // AA-1158
+  billing_changes_to_approve: <Landmark size={ICON} />,
+  owner_self_approvals: <UserCheck size={ICON} />,
 };
 /** A count above zero on these tiles is late work (red hint); on the approval tiles it waits for the viewer (amber). */
 const LATE = new Set(["trip_checks_overdue", "supplier_bills_overdue", "agency_invoices_overdue"]);

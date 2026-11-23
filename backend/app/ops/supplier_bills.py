@@ -14,7 +14,8 @@ the amount; a voided payout steps the bill back to ``approved``).
 payout is live (void them first). Cancelled is final.
 
 A **payout** (``SPO-000123``) records money AA sent the supplier against an approved bill (``payout.write``, admin;
-never the person who entered the bill or last changed its money facts: 403 ``maker_checker``): amount in the bill
+never the person who entered the bill or last changed its money facts, nor its approver: 403 ``maker_checker``;
+the business-owner exceptions are :mod:`app.ops.bill_approvals`, AA-1158): amount in the bill
 currency (never above the balance: 409 ``payout_exceeds_balance``), method, the day it was paid, the bank reference
 (never a card number: 422 ``card_number_not_allowed``), a note; the evidence (bank slip) is uploaded right after
 (``POST /ops-files`` kind ``payout_evidence``, the payout as entity). A payout counts at once (no verify step); a
@@ -47,8 +48,9 @@ from app import audit, paging
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
-from app.ops import bill_filters, lifecycle, money
+from app.ops import bill_approvals, bill_filters, lifecycle, money
 from app.ops import files as ops_files
+from app.ops.bill_approvals import OwnerPaths, owner_paths, payer_checks
 from app.pricing import fx
 
 log = logging.getLogger(__name__)
@@ -150,14 +152,14 @@ def _no_card(field: str, text: str | None) -> None:
         )
 
 
-def approve_blockers(row: dict[str, Any], staff: Staff) -> list[str]:
+def approve_blockers(row: dict[str, Any], staff: Staff, owner: OwnerPaths = OwnerPaths()) -> list[str]:  # noqa: B008
     """Why ``staff`` cannot approve the bill now (empty = can): the UI explains, the API and the DB refuse."""
     out = []
     if row["status"] != "received":
         out.append("not_received")
     if not staff.can("bill.approve"):
         out.append("permission")
-    if staff.cis_user_id in (row["created_by"], row["facts_edited_by"]):
+    if staff.cis_user_id in (row["created_by"], row["facts_edited_by"]) and not owner.approve:
         out.append("maker_checker")
     if not row["line_count"]:
         out.append("no_lines")
@@ -166,9 +168,9 @@ def approve_blockers(row: dict[str, Any], staff: Staff) -> list[str]:
     return out
 
 
-def bill_out(row: Any, staff: Staff) -> dict[str, Any]:
+def bill_out(row: Any, staff: Staff, owner: OwnerPaths = OwnerPaths()) -> dict[str, Any]:  # noqa: B008
     out = dict(row)
-    creator, editor = out["created_by"], out["facts_edited_by"]
+    creator, editor, approver = out["created_by"], out["facts_edited_by"], out["approved_by"]
     for who in ("created_by", "facts_edited_by", "approved_by", "cancelled_by"):
         out[who] = _person(out[who], out.pop(f"{who}_name"))
     out["supplier"] = {"id": out.pop("supplier_id"), "name": out.pop("supplier_name")}
@@ -178,19 +180,23 @@ def bill_out(row: Any, staff: Staff) -> dict[str, Any]:
     # AA-1074 (bk-045): a bill of the shared costs of one departure.
     out["departure"] = {"id": departure_id, "start_date": departure_start} if departure_id else None
     status = out["status"]
-    blockers = approve_blockers({**dict(row), "created_by": creator, "facts_edited_by": editor}, staff)
+    blockers = approve_blockers({**dict(row), "created_by": creator, "facts_edited_by": editor}, staff, owner)
     out["approve_blockers"] = blockers
+    mine, pays_own_approval = staff.cis_user_id in (creator, editor), staff.cis_user_id == approver
     out["actions"] = {
         # Received: everything; approved / paid: the notes only (the form's locked mode).
         "edit": status != "cancelled" and staff.can("bill.write"),
         "attach": status == "received" and staff.can("bill.write"),
         "approve": not blockers,
+        "approve_self": not blockers and mine,  # AA-1158: a business-owner self-approval (flagged)
         "cancel": staff.can("bill.write")
         and (status == "received" or (status == "approved" and not out["live_payouts"])),
         "pay": status == "approved"
         and staff.can("payout.write")
-        and staff.cis_user_id not in (creator, editor)
+        and not mine
+        and (not pays_own_approval or owner.pay)
         and Decimal(out["balance"]) > 0,
+        "pay_flagged": pays_own_approval and owner.pay,  # AA-1158 Q4: the approver pays (business owner, flagged)
     }
     return out
 
@@ -254,7 +260,7 @@ async def _audit(
 
 async def detail(conn: asyncpg.Connection, staff: Staff, bill_id: str) -> dict[str, Any]:
     row = await _find(conn, bill_id)
-    out = bill_out(row, staff)
+    out = bill_out(row, staff, await owner_paths(conn, staff))
     see_net = staff.can("pricing.read")
     lines = []
     for r in await conn.fetch(LINES_SQL, row["id"]):
@@ -290,10 +296,13 @@ async def list_bills(
     ``approvable="me"``: only the bills the caller may approve or pay (not entered nor last changed by them)."""
     if not 1 <= limit <= MAX_PAGE or offset < 0:
         raise Invalid("invalid_page", f"limit is 1..{MAX_PAGE} and offset >= 0")
+    owner = await owner_paths(conn, staff)
     clause, args = bill_filters.bill_filter(
         **filters,
         due_soon_days=await bill_filters.due_soon_days(conn) if due_soon else None,
         actionable_by=staff.cis_user_id if approvable == "me" else None,
+        owner_approve=owner.approve,
+        owner_pay=owner.pay,
     )
     total = await conn.fetchval(f"SELECT count(*) {BILL_FROM} WHERE {clause}", *args)  # noqa: S608
     args.extend([limit, offset])
@@ -305,7 +314,7 @@ async def list_bills(
         *args,
     )
     return jsonable(
-        {"items": [bill_out(r, staff) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset}
+        {"items": [bill_out(r, staff, owner) for r in rows], "total": int(total or 0), "limit": limit, "offset": offset}
     )
 
 
@@ -815,10 +824,7 @@ async def approve(conn: asyncpg.Connection, staff: Staff, ident: str) -> dict[st
         return await detail(conn, staff, row["id"])  # the same answer again
     if row["status"] == "cancelled":
         raise Conflict("supplier_bill_closed", f"{row['code']} is cancelled")
-    if row["created_by"] == staff.cis_user_id:
-        raise Forbidden("maker_checker", f"you entered {row['code']}: another person approves it")
-    if row["facts_edited_by"] == staff.cis_user_id:
-        raise Forbidden("maker_checker", f"you last changed the amounts of {row['code']}: another person approves it")
+    flagged = await bill_approvals.approver(conn, staff, row)
     if not row["line_count"]:
         raise Conflict("bill_not_ready", "match the bill to at least one confirmed supplier booking first")
     if Decimal(row["lines_amount"]) != Decimal(row["amount"]):
@@ -832,11 +838,12 @@ async def approve(conn: asyncpg.Connection, staff: Staff, ident: str) -> dict[st
     try:
         await conn.execute(
             "UPDATE booking.supplier_bills SET status = 'approved', approved_by = $2, approved_at = now(),"
-            " updated_by = $2, fx_rate_per_usd = $3, fx_as_of = $4 WHERE id = $1::uuid",
+            " updated_by = $2, fx_rate_per_usd = $3, fx_as_of = $4, owner_self_approved = $5 WHERE id = $1::uuid",
             row["id"],
             staff.cis_user_id,
             snap["fx_rate_per_usd"],
             snap["fx_as_of"],
+            flagged,
         )
     except asyncpg.CheckViolationError as exc:
         raise Conflict("bill_not_ready", str(exc).split("\n")[0]) from exc
@@ -847,9 +854,10 @@ async def approve(conn: asyncpg.Connection, staff: Staff, ident: str) -> dict[st
         "supplier_bill",
         row["id"],
         f"{row['code']} {row['supplier_name']}",
-        f"Approved {row['code']}: {row['amount']} {row['currency']} to {row['supplier_name']}",
+        f"Approved {row['code']}: {row['amount']} {row['currency']} to {row['supplier_name']}"
+        + (" (business-owner self-approval)" if flagged else ""),
         before={"status": "received"},
-        after={"status": "approved"},
+        after={"status": "approved", **({"owner_self_approved": True} if flagged else {})},
     )
     await notifications.notify_staff(
         conn,
@@ -933,12 +941,7 @@ async def record_payout(
         return {**await _payout(conn, staff, stored["id"]), "bill": await detail(conn, staff, bill["id"])}, True
     if bill["status"] != "approved":
         raise Conflict("bill_not_payable", f"{bill['code']} is {bill['status']}: payouts go on an approved bill")
-    if bill["created_by"] == staff.cis_user_id:
-        raise Forbidden("maker_checker", f"you entered {bill['code']}: another admin records its payout")
-    if bill["facts_edited_by"] == staff.cis_user_id:
-        raise Forbidden(
-            "maker_checker", f"you last changed the amounts of {bill['code']}: another admin records its payout"
-        )
+    same_approver = await payer_checks(conn, staff, bill)
     method = body.get("method")
     if method not in METHODS:
         raise Invalid("invalid_payout", "unknown method")
@@ -977,8 +980,8 @@ async def record_payout(
         async with conn.transaction():
             payout_id = await conn.fetchval(
                 "INSERT INTO booking.supplier_payouts (bill_id, amount, currency, method, paid_on, reference, note,"
-                " idempotency_key, request_sha256, recorded_by, updated_by)"
-                " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) RETURNING id::text",
+                " idempotency_key, request_sha256, recorded_by, updated_by, same_approver_payer)"
+                " VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11) RETURNING id::text",
                 bill["id"],
                 amount,
                 currency,
@@ -989,6 +992,7 @@ async def record_payout(
                 idem,
                 sha,
                 staff.cis_user_id,
+                same_approver,
             )
     except asyncpg.CheckViolationError as exc:
         raise Conflict("invalid_payout", str(exc).split("\n")[0]) from exc
@@ -1002,7 +1006,8 @@ async def record_payout(
         payout_id,
         f"{bill['code']} {out['code']}",
         f"Paid {amount} {currency} to {bill['supplier_name']} on {bill['code']} ({method.replace('_', ' ')});"
-        f" bill {bill['status']} -> {after}",
+        f" bill {bill['status']} -> {after}"
+        + (" (paid by the bill's approver, business owner)" if same_approver else ""),
         after={
             "bill": bill["code"],
             "amount": amount,
@@ -1012,6 +1017,7 @@ async def record_payout(
             "reference": "(set)" if reference else None,
             "note": "(set)" if note else None,
             "bill_status": after,
+            **({"owner_self_approved": True, "same_approver_payer": True} if same_approver else {}),
         },
     )
     return {**out, "bill": await detail(conn, staff, bill["id"])}, False

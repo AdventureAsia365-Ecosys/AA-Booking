@@ -45,6 +45,7 @@ async def list_audit_logs(
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     before: Annotated[str | None, Query(max_length=100, description="next_before of the previous page")] = None,
+    owner_self_approved: Annotated[bool | None, Query(description="true: only business-owner self-approvals")] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await audit.list_logs(
@@ -57,4 +58,5 @@ async def list_audit_logs(
             q=q,
             before=before,
             limit=limit,
+            owner_self_approved=owner_self_approved,
         )

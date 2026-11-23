@@ -32,7 +32,7 @@ async def conn(migrated_admin_dsn: str, migrated_booking_dsn: str) -> AsyncItera
     # CHECKs, the outbox column grant): put bk-048 back first.
     admin = await asyncpg.connect(migrated_admin_dsn)
     try:
-        await apply_migrations(admin, only=[48])
+        await apply_migrations(admin, only=[48, 64])  # bk-064 re-grants owner_self_approved (AA-1158)
     finally:
         await admin.close()
     c = await asyncpg.connect(migrated_booking_dsn)
@@ -135,12 +135,12 @@ async def _adjustment(c: asyncpg.Connection, departure: str, **kw: object) -> st
 async def test_registered_and_rerun_is_a_no_op(migrated_admin_dsn: str) -> None:
     admin = await asyncpg.connect(migrated_admin_dsn)
     try:
-        await apply_migrations(admin, only=[48])
+        await apply_migrations(admin, only=[48, 64])  # bk-064 re-grants owner_self_approved (AA-1158)
         assert await admin.fetchval("SELECT 1 FROM booking.v_schema_versions WHERE version = 'bk-048'") == 1
         before = await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint")
         triggers = await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_trigger WHERE NOT tgisinternal")
         clauses = await admin.fetchval("SELECT count(*) FROM booking.partner_terms_clause")
-        await apply_migrations(admin, only=[48])
+        await apply_migrations(admin, only=[48, 64])  # bk-064 re-grants owner_self_approved (AA-1158)
         assert await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_constraint") == before
         assert await admin.fetchval("SELECT count(*) FROM pg_catalog.pg_trigger WHERE NOT tgisinternal") == triggers
         assert await admin.fetchval("SELECT count(*) FROM booking.partner_terms_clause") == clauses

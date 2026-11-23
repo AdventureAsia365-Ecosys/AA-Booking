@@ -48,6 +48,7 @@ import {
 import { CHANGE_TONE, SEASON_TONE, changeActions, needsReason, personText } from "@/ui/booking/priceVersions";
 import { S, type SeasonMessage } from "./messages";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useSelfApproval } from "@/lib/useSelfApproval";
 
 function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -80,7 +81,9 @@ export function ChangeButtons({
   // AA-1150: reviewing a stop-sale range (or its removal) is a stop-sale approval too (stop_sale.approve).
   const canApproveStop = useCan("stop_sale.approve");
   const canApprove = useCan("season.approve") && (item.kind !== "stop_sale" || canApproveStop);
-  const actions = changeActions(item, me, useCan("season.write"), canApprove);
+  // AA-1158: the business owner approves her own season range or event (never a stop-sale: two people).
+  const selfOk = useSelfApproval().approve && item.kind !== "stop_sale";
+  const actions = changeActions(item, me, useCan("season.write"), canApprove, selfOk);
   const [asking, setAsking] = useState<ChangeAction | null>(null);
   if (!actions.length) return null;
   return (

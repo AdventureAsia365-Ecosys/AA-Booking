@@ -214,6 +214,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "agency_billing.write": frozenset({"admin", "finance"}),
     "agency_payment.approve": frozenset({"admin", "finance"}),
     "billing_config.write": frozenset({"admin", "finance"}),
+    # AA-1158 (bk-064): approving a change of a billing entity's payment details or default flag (a second person).
+    "billing_config.approve": frozenset({"admin", "finance"}),
     # AA-1037 extras G6 (bk-044): a partner terms clause (e.g. price errors) reaches agencies only once approved; the
     # business owner approves (admin), never the clause's last editor (403 maker_checker + a CHECK).
     "terms_clause.approve": frozenset({"admin"}),

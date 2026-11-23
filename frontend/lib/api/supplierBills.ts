@@ -66,7 +66,9 @@ export interface SupplierBill {
   lines_amount: DecimalString;
   overdue: boolean;
   approve_blockers: ApproveBlocker[];
-  actions: { edit: boolean; attach: boolean; approve: boolean; cancel: boolean; pay: boolean };
+  /** AA-1158: `approve_self` = approving is the business owner's self-approval; `pay_flagged` = she records the payout
+   * of a bill she approved (both flagged in the audit log). */
+  actions: { edit: boolean; attach: boolean; approve: boolean; cancel: boolean; pay: boolean; approve_self?: boolean; pay_flagged?: boolean };
 }
 
 export interface SupplierBillLine {
