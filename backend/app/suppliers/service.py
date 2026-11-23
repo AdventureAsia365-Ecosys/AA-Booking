@@ -704,7 +704,9 @@ async def update_contract(
     supplier = await resolve_supplier(conn, current["supplier_id"], lock=True)
     if status is not None:
         if status == "published" and current["status"] == "draft":
-            await _require_review(conn, current["id"], acknowledged)
+            from app.supply import rate_review  # noqa: PLC0415 — rate_review imports this module
+
+            await rate_review.require_acknowledged(conn, current["id"], acknowledged)
         return await _move(conn, staff, current, supplier, status)
     if current["status"] != "draft":
         raise Conflict("contract_locked", f"a {current['status']} contract is fixed; create a new contract instead")
@@ -735,24 +737,6 @@ async def update_contract(
         summary=f"Updated {', '.join(sorted(changed))}",
     )
     return {**(await get_contract(conn, current["id"])), "changed": sorted(changed)}
-
-
-async def _require_review(conn: asyncpg.Connection, contract_id: str, acknowledged: bool) -> None:
-    """AA-1153 (T10): the publisher of an imported draft acknowledges the warnings of its live review."""
-    from app.supply import rate_review  # noqa: PLC0415 — rate_review imports this module
-
-    if not await conn.fetchval(
-        "SELECT 1 FROM booking.rate_sheet_imports WHERE supplier_contract_id = $1::uuid", contract_id
-    ):
-        return
-    found = await rate_review.review(conn, contract_id)
-    if found["acknowledge"] and not acknowledged:
-        raise Conflict(
-            "checks_unacknowledged",
-            f"{len([c for c in found['checks'] if c['severity'] == 'warning'])} warning(s) in the rate review: read "
-            "them, then publish with acknowledge_checks",
-            checks=found["checks"],
-        )
 
 
 async def _move(

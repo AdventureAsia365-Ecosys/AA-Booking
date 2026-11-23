@@ -168,6 +168,23 @@ class LineCost:
     supply: list[SupplyAsk] = field(default_factory=list)  # the availability engine's asks (bk-060)
     parts: list[PartCost] = field(default_factory=list)  # AA-1149: the components of a tp: line (bk-065)
 
+    def notes(self, supply_note: Any) -> dict[str, Any]:
+        """The price-note parts this cost brings (stop-sale dates, B4 child basis, AA-1153 board and hotel children);
+        only the ones it has."""
+        parts = {"supply": supply_note, "child": self.child, "board": self.board, "child_room": self.child_room}
+        return {k: v for k, v in parts.items() if v}
+
+
+def board_hash(line: dict[str, Any]) -> dict[str, Any]:
+    """AA-1153: the board and the children's ages a quote line asked, for its price hash; only when sent (any other
+    line hashes as before)."""
+    out: dict[str, Any] = {}
+    if line.get("meal_plan"):
+        out["meal_plan"] = line["meal_plan"]
+    if line.get("child_ages"):
+        out["child_ages"] = list(line["child_ages"])
+    return out
+
 
 PLANS_SQL = "SELECT id::text AS id, sellable FROM booking.trip_plans WHERE id = ANY($1::uuid[])"
 PLAN_COMPONENTS_SQL = """

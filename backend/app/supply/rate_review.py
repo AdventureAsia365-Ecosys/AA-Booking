@@ -13,7 +13,7 @@ from typing import Any
 import asyncpg
 
 from app.auth.staff import Staff
-from app.errors import Invalid
+from app.errors import Conflict, Invalid
 from app.pricing import policy_values
 from app.pricing.policy_params_hotels import JUMP_WARN_PCT
 from app.suppliers import service as suppliers
@@ -188,3 +188,20 @@ async def review(conn: asyncpg.Connection, contract_id: str) -> dict[str, Any]:
         "import": imported,
         "acknowledge": imported is not None and bool(rate_checks.warnings(findings)),
     }
+
+
+async def require_acknowledged(conn: asyncpg.Connection, contract_id: str, acknowledged: bool) -> None:
+    """AA-1153 (T10): the publisher of a draft made by a rate-sheet import acknowledges the warnings of its live
+    review (``acknowledge_checks``), else 409 ``checks_unacknowledged``."""
+    if not await conn.fetchval(
+        "SELECT 1 FROM booking.rate_sheet_imports WHERE supplier_contract_id = $1::uuid", contract_id
+    ):
+        return
+    found = await review(conn, contract_id)
+    if found["acknowledge"] and not acknowledged:
+        raise Conflict(
+            "checks_unacknowledged",
+            f"{len([c for c in found['checks'] if c['severity'] == 'warning'])} warning(s) in the rate review: read "
+            "them, then publish with acknowledge_checks",
+            checks=found["checks"],
+        )

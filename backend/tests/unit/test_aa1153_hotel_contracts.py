@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.b2b import components, hotel_children, quotes
+from app.b2b import components, hotel_children
 from app.b2b.errors import B2BError
 from app.errors import Invalid
 from app.pricing import policy_guides, policy_params, policy_params_hotels
@@ -232,8 +232,8 @@ async def test_half_board_with_a_meal_service_that_night_warns_of_a_double_dinne
 
 
 def test_the_board_and_ages_are_hashed_only_when_sent() -> None:
-    assert quotes._board_hash({"meal_plan": None, "child_ages": []}) == {}
-    assert quotes._board_hash({"meal_plan": "HB", "child_ages": [7]}) == {"meal_plan": "HB", "child_ages": [7]}
+    assert components.board_hash({"meal_plan": None, "child_ages": []}) == {}
+    assert components.board_hash({"meal_plan": "HB", "child_ages": [7]}) == {"meal_plan": "HB", "child_ages": [7]}
 
 
 def test_request_line_ages_match_the_children() -> None:

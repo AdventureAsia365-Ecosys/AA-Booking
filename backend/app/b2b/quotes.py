@@ -76,7 +76,7 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import agency_pricing, cancellation, departures, price_adjustments, quote_parts, served
+from app.b2b import agency_pricing, cancellation, components, departures, price_adjustments, quote_parts, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_SERVICE, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.catalog import operability
@@ -201,7 +201,7 @@ def price_hash(
                 "b2b_price": format(line["b2b_price"], "f"),
                 **_discount_hash(line),
                 **_note_hash(line),
-                **_board_hash(line),
+                **components.board_hash(line),
             }
             for line in lines
         ],
@@ -225,24 +225,6 @@ def _note_hash(line: dict[str, Any]) -> dict[str, Any]:
     note = line.get("price_note") or {}
     priced = {k: note[k] for k in ("adjustment", "early_booking") if k in note}
     return {"price_note": priced} if priced else {}
-
-
-def _board_hash(line: dict[str, Any]) -> dict[str, Any]:
-    """AA-1153: the board and the children's ages a line asked, hashed only when sent (any other line hashes as
-    before)."""
-    out: dict[str, Any] = {}
-    if line.get("meal_plan"):
-        out["meal_plan"] = line["meal_plan"]
-    if line.get("child_ages"):
-        out["child_ages"] = list(line["child_ages"])
-    return out
-
-
-def _cost_notes(lc: LineCost, supply_note: Any) -> dict[str, Any]:
-    """The price-note parts the cost of a line brings (stop-sale dates, B4 child basis, AA-1153 board and hotel
-    children); only the ones it has."""
-    parts = {"supply": supply_note, "child": lc.child, "board": lc.board, "child_room": lc.child_room}
-    return {k: v for k, v in parts.items() if v}
 
 
 def _line_plan(component_id: str) -> str | None:
@@ -673,7 +655,7 @@ async def quote_in(
             log.warning(
                 "b2b_quote_line_below_floor partner=%s line=%s departure=%s", partner_id, ask.line_ref, departure_id
             )
-        note.update(_cost_notes(lc, supply_note))
+        note.update(lc.notes(supply_note))
         priced.append(
             {
                 "line_no": no,
