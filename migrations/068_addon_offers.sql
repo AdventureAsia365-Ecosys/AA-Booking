@@ -411,6 +411,8 @@ SELECT 'sv:' || s.id::text AS component_id,
 COMMENT ON VIEW booking.v_place_addons IS
     'bk-068 (AA-1151, contract supply.place_addons.v1): one row per published add-on offer, place and day (today UTC + addon_days_ahead) on which it runs, has an in-force adult rate under a published contract of its active supplier and no stop-sale in effect. No net, price or supplier identity: quote the component_id through booking.b2b.v1. SELECT to tripplanner.';
 
+-- A view is read-only for the app role (the bk-014 default privileges would give it DML).
+REVOKE INSERT, UPDATE, DELETE ON booking.v_place_addons FROM booking;
 GRANT SELECT ON booking.v_place_addons TO booking;
 GRANT USAGE ON SCHEMA booking TO tripplanner;
 GRANT SELECT ON booking.v_place_addons TO tripplanner;
