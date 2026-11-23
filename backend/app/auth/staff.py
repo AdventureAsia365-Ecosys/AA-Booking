@@ -58,6 +58,11 @@ user may also cancel a synthetic departure (body exactly ``{"status": "cancelled
 checker (``booking-contracting``) run the price steps on synthetic trip plans only; the workbook import checks its
 tours inside the route (``Staff.e2e_writer``).
 
+**Dev-only E2E owner (AA-1176, root ADR 0006a A10h; :func:`app.auth.e2e_owner.check_session`).** The WORKFORCE
+address ``e2e-owner@`` with exactly ``cis-admin`` + ``booking-admin`` is a plain administrator session (not read-only),
+refused outside ``ENVIRONMENT`` exactly ``dev`` and with any other group set, before any DB access; exempt from the
+administrator MFA switch below; named "E2E owner (agent, Dev only)" on its staff row.
+
 **Administrator MFA (AA-1111 S2, root ADR 0006c, bk-061; :mod:`app.auth.admin_mfa`).** A WORKFORCE ``booking-admin``
 session (not Preview, not a Dev-only E2E identity) whose access token's ``amr`` lacks ``otp`` (no authenticator code)
 is refused 403 ``mfa_required`` while the pricing policy parameter ``staff_admin_mfa_required`` is on; off, it is only
@@ -96,7 +101,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit
-from app.auth import admin_mfa, custom_roles, e2e_staff, identity_config, view_as
+from app.auth import admin_mfa, custom_roles, e2e_owner, e2e_staff, identity_config, view_as
 from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
@@ -463,6 +468,7 @@ async def sync_cognito_staff(conn: asyncpg.Connection, principal: Principal, rol
     )
     if row is None:
         key = COGNITO_KEY_PREFIX + principal.sub
+        owner_e2e = e2e_owner.is_e2e_owner(principal.email)  # AA-1176 A10h: its rows name it
         row = await conn.fetchrow(
             f"""
             INSERT INTO booking.staff_users
@@ -473,7 +479,7 @@ async def sync_cognito_staff(conn: asyncpg.Connection, principal: Principal, rol
             """,  # noqa: S608 — constants only
             key,
             principal.email,
-            _display_name(principal.email),
+            e2e_owner.E2E_OWNER_NAME if owner_e2e else _display_name(principal.email),
             role,
             cis_role,
             principal.iss,
@@ -489,9 +495,18 @@ async def sync_cognito_staff(conn: asyncpg.Connection, principal: Principal, rol
                 action="staff.provisioned",
                 entity_type="staff_user",
                 entity_id=staff.cis_user_id,
-                after={**staff.public(), "source": "cognito", "client_id": principal.client_id},
+                after={
+                    **staff.public(),
+                    "source": "cognito",
+                    "client_id": principal.client_id,
+                    **({"e2e_owner": True} if owner_e2e else {}),
+                },
                 entity_label=staff.name or staff.cis_user_id,
-                summary=f"Created on the first company e-mail sign-in, role {role} (Cognito group)",
+                summary=(
+                    f"Created on the first sign-in of the Dev-only E2E owner, role {role} (Cognito group)"
+                    if owner_e2e
+                    else f"Created on the first company e-mail sign-in, role {role} (Cognito group)"
+                ),
             )
             return staff
         # A concurrent first sign-in created it (ON CONFLICT waited for that commit), or the key is taken.
@@ -667,6 +682,8 @@ async def current_staff(
         preview = identity_config.is_preview_client(request.app.state.settings, principal.client_id)
         view_ref = request.headers.get(view_as.HEADER)
         _refuse_read_only_writes(request, principal, preview=preview, view_ref=view_ref)
+        # AA-1176 (ADR 0006a A10h): the Dev-only E2E owner, Dev only and exact groups, before any DB access.
+        is_e2e_owner = e2e_owner.check_session(principal.email, principal.groups)
         writer = e2e_staff.writer_for(principal.email)
         route_obj = request.scope.get("route")
         route = getattr(route_obj, "path", None)
@@ -689,7 +706,11 @@ async def current_staff(
         # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
         # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
         await admin_mfa.check_session(
-            pool, principal, token, role=role, exempt=preview or writer is not None or is_e2e_test_principal(principal)
+            pool,
+            principal,
+            token,
+            role=role,
+            exempt=preview or writer is not None or is_e2e_test_principal(principal) or is_e2e_owner,
         )
         if writer is not None:
             # AA-1087: an allowed write only on a synthetic agency's record (A10e-2: a synthetic plan, an E2E maker's
