@@ -5,6 +5,7 @@
 // edit the same lines; ui/booking/phrasebookRegistry.test.mjs checks that every catalogue is listed once.
 import "@/app/(staff)/agency-billing/_parts/AgencyBillingView.messages";
 import "@/app/(staff)/agency-billing/_parts/BillingSettings.messages";
+import "@/app/(staff)/agency-billing/_parts/EntityChanges.messages";
 import "@/app/(staff)/agency-billing/_parts/TermsSection.messages";
 import "@/app/(staff)/agency-billing/_parts/shared.messages";
 import "@/app/(staff)/agency-billing/invoices/[ref]/page.messages";

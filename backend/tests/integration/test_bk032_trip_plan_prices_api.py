@@ -18,7 +18,7 @@ import pytest_asyncio
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.integration.conftest import MIGRATIONS
+from tests.integration.conftest import MIGRATIONS, make_sellable
 from tests.integration.price_versions_helper import purge_price_versions
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import LocalCis
@@ -189,7 +189,7 @@ async def _supplier(conn: asyncpg.Connection, suffix: str, status: str = "active
     )
 
 
-COMMERCIAL = {"sellable": True, "trip_style": "Private", "default_channel": "b2c_tailor_made"}
+COMMERCIAL = {"sellable": False, "trip_style": "Private", "default_channel": "b2c_tailor_made"}
 
 
 def _row(**over: object) -> dict[str, object]:
@@ -220,6 +220,7 @@ async def test_supplier_on_the_commercial_row(
     body = put.json()
     assert body["supplier"]["id"] == active and body["supplier"]["company_name"] == f"{SUPPLIER_NAME} A"
     assert body["supplier"]["code"].startswith("SUP-") and "supplier_id" in body["changed"]
+    await make_sellable(admin, PLAN)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
 
     # Left out (the sellable toggle, an older UI): the supplier is kept.
     kept = await c.put(url, json={**COMMERCIAL, "sellable": False}, headers=contracting)
@@ -414,6 +415,7 @@ async def test_list_rows_sellable_first_with_destinations_and_cover(
     assert (
         await c.put(f"/catalog/trip-plans/{PLAN}/commercial", json=COMMERCIAL, headers=contracting)
     ).status_code == 200
+    await make_sellable(admin, PLAN)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
 
     page = (await c.get("/catalog/trip-plans", params={"country": "Vietnam"}, headers=contracting)).json()
     titles = [i["title"] for i in page["items"]]
@@ -447,6 +449,7 @@ async def test_list_answers_when_an_extra_is_unreadable(
     assert (
         await c.put(f"/catalog/trip-plans/{PLAN}/commercial", json=COMMERCIAL, headers=contracting)
     ).status_code == 200
+    await make_sellable(admin, PLAN)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     await admin.execute("REVOKE SELECT ON catalog.v_tour_place_name FROM booking")
     try:
         resp = await c.get("/catalog/trip-plans", params={"country": "Vietnam"}, headers=contracting)

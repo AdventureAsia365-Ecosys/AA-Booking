@@ -49,6 +49,8 @@ export const MSG = phrasebook(
     "Contact": "Contact",
     "Contracts": "Contracts",
     "Updated": "Updated",
+    "Pending approval": "Pending approval",
+    "Reject": "Reject",
   },
   {
     "country": "quốc gia",
@@ -93,6 +95,8 @@ export const MSG = phrasebook(
     "Contact": "Liên hệ",
     "Contracts": "Hợp đồng",
     "Updated": "Cập nhật",
+    "Pending approval": "Chờ duyệt",
+    "Reject": "Từ chối",
   },
   ),
 );

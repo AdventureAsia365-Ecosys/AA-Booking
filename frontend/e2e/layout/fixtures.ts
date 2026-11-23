@@ -2160,6 +2160,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
   if (p === "staff/me") return ok(STAFF_ME);
   if (p === "staff/me/preferences") return ok({ notify: {} });
+  if (p === "staff/me/self-approval") return ok({ is_business_owner: false, approve: false, payout: false }); // AA-1158
   if (p === "staff/directory") return ok({ items: range(8).map((i) => ({ cis_user_id: `u-${pad(i, 3)}`, name: staffProfile(i).name, role: ROLES[i % 4] })) });
   if (p === "staff") return ok({ items: range(query.get("active") === "false" ? 3 : 18).map(staffProfile) });
   if (at(0) === "staff" && seg.length === 2) return ok(staffDetail(at(1)));

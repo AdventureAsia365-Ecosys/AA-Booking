@@ -47,6 +47,7 @@ import { VERSION_TONE, changeText, personText, versionActions } from "@/ui/booki
 import { PriceMatrixEditor } from "../../../catalog/trip-plans/_parts/PriceMatrixEditor";
 import { V, type VersionMessage } from "./versions.messages";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useSelfApproval } from "@/lib/useSelfApproval";
 
 type Tab = "components" | "versions";
 
@@ -325,7 +326,7 @@ function Decisions({ detail, onDone }: { detail: VersionDetail; onDone: () => vo
   const toast = useToast();
   const qc = useQueryClient();
   const me = useStaff().cis_user_id;
-  const actions = versionActions(detail, me, useCan("price_version.write"), useCan("price_version.approve"));
+  const actions = versionActions(detail, me, useCan("price_version.write"), useCan("price_version.approve"), useSelfApproval().approve);
   const [open, setOpen] = useState<"approve" | "reject" | "withdraw" | null>(null);
   const preview = useQuery({
     queryKey: ["price-versions", "withdraw-preview", detail.id],

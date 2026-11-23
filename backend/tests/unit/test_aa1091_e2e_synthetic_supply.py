@@ -10,7 +10,9 @@ keys + fake JWKS and a scripted pool (no network, no DB):
   ``e2e_read_only`` before any DB access;
 - every supply write except the supplier create reaches the route only on the maker's synthetic supplier (path record,
   or the supplier the create body names; UUID or code), else 403 ``e2e_synthetic_only`` before the staff row sync;
-- the checker's only supply write is the contract status;
+- the checker's only supply writes are the contract status and (AA-1158) the activation of the maker's synthetic
+  supplier, which starts pending: refused 403 ``e2e_synthetic_only`` on a real supplier, before the staff sync; the
+  maker never activates (403 ``e2e_read_only``);
 - a real contracting member is unaffected.
 
 The SQL itself runs on PostgreSQL in tests/integration/test_aa1091_e2e_synthetic_supply.py.
@@ -56,6 +58,7 @@ RATE_SHEET = ("POST", f"/booking/suppliers/{SUPPLIER}/rate-sheets?dry_run=true",
 PUBLISH = ("PATCH", f"/booking/contracts/{CONTRACT}", {"status": "published"})
 EXPIRE = ("PATCH", f"/booking/contracts/{CONTRACT}", {"status": "expired"})
 OFF_SUPPLIER = ("POST", f"/booking/suppliers/{SUPPLIER}/deactivate", None)
+ACTIVATE = ("POST", f"/booking/suppliers/{SUPPLIER}/activate", None)  # AA-1158: the pricing checker only
 OFF_HOTEL = ("POST", f"/booking/hotels/{HOTEL}/deactivate", None)
 OFF_SERVICE = ("POST", f"/booking/services/{SERVICE}/deactivate", None)
 # (request, the record key the guard looks up) for every write checked against the maker's supplier.
@@ -206,7 +209,9 @@ def test_other_supply_writes_or_bodies_are_403_before_any_db_access(method: str,
 
 
 @pytest.mark.parametrize("request_", [w for w, _ in CHECKED if w not in (PUBLISH, EXPIRE)] + [CREATE_SUPPLIER])
-def test_the_checker_makes_no_supply_write_but_the_contract_status(request_: tuple[str, str, Any]) -> None:
+def test_the_checker_makes_no_supply_write_but_the_contract_status_and_the_activation(
+    request_: tuple[str, str, Any],
+) -> None:
     method, path, body = request_
     cis, conn = LocalCis(), ScriptedConn()
     with _client(cis, conn) as c:
@@ -233,7 +238,7 @@ def test_supply_writes_off_the_makers_supplier_are_refused_before_the_staff_sync
 @pytest.mark.parametrize("email", [MAKER, CHECKER])
 def test_allowed_supply_writes_on_the_makers_supplier_reach_the_route(email: str) -> None:
     cis = LocalCis()
-    writes = CHECKED if email == MAKER else [(PUBLISH, CONTRACT), (EXPIRE, CONTRACT)]
+    writes = CHECKED if email == MAKER else [(PUBLISH, CONTRACT), (EXPIRE, CONTRACT), (ACTIVATE, SUPPLIER)]
     for (method, path, body), key in writes:
         conn = ScriptedConn().on(GUARD, True).on(IDENTITY_SELECT, _row(email))
         with _client(cis, conn) as c:
@@ -246,6 +251,19 @@ def test_allowed_supply_writes_on_the_makers_supplier_reach_the_route(email: str
         assert _guard(conn) == [(key, MAKER)]
         assert flat.index(next(s for s in flat if GUARD in s)) < first_staff
         assert len(flat) > first_staff + 1, path  # the route ran past the staff dependency
+
+
+@pytest.mark.parametrize("synthetic", [False, None])
+def test_the_checkers_activation_of_a_real_supplier_is_refused_before_the_staff_sync(synthetic: Any) -> None:
+    """AA-1158: the checker activates only the maker's synthetic supplier (a single guard query, no staff sync)."""
+    cis = LocalCis()
+    conn = ScriptedConn().on(GUARD, synthetic).on(IDENTITY_SELECT, _row(CHECKER))
+    method, path, body = ACTIVATE
+    with _client(cis, conn) as c:
+        r = c.request(method, path, json=body, headers=auth(_token(cis, CHECKER)))
+    assert (r.status_code, r.json()["detail"]) == (403, "e2e_synthetic_only")
+    assert _guard(conn) == [(SUPPLIER, MAKER)]
+    assert _staff_calls(conn) == [] and len(conn.calls) == 1
 
 
 def test_the_supplier_create_reaches_the_route_on_its_body_check_alone() -> None:

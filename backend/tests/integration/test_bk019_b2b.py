@@ -22,7 +22,7 @@ from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from app.supply.rates import RateAsk, rate_in_force, rates_in_force_many
-from tests.integration.conftest import MIGRATIONS
+from tests.integration.conftest import MIGRATIONS, make_sellable
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import CRM_CLIENT, M2M_ISSUER, OTHER_M2M_CLIENT, LocalCis, LocalM2M
 
@@ -177,7 +177,7 @@ async def test_partner_components_products_and_quote(
     assert len((await _ok(await c.get("/b2b-partners", headers=boss)))["items"]) == 1
 
     # Plan commercial row + components (trip_plan.write).
-    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    commercial = {"sellable": False, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {
         "items": [
@@ -187,6 +187,7 @@ async def test_partner_components_products_and_quote(
     }
     assert (await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=sales)).status_code == 403
     saved = await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker))
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     assert {i["kind"] for i in saved["items"]} == {"hotel_room", "transfer"}
     plan_id = saved["trip_plan_id"]
     bad = {"items": [{"day_no": 1, "service_id": str(uuid.uuid4())}]}
@@ -382,12 +383,13 @@ async def test_room_mix_batched_rates_and_change_signal(
     assert refused.status_code == 422 and "for 3 per room" in refused.json()["message"]
 
     # Change signal: emptying the component set and deactivating a room type both move the product's updated_at.
-    commercial = {"sellable": True, "price_hint": None}
+    commercial = {"sellable": False, "price_hint": None}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {"items": [{"day_no": 1, "hotel_room_type_id": banded}]}
     plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
         "trip_plan_id"
     ]
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     read = _m2m(m2m, scope="booking.b2b/read")
 
     async def stamp() -> datetime:

@@ -46,6 +46,8 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   supplier_order: "Supplier order",
   terms_clause: "Terms clause",
   trip_case_check: "Trip check",
+  // AA-1157: an owner's read-only "view as a lower role" session (start with the role's full permission list, end).
+  staff_view_as: "View as",
 };
 
 export function auditEntityLabel(entityType: string): string {

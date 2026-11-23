@@ -105,6 +105,11 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
             <Ban size={15} /> {t("This supplier is inactive: it stays on record, but no new contract can be added or published.")}
           </div>
         )}
+        {s.status === "pending" && (
+          <div role="status" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-body">
+            <Power size={15} /> {t("This supplier waits for approval: a second person activates it before contracts can be added.")}
+          </div>
+        )}
         {tab === "profile" && <Profile s={s} />}
         {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
         {tab === "rates" && <RatesTab s={s} canWrite={actions.canWrite} />}
@@ -226,9 +231,17 @@ function StatusButton({ s, actions }: { s: SupplierDetail; actions: ReturnType<t
     );
   }
   if (!actions.canActivate) return null;
+  // AA-1158: the API says whether the caller may activate it (never its creator, but the business owner, flagged).
+  const can = s.actions?.activate;
+  const blocked = can ? !can.allowed : false;
   return (
-    <Button variant="secondary" onClick={() => actions.activate(s)}>
-      <Power size={14} /> {t("Activate")}
+    <Button
+      variant="secondary"
+      disabled={blocked}
+      title={blocked ? t("A second person activates a supplier you created.") : undefined}
+      onClick={() => actions.activate({ ...s, selfApproval: can?.self_approval })}
+    >
+      <Power size={14} /> {blocked ? t("Activate (needs a second person)") : t("Activate")}
     </Button>
   );
 }
@@ -261,8 +274,9 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
     setMove(m);
   }
 
-  /** The maker of a draft is its last writer (bk-008): they cannot publish it. */
-  const isMaker = (k: SupplierContract) => (k.updated_by ?? k.created_by) === me.cis_user_id;
+  /** AA-1158: every writer of a draft is a maker (the API lists them and says whether the caller may publish). */
+  const isMaker = (k: SupplierContract) =>
+    k.actions?.publish ? !k.actions.publish.allowed : (k.writers ?? [k.updated_by ?? k.created_by]).includes(me.cis_user_id);
 
   function menuFor(k: SupplierContract): RowMenuItem[] {
     if (!canWrite) return [];

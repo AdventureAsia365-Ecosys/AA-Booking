@@ -874,6 +874,19 @@
             ],
             "title": "Active"
           },
+          "change_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
           "country_iso2": {
             "anyOf": [
               {
@@ -969,6 +982,19 @@
       "BillingEntityIn": {
         "additionalProperties": false,
         "properties": {
+          "change_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
           "code": {
             "pattern": "^[A-Z][A-Z0-9_-]{1,31}$",
             "title": "Code",
@@ -3826,6 +3852,78 @@
           "reason"
         ],
         "title": "EndRequest",
+        "type": "object"
+      },
+      "EntityChangeDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "reject",
+              "withdraw"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "EntityChangeDecision",
+        "type": "object"
+      },
+      "EntityChangeIn": {
+        "additionalProperties": false,
+        "description": "AA-1158: ask for new payment details and / or the default flag (pending until a second person approves).",
+        "properties": {
+          "make_default": {
+            "default": false,
+            "title": "Make Default",
+            "type": "boolean"
+          },
+          "payment_instructions": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Instructions"
+          },
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "set_payment_instructions": {
+            "default": false,
+            "title": "Set Payment Instructions",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "EntityChangeIn",
         "type": "object"
       },
       "EntryIn": {
@@ -10142,6 +10240,41 @@
         "title": "StaffPatch",
         "type": "object"
       },
+      "StartView": {
+        "additionalProperties": false,
+        "properties": {
+          "minutes": {
+            "default": 30,
+            "maximum": 60.0,
+            "minimum": 5.0,
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "role": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "StartView",
+        "type": "object"
+      },
       "StatusChange": {
         "additionalProperties": false,
         "properties": {
@@ -12963,6 +13096,24 @@
               ],
               "description": "next_before of the previous page",
               "title": "Before"
+            }
+          },
+          {
+            "description": "true: only business-owner self-approvals",
+            "in": "query",
+            "name": "owner_self_approved",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only business-owner self-approvals",
+              "title": "Owner Self Approved"
             }
           }
         ],
@@ -17341,6 +17492,127 @@
           }
         ],
         "summary": "Update Billing Entity",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/billing-entities/{entity_id}/changes": {
+      "post": {
+        "operationId": "request_billing_entity_change_booking_billing_entities__entity_id__changes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntityChangeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Request Billing Entity Change Booking Billing Entities  Entity Id  Changes Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Request Billing Entity Change",
+        "tags": [
+          "agency-billing"
+        ]
+      }
+    },
+    "/booking/billing-entity-changes/{change_id}/decision": {
+      "post": {
+        "description": "Approve / reject (``billing_config.approve``) or withdraw (the requester, ``billing_config.write``).",
+        "operationId": "decide_billing_entity_change_booking_billing_entity_changes__change_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "change_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Change Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntityChangeDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Billing Entity Change Booking Billing Entity Changes  Change Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Billing Entity Change",
         "tags": [
           "agency-billing"
         ]
@@ -27529,6 +27801,35 @@
         ]
       }
     },
+    "/booking/staff/me/self-approval": {
+      "get": {
+        "description": "AA-1158: whether the caller is the business owner and which self-approvals the policy switches allow now, so\nthe pages show the self-approval paths. Display only: every write checks it again server-side\n(:mod:`app.auth.self_approval`). Kept off ``/staff/me`` so a sign-in never reads the CIS view.",
+        "operationId": "my_self_approval_booking_staff_me_self_approval_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Self Approval Booking Staff Me Self Approval Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Self Approval",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
     "/booking/staff/{cis_user_id}": {
       "get": {
         "operationId": "get_staff_booking_staff__cis_user_id__get",
@@ -29554,7 +29855,7 @@
             }
           },
           {
-            "description": "active | inactive",
+            "description": "pending | active | inactive",
             "in": "query",
             "name": "status",
             "required": false,
@@ -29568,8 +29869,27 @@
                   "type": "null"
                 }
               ],
-              "description": "active | inactive",
+              "description": "pending | active | inactive",
               "title": "Status"
+            }
+          },
+          {
+            "description": "me: pending suppliers the caller may activate now",
+            "in": "query",
+            "name": "approvable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "me: pending suppliers the caller may activate now",
+              "title": "Approvable"
             }
           },
           {
@@ -33356,6 +33676,158 @@
         "summary": "List Versions",
         "tags": [
           "trip-cases"
+        ]
+      }
+    },
+    "/booking/view-as": {
+      "get": {
+        "operationId": "current_view_booking_view_as_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Current View Booking View As Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Current View",
+        "tags": [
+          "staff"
+        ]
+      },
+      "post": {
+        "operationId": "start_view_booking_view_as_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start View Booking View As Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start View",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/booking/view-as/end-all": {
+      "post": {
+        "operationId": "end_all_booking_view_as_end_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response End All Booking View As End All Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End All",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/booking/view-as/{session_id}/end": {
+      "post": {
+        "operationId": "end_view_booking_view_as__session_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-fA-F-]{36}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response End View Booking View As  Session Id  End Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End View",
+        "tags": [
+          "staff"
         ]
       }
     }

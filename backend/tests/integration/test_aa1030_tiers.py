@@ -16,6 +16,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from tests.integration.conftest import make_sellable
 from tests.integration.test_bk019_b2b import (  # noqa: F401 — fixtures used by name
     ADMIN,
     CHECKER,
@@ -89,7 +90,7 @@ async def test_two_partners_on_different_tiers_get_different_prices(
     terms = await _ok(await c.get("/pricing/partner-terms", headers=sales))
     assert {t["tier_code"] for t in terms["items"]} == {"standard"}
 
-    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    commercial = {"sellable": False, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {
         "items": [{"day_no": 1, "hotel_room_type_id": supply["room"]}, {"day_no": 1, "service_id": supply["service"]}]
@@ -97,6 +98,7 @@ async def test_two_partners_on_different_tiers_get_different_prices(
     plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
         "trip_plan_id"
     ]
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     lines = [
         {"line_ref": "plan", "component_id": f"tp:{plan_id}", "service_date": "2027-03-01", "pax": {"adult": 2}},
         {"line_ref": "car", "component_id": f"sv:{supply['service']}", "service_date": "2027-03-01",

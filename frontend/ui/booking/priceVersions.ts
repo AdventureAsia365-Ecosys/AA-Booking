@@ -42,17 +42,29 @@ export function changeActions(
   me: string | undefined,
   canWrite: boolean,
   canApprove: boolean,
+  /** AA-1158: the caller is the business owner and may approve her own proposal (flagged; never a rejection, a
+   * stop-sale or a removal: the caller passes false for those). */
+  selfApprove = false,
 ): ChangeAction[] {
   const out: ChangeAction[] = [];
   const mine = item.created_by.id === me;
   if (item.state === "pending") {
-    if (canApprove && !mine) out.push("approve", "reject");
-    if (canWrite && mine) out.push("withdraw");
+    out.push(...pendingActions(mine, canWrite, canApprove, selfApprove));
   } else if (item.state === "approved") {
     if (canWrite) out.push("end");
   } else if (item.state === "ending") {
     if (canApprove && item.end_requested_by?.id !== me) out.push("end_approve", "end_reject");
   }
+  return out;
+}
+
+/** A pending row: a second person approves or rejects it; its maker withdraws it; AA-1158: the business owner may
+ *  also approve her own (flagged), never reject it. */
+function pendingActions(mine: boolean, canWrite: boolean, canApprove: boolean, selfApprove: boolean): ("approve" | "reject" | "withdraw")[] {
+  const out: ("approve" | "reject" | "withdraw")[] = [];
+  if (canApprove && (!mine || selfApprove)) out.push("approve");
+  if (canApprove && !mine) out.push("reject");
+  if (canWrite && mine) out.push("withdraw");
   return out;
 }
 
@@ -63,15 +75,13 @@ export function versionActions(
   me: string | undefined,
   canWrite: boolean,
   canApprove: boolean,
+  /** AA-1158: the caller is the business owner and may approve her own version (flagged; reject / withdraw stay
+   * two-person). */
+  selfApprove = false,
 ): VersionAction[] {
   const mine = v.created_by.id === me;
   if (v.status === "draft") return canWrite && mine ? ["edit", "submit", "withdraw"] : [];
-  if (v.status === "pending") {
-    const out: VersionAction[] = [];
-    if (canApprove && !mine) out.push("approve", "reject");
-    if (canWrite && mine) out.push("withdraw");
-    return out;
-  }
+  if (v.status === "pending") return pendingActions(mine, canWrite, canApprove, selfApprove);
   if (v.status === "published") return canApprove && !mine ? ["withdraw"] : [];
   return [];
 }

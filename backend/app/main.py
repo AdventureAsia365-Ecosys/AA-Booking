@@ -81,6 +81,7 @@ from app.routers import (
     retention,
     staff,
     staff_roles,
+    staff_view_as,
     supplier_bills,
     supplier_bookings,
     suppliers,
@@ -230,6 +231,7 @@ def create_app(
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(docs.router)
+    app.include_router(staff_view_as.router)  # AA-1157: the owner's read-only view as a lower role
     app.include_router(staff.router)
     app.include_router(staff_roles.router)  # AA-1155 T6: the role editor (custom staff roles, bk-062)
     app.include_router(ops_checks.router)  # AA-1171: GET /booking/ops/checks, the job check registry for CIS

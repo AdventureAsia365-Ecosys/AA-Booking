@@ -35,6 +35,10 @@ TERMS = {"id": "t", "party_tenant_id": None, "deposit_pct": Decimal("0.3000"), "
 ENTITY = {"id": "e", "code": "LB", "legal_entity": "Lantern Bay Ltd", "tax_code": None, "registered_office": None,
           "country_iso2": "VN", "invoice_inbox": None, "payment_instructions": None, "is_default": True,
           "active": True}  # fmt: skip
+CHANGE = {"id": "c", "billing_entity_id": "e", "set_payment_instructions": False, "payment_instructions": None,
+          "make_default": True, "reason": "Requested on the billing settings page", "status": "pending",
+          "requested_by": "fin-1", "requested_at": None, "decided_by": None, "decided_at": None,
+          "reject_reason": None, "owner_self_approved": False}  # fmt: skip
 
 
 @pytest.fixture(autouse=True)
@@ -265,17 +269,39 @@ async def test_config_branches() -> None:
     taken = ScriptedConn([("SELECT 1 FROM booking.billing_entity WHERE code", 1)])
     with pytest.raises(Conflict):
         await config.create_entity(taken, {"code": "LB", "legal_entity": "x"}, "fin-1")
-    made = ScriptedConn([("INSERT INTO booking.billing_entity", {**ENTITY, "id": uuid.uuid4()})])
+    # AA-1158: a new entity starts without payment details and not the default; those become one pending change.
+    eid = uuid.uuid4()
+    made = ScriptedConn(
+        [
+            ("INSERT INTO booking.billing_entity_change", CHANGE),
+            ("INSERT INTO booking.billing_entity ", {**ENTITY, "id": eid, "is_default": False}),
+            ("FROM booking.billing_entity WHERE id", {**ENTITY, "id": str(eid), "is_default": False}),
+        ]
+    )
     out = await config.create_entity(made, {"code": "LB", "legal_entity": "x", "is_default": True}, "fin-1")
-    assert isinstance(out["id"], str) and made.sql("SET is_default = false") and made.sql("INSERT INTO booking.audit")
+    assert (
+        isinstance(out["id"], str) and not made.sql("SET is_default = false") and made.sql("INSERT INTO booking.audit")
+    )
+    assert out["pending_change"]["make_default"] is True
+    (insert,) = made.sql("INSERT INTO booking.billing_entity (code")
+    assert insert[6:8] == (None, False)  # payment_instructions, is_default
     with pytest.raises(NotFound):
         await config.update_entity(ScriptedConn(), "e", {}, "fin-1")
     off = ScriptedConn([("FROM booking.billing_entity WHERE id", ENTITY)])
     with pytest.raises(Invalid):
         await config.update_entity(off, "e", {"active": False}, "fin-1")
-    ok = ScriptedConn([("FROM booking.billing_entity WHERE id", {**ENTITY, "is_default": False}),
-                       ("UPDATE booking.billing_entity SET legal_entity", ENTITY)])  # fmt: skip
-    assert (await config.update_entity(ok, "e", {"is_default": True}, "fin-1"))["code"] == "LB"
+    plain = {**ENTITY, "is_default": False}
+    ok = ScriptedConn([("INSERT INTO booking.billing_entity_change", CHANGE),
+                       ("FROM booking.billing_entity WHERE id", plain),
+                       ("UPDATE booking.billing_entity SET legal_entity", plain)])  # fmt: skip
+    out = await config.update_entity(ok, "e", {"is_default": True}, "fin-1")
+    assert out["code"] == "LB" and out["is_default"] is False and out["pending_change"]["make_default"] is True
+    (update,) = ok.sql("UPDATE booking.billing_entity SET legal_entity")
+    assert update[7] is False  # is_default stays until the change is approved
+    with pytest.raises(Invalid) as err:
+        await config.update_entity(ScriptedConn([("FROM booking.billing_entity WHERE id", ENTITY)]), "e",
+                                   {"is_default": False}, "fin-1")  # fmt: skip
+    assert err.value.code == "default_moves_by_change"
     with pytest.raises(Invalid):
         await config.create_tax_rule(ScriptedConn(), {"code": "X", "effective_from": date(2026, 2, 1),
                                                       "effective_to": date(2026, 1, 1)}, "fin-1")  # fmt: skip
@@ -295,7 +321,11 @@ async def test_config_branches() -> None:
     assert await config.pick_tax_rule(ScriptedConn([("FROM booking.tax_rule", rule)]), "saas", "TH",
                                       date(2026, 5, 1)) == rule  # fmt: skip
     assert await config.list_tax_rules(ScriptedConn([("FROM booking.tax_rule", [rule])])) == [rule]
-    assert await config.list_entities(ScriptedConn([("FROM booking.billing_entity", [ENTITY])])) == [ENTITY]
+    listed = ScriptedConn([("FROM booking.billing_entity_change", [{**CHANGE, "requested_by_name": "Fin One"}]),
+                           ("FROM booking.billing_entity ORDER BY", [ENTITY])])  # fmt: skip
+    assert await config.list_entities(listed) == [
+        {**ENTITY, "pending_change": {**CHANGE, "requested_by_name": "Fin One"}}
+    ]
     assert await config.default_entity(ScriptedConn()) is None
 
 

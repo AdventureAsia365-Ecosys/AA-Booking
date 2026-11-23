@@ -210,8 +210,10 @@ def _plan(key: str = KEY, *, sellable: bool = False, components: int = 2) -> dic
 
 @pytest.mark.asyncio
 async def test_make_sellable_and_not() -> None:
-    conn = _plans(_plan(), _plan(OTHER, components=0)).on(
-        "SELECT DISTINCT source_id FROM catalog.v_tour", [{"source_id": KEY}]
+    conn = (
+        _plans(_plan(), _plan(OTHER, components=0))
+        .on("SELECT DISTINCT source_id FROM catalog.v_tour", [{"source_id": KEY}])
+        .on("SELECT DISTINCT r.trip_plan_id", [{"plan_id": "id-1"}])  # AA-1158 Q9: KEY is price-ready
     )
     out = await pw.apply_action(conn, STAFF, "make_sellable", [KEY, OTHER, "gone"], on=ON)  # type: ignore[arg-type]
     assert [(r["outcome"], r["reason"]) for r in out["results"]] == [
@@ -222,6 +224,11 @@ async def test_make_sellable_and_not() -> None:
     assert (out["done"], out["skipped"]) == (1, 2)
     assert conn.sql("UPDATE booking.trip_plans SET sellable") == [("id-1", True, "it-1091")]
     assert any("trip_plan.updated" in a for a in map(str, conn.sql("INSERT INTO booking.audit_logs")))
+
+    unpriced = _plans(_plan()).on("SELECT DISTINCT source_id FROM catalog.v_tour", [{"source_id": KEY}])
+    out = await pw.apply_action(unpriced, STAFF, "make_sellable", [KEY], on=ON)  # type: ignore[arg-type]
+    assert out["results"][0]["reason"] == "no_approved_price"
+    assert unpriced.sql("UPDATE booking.trip_plans SET sellable") == []
 
     out_of = _plans(_plan()).on("SELECT DISTINCT source_id FROM catalog.v_tour", [])
     out = await pw.apply_action(out_of, STAFF, "make_sellable", [KEY], on=ON)  # type: ignore[arg-type]

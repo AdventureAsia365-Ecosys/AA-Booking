@@ -84,6 +84,7 @@ export const MSG = phrasebook(
     "Overdue amount": "Overdue amount",
     "Software paid through": "Software paid through",
     "Warn / suspend after": "Warn / suspend after",
+    "Recorded as a business-owner self-approval": "Recorded as a business-owner self-approval",
   },
   {
     "{0} days": (...a: unknown[]) => `${a[0]} ngày`,
@@ -163,6 +164,7 @@ export const MSG = phrasebook(
     "Overdue amount": "Số tiền quá hạn",
     "Software paid through": "Phí phần mềm đã trả tới",
     "Warn / suspend after": "Cảnh báo / tạm ngưng sau",
+    "Recorded as a business-owner self-approval": "Được ghi nhận là chủ doanh nghiệp tự duyệt",
   },
   ),
 );

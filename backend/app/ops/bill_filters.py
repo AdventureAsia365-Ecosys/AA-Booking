@@ -5,8 +5,10 @@
 ``supplier_bills.queue`` (``app.my_work``) both call it, so a tile equals the list total for the same filter.
 
 "Approvable by me" (``actionable_by``) = bills the caller may approve or pay: not entered by them and not last
-changed by them (``created_by`` / ``facts_edited_by``), the maker-checker rule ``supplier_bills.approve`` and
-``record_payout`` enforce, so the My work approval tiles never count a bill the viewer would be refused.
+changed by them (``created_by`` / ``facts_edited_by``), and an approved bill not approved by them either (AA-1158
+R3), the maker-checker rules ``supplier_bills.approve`` and ``record_payout`` enforce, so the My work approval tiles
+never count a bill the viewer would be refused. The business owner (``owner_approve`` / ``owner_pay``, decided by
+:mod:`app.auth.self_approval`) also sees her own received bills and the approved bills she approved.
 
 "Due soon" = open bills not overdue yet that fall due within ``supplier_bill_due_soon_days``: the window of the
 ``supplier_bill.due`` reminder (Pricing > Policy, maker-checker; :func:`due_soon_days`), never a number in code.
@@ -89,6 +91,8 @@ def bill_filter(
     due_soon_days: int | None = None,
     actionable_by: str | None = None,
     q: str | None = None,
+    owner_approve: bool = False,
+    owner_pay: bool = False,
 ) -> tuple[str, list[Any]]:
     """The WHERE text and its arguments. ``due_soon_days``: open bills not overdue yet that fall due within that many
     days (the view's overdue is "past the due date in the session's day", ``current_date``: the same clock here).
@@ -115,7 +119,10 @@ def bill_filter(
             due_soon_days,
         )
     if actionable_by:
-        add("b.created_by <> {p} AND b.facts_edited_by IS DISTINCT FROM {p}", actionable_by)
+        maker = "b.created_by <> {p} AND b.facts_edited_by IS DISTINCT FROM {p}"
+        payer = maker + ("" if owner_pay else " AND b.approved_by IS DISTINCT FROM {p}")
+        approver = "true" if owner_approve else maker
+        add(f"(CASE WHEN b.status = 'approved' THEN ({payer}) ELSE ({approver}) END)", actionable_by)
     if q:
         add(
             "(b.code ILIKE {p} OR b.bill_number ILIKE {p} OR s.company_name ILIKE {p} OR tc.code ILIKE {p})",

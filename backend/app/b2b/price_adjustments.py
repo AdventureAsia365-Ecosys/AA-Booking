@@ -28,6 +28,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
+from app.auth import self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 
@@ -259,7 +260,8 @@ async def create(conn: asyncpg.Connection, staff: Staff, departure_id: str, data
 
 async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) -> dict[str, Any]:
     """The checker step (call inside a transaction): another person than the maker puts it in force, ending the one in
-    force. Approving one in force again returns it unchanged."""
+    force (AA-1158 Q5: or the business owner on her own proposal, flagged ``owner_self_approved``). Approving one in
+    force again returns it unchanged."""
     require_approve(staff)
     row = await _row(conn, adjustment_id, lock=True)
     st = state(row)
@@ -267,8 +269,9 @@ async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) ->
         return adjustment_out(row, staff)
     if st == "ended":
         raise Conflict("price_adjustment_ended", f"this adjustment was {row['end_reason']}; propose a new one")
-    if row["created_by"] == staff.cis_user_id:
-        raise Forbidden("maker_checker", "you proposed this price adjustment: another person approves it")
+    flagged = await self_approval.check(
+        conn, staff, [row["created_by"]], message="you proposed this price adjustment: another person approves it"
+    )
     status = await conn.fetchval(
         "SELECT status FROM booking.departures WHERE id = $1::uuid FOR UPDATE", row["departure_id"]
     )
@@ -281,9 +284,11 @@ async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) ->
         staff.cis_user_id,
     )
     await conn.execute(
-        "UPDATE booking.departure_price_adjustments SET approved_by = $2, approved_at = now() WHERE id = $1::uuid",
+        "UPDATE booking.departure_price_adjustments SET approved_by = $2, approved_at = now(),"
+        " owner_self_approved = $3 WHERE id = $1::uuid",
         row["id"],
         staff.cis_user_id,
+        flagged,
     )
     await audit.record(
         conn,
@@ -292,8 +297,13 @@ async def approve(conn: asyncpg.Connection, staff: Staff, adjustment_id: str) ->
         action="price_adjustment.approved",
         entity_type="departure",
         entity_id=row["departure_id"],
-        after={"price_adjustment_id": row["id"], "replaced": [r["id"] for r in ended]},
-        summary=f"Price adjustment {describe(row['adjust_pct'], row['amount'], row['currency'])} approved",
+        after={
+            "price_adjustment_id": row["id"],
+            "replaced": [r["id"] for r in ended],
+            **({"owner_self_approved": True} if flagged else {}),
+        },
+        summary=f"Price adjustment {describe(row['adjust_pct'], row['amount'], row['currency'])} approved"
+        + (" (business-owner self-approval)" if flagged else ""),
     )
     return adjustment_out(await _row(conn, row["id"]), staff)
 

@@ -79,6 +79,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-061",  # AA-1111 S2: the administrator MFA switch (staff_admin_mfa_required) as a pricing policy value; MIG-4
     "bk-062",  # AA-1155 T5: custom staff roles (booking.staff_role + capabilities; the booking-custom resolver); MIG-4
     "bk-063",  # AA-1171: the job check thresholds as pricing policy values (app.jobs.metrics reads them); MIG-4
+    "bk-064",  # AA-1158: approval rules (pending suppliers, contract writers, owner self-approval flags); MIG-4
     "bk-065",  # AA-1149: tour parts (one supplier booking per component), can-operate check, sale exception; MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)

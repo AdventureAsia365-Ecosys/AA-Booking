@@ -40,6 +40,7 @@ import {
   useCan,
   useUrlFilters,
 } from "@/ui";
+import { SavedTabs } from "@/app/(staff)/_parts/SavedTabs";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
@@ -63,6 +64,7 @@ export function AuditLogView() {
     to: DATE_RE.test(get("to")) ? get("to") : undefined,
     entity_id: entityIdValid ? entityId : undefined,
     q: get("q").trim().slice(0, 200) || undefined, // the API caps q at 200 (422 beyond)
+    owner_self_approved: ownerSelfParam(get("owner_self_approved")),
     limit: PAGE_SIZE,
   };
   const filtered = Object.entries(filters).some(([k, v]) => k !== "limit" && v !== undefined);
@@ -102,6 +104,7 @@ export function AuditLogView() {
         </Button>
       }
     >
+      <SelfApprovalTabs show={canRead} on={!!filters.owner_self_approved} onChange={(on) => set("owner_self_approved", on ? "true" : null)} />
       <Section padded={false}>
         <div className="border-b border-line2 px-4 py-4 sm:px-5">
           <FilterBar
@@ -116,7 +119,7 @@ export function AuditLogView() {
               { key: "actor", label: t("Staff member"), allLabel: t("All staff"), options: staffOptions, width: 180 },
             ]}
             dateRange={{ fromKey: "from", toKey: "to", label: t("Date") }}
-            extraKeys={["entity_id"]}
+            extraKeys={["entity_id", "owner_self_approved"]}
           >
             {entityId && (
               <span className="inline-flex h-9 max-w-full items-center gap-1.5 rounded-full border border-accent-border bg-accent-tint px-3 text-[13px] text-accent-deep">
@@ -300,5 +303,26 @@ function ListSkeleton() {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** AA-1158: the saved filter "Business-owner self-approvals" (also the target of the My work tile). */
+function ownerSelfParam(value: string): "true" | undefined {
+  return value === "true" ? "true" : undefined;
+}
+
+function SelfApprovalTabs({ show, on, onChange }: { show: boolean; on: boolean; onChange: (on: boolean) => void }) {
+  const t = useT(MSG);
+  if (!show) return null;
+  return (
+    <SavedTabs
+      ariaLabel={t("Audit log views")}
+      active={on ? "owner_self" : "all"}
+      onSelect={(key) => onChange(key === "owner_self")}
+      tabs={[
+        { key: "all", label: t("All changes") },
+        { key: "owner_self", label: t("Business-owner self-approvals") },
+      ]}
+    />
   );
 }

@@ -17,6 +17,8 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from tests.integration.conftest import apply_migrations
+
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MIGRATIONS = Path(__file__).resolve().parents[3] / "migrations"
@@ -121,6 +123,7 @@ async def test_registered_and_rerunnable(migrated_admin_dsn: str) -> None:
         await c.execute(BK041.read_text(encoding="utf-8"))
         await c.execute(BK042.read_text(encoding="utf-8"))
         await c.execute("RESET ROLE")
+        await apply_migrations(c, only=[64])  # bk-064 replaces bk-041 CHECKs: put it back for the later tests
         n = await c.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version IN ('bk-041', 'bk-042')")
         assert n == 2
         assert await c.fetchval("SELECT count(*) FROM booking.billing_terms WHERE party_tenant_id IS NULL") == 1
