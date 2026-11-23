@@ -653,7 +653,8 @@ async def current_staff(
             raise HTTPException(status_code=403, detail="e2e_read_only")
         view_ref = request.headers.get(view_as.HEADER)
         if view_ref is not None and request.method.upper() not in PREVIEW_METHODS:
-            # AA-1157: a view-as session never writes, whatever the route. Refused before any DB access.
+            # AA-1157: a view-as session never writes, whatever the route. Refused before any DB access. The staff BFF
+            # refuses (and logs) such a write itself first; this is the API's own check for a write sent straight here.
             log.info("booking_view_as_write_refused method=%s path=%s", request.method, request.url.path)
             raise HTTPException(status_code=403, detail=view_as.READ_ONLY)
         writer = e2e_staff.writer_for(principal.email)

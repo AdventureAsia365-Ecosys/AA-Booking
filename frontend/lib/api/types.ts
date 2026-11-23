@@ -55,8 +55,8 @@ export interface StaffMe extends StaffProfile {
   read_only?: boolean;
 }
 
+/** The page's view of the owner's view (never the session id: only the BFF holds it, in an httpOnly cookie). */
 export interface StaffViewAs {
-  session_id: string;
   target_role: string;
   target_label: string;
   viewer_role: string;

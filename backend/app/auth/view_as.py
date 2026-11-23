@@ -25,8 +25,12 @@ How it works
 4. During a view the owner markers read False (:data:`app.auth.custom_roles.VIEWING`), so no owner or business-owner
    power is reachable, whatever route asks.
 5. Ending: ``POST /booking/view-as/{session_id}/end`` (the BFF's Back, sent WITHOUT the header), a new start, the
-   staff sign-out (the BFF ends it), or :func:`apply` on expiry. An abandoned session's expiry is in its start row
-   (``after.expires_at``); its end row is written the next time it is touched or replaced.
+   staff sign-out (the BFF ends every open view, also an expired one), :func:`apply` on expiry, or the owner's next
+   ``GET /booking/view-as`` outside a view (:func:`close_expired`: the banner's check at 0 minutes, the Roles page). A
+   session already past its expiry always ends with reason ``expired``, whichever path closes it.
+6. Writes: in the browser flow the staff BFF refuses every write of a view first (never forwarded) and writes one
+   structured log line ``booking_view_as_write_refused`` (the staff admin's container log). A write that reaches the
+   API with the header anyway is refused in :func:`app.auth.staff.current_staff` with the same log line from the API.
 """
 
 from __future__ import annotations
@@ -83,9 +87,9 @@ ENDED_SQL = (
     "SELECT 1 FROM booking.audit_logs WHERE entity_type = 'staff_view_as' AND entity_id = $1::uuid "
     "AND action = 'staff.view_as_ended' LIMIT 1"
 )
-# The viewer's sessions that have no end row yet (open or expired-unclosed), newest first.
+# The viewer's sessions that have no end row yet (open or expired-unclosed), newest first, with their start row's after.
 OPEN_SQL = (
-    "SELECT s.entity_id::text AS session_id FROM booking.audit_logs s "
+    "SELECT s.entity_id::text AS session_id, s.after::text AS after FROM booking.audit_logs s "
     "WHERE s.entity_type = 'staff_view_as' AND s.action = 'staff.view_as_started' AND s.actor_ref = $1 "
     "AND NOT EXISTS (SELECT 1 FROM booking.audit_logs e WHERE e.entity_type = 'staff_view_as' "
     "AND e.entity_id = s.entity_id AND e.action = 'staff.view_as_ended') ORDER BY s.created_at DESC LIMIT 20"
@@ -103,8 +107,9 @@ class ViewAs:
     expires_at: str
 
     def public(self) -> dict[str, Any]:
+        """What the page may see (GET /booking/view-as, /booking/staff/me): never the session id, which only the BFF
+        holds (httpOnly cookie)."""
         return {
-            "session_id": self.session_id,
             "target_role": self.target_role,
             "target_label": self.target_label,
             "viewer_role": self.viewer_role,
@@ -230,11 +235,8 @@ async def start(
             raise HTTPException(status_code=403, detail=NOT_DOWNWARD)
         actor = staff.cis_user_id
         await conn.execute(LOCK_SQL, actor)
-        ended = []
-        for r in await conn.fetch(OPEN_SQL, actor):
-            if await _end(conn, actor, r["session_id"], "superseded"):
-                ended.append(r["session_id"])
         now: datetime = await conn.fetchval("SELECT now()")
+        ended = await _end_open(conn, actor, "superseded", now)
         expires = now + timedelta(minutes=minutes)
         session_id = str(uuid.uuid4())
         await audit.record(
@@ -281,11 +283,55 @@ async def end(pool: asyncpg.Pool, staff: Any, session_id: str, reason: str = "en
 
 
 async def end_all(pool: asyncpg.Pool, staff: Any, reason: str = "signed_out") -> list[str]:
-    """End every open session of the viewer (the BFF's sign-out)."""
+    """End every open session of the viewer (the BFF's sign-out); one already past its expiry ends as ``expired``."""
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(LOCK_SQL, staff.cis_user_id)
-        closed = [r["session_id"] for r in await conn.fetch(OPEN_SQL, staff.cis_user_id)]
-        return [sid for sid in closed if await _end(conn, staff.cis_user_id, sid, reason)]
+        now: datetime = await conn.fetchval("SELECT now()")
+        return await _end_open(conn, staff.cis_user_id, reason, now)
+
+
+async def close_expired(pool: asyncpg.Pool, staff: Any) -> list[str]:
+    """End the viewer's sessions that are past their expiry but have no end row yet (reason ``expired``, actor the
+    system), so a view left to time out gets its end row on the owner's next view-as read. Cheap: one indexed read when
+    there is nothing to close. Best effort: a database error is logged and nothing is closed."""
+    actor = getattr(staff, "cis_user_id", None)
+    if not actor:
+        return []
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            if not await conn.fetch(OPEN_SQL, actor):
+                return []
+            await conn.execute(LOCK_SQL, actor)
+            now: datetime = await conn.fetchval("SELECT now()")
+            return await _end_open(conn, actor, None, now, actor_type="system")
+    except (asyncpg.PostgresError, OSError) as exc:
+        log.warning("booking_view_as_close_expired_failed error_class=%s", type(exc).__name__)
+        return []
+
+
+def _past_expiry(after_text: Any, now: datetime) -> bool:
+    """Is the start row's ``after.expires_at`` at or before ``now``? An unreadable one counts as past (fail closed)."""
+    import json  # noqa: PLC0415
+
+    try:
+        after = json.loads(after_text) if isinstance(after_text, str) else None
+    except ValueError:
+        after = None
+    expires = _parse(after.get("expires_at")) if isinstance(after, dict) else None
+    return expires is None or expires <= now
+
+
+async def _end_open(
+    conn: asyncpg.Connection, actor: str, reason: str | None, now: datetime, actor_type: str = "staff"
+) -> list[str]:
+    """End the viewer's sessions without an end row (the caller holds the lock): a session past its expiry as
+    ``expired``, the others as ``reason`` (``None``: leave them open). The ids ended."""
+    ended = []
+    for r in await conn.fetch(OPEN_SQL, actor):
+        why = "expired" if _past_expiry(r["after"], now) else reason
+        if why is not None and await _end(conn, actor, r["session_id"], why, actor_type=actor_type):
+            ended.append(r["session_id"])
+    return ended
 
 
 # ── Per request ──────────────────────────────────────────────────────────────

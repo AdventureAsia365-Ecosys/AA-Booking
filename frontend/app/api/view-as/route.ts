@@ -5,7 +5,8 @@
 //          id it answers goes into the httpOnly cookie bk_view_as (SameSite=Strict, at most 60 minutes) and is not
 //          sent to the page.
 //   GET    → Booking GET /booking/view-as with the cookie's session ({ active: false } outside a view; a view the API
-//          ended clears the cookie).
+//          ended clears the cookie). Without the cookie it still asks the API (no view header): the API then ends the
+//          member's views that are past their expiry (their end rows), e.g. at the banner's check at 0 minutes.
 //   DELETE → the "Back" button: Booking POST /booking/view-as/{id}/end WITHOUT the view header (as the owner), then the
 //          cookie is cleared (also when the API call fails: the view then ends at its expiry).
 // The company sign-in cookies are never touched, so the sign-in session is the same before and after. The access token
@@ -15,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { bookingApiUrl, UPSTREAM_TIMEOUT_MS } from "@/lib/config";
 import { isSameOrigin } from "@/lib/sameOrigin";
 import { withAccess } from "@/lib/bffAccess";
-import { VIEW_AS_COOKIE, cookieMaxAge, isViewEnded, viewAsHeaders, viewAsRef } from "@/lib/viewAs";
+import { VIEW_AS_COOKIE, cookieMaxAge, isViewEnded, refusedWriteLog, viewAsHeaders, viewAsRef } from "@/lib/viewAs";
 import { clearViewAsCookie, setViewAsCookie } from "@/lib/viewAsCookie";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +52,9 @@ function started(data: { session_id?: unknown; expires_at?: unknown }): NextResp
 export async function POST(req: NextRequest) {
   const refused = crossSite(req);
   if (refused) return refused;
-  if (viewAsRef(req.cookies.get(VIEW_AS_COOKIE)?.value)) {
+  const current = req.cookies.get(VIEW_AS_COOKIE)?.value;
+  if (viewAsRef(current)) {
+    console.warn(refusedWriteLog(req.method, "/booking/view-as", current));
     return NextResponse.json({ detail: "view_as_read_only", message: "Go back first." }, { status: 403 });
   }
   const body = await req.text();
@@ -65,7 +68,6 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const ref = viewAsRef(req.cookies.get(VIEW_AS_COOKIE)?.value);
-  if (!ref) return NextResponse.json({ active: false });
   return withAccess(req, async (access) => {
     const res = await upstream("view-as", access, { view: ref });
     const data = await res.json().catch(() => ({}));

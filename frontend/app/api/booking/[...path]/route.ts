@@ -14,7 +14,8 @@
 //   to 8-200 printable ASCII characters.
 // - Path segments are re-encoded and `.` / `..` are refused, so a request can never leave /booking/.
 // - AA-1157: inside the owner's read-only "view as a lower role" (httpOnly cookie bk_view_as, lib/viewAs.ts) every
-//   write is refused here (403 view_as_read_only) and every read carries the view header; a 409 view_as_ended from
+//   write is refused here (403 view_as_read_only, never forwarded; one structured log line
+//   "booking_view_as_write_refused" is its trace) and every read carries the view header; a 409 view_as_ended from
 //   the API clears the cookie. The view's start / end go through app/api/view-as/route.ts only.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -25,10 +26,11 @@ import {
   readRefreshCookie,
   refreshStaffTokens,
   setStaffSessionCookies,
+  type StaffRefreshCookie,
   type StaffTokens,
 } from "@/lib/cognito";
 import { isSameOrigin } from "@/lib/sameOrigin";
-import { VIEW_AS_COOKIE, isViewEnded, proxyRefusal, viewAsHeaders } from "@/lib/viewAs";
+import { VIEW_AS_COOKIE, VIEW_AS_READ_ONLY, isViewEnded, proxyRefusal, refusedWriteLog, viewAsHeaders } from "@/lib/viewAs";
 import { clearViewAsCookie } from "@/lib/viewAsCookie";
 
 export const dynamic = "force-dynamic";
@@ -54,19 +56,68 @@ function endSession(status: number, detail: string, message: string) {
   return res;
 }
 
-async function handler(req: NextRequest, { params }: Ctx) {
-  const { path } = await params;
+/** The answer the BFF gives itself, before any token is read: a bad path, a cross-site write, or a write inside the
+ *  owner's view (AA-1157: refused here, never forwarded, with one structured log line as its trace). */
+function refuseEarly(req: NextRequest, path: string[], viewCookie: string | undefined): NextResponse | null {
   if (!path?.length || path.some((s) => s === "." || s === ".." || s.includes("\\"))) {
     return json(400, "bad_path", "Invalid API path.");
   }
-
   // Defence in depth on top of SameSite=Lax: a write must come from this origin.
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    if (!isSameOrigin(req)) return json(403, "bad_origin", "Cross-site request refused.");
-  }
-  const viewCookie = req.cookies.get(VIEW_AS_COOKIE)?.value;
+  if (!isRead(req.method) && !isSameOrigin(req)) return json(403, "bad_origin", "Cross-site request refused.");
   const viewRefused = proxyRefusal(req.method, path.join("/"), viewCookie);
-  if (viewRefused) return json(403, viewRefused, "View-as is read-only: go back to change anything.");
+  if (!viewRefused) return null;
+  if (viewRefused === VIEW_AS_READ_ONLY) console.warn(refusedWriteLog(req.method, `/booking/${path.join("/")}`, viewCookie));
+  return json(403, viewRefused, "View-as is read-only: go back to change anything.");
+}
+
+function isRead(method: string): boolean {
+  return method === "GET" || method === "HEAD";
+}
+
+/** The JSON body to forward (undefined for a read or an empty body), or the 413 answer. */
+async function readBody(req: NextRequest, path: string[]): Promise<{ body?: string } | NextResponse> {
+  if (isRead(req.method)) return {};
+  const body = await req.text();
+  const limit = req.method === "POST" && MEDIA_UPLOAD_PATH.test(path.join("/")) ? MEDIA_MAX_BODY_BYTES : MAX_BODY_BYTES;
+  if (body.length > limit) return json(413, "body_too_large", "Request body is too large.");
+  return { body: body || undefined };
+}
+
+/** The upstream request headers: the token, the JSON type for a body, a checked Idempotency-Key, the view header. */
+function upstreamHeaders(req: NextRequest, access: string, hasBody: boolean, viewCookie?: string): Record<string, string> {
+  const idempotencyKey = req.headers.get("idempotency-key");
+  const forwardKey = idempotencyKey && /^[\x21-\x7e]{8,200}$/.test(idempotencyKey) ? idempotencyKey : null;
+  return {
+    Authorization: `Bearer ${access}`,
+    Accept: "application/json",
+    ...(hasBody ? { "Content-Type": "application/json" } : {}),
+    ...(forwardKey ? { "Idempotency-Key": forwardKey } : {}),
+    ...viewAsHeaders(viewCookie),
+  };
+}
+
+/** The upstream answer passed through: status, body and the allowed headers; a 409 view_as_ended clears the view
+ *  cookie (AA-1157) and rotated sign-in cookies are set. */
+async function passThrough(
+  upstream: Response, viewCookie: string | undefined, rotated: StaffTokens | null, rt: StaffRefreshCookie,
+): Promise<NextResponse> {
+  const headers = new Headers();
+  for (const h of PASS_HEADERS) {
+    const v = upstream.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+  const payload = upstream.status === 204 ? null : await upstream.arrayBuffer();
+  const out = new NextResponse(payload, { status: upstream.status, headers });
+  if (upstream.status === 409 && viewCookie && payload && endsView(payload)) clearViewAsCookie(out);
+  if (rotated) setStaffSessionCookies(out, rotated, rt.sessionEnd, rt.refreshToken);
+  return out;
+}
+
+async function handler(req: NextRequest, { params }: Ctx) {
+  const { path } = await params;
+  const viewCookie = req.cookies.get(VIEW_AS_COOKIE)?.value;
+  const early = refuseEarly(req, path, viewCookie);
+  if (early) return early;
 
   const rt = readRefreshCookie(req);
   if (!rt) return endSession(401, "not_signed_in", "Your session has ended. Sign in again.");
@@ -92,27 +143,15 @@ async function handler(req: NextRequest, { params }: Ctx) {
     if (failed) return failed;
   }
 
-  let body: string | undefined;
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    body = await req.text();
-    const limit = req.method === "POST" && MEDIA_UPLOAD_PATH.test(path.join("/")) ? MEDIA_MAX_BODY_BYTES : MAX_BODY_BYTES;
-    if (body.length > limit) return json(413, "body_too_large", "Request body is too large.");
-    if (!body) body = undefined;
-  }
+  const read = await readBody(req, path);
+  if (read instanceof NextResponse) return read;
+  const { body } = read;
 
   const url = `${bookingApiUrl()}/booking/${path.map(encodeURIComponent).join("/")}${req.nextUrl.search}`;
-  const idempotencyKey = req.headers.get("idempotency-key");
-  const forwardKey = idempotencyKey && /^[\x21-\x7e]{8,200}$/.test(idempotencyKey) ? idempotencyKey : null;
   const send = () =>
     fetch(url, {
       method: req.method,
-      headers: {
-        Authorization: `Bearer ${access}`,
-        Accept: "application/json",
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-        ...(forwardKey ? { "Idempotency-Key": forwardKey } : {}),
-        ...viewAsHeaders(viewCookie),
-      },
+      headers: upstreamHeaders(req, access, body !== undefined, viewCookie),
       body,
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       cache: "no-store",
@@ -129,18 +168,7 @@ async function handler(req: NextRequest, { params }: Ctx) {
   } catch {
     return json(502, "upstream_unavailable", "The Booking service is not answering. Try again in a moment.");
   }
-
-  const headers = new Headers();
-  for (const h of PASS_HEADERS) {
-    const v = upstream.headers.get(h);
-    if (v) headers.set(h, v);
-  }
-  const payload = upstream.status === 204 ? null : await upstream.arrayBuffer();
-  const out = new NextResponse(payload, { status: upstream.status, headers });
-  if (upstream.status === 409 && viewCookie && payload && endsView(payload)) clearViewAsCookie(out);
-  const cognito = rotated as StaffTokens | null;
-  if (cognito) setStaffSessionCookies(out, cognito, rt.sessionEnd, rt.refreshToken);
-  return out;
+  return passThrough(upstream, viewCookie, rotated as StaffTokens | null, rt);
 }
 
 /** AA-1157: is this 409 body the API's end of the view? */

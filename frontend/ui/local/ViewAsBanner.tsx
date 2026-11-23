@@ -1,8 +1,10 @@
 "use client";
 // ui/local/ViewAsBanner.tsx — AA-1157: the banner of the owner's read-only "view as a lower role", in the shell's banner
 // slot while the profile carries `view_as`. It names the role, says read-only, counts the minutes down, and "Back" ends
-// the view (DELETE /api/view-as, as the owner) and reloads the dashboard with the same sign-in. A Booking-local file
-// (never ui/core).
+// the view (DELETE /api/view-as, as the owner) and reloads the dashboard with the same sign-in. Like the CIS banner it
+// re-checks the view (GET /api/view-as) every 60 s and once when the countdown reaches 0 (at expiry that read writes
+// the end row), and reloads the page when the view is over, so the narrowed nav never outlives the view. A
+// Booking-local file (never ui/core).
 
 import { useEffect, useState } from "react";
 import { Eye } from "lucide-react";
@@ -11,6 +13,20 @@ import { useT } from "@/ui/core/useI18n";
 import { VIEW_AS_API, minutesLeft } from "@/lib/viewAs";
 import { useStaff } from "./StaffContext";
 import { VIEW_AS_MSG } from "./ViewAsBanner.messages";
+
+const POLL_MS = 60_000;
+
+/** Re-read the view (GET /api/view-as) and reload the page once it is over. */
+async function checkView(): Promise<void> {
+  try {
+    const r = await fetch(VIEW_AS_API, { cache: "no-store" });
+    if (!r.ok) return;
+    const body = (await r.json()) as { active?: boolean };
+    if (body.active === false) window.location.reload();
+  } catch {
+    /* keep the banner; the next check tries again */
+  }
+}
 
 export function ViewAsBanner() {
   const t = useT(VIEW_AS_MSG);
@@ -21,8 +37,17 @@ export function ViewAsBanner() {
   useEffect(() => {
     if (!view) return;
     const tick = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(tick);
+    const poll = setInterval(checkView, POLL_MS);
+    return () => {
+      clearInterval(tick);
+      clearInterval(poll);
+    };
   }, [view]);
+
+  const over = !!view && minutesLeft(view.expires_at, now) <= 0;
+  useEffect(() => {
+    if (over) void checkView();
+  }, [over]);
 
   if (!view) return null;
   const back = async () => {

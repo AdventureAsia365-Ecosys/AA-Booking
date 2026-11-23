@@ -621,7 +621,11 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   False during it (`custom_roles.VIEWING`). A dead session (ended, expired, start row erased, owner lost, role archived
   or no longer downward) gets one `staff.view_as_ended` row and answers 409 `view_as_ended`; another viewer's 403
   `view_as_not_own`. Back = `POST /booking/view-as/{session_id}/end` (as the owner, without the header); sign-out =
-  `POST /booking/view-as/end-all`. Under `/booking/view-as`, not `/booking/staff/...` (`GET /booking/staff/{id}`).
+  `POST /booking/view-as/end-all` (every sign-out, also after the view cookie expired); `GET /booking/view-as` outside a
+  view ends the caller's views past their expiry (the banner's check at 0 minutes); a view past its expiry always ends
+  as `expired`. The session id never reaches the page (`ViewAs.public()` leaves it out). The staff BFF refuses every
+  write of a view itself (never forwarded) with one structured log line `booking_view_as_write_refused`; the API's own
+  refusal logs the same event name. Under `/booking/view-as`, not `/booking/staff/...` (`GET /booking/staff/{id}`).
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed).
   **Lean staff roles step 1 (AA-1150, S286)**: `finance` also reads trip cases, prices, supply, operations, supplier
   bills and the catalog (`trip_case.read`, `pricing.read`, `supply.read`, `ops.read`, `bill.read`, `catalog.read`; it

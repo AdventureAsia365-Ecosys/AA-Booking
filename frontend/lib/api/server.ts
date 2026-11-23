@@ -29,20 +29,23 @@ export async function fetchStaffMe(accessToken: string, viewRef?: string | null)
   }
   if (res.status === 401) return { kind: "unauthorized" };
   if (res.status === 409 && viewRef) return { kind: "view_ended" };
-  if (res.status === 403) {
-    let code = "";
-    try {
-      const body = (await res.json()) as { detail?: unknown };
-      code = typeof body.detail === "string" ? body.detail : "";
-    } catch {
-      /* ignore */
-    }
-    return code === "staff_inactive" ? { kind: "inactive" } : { kind: "forbidden", code };
-  }
+  if (res.status === 403) return forbidden(res);
   if (!res.ok) return { kind: "unavailable", status: res.status };
   try {
     return { kind: "ok", staff: (await res.json()) as StaffMe };
   } catch {
     return { kind: "unavailable", status: res.status };
   }
+}
+
+/** A 403 of /booking/staff/me: staff_inactive, or another refusal with its detail code. */
+async function forbidden(res: Response): Promise<StaffMeResult> {
+  let code = "";
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    code = typeof body.detail === "string" ? body.detail : "";
+  } catch {
+    /* ignore */
+  }
+  return code === "staff_inactive" ? { kind: "inactive" } : { kind: "forbidden", code };
 }

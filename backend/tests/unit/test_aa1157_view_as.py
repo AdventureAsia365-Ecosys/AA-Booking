@@ -57,6 +57,13 @@ def start_row(*, actor: str = COG_KEY, target: str = "sales", expires: datetime 
     return {"actor_ref": actor, "after": json.dumps(after)}
 
 
+def open_row(session_id: str, *, minutes: int = 10, after: Any = "default") -> dict[str, Any]:
+    """A row of OPEN_SQL: a session without an end row, expiring ``minutes`` from now (negative: already past)."""
+    if after == "default":
+        after = json.dumps({"expires_at": (datetime.now(UTC) + timedelta(minutes=minutes)).isoformat()})
+    return {"session_id": session_id, "after": after}
+
+
 def viewer_conn(role: str = "admin", *, owner: bool = True, row: Any = None, ended: bool = False) -> ScriptedConn:
     return (
         ScriptedConn()
@@ -85,7 +92,8 @@ def test_me_in_a_view_is_the_target_role_narrowed_and_read_only() -> None:
     body = r.json()
     assert body["role"] == "sales" and body["read_only"] is True
     assert set(body["permissions"]) == role_permissions("sales") & role_permissions("admin")
-    assert body["view_as"]["session_id"] == SESSION and body["view_as"]["viewer_role"] == "admin"
+    assert body["view_as"]["viewer_role"] == "admin" and body["view_as"]["target_label"] == "Sales"
+    assert "session_id" not in body["view_as"] and SESSION not in r.text   # only the BFF holds the session id
     assert "staff.admin" not in body["permissions"]
 
 
@@ -102,6 +110,7 @@ def test_the_view_route_is_not_the_staff_detail_route() -> None:
         inside = c.get("/booking/view-as", headers=view_headers(cis))
         outside = c.get("/booking/view-as", headers=auth(admin_token(cis)))
     assert inside.json()["active"] is True and inside.json()["target_role"] == "sales"
+    assert "session_id" not in inside.json()
     assert outside.json() == {"active": False}
 
 
@@ -228,7 +237,7 @@ def _start(conn: ScriptedConn, body: dict[str, Any], token: str | None = None, c
 
 
 def test_an_owner_start_logs_the_full_capability_list() -> None:
-    conn = viewer_conn().on(OPEN, [{"session_id": "b1157000-0000-4000-8000-0000000000aa"}]).on(ENDED, None)
+    conn = viewer_conn().on(OPEN, [open_row("b1157000-0000-4000-8000-0000000000aa")]).on(ENDED, None)
     r = _start(conn, {"role": "contracting", "minutes": 15, "reason": "Check the product nav"})
     assert r.status_code == 201, r.text
     assert r.json()["target_role"] == "contracting" and r.json()["read_only"] is True
@@ -241,6 +250,50 @@ def test_an_owner_start_logs_the_full_capability_list() -> None:
     assert after["ended_sessions"] == ["b1157000-0000-4000-8000-0000000000aa"]
     superseded = [json.loads(a[7]) for a in rows if a[3] == view_as.ENDED]
     assert superseded == [{"session_id": "b1157000-0000-4000-8000-0000000000aa", "end_reason": "superseded"}]
+
+
+def test_a_start_ends_an_expired_open_session_as_expired() -> None:
+    old = "b1157000-0000-4000-8000-0000000000bb"
+    conn = viewer_conn().on(OPEN, [open_row(old, minutes=-5)]).on(ENDED, None)
+    assert _start(conn, {"role": "sales"}).status_code == 201
+    ended = [json.loads(a[7]) for a in conn.sql(AUDIT) if a[3] == view_as.ENDED]
+    assert ended == [{"session_id": old, "end_reason": "expired"}]
+
+
+def test_the_owner_next_view_read_closes_an_expired_session_once() -> None:
+    """A view left to time out (the cookie is gone): GET /booking/view-as outside a view (the banner's check at 0
+    minutes, the Roles page) writes its end row as the system, reason expired; an open one is left alone."""
+    cis = LocalCis()
+    old, live = "b1157000-0000-4000-8000-0000000000cc", "b1157000-0000-4000-8000-0000000000dd"
+    conn = viewer_conn().on(OPEN, [open_row(old, minutes=-1), open_row(live, minutes=10)]).on(ENDED, None)
+    with client(cis, conn) as c:
+        r = c.get("/booking/view-as", headers=auth(admin_token(cis)))
+    assert r.json() == {"active": False}
+    ended = [(a[0], json.loads(a[7])) for a in conn.sql(AUDIT) if a[3] == view_as.ENDED]
+    assert ended == [("system", {"session_id": old, "end_reason": "expired"})]
+    assert conn.sql(view_as.LOCK_SQL)
+
+
+def test_the_view_read_with_nothing_open_writes_nothing() -> None:
+    cis = LocalCis()
+    conn = viewer_conn()
+    with client(cis, conn) as c:
+        assert c.get("/booking/view-as", headers=auth(admin_token(cis))).json() == {"active": False}
+    assert not conn.sql(AUDIT) and not conn.sql(view_as.LOCK_SQL)
+
+
+@pytest.mark.asyncio
+async def test_sign_out_ends_open_views_and_an_expired_one_as_expired() -> None:
+    old, live = "b1157000-0000-4000-8000-0000000000ee", "b1157000-0000-4000-8000-0000000000ff"
+    conn = ScriptedConn().on(OPEN, [open_row(old, minutes=-1), open_row(live, minutes=10)]).on(ENDED, None)
+    conn.on("SELECT now()", datetime.now(UTC))
+
+    class Viewer:
+        cis_user_id = COG_KEY
+
+    assert await view_as.end_all(conn, Viewer()) == [old, live]
+    reasons = [json.loads(a[7])["end_reason"] for a in conn.sql(AUDIT) if a[3] == view_as.ENDED]
+    assert reasons == ["expired", "signed_out"]
 
 
 def test_a_custom_role_start() -> None:

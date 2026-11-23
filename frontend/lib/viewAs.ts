@@ -2,8 +2,9 @@
 //
 // Roles › "View as" (owners) → POST /api/view-as (app/api/view-as/route.ts) → Booking POST /booking/view-as (owner only,
 // downward only, logged with the role's full capability list). The opaque session id it answers goes into the httpOnly
-// cookie VIEW_AS_COOKIE (never readable by the page); the BFF proxy forwards it as VIEW_AS_HEADER on every read and
-// refuses every write itself (403 view_as_read_only) while it is set. The API answers 409 view_as_ended when the view
+// cookie VIEW_AS_COOKIE (never readable by the page; the API never answers it to the page either); the BFF proxy
+// forwards it as VIEW_AS_HEADER on every read and refuses every write itself (403 view_as_read_only, one log line from
+// refusedWriteLog) while it is set. The API answers 409 view_as_ended when the view
 // is over; the BFF then clears the cookie. The company sign-in cookies are never touched. Dependency-free.
 
 export const VIEW_AS_COOKIE = "bk_view_as";
@@ -36,6 +37,14 @@ export function proxyRefusal(method: string, path: string, cookie: string | unde
   if (!read && viewAsRef(cookie)) return VIEW_AS_READ_ONLY;
   if (!read && /^view-as(\/|$)/i.test(path)) return "view_as_bff_only";
   return null;
+}
+
+/** The log line of a write the BFF refused inside a view (structured, one line, no body, no query string). The refusal
+ *  never reaches the API, so this line is its trace; the API logs a write that reaches it with the same event name. */
+export function refusedWriteLog(method: string, path: string, cookie: string | undefined | null): string {
+  const clean = path.split("?")[0].replace(/[^\w\-./]/g, "_").slice(0, 200);
+  return `[view-as] booking_view_as_write_refused app=booking session=${viewAsRef(cookie) ?? "invalid"} `
+    + `method=${method.toUpperCase()} path=${clean}`;
 }
 
 /** Is an API answer the end of the view (the BFF clears the cookie)? */

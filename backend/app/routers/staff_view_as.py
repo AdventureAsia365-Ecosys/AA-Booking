@@ -5,6 +5,9 @@
   ``view_as_not_downward``). Ends the caller's other open views, writes one ``staff.view_as_started`` audit row with the
   role's full capability list. Answers the session id, which the staff BFF keeps in an httpOnly cookie.
 - ``GET  /booking/view-as``                      — the view this request runs in (``active`` false outside one).
+  Outside a view it first ends the caller's own sessions that are past their expiry (one ``staff.view_as_ended`` row
+  each, reason ``expired``): the banner's check at 0 minutes and the Roles page call it. The session id is never in
+  the answer (the BFF holds it).
 - ``POST /booking/view-as/{session_id}/end``     — end the caller's own view (idempotent; the BFF sends it WITHOUT the
   view header, as the owner). One ``staff.view_as_ended`` row.
 - ``POST /booking/view-as/end-all``              — end every open view of the caller (the BFF's sign-out).
@@ -46,8 +49,9 @@ async def start_view(body: StartView, request: Request, staff: Me, pool: Pool) -
 
 
 @router.get("")
-async def current_view(staff: Me) -> dict[str, Any]:
+async def current_view(staff: Me, pool: Pool) -> dict[str, Any]:
     if staff.view_as is None:
+        await view_as.close_expired(pool, staff)
         return {"active": False}
     return {"active": True, "read_only": True, **staff.view_as.public()}
 

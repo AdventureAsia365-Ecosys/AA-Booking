@@ -66,7 +66,7 @@ function RolesBody() {
   const canEdit = data?.can_edit === true;
   return (
     <>
-      {data?.can_view_as ? <ViewAsStart data={data} /> : null}
+      <OwnerViewAs data={data} />
       <CustomRolesSection
         roles={data?.custom ?? []}
         canEdit={canEdit}
@@ -83,6 +83,11 @@ function RolesBody() {
       <ArchiveDialog role={archiving} onClose={() => setArchiving(null)} />
     </>
   );
+}
+
+/** AA-1157: the owner's "View as a role" panel (only when the API says this member may start one). */
+function OwnerViewAs({ data }: { data: StaffRoles | undefined }) {
+  return data?.can_view_as ? <ViewAsStart data={data} /> : null;
 }
 
 function CustomRolesSection(props: {

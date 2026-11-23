@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
-  VIEW_AS_HEADER, cookieMaxAge, isViewEnded, minutesLeft, proxyRefusal, viewAsHeaders, viewAsRef,
+  VIEW_AS_HEADER, cookieMaxAge, isViewEnded, minutesLeft, proxyRefusal, refusedWriteLog, viewAsHeaders, viewAsRef,
 } from "./viewAs.ts";
 
 const SID = "b1157000-0000-4000-8000-000000000001";
@@ -63,4 +63,31 @@ test("the shell shows the banner from the profile and the layout clears an ended
   const layout = read("app/(staff)/layout.tsx");
   assert.match(layout, /fetchStaffMe\(token, jar\.get\(VIEW_AS_COOKIE\)\?\.value\)/);
   assert.match(layout, /redirect\(VIEW_AS_CLEAR\)/);
+});
+
+test("a refused write leaves one structured log line (session, method, path; no query string)", () => {
+  assert.equal(refusedWriteLog("post", "/booking/trip-cases?x=secret value", SID),
+    `[view-as] booking_view_as_write_refused app=booking session=${SID} method=POST path=/booking/trip-cases`);
+  assert.match(refusedWriteLog("DELETE", "/booking/a b", "junk"), /session=invalid .* path=\/booking\/a_b$/);
+  const proxy = read("app/api/booking/[...path]/route.ts");
+  assert.match(proxy, /if \(viewRefused === VIEW_AS_READ_ONLY\) console\.warn\(refusedWriteLog\(/);
+  const route = read("app/api/view-as/route.ts");
+  assert.match(route, /console\.warn\(refusedWriteLog\(req\.method, "\/booking\/view-as", current\)\)/);
+});
+
+test("the page never holds the session id; the view read always asks the API (expired views get their end row)", () => {
+  assert.doesNotMatch(read("lib/api/types.ts"), /interface StaffViewAs \{[^}]*session_id/);
+  const route = read("app/api/view-as/route.ts");
+  assert.doesNotMatch(route, /if \(!ref\) return NextResponse\.json\(\{ active: false \}\)/);
+  assert.match(route, /upstream\("view-as", access, \{ view: ref \}\)/);
+  const logout = read("app/api/auth/logout/route.ts");
+  assert.match(logout, /if \(cognito\) await endViews\(/);
+});
+
+test("the banner re-checks the view every 60 s and at 0 minutes, and reloads when it is over", () => {
+  const banner = read("ui/local/ViewAsBanner.tsx");
+  assert.match(banner, /const POLL_MS = 60_000;/);
+  assert.match(banner, /setInterval\(checkView, POLL_MS\)/);
+  assert.match(banner, /if \(over\) void checkView\(\)/);
+  assert.match(banner, /if \(body\.active === false\) window\.location\.reload\(\)/);
 });
