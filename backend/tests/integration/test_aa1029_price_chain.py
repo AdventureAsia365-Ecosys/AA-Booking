@@ -345,7 +345,8 @@ async def test_rate_sheet_to_from_price(admin: asyncpg.Connection, pool: asyncpg
         "Low",
     )
     assert low2["valid_to"] == TODAY + timedelta(days=89)  # the day-2 night of a start on day 90 is High
-    assert {(r["pax_min"], r["pax_max"]) for r in rows} == {(1, 1), (2, 2), (3, 4), (5, 6), (7, 10), (11, None)}
+    # AA-1175: the bands of the seeded policy price_pax_bands (bk-066 v2)
+    assert {(r["pax_min"], r["pax_max"]) for r in rows} == {(1, 1), (2, 2), (3, 3), (4, 4), (5, 7), (8, 10), (11, None)}
 
     await admin.execute("SET ROLE tripplanner")
     try:

@@ -13,6 +13,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from app.pricing import pax_bands
+
 Answer = Any | Callable[..., Any]
 
 # AA-1091 (bk-050): the pricing policy in force, as app.pricing.policy_values.IN_FORCE_SQL answers it. Every scripted
@@ -75,6 +77,8 @@ POLICY_SEED: dict[str, str] = {
     # AA-1149 (bk-065)
     "operable_exception_default_days": "14",
     "operable_exception_max_days": "30",
+    # AA-1175 (bk-066): v2, the business owner's bands
+    "price_pax_bands": "[[1, 1], [2, 2], [3, 3], [4, 4], [5, 7], [8, 10], [11, null]]",
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
 # The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure
@@ -82,6 +86,12 @@ POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_eve
 SEED_ROUNDING: dict[str, Decimal] = {
     code: Decimal(amount) for code, amount in json.loads(POLICY_SEED["rounding_increment_by_currency"]).items()
 }
+
+
+# AA-1175: the seeded group-size bands (bk-066 v2), as cost_sheet.Pricing.bands holds them; the bands the code used
+# before bk-066 (bk-066 v1) for tests that pin the old matrix shape.
+SEED_BANDS = pax_bands.as_bands(json.loads(POLICY_SEED["price_pax_bands"]))
+OLD_BANDS = pax_bands.as_bands([[1, 1], [2, 2], [3, 4], [5, 6], [7, 10], [11, None]])
 
 
 def seed_values(*keys: str) -> dict[str, Any]:

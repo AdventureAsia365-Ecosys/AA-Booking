@@ -66,7 +66,7 @@ from app.catalog import (
     trip_plans,
 )
 from app.errors import Conflict, Invalid, NotFound
-from app.pricing import engine
+from app.pricing import engine, pax_bands, policy_values
 from app.routers.trip_cases import Currency
 
 router = APIRouter(prefix="/booking/catalog", tags=["catalog"])
@@ -414,14 +414,16 @@ async def price_import_template(
 ) -> Response:
     """AA-1091: the price setup workbook, prefilled with the plans the workbench filters select (``blank`` = empty)."""
     day = cost_sheet.today()
-    if blank:
-        content = price_import.template()
-    else:
-        async with pool.acquire() as conn:
+    async with pool.acquire() as conn:
+        # AA-1175: the README names the group-size bands the computed prices use today.
+        notes = (pax_bands.workbook_line((await policy_values.load(conn, day)).values.get(pax_bands.KEY)),)
+        if blank:
+            content = price_import.template(notes)
+        else:
             report = await price_workbench.build(
                 conn, on=day, status=status, country=country, q=q, missing_check=missing, step=next_step
             )
-            content = await price_import.prefilled(conn, report["items"], today=day)
+            content = await price_import.prefilled(conn, report["items"], today=day, notes=notes)
     return Response(
         content=content,
         media_type=XLSX,

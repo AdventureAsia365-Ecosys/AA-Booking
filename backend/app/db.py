@@ -81,6 +81,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-063",  # AA-1171: the job check thresholds as pricing policy values (app.jobs.metrics reads them); MIG-4
     "bk-064",  # AA-1158: approval rules (pending suppliers, contract writers, owner self-approval flags); MIG-4
     "bk-065",  # AA-1149: tour parts (one supplier booking per component), can-operate check, sale exception; MIG-4
+    "bk-066",  # AA-1175: the group-size price bands (price_pax_bands; app.catalog.cost_sheet reads them); MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

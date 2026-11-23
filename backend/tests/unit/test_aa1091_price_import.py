@@ -300,7 +300,7 @@ def test_template_round_trip() -> None:
                 "status": "scheduled",
             }
         ],
-        note="a note",
+        notes=("a note", "a second note"),
     )
     sheets = pi.parse(data)
     assert sheets.problems == []

@@ -378,8 +378,9 @@ class PolicyProposal(BaseModel):
     key: PolicyKey
     # The typed value (app.pricing.policy_params: a number, a decimal string, a boolean, "MM-DD", a list or a map).
     # list[int] before list[str] (S280): an ``integers`` parameter (agency_reminder_steps_days) comes as JSON numbers,
-    # which Pydantic never turns into strings, so without it every such change was a 422.
-    value: int | str | bool | list[int] | list[str] | dict[str, str]
+    # which Pydantic never turns into strings, so without it every such change was a 422. AA-1175: list[list[...]] =
+    # the group-size bands of ``price_pax_bands`` ([[1, 1], [2, 2], [5, 7], [8, null]]).
+    value: int | str | bool | list[int] | list[str] | dict[str, str] | list[list[int | None]]
     effective_from: date
     reason: str = Field(min_length=1, max_length=policy_admin.MAX_REASON)
     # true = submit for approval at once (pending); false = save a draft the maker submits later.

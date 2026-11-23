@@ -7733,6 +7733,22 @@
                   "type": "string"
                 },
                 "type": "object"
+              },
+              {
+                "items": {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                "type": "array"
               }
             ],
             "title": "Value"

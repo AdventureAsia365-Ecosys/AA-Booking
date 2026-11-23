@@ -15,7 +15,7 @@ from app.catalog import cost_sheet as cs
 from app.catalog import trip_plan_prices as prices
 from app.pricing import engine, repository, seasons
 from app.supply.rates import RateAsk
-from tests.unit.fakes import SEED_ROUNDING
+from tests.unit.fakes import OLD_BANDS, SEED_ROUNDING
 
 DAY = date(2027, 3, 1)
 ROOM, GUIDE, JEEP = "r-1", "s-guide", "s-jeep"
@@ -69,7 +69,7 @@ def test_horizon() -> None:
 
 
 def _found(parts: list[cs.Part], wins: list[cs.Window], pick: Any) -> dict[RateAsk, Any]:
-    return {ask: pick(ask) for ask in cs.asks(wins, parts)}
+    return {ask: pick(ask) for ask in cs.asks(wins, parts, OLD_BANDS)}
 
 
 def test_net_per_person_per_band() -> None:
@@ -83,8 +83,8 @@ def test_net_per_person_per_band() -> None:
             return rate("60", "group")
         return rate("20", "person")
 
-    grid = cs.cells(wins, parts, _found(parts, wins, pick))
-    rows, unpriced = cs.net_rows(wins, grid, {})
+    grid = cs.cells(wins, parts, _found(parts, wins, pick), OLD_BANDS)
+    rows, unpriced = cs.net_rows(wins, grid, {}, OLD_BANDS)
     assert unpriced == 0
     by_band = {(r.pax_min, r.pax_max): r.net_amount for r in rows}
     # 1 pax: single 80 + guide 60 + jeep 20 = 160; 2 pax: (100 + 60 + 40) / 2 = 100; 3 pax: (100 + 80 + 60 + 60) / 3
@@ -105,9 +105,9 @@ def test_mixed_currencies_are_summed_in_usd_and_a_missing_rate_leaves_the_cell_u
             return rate("2400000", "group", "VND", season="Peak")
         return rate("50", "group", "USD") if (ask.pax or 0) <= 6 else None
 
-    grid = cs.cells(wins, parts, _found(parts, wins, pick))
+    grid = cs.cells(wins, parts, _found(parts, wins, pick), OLD_BANDS)
     fx = {"VND": engine.FxRate("VND", D("24000"))}
-    rows, unpriced = cs.net_rows(wins, grid, fx)
+    rows, unpriced = cs.net_rows(wins, grid, fx, OLD_BANDS)
     assert unpriced == 2  # bands 7-10 and 11+ have no jeep rate
     two = next(r for r in rows if r.pax_min == 2)
     assert (two.net_amount, two.net_currency) == (D("75.00"), "USD")  # (100 + 50) / 2
@@ -115,10 +115,10 @@ def test_mixed_currencies_are_summed_in_usd_and_a_missing_rate_leaves_the_cell_u
     # label saying "Peak" makes the row peak.
     assert two.season == "Low / Peak" and two.peak is True and two.season_code == "peak"
     # Once the plan's calendar is configured, the calendar decides and the label is only shown.
-    calendar_rows, _ = cs.net_rows(wins, grid, fx, codes=["low"])
+    calendar_rows, _ = cs.net_rows(wins, grid, fx, OLD_BANDS, codes=["low"])
     two = next(r for r in calendar_rows if r.pax_min == 2)
     assert two.season == "Low / Peak" and two.peak is False and two.season_code == "low"
-    assert cs.net_rows(wins, grid, {})[0] == []  # no VND rate: nothing can be priced
+    assert cs.net_rows(wins, grid, {}, OLD_BANDS)[0] == []  # no VND rate: nothing can be priced
 
 
 def test_a_peak_calendar_season_makes_the_row_peak_and_windows_cut_where_it_changes() -> None:
@@ -131,9 +131,9 @@ def test_a_peak_calendar_season_makes_the_row_peak_and_windows_cut_where_it_chan
         (DAY + timedelta(days=10), DAY + timedelta(days=19)),
         (DAY + timedelta(days=20), DAY + timedelta(days=29)),
     ]
-    grid = cs.cells(wins, parts, _found(parts, wins, lambda a: rate("30")))
+    grid = cs.cells(wins, parts, _found(parts, wins, lambda a: rate("30")), OLD_BANDS)
     codes = [peak.season_on(w.start).code for w in wins]
-    rows, _ = cs.net_rows(wins, grid, {}, codes=codes)
+    rows, _ = cs.net_rows(wins, grid, {}, OLD_BANDS, codes=codes)
     two = [r for r in rows if r.pax_min == 2]
     assert [(r.season_code, r.peak) for r in two] == [("low", False), ("peak", True), ("low", False)]
     # Without a calendar the same rate is one window, low season.
@@ -143,10 +143,10 @@ def test_a_peak_calendar_season_makes_the_row_peak_and_windows_cut_where_it_chan
 def test_equal_neighbour_windows_merge() -> None:
     parts = [cs.Part(1, None, GUIDE)]
     wins = [cs.Window(DAY, DAY), cs.Window(DAY + timedelta(days=1), DAY + timedelta(days=9))]
-    grid = cs.cells(wins, parts, _found(parts, wins, lambda a: rate("30")))
-    rows, _ = cs.net_rows(wins, grid, {})
+    grid = cs.cells(wins, parts, _found(parts, wins, lambda a: rate("30")), OLD_BANDS)
+    rows, _ = cs.net_rows(wins, grid, {}, OLD_BANDS)
     assert {(r.valid_from, r.valid_to) for r in rows} == {(DAY, DAY + timedelta(days=9))}
-    assert len(rows) == len(cs.PAX_BANDS)
+    assert len(rows) == len(OLD_BANDS)
 
 
 RULE_B2B = repository.DatedRule(
@@ -202,7 +202,7 @@ def test_assemble_keeps_hand_rows_and_drops_overlapping_computed_rows() -> None:
     overridden = _stored(position=2, pax_min=3, pax_max=4, computed=True, overridden=True, net_amount="90.00",
                          net_currency="USD", priced_on=DAY, effective_margin="0.1000")  # fmt: skip
     stale = _stored(position=3, pax_min=5, pax_max=6, computed=True, net_amount="1", net_currency="USD", priced_on=DAY)
-    nets = [cs.NetRow(DAY, DAY + timedelta(days=60), lo, hi, D("100"), "USD", "Low", False) for lo, hi in cs.PAX_BANDS]
+    nets = [cs.NetRow(DAY, DAY + timedelta(days=60), lo, hi, D("100"), "USD", "Low", False) for lo, hi in OLD_BANDS]
     computed, _ = cs.priced_rows(nets, _pricing(b2b=RULE_B2B))
     final, counts = cs.assemble([hand, overridden, stale], computed, _pricing(b2b=RULE_B2B))
     assert counts == {"kept": 2, "computed": 4, "shadowed": 2, "trimmed": 0, "truncated": 0}

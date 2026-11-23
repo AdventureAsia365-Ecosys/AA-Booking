@@ -444,7 +444,7 @@ def _item(plan: Plan, verdict: Verdict, *, pending: bool = False, note: str | No
 
 async def resolve(conn: asyncpg.Connection, facts: Facts, rated: Mapping[str, set[str]]) -> list[dict[str, Any]]:
     """Classify every plan; a plan only the cost sheet can decide is probed with it (at most :data:`MAX_PROBES`)."""
-    has_rule = bool(facts.pricing.rules)
+    has_rule = facts.pricing.can_price  # AA-1175: a rule and the group-size bands
     probes = 0
     out: list[dict[str, Any]] = []
     for plan in facts.plans:
@@ -558,7 +558,7 @@ async def impact(
     for item, currencies in draft_rated(contract, rates, on).items():
         after_rated.setdefault(item, set()).update(currencies)
     used = set(rooms) | set(services)
-    has_rule = bool(facts.pricing.rules)
+    has_rule = facts.pricing.can_price  # AA-1175: a rule and the group-size bands
     plans: list[dict[str, Any]] = []
     moving = 0
     for plan in facts.plans:
