@@ -67,7 +67,8 @@ def maker_role(monkeypatch: pytest.MonkeyPatch) -> Staff:
 def test_finance_gets_the_six_reads_and_no_new_write() -> None:
     fin = _role("finance")
     assert all(fin.can(p) for p in FINANCE_READS)
-    assert set(fin.permissions) == FINANCE_BEFORE | set(FINANCE_READS)
+    # AA-1158 (bk-064): finance also approves billing entity changes (bank details, default issuer).
+    assert set(fin.permissions) == FINANCE_BEFORE | set(FINANCE_READS) | {"billing_config.approve"}
     for perm in (*APPROVALS, "payout.write", "bill.write", "bill.approve", "supply.write", "ops.write"):
         assert not fin.can(perm), perm
 
@@ -186,11 +187,14 @@ async def test_the_range_decision_route_refuses_the_maker_on_a_stop_sale_range(m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("role", "status"), [("admin", "active"), ("contracting", "active"), (MAKER_ROLE, "inactive")])
+@pytest.mark.parametrize(
+    ("role", "status"), [("admin", "pending"), ("contracting", "pending"), (MAKER_ROLE, "pending")]
+)
 async def test_a_new_supplier_is_active_only_for_a_holder_of_supplier_activate(
     maker_role: Staff, role: str, status: str
 ) -> None:
-    """The column default is ``active``: the create writes the status itself, so a maker cannot skip the approval."""
+    """AA-1158 (R5): every new supplier starts pending, whoever creates it (the create writes the status itself: the
+    column default is ``active`` until the part 2 migration)."""
     staff = maker_role if role == MAKER_ROLE else _role(role)
     conn = ScriptedConn().on("INSERT INTO booking.suppliers", {"id": CONTRACT, "code": SUPPLIER})
     out = await suppliers_service.create_supplier(

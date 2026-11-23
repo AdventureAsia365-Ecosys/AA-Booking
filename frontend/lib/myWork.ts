@@ -111,6 +111,33 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     aria: "Stop-sales to review: open the stop-sales waiting for a second person",
     empty: "Nothing to review",
   },
+  {
+    key: "suppliers_to_activate",
+    capability: "supplier.activate",
+    group: "approve",
+    path: "/suppliers",
+    label: "Suppliers to activate",
+    aria: "Suppliers to activate: open the pending suppliers",
+    empty: "Nothing to activate",
+  },
+  {
+    key: "billing_changes_to_approve",
+    capability: "billing_config.approve",
+    group: "approve",
+    path: "/agency-billing",
+    label: "Billing changes to approve",
+    aria: "Billing changes to approve: open the billing settings with a pending change",
+    empty: "Nothing to approve",
+  },
+  {
+    key: "owner_self_approvals",
+    capability: "audit.read",
+    group: "work",
+    path: "/audit-log",
+    label: "Business-owner self-approvals",
+    aria: "Business-owner self-approvals this month: open them in the audit log",
+    empty: "None this month",
+  },
 ];
 
 export const MY_WORK_CAPABILITIES: readonly string[] = [...new Set(MY_WORK_TILES.map((t) => t.capability))];

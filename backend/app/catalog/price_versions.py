@@ -44,7 +44,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.auth import people
+from app.auth import people, self_approval
 from app.auth.staff import Staff
 from app.catalog import cost_sheet, trip_plan_prices, version_matrix
 from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
@@ -60,7 +60,7 @@ SHOWN_REFS = 20
 VERSION_SQL = """
 SELECT v.id::text AS id, v.trip_plan_id::text AS trip_plan_id, p.source_id, v.version_no, v.label, v.tariff_year,
        v.travel_from, v.travel_to, v.sale_from, v.sale_to, v.status, v.source, v.reason,
-       v.replaces_id::text AS replaces_id,
+       v.replaces_id::text AS replaces_id, v.owner_self_approved,
        v.created_by, v.created_at, v.updated_at, v.submitted_at, v.approved_by, v.approved_at, v.rejected_by,
        v.rejected_at, v.reject_reason, v.withdrawn_by, v.withdrawn_at, v.withdraw_reason, v.superseded_at,
        v.diff_sha256, (SELECT count(*) FROM booking.price_list_version_rows r WHERE r.version_id = v.id) AS rows
@@ -666,11 +666,11 @@ async def submit(conn: asyncpg.Connection, staff: Staff, version_id: str, reason
     return await get_version(conn, staff, version_id)
 
 
-def _checker(row: Any, staff: Staff) -> None:
+async def _checker(conn: asyncpg.Connection, row: Any, staff: Staff, *, approve: bool = False) -> bool:
     if not staff.can("price_version.approve"):
         raise Forbidden("forbidden", "approving prices needs price_version.approve")
-    if row["created_by"] == staff.cis_user_id:
-        raise Forbidden("maker_checker", "a second person approves, rejects or withdraws a price version")
+    msg = "a second person approves, rejects or withdraws a price version"  # the business owner approves her own
+    return await self_approval.check(conn, staff, [row["created_by"]], message=msg, allow_self=approve)
 
 
 async def refresh_states(conn: asyncpg.Connection, plan_id: str) -> dict[str, list[str]]:
@@ -710,25 +710,25 @@ async def _rebuild(conn: asyncpg.Connection, staff: Staff, plan_id: str, action:
 async def approve(conn: asyncpg.Connection, staff: Staff, version_id: str, diff_sha256: str) -> dict[str, Any]:
     """A second person publishes a pending version, having seen its diff (the SHA-256 must match)."""
     row = await _version(conn, version_id, lock=True)
-    _checker(row, staff)
+    own = await _checker(conn, row, staff, approve=True)  # AA-1158 Q5: the business owner's own, flagged
     if row["status"] != "pending":
         raise Conflict("not_pending", f"version {row['version_no']} is {row['status']}")
     if (diff_sha256 or "").strip().lower() != row["diff_sha256"]:
         raise Conflict("diff_changed", "the diff you saw is not the one submitted: reload the version")
     await conn.execute(
         "UPDATE booking.price_list_versions SET status = 'published', approved_by = $2, approved_at = now(),"
-        " updated_at = now() WHERE id = $1::uuid",
+        " updated_at = now(), owner_self_approved = ($2 = created_by) WHERE id = $1::uuid",
         version_id,
         staff.cis_user_id,
     )
     effect = await _rebuild(conn, staff, row["trip_plan_id"], "price_version.published", version_id)
-    await _audit(conn, staff, "price_version.approved", version_id, row["source_id"], effect)
+    await _audit(conn, staff, "price_version.approved", version_id, row["source_id"], effect | self_approval.flag(own))
     return {**(await get_version(conn, staff, version_id)), "effect": effect}
 
 
 async def reject(conn: asyncpg.Connection, staff: Staff, version_id: str, reason: str | None) -> dict[str, Any]:
     row = await _version(conn, version_id, lock=True)
-    _checker(row, staff)
+    await _checker(conn, row, staff)
     if row["status"] != "pending":
         raise Conflict("not_pending", f"version {row['version_no']} is {row['status']}")
     text = _text(reason, "reason", REASON_MAX, required=True)
@@ -779,7 +779,7 @@ async def withdraw(conn: asyncpg.Connection, staff: Staff, version_id: str, reas
         if row["created_by"] != staff.cis_user_id:
             raise Forbidden("not_the_maker", "only its maker withdraws a draft or pending version")
     elif row["status"] == "published":
-        _checker(row, staff)
+        await _checker(conn, row, staff)
     else:
         raise Conflict("not_withdrawable", f"version {row['version_no']} is {row['status']}")
     preview = None

@@ -159,7 +159,8 @@ def _bad_workbook(s: dict[str, str]) -> bytes:
 def _workbook(s: dict[str, str]) -> bytes:
     later = TODAY + timedelta(days=40)
     return price_import.build_workbook(
-        [{"tour_key": TOUR, "sellable": True}, {"tour_key": STAFF_TOUR, "sellable": None}],
+        # AA-1158 Q9: TOUR has no approved price yet (its rates come in step 4), so the workbook does not sell it.
+        [{"tour_key": TOUR, "sellable": None}, {"tour_key": STAFF_TOUR, "sellable": None}],
         [{"source_id": STAFF_TOUR, "day_no": 1, "hotel_code": s["hotel_code"], "room_type": "garden  twin"}],
         [
             {
@@ -261,7 +262,7 @@ async def test_workbench_suggestions_import_and_actions(
     tours = {t["tour_key"]: t for t in preview["tours"]}
     assert tours[STAFF_TOUR]["components_after"] == 1 and tours[STAFF_TOUR]["components_changed"]
     assert (tours[STAFF_TOUR]["hand_rows_after"], tours[STAFF_TOUR]["status_after"]) == (2, "hand_priced")
-    assert (tours[TOUR]["sellable_before"], tours[TOUR]["sellable_after"]) == (False, True)
+    assert (tours[TOUR]["sellable_before"], tours[TOUR]["sellable_after"]) == (False, False)
     assert len(tours[TOUR]["departures_new"]) == 2
     assert preview["totals"]["departures_new"] == 2
     count = "SELECT count(*) FROM booking.trip_plan_prices r JOIN booking.trip_plans p ON p.id = r.trip_plan_id"
@@ -291,7 +292,7 @@ async def test_workbench_suggestions_import_and_actions(
         (Decimal("350.00"), Decimal("440.00"), False),  # RRP rounded up
     ]
     assert hand[0]["child_amount"] == Decimal("300.00")
-    assert await admin.fetchval("SELECT sellable FROM booking.trip_plans WHERE source_id = $1", TOUR) is True
+    assert await admin.fetchval("SELECT sellable FROM booking.trip_plans WHERE source_id = $1", TOUR) is False
     deps = await admin.fetch(
         "SELECT d.capacity, d.min_to_operate FROM booking.departures d JOIN booking.trip_plans p ON p.id ="
         " d.trip_plan_id WHERE p.source_id = $1 ORDER BY d.start_date",
@@ -317,6 +318,9 @@ async def test_workbench_suggestions_import_and_actions(
     async with pool.acquire() as conn, conn.transaction():
         recomputed = await price_workbench.apply_action(conn, _staff(MAKER), "recompute", [TOUR], on=TODAY)
     assert recomputed["done"] == 1
+    async with pool.acquire() as conn, conn.transaction():  # AA-1158 Q9: sellable once it has a price
+        sold = await price_workbench.apply_action(conn, _staff(MAKER), "make_sellable", [TOUR], on=TODAY)
+    assert sold["done"] == 1
     async with pool.acquire() as conn:
         rows = {r["tour_key"]: r for r in (await price_workbench.build(conn, on=TODAY))["items"]}
     assert rows[TOUR]["status"] == "priced" and rows[TOUR]["next_step"] == "done"

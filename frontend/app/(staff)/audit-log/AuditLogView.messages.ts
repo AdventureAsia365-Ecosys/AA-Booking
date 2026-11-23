@@ -48,6 +48,9 @@ export const MSG = phrasebook(
     "Record": "Record",
     "Record id": "Record id",
     "Summary": "Summary",
+    "All changes": "All changes",
+    "Business-owner self-approvals": "Business-owner self-approvals",
+    "Audit log views": "Audit log views",
   },
   {
     "Audit log": "Nhật ký thao tác",
@@ -91,6 +94,9 @@ export const MSG = phrasebook(
     "Record": "Bản ghi",
     "Record id": "Mã bản ghi",
     "Summary": "Tóm tắt",
+    "All changes": "Mọi thay đổi",
+    "Business-owner self-approvals": "Chủ doanh nghiệp tự duyệt",
+    "Audit log views": "Các chế độ xem nhật ký",
   },
   ),
 );

@@ -32,6 +32,7 @@ import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./DepartureBoardDrawer.messages";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
+import { useSelfApproval } from "@/lib/useSelfApproval";
 
 function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
@@ -370,6 +371,12 @@ function PriceSection({ data }: { data: BoardDetail }) {
   const canPrice = useCan("pricing.write");
   const canDecide = useCan("pricing.approve"); // AA-1155: approve, reject another person's, withdraw one in force
   const me = useStaff();
+  const self = useSelfApproval(); // AA-1158
+  const ownOf = (a: { created_by?: { id: string } | null }) => ownApproval(a.created_by?.id, me.cis_user_id, self.approve);
+  const ownTitle = (k: OwnApproval) => {
+    const key = OWN_APPROVAL_TITLE[k];
+    return key ? t(key) : undefined;
+  };
   // AA-1155: the maker withdraws its own pending adjustment with pricing.write; every other end is a decision.
   const endOf = (a: PriceAdjustment) =>
     endAction(a.state, { canDecide, canWrite: canPrice, isMaker: a.created_by?.id === me.cis_user_id });
@@ -439,8 +446,8 @@ function PriceSection({ data }: { data: BoardDetail }) {
                   <Button
                     size="sm"
                     variant="primary"
-                    disabled={act.isPending || a.created_by?.id === me.cis_user_id}
-                    title={a.created_by?.id === me.cis_user_id ? t("You proposed it: another person approves it") : undefined}
+                    disabled={act.isPending || ownOf(a) === "blocked"}
+                    title={ownTitle(ownOf(a))}
                     onClick={() => act.mutate({ id: a.id, action: "approve" })}
                   >
                     {t("Approve")}
@@ -489,3 +496,17 @@ function PriceSection({ data }: { data: BoardDetail }) {
     </section>
   );
 }
+
+/** AA-1158: a price adjustment the caller proposed: blocked, unless the business owner (a flagged self-approval). */
+type OwnApproval = "other" | "self" | "blocked";
+
+function ownApproval(maker: string | undefined, me: string, selfOk: boolean): OwnApproval {
+  if (maker !== me) return "other";
+  return selfOk ? "self" : "blocked";
+}
+
+const OWN_APPROVAL_TITLE: Record<OwnApproval, "Recorded as a business-owner self-approval" | "You proposed it: another person approves it" | undefined> = {
+  other: undefined,
+  self: "Recorded as a business-owner self-approval",
+  blocked: "You proposed it: another person approves it",
+};

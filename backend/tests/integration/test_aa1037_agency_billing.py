@@ -178,7 +178,18 @@ async def _entity(c: httpx.AsyncClient, cis: LocalCis) -> dict[str, Any]:
     body = {"code": "IT1037AA", "legal_entity": "Lantern Bay Travel Ltd", "tax_code": "0100000001",
             "country_iso2": "VN", "payment_instructions": "Transfer to the account on the contract.",
             "is_default": True}  # fmt: skip
-    return await _ok(await c.post("/billing-entities", json=body, headers=_as(cis, FIN_A)), 201)
+    made = await _ok(await c.post("/billing-entities", json=body, headers=_as(cis, FIN_A)), 201)
+    # AA-1158: the payment details and the default flag wait for a second person (FIN_B approves, FIN_A may not).
+    assert made["payment_instructions"] is None and made["is_default"] is False
+    change = made["pending_change"]["id"]
+    own = await c.post(
+        f"/billing-entity-changes/{change}/decision", json={"action": "approve"}, headers=_as(cis, FIN_A)
+    )
+    assert own.status_code == 403 and own.json()["detail"] == "maker_checker"
+    await _ok(await c.post(f"/billing-entity-changes/{change}/decision", json={"action": "approve"},
+                           headers=_as(cis, FIN_B)))  # fmt: skip
+    entities = await _ok(await c.get("/billing-entities", headers=_as(cis, FIN_A)))
+    return next(e for e in entities["items"] if e["id"] == made["id"])
 
 
 async def _hold(admin: asyncpg.Connection, pid: str, tid: str, *, total: str, confirmed: datetime, departs: date,

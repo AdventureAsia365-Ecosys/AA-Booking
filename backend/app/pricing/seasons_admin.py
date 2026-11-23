@@ -25,7 +25,9 @@ maker-checker, like the other pricing data.
   festive quote validity and stop-sale, so it gets the maker-checker the ranges have.
 
 Permissions: reads ``pricing.read``; proposals ``season.write``; approvals ``season.approve`` (never one's own proposal:
-403 ``maker_checker``, and the table CHECKs). AA-1150: approving or rejecting a stop-sale range, or its removal, also
+403 ``maker_checker``, and the table CHECKs; AA-1158 Q5: the business owner may approve her own season range, holiday
+event, default season or plan calendar, flagged ``owner_self_approved``; a stop-sale range, every removal and every
+rejection stay two-person). AA-1150: approving or rejecting a stop-sale range, or its removal, also
 needs ``stop_sale.approve`` (the same review a contract stop-sale takes). A reason (at most 300 characters, ADR 0005b
 d1, the bk-048 model) is required on every proposal, withdrawal, removal request and rejection; it is stored on the row
 when the row keeps it (``note``, ``reason``, ``withdraw_reason``, ``end_reason``, ``reject_reason``,
@@ -44,7 +46,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.auth import people
+from app.auth import people, self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.pricing import season_sync, seasons
@@ -162,6 +164,13 @@ def _approve(staff: Staff, maker: str | None) -> None:
         raise Forbidden("maker_checker", "a second person approves or rejects it")
 
 
+async def _approve_own(conn: asyncpg.Connection, staff: Staff, maker: str | None) -> bool:
+    """An approval the business owner may give on her own proposal (AA-1158 Q5): the ``owner_self_approved`` flag."""
+    if not staff.can("season.approve"):
+        raise Forbidden("forbidden", "approving seasons or holiday events needs season.approve")
+    return await self_approval.check(conn, staff, [maker], message="a second person approves or rejects it")
+
+
 def _approve_stop(staff: Staff, row: Any) -> None:
     """AA-1150: a stop-sale range's review (and its removal's) is a stop-sale approval too."""
     if row["kind"] == "stop_sale" and not staff.can("stop_sale.approve"):
@@ -178,6 +187,7 @@ def _text(value: str | None, field: str, limit: int, *, required: bool = False) 
 
 
 async def _audit(conn: asyncpg.Connection, staff: Staff, action: str, kind: str, ident: str, after: Any) -> None:
+    flagged = isinstance(after, dict) and after.get("owner_self_approved") is True
     await audit.record(
         conn,
         actor_type="staff",
@@ -187,8 +197,12 @@ async def _audit(conn: asyncpg.Connection, staff: Staff, action: str, kind: str,
         entity_id=ident,
         after=json.loads(json.dumps(after, default=str)),
         entity_label=action.split(".")[0].replace("_", " "),
-        summary=action.replace("_", " ").replace(".", ": "),
+        summary=action.replace("_", " ").replace(".", ": ") + (" (business-owner self-approval)" if flagged else ""),
     )
+
+
+def _flag(after: dict[str, Any], flagged: bool) -> dict[str, Any]:
+    return {**after, "owner_self_approved": True} if flagged else after
 
 
 # ── Calendars ────────────────────────────────────────────────────────────────
@@ -299,7 +313,11 @@ async def decide_default(
     row = await _calendar(conn, calendar_id, lock=True)
     if row["pending_default_season"] is None:
         raise Conflict("nothing_pending", "no change of the default season waits")
-    _approve(staff, row["default_requested_by"])
+    flagged = False
+    if approve:
+        flagged = await _approve_own(conn, staff, row["default_requested_by"])
+    else:
+        _approve(staff, row["default_requested_by"])
     text = _text(reason, "reason", REASON_MAX, required=not approve)
     await conn.execute(
         "UPDATE booking.season_calendars SET default_season = CASE WHEN $2 THEN pending_default_season"
@@ -315,7 +333,10 @@ async def decide_default(
         action,
         "season_calendar",
         calendar_id,
-        {"to": row["pending_default_season"], "request_reason": row["default_request_reason"], "reason": text},
+        _flag(
+            {"to": row["pending_default_season"], "request_reason": row["default_request_reason"], "reason": text},
+            flagged,
+        ),
     )
     return await get_calendar(conn, staff, calendar_id, None)
 
@@ -412,16 +433,20 @@ async def decide_range(
     text = _reason_for(action, reason)
     row = await _range(conn, range_id)
     table = "booking.season_ranges"
+    flagged = False
     if action in ("approve", "reject"):
         if row["status"] != "pending":
             raise Conflict("not_pending", f"the range is {state(row)}")
-        _approve(staff, row["created_by"])
+        if action == "approve" and row["kind"] == "season":
+            flagged = await _approve_own(conn, staff, row["created_by"])
+        else:
+            _approve(staff, row["created_by"])  # a stop-sale range and every rejection keep two people
         _approve_stop(staff, row)
         if action == "approve" and row["kind"] == "season" and row["date_from"] is not None:
             await _no_overlap(
                 conn, row["calendar_id"], seasons.Span(row["date_from"], row["date_to"], row["season_code"]), range_id
             )
-        await _decide(conn, table, range_id, staff, action, text)
+        await _decide(conn, table, range_id, staff, action, text, flagged=flagged)
     elif action == "withdraw":
         _write(staff)
         if row["status"] != "pending" or row["created_by"] != staff.cis_user_id:
@@ -431,7 +456,9 @@ async def decide_range(
         if action in ("end_approve", "end_reject"):
             _approve_stop(staff, row)
         await _end(conn, table, row, staff, action, text)
-    await _audit(conn, staff, f"season_range.{action}", "season_range", range_id, _decision_audit(row, text))
+    await _audit(
+        conn, staff, f"season_range.{action}", "season_range", range_id, _flag(_decision_audit(row, text), flagged)
+    )
     return await _range_out(conn, range_id)
 
 
@@ -449,17 +476,25 @@ def _decision_audit(row: Any, reason: str | None) -> dict[str, Any]:
 
 
 async def _decide(
-    conn: asyncpg.Connection, table: str, ident: str, staff: Staff, action: str, reason: str | None
+    conn: asyncpg.Connection,
+    table: str,
+    ident: str,
+    staff: Staff,
+    action: str,
+    reason: str | None,
+    *,
+    flagged: bool = False,
 ) -> None:
     status = {"approve": "approved", "reject": "rejected", "withdraw": "withdrawn"}[action]
     await conn.execute(
         f"UPDATE {table} SET status = $2, decided_by = $3, decided_at = now(), reject_reason = $4,"  # noqa: S608
-        " withdraw_reason = $5 WHERE id = $1::uuid",
+        " withdraw_reason = $5, owner_self_approved = $6 WHERE id = $1::uuid",
         ident,
         status,
         staff.cis_user_id,
         reason if action == "reject" else None,
         reason if action == "withdraw" else None,
+        flagged,
     )
 
 
@@ -557,11 +592,15 @@ async def decide_event(
     if row is None:
         raise NotFound("event_not_found", "no such holiday event")
     table = "booking.holiday_events"
+    flagged = False
     if action in ("approve", "reject"):
         if row["status"] != "pending":
             raise Conflict("not_pending", f"the event is {state(row)}")
-        _approve(staff, row["created_by"])
-        await _decide(conn, table, event_id, staff, action, text)
+        if action == "approve":
+            flagged = await _approve_own(conn, staff, row["created_by"])
+        else:
+            _approve(staff, row["created_by"])
+        await _decide(conn, table, event_id, staff, action, text, flagged=flagged)
     elif action == "withdraw":
         _write(staff)
         if row["status"] != "pending" or row["created_by"] != staff.cis_user_id:
@@ -569,7 +608,9 @@ async def decide_event(
         await _decide(conn, table, event_id, staff, action, text)
     else:
         await _end(conn, table, row, staff, action, text)
-    await _audit(conn, staff, f"holiday_event.{action}", "holiday_event", event_id, _decision_audit(row, text))
+    await _audit(
+        conn, staff, f"holiday_event.{action}", "holiday_event", event_id, _flag(_decision_audit(row, text), flagged)
+    )
     return await _event_out(conn, event_id)
 
 
@@ -658,12 +699,15 @@ async def decide_plan_calendar(
         raise Invalid("invalid_action", action)
     text = _reason_for(action, reason)
     plan = await _plan_calendar(conn, source_id, lock=True)
+    flagged = False
     if plan["requested_by"] is None:
         raise Conflict("nothing_pending", "no change of this plan's calendar waits")
     if action == "withdraw":
         _write(staff)
         if plan["requested_by"] != staff.cis_user_id:
             raise Conflict("not_withdrawable", "only who asked for the change withdraws it")
+    elif action == "approve":
+        flagged = await _approve_own(conn, staff, plan["requested_by"])
     else:
         _approve(staff, plan["requested_by"])
     applied = "season_calendar_id = pending_season_calendar_id, " if action == "approve" else ""
@@ -674,7 +718,14 @@ async def decide_plan_calendar(
         plan["id"],
     )
     await _plan_audit(
-        conn, staff, f"trip_plan.season_calendar_{action}", plan, plan["pending_calendar_id"], text, source_id
+        conn,
+        staff,
+        f"trip_plan.season_calendar_{action}",
+        plan,
+        plan["pending_calendar_id"],
+        text,
+        source_id,
+        flagged=flagged,
     )
     return await plan_calendar(conn, source_id)
 
@@ -687,6 +738,8 @@ async def _plan_audit(
     calendar_id: str | None,
     reason: str | None,
     source_id: str,
+    *,
+    flagged: bool = False,
 ) -> None:
     await audit.record(
         conn,
@@ -701,7 +754,9 @@ async def _plan_audit(
             "reason": reason,
             "requested_by": plan["requested_by"],
             "request_reason": plan["request_reason"],
+            **({"owner_self_approved": True} if flagged else {}),
         },
         entity_label=source_id[:80],
-        summary=action.split(".")[1].replace("_", " ").capitalize(),
+        summary=action.split(".")[1].replace("_", " ").capitalize()
+        + (" (business-owner self-approval)" if flagged else ""),
     )

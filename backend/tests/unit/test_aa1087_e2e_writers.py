@@ -131,6 +131,7 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                     e2e_staff.PRICE_VERSION_REJECT,
                     e2e_staff.PRICE_VERSION_WITHDRAW,
                     e2e_staff.CONTRACT_STATUS,
+                    e2e_staff.SUPPLIER_ACTIVATE,  # AA-1158: the synthetic supplier starts pending
                 }
             ),
         ),

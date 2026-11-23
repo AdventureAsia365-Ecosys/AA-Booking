@@ -14,7 +14,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app import my_work
+from app import audit, my_work
+from app.agency_billing import entity_changes
 from app.agency_billing import invoices as agency_invoices
 from app.agency_billing import payments as agency_payments
 from app.auth.staff import PERMISSIONS, Staff, current_staff, get_pool
@@ -23,6 +24,7 @@ from app.errors import Unavailable
 from app.main import create_app
 from app.ops import bill_filters, supplier_bills, trip_checks
 from app.settings import Settings
+from app.suppliers import service as suppliers
 from app.supply import restrictions
 from app.trip_cases import service as trip_cases
 from tests.unit.fakes import ScriptedConn
@@ -80,6 +82,9 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "supplier_bills_to_pay",
                 "agency_payments_to_approve",
                 "stop_sales_to_review",
+                "suppliers_to_activate",
+                "billing_changes_to_approve",
+                "owner_self_approvals",
             ],
         ),
         (
@@ -92,6 +97,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "supplier_bills_due_soon",
                 "supplier_bills_to_approve",
                 "stop_sales_to_review",
+                "suppliers_to_activate",
             ],
         ),
         (
@@ -113,6 +119,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "supplier_bills_due_soon",
                 "agency_invoices_overdue",
                 "agency_payments_to_approve",
+                "billing_changes_to_approve",
             ],
         ),
         (CONTENT, []),
@@ -200,6 +207,18 @@ def stubbed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
         "review_queue",
         _queue({"count": 6, "oldest_at": stamp, "earliest_due": None}, calls, "stop_sales"),
     )
+    # AA-1158: pending suppliers, billing entity changes, the month's business-owner self-approvals.
+    monkeypatch.setattr(suppliers, "queue", _queue({"count": 7, "oldest_at": stamp}, calls, "suppliers"))
+    monkeypatch.setattr(entity_changes, "queue", _queue({"count": 8, "oldest_at": stamp}, calls, "entity_changes"))
+    monkeypatch.setattr(
+        audit,
+        "owner_self_approvals_month",
+        _queue(
+            {"count": 9, "oldest_at": stamp, "filter": {"owner_self_approved": "true", "from": "2026-11-01"}},
+            calls,
+            "owner_self",
+        ),
+    )
     return calls
 
 
@@ -223,6 +242,9 @@ def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None
     assert tiles["supplier_bills_due_soon"]["filter"] == {"bill_status": "open", "bill_due": "soon"}
     assert tiles["agency_payments_to_approve"]["filter"] == {"tab": "payments", "approvable": "me"}
     assert tiles["supplier_bills_to_approve"]["filter"] == {"bill_status": "received", "approvable": "me"}
+    assert tiles["suppliers_to_activate"]["filter"] == {"status": "pending", "approvable": "me"}
+    assert tiles["suppliers_to_activate"]["count"] == 7 and tiles["billing_changes_to_approve"]["count"] == 8
+    assert tiles["owner_self_approvals"]["filter"] == {"owner_self_approved": "true", "from": "2026-11-01"}
     assert tiles["stop_sales_to_review"] | {"oldest_at": None} == {
         "key": "stop_sales_to_review",
         "capability": "stop_sale.approve",
@@ -242,12 +264,14 @@ def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None
     assert bill_calls == [
         {"status": "open", "overdue": True},
         {"status": "open", "due_soon_days": 3},
-        {"status": "received", "actionable_by": "a-1"},
-        {"status": "approved", "actionable_by": "a-1"},
+        {"status": "received", "actionable_by": "a-1", "owner_approve": False, "owner_pay": False},
+        {"status": "approved", "actionable_by": "a-1", "owner_approve": False, "owner_pay": False},
     ]
     assert [kw for name, kw in stubbed if name == "invoices"] == [{"status": "overdue"}]
     # The approval tiles count only what the caller may act on (maker-checker), the page's approvable / review=me.
-    assert [kw for name, kw in stubbed if name == "payments"] == [{"state": "recorded", "actionable_by": "a-1"}]
+    assert [kw for name, kw in stubbed if name == "payments"] == [
+        {"state": "recorded", "actionable_by": "a-1", "owner": False}
+    ]
     assert [kw for name, kw in stubbed if name == "stop_sales"] == [{"reviewable_by": "a-1"}]
 
 
@@ -310,8 +334,17 @@ def test_case_and_invoice_and_payment_filters_are_the_lists_where() -> None:
 
 def test_approvable_by_me_leaves_out_what_the_caller_entered_changed_or_recorded() -> None:
     clause, args = bill_filters.bill_filter(status="received", actionable_by="u-5")
-    assert clause == "true AND b.status = $1 AND b.created_by <> $2 AND b.facts_edited_by IS DISTINCT FROM $2"
+    maker = "b.created_by <> $2 AND b.facts_edited_by IS DISTINCT FROM $2"
+    assert clause == (
+        f"true AND b.status = $1 AND (CASE WHEN b.status = 'approved' THEN ({maker}"
+        f" AND b.approved_by IS DISTINCT FROM $2) ELSE ({maker}) END)"
+    )
     assert args == ["received", "u-5"]
+    # AA-1158: the business owner sees her own received bills and the bills she approved (to pay, flagged).
+    clause, _ = bill_filters.bill_filter(status="received", actionable_by="u-5", owner_approve=True, owner_pay=True)
+    assert clause == f"true AND b.status = $1 AND (CASE WHEN b.status = 'approved' THEN ({maker}) ELSE (true) END)"
+    clause, _ = agency_payments.payment_filter(state="recorded", actionable_by="u-7", owner=True)
+    assert clause == "true AND p.status = $1"
     clause, args = agency_payments.payment_filter(state="recorded", actionable_by="u-7")
     assert clause == "true AND p.recorded_by <> $1 AND p.status = $2" and args == ["u-7", "recorded"]
 

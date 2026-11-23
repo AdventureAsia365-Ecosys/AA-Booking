@@ -36,6 +36,7 @@ export function SuppliersListView() {
     category: get("category") || undefined,
     country: get("country") || undefined,
     sort: get("sort") || undefined,
+    approvable: approvableParam(get("approvable")),
   };
   const list = useQuery({
     queryKey: ["suppliers", "list", filters, paging.limit, paging.offset],
@@ -51,8 +52,12 @@ export function SuppliersListView() {
       if (row.status === "active") {
         items.push({ label: t("Deactivate"), icon: <Ban size={15} />, onSelect: () => actions.deactivate(row), danger: true, divider: true });
       } else if (actions.canActivate) {
-        // AA-1150: activating a supplier is an approval (supplier.activate).
+        // AA-1150: activating a supplier is an approval (supplier.activate); AA-1158: never by its creator (the API
+        // refuses it, but the business owner's own, flagged), so the detail page shows why.
         items.push({ label: t("Activate"), icon: <Power size={15} />, onSelect: () => actions.activate(row), divider: true });
+      }
+      if (row.status === "pending") {
+        items.push({ label: t("Reject"), icon: <Ban size={15} />, onSelect: () => actions.deactivate(row), danger: true });
       }
     }
     return items;
@@ -107,6 +112,7 @@ export function SuppliersListView() {
                     label: t("Status"),
                     allLabel: t("All statuses"),
                     options: [
+                      { value: "pending", label: t("Pending approval") },
                       { value: "active", label: t("Active") },
                       { value: "inactive", label: t("Inactive") },
                     ],
@@ -219,3 +225,8 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
   { id: "status", header: "Status", accessorKey: "status", cell: ({ row }) => <SupplierStatusBadge status={row.original.status} /> },
   { id: "updated", header: "Updated", meta: { compact: "drawer" }, accessorKey: "updated_at", cell: ({ row }) => <DateText value={row.original.updated_at} relative className="whitespace-nowrap text-[13px] text-muted" /> },
 ];
+
+/** AA-1158 My work "Suppliers to activate": `approvable=me` lists the pending ones the caller may activate now. */
+function approvableParam(value: string): "me" | undefined {
+  return value === "me" ? "me" : undefined;
+}

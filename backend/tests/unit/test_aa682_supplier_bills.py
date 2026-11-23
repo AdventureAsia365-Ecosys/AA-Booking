@@ -219,19 +219,15 @@ def test_routes_depend_on_their_permission() -> None:
 
 def test_actions_and_approve_blockers() -> None:
     received = bills.bill_out(bill_row(), CHECKER)
-    assert received["approve_blockers"] == [] and received["actions"] == {
-        "edit": True,
-        "attach": True,
-        "approve": True,
-        "cancel": True,
-        "pay": False,
-    }
+    owner_paths = {"approve_self": False, "pay_flagged": False}  # AA-1158
+    assert received["approve_blockers"] == []
+    assert received["actions"] == dict(edit=True, attach=True, approve=True, cancel=True, pay=False, **owner_paths)
     mine = bills.bill_out(bill_row(lines_amount="370.00"), CONTRACTING)
     assert mine["approve_blockers"] == ["maker_checker", "lines_mismatch"] and not mine["actions"]["approve"]
     assert bills.bill_out(bill_row(line_count=0), SALES)["approve_blockers"] == ["permission", "no_lines"]
     approved = bills.bill_out(bill_row(status="approved", live_payouts=1, balance="280.00"), ADMIN)
     # Edit stays on for an approved bill: the form edits its notes only (review S4).
-    assert approved["actions"] == {"edit": True, "attach": False, "approve": False, "cancel": False, "pay": True}
+    assert approved["actions"] == dict(edit=True, attach=False, approve=False, cancel=False, pay=True, **owner_paths)
     assert bills.bill_out(bill_row(status="cancelled"), ADMIN)["actions"]["edit"] is False
     assert bills.bill_out(bill_row(status="approved"), SALES)["actions"]["edit"] is False
     assert approved["supplier"] == {"id": SUP_ID, "name": "Delta Hotels"}

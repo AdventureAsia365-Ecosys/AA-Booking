@@ -109,10 +109,13 @@ def _payload(body: BaseModel) -> dict[str, Any]:
 
 @router.get("/suppliers")
 async def list_suppliers(
-    _: CanRead,
+    staff: CanRead,
     pool: Pool,
     q: Annotated[str | None, Query(max_length=200, description="name, code, contact name or e-mail")] = None,
-    status: Annotated[str | None, Query(max_length=20, description="active | inactive")] = None,
+    status: Annotated[str | None, Query(max_length=20, description="pending | active | inactive")] = None,
+    approvable: Annotated[
+        Literal["me"] | None, Query(description="me: pending suppliers the caller may activate now")
+    ] = None,
     category: Annotated[str | None, Query(max_length=20)] = None,
     country: Annotated[str | None, Query(max_length=2, min_length=2)] = None,
     sort: Annotated[
@@ -123,7 +126,15 @@ async def list_suppliers(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await service.list_suppliers(
-            conn, q=q, status=status, category=category, country=country, sort=sort, limit=limit, offset=offset
+            conn,
+            q=q,
+            status=status,
+            category=category,
+            country=country,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            approvable_by=staff if approvable == "me" else None,
         )
 
 
@@ -137,13 +148,13 @@ async def supplier_summary(_: CanRead, pool: Pool) -> dict[str, Any]:
 async def create_supplier(body: NewSupplier, staff: CanWrite, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         created = await service.create_supplier(conn, staff, _payload(body))
-        return await service.get_supplier(conn, created["id"])
+        return await service.get_supplier(conn, created["id"], staff)
 
 
 @router.get("/suppliers/{supplier_ref}")
-async def get_supplier(supplier_ref: SupplierRef, _: CanRead, pool: Pool) -> dict[str, Any]:
+async def get_supplier(supplier_ref: SupplierRef, staff: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await service.get_supplier(conn, supplier_ref)
+        return await service.get_supplier(conn, supplier_ref, staff)
 
 
 @router.patch("/suppliers/{supplier_ref}")
@@ -171,9 +182,9 @@ async def activate_supplier(
 
 
 @router.get("/suppliers/{supplier_ref}/contracts")
-async def list_contracts(supplier_ref: SupplierRef, _: CanRead, pool: Pool) -> dict[str, Any]:
+async def list_contracts(supplier_ref: SupplierRef, staff: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await service.list_contracts(conn, supplier_ref)
+        return await service.list_contracts(conn, supplier_ref, staff)
 
 
 @router.post("/suppliers/{supplier_ref}/contracts", status_code=201)
@@ -183,9 +194,10 @@ async def create_contract(body: NewContract, supplier_ref: SupplierRef, staff: C
 
 
 @router.get("/contracts/{contract_id}")
-async def get_contract(contract_id: ContractId, _: CanRead, pool: Pool) -> dict[str, Any]:
+async def get_contract(contract_id: ContractId, staff: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await service.get_contract(conn, contract_id)
+        contract = await service.get_contract(conn, contract_id)
+        return {**contract, "actions": {"publish": await service.publication(conn, staff, contract)}}
 
 
 @router.patch("/contracts/{contract_id}")

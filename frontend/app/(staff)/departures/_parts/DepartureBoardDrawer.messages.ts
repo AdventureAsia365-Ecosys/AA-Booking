@@ -85,6 +85,7 @@ export const MSG = phrasebook(
     "Reason": "Reason",
     "Propose price adjustment": "Propose price adjustment",
     "Something went wrong": "Something went wrong",
+    "Recorded as a business-owner self-approval": "Recorded as a business-owner self-approval",
   },
   {
     " · {0} kept for allotments": (...a: unknown[]) => ` · ${a[0]} giữ cho allotment`,
@@ -164,6 +165,7 @@ export const MSG = phrasebook(
     "Reason": "Lý do",
     "Propose price adjustment": "Đề xuất điều chỉnh giá",
     "Something went wrong": "Đã có lỗi xảy ra",
+    "Recorded as a business-owner self-approval": "Được ghi nhận là chủ doanh nghiệp tự duyệt",
   },
   ),
 );

@@ -59,6 +59,7 @@ import { useLang, useT } from "@/ui/core/useI18n";
 import { Phrase } from "@/ui/local/Phrase";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./AgencyBillingView.messages";
+import { useSelfApproval } from "@/lib/useSelfApproval";
 
 const TABS = [
   { key: "invoices", label: "Invoices" },
@@ -357,6 +358,7 @@ function PaymentsTab() {
   const approvable = get("approvable") === "me" ? "me" : undefined;
   const paging = useOffsetPage();
   const me = useStaff();
+  const self = useSelfApproval(); // AA-1158
   const canApprove = useCan("agency_payment.approve");
   const toast = useToast();
   const qc = useQueryClient();
@@ -406,7 +408,11 @@ function PaymentsTab() {
       cell: ({ row }) => {
         const p = row.original;
         if (!canApprove || p.status !== "recorded") return null;
-        if (p.recorded_by === me.cis_user_id) return <span className="text-[12px] text-muted">{t("Another person approves")}</span>;
+        if (p.recorded_by === me.cis_user_id && !self.approve) return <span className="text-[12px] text-muted">{t("Another person approves")}</span>;
+        if (p.recorded_by === me.cis_user_id) {
+          // AA-1158: the business owner approves a payment she recorded (flagged); a rejection stays two-person.
+          return <Button size="sm" variant="primary" disabled={approve.isPending} title={t("Recorded as a business-owner self-approval")} onClick={() => approve.mutate(p)}>{t("Approve")}</Button>;
+        }
         return (
           <span className="flex gap-2">
             <Button size="sm" variant="primary" disabled={approve.isPending} onClick={() => approve.mutate(p)}>{t("Approve")}</Button>

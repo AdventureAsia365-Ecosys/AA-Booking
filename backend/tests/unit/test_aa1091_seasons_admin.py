@@ -495,6 +495,7 @@ async def test_approving_a_range_is_a_second_persons_and_rechecks_the_overlap() 
         CHECKER.cis_user_id,
         None,
         None,
+        False,
     )
     assert out["id"] == RANGE and audited(conn) == ["season_range.approve"]
     with pytest.raises(Conflict) as err:
@@ -514,6 +515,7 @@ async def test_reject_and_withdraw_need_a_reason() -> None:
         CHECKER.cis_user_id,
         "Wrong dates",
         None,
+        False,
     )
     with pytest.raises(Conflict) as err:
         await sa.decide_range(db(cal=calendar(), rng=range_row()), CHECKER, RANGE, "withdraw", "Mine?")
@@ -525,6 +527,7 @@ async def test_reject_and_withdraw_need_a_reason() -> None:
         MAKER.cis_user_id,
         None,
         "Typo",
+        False,
     )
     with pytest.raises(NotFound):
         await sa.decide_range(db(cal=calendar()), CHECKER, RANGE, "approve")

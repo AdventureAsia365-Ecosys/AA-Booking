@@ -11,5 +11,6 @@ this table in the same PR.
 | ADR | Decision | Status | Implements | Linear |
 |---|---|---|---|---|
 | [0001](0001-implements-root-0004.md) | Implement root ADR 0004 (stack and bootstrap) in this repo | Accepted (14/10/2026, S235) | root ADR 0004 | AA-678 |
+| [0002](0002-three-person-approval-rules.md) | Approval rules for a three-person team and business-owner self-approval | Proposed (S288) | root ADR 0006a A14 | AA-1158 |
 
 Template: the ecosystem ADR template (AA-Ecosys `docs/templates/adr.md`).

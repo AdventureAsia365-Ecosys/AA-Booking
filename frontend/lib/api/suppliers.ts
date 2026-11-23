@@ -22,7 +22,16 @@ const enc = encodeURIComponent;
 
 export const SUPPLIER_CATEGORIES = ["hotel", "transport", "guide", "entrance", "activity", "meal"] as const;
 export type SupplierCategory = (typeof SUPPLIER_CATEGORIES)[number];
-export type SupplierStatus = "active" | "inactive";
+/** AA-1158: every new supplier starts `pending`; a second person activates it. */
+export type SupplierStatus = "pending" | "active" | "inactive";
+
+/** What the caller may do about an approval (the API re-checks on write). `self_approval`: it would be the business
+ * owner's own (flagged and listed in the audit log). */
+export interface ApprovalAction {
+  allowed: boolean;
+  self_approval: boolean;
+  blockers: string[];
+}
 
 export interface SupplierPlace {
   id: string;
@@ -53,6 +62,9 @@ export interface Supplier {
   contracts_in_force: number;
   created_by: string | null;
   updated_by: string | null;
+  activated_by?: string | null;
+  activated_at?: IsoDateTime | null;
+  owner_self_approved?: boolean;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
 }
@@ -70,6 +82,7 @@ export interface SupplierActivity {
 export interface SupplierDetail extends Supplier {
   contract_counts: { total: number; drafts: number; in_force: number };
   recent_activity: SupplierActivity[];
+  actions?: { activate: ApprovalAction };
 }
 
 export interface SupplierList {
@@ -83,6 +96,7 @@ export interface SupplierSummary {
   total: number;
   active: number;
   inactive: number;
+  pending?: number;
   countries: number;
   contracts_ending_30d: number;
 }
@@ -133,6 +147,10 @@ export interface SupplierContract {
   expired_at: IsoDateTime | null;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
+  /** AA-1158: every staff key that wrote the draft; none of them publishes it (but the business owner, flagged). */
+  writers?: string[];
+  owner_self_approved?: boolean;
+  actions?: { publish: ApprovalAction };
 }
 
 export interface ContractBody {
@@ -226,7 +244,7 @@ async function rateSheetTemplate(): Promise<Blob> {
 }
 
 export const suppliersApi = {
-  list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number } = {}) =>
+  list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number; approvable?: "me" } = {}) =>
     bkGet<SupplierList>("suppliers", q),
   summary: () => bkGet<SupplierSummary>("suppliers/summary"),
   get: (ref: string) => bkGet<SupplierDetail>(`suppliers/${enc(ref)}`),

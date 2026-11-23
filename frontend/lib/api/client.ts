@@ -134,6 +134,9 @@ const enc = encodeURIComponent;
 export const api = {
   staff: {
     me: () => bkGet<StaffMe>("staff/me"),
+    /** AA-1158: is the caller the business owner, and which self-approvals the policy switches allow (display only;
+     * every write checks it again). */
+    selfApproval: () => bkGet<{ is_business_owner: boolean; approve: boolean; payout: boolean }>("staff/me/self-approval"),
     preferences: () => bkGet<StaffPreferences>("staff/me/preferences"),
     setPreferences: (notify: Record<string, boolean>) =>
       bkSend<StaffPreferences>("staff/me/preferences", { method: "PUT", body: { notify } }),
@@ -202,6 +205,8 @@ export const api = {
         to?: string;
         /** AA-996: text in the summary, action, record label or actor name. */
         q?: string;
+        /** AA-1158: "true" = only the business-owner self-approvals. */
+        owner_self_approved?: "true";
         limit?: number;
         before?: string;
       } = {},

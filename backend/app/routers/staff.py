@@ -9,7 +9,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import admin
+from app.auth import admin, self_approval
 from app.auth.staff import Staff, current_staff, get_pool, require
 
 router = APIRouter(prefix="/booking", tags=["staff"])
@@ -52,6 +52,18 @@ async def me(staff: Me) -> dict[str, Any]:
         "view_as": staff.view_as.public() if staff.view_as is not None else None,
         "read_only": staff.preview or staff.view_as is not None,
     }
+
+
+@router.get("/staff/me/self-approval")
+async def my_self_approval(staff: Me, pool: Pool) -> dict[str, Any]:
+    """AA-1158: whether the caller is the business owner and which self-approvals the policy switches allow now, so
+    the pages show the self-approval paths. Display only: every write checks it again server-side
+    (:mod:`app.auth.self_approval`). Kept off ``/staff/me`` so a sign-in never reads the CIS view."""
+    async with pool.acquire() as conn:
+        owner = await self_approval.is_business_owner(conn, staff)
+        approve = owner and await self_approval.switch_on(conn, self_approval.APPROVE)
+        payout = owner and await self_approval.switch_on(conn, self_approval.PAYOUT)
+    return {"is_business_owner": owner, "approve": approve, "payout": payout}
 
 
 @router.get("/staff/me/preferences")

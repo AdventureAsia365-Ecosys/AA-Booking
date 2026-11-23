@@ -75,6 +75,9 @@ export const MSG = phrasebook(
     ")? You confirm you checked the terms entered by {0}. Once published the contract is fixed.": (...a: unknown[]) => `)? You confirm you checked the terms entered by ${a[0]}. Once published the contract is fixed.`,
     "? It closes for good and stops counting as in force. New terms are a new contract.": "? It closes for good and stops counting as in force. New terms are a new contract.",
     "another staff member": "another staff member",
+    "This supplier waits for approval: a second person activates it before contracts can be added.": "This supplier waits for approval: a second person activates it before contracts can be added.",
+    "A second person activates a supplier you created.": "A second person activates a supplier you created.",
+    "Activate (needs a second person)": "Activate (needs a second person)",
   },
   {
     "Profile": "Hồ sơ",
@@ -145,6 +148,9 @@ export const MSG = phrasebook(
     ")? You confirm you checked the terms entered by {0}. Once published the contract is fixed.": (...a: unknown[]) => `)? Bạn xác nhận đã kiểm tra các điều khoản do ${a[0]} nhập. Đã công bố thì hợp đồng cố định.`,
     "? It closes for good and stops counting as in force. New terms are a new contract.": "? Hợp đồng đóng vĩnh viễn và không còn được tính là đang áp dụng. Điều khoản mới là một hợp đồng mới.",
     "another staff member": "nhân viên khác",
+    "This supplier waits for approval: a second person activates it before contracts can be added.": "Nhà cung cấp này đang chờ duyệt: người thứ hai kích hoạt trước khi thêm được hợp đồng.",
+    "A second person activates a supplier you created.": "Người thứ hai kích hoạt nhà cung cấp do bạn tạo.",
+    "Activate (needs a second person)": "Kích hoạt (cần người thứ hai)",
   },
   ),
 );

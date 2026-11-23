@@ -22,7 +22,7 @@ from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from tests.integration import ops
-from tests.integration.conftest import MIGRATIONS
+from tests.integration.conftest import MIGRATIONS, activate_supplier
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import LocalCis
 
@@ -96,9 +96,13 @@ async def _ok(response: httpx.Response, status: int = 200) -> Any:
     return response.json() if response.content else None
 
 
-async def _supplier(c: httpx.AsyncClient, headers: dict[str, str], name: str, categories: list[str]) -> dict:
+async def _supplier(
+    c: httpx.AsyncClient, headers: dict[str, str], name: str, categories: list[str], admin: asyncpg.Connection
+) -> dict:
     body = {"company_name": name, "categories": categories, "country_code": "VN"}
-    return await _ok(await c.post("/suppliers", json=body, headers=headers), 201)
+    made = await _ok(await c.post("/suppliers", json=body, headers=headers), 201)
+    await activate_supplier(admin, made["id"])  # AA-1158: a new supplier starts pending
+    return made
 
 
 async def test_hotels_and_services_crud_rbac_and_facts_only(
@@ -106,8 +110,8 @@ async def test_hotels_and_services_crud_rbac_and_facts_only(
 ) -> None:
     c, cis = client
     maker, checker, sales = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, SALES)
-    sup = await _supplier(c, maker, "Red River DMC", ["hotel", "activity", "transport"])
-    meals_only = await _supplier(c, maker, "Pho Kitchen", ["meal"])
+    sup = await _supplier(c, maker, "Red River DMC", ["hotel", "activity", "transport"], admin)
+    meals_only = await _supplier(c, maker, "Pho Kitchen", ["meal"], admin)
     body = {
         "supplier_id": sup["code"],
         "name": " Hanoi Emerald Hotel ",
@@ -209,7 +213,7 @@ async def test_rates_default_the_item_net_and_price_the_version(
 ) -> None:
     c, cis = client
     maker, checker, sales = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, SALES)
-    sup = await _supplier(c, maker, "Red River DMC", ["hotel", "activity"])
+    sup = await _supplier(c, maker, "Red River DMC", ["hotel", "activity"], admin)
     hotel = await _ok(
         await c.post(
             "/hotels", json={"supplier_id": sup["id"], "name": "Emerald", "destination_id": HANOI}, headers=maker

@@ -38,6 +38,8 @@ export const MSG = phrasebook(
     "Only a published contract can be expired.": "Only a published contract can be expired.",
     "This supplier no longer exists.": "This supplier no longer exists.",
     "Some fields are not valid.": "Some fields are not valid.",
+    "Pending approval": "Pending approval",
+    "A second person approves this: you made or edited it.": "A second person approves this: you made or edited it.",
   },
   {
     "Hotel": "Khách sạn",
@@ -71,6 +73,8 @@ export const MSG = phrasebook(
     "Only a published contract can be expired.": "Chỉ hợp đồng đã công bố mới cho hết hạn được.",
     "This supplier no longer exists.": "Nhà cung cấp này không còn tồn tại.",
     "Some fields are not valid.": "Một số trường không hợp lệ.",
+    "Pending approval": "Chờ duyệt",
+    "A second person approves this: you made or edited it.": "Người thứ hai sẽ duyệt việc này: bạn đã tạo hoặc sửa nó.",
   },
   ),
 );

@@ -38,7 +38,7 @@ async def app(migrated_admin_dsn: str, migrated_booking_dsn: str) -> AsyncIterat
     try:
         # bk-055 itself (the re-run must be a no-op); never bk-054, whose data step would version every plan other
         # tests left with prices.
-        await apply_migrations(admin, only=[55])
+        await apply_migrations(admin, only=[55, 64])  # bk-064 re-grants owner_self_approved (AA-1158)
     finally:
         await admin.close()
     c = await asyncpg.connect(migrated_booking_dsn)
