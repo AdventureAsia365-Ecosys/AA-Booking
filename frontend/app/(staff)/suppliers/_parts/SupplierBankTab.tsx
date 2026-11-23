@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Eye, Landmark, Lock, Plus } from "lucide-react";
 import { supplierBankApi, type BankDecision, type BankDetails, type NewBankAccount, type PayoutLock, type SupplierBankAccount, type SupplierBankList } from "@/lib/api/supplierBank";
+import { ContactChanges } from "./SupplierBankContactChanges";
 import { Button, ConfirmDialog, DateText, Field, FormDrawer, Input, Modal, Pill, Section, type BookingTone, useToast } from "@/ui";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { supplierError } from "./shared";
@@ -81,6 +82,7 @@ function AccountList({ q, onDecide }: { q: UseQueryResult<SupplierBankList>; onD
   return (
     <>
       <LockNotice lock={data.payout_lock} />
+      <ContactChanges changes={data.contact_changes} />
       {data.items.length === 0 && <p className="text-[13px] text-muted">{t("No bank account on file.")}</p>}
       <ul className="flex flex-col gap-3">
         {data.items.map((a) => (
@@ -169,10 +171,12 @@ function AccountCard({
   onReveal: () => void;
   revealing: boolean;
 }) {
+  const t = useT(MSG);
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-line bg-card px-4 py-3 text-[13px] text-body">
       <AccountHead a={a} />
       <AccountHistory a={a} />
+      {a.approve_blocked && <p className="text-warning">{t("Approval closed: the person who entered this account, or you, changed the supplier's contacts recently. Another person checks the contacts against the contract and approves.")}</p>}
       <AccountButtons a={a} onDecide={onDecide} onReveal={onReveal} revealing={revealing} />
     </li>
   );

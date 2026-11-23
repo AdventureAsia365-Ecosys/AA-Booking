@@ -37,6 +37,15 @@ export interface SupplierBankAccount {
   closed_at: IsoDateTime | null;
   close_reason: string | null;
   actions: { reveal: boolean; approve: boolean; approve_self: boolean; reject: boolean; withdraw: boolean };
+  /** Review S289: why approving is closed (the enterer or the caller changed the supplier's contacts recently). */
+  approve_blocked?: "contacts_recently_changed" | null;
+}
+
+/** One change of the supplier's contacts within the call-back window (never the values). */
+export interface ContactChange {
+  at: IsoDateTime;
+  by: Person;
+  fields: ("contact_name" | "contact_email" | "contact_phone" | "role_contacts")[];
 }
 
 /** `none`: no account on file; `pending`: a change waits; `locked` until `until`; `open`. */
@@ -50,6 +59,8 @@ export interface SupplierBankList {
   supplier: { id: string; code: string; company_name: string };
   items: SupplierBankAccount[];
   payout_lock: PayoutLock;
+  /** The contact changes of the last `days` (policy supplier_bank_contact_change_days); only while a change waits. */
+  contact_changes?: { days: number | null; items: ContactChange[] };
   actions: { enter: boolean };
   can_read_details: boolean;
 }

@@ -52,6 +52,7 @@ export const MSG = phrasebook(
     "Entered by {0}": (...a: unknown[]) => `Entered by ${a[0]}`,
     "Approved by {0}": (...a: unknown[]) => `Approved by ${a[0]}`,
     "Closed by {0}": (...a: unknown[]) => `Closed by ${a[0]}`,
+    "Approval closed: the person who entered this account, or you, changed the supplier's contacts recently. Another person checks the contacts against the contract and approves.": "Approval closed: the person who entered this account, or you, changed the supplier's contacts recently. Another person checks the contacts against the contract and approves.",
   },
   {
     "Bank accounts": "Tài khoản ngân hàng",
@@ -99,6 +100,7 @@ export const MSG = phrasebook(
     "Entered by {0}": (...a: unknown[]) => `Nhập bởi ${a[0]}`,
     "Approved by {0}": (...a: unknown[]) => `Duyệt bởi ${a[0]}`,
     "Closed by {0}": (...a: unknown[]) => `Đóng bởi ${a[0]}`,
+    "Approval closed: the person who entered this account, or you, changed the supplier's contacts recently. Another person checks the contacts against the contract and approves.": "Chưa thể duyệt: người nhập tài khoản này, hoặc chính bạn, vừa thay đổi thông tin liên hệ của nhà cung cấp. Người khác sẽ đối chiếu liên hệ với hợp đồng rồi duyệt.",
   },
   ),
 );

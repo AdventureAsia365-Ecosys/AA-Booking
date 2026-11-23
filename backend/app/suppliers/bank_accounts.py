@@ -12,6 +12,11 @@ Where AA sends a supplier's money is the main payout fraud path, so a bank accou
   (:mod:`app.auth.self_approval`; the database checks the CIS marker again). The previous approved account becomes
   ``superseded`` in the same transaction. **Reject** (``supplier_bank.approve``, not the person who entered it, a
   reason) or **withdraw** (the person who entered it, a reason).
+- **Contact changes before a call-back** (review S289): the supplier's contacts (name, e-mail, phone, contacts by role)
+  are edited without an approval while it is active, so one person could plant a number and then "confirm" a forged
+  account on it. The approval is refused (409 ``contacts_recently_changed``) when the person who entered the account
+  or the approver changed those contacts in the last ``supplier_bank_contact_change_days`` (Pricing > Policy, 30 by
+  default); the list shows every contact change of that window on the approval card (when, who, which fields).
 - **Payout lock**: no payout to the supplier while one of its accounts is pending, nor for
   ``supplier_bank_payout_lock_hours`` (Pricing > Policy, 24 by default) after the newest approval: 409
   ``bank_account_pending`` / ``bank_payout_locked`` (:func:`check_payout`, called by the payout checks); the database
@@ -38,7 +43,7 @@ from app.auth import self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.pricing import policy_values
-from app.pricing.policy_params_security import BANK_LOCK_HOURS
+from app.pricing.policy_params_security import BANK_LOCK_HOURS, CONTACT_CHANGE_DAYS
 from app.suppliers import bank_crypto
 
 ACTIONS = ("approve", "reject", "withdraw")
@@ -65,6 +70,29 @@ ACCOUNT_SQL = (
     "SELECT id::text AS id, supplier_id::text AS supplier_id, status, entered_by, account_last4, bank_name"
     " FROM booking.supplier_bank_account WHERE id = $1::uuid"
 )
+# The supplier columns a call-back relies on (``supplier.updated`` audit rows name the changed columns in ``after``).
+CONTACT_FIELDS = ("contact_name", "contact_email", "contact_phone", "role_contacts")
+CONTACT_CHANGES_SHOWN = 20  # technical-constant: rows on the approval card; the refusal reads every row (EXISTS)
+CONTACT_CHANGES_SQL = """
+SELECT l.created_at AS at, l.actor_ref, st.name AS actor_name,
+       ARRAY(SELECT k FROM jsonb_object_keys(l.after) AS k WHERE k = ANY($3::text[]) ORDER BY k) AS fields
+  FROM booking.audit_logs l
+  LEFT JOIN booking.staff_users st ON st.cis_user_id = l.actor_ref
+ WHERE l.entity_type = 'supplier' AND l.entity_id = $1::uuid AND l.action = 'supplier.updated'
+   AND l.created_at >= now() - make_interval(days => $2::int)
+   AND jsonb_typeof(l.after) = 'object' AND l.after ?| $3::text[]
+ ORDER BY l.created_at DESC
+ LIMIT $4
+"""
+CONTACT_CHANGED_BY_SQL = """
+SELECT l.actor_ref, max(l.created_at) AS at
+  FROM booking.audit_logs l
+ WHERE l.entity_type = 'supplier' AND l.entity_id = $1::uuid AND l.action = 'supplier.updated'
+   AND l.created_at >= now() - make_interval(days => $2::int)
+   AND jsonb_typeof(l.after) = 'object' AND l.after ?| $3::text[] AND l.actor_ref = ANY($4::text[])
+ GROUP BY l.actor_ref
+ ORDER BY at DESC
+"""
 LOCK_SQL = """
 SELECT coalesce(bool_or(a.status = 'pending'), false) AS pending,
        max(a.approved_at) FILTER (WHERE a.status = 'approved') AS last_approved, now() AS now
@@ -128,16 +156,19 @@ def masked(last4: str) -> str:
     return f"{MASK} {last4}"
 
 
-def row_out(row: Any, staff: Staff) -> dict[str, Any]:
+def row_out(row: Any, staff: Staff, contacts_changed_by: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """``contacts_changed_by``: who changed the supplier's contacts within the call-back window (pending rows only)."""
     out = dict(row)
     entered_by = out["entered_by"]
     for who in ("entered_by", "approved_by", "closed_by"):
         out[who] = _person(out[who], out.pop(f"{who}_name"))
     out["account_masked"] = masked(out["account_last4"])
     pending, mine = out["status"] == "pending", staff.cis_user_id == entered_by
+    blocked = pending and bool({entered_by, staff.cis_user_id} & contacts_changed_by)
+    out["approve_blocked"] = "contacts_recently_changed" if blocked else None
     out["actions"] = {
         "reveal": staff.can("supplier_bank.read") and out["status"] != "withdrawn",
-        "approve": pending and staff.can("supplier_bank.approve"),  # the write re-checks the maker rule
+        "approve": pending and staff.can("supplier_bank.approve") and not blocked,  # the write re-checks every rule
         "approve_self": pending and mine and staff.can("supplier_bank.approve"),
         "reject": pending and staff.can("supplier_bank.approve") and not mine,
         "withdraw": pending and mine and staff.can("supplier_bank.write"),
@@ -225,6 +256,53 @@ async def check_payout(conn: asyncpg.Connection, supplier_id: str, *, now: datet
         )
 
 
+# ── Contact changes before a call-back ──────────────────────────────────────
+
+
+async def contact_window_days(conn: asyncpg.Connection) -> int:
+    today = await policy_values.today_utc(conn)
+    return (await policy_values.require_staff(conn, today, CONTACT_CHANGE_DAYS)).integer(CONTACT_CHANGE_DAYS)
+
+
+async def contact_changes(conn: asyncpg.Connection, supplier_id: str, days: int) -> list[dict[str, Any]]:
+    """The newest changes of the supplier's contacts within ``days``: when, who, which fields (never the values)."""
+    rows = await conn.fetch(CONTACT_CHANGES_SQL, supplier_id, days, list(CONTACT_FIELDS), CONTACT_CHANGES_SHOWN)
+    return [{"at": r["at"], "by": _person(r["actor_ref"], r["actor_name"]), "fields": list(r["fields"])} for r in rows]
+
+
+async def _contact_window(
+    conn: asyncpg.Connection, supplier_id: str, pending: Any, staff: Staff
+) -> tuple[dict[str, Any], frozenset[str]]:
+    """For the approval card of a pending account: the contact changes of the window, and which of the two people
+    that matter (who entered it, the caller) made one. Nothing to read without a pending account."""
+    if pending is None:
+        return {"days": None, "items": []}, frozenset()
+    days = await contact_window_days(conn)
+    who = [pending["entered_by"], staff.cis_user_id]
+    by = await conn.fetch(CONTACT_CHANGED_BY_SQL, supplier_id, days, list(CONTACT_FIELDS), who)
+    items = await contact_changes(conn, supplier_id, days)
+    return {"days": days, "items": items}, frozenset(r["actor_ref"] for r in by)
+
+
+async def check_contacts(conn: asyncpg.Connection, supplier_id: str, entered_by: str, approver: str) -> None:
+    """409 ``contacts_recently_changed`` when the person who entered the account or the approver changed the supplier's
+    contacts within the policy window: a call-back could then reach a number one of them set."""
+    days = await contact_window_days(conn)
+    rows = await conn.fetch(CONTACT_CHANGED_BY_SQL, supplier_id, days, list(CONTACT_FIELDS), [entered_by, approver])
+    if not rows:
+        return
+    who = "you" if rows[0]["actor_ref"] == approver else "the person who entered this bank account"
+    until = rows[0]["at"] + timedelta(days=days)
+    raise Conflict(
+        "contacts_recently_changed",
+        f"{who} changed this supplier's contacts on {rows[0]['at'].date().isoformat()}: a call-back could reach a"
+        f" number set then. Ask another person to check the contacts against the contract and approve, or approve"
+        f" after {until.date().isoformat()}",
+        changed_at=rows[0]["at"].isoformat(),
+        until=until.isoformat(),
+    )
+
+
 # ── Approval queue (My work, the supplier list filter) ──────────────────────
 
 # The supplier ({p} = the caller) has a pending bank account the caller did not enter (one pending per supplier).
@@ -277,11 +355,14 @@ async def list_for(conn: asyncpg.Connection, staff: Staff, supplier_ref: str) ->
         supplier["id"],
     )
     lock = await payout_lock(conn, supplier["id"])
+    pending = next((r for r in rows if r["status"] == "pending"), None)
+    changes, changed_by = await _contact_window(conn, supplier["id"], pending, staff)
     return {
         "supplier": supplier,
-        "items": [row_out(r, staff) for r in rows],
+        "items": [row_out(r, staff, changed_by) for r in rows],
         "payout_lock": {**lock, "until": lock["until"].isoformat() if lock["until"] else None},
-        "actions": {"enter": staff.can("supplier_bank.write") and not any(r["status"] == "pending" for r in rows)},
+        "contact_changes": changes,
+        "actions": {"enter": staff.can("supplier_bank.write") and pending is None},
         "can_read_details": staff.can("supplier_bank.read"),
     }
 
@@ -439,6 +520,7 @@ async def _approve(
         [account["entered_by"]],
         message="you entered this bank account: another person approves it after a call-back",
     )
+    await check_contacts(conn, supplier["id"], account["entered_by"], staff.cis_user_id)
     old = await conn.fetchval(
         "UPDATE booking.supplier_bank_account SET status = 'superseded', closed_by = $2, closed_at = now()"
         " WHERE supplier_id = $1::uuid AND status = 'approved' RETURNING account_last4",

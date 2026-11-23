@@ -7,7 +7,9 @@ tests/integration/test_bk067_schema.py, the HTTP flows tests/integration/test_aa
 - input checks and masking; what each caller may do on a row;
 - the payout lock with a clock override (pending, none, locked, open) and its 409 answers;
 - the decisions' permission and maker rules before any write;
-- the profile fields (contacts by role, payment terms).
+- the profile fields (contacts by role, payment terms): shapes here, the codes against the admin-edited choices in
+  tests/unit/test_aa1158_profile_options.py;
+- a contact change by the person who entered the account or by the approver blocks the approval (review S289).
 
 KMS is a fake key provider; all names and numbers are invented."""
 
@@ -234,6 +236,18 @@ def test_row_actions_by_caller() -> None:
     assert not done["approve"] and not done["reject"]
 
 
+def test_a_recent_contact_change_blocks_the_approve_action() -> None:
+    by_enterer = bank_accounts.row_out(_row(), CHECKER, frozenset({ENTERER.cis_user_id}))
+    assert by_enterer["approve_blocked"] == "contacts_recently_changed"
+    assert not by_enterer["actions"]["approve"] and by_enterer["actions"]["reject"]
+    by_me = bank_accounts.row_out(_row(), CHECKER, frozenset({CHECKER.cis_user_id}))
+    assert not by_me["actions"]["approve"]
+    someone_else = bank_accounts.row_out(_row(), CHECKER, frozenset({"it-1158p2-third"}))
+    assert someone_else["actions"]["approve"] and someone_else["approve_blocked"] is None
+    decided = bank_accounts.row_out(_row(status="approved"), CHECKER, frozenset({ENTERER.cis_user_id}))
+    assert decided["approve_blocked"] is None
+
+
 # ── The payout lock (clock override) ─────────────────────────────────────────
 
 
@@ -367,6 +381,56 @@ async def test_approve_supersedes_then_approves_with_the_callback() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("changer", "who"),
+    [(ENTERER.cis_user_id, "the person who entered"), (CHECKER.cis_user_id, "you changed")],
+)
+async def test_approve_refused_after_a_contact_change(changer: str, who: str) -> None:
+    changed = NOW - timedelta(days=3)
+    conn = decide_conn().on("max(l.created_at) AS at", [{"actor_ref": changer, "at": changed}])
+    with pytest.raises(Conflict) as err:
+        await bank_accounts.decide(conn, CHECKER, ROW, "approve", "Called the desk on the contract number")
+    assert err.value.code == "contacts_recently_changed" and who in err.value.message
+    assert err.value.extra["until"] == (changed + timedelta(days=30)).isoformat()
+    assert writes(conn) == []
+    days, fields, people = conn.sql("max(l.created_at) AS at")[0][1:]
+    assert days == 30 and set(fields) == set(bank_accounts.CONTACT_FIELDS)
+    assert people == [ENTERER.cis_user_id, CHECKER.cis_user_id]
+
+
+@pytest.mark.asyncio
+async def test_list_shows_the_contact_changes_of_the_window() -> None:
+    pending = _row()
+    change = {"at": NOW, "actor_ref": "it-1158p2-third", "actor_name": "Third", "fields": ["contact_phone"]}
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.suppliers WHERE", {"id": SUPPLIER, "code": "SUP-001158", "company_name": "Kestrel"})
+        .on("ORDER BY a.entered_at DESC", [pending])
+        .on(
+            "FROM booking.supplier_bank_account a WHERE a.supplier_id",
+            {"pending": True, "last_approved": None, "now": NOW},
+        )  # fmt: skip
+        .on("LIMIT $4", [change])
+        .on("max(l.created_at) AS at", [{"actor_ref": ENTERER.cis_user_id, "at": NOW}])
+    )
+    out = await bank_accounts.list_for(conn, CHECKER, SUPPLIER)
+    assert out["contact_changes"] == {
+        "days": 30,
+        "items": [{"at": NOW, "by": {"id": "it-1158p2-third", "name": "Third"}, "fields": ["contact_phone"]}],
+    }
+    assert out["items"][0]["approve_blocked"] == "contacts_recently_changed"
+    assert not out["items"][0]["actions"]["approve"] and not out["actions"]["enter"]
+    none_pending = (
+        ScriptedConn()
+        .on("FROM booking.suppliers WHERE", {"id": SUPPLIER, "code": "SUP-001158", "company_name": "Kestrel"})
+        .on("ORDER BY a.entered_at DESC", [_row(status="approved")])
+    )
+    out = await bank_accounts.list_for(none_pending, CHECKER, SUPPLIER)
+    assert out["contact_changes"] == {"days": None, "items": []}
+    assert none_pending.sql("FROM booking.audit_logs") == []
+
+
+@pytest.mark.asyncio
 async def test_enter_needs_the_right_and_the_key() -> None:
     with pytest.raises(Forbidden):
         await bank_accounts.enter(ScriptedConn(), SALES, FakeKms(), SUPPLIER, GOOD)
@@ -446,19 +510,19 @@ def test_profile_normalize() -> None:
 @pytest.mark.parametrize(
     ("body", "code"),
     [
-        ({"role_contacts": [{"role": "chef", "name": "x"}]}, "invalid_role_contact"),
+        ({"role_contacts": [{"role": "Head Chef", "name": "x"}]}, "invalid_role_contact"),
         ({"role_contacts": [{"role": "sales"}]}, "invalid_role_contact"),
         ({"role_contacts": [{"role": "sales", "email": "nope"}]}, "invalid_role_contact"),
         ({"role_contacts": [{"role": "sales", "name": "x"}] * 13}, "invalid_role_contacts"),
         ({"role_contacts": "x"}, "invalid_role_contacts"),
-        ({"payment_terms": {"basis": "barter"}}, "invalid_payment_terms"),
+        ({"payment_terms": {"basis": "Barter!"}}, "invalid_payment_terms"),
         ({"payment_terms": {"basis": "prepayment", "deposit_percent": 20}}, "invalid_payment_terms"),
         ({"payment_terms": {"basis": "deposit_balance"}}, "invalid_payment_terms"),
         ({"payment_terms": {"basis": "deposit_balance", "deposit_percent": "abc"}}, "invalid_payment_terms"),
         ({"payment_terms": {"basis": "deposit_balance", "deposit_percent": 0}}, "invalid_payment_terms"),
         ({"payment_terms": {"basis": "after_service", "due_days": 400}}, "invalid_payment_terms"),
         ({"payment_terms": {"basis": "after_service", "due_days": True}}, "invalid_payment_terms"),
-        ({"payment_terms": {"basis": "after_service", "method": "barter"}}, "invalid_payment_terms"),
+        ({"payment_terms": {"basis": "after_service", "method": "bar ter"}}, "invalid_payment_terms"),
         ({"legal_entity": "x" * 301}, "legal_entity_too_long"),
     ],
 )
