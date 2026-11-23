@@ -79,6 +79,12 @@ async def purge_ops(conn: asyncpg.Connection) -> None:
             "DELETE FROM booking.services WHERE supplier_id IN"
             " (SELECT id FROM booking.suppliers WHERE company_name LIKE 'it-682 %')"
         )
+        if await conn.fetchval("SELECT to_regclass('booking.supplier_bank_account')") is not None:  # bk-067 on
+            # ON DELETE RESTRICT (accounting evidence): the test purge removes the bank rows before their supplier.
+            await conn.execute(
+                "DELETE FROM booking.supplier_bank_account WHERE supplier_id IN"
+                " (SELECT id FROM booking.suppliers WHERE company_name LIKE 'it-682 %')"
+            )
         await conn.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-682 %'")
 
 

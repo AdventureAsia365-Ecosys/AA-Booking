@@ -16,6 +16,8 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from tests.integration.conftest import run_062_keeping_later_caps
+
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "062_custom_staff_roles.sql"
@@ -26,6 +28,7 @@ SEED_CAPS = {
     "bill.read", "bill.write", "billing.read", "billing.write", "agency_billing.read", "agency_billing.write",
     "profit.read", "b2b_desk.book", "trip_case.read", "trip_case.write", "customer.read", "customer.write",
 }  # fmt: skip
+LATER_CAPS = {"supplier_bank.write"}  # bk-067 (AA-1158 part 2, Q10)
 ZZ = "custom_zz_lantern"
 
 
@@ -57,7 +60,8 @@ async def clean(app: asyncpg.Connection) -> AsyncIterator[None]:
 async def test_registered_once_and_rerun_is_a_no_op(admin: asyncpg.Connection) -> None:
     before = await admin.fetch("SELECT role_code, capability FROM booking.staff_role_capability ORDER BY 1, 2")
     await admin.execute("SET ROLE bk_owner")
-    await admin.execute(MIGRATION.read_text(encoding="utf-8"))
+    # bk-067 added supplier_bank.write to the seed role; the bk-062 post-check counts its own 24 (conftest helper).
+    await run_062_keeping_later_caps(admin, MIGRATION.read_text(encoding="utf-8"))
     await admin.execute("RESET ROLE")
     after = await admin.fetch("SELECT role_code, capability FROM booking.staff_role_capability ORDER BY 1, 2")
     assert [dict(r) for r in after] == [dict(r) for r in before]
@@ -75,9 +79,11 @@ async def test_seed_is_the_exact_allow_list(admin: asyncpg.Connection) -> None:
     assert dict(role) == {"label": "Product, ops & accounting", "based_on": "contracting", "archived": False}
     caps = {r["capability"] for r in await admin.fetch(
         "SELECT capability FROM booking.staff_role_capability WHERE role_code = $1", SEED)}  # fmt: skip
-    assert caps == SEED_CAPS
+    # bk-067 (AA-1158 part 2, Q10) adds the entry of supplier bank accounts, never their read or approval.
+    assert caps == SEED_CAPS | LATER_CAPS
     assert not caps & {"customer.admin", "trip_case.assign", "version.write", "payout.write", "billing_config.write"}
-    assert not any(c.endswith(".approve") or c.startswith("supplier_bank.") for c in caps)
+    assert not any(c.endswith(".approve") for c in caps)
+    assert {c for c in caps if c.startswith("supplier_bank.")} == {"supplier_bank.write"}
 
 
 @pytest.mark.parametrize(
@@ -174,7 +180,7 @@ async def test_view_columns_and_readers(admin: asyncpg.Connection, app: asyncpg.
     by_role: dict[str, set[str | None]] = {}
     for r in rows:
         by_role.setdefault(r["role_code"], set()).add(r["capability"])
-    assert by_role == {SEED: SEED_CAPS, ZZ: {None}}
+    assert by_role == {SEED: SEED_CAPS | LATER_CAPS, ZZ: {None}}
 
 
 @pytest.mark.parametrize(
