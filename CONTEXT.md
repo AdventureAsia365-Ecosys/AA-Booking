@@ -605,6 +605,27 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `cis-custom` + `booking-custom`): the custom-role maker creates and deactivates its own SYNTHETIC supplier; every
   approve-class write it sends (a route gate in the approve class, or supplier / hotel / service activate, contract
   publish, stop-sale review) is answered 403 `forbidden` from its capabilities before any record is read.
+- **View as a lower role (AA-1157, root ADR 0019 d5 as amended; `app/auth/view_as.py`, `app/routers/staff_view_as.py`).**
+  An owner (the CIS `is_owner` marker, read uncached; the business-owner marker alone does not qualify) starts
+  `POST /booking/view-as` (`{role, minutes 5-60, reason?}`) on a built-in role or an active custom role whose read
+  permissions (every permission a GET route checks, walked from `app.routes`, plus every `*.read`) are a subset of the
+  owner's (403 `view_as_not_downward`; unknown or archived 404). Under a per-staff advisory lock the owner's other open
+  views end (`superseded`), then one `staff.view_as_started` row goes to `booking.audit_logs` (entity `staff_view_as`,
+  id = the new session id) with the viewer's role, the target role, its label, its FULL capability list, the start,
+  the expiry and the reason; no new table. The session id is opaque (uuid4, not signed: Booking has no signing secret;
+  it is checked on every request against its start / end rows and bound to the viewer, and can only narrow rights).
+  The staff BFF keeps it in the httpOnly cookie `bk_view_as` and sends it as `x-booking-view-as`. `current_staff`
+  refuses every non-GET/HEAD/OPTIONS request carrying it with 403 `view_as_read_only` before any database access; a
+  read runs as the target role (permissions target ∩ viewer, no E2E grant, `view_as` set, `/booking/staff/me` adds
+  `view_as` and `read_only`), and the owner markers (`custom_roles.is_owner`, `is_business_owner`, `markers`) read
+  False during it (`custom_roles.VIEWING`). A dead session (ended, expired, start row erased, owner lost, role archived
+  or no longer downward) gets one `staff.view_as_ended` row and answers 409 `view_as_ended`; another viewer's 403
+  `view_as_not_own`. Back = `POST /booking/view-as/{session_id}/end` (as the owner, without the header); sign-out =
+  `POST /booking/view-as/end-all` (every sign-out, also after the view cookie expired); `GET /booking/view-as` outside a
+  view ends the caller's views past their expiry (the banner's check at 0 minutes); a view past its expiry always ends
+  as `expired`. The session id never reaches the page (`ViewAs.public()` leaves it out). The staff BFF refuses every
+  write of a view itself (never forwarded) with one structured log line `booking_view_as_write_refused`; the API's own
+  refusal logs the same event name. Under `/booking/view-as`, not `/booking/staff/...` (`GET /booking/staff/{id}`).
 - Permissions are a matrix in code (`app/auth/staff.py`, provisional until the PRD matrix is confirmed).
   **Lean staff roles step 1 (AA-1150, S286)**: `finance` also reads trip cases, prices, supply, operations, supplier
   bills and the catalog (`trip_case.read`, `pricing.read`, `supply.read`, `ops.read`, `bill.read`, `catalog.read`; it

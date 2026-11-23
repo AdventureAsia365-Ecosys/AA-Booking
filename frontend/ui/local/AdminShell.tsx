@@ -11,6 +11,7 @@
 // ui/local/lang.ts, cookie `bk_lang`, English by default) around the frame and every page, and the Topbar carries the
 // one EN | VI switch. The staff layout reads the cookie and passes `initialLang`, so a Vietnamese user gets Vietnamese
 // HTML from the server (no English flash, no hydration mismatch).
+// AA-1157: the owner's read-only "view as a lower role" banner sits in the banner slot (nothing outside a view).
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -23,6 +24,7 @@ import { EmptyState } from "../core/primitives";
 import { PageFrame } from "../booking/PageFrame";
 import { ShellFrame } from "../core/ShellFrame";
 import { useStaff } from "./StaffContext";
+import { ViewAsBanner } from "./ViewAsBanner";
 import { canSeePage } from "@/lib/rbac";
 import { useT } from "@/ui/core/useI18n";
 import { MSG } from "./AdminShell.messages";
@@ -53,6 +55,7 @@ function ShellBody({ children }: { children: React.ReactNode }) {
       sidebarId="admin-sidebar-drawer"
       sidebar={(c) => <Sidebar drawerOpen={c.drawerOpen} onNavigate={c.closeDrawer} />}
       topbar={(c) => <Topbar onOpenSearch={c.openPalette} onOpenMenu={c.openDrawer} />}
+      banner={() => <ViewAsBanner />}
       bottomNav={(c) => <BottomNav onOpenMore={c.openDrawer} />}
       palette={(c) => <CommandPalette open={c.paletteOpen} onClose={c.closePalette} />}
     >
