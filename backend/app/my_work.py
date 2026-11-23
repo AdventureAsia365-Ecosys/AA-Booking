@@ -18,7 +18,7 @@ due date among them (``earliest_due``), and the query string of the list page th
     stop_sales_to_review        stop_sale.approve       approve   /stop-sales?review=me
     suppliers_to_activate       supplier.activate       approve   /suppliers?status=pending&approvable=me
     billing_changes_to_approve  billing_config.approve  approve   /agency-billing?tab=settings&approvable=me
-    owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&since=<month>
+    owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&from=<month start>
 
 AA-1158: ``owner_self_approvals`` counts the business-owner self-approvals of the current UTC calendar month (audit
 rows with ``owner_self_approved``). It is shown to every ``audit.read`` holder, not only to the marker holder, so the

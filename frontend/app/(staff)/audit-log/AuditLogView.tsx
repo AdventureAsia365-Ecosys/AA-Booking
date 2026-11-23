@@ -316,7 +316,7 @@ function SelfApprovalTabs({ show, on, onChange }: { show: boolean; on: boolean; 
   if (!show) return null;
   return (
     <SavedTabs
-      ariaLabel="Audit log views"
+      ariaLabel={t("Audit log views")}
       active={on ? "owner_self" : "all"}
       onSelect={(key) => onChange(key === "owner_self")}
       tabs={[
