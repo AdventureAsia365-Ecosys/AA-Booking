@@ -276,7 +276,7 @@ async def detail(conn: asyncpg.Connection, staff: Staff, bill_id: str) -> dict[s
     attached = await ops_files.files_of(conn, "supplier_payout", [p["id"] for p in payouts])
     out["payouts"] = [payout_out(p, staff, attached.get(p["id"])) for p in payouts]
     out["files"] = (await ops_files.files_of(conn, "supplier_bill", [row["id"]])).get(row["id"], [])
-    return jsonable(out)
+    return jsonable(await bill_approvals.with_payout_lock(conn, out, row["supplier_id"]))
 
 
 async def list_bills(

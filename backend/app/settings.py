@@ -65,6 +65,14 @@ bucket, SSE-S3, objects reachable by the task role only, and grants it ``s3:PutO
   Empty (default) = uploads answer 503 ``ops_storage_unavailable`` and downloads are unavailable.
 - ``OPS_DOCS_REGION``: default ``us-west-1``.
 
+Supplier bank accounts (AA-1158 part 2, ``app.suppliers.bank_crypto``; AA-CIS-Infra ``booking_supplier_bank.tf``
+creates the KMS key and grants the task role ``kms:GenerateDataKey`` / ``Decrypt`` / ``Encrypt`` under the context
+``{purpose, supplier_id}``):
+
+- ``SUPPLIER_BANK_KMS_KEY_ID``: the key's alias (``alias/aa-booking-<env>-supplier-bank``) or ARN. Empty (default) =
+  entering or reading a bank account answers 503 ``bank_crypto_unavailable`` (the masked list still works).
+- ``SUPPLIER_BANK_KMS_REGION``: default ``us-west-1``.
+
 Error tracking (AA-871, ``app.observability.sentry``):
 
 - ``SENTRY_DSN``: the Sentry project DSN (task definition secret). Empty (default) = Sentry off. Must be ``https://``.
@@ -103,6 +111,10 @@ DEFAULT_SUPPLY_MEDIA_REGION = "us-west-1"
 SUPPLY_MEDIA_BUCKET_RE = re.compile(r"^aa-booking-[a-z0-9]+-supply-media-[0-9]{12}$")
 # The bk-026 CHECK on booking.ops_files.s3_bucket.
 OPS_DOCS_BUCKET_RE = re.compile(r"^aa-booking-[a-z0-9]+-ops-docs-[0-9]{12}$")
+# AA-1158 part 2: a KMS alias name or a key / alias ARN (the task definition sets the alias name).
+SUPPLIER_BANK_KEY_RE = re.compile(
+    r"^(alias/[A-Za-z0-9/_-]{1,250}|arn:aws:kms:[a-z0-9-]+:[0-9]{12}:(key|alias)/[A-Za-z0-9/_-]{1,250})$"
+)
 
 
 class SettingsError(ValueError):
@@ -144,6 +156,8 @@ class Settings:
     supply_media_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     ops_docs_bucket: str = ""
     ops_docs_region: str = DEFAULT_SUPPLY_MEDIA_REGION
+    supplier_bank_kms_key_id: str = ""
+    supplier_bank_kms_region: str = DEFAULT_SUPPLY_MEDIA_REGION
     sentry_dsn: str = field(default="", repr=False)
     sentry_required: bool = False
 
@@ -157,6 +171,18 @@ class Settings:
             raise SettingsError(
                 "COGNITO_CIS_ADMIN_CLIENT_ID must be a Cognito app client id (letters and digits) other than the "
                 f"Booking clients, or empty, got {cis_admin!r}"
+            )
+
+    def _check_supplier_bank_key(self) -> None:
+        """AA-1158 part 2: SUPPLIER_BANK_KMS_KEY_ID is empty or a KMS alias / ARN; the region is an AWS region."""
+        key = self.supplier_bank_kms_key_id
+        if key and not SUPPLIER_BANK_KEY_RE.fullmatch(key):
+            raise SettingsError(
+                f"SUPPLIER_BANK_KMS_KEY_ID must be a KMS alias (alias/...) or a key / alias ARN, got {key!r}"
+            )
+        if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.supplier_bank_kms_region):
+            raise SettingsError(
+                f"SUPPLIER_BANK_KMS_REGION must be an AWS region, got {self.supplier_bank_kms_region!r}"
             )
 
     def __post_init__(self) -> None:
@@ -232,6 +258,7 @@ class Settings:
             )
         if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-[0-9]", self.ops_docs_region):
             raise SettingsError(f"OPS_DOCS_REGION must be an AWS region, got {self.ops_docs_region!r}")
+        self._check_supplier_bank_key()
         if self.sentry_dsn and not self.sentry_dsn.startswith("https://"):
             raise SettingsError("SENTRY_DSN must be an https:// URL")  # the value is never echoed
         if self.sentry_required and not self.sentry_dsn:
@@ -285,6 +312,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         supply_media_region=(env.get("SUPPLY_MEDIA_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
         ops_docs_bucket=(env.get("OPS_DOCS_BUCKET") or "").strip(),
         ops_docs_region=(env.get("OPS_DOCS_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
+        supplier_bank_kms_key_id=(env.get("SUPPLIER_BANK_KMS_KEY_ID") or "").strip(),
+        supplier_bank_kms_region=(env.get("SUPPLIER_BANK_KMS_REGION") or DEFAULT_SUPPLY_MEDIA_REGION).strip(),
         sentry_dsn=(env.get("SENTRY_DSN") or "").strip(),
         sentry_required=_flag(env.get("SENTRY_REQUIRED"), False, "SENTRY_REQUIRED"),
     )

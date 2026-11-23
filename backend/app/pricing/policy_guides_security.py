@@ -51,4 +51,25 @@ SECURITY_GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu là bật (quyết định Q4 của trưởng nhóm kỹ thuật).",
         ),
     ),
+    "supplier_bank_payout_lock_hours": _g(
+        (
+            "How long supplier payouts stay locked after a change of the supplier's bank account is approved. While "
+            "a change waits for approval, payouts to that supplier are locked too.",
+            "Raise it to give the business owner more time to notice a wrong or forged bank change before money "
+            "leaves.",
+            "Lower it when urgent supplier payments wait too long after a checked change; the call-back check stays.",
+            "Change it when the payment routine changes, for example payouts once a week.",
+            "Starting value 24 hours (tech lead decision Q10).",
+        ),
+        (
+            "Khoá chi trả cho nhà cung cấp trong bao lâu sau khi một thay đổi tài khoản ngân hàng của họ được duyệt. "
+            "Trong lúc thay đổi còn chờ duyệt, việc chi trả cho nhà cung cấp đó cũng bị khoá.",
+            "Tăng để chủ doanh nghiệp có thêm thời gian phát hiện một thay đổi tài khoản sai hoặc giả trước khi tiền "
+            "đi.",
+            "Giảm khi các khoản chi gấp cho nhà cung cấp phải chờ quá lâu sau một thay đổi đã kiểm; bước gọi lại xác "
+            "nhận vẫn giữ.",
+            "Đổi khi lịch chi trả thay đổi, ví dụ chi mỗi tuần một lần.",
+            "Giá trị ban đầu là 24 giờ (quyết định Q10 của trưởng nhóm kỹ thuật).",
+        ),
+    ),
 }

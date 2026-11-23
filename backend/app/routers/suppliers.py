@@ -40,6 +40,25 @@ Country = Annotated[str, Field(pattern=r"^\s*([A-Za-z]{2})?\s*$")]
 Currency = Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")]
 
 
+class SupplierRoleContact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["reservations", "accounts", "sales", "operations", "emergency", "management"]
+    name: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=254)
+    phone: str | None = Field(default=None, max_length=40)
+
+
+class SupplierPaymentTerms(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    basis: Literal["prepayment", "deposit_balance", "on_arrival", "after_service", "monthly_statement"]
+    deposit_percent: float | None = Field(default=None, ge=1, le=100)
+    due_days: int | None = Field(default=None, ge=0, le=365)
+    method: Literal["bank_transfer", "card", "cash", "other"] | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
 class SupplierFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +75,11 @@ class SupplierFields(BaseModel):
     postal_code: str | None = Field(default=None, max_length=20)
     destination_id: UUID | None = None
     country_code: Country | None = None
+    # AA-1158 part 2 (bk-067): the supplier profile (app.suppliers.profile checks the rest).
+    legal_entity: str | None = Field(default=None, max_length=300)
+    tax_code: str | None = Field(default=None, max_length=64)
+    role_contacts: list[SupplierRoleContact] | None = Field(default=None, max_length=12)
+    payment_terms: SupplierPaymentTerms | None = None
 
 
 class NewSupplier(SupplierFields):

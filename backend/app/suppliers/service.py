@@ -35,6 +35,7 @@ from app import audit, catalog, paging
 from app.auth import self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
+from app.suppliers import profile
 
 CATEGORIES = ("hotel", "transport", "guide", "entrance", "activity", "meal")
 STATUSES = ("pending", "active", "inactive")
@@ -50,7 +51,7 @@ TEXT_FIELDS = (
     "region",
     "postal_code",
 )
-EDITABLE = ("company_name", "categories", *TEXT_FIELDS, "destination_id", "country_code")
+EDITABLE = ("company_name", "categories", *TEXT_FIELDS, "destination_id", "country_code", *profile.FIELDS)
 
 CONTRACT_EDITABLE = (
     "title",
@@ -86,6 +87,7 @@ SUPPLIER_COLUMNS = f"""
     s.country_code::text AS country_code, co.name AS country_name, s.status,
     s.created_by, s.updated_by, s.created_at, s.updated_at,
     s.activated_by, s.activated_at, s.owner_self_approved, s.writers,
+    s.legal_entity, s.tax_code, s.role_contacts, s.payment_terms,
     (SELECT count(*) FROM booking.supplier_contracts k WHERE k.supplier_id = s.id AND {IN_FORCE})
         AS contracts_in_force
 """  # noqa: S608 — constants only
@@ -137,7 +139,7 @@ def _row(row: Any) -> dict[str, Any]:
     out = dict(row)
     if "categories" in out and out["categories"] is not None:
         out["categories"] = list(out["categories"])
-    return out
+    return profile.decode(out)
 
 
 def clean_text(value: Any) -> str | None:
@@ -171,7 +173,7 @@ def normalize(data: dict[str, Any]) -> dict[str, Any]:
         out["country_code"] = (clean_text(out["country_code"]) or "").upper() or None
     if "destination_id" in out and out["destination_id"] is not None:
         out["destination_id"] = str(out["destination_id"])
-    return out
+    return profile.normalize(out)  # AA-1158 part 2: legal entity, tax code, contacts by role, payment terms
 
 
 async def check_place(conn: asyncpg.Connection, merged: dict[str, Any], changed: set[str]) -> dict[str, Any]:
@@ -403,12 +405,12 @@ async def create_supplier(conn: asyncpg.Connection, staff: Staff, data: dict[str
     values.update(await check_place(conn, values, set(values)))
     values["status"] = "pending"
     columns = [*(k for k in EDITABLE if k in values), "status"]
-    marks = ", ".join(f"${i + 1}" + ("::uuid" if c == "destination_id" else "") for i, c in enumerate(columns))
+    marks = ", ".join(f"${i + 1}" + profile.cast(c) for i, c in enumerate(columns))
     try:
         row = await conn.fetchrow(
             f"INSERT INTO booking.suppliers ({', '.join(columns)}, created_by, updated_by)"  # noqa: S608 — whitelisted
             f" VALUES ({marks}, ${len(columns) + 1}, ${len(columns) + 1}) RETURNING id::text AS id, code",
-            *[values[c] for c in columns],
+            *[profile.db_value(c, values[c]) for c in columns],
             staff.cis_user_id,
         )
     except asyncpg.UniqueViolationError as exc:
@@ -450,14 +452,12 @@ async def update_supplier(conn: asyncpg.Connection, staff: Staff, ref: str, chan
             changed.pop(key, None)
     if not changed:
         return {**current, "changed": []}
-    sets = ", ".join(
-        f"{column} = ${i + 2}" + ("::uuid" if column == "destination_id" else "") for i, column in enumerate(changed)
-    )
+    sets = ", ".join(f"{column} = ${i + 2}" + profile.cast(column) for i, column in enumerate(changed))
     try:
         await conn.execute(
             f"UPDATE booking.suppliers SET {sets}, updated_by = ${len(changed) + 2} WHERE id = $1::uuid",  # noqa: S608
             current["id"],
-            *changed.values(),
+            *(profile.db_value(c, v) for c, v in changed.items()),
             staff.cis_user_id,
         )
     except asyncpg.UniqueViolationError as exc:

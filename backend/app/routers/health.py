@@ -64,9 +64,13 @@ async def ready(request: Request) -> JSONResponse:
 
 def _storage(request: Request) -> dict[str, str]:
     """Whether each Booking bucket is configured on this task (AA-682: the ops-docs bucket was missing on Dev and no
-    probe said so). The stores are None when their env is unset."""
+    probe said so). The stores are None when their env is unset. AA-1158 part 2: also the supplier bank account key."""
     state = request.app.state
     return {
         name: "configured" if getattr(state, attr, None) is not None else "not_configured"
-        for name, attr in (("supply_media", "media_store"), ("ops_docs", "ops_store"))
+        for name, attr in (
+            ("supply_media", "media_store"),
+            ("ops_docs", "ops_store"),
+            ("supplier_bank_key", "bank_key"),  # AA-1158 part 2: SUPPLIER_BANK_KMS_KEY_ID set
+        )
     }

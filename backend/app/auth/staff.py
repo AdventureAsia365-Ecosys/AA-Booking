@@ -221,6 +221,14 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "bill.write": frozenset({"admin", "contracting"}),
     "bill.approve": frozenset({"admin", "contracting"}),
     "payout.write": frozenset({"admin"}),
+    # AA-1158 part 2 (bk-067, tech lead S285 Q10): supplier bank accounts. Entering one (pending) = admin, contracting,
+    # finance (and the content + operations custom role, entry only); reading the full details (they are KMS-encrypted,
+    # every read audited) = admin, finance; approving one after a call-back = admin, never the person who entered it
+    # (the business owner may, flagged). Without supplier_bank.read the list shows the bank and the last 4 only. None
+    # is in the preview cap.
+    "supplier_bank.read": frozenset({"admin", "finance"}),
+    "supplier_bank.write": frozenset({"admin", "contracting", "finance"}),
+    "supplier_bank.approve": frozenset({"admin"}),
     # Agency billing (bk-041 / bk-042, AA-1037 R4, root ADR 0019 d3 / d9): every invoice from AA to an agency (software
     # fee + tour settlement). Finance runs it: drafts, issues, records payments; a second finance user (or an admin)
     # approves or rejects a payment, never its recorder (maker-checker, 403 maker_checker + a CHECK). The billing

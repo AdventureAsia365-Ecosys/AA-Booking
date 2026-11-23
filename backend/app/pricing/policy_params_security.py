@@ -8,11 +8,18 @@ spec here (plain data, so this module imports nothing from it). Read by :mod:`ap
 AA-1158 (bk-064, tech lead S285 Q4 / Q5): the two business-owner self-approval switches, in the same section and
 approved by the administrator group. Pricing > Policy itself stays two-person, so the business owner never turns them
 on or off alone. Read by :mod:`app.auth.self_approval`.
+
+AA-1158 part 2 (bk-067, tech lead S285 Q10): the payout lock after a supplier bank account change, in hours, in the
+same section and approved by the administrator group. Read by :mod:`app.suppliers.bank_accounts` and by the database
+(``booking.supplier_payouts_bank_lock``, the same value in force).
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
+
+BANK_LOCK_HOURS = "supplier_bank_payout_lock_hours"
 
 SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -49,5 +56,19 @@ SPECS: tuple[dict[str, Any], ...] = (
         "Nobody else ever pays a bill they approved.",
         "used_by": "app.auth.self_approval",
         "section": "security",
+    },
+    {
+        "key": BANK_LOCK_HOURS,
+        "type": "integer",
+        "unit": "hours",
+        "question": "S285 Q10",
+        "group": "admin",
+        "label": "Supplier payouts locked after a bank account change (hours)",
+        "help": "No payout to a supplier while a bank account change waits for approval, nor for this many hours after "
+        "one is approved.",
+        "used_by": "app.suppliers.bank_accounts",
+        "section": "security",
+        "minimum": Decimal("1"),
+        "maximum": Decimal("168"),
     },
 )
