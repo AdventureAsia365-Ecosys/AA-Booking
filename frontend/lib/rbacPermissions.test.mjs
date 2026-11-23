@@ -46,6 +46,7 @@ const BEFORE = {
   "/pricing/seasons": [A, S, C, F],
   "/pricing/holiday-events": [A, S, C, F],
   "/stop-sales": [A, S, C, F],
+  "/add-ons": ALL, // AA-1151: new page, every role reads add-ons (addon.read)
   "/catalog/trip-plans/:id/commercial": [A, C],
   "/catalog/*": ALL,
   "/billing": [A, S, C, F],

@@ -62,6 +62,7 @@ import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripC
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
 import type { MyWorkSummary } from "../../lib/api/myWork";
 import type { StopSale, StopSalePage } from "../../lib/api/stopSales";
+import type { AddonOffer, AddonPage, ExpiringContract } from "../../lib/api/addons";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
 import type { StaffRoles } from "../../lib/api/staffRoles";
 import type { AgencyProfitMonth, CaseProfit, DepartureCosts, DepartureProfit, FinanceDeparture, OrderLine, SupplierOrder } from "../../lib/api/finance";
@@ -2122,6 +2123,41 @@ const MY_WORK: MyWorkSummary = {
 };
 
 // AA-1159: stop-sales waiting for a second person (invented suppliers, hotels and dates).
+// AA-1151: add-on offers (invented activities) and the contracts ending soon.
+function addonOffer(i: number): AddonOffer {
+  const status = (["draft", "published", "retired"] as const)[i % 3];
+  return {
+    id: `a1151000-0000-4000-8000-00000000000${i}`,
+    component_id: `sv:9100000${i}-0000-4000-8000-000000000000`,
+    service_id: `9100000${i}-0000-4000-8000-000000000000`,
+    service_code: `SVC-00010${i}`,
+    service_title: ["Lotus lake paddle", "Lantern night walk", "Herb garden cooking class with a very long title"][i % 3],
+    service_type: "activity",
+    unit: "person",
+    supplier_code: `SUP-00000${i + 1}`,
+    supplier_name: ["Lotus Bay Travel", "Mekong Riverside Co.", "Highland Trails Ltd"][i % 3],
+    status,
+    min_pax: 2,
+    cutoff_hours: 24,
+    operating_weekdays: i % 2 ? [1, 2, 3, 4, 5, 6, 7] : [1, 4],
+    start_times: i % 2 ? [] : ["08:30", "14:00"],
+    child_pct: i === 0 ? "50.00" : null,
+    sort_order: 0,
+    featured: false,
+    writers: i === 0 ? ["u-layout"] : ["u-002"],
+    published_by: status === "published" ? "u-003" : null,
+    published_at: status === "published" ? "2026-11-02T04:00:00Z" : null,
+    owner_self_approved: false,
+    updated_at: `2026-11-0${i + 1}T04:00:00Z`,
+    places: [{ destination_id: `d000000${i}-0000-4000-8000-000000000000`, role: "operates", name: ["Hanoi", "Hoi An", "Luang Prabang"][i % 3], country: "Vietnam" }],
+    missing: status === "draft" && i > 2 ? ["no_price"] : [],
+    content_published: true,
+  };
+}
+const EXPIRING: ExpiringContract[] = [
+  { id: "c1151000-0000-4000-8000-000000000001", title: "2026 excursions", supplier_code: "SUP-000001", supplier_name: "Lotus Bay Travel", valid_to: "2026-12-31", days_left: 38, announced: true },
+];
+
 function stopSale(i: number): StopSale {
   const end = i % 3 === 2;
   return {
@@ -2268,6 +2304,11 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
     const items = range(3).map(stopSale).filter((s) => query.get("review") !== "me" || s.created_by !== "u-layout");
     return ok({ items, total: items.length } satisfies StopSalePage);
   }
+  if (p === "add-ons") {
+    const items = range(4).map(addonOffer).filter((o) => query.get("approvable") !== "me" || (o.status === "draft" && !o.writers.includes("u-layout")));
+    return ok({ items, total: items.length } satisfies AddonPage);
+  }
+  if (p === "contracts/expiring") return ok({ window_days: 60, items: EXPIRING });
   if (p === "supplier-bookings/summary") return ok({ requested: 6, overdue: 2, pending: 3, answer_days: 3 } satisfies SupplierBookingSummary);
   if (p === "supplier-bills/summary") return ok(SUPPLIER_BILLS_SUMMARY);
   if (p === "supplier-bills") return ok(billingPage(range(ROWS).map(supplierBill), 24));

@@ -122,6 +122,8 @@ export const PAGE_RULES: readonly PageRule[] = [
   { pattern: "/pricing/holiday-events", perms: ["pricing.read"] },
   // AA-1159: stop-sales on supplier contracts waiting for a second person (API supply.read; decisions stop_sale.approve).
   { pattern: "/stop-sales", perms: ["supply.read"] },
+  // AA-1151 (bk-068): add-on offers (API addon.read; drafts addon.write, publishing addon.approve).
+  { pattern: "/add-ons", perms: ["addon.read"] },
   // Catalog from CIS (W2): everyone reads (catalog.read); the commercial fields need trip_plan.write.
   { pattern: "/catalog/trip-plans/:id/commercial", perms: ["trip_plan.write"] },
   { pattern: "/catalog/*", perms: ["catalog.read"] },

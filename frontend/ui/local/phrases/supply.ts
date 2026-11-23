@@ -37,6 +37,7 @@ import "@/app/(staff)/services/_parts/ServiceDetailView.messages";
 import "@/app/(staff)/services/_parts/ServiceFormDrawer.messages";
 import "@/app/(staff)/services/_parts/ServicesView.messages";
 import "@/app/(staff)/stop-sales/_parts/StopSalesView.messages";
+import "@/app/(staff)/add-ons/_parts/AddonsView.messages";
 import "@/app/(staff)/suppliers/_parts/ContractDrawer.messages";
 import "@/app/(staff)/suppliers/_parts/DestinationPicker.messages";
 import "@/app/(staff)/suppliers/_parts/EditSupplierView.messages";

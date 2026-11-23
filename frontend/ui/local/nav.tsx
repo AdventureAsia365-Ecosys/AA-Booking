@@ -29,6 +29,7 @@ import {
   Map as MapIcon,
   MapPin,
   OctagonX,
+  Ticket,
   Percent,
   PartyPopper,
   Scale,
@@ -136,6 +137,8 @@ export function navGroups(): NavGroup[] {
         { href: "/pricing/holiday-events", label: "Holiday events", icon: <PartyPopper size={ICON} />, wave: 2, shipped: true },
         // AA-1159: stop-sales on supplier contracts waiting for a second person (review, lifting).
         { href: "/stop-sales", label: "Stop-sales", icon: <OctagonX size={ICON} />, wave: 2, shipped: true },
+        // AA-1151 (bk-068): optional activities per place and day (drafts, second-person publish, expiring contracts).
+        { href: "/add-ons", label: "Add-ons", icon: <Ticket size={ICON} />, wave: 2, shipped: true },
       ],
     },
     {

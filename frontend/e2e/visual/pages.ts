@@ -101,6 +101,7 @@ export const PAGES: VisualPage[] = [
   { slug: "suppliers", route: "/suppliers", path: "/suppliers", auth: "staff" },
   { slug: "supplier", route: "/suppliers/[id]", path: "/suppliers/SUP-000001", auth: "staff" },
   { slug: "stop-sales", route: "/stop-sales", path: "/stop-sales", auth: "staff" },
+  { slug: "add-ons", route: "/add-ons", path: "/add-ons", auth: "staff" },
   { slug: "trip-checks", route: "/trip-checks", path: "/trip-checks", auth: "staff" },
 ];
 
