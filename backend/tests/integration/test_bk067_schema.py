@@ -64,6 +64,9 @@ async def _purge(admin: asyncpg.Connection) -> None:
         await admin.execute("DELETE FROM booking.billing_entity_change WHERE billing_entity_id IN"
                             " (SELECT id FROM booking.billing_entity WHERE code LIKE 'IT1158B%')")  # fmt: skip
         await admin.execute("DELETE FROM booking.billing_entity WHERE code LIKE 'IT1158B%'")
+        # ON DELETE RESTRICT (accounting evidence, kept 10 years): the test purge removes bank rows first.
+        await admin.execute("DELETE FROM booking.supplier_bank_account WHERE supplier_id IN"
+                            " (SELECT id FROM booking.suppliers WHERE company_name LIKE 'it-1158b%')")  # fmt: skip
         await admin.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-1158b%'")
         await admin.execute("DELETE FROM booking.supplier_profile_option WHERE created_by LIKE 'it-1158b%'")
     await admin.execute("DELETE FROM shared.staff_booking_grant_stub WHERE cognito_sub = $1", OWNER_SUB)
@@ -331,6 +334,35 @@ async def test_an_account_starts_pending_and_what_was_entered_never_changes(app_
         )
     with pytest.raises(asyncpg.UniqueViolationError):
         await app_conn.fetchval(ENTER, sid, FILLER, WRAPPED, CHECKER)  # one pending per supplier
+
+
+async def test_a_supplier_with_bank_rows_is_never_deleted_by_a_cascade(
+    app_conn: asyncpg.Connection, admin: asyncpg.Connection
+) -> None:
+    sid = await _pending_supplier(app_conn, "Bank R")
+    acc = await app_conn.fetchval(ENTER, sid, FILLER, WRAPPED, MAKER)
+    rule = await admin.fetchval(
+        "SELECT confdeltype::text AS t FROM pg_constraint WHERE conname = 'supplier_bank_account_supplier_fkey'"
+    )
+    assert rule == "r"  # RESTRICT: the rows are accounting evidence (DM-7.1, 10 years)
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await admin.execute("DELETE FROM booking.suppliers WHERE id = $1::uuid", sid)
+    assert await admin.fetchval("SELECT count(*) AS n FROM booking.supplier_bank_account WHERE id = $1::uuid", acc) == 1
+
+
+async def test_supplier_bank_read_is_in_the_approve_class(admin: asyncpg.Connection) -> None:
+    """It decrypts full account numbers: no custom role ever holds it, like supplier_bank.approve."""
+    for capability in ("supplier_bank.read", "supplier_bank.approve"):
+        async with admin.transaction():
+            await admin.execute("SET LOCAL ROLE bk_owner")
+            with pytest.raises(asyncpg.CheckViolationError, match="not_approve_chk"):
+                await admin.execute(
+                    "INSERT INTO booking.staff_role_capability (role_code, capability, created_by)"
+                    " VALUES ('custom_product_ops_accounting', $1, 'it-1158b')",
+                    capability,
+                )
 
 
 async def test_a_second_person_approves_with_a_call_back(app_conn: asyncpg.Connection) -> None:

@@ -44,6 +44,9 @@
 --      the person who entered the account changed the supplier's contacts within that many days, and shows anyone
 --      else's change on the approval card, so a planted call-back number never confirms a forged account).
 --   6. supplier_bank.write (entry only, Q10) added to the content + operations role custom_product_ops_accounting.
+--      supplier_bank.read (it decrypts full account numbers) joins the approve class of the bk-062 CHECK
+--      staff_role_capability_not_approve_chk, so no custom role ever holds it (built-in admin / finance only), like
+--      supplier_bank.approve (caught by the .approve suffix).
 --   7. booking.supplier_profile_option: the choices of the supplier profile (contact roles, payment terms bases,
 --      payment methods) as data an administrator edits (label EN / VI, order, active), seeded with today's values. A
 --      code never changes and a row is never deleted (a supplier may still name it); retiring one sets active = false.
@@ -59,14 +62,15 @@
 -- free texts (pii:free_text). suppliers.role_contacts is pii:contact (also name). DM-7.1: supplier_bank_account has its
 -- row in the root data standards (root PR merged before the Infra copy); supplier_profile_option too (configuration,
 -- no personal data).
--- Locks: ACCESS EXCLUSIVE, briefly, on suppliers (ADD COLUMN with constant defaults, a CHECK on tens of rows),
+-- Locks: ACCESS EXCLUSIVE, briefly, on suppliers (ADD COLUMN with constant defaults, a CHECK on tens of rows) and
+-- staff_role_capability (the approve CHECK re-added, a few dozen rows),
 -- SHARE ROW EXCLUSIVE on billing_entity and supplier_payouts (CREATE TRIGGER); lock_timeout 5s.
 -- Never reads shared.v_staff_booking_grant (bk_owner has no SELECT on it): no row of the new table exists yet.
 -- Re-runnable (the Integration Tests replay every file): ADD COLUMN IF NOT EXISTS, DROP CONSTRAINT IF EXISTS + ADD,
 -- CREATE OR REPLACE FUNCTION / TRIGGER, CREATE TABLE / INDEX IF NOT EXISTS, ON CONFLICT DO NOTHING.
 -- Number: owner main max + 1 (bk-066 on main). If it moves, renumber: file name, this header, the registration, the
 -- seed ids (…b67000…) and the tests that name it (git grep '067_' and 'bk-067').
--- Undo (a later bk- file, after the code is reverted): DROP the triggers billing_entity_guard, supplier_payouts_bank_lock and their functions; DELETE the bk-067 capability row and the seed:bk-067 policy rows; DROP
+-- Undo (a later bk- file, after the code is reverted): DROP the triggers billing_entity_guard, supplier_payouts_bank_lock and their functions; DELETE the bk-067 capability row and the seed:bk-067 policy rows; restore the bk-062 approve CHECK; DROP
 -- booking.supplier_profile_option, booking.supplier_bank_account (destructive: DRY RUN; it holds the approval
 -- evidence) and the four supplier columns.
 
@@ -196,7 +200,7 @@ CREATE TABLE IF NOT EXISTS booking.supplier_bank_account (
     close_reason        text,
     CONSTRAINT supplier_bank_account_pkey PRIMARY KEY (id),
     CONSTRAINT supplier_bank_account_supplier_fkey FOREIGN KEY (supplier_id)
-        REFERENCES booking.suppliers (id) ON DELETE CASCADE,
+        REFERENCES booking.suppliers (id) ON DELETE RESTRICT,
     CONSTRAINT supplier_bank_account_status_chk CHECK (
         status IN ('pending', 'approved', 'rejected', 'withdrawn', 'superseded')
         AND (approved_by IS NULL) = (approved_at IS NULL)
@@ -231,8 +235,10 @@ CREATE TABLE IF NOT EXISTS booking.supplier_bank_account (
         AND (closed_at IS NULL OR closed_at >= entered_at))
 );
 
--- ON DELETE CASCADE: a supplier is never deleted by the app (role booking has no DELETE on suppliers); the cascade only
--- follows an owner fixture or erasure delete of the supplier itself.
+-- ON DELETE RESTRICT: the rows are accounting evidence (who entered, who called back and approved where AA sent a
+-- supplier's money), kept 10 years (root DM-7.1 row). A supplier with bank account rows is never deleted by a cascade:
+-- an owner erasure (DRY RUN first) decides on these rows explicitly before the supplier (role booking has no DELETE on
+-- either table).
 CREATE UNIQUE INDEX IF NOT EXISTS supplier_bank_account_pending_uq
     ON booking.supplier_bank_account (supplier_id) WHERE status = 'pending';
 CREATE UNIQUE INDEX IF NOT EXISTS supplier_bank_account_approved_uq
@@ -438,6 +444,16 @@ SELECT r.code, 'supplier_bank.write', 'migration:bk-067'
  WHERE r.code = 'custom_product_ops_accounting'
 ON CONFLICT (role_code, capability) DO NOTHING;
 
+-- supplier_bank.read decrypts a full account number: in the approve class (never a custom role), the code's
+-- app.auth.custom_roles.APPROVE_NAMED and this CHECK in step (unit test test_aa1155_role_editor). No row holds it
+-- (the code before bk-067 did not know the capability), so the CHECK validates at once.
+ALTER TABLE booking.staff_role_capability
+    DROP CONSTRAINT IF EXISTS staff_role_capability_not_approve_chk,
+    ADD CONSTRAINT staff_role_capability_not_approve_chk CHECK (
+        capability !~ '\.approve(_[a-z0-9_]+)?$'
+        AND capability NOT IN ('supplier.activate', 'contract.publish', 'stop_sale.approve', 'payout.write',
+                               'payment.verify', 'billing_config.write', 'staff.admin', 'supplier_bank.read'));
+
 -- ── 7. The choices of the supplier profile, as data an administrator edits ────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS booking.supplier_profile_option (
@@ -581,10 +597,21 @@ BEGIN
                         WHERE role_code = 'custom_product_ops_accounting' AND capability = 'supplier_bank.write') THEN
         RAISE EXCEPTION 'bk-067: the content + operations role lacks supplier_bank.write';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'booking.staff_role_capability'::regclass
+                      AND conname = 'staff_role_capability_not_approve_chk' AND convalidated
+                      AND pg_get_constraintdef(oid) LIKE '%supplier_bank.read%') THEN
+        RAISE EXCEPTION 'bk-067: staff_role_capability_not_approve_chk does not hold supplier_bank.read';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'booking.supplier_bank_account'::regclass
+                  AND conname = 'supplier_bank_account_supplier_fkey' AND confdeltype <> 'r') THEN
+        RAISE EXCEPTION 'bk-067: supplier_bank_account_supplier_fkey must be ON DELETE RESTRICT (accounting evidence)';
+    END IF;
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-067', now(), 'AA-1158 part 2: supplier profile fields and their admin-edited choices (booking.supplier_profile_option), booking.supplier_bank_account (KMS envelope ciphertext, approved by a second person with a call-back, owner self-approval flagged), the payout lock after a bank change (supplier_bank_payout_lock_hours), the contact change window of a call-back (supplier_bank_contact_change_days), supplier_bank.write in the content + operations role, the DB backstop on the billing entity bank text / default flag')
+VALUES ('bk-067', now(), 'AA-1158 part 2: supplier profile fields and their admin-edited choices (booking.supplier_profile_option), booking.supplier_bank_account (KMS envelope ciphertext, approved by a second person with a call-back, owner self-approval flagged), the payout lock after a bank change (supplier_bank_payout_lock_hours), the contact change window of a call-back (supplier_bank_contact_change_days), supplier_bank.write in the content + operations role, supplier_bank.read in the approve class, the DB backstop on the billing entity bank text / default flag')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
