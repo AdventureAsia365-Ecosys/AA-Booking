@@ -112,7 +112,8 @@ async def test_registered_once_and_rerun_is_a_no_op(admin: asyncpg.Connection) -
         await admin.execute(MIGRATION.read_text(encoding="utf-8"))
     finally:
         await admin.execute("RESET ROLE")
-    assert await admin.fetchval("SELECT count(*) AS n FROM booking.pricing_policy WHERE created_by = 'seed:bk-067'") == before
+    seeded = "SELECT count(*) AS n FROM booking.pricing_policy WHERE created_by = 'seed:bk-067'"
+    assert await admin.fetchval(seeded) == before
     assert await admin.fetchval("SELECT count(*) AS n FROM booking.v_schema_versions WHERE version = 'bk-067'") == 1
 
 
@@ -166,8 +167,8 @@ async def test_profile_shapes_and_a_pending_edit_makes_a_writer(app_conn: asyncp
     sid = await _pending_supplier(app_conn, "Profile")
     await app_conn.execute(
         "UPDATE booking.suppliers SET legal_entity = 'Harbourline Lodges Co., Ltd', tax_code = '0312345678',"
-        " role_contacts = '[{\"role\": \"accounts\", \"name\": \"Mai Lantern\"}]'::jsonb,"
-        " payment_terms = '{\"basis\": \"after_service\", \"due_days\": 15}'::jsonb, updated_by = $2"
+        ' role_contacts = \'[{"role": "accounts", "name": "Mai Lantern"}]\'::jsonb,'
+        ' payment_terms = \'{"basis": "after_service", "due_days": 15}\'::jsonb, updated_by = $2'
         " WHERE id = $1::uuid",
         sid,
         CHECKER,
@@ -367,9 +368,8 @@ async def world(admin: asyncpg.Connection) -> dict[str, Any]:
 
 
 async def _approved_bill(conn: asyncpg.Connection, world: dict[str, Any], n: int) -> str:
-    made = await ops.bill(
-        conn, world["supplier"], by=MAKER, amount="100.00", number=f"IT1158B-{n}", lines=((world["bookings"][n], "100"),)
-    )
+    line = ((world["bookings"][n], "100"),)
+    made = await ops.bill(conn, world["supplier"], by=MAKER, amount="100.00", number=f"IT1158B-{n}", lines=line)
     await ops.approve_bill(conn, made["id"], by=CHECKER)
     return made["id"]
 
