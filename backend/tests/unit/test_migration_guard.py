@@ -74,6 +74,8 @@ def test_good_example_passes() -> None:
         (GOOD.replace("COMMIT;", "GRANT SELECT ON booking.t TO tripplanner;\nCOMMIT;"), "consumer-grant"),
         (GOOD.replace("COMMIT;", "GRANT SELECT ON booking.t TO PUBLIC;\nCOMMIT;"), "no-public-grant"),
         (GOOD.replace("COMMIT;", "SELECT * FROM shared.admin_users;\nCOMMIT;"), "foreign-schema"),
+        # AA-1158 (bk-064): the CIS contract view is read only, after FROM / JOIN.
+        (GOOD.replace("COMMIT;", "COMMENT ON VIEW shared.v_staff_booking_grant IS 'x';\nCOMMIT;"), "foreign-schema"),
         (GOOD.replace("COMMIT;", "CREATE ROLE booking LOGIN PASSWORD 'secret';\nCOMMIT;"), "no-password"),
         (GOOD.replace("COMMIT;", "CREATE ROLE booking LOGIN;\nCOMMIT;"), "no-login"),
         (GOOD.replace("COMMIT;", "CREATE ROLE other NOLOGIN;\nCOMMIT;"), "create-role"),
@@ -263,3 +265,14 @@ def test_role_switches_are_refused(statement: str) -> None:
 def test_other_set_config_names_are_fine() -> None:
     name, sql = _numbered(GOOD.replace("COMMIT;", "SELECT set_config('bk014.acl', 'x', true);\nCOMMIT;"), 14)
     assert _rules(sql, name) == set()
+
+
+def test_the_cis_business_owner_view_may_be_read() -> None:
+    """AA-1158 (bk-064): a trigger function reads shared.v_staff_booking_grant (CIS 462 contract view, SELECT only)."""
+    body = (
+        "CREATE OR REPLACE FUNCTION booking.f() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$"
+        " BEGIN PERFORM 1 FROM booking.staff_users s"
+        " JOIN shared.v_staff_booking_grant g ON g.cognito_sub = s.cognito_sub;"
+        " RETURN NEW; END $$;\nCOMMIT;"
+    )
+    assert "foreign-schema" not in _rules(GOOD.replace("COMMIT;", body))

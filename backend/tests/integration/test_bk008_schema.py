@@ -17,6 +17,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MAKER = "it-822-maker"
 CHECKER = "it-822-checker"
+THIRD = "it-822-third"  # bk-064: a publisher who wrote none of the draft
 EXPIRE = (
     "UPDATE booking.supplier_contracts SET status = 'expired', expired_by = $2, expired_at = now() WHERE id = $1::uuid"
 )
@@ -27,9 +28,11 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await conn.execute(
         "INSERT INTO booking.staff_users (cis_user_id, role, active)"
-        " VALUES ($1, 'contracting', true), ($2, 'admin', true) ON CONFLICT (cis_user_id) DO NOTHING",
+        " VALUES ($1, 'contracting', true), ($2, 'admin', true), ($3, 'admin', true)"
+        " ON CONFLICT (cis_user_id) DO NOTHING",
         MAKER,
         CHECKER,
+        THIRD,
     )
     await conn.execute("DELETE FROM booking.supplier_contracts")
     await conn.execute("DELETE FROM booking.suppliers")
@@ -129,15 +132,16 @@ async def test_maker_cannot_publish(app_conn: asyncpg.Connection) -> None:
     with pytest.raises(asyncpg.CheckViolationError) as exc:
         await app_conn.execute(publish, cid, MAKER)
     assert exc.value.constraint_name == "supplier_contracts_maker_checker_chk"
-    # The last editor is the maker now: they cannot publish, the original creator (who checks the edit) can.
+    # bk-064 (AA-1158 R4): every writer of the draft is a maker; an editor joins the creator, neither publishes.
     await app_conn.execute(
         "UPDATE booking.supplier_contracts SET payment_terms = '30 days', updated_by = $2 WHERE id = $1::uuid",
         cid,
         CHECKER,
     )
-    with pytest.raises(asyncpg.CheckViolationError):
-        await app_conn.execute(publish, cid, CHECKER)
-    await app_conn.execute(publish, cid, MAKER)
+    for writer in (CHECKER, MAKER):
+        with pytest.raises(asyncpg.CheckViolationError):
+            await app_conn.execute(publish, cid, writer)
+    await app_conn.execute(publish, cid, THIRD)
     assert (
         await app_conn.fetchval("SELECT status FROM booking.supplier_contracts WHERE id = $1::uuid", cid) == "published"
     )

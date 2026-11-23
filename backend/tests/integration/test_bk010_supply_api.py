@@ -232,7 +232,7 @@ async def test_rates_default_the_item_net_and_price_the_version(
         await c.post(
             f"/suppliers/{sup['id']}/contracts",
             json={"title": "2027 rates", "valid_from": "2027-01-01", "valid_to": "2027-12-31", "currency": "VND"},
-            headers=checker,
+            headers=maker,
         ),
         201,
     )
@@ -278,7 +278,7 @@ async def test_rates_default_the_item_net_and_price_the_version(
     edited = await _ok(await c.patch(f"/rates/{small['id']}", json={"net_amount": "320000.00"}, headers=maker))
     assert edited["changed"] == ["net_amount"] and edited["net_amount"] == "320000.00"
 
-    # The rates made MAKER the contract's maker, though CHECKER created it: CHECKER publishes, MAKER cannot.
+    # MAKER wrote the contract and its rates (bk-064 writers): CHECKER publishes, MAKER cannot.
     mine = await c.patch(f"/contracts/{contract['id']}", json={"status": "published"}, headers=maker)
     assert mine.status_code == 403 and mine.json()["detail"] == "maker_checker"
     await _ok(await c.patch(f"/contracts/{contract['id']}", json={"status": "published"}, headers=checker))
