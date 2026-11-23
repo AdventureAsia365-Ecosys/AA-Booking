@@ -13,6 +13,9 @@
 // - The only request header passed on besides the token is `Idempotency-Key` (AA-682 S3: invoices and payments), checked
 //   to 8-200 printable ASCII characters.
 // - Path segments are re-encoded and `.` / `..` are refused, so a request can never leave /booking/.
+// - AA-1157: inside the owner's read-only "view as a lower role" (httpOnly cookie bk_view_as, lib/viewAs.ts) every
+//   write is refused here (403 view_as_read_only) and every read carries the view header; a 409 view_as_ended from
+//   the API clears the cookie. The view's start / end go through app/api/view-as/route.ts only.
 
 import { NextRequest, NextResponse } from "next/server";
 import { bookingApiUrl, UPSTREAM_TIMEOUT_MS } from "@/lib/config";
@@ -25,6 +28,8 @@ import {
   type StaffTokens,
 } from "@/lib/cognito";
 import { isSameOrigin } from "@/lib/sameOrigin";
+import { VIEW_AS_COOKIE, isViewEnded, proxyRefusal, viewAsHeaders } from "@/lib/viewAs";
+import { clearViewAsCookie } from "@/lib/viewAsCookie";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +64,9 @@ async function handler(req: NextRequest, { params }: Ctx) {
   if (req.method !== "GET" && req.method !== "HEAD") {
     if (!isSameOrigin(req)) return json(403, "bad_origin", "Cross-site request refused.");
   }
+  const viewCookie = req.cookies.get(VIEW_AS_COOKIE)?.value;
+  const viewRefused = proxyRefusal(req.method, path.join("/"), viewCookie);
+  if (viewRefused) return json(403, viewRefused, "View-as is read-only: go back to change anything.");
 
   const rt = readRefreshCookie(req);
   if (!rt) return endSession(401, "not_signed_in", "Your session has ended. Sign in again.");
@@ -103,6 +111,7 @@ async function handler(req: NextRequest, { params }: Ctx) {
         Accept: "application/json",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(forwardKey ? { "Idempotency-Key": forwardKey } : {}),
+        ...viewAsHeaders(viewCookie),
       },
       body,
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
@@ -126,13 +135,21 @@ async function handler(req: NextRequest, { params }: Ctx) {
     const v = upstream.headers.get(h);
     if (v) headers.set(h, v);
   }
-  const out = new NextResponse(upstream.status === 204 ? null : await upstream.arrayBuffer(), {
-    status: upstream.status,
-    headers,
-  });
+  const payload = upstream.status === 204 ? null : await upstream.arrayBuffer();
+  const out = new NextResponse(payload, { status: upstream.status, headers });
+  if (upstream.status === 409 && viewCookie && payload && endsView(payload)) clearViewAsCookie(out);
   const cognito = rotated as StaffTokens | null;
   if (cognito) setStaffSessionCookies(out, cognito, rt.sessionEnd, rt.refreshToken);
   return out;
+}
+
+/** AA-1157: is this 409 body the API's end of the view? */
+function endsView(payload: ArrayBuffer): boolean {
+  try {
+    return isViewEnded(409, JSON.parse(new TextDecoder().decode(payload)));
+  } catch {
+    return false;
+  }
 }
 
 export const GET = handler;

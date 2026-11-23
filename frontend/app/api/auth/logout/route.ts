@@ -5,11 +5,33 @@
 //   session and returns to <origin>/login (a registered logout URL). The browser navigates there (ui/signOut.ts).
 // - Legacy CIS password session: the CIS session itself is not revoked (CIS has no revoke endpoint); it simply stops
 //   being held here.
+// - AA-1157: an open "view as a lower role" is ended first (Booking POST /booking/view-as/end-all, before the revoke
+//   invalidates the access token) and its cookie is cleared.
 
 import { NextRequest, NextResponse } from "next/server";
 import { allowedOriginForRequest, cognitoLogoutUrl, readRefreshCookie, revokeRefreshToken } from "@/lib/cognito";
 import { ACCESS_COOKIE, clearSessionCookies, isCognitoAccess } from "@/lib/session";
 import { isSameOrigin } from "@/lib/sameOrigin";
+import { bookingApiUrl } from "@/lib/config";
+import { VIEW_AS_COOKIE, viewAsRef } from "@/lib/viewAs";
+import { clearViewAsCookie } from "@/lib/viewAsCookie";
+
+const VIEW_AS_END_TIMEOUT_MS = 4000;
+
+/** AA-1157: end the member's open views (one end row each) before the refresh token is revoked. Best effort. */
+async function endViews(access: string | undefined): Promise<void> {
+  if (!access) return;
+  try {
+    await fetch(`${bookingApiUrl()}/booking/view-as/end-all`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(VIEW_AS_END_TIMEOUT_MS),
+      cache: "no-store",
+    });
+  } catch {
+    console.warn("[auth] logout: ending the open view-as sessions failed");
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +42,10 @@ export async function POST(req: NextRequest) {
   }
   const rt = readRefreshCookie(req);
   const cognito = rt !== null || isCognitoAccess(req.cookies.get(ACCESS_COOKIE)?.value);
+  if (viewAsRef(req.cookies.get(VIEW_AS_COOKIE)?.value)) await endViews(req.cookies.get(ACCESS_COOKIE)?.value);
   if (rt) await revokeRefreshToken(rt.refreshToken);
   const origin = cognito ? allowedOriginForRequest(req) : null;
   const response = NextResponse.json({ ok: true, logoutUrl: origin ? cognitoLogoutUrl(origin) : null });
   clearSessionCookies(response);
-  return response;
+  return clearViewAsCookie(response);
 }

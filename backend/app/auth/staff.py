@@ -71,6 +71,12 @@ from that role's capabilities (:attr:`Staff.custom_permissions`), never the appr
 or archived role is 403 ``no_booking_role``; an unreadable view or table 403 ``custom_role_unavailable`` (fail closed
 for custom holders only: built-in holders never read either).
 
+**View as a lower role (AA-1157, root ADR 0019 d5 as amended; :mod:`app.auth.view_as`).** A WORKFORCE request carrying
+the header ``x-booking-view-as`` (the owner's opaque view-as session id, forwarded by the staff BFF) is refused 403
+``view_as_read_only`` for every method other than GET / HEAD / OPTIONS, before anything is read or written. A read
+runs as the target role once the session checks out (permissions = target ∩ viewer, ``view_as`` set; the owner markers
+read False); a dead session answers 409 ``view_as_ended``. The header on a BRIDGE token is 403.
+
 Permissions are a role matrix in code (same pattern as CIS ``frontend/lib/rbac.ts``, ERD v2 README
 question 5). The matrix is provisional until the PRD role matrix is confirmed.
 """
@@ -90,7 +96,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit
-from app.auth import admin_mfa, custom_roles, e2e_staff, identity_config
+from app.auth import admin_mfa, custom_roles, e2e_staff, identity_config, view_as
 from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
@@ -311,6 +317,10 @@ class Staff:
     # non-approve capabilities) and its role's label. None for a built-in role: the matrix answers.
     custom_permissions: frozenset[str] | None = None
     role_label: str | None = None
+    # Session field, not a column (AA-1157): the owner's open read-only "view as a lower role" session
+    # (app.auth.view_as.ViewAs). role / custom_permissions are then the target's (target ∩ viewer); every write is
+    # refused before the route.
+    view_as: Any = None
 
     @classmethod
     def from_row(cls, row: Any) -> Staff:
@@ -641,6 +651,11 @@ async def current_staff(
             # AA-910: the E2E admin's codes are readable by CI roles; it may read every page but never write.
             log.info("booking_e2e_write_refused method=%s path=%s", request.method, request.url.path)
             raise HTTPException(status_code=403, detail="e2e_read_only")
+        view_ref = request.headers.get(view_as.HEADER)
+        if view_ref is not None and request.method.upper() not in PREVIEW_METHODS:
+            # AA-1157: a view-as session never writes, whatever the route. Refused before any DB access.
+            log.info("booking_view_as_write_refused method=%s path=%s", request.method, request.url.path)
+            raise HTTPException(status_code=403, detail=view_as.READ_ONLY)
         writer = e2e_staff.writer_for(principal.email)
         route_obj = request.scope.get("route")
         route = getattr(route_obj, "path", None)
@@ -672,7 +687,12 @@ async def current_staff(
         async with pool.acquire() as conn, conn.transaction():
             staff = await sync_cognito_staff(conn, principal, role)
         staff = _session(staff, custom=custom, preview=preview, writer=writer, method=request.method, route=route)
+        if view_ref is not None and staff.active:
+            staff = await view_as.apply(pool, request.app, staff, principal.sub, view_ref)
+        custom_roles.VIEWING.set(staff.view_as is not None)
     elif kind == identity_config.BRIDGE:
+        if request.headers.get(view_as.HEADER) is not None:
+            raise HTTPException(status_code=403, detail=view_as.READ_ONLY)
         claims = _bridge_claims(principal, token)
         role = ROLE_FROM_CIS.get(claims.cis_role)
         if role is None:

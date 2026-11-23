@@ -42,11 +42,15 @@ async def me(staff: Me) -> dict[str, Any]:
     # preview_viewer (AA-911 D-1): this session came from the Preview-only client and is read-only.
     # role_label (AA-1155 T5): the custom role's label for a booking-custom holder (null for a built-in role, which the
     # staff admin names itself); the pages follow ``permissions``, never the role name (root spec R4.5).
+    # view_as / read_only (AA-1157): the owner's read-only view as a lower role (role, label and permissions are then
+    # the target's); read_only is true in a view and in a Preview session.
     return {
         **staff.public(),
         "permissions": staff.permissions,
         "preview_viewer": staff.preview,
         "role_label": staff.role_label,
+        "view_as": staff.view_as.public() if staff.view_as is not None else None,
+        "read_only": staff.preview or staff.view_as is not None,
     }
 
 

@@ -49,6 +49,18 @@ export interface StaffMe extends StaffProfile {
   permissions: string[];
   /** AA-911 D-1: this session came from the Preview-only client and is read-only (permissions already capped). */
   preview_viewer?: boolean;
+  /** AA-1157: the owner's read-only "view as a lower role" (role and permissions are the view's), else null. */
+  view_as?: StaffViewAs | null;
+  /** AA-1157: every write is refused (a view, or a Preview session). */
+  read_only?: boolean;
+}
+
+export interface StaffViewAs {
+  session_id: string;
+  target_role: string;
+  target_label: string;
+  viewer_role: string;
+  expires_at: IsoDateTime;
 }
 
 export interface StaffDirectoryEntry {

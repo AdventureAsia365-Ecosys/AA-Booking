@@ -33,6 +33,7 @@ import { cloneOf, groupCapabilities, sameSet, suggestCode, toggle } from "@/ui/b
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./RolesView.messages";
+import { ViewAsStart } from "./ViewAsStart";
 
 function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : "Something went wrong";
@@ -65,6 +66,7 @@ function RolesBody() {
   const canEdit = data?.can_edit === true;
   return (
     <>
+      {data?.can_view_as ? <ViewAsStart data={data} /> : null}
       <CustomRolesSection
         roles={data?.custom ?? []}
         canEdit={canEdit}

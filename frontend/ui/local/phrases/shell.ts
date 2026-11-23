@@ -55,4 +55,5 @@ import "@/ui/local/BottomNav.messages";
 import "@/ui/local/CommandPalette.messages";
 import "@/ui/local/Sidebar.messages";
 import "@/ui/local/Topbar.messages";
+import "@/ui/local/ViewAsBanner.messages";
 import "@/ui/local/nav.messages";
