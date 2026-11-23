@@ -131,6 +131,31 @@ DELETE FROM booking.cancellation_policies WHERE id = '{S278_SEED_CANCELLATION}';
 """  # noqa: S608 — constant ids
 
 
+# bk-062's post-check counts exactly the 24 capabilities it seeds on the content + operations role; a later file that
+# adds one (bk-067: supplier_bank.write, AA-1158 Q10) would make a re-run of bk-062 raise. DB Migrate never re-runs a
+# registered file, so only the re-runs here take those later rows out around bk-062 and put them back right after.
+LATER_062_CAPS_OUT = """
+DELETE FROM booking.staff_role_capability
+ WHERE role_code = 'custom_product_ops_accounting' AND created_by <> 'migration:bk-062'
+   AND created_by LIKE 'migration:bk-%'
+RETURNING role_code, capability, created_by
+"""
+LATER_062_CAPS_IN = (
+    "INSERT INTO booking.staff_role_capability (role_code, capability, created_by) VALUES ($1, $2, $3)"
+    " ON CONFLICT (role_code, capability) DO NOTHING"
+)
+
+
+async def run_062_keeping_later_caps(conn: asyncpg.Connection, sql: str) -> None:
+    """Run the bk-062 text with the capabilities later files added to its seed role taken out, then put back."""
+    later = []
+    if await conn.fetchval("SELECT to_regclass('booking.staff_role_capability') IS NOT NULL AS ok"):
+        later = await conn.fetch(LATER_062_CAPS_OUT)
+    await conn.execute(sql)
+    for row in later:
+        await conn.execute(LATER_062_CAPS_IN, row["role_code"], row["capability"], row["created_by"])
+
+
 async def apply_migrations(
     conn: asyncpg.Connection,
     *,
@@ -159,7 +184,10 @@ async def apply_migrations(
         if role != login:
             await conn.execute(f'SET ROLE "{role}"')
         try:
-            await conn.execute(path.read_text(encoding="utf-8"))
+            if path.name.startswith("062_"):
+                await run_062_keeping_later_caps(conn, path.read_text(encoding="utf-8"))
+            else:
+                await conn.execute(path.read_text(encoding="utf-8"))
             if path.name.startswith("051_") and not keep_s278_seed:
                 await conn.execute(S278_SEED_UNDO)
         finally:
