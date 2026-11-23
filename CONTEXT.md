@@ -1575,7 +1575,7 @@ two-way round trip (facts and room-type sheets, export).
   unknown age by the band reaching the oldest age; exact board first). Basis: `sharing` while the rooms' free places
   (`max_occupancy` less the occupancy) hold the child, `extra_bed` beyond them (the oldest first), the other basis
   only when the DMC gives none on it. None found = no extra, `price_note.child_room` says so (with `extra_bed`, the
-  children counted on an extra bed).
+  children counted on an extra bed; `app/b2b/hotel_children.py`).
 - **The booking goes to the DMC of the price used**: a quote part stores its rate's supplier; Generate takes a version
   item's supplier from its first cost row's rate, else the B2B quote line's first rate, else the hotel's / service's.
   `supplier_bookings.hotel_confirmation_ref`: the hotel's own number the DMC passes on (confirm body or PATCH, while

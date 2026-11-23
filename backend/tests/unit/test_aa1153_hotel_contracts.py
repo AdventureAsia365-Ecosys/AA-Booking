@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.b2b import components, quotes
+from app.b2b import components, hotel_children, quotes
 from app.b2b.errors import B2BError
 from app.errors import Invalid
 from app.pricing import policy_guides, policy_params, policy_params_hotels
@@ -156,11 +156,11 @@ def test_child_policy_takes_the_board_first_then_any_board() -> None:
         {"meal_plan": None, "age_min": 6, "age_max": 11, "net_amount": "10"},
         {"meal_plan": "HB", "age_min": 6, "age_max": 11, "net_amount": "15"},
     ]
-    assert components.child_policy(rows, 7, "HB")["net_amount"] == "15"
-    assert components.child_policy(rows, 7, "BB")["net_amount"] == "10"
-    assert components.child_policy(rows, 3, "HB")["net_amount"] == "0"  # no HB band for 3: any board
-    assert components.child_policy(rows, None, None)["age_max"] == 11  # unknown age: the oldest band
-    assert components.child_policy(rows, 14, "HB") is None
+    assert hotel_children.child_policy(rows, 7, "HB")["net_amount"] == "15"
+    assert hotel_children.child_policy(rows, 7, "BB")["net_amount"] == "10"
+    assert hotel_children.child_policy(rows, 3, "HB")["net_amount"] == "0"  # no HB band for 3: any board
+    assert hotel_children.child_policy(rows, None, None)["age_max"] == 11  # unknown age: the oldest band
+    assert hotel_children.child_policy(rows, 14, "HB") is None
 
 
 def _room_conn(board: str, *, policy: list[dict[str, Any]], meal_service: bool = False) -> ScriptedConn:
@@ -312,18 +312,18 @@ def test_child_policy_takes_the_basis_first_then_the_other_basis() -> None:
         {"meal_plan": None, "basis": "extra_bed", "age_min": 6, "age_max": 11, "net_amount": "25"},
         {"meal_plan": None, "basis": "extra_bed", "age_min": 12, "age_max": 17, "net_amount": "30"},
     ]
-    assert components.child_policy(rows, 7, None, "sharing")["net_amount"] == "10"
-    assert components.child_policy(rows, 7, "HB", "extra_bed")["net_amount"] == "25"
-    assert components.child_policy(rows, 14, None, "sharing")["net_amount"] == "30"  # no sharing band: extra bed
-    assert components.child_policy(rows, None, None, "extra_bed")["age_max"] == 17
+    assert hotel_children.child_policy(rows, 7, None, "sharing")["net_amount"] == "10"
+    assert hotel_children.child_policy(rows, 7, "HB", "extra_bed")["net_amount"] == "25"
+    assert hotel_children.child_policy(rows, 14, None, "sharing")["net_amount"] == "30"  # no sharing band: extra bed
+    assert hotel_children.child_policy(rows, None, None, "extra_bed")["age_max"] == 17
 
 
 def test_children_share_the_free_places_and_the_oldest_take_extra_beds() -> None:
-    assert components.child_bases(0, [(2, 1)], 3) == ()
-    assert components.child_bases(2, [(2, 1)], 3) == ("extra_bed", "sharing")
-    assert components.child_bases(2, [(2, 2)], 3) == ("sharing", "sharing")
-    assert components.child_bases(1, [(2, 1)], 2) == ("extra_bed",)
-    assert components.child_bases(2, [(2, 1)], None) == ("sharing", "sharing")  # no maximum known
+    assert hotel_children.child_bases(0, [(2, 1)], 3) == ()
+    assert hotel_children.child_bases(2, [(2, 1)], 3) == ("extra_bed", "sharing")
+    assert hotel_children.child_bases(2, [(2, 2)], 3) == ("sharing", "sharing")
+    assert hotel_children.child_bases(1, [(2, 1)], 2) == ("extra_bed",)
+    assert hotel_children.child_bases(2, [(2, 1)], None) == ("sharing", "sharing")  # no maximum known
 
 
 def _two_dmc_conn(*, pinned_has_rate: bool = True) -> ScriptedConn:

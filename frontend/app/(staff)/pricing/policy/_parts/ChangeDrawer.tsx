@@ -47,6 +47,34 @@ function localProblem(t: T, p: PolicyParam, value: ParamValue | null, other: Par
   return null;
 }
 
+/** The value field: a yes / no picker, a picker of the parameter's choices (type code, AA-1153), or text. */
+function ValueInput({ param, text, setText }: { param: PolicyParam; text: string; setText: (v: string) => void }) {
+  const t = useT(M);
+  if (param.type === "boolean") {
+    return (
+      <Select
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        options={[
+          { value: "true", label: t("yes") },
+          { value: "false", label: t("no") },
+        ]}
+      />
+    );
+  }
+  if (param.type === "code") {
+    return (
+      <Select
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        options={param.choices.map((c) => ({ value: c, label: c }))}
+        data-testid="policy-value"
+      />
+    );
+  }
+  return <Input value={text} onChange={(e) => setText(e.target.value)} data-testid="policy-value" />;
+}
+
 function ScheduledNotes({ param, day }: { param: PolicyParam; day: string }) {
   const t = useT(M);
   const show = useShow();
@@ -121,25 +149,7 @@ export function ChangeDrawer({ param, items, onClose }: { param: PolicyParam; it
         </p>
         <ScheduledNotes param={param} day={effective} />
         <Field label={t("fieldValue")} required hint={valueHint(t, param, cross)}>
-          {param.type === "boolean" ? (
-            <Select
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              options={[
-                { value: "true", label: t("yes") },
-                { value: "false", label: t("no") },
-              ]}
-            />
-          ) : param.type === "code" ? (
-            <Select
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              options={param.choices.map((c) => ({ value: c, label: c }))}
-              data-testid="policy-value"
-            />
-          ) : (
-            <Input value={text} onChange={(e) => setText(e.target.value)} data-testid="policy-value" />
-          )}
+          <ValueInput param={param} text={text} setText={setText} />
         </Field>
         <Field label={t("fieldEffective")} required hint={t("fieldEffectiveHint") as string}>
           <DateField value={effective} onChange={changeDay} min={todayUtc()} />
