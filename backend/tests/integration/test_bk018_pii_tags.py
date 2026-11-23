@@ -163,6 +163,8 @@ ALLOWLIST: dict[str, str] = {
     "services.title), no customer data",
     "staff_role.label": "a custom staff role name (bk-062, e.g. Product, ops & accounting), no person",
     "v_staff_role_capability.label": "a custom staff role name (bk-062 contract view of staff_role.label), no person",
+    "supplier_profile_option.label_en": "the English name of a supplier profile choice (bk-067, e.g. Bank transfer)",
+    "supplier_profile_option.label_vi": "the Vietnamese name of a supplier profile choice (bk-067), no person",
 }
 
 COMMENTS_SQL = """
