@@ -2360,12 +2360,15 @@ NULL pair when they differ, the rate ids); the parts of a confirmed hold's quote
 with the partial unique index `supplier_bookings_part_live_uq` (one live booking per part). The old
 `supplier_bookings_item_live_uq` stays as it is (the running code's `ON CONFLICT` infers it). `supplier_bookings_guard`
 = the bk-045 body plus: a part of the case's own confirmed hold quote, on a line without a departure, never linked to a
-hold line. `v_trip_case_supply_state` (same columns) also counts the parts of confirmed hold lines without a departure
+hold line, whose hold line is `confirmed` and that no waiver closed (the set the supply view counts; a backstop behind
+the app's checks). `v_trip_case_supply_state` (same columns) also counts the parts of confirmed hold lines without a departure
 that no waiver closed (behaviour change for a new `tp:` case: `pre_departure` needs every part confirmed or waived).
 New `trip_case_part_waivers` (append-only; reason 20..500, `pii:free_text`), `trip_plans.no_hotel_nights`
-(`smallint[]`), `trip_plan_operable_overrides` (the admin sale exception: N1 / N3-supplier findings only, reason
-20..500, at most 90 days as a backstop, the expiry computed in SQL from the transaction clock so a 90-day choice
-passes the CHECK, one unrevoked per tour, revoked once; guard; `booking` updates the revoke
+(`smallint[]`) with `no_hotel_nights_reason` (why the nights were last set, 20..500, `pii:free_text`, NULL until first
+set; contracting staff lift rule N1 this way, so every change has a reason), `trip_plan_operable_overrides` (the admin
+sale exception: N1 / N3-supplier findings only, reason 20..500, at most 90 days as a backstop, the expiry computed in
+SQL from the transaction clock so a 90-day choice passes the CHECK, one unrevoked per tour, revoked once; guard;
+`booking` updates the revoke
 columns only), `b2b_quote_lines.operable_override_id`, and the trigger `b2b_holds_sale_exception_checks` (a hold
 confirmed with a covered line adds one open custom trip check per exception). Version 1 of the pricing policy
 parameters `operable_exception_default_days` = 14 and `operable_exception_max_days` = 30 (section operations, approver

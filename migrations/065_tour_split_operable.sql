@@ -26,7 +26,9 @@
 --      WHERE ... infers it during the MIG-4 window; changing its predicate would break it).
 --   3. booking.supplier_bookings_guard(): the bk-045 body plus: an INSERT naming a part needs the part to belong to
 --      the confirmed hold quote of the booking's own trip case, on a line without a departure, and no hold line link;
---      quote_part_id never changes; quantity is a fact (fixed once requested / confirmed, like nights and pax).
+--      the part's hold line must be confirmed (not on request, declined or cancelled) and no waiver may close the part
+--      (the same set the supply view counts; defence in depth behind the app's checks); quote_part_id never changes;
+--      quantity is a fact (fixed once requested / confirmed, like nights and pax).
 --   4. booking.v_trip_case_supply_state REPLACED (same columns): items_to_book also counts the parts of the case's
 --      confirmed hold whose hold line is confirmed (an on-request line counts once the desk accepted it), whose quote
 --      line has no departure (a departure's costs are booked once per departure) and which no waiver closed; a part
@@ -38,6 +40,9 @@
 --      text). One per part. The view counts a waived part as not to book.
 --   6. booking.trip_plans.no_hotel_nights smallint[] (default '{}'): the nights of a tour that need no hotel (night
 --      train, a cruise not modelled as a room type). Tour data for rule N1 of the can-operate check, not an exception.
+--      booking.trip_plans.no_hotel_nights_reason text: why the nights were last set (staff text, 20..500 characters,
+--      pii:free_text; NULL until first set; '[redacted]' on erasure). Contracting staff (trip_plan.write) may lift N1
+--      this way for good, so every change carries a reason (and an audit row, written by the app).
 --   7. booking.trip_plan_operable_overrides: the admin sale exception of a tour. It covers exact findings of rules N1
 --      (a night without a hotel) and N3 (a supplier not active) only: a missing rate (N2) or an inactive room type,
 --      hotel or service is refused by the quote whatever an exception says. Reason 20..500 characters
@@ -61,7 +66,8 @@
 -- bk-065. The running code never names a part, an override or no_hotel_nights, so nothing it writes or reads changes:
 -- no part exists until the code PR quotes, and every new column is nullable or defaulted.
 -- DM-6.1: parts and overrides hold no personal data (ids, dates, quantities, conf:commercial nets and rate ids);
--- override reason / revoke_reason and waiver reason are staff free text (pii:free_text by rule).
+-- override reason / revoke_reason, waiver reason and trip_plans.no_hotel_nights_reason are staff free text
+-- (pii:free_text by rule).
 -- DM-7.1: b2b_quote_line_parts, trip_case_part_waivers and trip_plan_operable_overrides have their rows in the root
 -- data standards (root PR merged before the Infra copy).
 -- Locks: ACCESS EXCLUSIVE, briefly, on supplier_bookings (tens of rows), b2b_quote_lines (~160 rows), trip_plans (~900
@@ -73,7 +79,8 @@
 -- registration, the seed ids (…b65000…) and the tests that name it (git grep '065_' and 'bk-065').
 -- Undo (a later bk- file, after the code is reverted): DROP the b2b_holds_sale_exception_checks trigger and function;
 -- put back the bk-045 guard body and the bk-026 view; DROP the new columns (supplier_bookings.quote_part_id /
--- quantity, b2b_quote_lines.operable_override_id, trip_plans.no_hotel_nights) with their CHECKs and indexes; DROP the
+-- quantity, b2b_quote_lines.operable_override_id, trip_plans.no_hotel_nights / no_hotel_nights_reason) with their
+-- CHECKs and indexes; DROP the
 -- three new tables (destructive: DRY RUN); DELETE the seed:bk-065 policy events, then the versions.
 
 BEGIN;
@@ -237,6 +244,23 @@ BEGIN
                 RAISE EXCEPTION 'tour component % is not a part of the confirmed booking of trip case % (or it is linked'
                     ' to a hold line)', NEW.quote_part_id, NEW.trip_case_id USING ERRCODE = 'check_violation';
             END IF;
+            -- The supply view's set: the part's hold line is confirmed (an on-request line once the desk accepted it;
+            -- never a declined or cancelled one) and no waiver closed the part.
+            IF NOT EXISTS (
+                SELECT 1
+                  FROM booking.b2b_quote_line_parts qp
+                  JOIN booking.b2b_holds h ON h.quote_id = qp.quote_id
+                  JOIN booking.b2b_hold_lines l ON l.hold_id = h.id AND l.line_no = qp.line_no
+                 WHERE qp.id = NEW.quote_part_id AND h.trip_case_id = NEW.trip_case_id AND h.status = 'confirmed'
+                   AND l.status = 'confirmed'
+            ) THEN
+                RAISE EXCEPTION 'tour component %: its agency line is not confirmed (on request, declined or cancelled):'
+                    ' nothing is booked for it', NEW.quote_part_id USING ERRCODE = 'check_violation';
+            END IF;
+            IF EXISTS (SELECT 1 FROM booking.trip_case_part_waivers w WHERE w.quote_part_id = NEW.quote_part_id) THEN
+                RAISE EXCEPTION 'tour component % is closed as needing no booking (waiver): nothing is booked for it',
+                    NEW.quote_part_id USING ERRCODE = 'check_violation';
+            END IF;
         END IF;
         IF NEW.b2b_hold_id IS NOT NULL THEN
             IF v_channel IS DISTINCT FROM 'b2b' OR NOT EXISTS (
@@ -316,7 +340,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.supplier_bookings_guard() IS
-    'bk-026 (AA-682) + bk-045 (AA-1074) + bk-065 (AA-1149): a supplier booking starts pending, belongs to an item of the approved version of its case, to a part of its case''s confirmed hold quote (no departure line, no hold line link) or to a departure that is not cancelled, names the hold of its own B2B case only; case / departure / item / part / line / code never change; supplier and service facts (quantity included) change only while pending / requested; the FX snapshot changes only on a re-request; an order line joins a draft order of its supplier and currency while pending and leaves only a draft or cancelled order; the voucher is an active supplier_voucher file of this booking and never on a B2B case.';
+    'bk-026 (AA-682) + bk-045 (AA-1074) + bk-065 (AA-1149): a supplier booking starts pending, belongs to an item of the approved version of its case, to a part of its case''s confirmed hold quote (no departure line, no hold line link, the part''s hold line confirmed, no waiver) or to a departure that is not cancelled, names the hold of its own B2B case only; case / departure / item / part / line / code never change; supplier and service facts (quantity included) change only while pending / requested; the FX snapshot changes only on a re-request; an order line joins a draft order of its supplier and currency while pending and leaves only a draft or cancelled order; the voucher is an active supplier_voucher file of this booking and never on a B2B case.';
 
 GRANT EXECUTE ON FUNCTION booking.supplier_bookings_guard() TO booking;
 
@@ -459,6 +483,16 @@ ALTER TABLE booking.trip_plans ADD CONSTRAINT trip_plans_no_hotel_nights_chk CHE
 COMMENT ON COLUMN booking.trip_plans.no_hotel_nights IS
     'bk-065 (AA-1149 B13): the nights of the tour that need no hotel (night n = between day n and day n + 1: a night '
     'train, a cruise not modelled as a room type); rule N1 of the can-operate check skips them.';
+
+ALTER TABLE booking.trip_plans ADD COLUMN IF NOT EXISTS no_hotel_nights_reason text;
+ALTER TABLE booking.trip_plans DROP CONSTRAINT IF EXISTS trip_plans_no_hotel_nights_reason_chk;
+ALTER TABLE booking.trip_plans ADD CONSTRAINT trip_plans_no_hotel_nights_reason_chk CHECK (
+    no_hotel_nights_reason IS NULL OR no_hotel_nights_reason = '[redacted]'
+    OR char_length(btrim(no_hotel_nights_reason)) BETWEEN 20 AND 500);
+
+COMMENT ON COLUMN booking.trip_plans.no_hotel_nights_reason IS
+    'pii:free_text — bk-065 (AA-1149 B13): why no_hotel_nights was last set (staff text, 20..500 characters; NULL '
+    'until first set). Contracting staff lift rule N1 this way, so every change has a reason and an audit row.';
 
 -- ── 7. The admin sale exception ──────────────────────────────────────────────────────────────────────────────
 
@@ -673,7 +707,7 @@ END
 $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-065', now(), 'AA-1149 tour split and can operate: b2b_quote_line_parts (sold snapshot), supplier_bookings.quote_part_id + quantity (one live per part), guard and supply view replaced, trip_case_part_waivers, trip_plans.no_hotel_nights, trip_plan_operable_overrides (sale exception), b2b_quote_lines.operable_override_id, exception trip check at confirm, policy operable_exception_default_days / max_days')
+VALUES ('bk-065', now(), 'AA-1149 tour split and can operate: b2b_quote_line_parts (sold snapshot), supplier_bookings.quote_part_id + quantity (one live per part), guard and supply view replaced, trip_case_part_waivers, trip_plans.no_hotel_nights + reason, trip_plan_operable_overrides (sale exception), b2b_quote_lines.operable_override_id, exception trip check at confirm, policy operable_exception_default_days / max_days')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

@@ -3,13 +3,14 @@ no-op, the policy seed, grants, and the database rules of the tour split and the
 
 - quote parts: CHECKs (one target, the room mix only on a room part, the net pair), append-only for role booking;
 - supplier bookings of a part: only a part of the case's own confirmed hold quote (no departure line, no hold line
-  link), one live booking per part, never with a version item, the part never changes, the quantity is a fact;
+  link) whose hold line is confirmed and that no waiver closed, one live booking per part, never with a version item,
+  the part never changes, the quantity is a fact;
 - the supply view counts the parts of confirmed hold lines without a departure, an on-request line only once the desk
   accepted it, a waived part not at all, and a part is booked when a confirmed booking names it;
 - waivers: never while a live booking names the part, 20..500 characters, final (except redaction);
 - sale exceptions: N1 / N3 findings only, one unrevoked per tour, at most 90 days, revoked once and final, redactable;
   a hold confirmed with a line covered by an exception adds one custom trip check to the new case;
-- trip_plans.no_hotel_nights range.
+- trip_plans.no_hotel_nights range and the reason's length.
 
 The supply graph is written in SQL the way the services write it (a quote with a tp: line and its parts, a hold
 confirmed into a B2B case). All names are invented."""
@@ -395,12 +396,17 @@ async def test_supply_state_counts_the_parts(admin: asyncpg.Connection, app_conn
         STAFF,
     )
     assert await _state(app_conn, sold["case"]) == (1, 1, "booked")
+    # The database refuses a booking of a waived part (the app checks first; this is the backstop).
+    with pytest.raises(asyncpg.CheckViolationError, match="closed as needing no booking"):
+        await _book(app_conn, sold["case"], sold["parts"]["service"], sup)
 
 
 async def test_an_on_request_line_counts_once_accepted(admin: asyncpg.Connection, app_conn: asyncpg.Connection) -> None:
     sup = await ops.supply(admin, "OnReq")
     sold = await _sold(admin, sup, tag="orq", held_as="on_request")
     assert await _state(app_conn, sold["case"]) == (0, 0, "none")
+    with pytest.raises(asyncpg.CheckViolationError, match="agency line is not confirmed"):
+        await _book(app_conn, sold["case"], sold["parts"]["room"], sup)
     with pytest.raises(asyncpg.CheckViolationError):  # nothing to book until the desk accepts the line
         await app_conn.execute(
             "INSERT INTO booking.trip_case_part_waivers (trip_case_id, quote_part_id, reason, created_by)"
@@ -413,6 +419,21 @@ async def test_an_on_request_line_counts_once_accepted(admin: asyncpg.Connection
         sold["hold"],
     )
     assert await _state(app_conn, sold["case"]) == (2, 0, "confirming")
+    assert await _book(app_conn, sold["case"], sold["parts"]["room"], sup)
+
+
+async def test_a_part_of_a_declined_line_is_not_bookable(
+    admin: asyncpg.Connection, app_conn: asyncpg.Connection
+) -> None:
+    sup = await ops.supply(admin, "Declined")
+    sold = await _sold(admin, sup, tag="dcl", held_as="on_request")
+    await admin.execute(
+        "UPDATE booking.b2b_hold_lines SET status = 'declined', decline_code = 'sold_out', answered_at = now()"
+        " WHERE hold_id = $1::uuid",
+        sold["hold"],
+    )
+    with pytest.raises(asyncpg.CheckViolationError, match="agency line is not confirmed"):
+        await _book(app_conn, sold["case"], sold["parts"]["service"], sup)
 
 
 async def test_waiver_rules(admin: asyncpg.Connection, app_conn: asyncpg.Connection) -> None:
@@ -513,3 +534,12 @@ async def test_no_hotel_nights_range(admin: asyncpg.Connection) -> None:
     for bad in ([0], [366]):
         with pytest.raises(asyncpg.CheckViolationError):
             await admin.execute("UPDATE booking.trip_plans SET no_hotel_nights = $2 WHERE id = $1::uuid", plan, bad)
+    reason = "UPDATE booking.trip_plans SET no_hotel_nights_reason = $2 WHERE id = $1::uuid"
+    for bad in ("too short", "   short with spaces   ", "x" * 501):
+        with pytest.raises(asyncpg.CheckViolationError):
+            await admin.execute(reason, plan, bad)
+    for good in ("Night 2 is on the overnight train to Sapa.", "[redacted]", None):
+        await admin.execute(reason, plan, good)
+    tag = "SELECT col_description('booking.trip_plans'::regclass, attnum) FROM pg_attribute"
+    tag += " WHERE attrelid = 'booking.trip_plans'::regclass AND attname = 'no_hotel_nights_reason'"
+    assert (await admin.fetchval(tag)).startswith("pii:free_text")
