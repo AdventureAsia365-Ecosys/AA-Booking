@@ -686,7 +686,9 @@ async def create_contract(conn: asyncpg.Connection, staff: Staff, ref: str, data
 async def update_contract(
     conn: asyncpg.Connection, staff: Staff, contract_id: str, changes: dict[str, Any]
 ) -> dict[str, Any]:
-    """Edit a draft's terms, or move its status (``published`` / ``expired``); not both in one call."""
+    """Edit a draft's terms, or move its status (``published`` / ``expired``); not both in one call. AA-1153: a draft
+    made by a rate-sheet import whose review has warnings is published only with ``acknowledge_checks``."""
+    acknowledged = bool(changes.pop("acknowledge_checks", None))
     status = changes.pop("status", None)
     unknown = sorted(set(changes) - set(CONTRACT_EDITABLE))
     if unknown:
@@ -701,6 +703,8 @@ async def update_contract(
     # same lock) then either sees this publish or makes it answer 409 supplier_inactive.
     supplier = await resolve_supplier(conn, current["supplier_id"], lock=True)
     if status is not None:
+        if status == "published" and current["status"] == "draft":
+            await _require_review(conn, current["id"], acknowledged)
         return await _move(conn, staff, current, supplier, status)
     if current["status"] != "draft":
         raise Conflict("contract_locked", f"a {current['status']} contract is fixed; create a new contract instead")
@@ -731,6 +735,24 @@ async def update_contract(
         summary=f"Updated {', '.join(sorted(changed))}",
     )
     return {**(await get_contract(conn, current["id"])), "changed": sorted(changed)}
+
+
+async def _require_review(conn: asyncpg.Connection, contract_id: str, acknowledged: bool) -> None:
+    """AA-1153 (T10): the publisher of an imported draft acknowledges the warnings of its live review."""
+    from app.supply import rate_sheet  # noqa: PLC0415 — rate_sheet imports this module
+
+    if not await conn.fetchval(
+        "SELECT 1 FROM booking.rate_sheet_imports WHERE supplier_contract_id = $1::uuid", contract_id
+    ):
+        return
+    found = await rate_sheet.review(conn, contract_id)
+    if found["acknowledge"] and not acknowledged:
+        raise Conflict(
+            "checks_unacknowledged",
+            f"{len([c for c in found['checks'] if c['severity'] == 'warning'])} warning(s) in the rate review: read "
+            "them, then publish with acknowledge_checks",
+            checks=found["checks"],
+        )
 
 
 async def _move(

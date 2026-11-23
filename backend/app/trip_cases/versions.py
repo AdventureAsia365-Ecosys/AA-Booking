@@ -266,6 +266,26 @@ async def _check_supply(
             raise Invalid("unknown_rate", f"rate {bad[0]} is not a published supplier rate", rate_ids=bad)
 
 
+async def _room_default(
+    conn: asyncpg.Connection, pos: int, it: Item, day: date, pax: int | None
+) -> tuple[Item, dict[str, Any]]:
+    """AA-1153: a room item's default net night by night (``supply_rates.default_room_costs``) and its report line."""
+    nights = supply_rates.quantity("room_night", day_from=it.day_from, day_to=it.day_to, pax=pax)
+    runs = await supply_rates.default_room_costs(
+        conn, str(it.hotel_room_type_id), first_day=day, nights=nights, pax=pax
+    )
+    if runs is None:
+        return it, {"position": pos, "on": day, "rate_id": None}
+    costs = tuple(Cost(d.net_amount, d.net_currency, d.supplier_note, d.supplier_rate_id) for d in runs)
+    return replace(it, costs=costs), {
+        "position": pos,
+        "on": day,
+        "rate_id": runs[0].supplier_rate_id,
+        "net_amount": str(sum((d.net_amount for d in runs), start=Decimal("0"))),
+        "net_currency": runs[0].net_currency,
+    }
+
+
 async def _supply_defaults(
     conn: asyncpg.Connection, case: Any, before: list[dict[str, Any]], positioned: list[tuple[int, Item]]
 ) -> tuple[list[tuple[int, Item]], list[dict[str, Any]]]:
@@ -284,6 +304,11 @@ async def _supply_defaults(
         books = it.hotel_room_type_id or it.service_id
         if books and it.costs is None and (it.supply != old_ref or not (old and old["costs"])):
             day = start + timedelta(days=it.day_from - 1) if start else datetime.now(UTC).date()
+            if it.hotel_room_type_id:  # AA-1153: night by night, the first night's DMC for the whole stay
+                it, line = await _room_default(conn, pos, it, day, pax)
+                report.append(line)
+                out.append((pos, it))
+                continue
             rate = await supply_rates.rate_in_force(
                 conn, room_type_id=it.hotel_room_type_id, service_id=it.service_id, on=day, pax=pax
             )

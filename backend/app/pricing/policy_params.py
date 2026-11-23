@@ -42,7 +42,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.pricing import pax_bands, policy_params_ops, policy_params_security
+from app.pricing import pax_bands, policy_params_hotels, policy_params_ops, policy_params_security
 from app.pricing import policy_cross_checks as cross
 from app.pricing.policy_shapes import PolicyValueError as PolicyValueError
 from app.pricing.policy_shapes import currency_map
@@ -85,6 +85,7 @@ SECTIONS = (
     "retention",
     "security",
     "ops",  # AA-1171 (policy_params_ops.py)
+    "hotels",  # AA-1153 (policy_params_hotels.py)
 )
 # The selling currencies a rounding increment is required for (= app.pricing.engine.SELLING_CURRENCIES, by a test).
 ROUNDING_CURRENCIES = ("AUD", "EUR", "GBP", "SGD", "USD")
@@ -689,6 +690,7 @@ PARAMS: dict[str, Param] = {
         ),
         # AA-1158 security, AA-1171 ops, AA-1175 the group-size bands (pax_bands.py)
         *(Param(**spec) for spec in (*policy_params_security.SPECS, *policy_params_ops.SPECS, *pax_bands.SPECS)),
+        *(Param(**spec) for spec in policy_params_hotels.SPECS),  # AA-1153 (bk-069): hotel contracting
     )
 }
 

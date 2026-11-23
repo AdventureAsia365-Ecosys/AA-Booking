@@ -66,9 +66,8 @@ from app.b2b import (
     quotes,
     vouchers,
 )
-from app.b2b.components import LineAsk, RoomAsk
 from app.errors import NotFound
-from app.routers.b2b import QuoteLineRequest
+from app.routers.b2b import QuoteLineRequest, line_ask
 
 router = APIRouter(prefix="/booking/b2b-desk", tags=["b2b"])
 
@@ -218,16 +217,7 @@ class EntryIn(BaseModel):
 def _ask_lines(lines: list[QuoteLineRequest]) -> list[quotes.AskLine]:
     return [
         quotes.AskLine(
-            ask=LineAsk(
-                line_ref=line.line_ref,
-                component_id=line.component_id,
-                service_date=line.service_date,
-                nights=line.nights,
-                adult=line.pax.adult,
-                child=line.pax.child,
-                infant=line.pax.infant,
-                rooms=tuple(RoomAsk(r.occupancy, r.count, r.room_type_id) for r in line.rooms),
-            ),
+            ask=line_ask(line),
             rooms=[r.model_dump() for r in line.rooms],
             departure_id=line.departure_id,
         )

@@ -580,6 +580,8 @@ class PlanComponentIn(BaseModel):
     day_no: int = Field(ge=1, le=366)
     hotel_room_type_id: uuid.UUID | None = None
     service_id: uuid.UUID | None = None
+    # AA-1153 (T9): the board of a hotel night; empty = the default BB (a quote line may ask another).
+    meal_plan: Literal["RO", "BB", "HB", "FB", "AI"] | None = None
 
     @model_validator(mode="after")
     def _one_target(self) -> PlanComponentIn:
@@ -616,6 +618,7 @@ async def put_trip_plan_components(
             "day_no": i.day_no,
             "hotel_room_type_id": str(i.hotel_room_type_id) if i.hotel_room_type_id else None,
             "service_id": str(i.service_id) if i.service_id else None,
+            "meal_plan": i.meal_plan,
         }
         for i in body.items
     ]

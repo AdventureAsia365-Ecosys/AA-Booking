@@ -49,7 +49,7 @@ INSERT = "INSERT INTO booking.supplier_bookings"
 SET_STATUS = "UPDATE booking.supplier_bookings SET status = $2"
 UPDATE_FACTS = "UPDATE booking.supplier_bookings SET"
 SUPPLIER_ROW = "SELECT status, code FROM booking.suppliers"
-ROOM_OF = "WHERE rt.id = $1::uuid AND h.supplier_id = $2::uuid"
+ROOM_OF = "WHERE rt.id = $1::uuid AND l.supplier_id = $2::uuid"  # AA-1153: a hotel linked to the supplier
 SERVICE_OF = "FROM booking.services WHERE id = $1::uuid"
 HOLD_LOCK = "FROM booking.b2b_holds WHERE id = $1::uuid FOR UPDATE"
 

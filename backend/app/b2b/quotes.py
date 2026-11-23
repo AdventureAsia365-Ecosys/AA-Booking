@@ -56,6 +56,10 @@
   (the supplier booking slice). **Children on an ``sv:`` line** (B4, :mod:`app.supply.child_price`): the supplier's
   child rate, else the contract's child %, else the policy's ``child_price_pct_by_service_type``, else the adult
   price; ``price_note.child`` says which (not hashed: the price is).
+- **Board basis and hotel children** (AA-1153, bk-069, :mod:`app.b2b.components`): a line may ask a board
+  (``meal_plan``: RO, BB, HB, FB, AI; default BB, or the tour night's) and give the children's ages (``child_ages``);
+  both are hashed only when sent, so a request without them hashes as before. ``price_note.board`` keeps the board and
+  its ``double_dinner`` warnings, ``price_note.child_room`` how the children beyond the room mix were priced.
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -197,6 +201,7 @@ def price_hash(
                 "b2b_price": format(line["b2b_price"], "f"),
                 **_discount_hash(line),
                 **_note_hash(line),
+                **_board_hash(line),
             }
             for line in lines
         ],
@@ -220,6 +225,17 @@ def _note_hash(line: dict[str, Any]) -> dict[str, Any]:
     note = line.get("price_note") or {}
     priced = {k: note[k] for k in ("adjustment", "early_booking") if k in note}
     return {"price_note": priced} if priced else {}
+
+
+def _board_hash(line: dict[str, Any]) -> dict[str, Any]:
+    """AA-1153: the board and the children's ages a line asked, hashed only when sent (any other line hashes as
+    before)."""
+    out: dict[str, Any] = {}
+    if line.get("meal_plan"):
+        out["meal_plan"] = line["meal_plan"]
+    if line.get("child_ages"):
+        out["child_ages"] = list(line["child_ages"])
+    return out
 
 
 def _line_plan(component_id: str) -> str | None:
@@ -652,6 +668,10 @@ async def quote_in(
             note["supply"] = supply_note
         if lc.child:
             note["child"] = lc.child
+        if lc.board:
+            note["board"] = lc.board
+        if lc.child_room:
+            note["child_room"] = lc.child_room
         priced.append(
             {
                 "line_no": no,
@@ -674,6 +694,8 @@ async def quote_in(
                 "rate_card_id": price.rate_card_id,
                 "price_note": note or None,
                 "operable_override_id": covered_by[no - 1],
+                "meal_plan": ask.meal_plan,
+                "child_ages": list(ask.child_ages),
             }
         )
     quoted_total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)

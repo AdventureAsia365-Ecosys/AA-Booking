@@ -138,6 +138,7 @@ class Part:
     room_type_id: str | None
     service_id: str | None
     max_occupancy: int | None = None
+    meal_plan: str | None = None  # AA-1153 (T9): the tour night's board (None = the default BB)
 
     @property
     def item(self) -> str:
@@ -258,13 +259,15 @@ def asks(wins: Sequence[Window], parts: Sequence[Part], bands: Sequence[pax_band
                 on = win.start + timedelta(days=part.offset)
                 if part.room_type_id:
                     for occupancy, _rooms in room_mix(low, part.max_occupancy):
-                        out.append(RateAsk(part.room_type_id, None, on, occupancy))
+                        out.append(RateAsk(part.room_type_id, None, on, occupancy, "adult", part.meal_plan))
                 else:
                     out.append(RateAsk(None, part.service_id, on, low))
         for part in parts:
             if part.room_type_id and not (part.max_occupancy is not None and part.max_occupancy < 2):
                 on = win.start + timedelta(days=part.offset)
-                out.extend(RateAsk(part.room_type_id, None, on, occupancy) for occupancy in (1, 2))
+                out.extend(
+                    RateAsk(part.room_type_id, None, on, occupancy, "adult", part.meal_plan) for occupancy in (1, 2)
+                )
     return out
 
 
@@ -284,7 +287,7 @@ def cells(
                 on = win.start + timedelta(days=part.offset)
                 if part.room_type_id:
                     for occupancy, rooms in room_mix(low, part.max_occupancy):
-                        rate = found.get(RateAsk(part.room_type_id, None, on, occupancy))
+                        rate = found.get(RateAsk(part.room_type_id, None, on, occupancy, "adult", part.meal_plan))
                         if rate is None:
                             cell.complete = False
                             continue
@@ -329,8 +332,8 @@ def single_supplement(
             continue
         rooms += 1
         on = win.start + timedelta(days=part.offset)
-        single = found.get(RateAsk(part.room_type_id, None, on, 1))
-        double = found.get(RateAsk(part.room_type_id, None, on, 2))
+        single = found.get(RateAsk(part.room_type_id, None, on, 1, "adult", part.meal_plan))
+        double = found.get(RateAsk(part.room_type_id, None, on, 2, "adult", part.meal_plan))
         if single is None or double is None:
             return None
         cell.add(single_part(single, double, fx), engine.BASE_CURRENCY if single["currency"] != double["currency"]
@@ -635,7 +638,9 @@ def assemble(
 async def _parts(conn: asyncpg.Connection, plan_id: str) -> tuple[list[Part], bool]:
     rows = await conn.fetch(COMPONENTS_SQL, plan_id)
     active = all(component_active(r) for r in rows)
-    parts = [Part(int(r["day_no"]), r["room_type_id"], r["service_id"], r["max_occupancy"]) for r in rows]
+    parts = [
+        Part(int(r["day_no"]), r["room_type_id"], r["service_id"], r["max_occupancy"], r.get("meal_plan")) for r in rows
+    ]
     return parts, active
 
 

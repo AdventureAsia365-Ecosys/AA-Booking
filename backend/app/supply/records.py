@@ -8,6 +8,10 @@ and ``country_code`` follows it. Records are addressed by UUID or by code (``HTL
   content later from these facts. Names and titles are internal working names.
 - **Supplier.** Set on create, never moved afterwards (rates of the record live under that supplier's contracts). The
   supplier must be active and carry the matching category (hotel; transport for a transfer, otherwise the service type).
+  AA-1153 (bk-069): a hotel is one real hotel that several DMCs may sell (``app.supply.hotel_master``: the supplier
+  links, the duplicate check on create and on a name / place / position change, external codes, facts confirmation
+  and room type aliases); ``supplier_id`` is the supplier that first listed it, and the list's supplier filter finds
+  every hotel a supplier is linked to.
 - **Never deleted.** ``deactivate`` / ``activate`` only; a record of an inactive supplier cannot be activated.
   Activating is an approval (AA-1155 T4.1): it needs ``supplier.activate`` on top of the route's ``supply.write``
   (403 ``forbidden`` before anything is read); deactivating stays ``supply.write``. For the same reason a record
@@ -35,7 +39,7 @@ from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
-from app.supply import content
+from app.supply import content, hotel_master
 
 HOTEL_RATES = (
     suppliers.RATE_ROOM_TYPE + " IN (SELECT t.id FROM booking.hotel_room_types t WHERE t.hotel_id = $1::uuid)"  # noqa: S608 — constants
@@ -84,7 +88,10 @@ HOTEL = Kind(
     name_field="name",
     columns=f"""
         r.name, r.hotel_style, r.star_rating, r.address, r.latitude, r.longitude, r.check_in_time, r.check_out_time,
-        r.amenities, r.links::text AS links,
+        r.amenities, r.links::text AS links, r.external_codes::text AS external_codes, r.facts_source,
+        r.facts_source_supplier_id::text AS facts_source_supplier_id, r.facts_confirmed_on, r.facts_confirmed_by,
+        (SELECT count(*) FROM booking.hotel_supplier_links l WHERE l.hotel_id = r.id AND l.status = 'active')
+            AS supplier_count,
         (SELECT count(*) FROM booking.hotel_room_types t WHERE t.hotel_id = r.id AND t.status = 'active')
             AS room_type_count,
         (SELECT count(*) FROM booking.supplier_rates x
@@ -106,6 +113,7 @@ HOTEL = Kind(
         "amenities",
         "links",
         "internal_notes",
+        "external_codes",
     ),
     text_fields=("hotel_style", "address", "internal_notes"),
     list_fields=("amenities",),
@@ -208,6 +216,8 @@ def _row(row: Any) -> dict[str, Any]:
             out[key] = list(out[key])
     if "links" in out:
         out["links"] = json.loads(out["links"]) if out["links"] else []
+    if "external_codes" in out:
+        out["external_codes"] = json.loads(out["external_codes"]) if out["external_codes"] else {}
     return out
 
 
@@ -242,6 +252,8 @@ def normalize(kind: Kind, data: dict[str, Any]) -> dict[str, Any]:
             for link in out["links"] or []
             if clean_text(link.get("url"))
         ]
+    if "external_codes" in out:
+        out["external_codes"] = hotel_master.clean_codes(out["external_codes"])
     if "country_code" in out:
         out["country_code"] = (clean_text(out["country_code"]) or "").upper() or None
     if out.get("destination_id") is not None:
@@ -262,13 +274,15 @@ def _db_values(values: dict[str, Any]) -> dict[str, Any]:
     out = dict(values)
     if "links" in out:
         out["links"] = json.dumps(out["links"])
+    if "external_codes" in out:
+        out["external_codes"] = json.dumps(out["external_codes"])
     if "source_id" in out:
         out["source_system"] = "cis" if out["source_id"] else None
     return out
 
 
 def _cast(column: str) -> str:
-    return {"destination_id": "::uuid", "links": "::jsonb"}.get(column, "")
+    return {"destination_id": "::uuid", "links": "::jsonb", "external_codes": "::jsonb"}.get(column, "")
 
 
 def label(kind: Kind, record: dict[str, Any]) -> str:
@@ -310,7 +324,10 @@ async def list_records(
     sort: str | None = None,
     limit: int = 25,
     offset: int = 0,
+    reconfirm_days: int | None = None,
 ) -> dict[str, Any]:
+    """One page of records. ``reconfirm_days`` (hotels, AA-1153): only the hotels whose facts were never confirmed or
+    were confirmed that many days ago or more (due for a new confirmation)."""
     where: list[str] = []
     args: list[Any] = []
 
@@ -324,9 +341,18 @@ async def list_records(
         add("r.status = {p}", status)
     if supplier:
         try:
-            add("r.supplier_id = {p}::uuid", str(uuid.UUID(supplier)))
+            ident, column = str(uuid.UUID(supplier)), "{p}::uuid"
         except ValueError:
-            add("sp.code = {p}", supplier.strip().upper())
+            ident, column = supplier.strip().upper(), "(SELECT s.id FROM booking.suppliers s WHERE s.code = {p})"
+        if kind is HOTEL:  # AA-1153: every hotel the supplier sells (an active link), not only those it listed first
+            linked = "EXISTS (SELECT 1 FROM booking.hotel_supplier_links l WHERE l.hotel_id = r.id"
+            add(f"{linked} AND l.status = 'active' AND l.supplier_id = {column})", ident)  # noqa: S608 — constants
+        elif column == "{p}::uuid":
+            add("r.supplier_id = {p}::uuid", ident)
+        else:
+            add("sp.code = {p}", ident)
+    if reconfirm_days is not None and kind is HOTEL:
+        add(f"(r.facts_confirmed_on IS NULL OR r.facts_confirmed_on + {{p}}::int <= {TODAY})", reconfirm_days)
     if country:
         add("r.country_code = {p}", country.strip().upper())
     if destination_id:
@@ -368,6 +394,12 @@ async def get_record(conn: asyncpg.Connection, kind: Kind, ref: str) -> dict[str
     record = (await suppliers.place_names(conn, [await resolve(conn, kind, ref)]))[0]
     if kind is HOTEL:
         record["room_types"] = await list_room_types(conn, record["id"])
+        aliases = await hotel_master.aliases_by_room(conn, [r["id"] for r in record["room_types"]])
+        for room in record["room_types"]:
+            room["aliases"] = aliases.get(room["id"], [])
+        record["suppliers"] = await hotel_master.list_links(conn, record["id"])  # AA-1153: the DMCs that sell it
+        days = await hotel_master.reconfirm_days(conn)
+        record["facts_reconfirm_due"] = hotel_master.reconfirm_due(record.get("facts_confirmed_on"), days)
     # AA-910: the rates that price this hotel's room types (or this service) show here too, deleted ones included.
     rates = HOTEL_RATES if kind is HOTEL else SERVICE_RATES
     activity = await conn.fetch(
@@ -410,6 +442,9 @@ async def create_record(conn: asyncpg.Connection, kind: Kind, staff: Staff, data
     supplier = await _supplier_for(conn, kind, str(data.get("supplier_id") or ""), values.get("service_type"))
     _check_geo(values)
     values.update(await suppliers.check_place(conn, values, set(values)))
+    duplicate = None
+    if kind is HOTEL:  # AA-1153 (T8): one row per real hotel
+        duplicate = await hotel_master.check_duplicates(conn, values, reason=data.get("not_duplicate_reason"))
     status = "active" if staff.can("supplier.activate") else "inactive"
     db = _db_values(values)
     columns = list(db)
@@ -432,7 +467,13 @@ async def create_record(conn: asyncpg.Connection, kind: Kind, staff: Staff, data
         action=f"{kind.entity}.created",
         entity_type=kind.entity,
         entity_id=row["id"],
-        after={"code": row["code"], "supplier_id": supplier["id"], "status": status, **values},
+        after={
+            "code": row["code"],
+            "supplier_id": supplier["id"],
+            "status": status,
+            **values,
+            **({"possible_duplicate": duplicate} if duplicate else {}),
+        },
         entity_label=f"{row['code']} {values[kind.name_field]}",
         summary=f"Created {kind.entity} {values[kind.name_field]} ({supplier['code']})"
         + ("" if status == "active" else " (inactive until approved)"),
@@ -443,6 +484,8 @@ async def create_record(conn: asyncpg.Connection, kind: Kind, staff: Staff, data
 async def update_record(
     conn: asyncpg.Connection, kind: Kind, staff: Staff, ref: str, changes: dict[str, Any]
 ) -> dict[str, Any]:
+    changes = dict(changes)
+    reason = changes.pop("not_duplicate_reason", None) if kind is HOTEL else None
     unknown = sorted(set(changes) - set(kind.editable))
     if unknown:
         raise Invalid("not_editable", f"not editable: {', '.join(unknown)}")
@@ -469,6 +512,11 @@ async def update_record(
             changed.pop(key, None)
     if not changed:
         return {**current, "changed": []}
+    duplicate = None
+    if kind is HOTEL and {"name", "destination_id", "latitude", "longitude"} & set(changed):
+        duplicate = await hotel_master.check_duplicates(
+            conn, {**merged, **changed}, exclude_id=current["id"], reason=reason
+        )
     db = _db_values(changed)
     sets = ", ".join(f"{column} = ${i + 2}{_cast(column)}" for i, column in enumerate(db))
     try:
@@ -488,7 +536,7 @@ async def update_record(
         entity_type=kind.entity,
         entity_id=current["id"],
         before={k: current[k] for k in changed},
-        after=changed,
+        after={**changed, **({"possible_duplicate": duplicate} if duplicate else {})},
         entity_label=label(kind, merged),
         summary=f"Updated {', '.join(sorted(changed))}",
     )

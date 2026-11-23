@@ -127,6 +127,8 @@ class ContractPatch(ContractFields):
     status: Literal["published", "expired"] | None = Field(
         default=None, description="publish a draft (second person) or expire a published contract; on its own"
     )
+    # AA-1153: publishing a draft made by a rate-sheet import whose review has warnings needs this (409 otherwise).
+    acknowledge_checks: bool | None = Field(default=None, description="the publisher saw the review warnings")
 
 
 def _payload(body: BaseModel) -> dict[str, Any]:
@@ -234,6 +236,14 @@ async def get_contract(contract_id: ContractId, staff: CanRead, pool: Pool) -> d
         return {**contract, "actions": {"publish": await service.publication(conn, staff, contract)}}
 
 
+@router.get("/contracts/{contract_id}/review")
+async def contract_review(contract_id: ContractId, _: CanRead, pool: Pool) -> dict[str, Any]:
+    """AA-1153 (T10): the business checks and the diff against the supplier's previous contract, live, with the
+    contract's seasons, hotel child prices and the rate-sheet import it came from (what the publisher reviews)."""
+    async with pool.acquire() as conn:
+        return await rate_sheet.review(conn, contract_id)
+
+
 @router.patch("/contracts/{contract_id}")
 async def patch_contract(body: ContractPatch, contract_id: ContractId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
@@ -277,7 +287,7 @@ async def import_rate_sheet(
     problem by sheet, row and column; a second person publishes the draft."""
     data = decode_sheet(body.data_base64)
     async with pool.acquire() as conn, conn.transaction():
-        return await rate_sheet.import_sheet(conn, staff, supplier_ref, data, dry_run=dry_run)
+        return await rate_sheet.import_sheet(conn, staff, supplier_ref, data, dry_run=dry_run, filename=body.filename)
 
 
 def decode_sheet(text: str) -> bytes:

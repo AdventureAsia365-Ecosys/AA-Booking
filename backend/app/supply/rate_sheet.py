@@ -18,6 +18,22 @@ Template (:func:`template`; ``GET /booking/rate-sheets/template``):
   numbers are kept on the rate; ``Net`` may then be empty, or must equal the derived net), and on the service sheets
   ``Pax type`` (adult, child, infant; empty = adult) with ``Age min`` / ``Age max`` (a child or infant band, B4).
 
+AA-1153 part 1 (bk-069; S285 advisory r2 hotels T8, T10, B7): a DMC rate sheet for hotels it shares with other DMCs.
+
+- **Hotels the supplier sells**: a hotel row matches a hotel **linked** to the supplier (``hotel_supplier_links``), by
+  the DMC's own code for it first, then the AA code; a room type by its name, then by an alias (the supplier's own
+  alias first, then an any-DMC alias). An unknown room type names the closest room types of the hotel.
+- optional sheet ``Seasons`` (Season, From, To; one season may have several rows): the contract's named seasons
+  (``supplier_contract_seasons``). A rate row naming a season with no dates becomes one rate per range of that season.
+- optional sheet ``Hotel children`` (Hotel code, Age min, Age max, Basis = sharing | extra bed, Meal plan, Net): the
+  DMC's child price per night for the hotel (``hotel_child_policies``).
+- **Business checks** (:mod:`app.supply.rate_checks`): seasons that overlap (an error: nothing is imported), contract
+  days no season covers, a board cheaper than one with fewer meals, a price at least ``rate_sheet_jump_warn_pct`` %
+  above the same rate of the supplier's previous contract (warnings). The dry run lists them with the **diff** against
+  that previous contract (added / changed / removed rates); an import stores both in ``booking.rate_sheet_imports``
+  (file hash and name), and the second person who publishes the draft acknowledges the warnings
+  (``app.suppliers.service``; the live review is :func:`review`).
+
 Items are matched to the supplier's **existing** hotels (by code, ``HTL-000123``, then the room type name, case and
 spaces ignored) and services (by code, ``SVC-000123``): supply facts are entered and checked in the admin (ADR 0004a),
 a rate sheet only prices them. Every problem is reported per sheet, row and column (``errors``) and **nothing is
@@ -31,12 +47,15 @@ executes VBA).
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import re
 import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from difflib import get_close_matches
 from typing import Any
 
 import asyncpg
@@ -45,13 +64,20 @@ from openpyxl import Workbook, load_workbook
 from app.auth.staff import Staff
 from app.catalog import cost_sheet, price_readiness
 from app.errors import Invalid
+from app.pricing import policy_values
+from app.pricing.policy_params_hotels import JUMP_WARN_PCT
 from app.suppliers import service as suppliers
-from app.supply import rates
+from app.supply import rate_checks, rates
 
 MAX_BYTES = 2 * 1024 * 1024
 MAX_ROWS = 2000
 CONTRACT_SHEET = "Contract"
 HOTEL_SHEET = "Hotel"
+SEASONS_SHEET = "Seasons"
+CHILDREN_SHEET = "Hotel children"
+SEASON_COLUMNS = ("Season", "From", "To")
+CHILDREN_COLUMNS = ("Hotel code", "Age min", "Age max", "Basis", "Meal plan", "Net")
+BASES = {"sharing": "sharing", "extra bed": "extra_bed", "extra_bed": "extra_bed"}
 SERVICE_SHEETS = {
     "Transport": "transfer",
     "Guide": "guide",
@@ -132,6 +158,8 @@ class Sheet:
     rows: list[RateRow]
     problems: list[Problem]
     ignored_sheets: list[str]
+    seasons: list[dict[str, Any]] = field(default_factory=list)  # AA-1153: {name, date_from, date_to, sheet, row}
+    children: list[dict[str, Any]] = field(default_factory=list)  # AA-1153: hotel child prices as read
 
 
 # ── Cell values ──────────────────────────────────────────────────────────────
@@ -380,6 +408,8 @@ def parse(data: bytes) -> Sheet:
     ignored: list[str] = []
     contract: dict[str, Any] = {}
     rows: list[RateRow] = []
+    seasons: list[dict[str, Any]] = []
+    children: list[dict[str, Any]] = []
     budget = [0]
     names = {_key(n): n for n in wb.sheetnames}
     if _key(CONTRACT_SHEET) not in names:
@@ -391,6 +421,10 @@ def parse(data: bytes) -> Sheet:
                 contract = _contract(ws, problems)
             elif key == _key(HOTEL_SHEET):
                 rows += _rows(ws, HOTEL_SHEET, problems, budget)
+            elif key == _key(SEASONS_SHEET):
+                seasons = _seasons(ws, problems)
+            elif key == _key(CHILDREN_SHEET):
+                children = _children(ws, problems)
             elif sheet := next((s for s in SERVICE_SHEETS if _key(s) == key), None):
                 rows += _rows(ws, sheet, problems, budget)
             else:
@@ -399,16 +433,137 @@ def parse(data: bytes) -> Sheet:
         wb.close()
     if not rows and not any(p.code == "missing_column" for p in problems):
         problems.append(Problem(HOTEL_SHEET, None, None, "no_rates", "the workbook holds no rate rows"))
-    return Sheet(contract=contract, rows=rows, problems=problems, ignored_sheets=ignored)
+    rows = _expand_seasons(rows, seasons, problems)
+    return Sheet(contract, rows, problems, ignored, seasons, children)
+
+
+def _table(ws: Any, sheet: str, columns: tuple[str, ...], problems: list[Problem]) -> list[tuple[int, dict[str, Any]]]:
+    """The rows of a small sheet as ``(row number, {column: raw value})``; every column is required."""
+    rows = ws.iter_rows(values_only=True)
+    header = next(rows, None)
+    if header is None:
+        return []
+    index = {_key(h): i for i, h in enumerate(header) if h is not None}
+    missing = [c for c in columns if _key(c) not in index]
+    if missing:
+        problems.append(
+            Problem(sheet, 1, ", ".join(missing), "missing_column", f"missing column(s): {', '.join(missing)}")
+        )
+        return []
+    out = []
+    for n, row in enumerate(rows, start=2):
+        if row is None or all(v is None or str(v).strip() == "" for v in row):
+            continue
+        out.append((n, {c: row[index[_key(c)]] if index[_key(c)] < len(row) else None for c in columns}))
+    return out
+
+
+def _seasons(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
+    out = []
+    for n, cells in _table(ws, SEASONS_SHEET, SEASON_COLUMNS, problems):
+        try:
+            name, start, end = _text(cells["Season"]), _date(cells["From"]), _date(cells["To"])
+        except ValueError as exc:
+            problems.append(Problem(SEASONS_SHEET, n, None, "invalid_value", str(exc)))
+            continue
+        if not name or len(name) > 80 or start is None or end is None or end < start:
+            problems.append(
+                Problem(SEASONS_SHEET, n, None, "invalid_season", "a season has a name (1-80) and From <= To")
+            )
+            continue
+        out.append({"name": name, "date_from": start, "date_to": end, "sheet": SEASONS_SHEET, "row": n})
+    return out
+
+
+def _children(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
+    out = []
+    for n, cells in _table(ws, CHILDREN_SHEET, CHILDREN_COLUMNS, problems):
+        try:
+            age_min, age_max = _age(cells["Age min"]), _age(cells["Age max"])
+            net = _amount(cells["Net"])
+        except ValueError as exc:
+            problems.append(Problem(CHILDREN_SHEET, n, None, "invalid_value", str(exc)))
+            continue
+        basis = BASES.get(_key(cells["Basis"]))
+        board = (_text(cells["Meal plan"]) or "").upper() or None
+        code = (_text(cells["Hotel code"]) or "").upper()
+        if not code or age_min is None or age_max is None or age_max < age_min or net is None or basis is None:
+            problems.append(
+                Problem(
+                    CHILDREN_SHEET,
+                    n,
+                    None,
+                    "invalid_child_price",
+                    "a child price has a hotel code, ages (min <= max), basis sharing or extra bed and a net",
+                )
+            )
+            continue
+        if board is not None and board not in rates.MEAL_PLANS:
+            problems.append(Problem(CHILDREN_SHEET, n, "Meal plan", "unknown_meal_plan", "RO, BB, HB, FB or AI"))
+            continue
+        out.append(
+            {
+                "hotel_code": code,
+                "age_min": age_min,
+                "age_max": age_max,
+                "basis": basis,
+                "meal_plan": board,
+                "net_amount": net,
+                "row": n,
+            }  # fmt: skip
+        )
+    return out
+
+
+def _expand_seasons(rows: list[RateRow], seasons: list[dict[str, Any]], problems: list[Problem]) -> list[RateRow]:
+    """A rate row naming a season of the Seasons sheet, with no dates, becomes one rate per range of that season."""
+    if not seasons:
+        return rows
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for season in seasons:
+        by_name.setdefault(_key(season["name"]), []).append(season)
+    out: list[RateRow] = []
+    for rate in rows:
+        name = rate.values.get("season")
+        if not name or "valid_from" in rate.values or "valid_to" in rate.values:
+            out.append(rate)
+            continue
+        ranges = by_name.get(_key(name))
+        if ranges is None:
+            problems.append(
+                Problem(rate.sheet, rate.row, "Season", "unknown_season", f"'{name}' is not on the Seasons sheet")
+            )
+            continue
+        for r in ranges:
+            values = {**rate.values, "season": r["name"], "valid_from": r["date_from"], "valid_to": r["date_to"]}
+            out.append(RateRow(rate.sheet, rate.row, rate.hotel_code, rate.room_type, rate.service_code, values))
+    return out
 
 
 # ── Matching and writing ─────────────────────────────────────────────────────
 
+# AA-1153 (bk-069): the room types of every hotel linked (active) to the supplier, with the DMC's code for the hotel.
 ROOM_TYPES_SQL = """
-SELECT upper(h.code) AS hotel_code, lower(regexp_replace(btrim(t.name), '\\s+', ' ', 'g')) AS room_type,
+SELECT upper(h.code) AS hotel_code, upper(btrim(l.supplier_hotel_code)) AS dmc_code, h.id::text AS hotel_id,
+       t.name, lower(regexp_replace(btrim(t.name), '\\s+', ' ', 'g')) AS room_type,
        t.id::text AS id, t.status, h.status AS hotel_status
-FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id
-WHERE h.supplier_id = $1::uuid
+FROM booking.hotel_supplier_links l
+JOIN booking.hotels h ON h.id = l.hotel_id
+JOIN booking.hotel_room_types t ON t.hotel_id = h.id
+WHERE l.supplier_id = $1::uuid AND l.status = 'active'
+"""
+HOTELS_SQL = """
+SELECT upper(h.code) AS hotel_code, upper(btrim(l.supplier_hotel_code)) AS dmc_code, h.id::text AS hotel_id
+FROM booking.hotel_supplier_links l JOIN booking.hotels h ON h.id = l.hotel_id
+WHERE l.supplier_id = $1::uuid AND l.status = 'active'
+"""
+ALIASES_SQL = """
+SELECT t.hotel_id::text AS hotel_id, a.room_type_id::text AS id,
+       lower(regexp_replace(btrim(a.alias), '\\s+', ' ', 'g')) AS alias, (a.supplier_id IS NOT NULL) AS own
+FROM booking.hotel_room_type_aliases a
+JOIN booking.hotel_room_types t ON t.id = a.room_type_id
+JOIN booking.hotel_supplier_links l ON l.hotel_id = t.hotel_id AND l.supplier_id = $1::uuid AND l.status = 'active'
+WHERE a.supplier_id IS NULL OR a.supplier_id = $1::uuid
 """
 SERVICES_SQL = """
 SELECT upper(s.code) AS code, s.id::text AS id, s.service_type, s.unit, s.status
@@ -416,8 +571,43 @@ FROM booking.services s WHERE s.supplier_id = $1::uuid
 """
 
 
+class _Rooms:
+    """The supplier's hotels and room types for the match (AA-1153): a hotel by the DMC's code, then the AA code; a
+    room type by its name, then the supplier's alias, then an any-DMC alias."""
+
+    def __init__(self, rows: list[Any], hotels: list[Any], aliases: list[Any]) -> None:
+        self.hotel: dict[str, str] = {}
+        for h in hotels:
+            self.hotel.setdefault(h["hotel_code"], h["hotel_id"])
+        for h in hotels:  # the DMC's code wins over an AA code that happens to read the same
+            if h["dmc_code"]:
+                self.hotel[h["dmc_code"]] = h["hotel_id"]
+        self.room = {(r["hotel_id"], r["room_type"]): r for r in rows}
+        self.names: dict[str, list[str]] = {}
+        for r in rows:
+            self.names.setdefault(r["hotel_id"], []).append(r["name"])
+        by_id = {r["id"]: r for r in rows}
+        self.alias: dict[tuple[str, str], Any] = {}
+        for a in sorted(aliases, key=lambda a: not a["own"]):
+            self.alias.setdefault((a["hotel_id"], a["alias"]), by_id.get(a["id"]))
+
+    def find(self, code: str | None, room_type: str | None) -> tuple[str | None, Any]:
+        hotel = self.hotel.get(code or "")
+        if hotel is None:
+            return None, None
+        key = (hotel, _key(room_type))
+        return hotel, self.room.get(key) or self.alias.get(key)
+
+    def closest(self, hotel: str, room_type: str | None) -> list[str]:
+        return get_close_matches(room_type or "", self.names.get(hotel, []), n=3, cutoff=0)
+
+
 async def _match(conn: asyncpg.Connection, supplier_id: str, sheet: Sheet) -> list[dict[str, Any]]:
-    rooms = {(r["hotel_code"], r["room_type"]): r for r in await conn.fetch(ROOM_TYPES_SQL, supplier_id)}
+    rooms = _Rooms(
+        list(await conn.fetch(ROOM_TYPES_SQL, supplier_id)),
+        list(await conn.fetch(HOTELS_SQL, supplier_id)),
+        list(await conn.fetch(ALIASES_SQL, supplier_id)),
+    )
     services = {r["code"]: r for r in await conn.fetch(SERVICES_SQL, supplier_id)}
     currency = sheet.contract.get("currency")
     out: list[dict[str, Any]] = []
@@ -425,14 +615,24 @@ async def _match(conn: asyncpg.Connection, supplier_id: str, sheet: Sheet) -> li
         problem = None
         target: dict[str, Any] = {}
         if rate.sheet == HOTEL_SHEET:
-            found = rooms.get((rate.hotel_code or "", _key(rate.room_type)))
-            if found is None:
+            hotel, found = rooms.find(rate.hotel_code, rate.room_type)
+            if hotel is None:
+                problem = Problem(
+                    rate.sheet,
+                    rate.row,
+                    "Hotel code",
+                    "unknown_item",
+                    f"no hotel {rate.hotel_code} sold by this supplier (link the supplier to the hotel first)",
+                )
+            elif found is None:
+                near = ", ".join(rooms.closest(hotel, rate.room_type))
                 problem = Problem(
                     rate.sheet,
                     rate.row,
                     "Room type",
                     "unknown_item",
-                    f"no room type '{rate.room_type}' at hotel {rate.hotel_code} of this supplier",
+                    f"no room type '{rate.room_type}' at hotel {rate.hotel_code}"
+                    + (f" (closest: {near}; add an alias or a room type)" if near else ""),
                 )
             elif found["status"] != "active" or found["hotel_status"] != "active":
                 problem = Problem(
@@ -502,14 +702,124 @@ def _preview(rate: dict[str, Any]) -> dict[str, Any]:
     return {k: rate.get(k) for k in keys}
 
 
+PREVIOUS_SQL = """
+SELECT k.id::text AS id, k.title, k.valid_from, k.valid_to FROM booking.supplier_contracts k
+WHERE k.supplier_id = $1::uuid AND k.status IN ('published', 'expired') AND k.valid_from < $2::date
+  AND ($3::uuid IS NULL OR k.id <> $3::uuid)
+ORDER BY k.valid_from DESC, k.published_at DESC NULLS LAST LIMIT 1
+"""
+CONTRACT_RATES_SQL = """
+SELECT x.id::text AS id, x.hotel_room_type_id::text AS hotel_room_type_id, x.service_id::text AS service_id,
+       x.meal_plan, x.pax_type, x.pax_min, x.pax_max, x.season, x.valid_from, x.valid_to, x.net_amount
+FROM booking.supplier_rates x WHERE x.supplier_contract_id = $1::uuid
+"""
+LABELS_SQL = """
+SELECT t.id::text AS id, h.code || ' ' || h.name || ' · ' || t.name AS label
+FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id WHERE t.id = ANY($1::uuid[])
+UNION ALL
+SELECT s.id::text, s.code || ' ' || s.title FROM booking.services s WHERE s.id = ANY($1::uuid[])
+"""
+SEASONS_OF_SQL = """
+SELECT name, date_from, date_to FROM booking.supplier_contract_seasons WHERE supplier_contract_id = $1::uuid
+ORDER BY date_from, lower(name)
+"""
+IMPORT_SQL = """
+SELECT i.id::text AS id, i.file_sha256, i.file_name, i.rate_rows, i.checks::text AS checks, i.diff::text AS diff,
+       i.previous_contract_id::text AS previous_contract_id, i.imported_by, i.imported_at
+FROM booking.rate_sheet_imports i WHERE i.supplier_contract_id = $1::uuid
+"""
+
+
+async def _jump_pct(conn: asyncpg.Connection) -> Decimal:
+    """``rate_sheet_jump_warn_pct`` in force today (503 ``policy_unavailable`` without it; never a literal)."""
+    policy = await policy_values.require_staff(conn, await policy_values.today_utc(conn), JUMP_WARN_PCT)
+    return Decimal(policy.integer(JUMP_WARN_PCT))
+
+
+async def _labels(conn: asyncpg.Connection, rates_: list[dict[str, Any]]) -> dict[str, str]:
+    ids = sorted({rate_checks.target(r) for r in rates_ if rate_checks.target(r)})
+    return {r["id"]: r["label"] for r in await conn.fetch(LABELS_SQL, ids)} if ids else {}
+
+
+async def _checks(
+    conn: asyncpg.Connection,
+    supplier_id: str,
+    contract: dict[str, Any],
+    rates_: list[dict[str, Any]],
+    seasons: list[dict[str, Any]],
+    *,
+    exclude: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
+    """The business checks and the diff of ``rates_`` against the supplier's previous published contract."""
+    previous = await conn.fetchrow(PREVIOUS_SQL, supplier_id, contract.get("valid_from"), exclude)
+    before = [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, previous["id"])] if previous else []
+    names = await _labels(conn, [*rates_, *before])
+    findings = rate_checks.run(
+        rates_,
+        seasons=seasons,
+        valid_from=contract.get("valid_from"),
+        valid_to=contract.get("valid_to"),
+        previous=before,
+        jump_pct=await _jump_pct(conn),
+        names=names,
+    )
+    diff = {**rate_checks.diff(rates_, before, names), "previous_contract": _contract_ref(previous)}
+    return findings, diff, _contract_ref(previous)
+
+
+def _contract_ref(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {"id": row["id"], "title": row["title"], "valid_from": row["valid_from"], "valid_to": row["valid_to"]}
+
+
+def _children_matched(sheet: Sheet, hotels: dict[str, str]) -> list[dict[str, Any]]:
+    out = []
+    for child in sheet.children:
+        hotel = hotels.get(child["hotel_code"])
+        if hotel is None:
+            sheet.problems.append(
+                Problem(
+                    CHILDREN_SHEET,
+                    child["row"],
+                    "Hotel code",
+                    "unknown_item",
+                    f"no hotel {child['hotel_code']} sold by this supplier",
+                )  # fmt: skip
+            )
+            continue
+        out.append({**{k: v for k, v in child.items() if k != "hotel_code"}, "hotel_id": hotel})
+    return out
+
+
+def _json_ready(value: Any) -> Any:
+    return json.loads(json.dumps(value, default=str))
+
+
 async def import_sheet(
-    conn: asyncpg.Connection, staff: Staff, supplier_ref: str, data: bytes, *, dry_run: bool
+    conn: asyncpg.Connection,
+    staff: Staff,
+    supplier_ref: str,
+    data: bytes,
+    *,
+    dry_run: bool,
+    filename: str | None = None,
 ) -> dict[str, Any]:
     """Validate the workbook against the supplier's items; unless ``dry_run``, create the draft contract and its rates
     (call inside a transaction: any refusal rolls every row back). 422 ``rate_sheet_invalid`` lists every problem."""
     supplier = await suppliers.resolve_supplier(conn, supplier_ref)
     sheet = parse(data)
     matched = await _match(conn, supplier["id"], sheet) if sheet.rows else []
+    hotels = _Rooms([], list(await conn.fetch(HOTELS_SQL, supplier["id"])), []).hotel if sheet.children else {}
+    children = _children_matched(sheet, hotels)
+    findings: list[dict[str, Any]] = []
+    diff: dict[str, Any] = {}
+    previous = None
+    if not sheet.problems:
+        # AA-1153: the business checks and the diff against the previous contract (an error blocks the import).
+        findings, diff, previous = await _checks(conn, supplier["id"], sheet.contract, matched, sheet.seasons)
+        for f in rate_checks.errors(findings):
+            sheet.problems.append(Problem(f.get("sheet") or SEASONS_SHEET, f.get("row"), None, f["code"], f["message"]))
     if sheet.problems:
         raise Invalid(
             "rate_sheet_invalid",
@@ -522,6 +832,12 @@ async def import_sheet(
         "supplier": {"id": supplier["id"], "code": supplier["code"]},
         "contract": {k: sheet.contract.get(k) for k in CONTRACT_FIELDS.values()},
         "rates": [_preview(r) for r in matched],
+        "seasons": [{k: s[k] for k in ("name", "date_from", "date_to")} for s in sheet.seasons],
+        "child_prices": [
+            {k: c[k] for k in ("hotel_id", "age_min", "age_max", "basis", "meal_plan", "net_amount")} for c in children
+        ],  # fmt: skip
+        "checks": findings,
+        "diff": diff,
         "ignored_sheets": sheet.ignored_sheets,
     }
     if dry_run:
@@ -532,6 +848,7 @@ async def import_sheet(
     contract = await suppliers.create_contract(
         conn, staff, supplier["id"], {k: v for k, v in sheet.contract.items() if v is not None}
     )
+    await _write_parts(conn, staff, contract["id"], sheet.seasons, children, sheet.ignored_sheets)
     for rate in matched:
         data_row = {k: v for k, v in rate.items() if k not in ("sheet", "row", "unit")}
         try:
@@ -544,9 +861,99 @@ async def import_sheet(
                 errors=[Problem(rate["sheet"], rate["row"], None, exc.code, exc.message).out()],
                 ignored_sheets=sheet.ignored_sheets,
             ) from None
+    await conn.execute(
+        "INSERT INTO booking.rate_sheet_imports (supplier_id, supplier_contract_id, previous_contract_id, file_sha256,"
+        " file_name, rate_rows, checks, diff, imported_by)"
+        " VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9)",
+        supplier["id"],
+        contract["id"],
+        previous["id"] if previous else None,
+        hashlib.sha256(data).hexdigest(),
+        (filename or "").strip()[:200] or None,
+        len(matched),
+        json.dumps(_json_ready(findings)),
+        json.dumps(_json_ready(diff)),
+        staff.cis_user_id,
+    )
     out["contract"] = {"id": contract["id"], "status": contract["status"], "title": contract["title"]}
     out["imported"] = len(matched)
     return out
+
+
+async def _write_parts(
+    conn: asyncpg.Connection,
+    staff: Staff,
+    contract_id: str,
+    seasons: list[dict[str, Any]],
+    children: list[dict[str, Any]],
+    ignored: list[str],
+) -> None:
+    """The contract's seasons and hotel child prices (draft only, bk-069 guard; a refusal names the row)."""
+    try:
+        for s in seasons:
+            await conn.execute(
+                "INSERT INTO booking.supplier_contract_seasons (supplier_contract_id, name, date_from, date_to,"
+                " created_by) VALUES ($1::uuid, $2, $3, $4, $5)",
+                contract_id,
+                s["name"],
+                s["date_from"],
+                s["date_to"],
+                staff.cis_user_id,
+            )
+        for c in children:
+            await conn.execute(
+                "INSERT INTO booking.hotel_child_policies (supplier_contract_id, hotel_id, age_min, age_max, basis,"
+                " meal_plan, net_amount, created_by) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)",
+                contract_id,
+                c["hotel_id"],
+                c["age_min"],
+                c["age_max"],
+                c["basis"],
+                c["meal_plan"],
+                c["net_amount"],
+                staff.cis_user_id,
+            )
+    except (asyncpg.CheckViolationError, asyncpg.UniqueViolationError) as exc:
+        raise Invalid(
+            "rate_sheet_invalid",
+            f"a season or child price was refused: {str(exc).splitlines()[0]}; nothing was imported",
+            errors=[Problem(SEASONS_SHEET, None, None, "invalid_value", str(exc).splitlines()[0]).out()],
+            ignored_sheets=ignored,
+        ) from None
+
+
+async def review(conn: asyncpg.Connection, contract_id: str) -> dict[str, Any]:
+    """AA-1153: what the second person sees before publishing a draft: the business checks and the diff against the
+    supplier's previous contract, live (the draft may have been edited since the import), its seasons, hotel child
+    prices and the import it came from (with the checks and diff as they were at import time). ``acknowledge`` is true
+    when publishing it needs the warnings acknowledged."""
+    contract = await suppliers.get_contract(conn, contract_id)
+    current = [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, contract["id"])]
+    seasons = [dict(r) for r in await conn.fetch(SEASONS_OF_SQL, contract["id"])]
+    findings, diff, previous = await _checks(
+        conn, contract["supplier_id"], contract, current, seasons, exclude=contract["id"]
+    )
+    row = await conn.fetchrow(IMPORT_SQL, contract["id"])
+    imported = None
+    if row is not None:
+        imported = {**dict(row), "checks": json.loads(row["checks"]), "diff": json.loads(row["diff"])}
+    children = await conn.fetch(
+        "SELECT p.id::text AS id, p.hotel_id::text AS hotel_id, h.code AS hotel_code, h.name AS hotel_name, p.age_min,"
+        " p.age_max, p.basis, p.meal_plan, p.net_amount::text AS net_amount FROM booking.hotel_child_policies p"
+        " JOIN booking.hotels h ON h.id = p.hotel_id WHERE p.supplier_contract_id = $1::uuid"
+        " ORDER BY h.code, p.meal_plan NULLS FIRST, p.age_min",
+        contract["id"],
+    )
+    return {
+        "contract": {k: contract[k] for k in ("id", "title", "status", "valid_from", "valid_to", "currency")},
+        "previous_contract": previous,
+        "checks": findings,
+        "diff": diff,
+        "seasons": seasons,
+        "child_prices": [dict(r) for r in children],
+        "import": imported,
+        "acknowledge": imported is not None and bool(rate_checks.warnings(findings)),
+    }
 
 
 # ── Template ─────────────────────────────────────────────────────────────────
@@ -566,8 +973,11 @@ def build_workbook(
     contract: dict[str, Any] | None = None,
     hotel_rows: list[tuple[Any, ...]] | None = None,
     service_rows: dict[str, list[tuple[Any, ...]]] | None = None,
+    season_rows: list[tuple[Any, ...]] | None = None,
+    child_rows: list[tuple[Any, ...]] | None = None,
 ) -> bytes:
-    """An AA rate-sheet workbook: the empty template, or (tests, fixtures) one filled with the given rows."""
+    """An AA rate-sheet workbook: the empty template, or (tests, fixtures) one filled with the given rows (AA-1153:
+    with the Seasons and Hotel children sheets)."""
     wb = Workbook()
     ws = wb.active
     ws.title = CONTRACT_SHEET
@@ -582,6 +992,14 @@ def build_workbook(
         sheet = wb.create_sheet(name)
         sheet.append(list(SERVICE_COLUMNS))
         for row in (service_rows or {}).get(name, []):
+            sheet.append(list(row))
+    for title, columns, extra in (
+        (SEASONS_SHEET, SEASON_COLUMNS, season_rows),
+        (CHILDREN_SHEET, CHILDREN_COLUMNS, child_rows),
+    ):
+        sheet = wb.create_sheet(title)
+        sheet.append(list(columns))
+        for row in extra or []:
             sheet.append(list(row))
     buf = io.BytesIO()
     wb.save(buf)
