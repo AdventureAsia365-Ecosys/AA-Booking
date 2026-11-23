@@ -6,8 +6,9 @@ Suppliers
     while a published contract is in force or upcoming. AA-1158 (R5, bk-064): every new supplier starts
     ``pending``, whoever creates it; a second person with ``supplier.activate`` activates it (``activated_by`` /
     ``activated_at``), never one of its makers (403 ``maker_checker`` + bk-064 CHECK): its creator and everyone who
-    changed its data while pending (``writers``, kept by the bk-064 trigger), except the business owner, flagged
-    ``owner_self_approved`` (:mod:`app.auth.self_approval`). Deactivating a pending supplier rejects it.
+    changed its data while it was not live (``writers``: pending or inactive, kept by the bk-064 trigger), except
+    the business owner, flagged ``owner_self_approved`` (:mod:`app.auth.self_approval`). Deactivating a pending
+    supplier rejects it.
     ``destination_id`` is a CIS place checked against ``catalog.v_destination`` (``app.catalog``); when it maps to an
     ISO country the supplier's ``country_code`` must agree (it is filled in when empty).
 
@@ -269,12 +270,12 @@ async def list_suppliers(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
-# The caller ({p}) is none of the supplier's makers: its creator and its pending-data writers (bk-064).
+# The caller ({p}) is none of the supplier's makers: its creator and the writers of its not-live data (bk-064).
 NOT_A_MAKER = "NOT ({p} = ANY (array_remove(array_append(s.writers, s.created_by), NULL)))"
 
 
 def supplier_makers(supplier: dict[str, Any]) -> list[str]:
-    """Who decided a supplier's pending data: its creator and every writer (bk-064 trigger; ``'{}'`` before it)."""
+    """Who decided a supplier's not-live data: its creator and every writer (bk-064 trigger; ``'{}'`` before it)."""
     keys = [*(supplier.get("writers") or []), supplier.get("created_by")]
     return list(dict.fromkeys(k for k in keys if k))
 
@@ -483,7 +484,7 @@ async def set_status(
     """``active`` / ``inactive`` (``pending`` is only where a supplier starts). Deactivating is refused while a
     published contract is in force or upcoming; deactivating a pending supplier rejects it (its creator withdraws it).
     Activating is an approval (AA-1150, AA-1158 R5): it needs ``supplier.activate`` on top of the route's
-    ``supply.write``, and never by one of its makers (creator or pending-data writer, 403 ``maker_checker``) unless
+    ``supply.write``, and never by one of its makers (creator or not-live-data writer, 403 ``maker_checker``) unless
     the business owner, flagged."""
     if target not in ("active", "inactive"):
         raise Invalid("unknown_status", "status must be active or inactive (a supplier starts pending)")

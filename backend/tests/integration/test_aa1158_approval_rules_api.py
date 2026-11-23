@@ -175,6 +175,32 @@ async def test_suppliers_start_pending_and_a_second_person_activates_them(
     assert published["published_by"] == OWNER and published["owner_self_approved"] is False
 
 
+async def test_a_rejected_supplier_is_not_a_way_round_the_second_person(
+    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection, migrated_booking_dsn: str
+) -> None:
+    """Reject a supplier someone else made, rewrite it, activate it alone: refused at the API and in the database."""
+    c, cis = http
+    owner, lead = admin_of(cis, OWNER_SUB), admin_of(cis, LEAD_SUB)
+    made = await _supplier(c, custom(cis), "Reed Rafts")
+    await _ok(await c.post(f"/suppliers/{made['id']}/deactivate", json={}, headers=lead))  # a reject
+    edited = await _ok(
+        await c.patch(f"/suppliers/{made['id']}", json={"contact_email": "desk@reed.example"}, headers=lead)
+    )
+    assert edited["status"] == "inactive" and edited["writers"][-1] == LEAD
+    _refused(await c.post(f"/suppliers/{made['id']}/activate", headers=lead))
+    app_conn = await asyncpg.connect(migrated_booking_dsn)  # role booking, like the running code
+    try:
+        with pytest.raises(asyncpg.CheckViolationError) as exc:  # the database refuses it too, whatever the API says
+            await app_conn.execute(
+                "UPDATE booking.suppliers SET status = 'active', updated_by = $1 WHERE id = $2::uuid", LEAD, made["id"]
+            )
+    finally:
+        await app_conn.close()
+    assert exc.value.constraint_name == "suppliers_maker_checker_chk"
+    on = await _ok(await c.post(f"/suppliers/{made['id']}/activate", headers=owner))
+    assert on["activated_by"] == OWNER and on["owner_self_approved"] is False
+
+
 # ── Bills and payouts ───────────────────────────────────────────────────────
 
 
@@ -216,6 +242,40 @@ async def test_the_approver_pays_only_as_the_business_owner_flagged(
     assert await admin.fetchval(
         "SELECT same_approver_payer FROM booking.supplier_payouts WHERE id = $1::uuid", out["id"]
     )
+
+
+async def test_an_unreadable_marker_refuses_only_the_self_approval(
+    http: tuple[httpx.AsyncClient, LocalCis], admin: asyncpg.Connection
+) -> None:
+    """Fail closed without breaking the rest: with the CIS view unreadable, the marker reads False in a savepoint, so a
+    normal approval, a payout and a supplier create (all in one transaction with that read) still commit, and only
+    the business owner's self-approval is refused."""
+    c, cis = http
+    owner, lead = admin_of(cis, OWNER_SUB), admin_of(cis, LEAD_SUB)
+    await c.get("/staff/me", headers=owner)  # provision the WORKFORCE rows
+    await c.get("/staff/me", headers=lead)
+    sup = await ops.supply(admin, "Osprey")
+    case = await ops.sold_case(admin, sup, tag="aa1158v")
+    bookings = [await ops.confirmed_booking(admin, case, sup["supplier"], net="100.00") for _ in range(2)]
+    b = await _approved_bill(admin, sup["supplier"], bookings[0], 21, by=MAKER)
+    own = await _approved_bill(admin, sup["supplier"], bookings[1], 22, by=OWNER)
+    await admin.execute("REVOKE SELECT ON shared.v_staff_booking_grant FROM booking")
+    try:
+        assert (await _ok(await c.get("/staff/me/self-approval", headers=owner)))["is_business_owner"] is False
+        approved = await _ok(await c.post(f"/supplier-bills/{b}/approve", headers=lead))
+        assert approved["status"] == "approved"
+        pay = {"amount": "100.00", "method": "bank_transfer", "paid_on": "2026-11-20", "reference": "IT1158-V21"}
+        await _ok(
+            await c.post(f"/supplier-bills/{b}/payouts", json=pay, headers={**owner, "Idempotency-Key": "it1158-v21"}),
+            201,
+        )
+        made = await _supplier(c, owner, "Unread Lodge")
+        assert made["status"] == "pending" and made["actions"]["activate"]["blockers"] == ["maker_checker"]
+        _refused(await c.post(f"/suppliers/{made['id']}/activate", headers=owner))
+        _refused(await c.post(f"/supplier-bills/{own}/approve", headers=owner))
+    finally:
+        await admin.execute("GRANT SELECT ON shared.v_staff_booking_grant TO booking")
+    assert await admin.fetchval("SELECT count(*) FROM booking.supplier_payouts WHERE reference = 'IT1158-V21'") == 1
 
 
 # ── Billing entity and the sellable gate ────────────────────────────────────

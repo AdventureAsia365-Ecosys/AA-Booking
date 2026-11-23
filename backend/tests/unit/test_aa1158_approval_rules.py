@@ -71,6 +71,32 @@ async def test_the_marker_is_read_uncached_and_fails_closed() -> None:
     assert await custom_roles.is_business_owner(broken, OWNER_SUB) is False
 
 
+class InTransaction(ScriptedConn):
+    """A connection inside the caller's transaction that counts the savepoints opened on it."""
+
+    savepoints = 0
+
+    def is_in_transaction(self) -> bool:
+        return True
+
+    def transaction(self, **kwargs: Any) -> Any:
+        self.savepoints += 1
+        return super().transaction(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_marker_and_switch_reads_run_in_a_savepoint_inside_a_transaction() -> None:
+    """A failed read of the CIS view or the policy must not abort the caller's transaction (the payout, the approve)."""
+    broken = InTransaction().on(GRANT, asyncpg.InsufficientPrivilegeError("denied"))
+    assert await custom_roles.is_business_owner(broken, OWNER_SUB) is False
+    assert broken.savepoints == 1
+    policy = InTransaction().on("FROM booking.pricing_policy p", asyncpg.InsufficientPrivilegeError("denied"))
+    assert await self_approval.switch_on(policy, self_approval.APPROVE) is False
+    assert policy.savepoints >= 1
+    outside = owner_conn()  # no transaction: no savepoint (nothing to protect)
+    assert await custom_roles.is_business_owner(outside, OWNER_SUB) is True
+
+
 @pytest.mark.parametrize(
     "session",
     [
@@ -165,7 +191,7 @@ async def test_the_creator_never_activates_except_the_business_owner() -> None:
 
 @pytest.mark.asyncio
 async def test_whoever_edited_a_pending_supplier_never_activates_it() -> None:
-    """R5 like R4: a writer of the pending data (bk-064 ``writers``) is a maker, not only the creator."""
+    """R5 like R4: a writer of the not-live data (bk-064 ``writers``) is a maker, not only the creator."""
     edited = supplier_row(writers=[MAKER.cis_user_id, CHECKER.cis_user_id])
     assert suppliers.supplier_makers(edited) == [MAKER.cis_user_id, CHECKER.cis_user_id]
     assert suppliers.supplier_makers(supplier_row(writers=None, created_by=None)) == []

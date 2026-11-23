@@ -32,6 +32,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -181,10 +183,26 @@ def _grant(row: Any) -> Grant | None:
     return Grant(row["booking_role_code"], row["is_owner"] is True, row["is_business_owner"] is True)
 
 
+@asynccontextmanager
+async def isolated(conn: asyncpg.Connection | asyncpg.Pool) -> AsyncIterator[None]:
+    """A savepoint around a read when ``conn`` is inside the caller's transaction, so an error of that read (the CIS
+    view missing or its grant revoked) never aborts the caller's work (AA-1158: fail closed means the self-approval is
+    refused and everything else goes on). Outside a transaction, or on a pool, nothing to protect."""
+    in_transaction = getattr(conn, "is_in_transaction", None)
+    if callable(in_transaction) and in_transaction():
+        async with conn.transaction():
+            yield
+    else:
+        yield
+
+
 async def read_grant(conn: asyncpg.Connection | asyncpg.Pool, sub: str) -> Grant | None:
-    """The view row of ``sub``, uncached. Raises :class:`Unavailable` on any database error."""
+    """The view row of ``sub``, uncached. Raises :class:`Unavailable` on any database error; inside a transaction the
+    read runs in a savepoint (:func:`isolated`), so the caller's transaction stays usable."""
     try:
-        return _grant(await conn.fetchrow(GRANT_SQL, sub))
+        async with isolated(conn):
+            row = await conn.fetchrow(GRANT_SQL, sub)
+        return _grant(row)
     except (asyncpg.PostgresError, OSError) as exc:
         log.warning("booking_custom_role_grant_unavailable error_class=%s", type(exc).__name__)
         raise Unavailable from exc

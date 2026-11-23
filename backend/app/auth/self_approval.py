@@ -54,10 +54,12 @@ async def is_business_owner(conn: asyncpg.Connection, staff: Staff) -> bool:
 
 
 async def switch_on(conn: asyncpg.Connection, kind: str) -> bool:
-    """The policy switch of ``kind`` in force today; no approved value reads as off."""
+    """The policy switch of ``kind`` in force today; no approved value, or a failed read, reads as off."""
     try:
-        return (await policy_values.load_today(conn)).flag(SWITCHES[kind])
-    except policy_values.PolicyUnavailable:
+        async with custom_roles.isolated(conn):  # a read error never aborts the caller's transaction
+            policy = await policy_values.load_today(conn)
+        return policy.flag(SWITCHES[kind])
+    except (policy_values.PolicyUnavailable, asyncpg.PostgresError, OSError):
         log.warning("owner_self_approval_switch_unavailable kind=%s (read as off)", kind)
         return False
 

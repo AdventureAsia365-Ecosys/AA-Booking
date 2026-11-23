@@ -724,9 +724,9 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
 
 - **Suppliers (R5)**: every new supplier starts `pending`, whoever creates it; a second person with
   `supplier.activate` activates it (`activated_by`, `activated_at`), never one of its makers: its creator or anyone who
-  changed its data while pending (`suppliers.writers`, kept by trigger `suppliers_writers`; 403 `maker_checker`; DB
-  `suppliers_maker_checker_chk`, and `suppliers_activation_guard` takes the activator from `updated_by` when a
-  statement names none). Deactivating a pending supplier rejects it (`supplier.rejected`; its creator: `withdrawn`).
+  changed its data while it was not live, pending or inactive (`suppliers.writers`, kept by trigger
+  `suppliers_writers`; 403 `maker_checker`; DB `suppliers_maker_checker_chk`, and `suppliers_activation_guard` takes
+  the activator from `updated_by` when a statement names none). Deactivating a pending supplier rejects it (`supplier.rejected`; its creator: `withdrawn`).
   The detail answers `actions.activate` (`allowed`, `self_approval`, `blockers`); `GET /suppliers?approvable=me`.
 - **Contracts (R4)**: `supplier_contracts.writers` lists every staff key that wrote the draft (kept by a trigger: the
   creator, then each `updated_by` while a draft, a rate write included); none of them publishes it
@@ -2359,7 +2359,7 @@ A **contract** file (MIG-4; the code PR raises readiness to bk-061). Version 1 o
 ### `bk-064` (AA-1158 part 1, approval rules — needs `bk-041`, `bk-048`, `bk-054`, `bk-055`, `bk-062`)
 
 A **contract** file (MIG-4; the code PR raises readiness to bk-064). `suppliers` gains `pending`, `activated_by`,
-`activated_at`, `owner_self_approved`, `writers` (trigger `suppliers_writers`: whoever changed the pending data) and
+`activated_at`, `owner_self_approved`, `writers` (trigger `suppliers_writers`: whoever changed the data while not live) and
 `suppliers_activation_guard`; `supplier_contracts` gains `writers` (trigger
 `supplier_contracts_writers`, backfilled on drafts) and `owner_self_approved`; `supplier_payouts` gains
 `same_approver_payer` (`supplier_payouts_guard` replaced); `supplier_bills`, `price_list_versions`, `season_ranges`,
