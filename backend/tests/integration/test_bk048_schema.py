@@ -29,10 +29,10 @@ START = date.today() + timedelta(days=75)
 @pytest_asyncio.fixture
 async def conn(migrated_admin_dsn: str, migrated_booking_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     # Tests of bk-022 / bk-041 / bk-046 / bk-047 re-run those files (older outbox CHECK and trigger, invoice line
-    # CHECKs, the outbox column grant): put bk-048 back first.
+    # CHECKs, the outbox column grant): put bk-048 back first, then bk-064 (it replaces bk-048 CHECKs).
     admin = await asyncpg.connect(migrated_admin_dsn)
     try:
-        await apply_migrations(admin, only=[48])
+        await apply_migrations(admin, only=[48, 64])
     finally:
         await admin.close()
     c = await asyncpg.connect(migrated_booking_dsn)
@@ -155,6 +155,7 @@ async def test_registered_and_rerun_is_a_no_op(migrated_admin_dsn: str) -> None:
         assert dict(clause) == {"status": "draft", "updated_by": "system:bk-048"}  # the business owner approves it
         assert BK048.read_text(encoding="utf-8").count("-- migrate:") == 0  # contract: no directive line
     finally:
+        await apply_migrations(admin, only=[64])  # bk-064 replaces bk-048 CHECKs: put it back for the later tests
         await admin.close()
 
 

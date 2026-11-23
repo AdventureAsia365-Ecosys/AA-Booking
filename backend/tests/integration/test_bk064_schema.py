@@ -227,6 +227,25 @@ async def test_the_business_owner_self_activates_flagged_and_keeps_editing(
     assert not await app_conn.fetchval("SELECT owner_self_approved FROM booking.suppliers WHERE id = $1::uuid", sid)
 
 
+async def test_a_flagged_reactivation_is_checked_against_the_marker_again(
+    app_conn: asyncpg.Connection, admin: asyncpg.Connection
+) -> None:
+    sid = await _supplier(app_conn, OWNER, "Owner Ridge")
+    await app_conn.execute(ACTIVATE, sid, OWNER, True)
+    await _marker(admin, OWNER_SUB, False)  # the marker moves in CIS
+    # A deactivation by someone else keeps the activation columns and stays possible after the marker moves.
+    await app_conn.execute(
+        "UPDATE booking.suppliers SET status = 'inactive', updated_by = $2 WHERE id = $1::uuid", sid, CHECKER
+    )
+    # Same activator, flag already set: the new activated_at makes the guard read the marker again.
+    with pytest.raises(asyncpg.CheckViolationError, match="not the business owner"):
+        await app_conn.execute(ACTIVATE, sid, OWNER, True)
+    assert await app_conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sid) == "inactive"
+    await _marker(admin, OWNER_SUB, True)
+    await app_conn.execute(ACTIVATE, sid, OWNER, True)
+    assert await app_conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sid) == "active"
+
+
 async def test_whoever_edits_a_pending_supplier_never_activates_it(
     app_conn: asyncpg.Connection, admin: asyncpg.Connection
 ) -> None:
