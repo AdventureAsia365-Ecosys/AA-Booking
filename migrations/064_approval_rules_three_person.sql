@@ -20,9 +20,13 @@
 --      shared.v_staff_booking_grant; else check_violation. "final": a set flag is never cleared. The DB refuses a
 --      forged flag, not only the API. SECURITY INVOKER: it runs as role booking, which reads the view and staff_users.
 --      If the view is unreadable, a self-approval fails and a normal approval is untouched.
---   1. suppliers: status pending, activated_by, activated_at, owner_self_approved. suppliers_status_chk (same name)
---      adds pending; suppliers_activation_chk; suppliers_maker_checker_chk (the activator is not the creator unless
---      flagged); suppliers_owner_self_chk (NULL-safe: the flag = activator IS NOT DISTINCT FROM creator). Trigger
+--   1. suppliers: status pending, activated_by, activated_at, owner_self_approved, writers. writers (kept by trigger
+--      suppliers_writers, the client value is ignored): INSERT = [created_by]; an UPDATE that changes the supplier's
+--      data while it is pending appends updated_by (also when the same statement activates it). suppliers_status_chk
+--      (same name) adds pending; suppliers_activation_chk; suppliers_maker_checker_chk (the activator is neither the
+--      creator nor a writer of the pending data, unless flagged); suppliers_owner_self_chk (NULL-safe: the flag =
+--      the activator is the creator or a writer). Existing rows keep writers '{}' (no backfill: the CHECKs name
+--      created_by too, so no row is touched). Trigger
 --      suppliers_activation_guard (for every role except members of bk_owner, i.e. the app): an INSERT has no
 --      activation; the creator never changes; a supplier never goes back to pending; becoming
 --      active records activated_by = updated_by (filled from updated_by when the statement names no activator, so the
@@ -54,6 +58,9 @@
 --   8. booking.billing_entity_change: one pending change of a billing entity's payment_instructions and / or making
 --      it the default, applied on a decision by a second person (or a flagged owner self-approval). Guard: an INSERT
 --      is pending and undecided; only pending -> approved / rejected / withdrawn, dated now(); decided rows are final.
+--      Erasure (DM-6.7): one update may set reason and / or reject_reason to the fixed marker '[redacted]' with every
+--      other column unchanged, on any row (it runs as bk_owner in a reviewed DB Migrate run-script, root
+--      docs/legal/dsar-erasure-runbook.md; role booking has no UPDATE grant on reason).
 --      The DB guard on billing_entity itself (payment_instructions / is_default change only in the transaction that
 --      approved a matching change) would refuse the running code's direct edit, so it ships with the part 2 migration
 --      (S289) together with the same guard for supplier bank accounts; until then the code PR is the control.
@@ -153,7 +160,8 @@ GRANT EXECUTE ON FUNCTION booking.owner_self_approval_guard() TO booking;
 ALTER TABLE booking.suppliers
     ADD COLUMN IF NOT EXISTS activated_by text,
     ADD COLUMN IF NOT EXISTS activated_at timestamptz,
-    ADD COLUMN IF NOT EXISTS owner_self_approved boolean NOT NULL DEFAULT false;
+    ADD COLUMN IF NOT EXISTS owner_self_approved boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS writers text[] NOT NULL DEFAULT '{}';
 
 ALTER TABLE booking.suppliers DROP CONSTRAINT IF EXISTS suppliers_status_chk;
 ALTER TABLE booking.suppliers ADD CONSTRAINT suppliers_status_chk CHECK (status IN ('pending', 'active', 'inactive'));
@@ -164,17 +172,24 @@ ALTER TABLE booking.suppliers ADD CONSTRAINT suppliers_activation_chk CHECK (
     AND (activated_by IS NULL OR char_length(activated_by) BETWEEN 1 AND 128));
 ALTER TABLE booking.suppliers DROP CONSTRAINT IF EXISTS suppliers_maker_checker_chk;
 ALTER TABLE booking.suppliers ADD CONSTRAINT suppliers_maker_checker_chk CHECK (
-    activated_by IS NULL OR activated_by IS DISTINCT FROM created_by OR owner_self_approved);
+    activated_by IS NULL OR owner_self_approved
+    OR (activated_by IS DISTINCT FROM created_by AND NOT (activated_by = ANY (writers))));
 ALTER TABLE booking.suppliers DROP CONSTRAINT IF EXISTS suppliers_owner_self_chk;
 ALTER TABLE booking.suppliers ADD CONSTRAINT suppliers_owner_self_chk CHECK (
-    owner_self_approved = (activated_by IS NOT NULL AND activated_by IS NOT DISTINCT FROM created_by));
+    owner_self_approved = (activated_by IS NOT NULL
+                           AND (activated_by IS NOT DISTINCT FROM created_by OR activated_by = ANY (writers))));
 
 COMMENT ON COLUMN booking.suppliers.activated_by IS
-    'bk-064 (AA-1158 R5): the staff key of the person who last activated the supplier (never its creator unless '
-    'owner_self_approved). NULL on suppliers active before bk-064 (legacy) and on pending ones.';
+    'bk-064 (AA-1158 R5): the staff key of the person who last activated the supplier (never its creator nor one of '
+    'its writers unless owner_self_approved). NULL on suppliers active before bk-064 (legacy) and on pending ones.';
 COMMENT ON COLUMN booking.suppliers.owner_self_approved IS
-    'bk-064 (AA-1158 Q5): the business owner activated a supplier she created (checked against the CIS marker by '
-    'booking.owner_self_approval_guard). Cleared by a later activation by someone else; the audit keeps the history.';
+    'bk-064 (AA-1158 Q5): the business owner activated a supplier she created or edited while pending (checked against '
+    'the CIS marker by booking.owner_self_approval_guard). Cleared by a later activation by someone else; the audit '
+    'keeps the history.';
+COMMENT ON COLUMN booking.suppliers.writers IS
+    'bk-064 (AA-1158 R5): every staff key that decided the supplier''s pending data (its creator, then each updated_by '
+    'of an UPDATE that changed the data while pending; kept by trigger suppliers_writers, the client value is '
+    'ignored). The activator is never one of them unless owner_self_approved. ''{}'' on suppliers made before bk-064.';
 
 CREATE OR REPLACE FUNCTION booking.suppliers_activation_guard() RETURNS trigger
     LANGUAGE plpgsql
@@ -238,6 +253,40 @@ CREATE OR REPLACE TRIGGER suppliers_activation_guard
 CREATE OR REPLACE TRIGGER suppliers_owner_self_approval
     BEFORE INSERT OR UPDATE ON booking.suppliers
     FOR EACH ROW EXECUTE FUNCTION booking.owner_self_approval_guard('activated_by', 'owner_self_approved', 'mutable');
+
+CREATE OR REPLACE FUNCTION booking.suppliers_writers() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path = pg_catalog
+AS $$
+DECLARE
+    -- Not the supplier's data: the status move, its activation and the bookkeeping columns.
+    v_meta CONSTANT text[] := ARRAY['status', 'activated_by', 'activated_at', 'owner_self_approved', 'writers',
+                                    'updated_by', 'updated_at'];
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        NEW.writers := array_remove(ARRAY[NEW.created_by], NULL);
+        RETURN NEW;
+    END IF;
+    NEW.writers := OLD.writers;
+    -- Whoever changes the data of a pending supplier decided what goes live, so never activates it (R5, like the
+    -- contract writers of R4 and the bill facts editor of bk-045); an edit in the activating statement counts too.
+    IF OLD.status = 'pending' AND NEW.updated_by IS NOT NULL AND NOT (NEW.updated_by = ANY (OLD.writers))
+       AND (to_jsonb(NEW) - v_meta) IS DISTINCT FROM (to_jsonb(OLD) - v_meta) THEN
+        NEW.writers := OLD.writers || NEW.updated_by;
+    END IF;
+    RETURN NEW;
+END $$;
+
+COMMENT ON FUNCTION booking.suppliers_writers() IS
+    'bk-064 (AA-1158 R5): writers = [created_by] on INSERT; on UPDATE the old list, plus updated_by when the update '
+    'changes the data of a pending supplier (status, activation and bookkeeping columns are not data).';
+
+GRANT EXECUTE ON FUNCTION booking.suppliers_writers() TO booking;
+
+-- Fires after suppliers_activation_guard and suppliers_set_updated_at (name order); the CHECKs read its result.
+CREATE OR REPLACE TRIGGER suppliers_writers
+    BEFORE INSERT OR UPDATE ON booking.suppliers
+    FOR EACH ROW EXECUTE FUNCTION booking.suppliers_writers();
 
 -- ── 2. Contracts: the writer list ───────────────────────────────────────────────────────────────────────────────
 
@@ -723,6 +772,13 @@ BEGIN
         END IF;
         RETURN NEW;
     END IF;
+    -- Erasure (DM-6.7): the staff reasons may be set to the fixed marker, nothing else in the same update.
+    IF (to_jsonb(NEW) - 'reason' - 'reject_reason') = (to_jsonb(OLD) - 'reason' - 'reject_reason')
+       AND (NEW.reason, NEW.reject_reason) IS DISTINCT FROM (OLD.reason, OLD.reject_reason)
+       AND (NEW.reason IS NOT DISTINCT FROM OLD.reason OR NEW.reason = '[redacted]')
+       AND (NEW.reject_reason IS NOT DISTINCT FROM OLD.reject_reason OR NEW.reject_reason = '[redacted]') THEN
+        RETURN NEW;
+    END IF;
     IF OLD.status <> 'pending' THEN
         RAISE EXCEPTION 'billing entity change % is %; it is final', OLD.id, OLD.status
             USING ERRCODE = 'check_violation';
@@ -743,7 +799,8 @@ END $$;
 
 COMMENT ON FUNCTION booking.billing_entity_change_guard() IS
     'bk-064 (AA-1158): a change starts pending and undecided; what was requested never changes; only pending -> '
-    'approved / rejected / withdrawn, dated now(); decided rows are final.';
+    'approved / rejected / withdrawn, dated now(); decided rows are final; on erasure (DM-6.7) reason and '
+    'reject_reason may be set to [redacted], alone.';
 
 GRANT EXECUTE ON FUNCTION booking.billing_entity_change_guard() TO booking;
 
@@ -818,7 +875,7 @@ BEGIN
     END IF;
     SELECT string_agg(want, ', ' ORDER BY want) INTO missing
       FROM unnest(ARRAY[
-          'suppliers.suppliers_activation_guard', 'suppliers.suppliers_owner_self_approval',
+          'suppliers.suppliers_activation_guard', 'suppliers.suppliers_owner_self_approval', 'suppliers.suppliers_writers',
           'supplier_contracts.supplier_contracts_writers', 'supplier_contracts.supplier_contracts_owner_self_approval',
           'supplier_bills.supplier_bills_owner_self_approval', 'supplier_payouts.supplier_payouts_owner_self_approval',
           'price_list_versions.price_list_versions_owner_self_approval', 'season_ranges.season_ranges_owner_self_approval',
@@ -864,7 +921,7 @@ BEGIN
 END $$;
 
 INSERT INTO shared.schema_versions (version, applied_at, description)
-VALUES ('bk-064', now(), 'AA-1158 approval rules (three-person team): suppliers pending + activated_by, contract writers, bill approver pays only flagged (same_approver_payer), owner_self_approved flags checked against the CIS business-owner marker (booking.owner_self_approval_guard), booking.billing_entity_change, policy switches owner_self_approval_allowed / owner_payout_after_approval_allowed')
+VALUES ('bk-064', now(), 'AA-1158 approval rules (three-person team): suppliers pending + activated_by + writers, contract writers, bill approver pays only flagged (same_approver_payer), owner_self_approved flags checked against the CIS business-owner marker (booking.owner_self_approval_guard), booking.billing_entity_change, policy switches owner_self_approval_allowed / owner_payout_after_approval_allowed')
 ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

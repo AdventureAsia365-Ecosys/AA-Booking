@@ -1,15 +1,17 @@
 """AA-1158 part 1 (bk-064) on a real PostgreSQL, as role ``booking`` where the app writes: registration and re-run
 no-op, the policy seed, grants, and the database rules of the three-person approval model:
 
-- suppliers: a new one has no activation; its creator never activates it (CHECK, also when the
-  statement names no activator: the guard takes it from updated_by); a forged business-owner flag is refused; the
-  owner's flag holds and the row stays editable after the marker moves; never back to pending;
+- suppliers: a new one has no activation; its creator, and whoever changed its pending data (``writers``), never
+  activates it (CHECK, also when the statement names no activator: the guard takes it from updated_by); a forged
+  business-owner flag is refused; the owner's flag holds and the row stays editable after the marker moves; never
+  back to pending;
 - contracts: the trigger keeps the writer list (the client value is ignored); no writer publishes, unless the
   business owner, flagged;
 - bills and payouts: the owner self-approves her bill, flagged; nobody else does; the bill approver records the payout
   only flagged and only as the business owner; the creator never pays (bk-030 rule kept); the flag never changes;
 - the generic guard on holiday events (final flag) and the season / stop-sale split in the CHECK text;
-- billing_entity_change: starts pending, decided once, dated now, never by the requester unless flagged.
+- billing_entity_change: starts pending, decided once, dated now, never by the requester unless flagged; its reasons
+  can be redacted alone (DM-6.7).
 
 The business owner is a ``staff_users`` row with a Cognito identity and a ``shared.staff_booking_grant_stub`` row with
 ``is_business_owner``; the tech lead the same with the marker off. All names are invented."""
@@ -223,6 +225,67 @@ async def test_the_business_owner_self_activates_flagged_and_keeps_editing(
     )
     await app_conn.execute(ACTIVATE, sid, CHECKER, False)
     assert not await app_conn.fetchval("SELECT owner_self_approved FROM booking.suppliers WHERE id = $1::uuid", sid)
+
+
+async def test_whoever_edits_a_pending_supplier_never_activates_it(
+    app_conn: asyncpg.Connection, admin: asyncpg.Connection
+) -> None:
+    """R5 like R4: every staff key that changed the pending data is a maker (the trigger keeps the list)."""
+    writers = "SELECT writers FROM booking.suppliers WHERE id = $1::uuid"
+    sid = await app_conn.fetchval(
+        "INSERT INTO booking.suppliers (company_name, categories, status, created_by, updated_by, writers)"
+        " VALUES ('it-1158 Writers Lodge', ARRAY['hotel'], 'pending', $1, $1, ARRAY['forged']) RETURNING id::text",
+        MAKER,
+    )
+    assert await app_conn.fetchval(writers, sid) == [MAKER]  # the client value is ignored
+    await app_conn.execute(
+        "UPDATE booking.suppliers SET contact_email = 'desk@lodge.example', updated_by = $2 WHERE id = $1::uuid",
+        sid,
+        CHECKER,
+    )
+    assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER]
+    await app_conn.execute(  # no data change: not a writer
+        "UPDATE booking.suppliers SET contact_email = 'desk@lodge.example', updated_by = $2 WHERE id = $1::uuid",
+        sid,
+        PAYER,
+    )
+    assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER]
+    for statement in (
+        "UPDATE booking.suppliers SET status = 'active', updated_by = $2 WHERE id = $1::uuid",
+        ACTIVATE.replace("$3", "false"),
+    ):
+        with pytest.raises(asyncpg.CheckViolationError) as exc:
+            await app_conn.execute(statement, sid, CHECKER)
+        assert exc.value.constraint_name in ("suppliers_maker_checker_chk", "suppliers_owner_self_chk")
+    # An edit in the activating statement makes the activator a writer: refused too.
+    with pytest.raises(asyncpg.CheckViolationError) as exc:
+        await app_conn.execute(
+            "UPDATE booking.suppliers SET status = 'active', website = 'https://x.example', updated_by = $2"
+            " WHERE id = $1::uuid",
+            sid,
+            PAYER,
+        )
+    assert exc.value.constraint_name == "suppliers_maker_checker_chk"
+    await app_conn.execute(ACTIVATE, sid, PAYER, False)
+    row = await app_conn.fetchrow(
+        "SELECT status, activated_by, writers FROM booking.suppliers WHERE id = $1::uuid", sid
+    )
+    assert dict(row) == {"status": "active", "activated_by": PAYER, "writers": [MAKER, CHECKER]}
+    await app_conn.execute(  # edits of a supplier that is not pending add no writer
+        "UPDATE booking.suppliers SET website = 'https://y.example', updated_by = $2 WHERE id = $1::uuid", sid, LEAD
+    )
+    assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER]
+    # The business owner who edited a pending supplier activates it only flagged.
+    other = await _supplier(app_conn, MAKER, "Owner Edit Lodge")
+    await app_conn.execute(
+        "UPDATE booking.suppliers SET contact_phone = '+84 28 0000 0000', updated_by = $2 WHERE id = $1::uuid",
+        other,
+        OWNER,
+    )
+    with pytest.raises(asyncpg.CheckViolationError):
+        await app_conn.execute(ACTIVATE, other, OWNER, False)
+    await app_conn.execute(ACTIVATE, other, OWNER, True)
+    assert await app_conn.fetchval("SELECT owner_self_approved FROM booking.suppliers WHERE id = $1::uuid", other)
 
 
 async def test_owner_connections_keep_the_legacy_insert(admin: asyncpg.Connection) -> None:
@@ -449,3 +512,44 @@ async def test_billing_entity_change_is_decided_once_by_another_person(
     await app_conn.execute(decide.replace("$3", "now()").replace("$4", "$3"), change, CHECKER, False)
     with pytest.raises(asyncpg.CheckViolationError, match="final"):
         await admin.execute("UPDATE booking.billing_entity_change SET decided_at = now() WHERE id = $1::uuid", change)
+
+
+async def test_billing_entity_change_reasons_can_be_redacted_alone(
+    app_conn: asyncpg.Connection, admin: asyncpg.Connection
+) -> None:
+    """Erasure (DM-6.7): reason / reject_reason may become '[redacted]', alone, on a decided row too (the owner
+    connection runs it in a reviewed run-script; role booking has no UPDATE grant on reason)."""
+    entity = await admin.fetchval(
+        "INSERT INTO booking.billing_entity (code, legal_entity) VALUES ('IT1158R', 'Lanternfield Travel Ltd')"
+        " RETURNING id::text"
+    )
+    change = await app_conn.fetchval(
+        "INSERT INTO booking.billing_entity_change (billing_entity_id, set_payment_instructions, payment_instructions,"
+        " reason, requested_by) VALUES ($1::uuid, true, 'Account 0002', 'asked by Mai Linh', $2) RETURNING id::text",
+        entity,
+        MAKER,
+    )
+    await app_conn.execute(
+        "UPDATE booking.billing_entity_change SET status = 'rejected', decided_by = $2, decided_at = now(),"
+        " reject_reason = 'Mai Linh left' WHERE id = $1::uuid",
+        change,
+        CHECKER,
+    )
+    redact = "UPDATE booking.billing_entity_change SET {} WHERE id = $1::uuid"
+    with pytest.raises(asyncpg.CheckViolationError, match="final"):
+        await admin.execute(redact.format("reason = 'someone else'"), change)
+    with pytest.raises(asyncpg.CheckViolationError, match="final"):
+        await admin.execute(redact.format("reason = '[redacted]', decided_by = 'it-1158-other'"), change)
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await app_conn.execute(redact.format("reason = '[redacted]'"), change)
+    await admin.execute(redact.format("reason = '[redacted]', reject_reason = '[redacted]'"), change)
+    row = await admin.fetchrow(
+        "SELECT reason, reject_reason, status, decided_by FROM booking.billing_entity_change WHERE id = $1::uuid",
+        change,
+    )
+    assert dict(row) == {
+        "reason": "[redacted]",
+        "reject_reason": "[redacted]",
+        "status": "rejected",
+        "decided_by": CHECKER,
+    }
