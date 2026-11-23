@@ -131,9 +131,9 @@ async def test_registered_once_and_rerun_is_a_no_op(admin: asyncpg.Connection) -
     seeded = await admin.fetch(
         "SELECT p.param_key, p.value::text AS value, e.actor FROM booking.pricing_policy p"
         " JOIN booking.pricing_policy_events e ON e.policy_id = p.id AND e.event = 'approved'"
-        " WHERE p.created_by = 'seed:bk-069' ORDER BY p.id"
+        " WHERE p.created_by = 'seed:bk-069' ORDER BY p.param_key COLLATE \"C\""
     )
-    assert [(r["param_key"], json.loads(r["value"])) for r in seeded] == list(PARAMS)
+    assert [(r["param_key"], json.loads(r["value"])) for r in seeded] == sorted(PARAMS)
     assert all(r["actor"] != "seed:bk-069" for r in seeded)
 
 
