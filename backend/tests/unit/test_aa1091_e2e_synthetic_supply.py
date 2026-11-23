@@ -26,7 +26,7 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 
-from app.auth import e2e_staff
+from app.auth import e2e_staff, e2e_staff_supply
 from app.supply import activity_import
 from tests.staff_tokens import BOOKING_STAFF_CLIENT, LocalCis
 from tests.unit.fakes import ScriptedConn
@@ -318,11 +318,12 @@ def test_an_activity_sheet_with_an_unmarked_row_is_refused_before_anything_is_re
 
 def test_check_activity_sheet_passes_marked_rows_only() -> None:
     marked = activity_import.parse(base64.b64decode(ACTIVITY_BODY["data_base64"]))
-    e2e_staff.check_activity_sheet("pricing_maker", marked)
-    e2e_staff.check_activity_sheet("pricing_maker", activity_import.parse(activity_import.build_workbook({}, [])))
+    e2e_staff_supply.check_activity_sheet("pricing_maker", marked)
+    check = e2e_staff_supply.check_activity_sheet
+    check("pricing_maker", activity_import.parse(activity_import.build_workbook({}, [])))
     with pytest.raises(HTTPException) as err:
-        e2e_staff.check_activity_sheet("pricing_maker", activity_import.parse(base64.b64decode(
-            _activities(("Market cycle", None))["data_base64"])))  # fmt: skip
+        unmarked = base64.b64decode(_activities(("Market cycle", None))["data_base64"])
+        check("pricing_maker", activity_import.parse(unmarked))
     assert err.value.detail == "e2e_read_only"
 
 
@@ -330,10 +331,10 @@ def test_check_activity_sheet_caps_an_e2e_import_at_five_rows() -> None:
     """Each imported activity queues one paid CIS draft job: the E2E maker imports at most 5 (the Done-when count)."""
     five = [(f"SYNTHETIC Trail {i}", None) for i in range(5)]
     sheet = activity_import.parse(base64.b64decode(_activities(*five)["data_base64"]))
-    e2e_staff.check_activity_sheet("pricing_maker", sheet)
+    e2e_staff_supply.check_activity_sheet("pricing_maker", sheet)
     six = activity_import.parse(base64.b64decode(_activities(*five, ("SYNTHETIC Trail 5", None))["data_base64"]))
     with pytest.raises(HTTPException) as err:
-        e2e_staff.check_activity_sheet("pricing_maker", six)
+        e2e_staff_supply.check_activity_sheet("pricing_maker", six)
     assert err.value.detail == "e2e_read_only"
 
 

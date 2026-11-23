@@ -18,7 +18,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import e2e_staff
+from app.auth import e2e_staff_supply
 from app.auth.staff import Staff, get_pool, require
 from app.errors import Forbidden
 from app.routers.suppliers import XLSX, RateSheetUpload, decode_sheet
@@ -219,7 +219,7 @@ async def import_activity_sheet(
     if staff.e2e_writer is not None:
         # A10e-4 (root ADR 0006a): a Dev-only E2E session imports marked activities only (its supplier was checked
         # synthetic from the path before the route ran); refused before anything is previewed or written.
-        e2e_staff.check_activity_sheet(staff.e2e_writer, activity_import.parse(data))
+        e2e_staff_supply.check_activity_sheet(staff.e2e_writer, activity_import.parse(data))
     async with pool.acquire() as conn, conn.transaction():
         return await activity_import.import_sheet(conn, staff, supplier_ref, data, dry_run=dry_run)
 

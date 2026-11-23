@@ -52,7 +52,8 @@ agency payment recorded by one finance user and approved by another (maker-check
   ``SVC-`` + digits).
 
 - **Synthetic activities (A10e-4, AA-1151 S289).** The maker also imports its synthetic supplier's activity catalogue
-  (:data:`ACTIVITY_SHEET_IMPORT`, route check :func:`check_activity_sheet`); the E2E owner (A10h) publishes the offers.
+  (:data:`ACTIVITY_SHEET_IMPORT`, route check :func:`app.auth.e2e_staff_supply.check_activity_sheet`); the E2E owner
+  (A10h) publishes the offers.
 
 - **The custom-role maker (A10g, AA-1155 T5, root spec R4.3).** The Dev-only address :data:`E2E_CUSTOM_MAKER_EMAIL`
   (groups exactly ``cis-custom`` + ``booking-custom``) holds the custom role CIS grants it (``app.auth.custom_roles``),
@@ -141,7 +142,7 @@ PRICE_VERSION_WITHDRAW = ("POST", f"{_VERSION}/withdraw")
 SUPPLIER_CREATE = ("POST", "/booking/suppliers")
 SUPPLIER_DEACTIVATE = ("POST", "/booking/suppliers/{supplier_ref}/deactivate")
 RATE_SHEET_IMPORT = ("POST", "/booking/suppliers/{supplier_ref}/rate-sheets")
-# A10e-4 (AA-1151 S289): the activity catalogue of the maker's synthetic supplier (+ check_activity_sheet).
+# A10e-4 (AA-1151 S289): the activity catalogue of the maker's synthetic supplier (+ e2e_staff_supply).
 ACTIVITY_SHEET_IMPORT = ("POST", "/booking/suppliers/{supplier_ref}/activity-sheets")
 CONTRACT_STATUS = ("PATCH", "/booking/contracts/{contract_id}")
 HOTEL_CREATE = ("POST", "/booking/hotels")
@@ -475,7 +476,7 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         SUPPLIER_DEACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
         SUPPLIER_ACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),  # AA-1158: the pricing checker
         RATE_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
-        ACTIVITY_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),  # A10e-4 (+ check_activity_sheet)
+        ACTIVITY_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),  # A10e-4 (+ e2e_staff_supply)
         CONTRACT_STATUS[1]: ("contract_id", CONTRACT_SYNTHETIC_SQL),
         HOTEL_DEACTIVATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),
         ROOM_TYPE_CREATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),
@@ -789,15 +790,3 @@ async def check_import(conn: asyncpg.Connection, writer_name: str, sheets: Any) 
         )
         raise HTTPException(status_code=403, detail=E2E_SYNTHETIC_ONLY)
     log.info("booking_e2e_write_allowed identity=%s route=%s tours=%d", writer_name, PRICE_IMPORT[1], len(keys))
-
-
-def check_activity_sheet(writer_name: str, sheet: Any) -> None:
-    """A10e-4: the activity import route's check for an E2E session, before any preview or write (the path's supplier
-    is synthetic). 403 ``e2e_read_only`` past 5 rows (each row queues a paid CIS draft job) or unless every row's title
-    starts with :data:`SYNTHETIC_SUPPLY_MARK` and has no inclusions. ``sheet`` = ``activity_import.parse(upload)``."""
-    for i, row in enumerate(getattr(sheet, "rows", None) or ()):
-        title = getattr(row, "title", None)
-        marked = i < 5 and isinstance(title, str) and title.strip().startswith(SYNTHETIC_SUPPLY_MARK)
-        if not marked or (getattr(row, "service", None) or {}).get("inclusions"):
-            log.info("booking_e2e_writer_refused identity=%s reason=activity_row", writer_name)
-            raise HTTPException(status_code=403, detail=E2E_READ_ONLY)
