@@ -131,7 +131,7 @@ async def test_hotels_and_services_crud_rbac_and_facts_only(
     assert hotel["check_in_time"] == "14:00:00"
 
     for bad, detail in (
-        ({**body, "name": "hanoi emerald hotel"}, "hotel_exists"),
+        ({**body, "name": "hanoi emerald hotel"}, "hotel_duplicate"),  # AA-1153: the property master answers first
         ({**body, "name": "Geo", "latitude": "21.03"}, "geo_pair"),
         ({**body, "name": "Nowhere", "destination_id": NOWHERE}, "unknown_destination"),
         ({**body, "name": "Kitchen Inn", "supplier_id": meals_only["id"]}, "supplier_category_missing"),
