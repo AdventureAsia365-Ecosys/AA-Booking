@@ -33,9 +33,46 @@ function problemsOf(err: unknown): ActivitySheetProblem[] {
   return Array.isArray(list) ? (list as ActivitySheetProblem[]) : [];
 }
 
-export function ActivityImportDrawer({ onClose }: { onClose: () => void }) {
+function SheetProblems({ problems }: { problems: ActivitySheetProblem[] }) {
   const t = useT(MSG);
   const tx = useTx();
+  if (!problems.length) return null;
+  return (
+    <ul className="flex flex-col gap-1 rounded-md border border-danger-border p-3 text-xs text-danger" aria-label={t("Problems in the sheet")}>
+      {problems.map((p, i) => (
+        <li key={i}>
+          {p.sheet}
+          {p.row ? t(" row {0}", p.row) : ""}
+          {p.column ? ` · ${p.column}` : ""}: {tx(p.message)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SheetPreview({ preview }: { preview: ActivitySheetResult | null }) {
+  const t = useT(MSG);
+  if (!preview) return null;
+  return (
+    <div className="flex flex-col gap-1 rounded-md border border-line p-3 text-xs text-body" data-testid="activity-sheet-preview">
+      <p className="font-medium text-ink">{t("{0} activities ready", preview.activities.length)}</p>
+      <ul className="flex flex-col gap-0.5 text-muted">
+        {preview.activities.slice(0, MAX_LISTED).map((a) => (
+          <li key={a.row}>{t("Row {0}: {1} at {2}", a.row, a.title, a.places.map((p) => p.name).join(", "))}</li>
+        ))}
+        {preview.activities.length > MAX_LISTED && <li>{t("… and {0} more", preview.activities.length - MAX_LISTED)}</li>}
+      </ul>
+    </div>
+  );
+}
+
+/** The drawer's error line: a local error, a request error, or the count of sheet problems. */
+function drawerError(local: string | null, err: unknown, problemsText: string | null): string | null {
+  return local ?? problemsText ?? (err instanceof Error ? err.message : null);
+}
+
+export function ActivityImportDrawer({ onClose }: { onClose: () => void }) {
+  const t = useT(MSG);
   const qc = useQueryClient();
   const toast = useToast();
   const [supplier, setSupplier] = useState("");
@@ -80,7 +117,6 @@ export function ActivityImportDrawer({ onClose }: { onClose: () => void }) {
   }
 
   const problems = problemsOf(send.error);
-  const error = localError ?? (send.error && !problems.length ? (send.error as Error).message : null);
   return (
     <FormDrawer
       open
@@ -93,7 +129,11 @@ export function ActivityImportDrawer({ onClose }: { onClose: () => void }) {
       }}
       busy={send.isPending}
       dirty={!!file}
-      error={error ?? (problems.length ? t("{0} problem(s) in the sheet: nothing was imported.", problems.length) : null)}
+      error={drawerError(
+        localError,
+        send.error,
+        problems.length ? t("{0} problem(s) in the sheet: nothing was imported.", problems.length) : null,
+      )}
       width={560}
     >
       <p className="text-[13px] text-muted">
@@ -132,30 +172,8 @@ export function ActivityImportDrawer({ onClose }: { onClose: () => void }) {
       <Button className="self-start" variant="secondary" disabled={!file || !supplier || send.isPending} onClick={() => send.mutate(true)}>
         <FileSpreadsheet size={14} /> {t("Check the sheet")}
       </Button>
-      {problems.length > 0 && (
-        <ul className="flex flex-col gap-1 rounded-md border border-danger-border p-3 text-xs text-danger" aria-label={t("Problems in the sheet")}>
-          {problems.map((p, i) => (
-            <li key={i}>
-              {p.sheet}
-              {p.row ? t(" row {0}", p.row) : ""}
-              {p.column ? ` · ${p.column}` : ""}: {tx(p.message)}
-            </li>
-          ))}
-        </ul>
-      )}
-      {preview && (
-        <div className="flex flex-col gap-1 rounded-md border border-line p-3 text-xs text-body" data-testid="activity-sheet-preview">
-          <p className="font-medium text-ink">{t("{0} activities ready", preview.activities.length)}</p>
-          <ul className="flex flex-col gap-0.5 text-muted">
-            {preview.activities.slice(0, MAX_LISTED).map((a) => (
-              <li key={a.row}>
-                {t("Row {0}: {1} at {2}", a.row, a.title, a.places.map((p) => p.name).join(", "))}
-              </li>
-            ))}
-            {preview.activities.length > MAX_LISTED && <li>{t("… and {0} more", preview.activities.length - MAX_LISTED)}</li>}
-          </ul>
-        </div>
-      )}
+      <SheetProblems problems={problems} />
+      <SheetPreview preview={preview} />
     </FormDrawer>
   );
 }
