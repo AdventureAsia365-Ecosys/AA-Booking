@@ -42,6 +42,8 @@ MASTER_ROLE = "aa_cis_admin"  # RDS master: DB Migrate's login role, owner of bo
 OWNER_ROLE = "bk_owner"  # NOLOGIN owner of schema booking from bk-014 on (Infra roles/001, X1 S3)
 OWNER_TRANSFER = 14  # bk-014 hands every booking.* object from MASTER_ROLE to OWNER_ROLE
 APP_ROLE = "booking"
+# The objects of schema shared a migration may name: the version registry, and the CIS contract view a trigger reads.
+SHARED_READS = frozenset({"schema_versions", "v_staff_booking_grant"})
 # Other apps' runtime roles that may read a Booking contract view (USAGE on the schema + SELECT on booking.v_*).
 CONSUMER_ROLES = frozenset({"cis_app", "tripplanner"})
 
@@ -186,10 +188,15 @@ def check_sql(name: str, sql: str) -> list[Violation]:
     if reg != [version]:
         bad("register", f"must insert exactly '{version}' into shared.schema_versions ON CONFLICT (version) DO NOTHING")
 
-    # shared.* — only schema_versions.
+    # shared.* — only schema_versions, and the read-only CIS contract view v_staff_booking_grant (CIS 462, root ADR
+    # 0006a A14: SELECT to role booking only; AA-1158 bk-064 reads the business-owner marker in a trigger), and that
+    # view only as a source after FROM / JOIN.
     for ref in re.findall(rf"\bshared\s*\.\s*({_IDENT})", flat, flags=re.IGNORECASE):
-        if _norm(ref) != "schema_versions":
+        if _norm(ref) not in SHARED_READS:
             bad("foreign-schema", f"shared.{ref} is outside schema booking")
+    for verb in re.findall(r"(\w+)\s+shared\s*\.\s*v_staff_booking_grant\b", flat, flags=re.IGNORECASE):
+        if verb.upper() not in ("FROM", "JOIN"):
+            bad("foreign-schema", f"shared.v_staff_booking_grant is read only (after FROM / JOIN), got {verb!r}")
 
     # Forbidden capabilities.
     for word, rule in (

@@ -22,6 +22,7 @@ from tests.staff_tokens import LocalCis
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 MAKER, CHECKER, SALES = "it-822-api-maker", "it-822-api-checker", "it-822-api-sales"
+THIRD = "it-822-api-third"  # bk-064: an admin who writes none of the drafts below
 HANOI = "d0000000-0000-4000-8000-000000000001"
 LUANG_PRABANG = "d0000000-0000-4000-8000-000000000002"
 ATLANTIS = "d0000000-0000-4000-8000-000000000004"  # a catalog place whose country is not in booking.countries
@@ -38,7 +39,7 @@ async def _clean(conn: asyncpg.Connection) -> None:
 async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     conn = await asyncpg.connect(migrated_admin_dsn)
     await _clean(conn)
-    for staff_id, role in ((MAKER, "contracting"), (CHECKER, "admin"), (SALES, "sales")):
+    for staff_id, role in ((MAKER, "contracting"), (CHECKER, "admin"), (SALES, "sales"), (THIRD, "admin")):
         await conn.execute(
             "INSERT INTO booking.staff_users (cis_user_id, role, active, name) VALUES ($1, $2, true, $1)"
             " ON CONFLICT (cis_user_id) DO UPDATE SET role = EXCLUDED.role, active = true",
@@ -264,20 +265,23 @@ async def test_contract_lifecycle_and_deactivate_rule(
     assert reason == "Deactivated: closed"
 
 
-async def test_creator_publishes_after_a_checker_edit(client: tuple[httpx.AsyncClient, LocalCis]) -> None:
-    """The maker is the last writer of the terms: when B corrects A's draft, B cannot publish it, A can."""
+async def test_no_writer_publishes_after_a_checker_edit(client: tuple[httpx.AsyncClient, LocalCis]) -> None:
+    """bk-064 (AA-1158 R4): every writer of the draft is a maker. When B corrects A's draft, neither A nor B
+    publishes it; a third person does."""
     c, cis = client
-    maker, checker = _auth(cis, MAKER), _auth(cis, CHECKER)
+    maker, checker, third = _auth(cis, MAKER), _auth(cis, CHECKER), _auth(cis, THIRD)
     sup = (
-        await c.post("/suppliers", json={"company_name": "Gobi Jeeps", "categories": ["transport"]}, headers=maker)
+        await c.post("/suppliers", json={"company_name": "Gobi Jeeps", "categories": ["transport"]}, headers=checker)
     ).json()
     body = {"title": "Next season", "valid_from": str(datetime.now(UTC).date() + timedelta(days=60)), "currency": "MNT"}
     k = (await c.post(f"/suppliers/{sup['id']}/contracts", json=body, headers=maker)).json()
     fixed = await c.patch(f"/contracts/{k['id']}", json={"payment_terms": "50% on booking"}, headers=checker)
     assert fixed.status_code == 200 and fixed.json()["updated_by"] == CHECKER
-    assert (await c.patch(f"/contracts/{k['id']}", json={"status": "published"}, headers=checker)).status_code == 403
-    ok = await c.patch(f"/contracts/{k['id']}", json={"status": "published"}, headers=maker)
-    assert ok.status_code == 200 and ok.json()["phase"] == "upcoming" and ok.json()["published_by"] == MAKER
+    for writer in (checker, maker):
+        refused = await c.patch(f"/contracts/{k['id']}", json={"status": "published"}, headers=writer)
+        assert refused.status_code == 403 and refused.json()["detail"] == "maker_checker", refused.text
+    ok = await c.patch(f"/contracts/{k['id']}", json={"status": "published"}, headers=third)
+    assert ok.status_code == 200 and ok.json()["phase"] == "upcoming" and ok.json()["published_by"] == THIRD
     blocked = await c.post(f"/suppliers/{sup['id']}/deactivate", headers=maker)  # an upcoming contract blocks too
     assert blocked.status_code == 409 and blocked.json()["detail"] == "supplier_has_contracts"
 
