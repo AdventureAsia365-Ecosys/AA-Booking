@@ -53,11 +53,11 @@ from app.pricing.policy_params_hotels import (
 from app.suppliers.service import clean_text
 
 # Words that do not tell two hotels apart (a cleaned name drops them); not a threshold.
-COMMON_WORDS = frozenset({"hotel", "hotels", "resort", "resorts", "spa", "boutique", "the", "and", "by", "a"})
+COMMON_WORDS = frozenset({"hotel", "hotels", "resort", "resorts", "spa", "boutique", "the", "and", "by"})
 FACTS_SOURCES = ("dmc_sheet", "hotel_website", "site_visit")
 CODE_KEY = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 MAX_CODES = 20  # technical-constant: the bk-069 CHECK keeps the object small (2000 characters)
-MAX_CANDIDATES = 5
+MAX_CANDIDATES = 5  # technical-constant: how many candidates an answer lists (display size)
 SCAN_LIMIT = 5000  # technical-constant: the hotels compared at most (same place, country or nearby)
 METRES_PER_DEGREE = 111_320.0
 EARTH_RADIUS_M = 6_371_000.0
