@@ -17,7 +17,7 @@ nights that need no hotel. The rules themselves live in :mod:`app.catalog.operab
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -34,9 +34,12 @@ REVOKE_MAX = 300  # technical-constant: the bk-065 CHECK bound of revoke_reason
 NOT_OVERRIDABLE = "a missing rate or an inactive room type, hotel or service cannot be overridden"
 
 PLAN_SQL = "SELECT id::text AS id, source_id FROM booking.trip_plans WHERE source_system = 'cis' AND source_id = $1"
+# The expiry comes from the transaction clock, the same now() as created_at, so a length equal to the bk-065 CHECK's
+# outer bound (90 days) still passes it.
 INSERT_SQL = """
 INSERT INTO booking.trip_plan_operable_overrides (trip_plan_id, rules, findings, reason, expires_at, created_by)
-VALUES ($1::uuid, $2::text[], $3::text[], $4, $5, $6) RETURNING id::text
+VALUES ($1::uuid, $2::text[], $3::text[], $4, now() + make_interval(days => $5::int), $6)
+RETURNING id::text, expires_at
 """
 REVOKE_SQL = """
 UPDATE booking.trip_plan_operable_overrides SET revoked_by = $2, revoked_at = now(), revoke_reason = $3
@@ -140,8 +143,8 @@ async def create_exception(
         raise Invalid("rule_not_failing", f"{', '.join(idle)} has no finding to cover on this tour now")
     findings = sorted(key for r in wanted for key in open_findings[r])
     previous = await conn.fetch(REVOKE_SQL, plan["id"], staff.cis_user_id, "Replaced by a new sale exception.")
-    expires_at = _now() + timedelta(days=length)
-    new_id = await conn.fetchval(INSERT_SQL, plan["id"], wanted, findings, text, expires_at, staff.cis_user_id)
+    created = await conn.fetchrow(INSERT_SQL, plan["id"], wanted, findings, text, length, staff.cis_user_id)
+    new_id, expires_at = created["id"], created["expires_at"]
     await _audit(
         conn,
         staff,

@@ -9,6 +9,9 @@
 - the tour missing the night-2 hotel is refused for agencies (422 invalid naming N1); an exception with a 10-character
   reason is refused, one with a reason unblocks the quote, and the confirm adds the custom trip check; a missing rate
   can never be covered;
+- a component whose supplier is no longer active is booked with another active supplier (201; the old supplier's
+  room type / service is dropped, the new one's service is accepted, the old one's refused);
+- an exception of the longest length the table allows (90 days, with the policy maximum at 90) passes the CHECK;
 - the readiness report carries the can-operate status; a tour on a fixed departure is not checked and keeps the
   supply state none (its costs are booked per departure).
 
@@ -25,6 +28,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from app.catalog import sell_exceptions
 from app.db import Database
 from tests.integration.test_bk020_b2b import (  # noqa: F401 — fixtures admin, client, plan are used by name
     ADMIN,
@@ -173,6 +177,82 @@ async def test_a_sold_tour_becomes_one_supplier_booking_per_component(
     # The agency vouchers list the confirmed components under the tour line.
     vouchers = await _ok(await c.get(f"/b2b/v1/bookings/{case_id}/vouchers", headers=_m2m(m2m)))
     assert len(vouchers["vouchers"]) == 9 and {v["line_ref"] for v in vouchers["vouchers"]} == {"tour"}
+
+
+async def test_a_component_of_a_supplier_no_longer_active_is_booked_with_another_supplier(
+    client: Client,
+    admin: asyncpg.Connection,  # noqa: F811
+    tour: dict[str, str],
+) -> None:
+    c, cis, m2m, _ = client
+    sales = _staff(cis, SALES)
+    booking = await _book(c, m2m, "SWAP-1", [_tour(tour["plan"])])
+    case_id = booking["booking_id"]
+    await _accept_if_on_request(c, cis, booking)
+    # The supplier leaves after the sale (the API refuses while its contract is in force, so set it directly).
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute("UPDATE booking.suppliers SET status = 'inactive' WHERE id = $1::uuid", tour["guide_co"])
+    made = await _ok(await c.post(f"/trip-cases/{case_id}/supplier-bookings/generate", headers=sales))
+    assert made["created"] == 9
+    [guide_part] = [i for i in made["unbooked_items"] if i["skip_reason"] == "supplier_not_active"]
+    assert guide_part["supplier"]["id"] == tour["guide_co"]
+
+    other_co = await _insert(admin, "suppliers", company_name="Guide Co 1149 B", categories=["guide"],
+                             country_code="VN", created_by=MAKER)  # fmt: skip
+    other_guide = await _insert(admin, "services", supplier_id=other_co, service_type="guide", title="Hanoi guide B",
+                                created_by=MAKER)  # fmt: skip
+    url = f"/trip-cases/{case_id}/supplier-bookings"
+    part = guide_part["quote_part_id"]
+    # The old supplier's service named with the new supplier is refused; the same supplier is still inactive.
+    wrong = await c.post(url, json={"supplier_id": other_co, "quote_part_id": part, "service_id": tour["guide"]},
+                         headers=sales)  # fmt: skip
+    assert wrong.status_code == 422 and wrong.json()["detail"] == "supply_not_of_supplier", wrong.text
+    same = await c.post(url, json={"supplier_id": tour["guide_co"], "quote_part_id": part}, headers=sales)
+    assert same.status_code == 409 and same.json()["detail"] == "supplier_inactive", same.text
+
+    # Another active supplier with only a description: 201, no room type or service of the old supplier.
+    swapped = await _ok(await c.post(url, json={"supplier_id": other_co, "quote_part_id": part,
+                                                "item_description": "Hanoi guide, day 3 (replacement)"},
+                                     headers=sales), 201)  # fmt: skip
+    assert swapped["supplier"]["id"] == other_co and swapped["quote_part_id"] == part
+    assert swapped["hotel_room_type_id"] is None and swapped["service_id"] is None
+    assert swapped["item_description"] == "Hanoi guide, day 3 (replacement)"
+    net = "SELECT net_amount FROM booking.supplier_bookings WHERE id = $1::uuid"
+    assert await admin.fetchval(net, swapped["id"]) == 40  # the part's net as sold; staff edit it on the booking
+
+    # Cancelled, then booked again with the new supplier's own service.
+    await _ok(await c.post(f"/supplier-bookings/{swapped['id']}/cancel", json={"reason": "Wrong guide"},
+                           headers=sales))  # fmt: skip
+    again = await _ok(await c.post(url, json={"supplier_id": other_co, "quote_part_id": part,
+                                              "service_id": other_guide}, headers=sales), 201)  # fmt: skip
+    assert again["service_id"] == other_guide and again["hotel_room_type_id"] is None
+    page = await _ok(await c.get(url, headers=sales))
+    assert page["supply"]["items_to_book"] == 10 and not page["unbooked_items"]
+
+
+async def test_an_exception_of_the_longest_length_passes_the_table_check(
+    client: Client,
+    admin: asyncpg.Connection,  # noqa: F811
+    tour: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The policy maximum may be 90 days (the bk-065 CHECK's outer bound): a 90-day exception is stored, its expiry
+    exactly created_at + 90 days on the transaction clock."""
+    c, cis, _, _ = client
+
+    async def policy(_conn: asyncpg.Connection) -> tuple[int, int]:
+        return 14, 90
+
+    monkeypatch.setattr(sell_exceptions, "_policy", policy)
+    await _components(c, cis, tour["room"], tour["service"], tour["guide"], rooms=(1, 3, 4))
+    exc_url = f"/catalog/trip-plans/{SOURCE_ID}/sell-exception"
+    body = {"rules": ["N1"], "reason": REASON, "days": 90}
+    allowed = await _ok(await c.post(exc_url, json=body, headers=_staff(cis, ADMIN)))
+    assert allowed["status"] == "exception"
+    assert await admin.fetchval(
+        "SELECT expires_at - created_at FROM booking.trip_plan_operable_overrides WHERE revoked_at IS NULL"
+    ) == timedelta(days=90)
 
 
 async def test_a_night_without_a_hotel_blocks_until_an_exception(

@@ -205,7 +205,9 @@ def _scripted(
     conn = ScriptedConn()
     conn.on("FROM booking.trip_plans WHERE source_system = 'cis' AND source_id", {"id": "plan-1", "source_id": "src-1"})
     conn.on("SELECT (now() AT TIME ZONE 'UTC')::date", date(2026, 11, 23))
-    conn.on("INSERT INTO booking.trip_plan_operable_overrides", "ex-new")
+    conn.on(
+        "INSERT INTO booking.trip_plan_operable_overrides", {"id": "ex-new", "expires_at": NOW + timedelta(days=14)}
+    )
     operable_plan(conn, "plan-1", "src-1", days=days, components=components or [(1, HOTEL_A, None, None)])
     return conn
 
@@ -233,8 +235,8 @@ async def test_create_exception_checks_rules_reason_and_length() -> None:
         assert refused.value.code == code
     await sell_exceptions.create_exception(conn, _Staff(), "src-1", rules=["N1"], reason=reason, days=None)  # type: ignore[arg-type]
     [insert] = conn.sql("INSERT INTO booking.trip_plan_operable_overrides")
-    assert insert[1:4] == (["N1"], ["N1:night:2"], reason)
-    assert timedelta(days=13) < insert[4] - datetime.now(UTC) <= timedelta(days=14)
+    # The length goes to SQL: the expiry is now() + days on the transaction clock, the same as created_at.
+    assert insert[1:5] == (["N1"], ["N1:night:2"], reason, 14)
     assert conn.sql("UPDATE booking.trip_plan_operable_overrides SET revoked_by")  # the previous one is revoked first
 
 
@@ -250,3 +252,20 @@ async def test_revoke_needs_a_live_exception_and_nights_stay_inside_the_tour() -
     await sell_exceptions.set_no_hotel_nights(conn, _Staff(), "src-1", [2])  # type: ignore[arg-type]
     [update] = conn.sql("SET no_hotel_nights")
     assert update[1] == [2]
+
+
+@pytest.mark.asyncio
+async def test_the_longest_exception_length_reaches_the_database_as_days(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A policy maximum of 90 (the bk-065 CHECK's outer bound) and a 90-day choice: the day count is passed to SQL,
+    never an expiry computed in Python after the transaction started (it would land past created_at + 90 days)."""
+
+    async def policy(_conn: Any) -> tuple[int, int]:
+        return 14, 90
+
+    monkeypatch.setattr(sell_exceptions, "_policy", policy)
+    conn = _scripted()
+    reason = "The guesthouse for night 2 is booked by hand."
+    await sell_exceptions.create_exception(conn, _Staff(), "src-1", rules=["N1"], reason=reason, days=90)  # type: ignore[arg-type]
+    [insert] = conn.sql("INSERT INTO booking.trip_plan_operable_overrides")
+    assert insert[4] == 90
+    assert "now() + make_interval(days => $5::int)" in sell_exceptions.INSERT_SQL

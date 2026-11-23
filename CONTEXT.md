@@ -1217,7 +1217,10 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   are never linked to the hold line (the desk answers an on-request tour line). Skip reasons on the tab: `booked`,
   `waived`, `line_not_confirmed`, `b2b_line_closed`, `supplier_not_active`; a case sold before bk-065 lists its tour
   lines as `sold_before_split` (add by hand). `POST …/supplier-bookings` with `quote_part_id` books a part by hand
-  (another supplier, a replacement); `POST …/supplier-bookings/parts/{part_id}/waive` (reason 20..500 characters,
+  (another supplier, a replacement). With another supplier the part's room type / service (the old supplier's) is
+  dropped: the booking names the new supplier's room type or service when the body gives one (checked against it,
+  422 `supply_not_of_supplier`), else only the description (the body's `item_description`, or the part's); date, pax,
+  quantity and net stay as sold. `POST …/supplier-bookings/parts/{part_id}/waive` (reason 20..500 characters,
   audited, refused while a live booking names the part) closes a part that needs no booking. **Behaviour change**: the
   supply view counts the parts, so a new B2B tour case reaches `pre_departure` only once every part is confirmed or
   waived. The old `supplier_bookings_item_live_uq` stays as it was (MIG-4: the running code's `ON CONFLICT` inferred
@@ -2361,7 +2364,8 @@ hold line. `v_trip_case_supply_state` (same columns) also counts the parts of co
 that no waiver closed (behaviour change for a new `tp:` case: `pre_departure` needs every part confirmed or waived).
 New `trip_case_part_waivers` (append-only; reason 20..500, `pii:free_text`), `trip_plans.no_hotel_nights`
 (`smallint[]`), `trip_plan_operable_overrides` (the admin sale exception: N1 / N3-supplier findings only, reason
-20..500, at most 90 days as a backstop, one unrevoked per tour, revoked once; guard; `booking` updates the revoke
+20..500, at most 90 days as a backstop, the expiry computed in SQL from the transaction clock so a 90-day choice
+passes the CHECK, one unrevoked per tour, revoked once; guard; `booking` updates the revoke
 columns only), `b2b_quote_lines.operable_override_id`, and the trigger `b2b_holds_sale_exception_checks` (a hold
 confirmed with a covered line adds one open custom trip check per exception). Version 1 of the pricing policy
 parameters `operable_exception_default_days` = 14 and `operable_exception_max_days` = 30 (section operations, approver

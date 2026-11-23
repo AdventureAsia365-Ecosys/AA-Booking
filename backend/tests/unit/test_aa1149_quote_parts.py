@@ -189,7 +189,9 @@ async def test_create_for_part_and_waive_refuse_what_is_closed() -> None:
     new_id = await cb.create_for_part(
         conn, _Staff(), case, {"quote_part_id": "qp-1", "supplier_id": "sup-2"}, check_supply=check
     )  # type: ignore[arg-type]
-    assert new_id == "sb-1" and checked == [("sup-2", ROOM, None)]
+    # Another supplier: the part's room type (the old supplier's) is dropped; the booking keeps the description.
+    assert new_id == "sb-1" and checked == [("sup-2", None, None)]
+    assert conn.inserted[0][2:6] == ("sup-2", None, None, cb.description(part()))
     with pytest.raises(Conflict):
         await cb.create_for_part(conn, _Staff(), case, {"quote_part_id": "qp-2"}, check_supply=check)  # type: ignore[arg-type]
     with pytest.raises(Invalid):
@@ -198,3 +200,28 @@ async def test_create_for_part_and_waive_refuse_what_is_closed() -> None:
         await cb.waive(conn, _Staff(), case, "qp-1", reason="short")  # type: ignore[arg-type]
     with pytest.raises(Conflict):
         await cb.waive(conn, _Staff(), case, "qp-2", reason="The agency dropped this transfer.")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_another_supplier_names_its_own_item_or_a_description() -> None:
+    """The part's own supplier keeps the part's room type; another one books its own service (checked against it) or
+    only what staff write; a blank description falls back to the part's."""
+    case = {"id": "case-1", "code": "TC-000001", "channel": "b2b"}
+    checked: list[Any] = []
+
+    async def check(_conn: Any, *args: Any) -> None:
+        checked.append(args)
+
+    conn = _Conn([part(supplier_status="inactive")])
+    body = {"quote_part_id": "qp-1", "supplier_id": "sup-2", "service_id": "sv-9", "item_description": "  Car  "}
+    await cb.create_for_part(conn, _Staff(), case, body, check_supply=check)  # type: ignore[arg-type]
+    blank = {"quote_part_id": "qp-1", "supplier_id": "sup-2", "item_description": "   "}
+    await cb.create_for_part(conn, _Staff(), case, blank, check_supply=check)  # type: ignore[arg-type]
+    conn.rows = [part()]
+    await cb.create_for_part(conn, _Staff(), case, {"quote_part_id": "qp-1"}, check_supply=check)  # type: ignore[arg-type]
+    assert checked == [("sup-2", None, "sv-9"), ("sup-2", None, None), (SUP, ROOM, None)]
+    assert [row[2:6] for row in conn.inserted] == [
+        ("sup-2", None, "sv-9", "Car"),
+        ("sup-2", None, None, cb.description(part())),
+        (SUP, ROOM, None, cb.description(part())),
+    ]

@@ -12,8 +12,9 @@ are ``confirmed`` (an on-request line once the desk accepted it: a declined line
 behind) and have no departure (a departure's costs are booked once per departure). Skip reasons shown on the tab:
 ``booked`` (a live booking), ``waived`` (closed with a reason, :func:`waive`), ``line_not_confirmed`` (the desk has not
 accepted the on-request line yet), ``b2b_line_closed`` (declined or cancelled), ``supplier_not_active`` (pick another
-supplier with :func:`create_for_part`). A case sold before bk-065 has no parts: its tour lines are listed with
-``sold_before_split`` (add the bookings by hand).
+supplier with :func:`create_for_part`: the part's room type / service are then dropped, the booking names the new
+supplier's room type or service if given, else only the description). A case sold before bk-065 has no parts: its
+tour lines are listed with ``sold_before_split`` (add the bookings by hand).
 
 Component bookings are never linked to the hold line (the desk answers an on-request tour line itself), so confirming
 or declining one never answers the agency. :func:`create_for_part` books a part by hand (a replacement after a
@@ -217,16 +218,23 @@ async def create_for_part(
 ) -> str:
     """Book one part by hand (the case is locked by the caller): its supplier or another one (``supplier_id``), the
     part's facts unless the body names others. ``check_supply`` = the supplier / item check of the caller. Returns the
-    new booking id."""
+    new booking id.
+
+    The part's room type / service belong to the part's own supplier. With another supplier they are dropped: the
+    booking names the new supplier's room type or service when the body gives one (checked against that supplier),
+    else only the description (the body's ``item_description``, or the part's as sold)."""
     part = await _part(conn, case["id"], data["quote_part_id"])
     reason = skip_reason(part)
     if reason in ("booked", "waived", "b2b_line_closed", "line_not_confirmed"):
         raise Conflict("part_not_bookable", f"this tour component is {reason.replace('_', ' ')}", reason=reason)
     supplier = str(data.get("supplier_id") or part["supplier_id"])
     row = _row(part, supplier_id=supplier)
+    if supplier != str(part["supplier_id"]):
+        row["hotel_room_type_id"] = row["service_id"] = None
     for key in ("hotel_room_type_id", "service_id", "item_description", "service_date", "nights", "pax"):
         if data.get(key) is not None:
             row[key] = data[key]
+    row["item_description"] = (row["item_description"] or "").strip()[:500] or description(part)
     for key in ("net_amount", "net_currency"):
         if data.get(key) is not None:
             row[key] = data[key]

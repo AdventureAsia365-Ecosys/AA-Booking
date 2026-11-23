@@ -19,7 +19,7 @@ import {
   type UnbookedPart,
 } from "@/lib/api/supplierBookings";
 import type { TripCaseDetail } from "@/lib/api/types";
-import { Button, FormDrawer, Pill, Section, Select, Textarea, useToast } from "@/ui";
+import { Button, FormDrawer, Input, Pill, Section, Select, Textarea, useToast } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./SupplierGroups.messages";
@@ -171,13 +171,37 @@ function PartRow({
   );
 }
 
+// Another supplier: the component's room type or service belongs to the supplier it was sold with, so the booking
+// names only what staff write (the server drops the old supplier's item; a blank text keeps the component's label).
+function isOtherSupplier(part: UnbookedPart, supplier: string): boolean {
+  return !!supplier && supplier !== part.supplier?.id;
+}
+
+function partBooking(part: UnbookedPart, supplier: string, what: string | null) {
+  const body = { supplier_id: supplier, quote_part_id: part.quote_part_id };
+  return what === null ? body : { ...body, item_description: what.trim() || null };
+}
+
+function OtherSupplierItem({ what, setWhat }: { what: string; setWhat: (v: string) => void }) {
+  const t = useT(MSG);
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs font-semibold text-muted">{t("What is booked")}</span>
+      <Input size="sm" className="w-full" maxLength={500} value={what} onChange={(e) => setWhat(e.target.value)} />
+      <span className="text-xs text-muted">{t("Another supplier: the booking names what you write here, not the room or service the tour was sold with.")}</span>
+    </label>
+  );
+}
+
 function BookPart({ c, part, onClose, onDone }: { c: TripCaseDetail; part: UnbookedPart; onClose: () => void; onDone: () => void }) {
   const t = useT(MSG);
   const toast = useToast();
   const suppliers = useQuery({ queryKey: ["suppliers", "active-options"], queryFn: () => suppliersApi.list({ status: "active", limit: 100 }) });
   const [supplier, setSupplier] = useState(part.bookable && part.supplier ? part.supplier.id : "");
+  const [what, setWhat] = useState(part.supply_label ?? "");
+  const other = isOtherSupplier(part, supplier);
   const run = useMutation({
-    mutationFn: () => supplierBookingsApi.create(c.code, { supplier_id: supplier, quote_part_id: part.quote_part_id }),
+    mutationFn: () => supplierBookingsApi.create(c.code, partBooking(part, supplier, other ? what : null)),
     onSuccess: (b) => {
       toast.success(t("{0} added for {1}", b.code, b.supplier.name));
       onDone();
@@ -210,6 +234,7 @@ function BookPart({ c, part, onClose, onDone }: { c: TripCaseDetail; part: Unboo
             ))}
           </Select>
         </label>
+        {other && <OtherSupplierItem what={what} setWhat={setWhat} />}
         <p className="text-xs text-muted">{t("The date, pax, quantity and net come from the component as sold; edit them on the booking.")}</p>
       </div>
     </FormDrawer>
