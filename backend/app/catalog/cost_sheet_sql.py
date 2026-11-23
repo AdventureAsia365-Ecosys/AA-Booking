@@ -3,6 +3,7 @@ plan's components, the plans a run recomputes and the watermark that queues a ru
 
 COMPONENTS_SQL = """
 SELECT c.day_no, c.hotel_room_type_id::text AS room_type_id, c.service_id::text AS service_id, rt.max_occupancy,
+       c.meal_plan,
        coalesce(rt.status, s.status) AS status, coalesce(h.status, 'active') AS hotel_status
 FROM booking.trip_plan_components c
 LEFT JOIN booking.hotel_room_types rt ON rt.id = c.hotel_room_type_id

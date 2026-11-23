@@ -227,6 +227,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
           <span className="flex flex-col gap-1">
             <SupplierBookingStatusBadge status={b.status} />
             {b.confirmation_ref && <span className="text-xs text-muted">{t("Ref")} {b.confirmation_ref}</span>}
+            {b.hotel_confirmation_ref && <span className="text-xs text-muted">{t("Hotel ref")} {b.hotel_confirmation_ref}</span>}
             {b.decline_code && <span className="text-xs text-muted">{tx(DECLINE_LABEL[b.decline_code])}</span>}
             {b.service_time && <span className="text-xs text-muted">{t("At")} {b.service_time}{b.pickup_point ? ` · ${b.pickup_point}` : ""}</span>}
             {b.supplier_cancel_fee && (
@@ -414,6 +415,7 @@ function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking;
   const tx = useTx();
   const toast = useToast();
   const [ref, setRef] = useState("");
+  const [hotelRef, setHotelRef] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<"supplier_voucher" | "supplier_confirmation">("supplier_voucher");
   const run = useMutation({
@@ -424,7 +426,7 @@ function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking;
         const up = await supplierBookingsApi.upload({ kind, entity_id: b.id, file_name: file.name, ...doc });
         if (kind === "supplier_voucher") voucher = up.id;
       }
-      return supplierBookingsApi.confirm(b.id, ref.trim(), voucher);
+      return supplierBookingsApi.confirm(b.id, ref.trim(), voucher, b.hotel_room_type_id ? hotelRef.trim() || null : null);
     },
     onSuccess: (r) => {
       toast.success(r.b2b_line ? t("{0} confirmed; the agency is told the line is confirmed", r.code) : t("{0} confirmed by {1}", r.code, r.supplier.name));
@@ -465,6 +467,13 @@ function ConfirmBooking({ b, documents, onClose, onDone }: { b: SupplierBooking;
           </span>
           <Input size="sm" className={fieldCls} value={ref} maxLength={100} onChange={(e) => setRef(e.target.value)} placeholder={t("e.g. HTL-48213")} />
         </label>
+        {b.hotel_room_type_id && (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-muted">{t("Hotel confirmation number (optional)")}</span>
+            <Input size="sm" className={fieldCls} value={hotelRef} maxLength={100} onChange={(e) => setHotelRef(e.target.value)} />
+            <span className="text-xs text-muted">{t("The hotel's own number the supplier passes on; travellers check in with it.")}</span>
+          </label>
+        )}
         {documents ? (
           <div className="flex flex-col gap-2 rounded-md border border-line2 p-3">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">

@@ -81,6 +81,8 @@ FACT_FIELDS = (
 # AA-1075 (bk-12): what an agency voucher prints; editable while the booking is live (the pick-up time often comes
 # with the supplier's confirmation). Never traveller names (field help).
 VOUCHER_FIELDS = ("service_time", "pickup_point", "dropoff_point", "voucher_note")
+# AA-1153 (T11, bk-069): the hotel's own confirmation number the DMC passes on; editable like the voucher details.
+LIVE_TEXT_FIELDS = (*VOUCHER_FIELDS, "hotel_confirmation_ref")
 MAX_PAGE = 100
 NOTIFY_CANCEL_TYPE = "supplier_booking.cancel_with_supplier"
 
@@ -98,7 +100,7 @@ BOOKING_COLUMNS = """
     sb.supplier_order_id::text AS supplier_order_id, so.code AS supplier_order_code, so.status AS supplier_order_status,
     sb.fx_rate_per_usd, sb.fx_as_of, sb.service_time, sb.pickup_point, sb.dropoff_point, sb.voucher_note,
     sb.supplier_cancel_fee, sb.supplier_cancel_fee_currency, sb.quote_part_id::text AS quote_part_id, sb.quantity,
-    qp.day_no AS tour_day, s.status AS supplier_status
+    qp.day_no AS tour_day, s.status AS supplier_status, sb.hotel_confirmation_ref
 """
 BOOKING_FROM = """
 FROM booking.supplier_bookings sb
@@ -118,10 +120,10 @@ FROM booking.v_trip_case_supply_state WHERE trip_case_id = $1::uuid
 """
 # Supply items of the approved version: what a booking would copy, with the supplier, the cost rows and, for a B2B
 # case, the hold line of the same position.
-ITEMS_SQL = """
+ITEMS_SQL = f"""
 SELECT i.id::text AS id, i.position, i.title, i.day_from, i.day_to,
        i.hotel_room_type_id::text AS hotel_room_type_id, i.service_id::text AS service_id,
-       coalesce(h.supplier_id, sv.supplier_id)::text AS supplier_id,
+       {item_bookings.RATE_SUPPLIER_SQL} AS supplier_id,
        CASE WHEN rt.id IS NOT NULL THEN h.name || ' · ' || rt.name ELSE sv.title END AS supply_label,
        (SELECT array_agg(c.net_amount ORDER BY c.created_at, c.id) FROM booking.version_item_costs c
          WHERE c.version_item_id = i.id) AS net_amounts,
@@ -143,7 +145,7 @@ LEFT JOIN booking.b2b_hold_lines hl ON hl.hold_id = bh.id AND hl.line_no = i.pos
 WHERE v.trip_case_id = $1::uuid AND v.is_approved AND v.deleted_at IS NULL
   AND (i.hotel_room_type_id IS NOT NULL OR i.service_id IS NOT NULL)
 ORDER BY i.position
-"""
+"""  # noqa: S608 — constants only
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -481,25 +483,6 @@ async def generate(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[str
     return {**out, "created": len(created)}
 
 
-async def _check_supply(conn: asyncpg.Connection, supplier_id: str, room: str | None, service: str | None) -> None:
-    supplier = await conn.fetchrow("SELECT status, code FROM booking.suppliers WHERE id = $1::uuid", supplier_id)
-    if supplier is None:
-        raise NotFound("supplier_not_found", f"supplier {supplier_id} not found")
-    if supplier["status"] != "active":
-        raise Conflict("supplier_inactive", f"supplier {supplier['code']} is inactive")
-    if room and not await conn.fetchval(
-        "SELECT 1 FROM booking.hotel_room_types rt JOIN booking.hotels h ON h.id = rt.hotel_id"
-        " WHERE rt.id = $1::uuid AND h.supplier_id = $2::uuid",
-        room,
-        supplier_id,
-    ):
-        raise Invalid("supply_not_of_supplier", "the room type is not one of this supplier's hotels")
-    if service and not await conn.fetchval(
-        "SELECT 1 FROM booking.services WHERE id = $1::uuid AND supplier_id = $2::uuid", service, supplier_id
-    ):
-        raise Invalid("supply_not_of_supplier", "the service is not one of this supplier's services")
-
-
 async def create(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[str, Any]) -> dict[str, Any]:
     """Add a booking by hand: an extra item (no ``version_item_id``) or the replacement of a declined one."""
     case = await lock_case(conn, ref)
@@ -510,7 +493,7 @@ async def create(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[st
     room, service = data.get("hotel_room_type_id"), data.get("service_id")
     if room and service:
         raise Invalid("one_supply_record", "a booking books a room type or a service, not both")
-    await _check_supply(conn, supplier, room, service)
+    await item_bookings.check_supply(conn, supplier, room, service)
     row: dict[str, Any] = {k: data.get(k) for k in FACT_FIELDS}
     row["supplier_id"] = supplier
     row["notes"] = (data.get("notes") or "").strip() or None
@@ -556,7 +539,7 @@ async def create_part(conn: asyncpg.Connection, staff: Staff, ref: str, data: di
     """AA-1149: book a sold tour component by hand (``quote_part_id``; a replacement or another supplier)."""
     case = await lock_case(conn, ref)
     _ensure_open(case)
-    new_id = await component_bookings.create_for_part(conn, staff, case, data, check_supply=_check_supply)
+    new_id = await component_bookings.create_for_part(conn, staff, case, data, check_supply=item_bookings.check_supply)
     created = await _get(conn, new_id)
     summary = f"Added supplier booking {created['code']} ({created['supplier_name']}) for a tour component"
     after = {"supplier_id": created["supplier_id"], "quote_part_id": data["quote_part_id"], "status": "pending"}
@@ -631,7 +614,7 @@ async def update(conn: asyncpg.Connection, staff: Staff, booking_id: str, change
     facts = {k: v for k, v in changes.items() if k in FACT_FIELDS}
     if "notes" in changes:
         facts["notes"] = (changes["notes"] or "").strip() or None
-    for key in VOUCHER_FIELDS:
+    for key in LIVE_TEXT_FIELDS:
         if key in changes:
             value = changes[key]
             facts[key] = (value or "").strip() or None if key != "service_time" else value
@@ -642,7 +625,7 @@ async def update(conn: asyncpg.Connection, staff: Staff, booking_id: str, change
     }
     if any(k in FACT_FIELDS for k in changed) and row["status"] not in ("pending", "requested"):
         raise Conflict("supplier_booking_locked", f"{row['code']} is {row['status']}: only its notes change")
-    if any(k in VOUCHER_FIELDS for k in changed) and row["status"] not in LIVE:
+    if any(k in LIVE_TEXT_FIELDS for k in changed) and row["status"] not in LIVE:
         raise Conflict("supplier_booking_locked", f"{row['code']} is {row['status']}: its voucher details are final")
     if "item_description" in changed and not (changed["item_description"] or "").strip():
         raise Invalid("description_required", "say what is booked")
@@ -654,7 +637,7 @@ async def update(conn: asyncpg.Connection, staff: Staff, booking_id: str, change
     if room and service:
         raise Invalid("one_supply_record", "a booking books a room type or a service, not both")
     if {"supplier_id", "hotel_room_type_id", "service_id"} & set(changed):
-        await _check_supply(conn, supplier, str(room) if room else None, str(service) if service else None)
+        await item_bookings.check_supply(conn, supplier, str(room) if room else None, str(service) if service else None)
     net = changed.get("net_amount", row["net_amount"])
     currency = changed.get("net_currency", row["net_currency"])
     if (net is None) != (currency is None):
@@ -710,6 +693,7 @@ async def confirm(
     *,
     confirmation_ref: str,
     voucher_file_id: str | None = None,
+    hotel_confirmation_ref: str | None = None,
 ) -> dict[str, Any]:
     """requested → confirmed with the supplier's ref (and a voucher of this booking, B2C only). A booking of an
     on-request B2B line accepts the line in the same transaction (``line.confirmed``)."""
@@ -738,6 +722,7 @@ async def confirm(
         )
     now = _now()
     extra: dict[str, Any] = {"confirmation_ref": ref, "confirmed_at": now, "confirmed_by": staff.cis_user_id}
+    extra.update(item_bookings.hotel_ref(row, hotel_confirmation_ref))  # AA-1153 (T11)
     # AA-1074 (bk-045, bk-10): the plain approved FX rate of the net currency on the confirm day (None without one).
     extra.update(await fx.snapshot(conn, row["net_currency"], now.date()))
     if voucher_file_id is not None:

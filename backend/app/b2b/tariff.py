@@ -71,6 +71,7 @@ from app.b2b.components import (
     LineCost,
     RoomAsk,
     component_id,
+    default_board_b2b,
     price_lines,
 )
 from app.b2b.errors import B2BError
@@ -234,18 +235,19 @@ def chunks(cells: Sequence[Cell]) -> list[list[Cell]]:
     return out
 
 
-async def _costs(conn: asyncpg.Connection, cells: Sequence[Cell]) -> dict[int, LineCost | str]:
-    """``{cell no: LineCost or the refusal reason}``: whole chunks first, one cell at a time where a chunk fails."""
+async def _costs(conn: asyncpg.Connection, cells: Sequence[Cell], board: str) -> dict[int, LineCost | str]:
+    """``{cell no: LineCost or the refusal reason}``: whole chunks first, one cell at a time where a chunk fails.
+    ``board``: the policy's default board on the tariff day (bk-069 T9, read once)."""
     out: dict[int, LineCost | str] = {}
     for group in chunks(cells):
         try:
-            costs = await price_lines(conn, [c.ask for c in group])
+            costs = await price_lines(conn, [c.ask for c in group], default_board=board)
         except B2BError as exc:
             if len(group) == 1:
                 out[group[0].no] = _reason(exc, group[0].ask.line_ref)
             else:
                 for cell in group:
-                    out.update(await _costs(conn, [cell]))
+                    out.update(await _costs(conn, [cell], board))
             continue
         out.update({c.no: lc for c, lc in zip(group, costs, strict=True)})
     return out
@@ -301,7 +303,7 @@ async def build(
             cells.append(cell)
     # AA-1075: the same cells with every traveller in a single room (a refusal there only empties the supplement).
     singles = [replace(cell, no=cell.no + len(cells), singles=True) for cell in cells]
-    costs = await _costs(conn, [*cells, *singles])
+    costs = await _costs(conn, [*cells, *singles], await default_board_b2b(conn, on)) if cells else {}
     basis = await quotes.price_basis(
         conn,
         partner_id=partner_id,

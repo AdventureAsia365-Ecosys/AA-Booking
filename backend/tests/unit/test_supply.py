@@ -286,7 +286,8 @@ async def test_list_records_filters_and_errors() -> None:
     )
     assert out["total"] == 1 and out["items"][0]["links"] == [] and out["items"][0]["destination"] is None
     flat = conn.calls[0][0]
-    assert "r.supplier_id = $2::uuid" in flat and "r.star_rating = $5" in flat
+    # AA-1153: a hotel of a supplier = an active link to it (several DMCs may sell one hotel)
+    assert "l.status = 'active' AND l.supplier_id = $2::uuid" in flat and "r.star_rating = $5" in flat
     conn = ScriptedConn([("SELECT count(*) FROM booking.services r", 0), ("FROM booking.services r JOIN", [])])
     await records.list_records(conn, SERVICE, supplier="sup-000001", service_type="meal", sort="title")
     assert "sp.code = $1" in conn.calls[0][0]
@@ -522,9 +523,22 @@ async def test_list_and_get_rates() -> None:
         await rates.get_rate(ScriptedConn(), XID)
     with pytest.raises(NotFound):
         await rates.get_rate(ScriptedConn(), "x")
-    conn = ScriptedConn([("LIMIT 1", rate_row())])
-    assert (await rates.rate_in_force(conn, service_id=SID, on=date(2027, 3, 1), pax=2))["id"] == XID
+    # AA-1153: one rate choice for every caller (the batched query), then the full row by id.
+    conn = ScriptedConn([("WITH ORDINALITY", _many(KID)), ("WHERE x.id = $1::uuid", rate_row())])
+    found = await rates.rate_in_force(conn, service_id=SID, on=date(2027, 3, 1), pax=2)
+    assert found["id"] == XID and found["supplier_id"] == "sup-a"
     assert await rates.rate_in_force(ScriptedConn(), room_type_id=RID, on=date(2027, 3, 1)) is None
+
+
+def _many(contract: str) -> Any:
+    """The batched rate query's answer: the rate XID of supplier sup-a for every ask."""
+
+    def answer(*args: Any) -> list[dict[str, Any]]:
+        row = {"id": XID, "unit": "room_night", "net_amount": "100.00", "currency": "VND", "season": None,
+               "contract_id": contract, "age_max": None, "supplier_id": "sup-a", "meal_plan": None}  # fmt: skip
+        return [{"n": n, **row} for n in range(1, len(args[0]) + 1)]
+
+    return answer
 
 
 def test_quantity_and_default_cost() -> None:
@@ -674,7 +688,11 @@ def stored_item(**kw: Any) -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_item_takes_the_rate_in_force() -> None:
     room = rate_row(unit="room_night", hotel_room_type_id=RID, service_id=None, hotel_code="H", hotel_name="E")
-    conn = version_conn().on("LIMIT 1", room | {"room_type_name": "D", "net_amount": "100.00"})
+    conn = (
+        version_conn()
+        .on("WITH ORDINALITY", _many(KID))
+        .on("WHERE x.id = $1::uuid", room | {"room_type_name": "D", "net_amount": "100.00"})
+    )
     out = await versions.replace_items(
         conn, SALES, "TC-1", 1, [Item("Stay", 1, 3, hotel_room_type_id=RID), Item("Free day", 4, 4)]
     )

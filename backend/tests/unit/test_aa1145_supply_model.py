@@ -127,7 +127,7 @@ def _service_conn(*, child_rate: dict[str, Any] | None, contract_pct: str | None
 
     conn = ScriptedConn()
     conn.on("FROM booking.services WHERE id = ANY", [{"id": SERVICE, "status": "active", "service_type": "activity"}])
-    conn.on("AS a(room_type_id, service_id, on_day, pax, pax_type, n)", rates_answer)
+    conn.on("AS a(room_type_id, service_id, on_day, pax, pax_type, meal_plan, supplier_id, n)", rates_answer)
     conn.on(
         "FROM booking.supplier_contract_terms",
         [{"contract_id": "k-1", "child_pct": D(contract_pct)}] if contract_pct else [],
@@ -163,7 +163,7 @@ async def test_adults_only_sv_line_prices_as_before() -> None:
     conn = _service_conn(child_rate=None, contract_pct="50")
     [cost] = await components.price_lines(conn, [components.LineAsk("l1", f"sv:{SERVICE}", DAY, None, 2, 0, 0)])
     assert cost.costs == [(D("80.00"), "USD")] and cost.child is None
-    (rate_args,) = conn.sql("AS a(room_type_id, service_id, on_day, pax, pax_type, n)")
+    (rate_args,) = conn.sql("AS a(room_type_id, service_id, on_day, pax, pax_type, meal_plan, supplier_id, n)")
     assert rate_args[4] == ["adult"]  # only the adult rate is looked up
     assert conn.sql("FROM booking.supplier_contract_terms") == []
 

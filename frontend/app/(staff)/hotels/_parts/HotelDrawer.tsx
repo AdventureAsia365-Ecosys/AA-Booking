@@ -4,6 +4,7 @@
 // are written on the supplier page → Rates) and recent activity. Edit / Deactivate need supply.write; sales read.
 // Customer-facing description and photos are CIS content, not edited here (ADR 0004a): AA-835 shows what CIS published
 // (read-only, "Edit in CIS"; hidden until CIS serves it) and the supplier photos contracting uploads for CIS to use.
+// AA-1153: the suppliers (DMCs) that sell the hotel, their room type names and the facts confirmation (HotelSuppliers).
 
 import { useState } from "react";
 import Link from "next/link";
@@ -20,6 +21,7 @@ import { SupplierStatusBadge } from "@/app/(staff)/suppliers/_parts/shared";
 import { CisContentPanel, SupplierPhotos } from "@/app/(staff)/_parts/SupplyContent";
 import { HotelFormDrawer } from "./HotelFormDrawer";
 import { RoomTypeDrawer } from "./RoomTypeDrawer";
+import { HotelSuppliers } from "./HotelSuppliers";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./HotelDrawer.messages";
@@ -72,6 +74,7 @@ export function HotelDrawer({ hotelRef, onClose }: { hotelRef: string; onClose: 
           <CisContentPanel content={h.content} />
           <SupplierPhotos kind="hotel" recordRef={h.code} recordActive={h.status === "active"} canWrite={status.canWrite} />
           <RoomTypes h={h} canWrite={status.canWrite} />
+          <HotelSuppliers h={h} canWrite={status.canWrite} />
           <HotelRates h={h} />
           <Activity h={h} />
         </div>

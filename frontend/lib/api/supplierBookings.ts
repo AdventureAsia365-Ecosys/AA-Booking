@@ -71,6 +71,8 @@ export interface SupplierBooking {
   confirmed_at: IsoDateTime | null;
   confirmed_by: { id: string; name: string | null } | null;
   confirmation_ref: string | null;
+  /** AA-1153 (T11): the hotel's own confirmation number the DMC passes on (rooms only). */
+  hotel_confirmation_ref?: string | null;
   declined_at: IsoDateTime | null;
   decline_code: DeclineCode | null;
   cancelled_at: IsoDateTime | null;
@@ -202,9 +204,13 @@ export const supplierBookingsApi = {
   waivePart: (ref: string, partId: string, reason: string) =>
     bkSend<CaseSupplierBookings>(`trip-cases/${enc(ref)}/supplier-bookings/parts/${enc(partId)}/waive`, { body: { reason } }),
   request: (id: string) => bkSend<SupplierBooking>(`supplier-bookings/${enc(id)}/request`),
-  confirm: (id: string, confirmation_ref: string, voucher_file_id?: string | null) =>
+  confirm: (id: string, confirmation_ref: string, voucher_file_id?: string | null, hotel_confirmation_ref?: string | null) =>
     bkSend<SupplierBooking>(`supplier-bookings/${enc(id)}/confirm`, {
-      body: { confirmation_ref, ...(voucher_file_id ? { voucher_file_id } : {}) },
+      body: {
+        confirmation_ref,
+        ...(voucher_file_id ? { voucher_file_id } : {}),
+        ...(hotel_confirmation_ref ? { hotel_confirmation_ref } : {}),
+      },
     }),
   decline: (id: string, decline_code: DeclineCode) =>
     bkSend<SupplierBooking>(`supplier-bookings/${enc(id)}/decline`, { body: { decline_code } }),

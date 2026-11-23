@@ -294,6 +294,47 @@ export interface RateSheetResult {
   ignored_sheets: string[];
   imported?: number;
   impact?: RateSheetImpact;
+  /** AA-1153: the business checks of the sheet and the diff against the supplier's previous contract. */
+  checks?: RateCheck[];
+  diff?: RateDiff;
+}
+
+/** AA-1153: one business check of a rate sheet (an error blocks the import, a warning is acknowledged at publish). */
+export interface RateCheck {
+  code: "board_order" | "season_gap" | "season_overlap" | "price_jump" | string;
+  severity: "error" | "warning";
+  message: string;
+  sheet?: string;
+  row?: number;
+}
+
+export interface RateDiffRow {
+  label: string | null;
+  meal_plan: string | null;
+  season: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  old_net?: string;
+  new_net?: string;
+  change_pct?: string | null;
+}
+
+export interface RateDiff {
+  added: RateDiffRow[];
+  changed: RateDiffRow[];
+  removed: RateDiffRow[];
+  previous_contract?: { id: string; title: string; valid_from: IsoDate; valid_to: IsoDate | null } | null;
+}
+
+/** AA-1153: what the publisher of a draft reviews (live), and whether publishing needs the warnings acknowledged. */
+export interface ContractReview {
+  contract: { id: string; title: string; status: ContractStatus; currency: string };
+  checks: RateCheck[];
+  diff: RateDiff;
+  seasons: { name: string; date_from: IsoDate; date_to: IsoDate }[];
+  child_prices: { id: string; hotel_code: string; hotel_name: string; age_min: number; age_max: number; basis: string; meal_plan: string | null; net_amount: string }[];
+  import: { file_name: string | null; imported_by: string; imported_at: IsoDateTime } | null;
+  acknowledge: boolean;
 }
 
 /** The empty AA rate-sheet workbook, as a Blob to save. */
@@ -315,10 +356,12 @@ export const suppliersApi = {
   activate: (ref: string) => bkSend<Changed<Supplier>>(`suppliers/${enc(ref)}/activate`, { body: {} }),
   contracts: (ref: string) => bkGet<{ items: SupplierContract[] }>(`suppliers/${enc(ref)}/contracts`),
   createContract: (ref: string, body: ContractBody) => bkSend<SupplierContract>(`suppliers/${enc(ref)}/contracts`, { body }),
-  updateContract: (id: string, body: ContractBody | { status: "published" | "expired" }) =>
+  updateContract: (id: string, body: ContractBody | { status: "published" | "expired"; acknowledge_checks?: boolean }) =>
     bkSend<Changed<SupplierContract>>(`contracts/${enc(id)}`, { method: "PATCH", body }),
   places: (q: { q?: string; country?: string; limit?: number }) => bkGet<{ items: CatalogPlace[] }>("catalog/destinations", q),
   rateSheetTemplate,
+  /** AA-1153: the checks and diff of a draft before a second person publishes it. */
+  review: (id: string) => bkGet<ContractReview>(`contracts/${enc(id)}/review`),
   /** AA-1029: check (dryRun) or import a filled rate sheet into a draft contract of this supplier. */
   importRateSheet: (ref: string, dataBase64: string, filename: string, dryRun: boolean) =>
     bkSend<RateSheetResult>(`suppliers/${enc(ref)}/rate-sheets${dryRun ? "?dry_run=true" : ""}`, {

@@ -56,6 +56,10 @@
   (the supplier booking slice). **Children on an ``sv:`` line** (B4, :mod:`app.supply.child_price`): the supplier's
   child rate, else the contract's child %, else the policy's ``child_price_pct_by_service_type``, else the adult
   price; ``price_note.child`` says which (not hashed: the price is).
+- **Board basis and hotel children** (AA-1153, bk-069, :mod:`app.b2b.components`): a line may ask a board
+  (``meal_plan``: RO, BB, HB, FB, AI; default BB, or the tour night's) and give the children's ages (``child_ages``);
+  both are hashed only when sent, so a request without them hashes as before. ``price_note.board`` keeps the board and
+  its ``double_dinner`` warnings, ``price_note.child_room`` how the children beyond the room mix were priced.
 - **Stored append-only** (``b2b_quotes`` + ``b2b_quote_lines``): the net behind each line is kept as ``net_cost_usd``
   (``conf:commercial``) and never serialised. Nothing named ``supplier_net`` exists (ADR 0005a decision 2, Fix B19).
 """
@@ -72,7 +76,7 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import agency_pricing, cancellation, departures, price_adjustments, quote_parts, served
+from app.b2b import agency_pricing, cancellation, components, departures, price_adjustments, quote_parts, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_SERVICE, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
 from app.catalog import operability
@@ -197,6 +201,7 @@ def price_hash(
                 "b2b_price": format(line["b2b_price"], "f"),
                 **_discount_hash(line),
                 **_note_hash(line),
+                **components.board_hash(line),
             }
             for line in lines
         ],
@@ -238,6 +243,7 @@ async def _policy(conn: asyncpg.Connection, on: date) -> policy_values.Policy:
         policy = await policy_values.load(conn, on)
         policy.quote_validity_days, policy.quote_validity_festive_days, policy.group_on_request_min_pax  # noqa: B018
         policy.child_price_pct_by_service_type  # noqa: B018 — AA-1145 (bk-060): the B4 child % of an sv: line
+        policy.hotel_default_board  # noqa: B018 — AA-1153 (bk-069 T9): the board of a hotel night that names none
     except policy_values.PolicyUnavailable as exc:
         log.warning("b2b_policy_unavailable error=%s", exc)
         raise B2BError("unavailable", "pricing policy is not available") from None
@@ -573,6 +579,7 @@ async def quote_in(
         [line.ask for line in lines],
         child_pct_by_type=pricing_policy.child_price_pct_by_service_type,
         child_age_max=_child_age_max(pricing_policy),
+        default_board=pricing_policy.hotel_default_board,
     )
     # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip.
     supply_asks = [a for lc in costs for a in lc.supply]
@@ -648,10 +655,7 @@ async def quote_in(
             log.warning(
                 "b2b_quote_line_below_floor partner=%s line=%s departure=%s", partner_id, ask.line_ref, departure_id
             )
-        if supply_note:
-            note["supply"] = supply_note
-        if lc.child:
-            note["child"] = lc.child
+        note.update(lc.notes(supply_note))
         priced.append(
             {
                 "line_no": no,
@@ -674,6 +678,8 @@ async def quote_in(
                 "rate_card_id": price.rate_card_id,
                 "price_note": note or None,
                 "operable_override_id": covered_by[no - 1],
+                "meal_plan": ask.meal_plan,
+                "child_ages": list(ask.child_ages),
             }
         )
     quoted_total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
