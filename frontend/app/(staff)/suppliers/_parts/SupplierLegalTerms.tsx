@@ -86,13 +86,16 @@ export function LegalTermsFacts({ s }: { s: SupplierDetail }) {
 type TermsDraft = { basis: string; deposit_percent: string; due_days: string; method: string; note: string };
 type ContactDraft = { role: ContactRole; name: string; email: string; phone: string };
 
+const text = (v: unknown): string => (v == null ? "" : String(v));
+
 function termsDraft(p: PaymentTerms | null | undefined): TermsDraft {
+  const d = p ?? ({} as Partial<PaymentTerms>);
   return {
-    basis: p?.basis ?? "",
-    deposit_percent: p?.deposit_percent != null ? String(p.deposit_percent) : "",
-    due_days: p?.due_days != null ? String(p.due_days) : "",
-    method: p?.method ?? "",
-    note: p?.note ?? "",
+    basis: text(d.basis),
+    deposit_percent: text(d.deposit_percent),
+    due_days: text(d.due_days),
+    method: text(d.method),
+    note: text(d.note),
   };
 }
 

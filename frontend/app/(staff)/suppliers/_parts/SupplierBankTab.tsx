@@ -7,9 +7,9 @@
 // The full details open only for supplier_bank.read, one read at a time, and every read is audited.
 
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Eye, Landmark, Lock, Plus } from "lucide-react";
-import { supplierBankApi, type BankDecision, type BankDetails, type NewBankAccount, type PayoutLock, type SupplierBankAccount } from "@/lib/api/supplierBank";
+import { supplierBankApi, type BankDecision, type BankDetails, type NewBankAccount, type PayoutLock, type SupplierBankAccount, type SupplierBankList } from "@/lib/api/supplierBank";
 import { Button, ConfirmDialog, DateText, Field, FormDrawer, Input, Modal, Pill, Section, type BookingTone, useToast } from "@/ui";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { supplierError } from "./shared";
@@ -41,68 +41,91 @@ const DONE: Partial<Record<SupplierBankAccount["status"], "Bank account approved
 
 export function SupplierBankTab({ supplierRef }: { supplierRef: string }) {
   const t = useT(MSG);
-  const tx = useTx();
   const qc = useQueryClient();
-  const toast = useToast();
   const q = useQuery({ queryKey: ["supplier", supplierRef, "bank"], queryFn: () => supplierBankApi.list(supplierRef) });
   const [entering, setEntering] = useState(false);
   const [decision, setDecision] = useState<Decision>(null);
-  const [revealed, setRevealed] = useState<BankDetails | null>(null);
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["supplier", supplierRef, "bank"] });
     qc.invalidateQueries({ queryKey: ["supplier", supplierRef] });
   };
-  const decide = useMutation({
-    mutationFn: ({ d, note }: { d: NonNullable<Decision>; note: string }) => supplierBankApi.decide(d.account.id, d.action, note),
-    onSuccess: (a) => {
-      toast.success(t(DONE[a.status] ?? "Bank account withdrawn"));
-      setDecision(null);
-      refresh();
-    },
-  });
-  const reveal = useMutation({ mutationFn: (id: string) => supplierBankApi.reveal(id), onSuccess: setRevealed });
-
-  const data = q.data;
-  const action = decision?.action ?? "withdraw";
+  const canEnter = !!q.data?.actions.enter;
   return (
     <Section
       title={t("Bank accounts")}
       description={t("Where AA pays this supplier. A change waits for a second person, who calls the supplier back on a number AA already knew; payouts pause while a change waits and for a while after it is approved.")}
       actions={
-        data?.actions.enter && (
+        canEnter && (
           <Button variant="primary" onClick={() => setEntering(true)}>
             <Plus size={15} /> {t("Enter bank account")}
           </Button>
         )
       }
     >
-      {q.isLoading && <p className="text-[13px] text-muted">{t("Loading bank accounts")}</p>}
-      {q.isError && <p className="text-[13px] text-danger">{tx(supplierError(q.error))}</p>}
-      {data && <LockNotice lock={data.payout_lock} />}
-      {data && data.items.length === 0 && <p className="text-[13px] text-muted">{t("No bank account on file.")}</p>}
+      <AccountList q={q} onDecide={setDecision} />
+      {entering && <EnterDrawer supplierRef={supplierRef} onClose={() => setEntering(false)} onDone={refresh} />}
+      <DecisionDialog decision={decision} onClose={() => setDecision(null)} onDone={refresh} />
+    </Section>
+  );
+}
+
+/** The list (masked), the payout pause and the details view of one account. */
+function AccountList({ q, onDecide }: { q: UseQueryResult<SupplierBankList>; onDecide: (d: NonNullable<Decision>) => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  const [revealed, setRevealed] = useState<BankDetails | null>(null);
+  const reveal = useMutation({ mutationFn: (id: string) => supplierBankApi.reveal(id), onSuccess: setRevealed });
+  if (q.isLoading) return <p className="text-[13px] text-muted">{t("Loading bank accounts")}</p>;
+  if (q.isError || !q.data) return <p className="text-[13px] text-danger">{tx(supplierError(q.error))}</p>;
+  const data = q.data;
+  return (
+    <>
+      <LockNotice lock={data.payout_lock} />
+      {data.items.length === 0 && <p className="text-[13px] text-muted">{t("No bank account on file.")}</p>}
       <ul className="flex flex-col gap-3">
-        {data?.items.map((a) => (
-          <AccountCard key={a.id} account={a} onDecide={(act) => { decide.reset(); setDecision({ account: a, action: act }); }} onReveal={() => reveal.mutate(a.id)} revealing={reveal.isPending && reveal.variables === a.id} />
+        {data.items.map((a) => (
+          <AccountCard key={a.id} account={a} onDecide={(action) => onDecide({ account: a, action })} onReveal={() => reveal.mutate(a.id)} revealing={reveal.isPending} />
         ))}
       </ul>
       {reveal.isError && <p role="alert" className="mt-2 text-[13px] text-danger">{tx(supplierError(reveal.error))}</p>}
-      {entering && <EnterDrawer supplierRef={supplierRef} onClose={() => setEntering(false)} onDone={refresh} />}
-      <ConfirmDialog
-        open={decision !== null}
-        onClose={() => setDecision(null)}
-        onConfirm={(note) => decision && decide.mutate({ d: decision, note })}
-        busy={decide.isPending}
-        error={tx(supplierError(decide.error))}
-        danger={action === "reject"}
-        title={t(DIALOG[action].title)}
-        confirmLabel={t(DIALOG[action].confirm)}
-        reason={{ label: t(DIALOG[action].note), required: true, maxLength: action === "approve" ? 500 : 300 }}
-        message={t(decision?.account.actions.approve_self && action === "approve" ? "You entered this account. Approving it yourself is recorded as a business-owner self-approval." : DIALOG[action].message)}
-      />
       <Modal open={revealed !== null} onClose={() => setRevealed(null)} title={t("Bank details")}>
         {revealed && <DetailsList d={revealed} />}
       </Modal>
-    </Section>
+    </>
+  );
+}
+
+/** Approve (call-back note), reject or withdraw (reason) one account. */
+function DecisionDialog({ decision, onClose, onDone }: { decision: Decision; onClose: () => void; onDone: () => void }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  const toast = useToast();
+  const decide = useMutation({
+    mutationFn: ({ d, note }: { d: NonNullable<Decision>; note: string }) => supplierBankApi.decide(d.account.id, d.action, note),
+    onSuccess: (a) => {
+      toast.success(t(DONE[a.status] ?? "Bank account withdrawn"));
+      onClose();
+      onDone();
+    },
+  });
+  const action = decision?.action ?? "withdraw";
+  const ownApproval = action === "approve" && !!decision?.account.actions.approve_self;
+  return (
+    <ConfirmDialog
+      open={decision !== null}
+      onClose={() => {
+        decide.reset();
+        onClose();
+      }}
+      onConfirm={(note) => decision && decide.mutate({ d: decision, note })}
+      busy={decide.isPending}
+      error={tx(supplierError(decide.error))}
+      danger={action === "reject"}
+      title={t(DIALOG[action].title)}
+      confirmLabel={t(DIALOG[action].confirm)}
+      reason={{ label: t(DIALOG[action].note), required: true, maxLength: DIALOG[action].max }}
+      message={ownApproval ? t("You entered this account. Approving it yourself is recorded as a business-owner self-approval.") : t(DIALOG[action].message)}
+    />
   );
 }
 
@@ -112,9 +135,10 @@ const DIALOG = {
     confirm: "Approve",
     note: "Call-back note: who confirmed the details, on which number AA already knew",
     message: "Call the supplier on a number from the contract or earlier records, never one sent with this change, and read the details back.",
+    max: 500,
   },
-  reject: { title: "Reject the bank account", confirm: "Reject", note: "Reason", message: "The current account stays in use." },
-  withdraw: { title: "Withdraw the bank account", confirm: "Withdraw", note: "Reason", message: "The current account stays in use." },
+  reject: { title: "Reject the bank account", confirm: "Reject", note: "Reason", message: "The current account stays in use.", max: 300 },
+  withdraw: { title: "Withdraw the bank account", confirm: "Withdraw", note: "Reason", message: "The current account stays in use.", max: 300 },
 } as const;
 
 function LockNotice({ lock }: { lock: PayoutLock }) {
@@ -145,50 +169,79 @@ function AccountCard({
   onReveal: () => void;
   revealing: boolean;
 }) {
-  const t = useT(MSG);
-  const buttons = (["approve", "reject", "withdraw"] as const).filter((k) => a.actions[k]);
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-line bg-card px-4 py-3 text-[13px] text-body">
-      <div className="flex flex-wrap items-center gap-2">
-        <Landmark size={15} className="text-muted" />
-        <span className="font-semibold text-ink">{a.bank_name}</span>
-        <span className="font-mono">{a.account_masked}</span>
-        <span className="text-muted">
-          {a.currency}
-          {a.bank_country ? ` · ${a.bank_country}` : ""}
-        </span>
-        <Pill tone={STATUS_TONE[a.status]}>{t(STATUS_LABEL[a.status])}</Pill>
-        {a.owner_self_approved && <Pill tone="info">{t("Business-owner self-approval")}</Pill>}
-      </div>
+      <AccountHead a={a} />
+      <AccountHistory a={a} />
+      <AccountButtons a={a} onDecide={onDecide} onReveal={onReveal} revealing={revealing} />
+    </li>
+  );
+}
+
+function AccountHead({ a }: { a: SupplierBankAccount }) {
+  const t = useT(MSG);
+  const place = [a.currency, a.bank_country].filter(Boolean).join(" · ");
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Landmark size={15} className="text-muted" />
+      <span className="font-semibold text-ink">{a.bank_name}</span>
+      <span className="font-mono">{a.account_masked}</span>
+      <span className="text-muted">{place}</span>
+      <Pill tone={STATUS_TONE[a.status]}>{t(STATUS_LABEL[a.status])}</Pill>
+      {a.owner_self_approved && <Pill tone="info">{t("Business-owner self-approval")}</Pill>}
+    </div>
+  );
+}
+
+function AccountHistory({ a }: { a: SupplierBankAccount }) {
+  const t = useT(MSG);
+  const name = (p: SupplierBankAccount["entered_by"]) => p?.name ?? "—";
+  return (
+    <>
       <p className="text-muted">
-        {t("Entered by {0}", a.entered_by?.name ?? "—")} · <DateText value={a.entered_at} withTime /> · {a.reason}
+        {t("Entered by {0}", name(a.entered_by))} · <DateText value={a.entered_at} withTime /> · {a.reason}
       </p>
       {a.approved_by && (
         <p className="text-muted">
-          {t("Approved by {0}", a.approved_by.name ?? "—")} · <DateText value={a.approved_at ?? ""} withTime />
-          {a.callback_note ? ` · ${a.callback_note}` : ""}
+          {t("Approved by {0}", name(a.approved_by))} · <DateText value={a.approved_at ?? ""} withTime /> · {a.callback_note}
         </p>
       )}
       {a.closed_by && a.close_reason && (
         <p className="text-muted">
-          {t("Closed by {0}", a.closed_by.name ?? "—")} · {a.close_reason}
+          {t("Closed by {0}", name(a.closed_by))} · {a.close_reason}
         </p>
       )}
-      {(buttons.length > 0 || a.actions.reveal) && (
-        <div className="flex flex-wrap gap-2">
-          {buttons.map((k) => (
-            <Button key={k} size="sm" variant={k === "approve" ? "primary" : "ghost"} onClick={() => onDecide(k)}>
-              {t(DIALOG[k].confirm)}
-            </Button>
-          ))}
-          {a.actions.reveal && (
-            <Button size="sm" variant="ghost" onClick={onReveal} disabled={revealing}>
-              <Eye size={14} /> {t("Show details")}
-            </Button>
-          )}
-        </div>
+    </>
+  );
+}
+
+function AccountButtons({
+  a,
+  onDecide,
+  onReveal,
+  revealing,
+}: {
+  a: SupplierBankAccount;
+  onDecide: (action: BankDecision) => void;
+  onReveal: () => void;
+  revealing: boolean;
+}) {
+  const t = useT(MSG);
+  const buttons = (["approve", "reject", "withdraw"] as const).filter((k) => a.actions[k]);
+  if (buttons.length === 0 && !a.actions.reveal) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {buttons.map((k) => (
+        <Button key={k} size="sm" variant={k === "approve" ? "primary" : "ghost"} onClick={() => onDecide(k)}>
+          {t(DIALOG[k].confirm)}
+        </Button>
+      ))}
+      {a.actions.reveal && (
+        <Button size="sm" variant="ghost" onClick={onReveal} disabled={revealing}>
+          <Eye size={14} /> {t("Show details")}
+        </Button>
       )}
-    </li>
+    </div>
   );
 }
 

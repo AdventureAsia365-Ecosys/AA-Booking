@@ -114,22 +114,38 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
             <Power size={15} /> {t("This supplier waits for approval: a second person activates it before contracts can be added.")}
           </div>
         )}
-        {tab === "profile" && <Profile s={s} />}
-        {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
-        {tab === "rates" && <RatesTab s={s} canWrite={actions.canWrite} />}
-        {tab === "bookings" && <SupplierBookingsTab s={s} />}
-        {tab === "bank" && <SupplierBankTab supplierRef={s.code} />}
-        {tab === "bills" && (
-          <SupplierBillsList
-            supplier={{ id: s.id, name: s.company_name }}
-            title={t("Bills from this supplier")}
-            description={t("Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin.")}
-          />
-        )}
+        <TabPane tab={tab} s={s} canWrite={actions.canWrite} />
       </div>
       {actions.dialogs}
     </PageFrame>
   );
+}
+
+/** The body of the active tab (one switch, so the page itself stays simple). */
+function TabPane({ tab, s, canWrite }: { tab: string; s: SupplierDetail; canWrite: boolean }) {
+  const t = useT(MSG);
+  switch (tab) {
+    case "profile":
+      return <Profile s={s} />;
+    case "contracts":
+      return <Contracts s={s} canWrite={canWrite} />;
+    case "rates":
+      return <RatesTab s={s} canWrite={canWrite} />;
+    case "bookings":
+      return <SupplierBookingsTab s={s} />;
+    case "bank":
+      return <SupplierBankTab supplierRef={s.code} />;
+    case "bills":
+      return (
+        <SupplierBillsList
+          supplier={{ id: s.id, name: s.company_name }}
+          title={t("Bills from this supplier")}
+          description={t("Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin.")}
+        />
+      );
+    default:
+      return null;
+  }
 }
 
 function Profile({ s }: { s: SupplierDetail }) {
