@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
-import { supplyApi, type HotelBody, type HotelDetail } from "@/lib/api/supply";
+import { supplyApi, type HotelBody, type HotelCandidate, type HotelDetail } from "@/lib/api/supply";
 import { Input, Select, Textarea, FormDrawer, useToast, TimeField } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { SupplierSelect, joinList, splitList, supplyError } from "@/app/(staff)/_parts/supply";
@@ -55,6 +55,7 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
   const [place, setPlace] = useState<PickedPlace | null>(hotel?.destination ?? null);
   const [placeId, setPlaceId] = useState<string | null>(hotel?.destination_id ?? null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [reason, setReason] = useState(""); // AA-1153: why a hotel that looks like another one is a different hotel
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
   const dirty = JSON.stringify(form) !== JSON.stringify(initial) || placeId !== (hotel?.destination_id ?? null);
 
@@ -89,11 +90,14 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
       amenities: splitList(form.amenities),
       links: parseLinks(form.links),
       internal_notes: clean(form.internal_notes),
+      ...(reason.trim() ? { not_duplicate_reason: reason.trim() } : {}),
     };
     save.mutate(hotel ? body : { ...body, supplier_id: form.supplier_id });
   }
 
   const fe = save.error instanceof ApiError ? save.error.fieldErrors : [];
+  const dup = save.error instanceof ApiError && save.error.code.startsWith("hotel_") && save.error.code.endsWith("duplicate") ? save.error : null;
+  const candidates = (dup?.body.candidates as HotelCandidate[] | undefined) ?? [];
   return (
     <FormDrawer
       open
@@ -103,7 +107,7 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
       onSubmit={submit}
       busy={save.isPending}
       dirty={dirty}
-      error={localError ?? (fe.length ? null : supplyError(save.error))}
+      error={localError ?? (fe.length || dup ? null : supplyError(save.error))}
       fieldErrors={fe}
       width={560}
     >
@@ -118,6 +122,28 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
         <FormField label={tr("Supplier")} required hint={tr("Active suppliers with the Hotel category.")} error={errorFor(fe, "supplier_id")}>
           <SupplierSelect value={form.supplier_id} category="hotel" onChange={set("supplier_id")} />
         </FormField>
+      )}
+      {dup && (
+        <div role="alert" className="flex flex-col gap-2 rounded-md border border-warning bg-warning-soft p-3 text-[13px] text-body" data-testid="hotel-duplicates">
+          <p className="font-medium text-ink">
+            {dup.code === "hotel_duplicate"
+              ? tr("This is the same hotel as one already in Booking. Open it and link this supplier to it instead.")
+              : tr("A hotel with a similar name is close by. Check it; if this is a different hotel, say why and save again.")}
+          </p>
+          <ul className="flex flex-col gap-0.5 text-xs">
+            {candidates.map((c) => (
+              <li key={c.id}>
+                {c.code} {c.name} · {tr("{0} % alike", c.similarity)}
+                {c.distance_m != null ? ` · ${c.distance_m} m` : ""}
+              </li>
+            ))}
+          </ul>
+          {dup.code === "hotel_possible_duplicate" && (
+            <FormField label={tr("Why it is a different hotel")} hint={tr("10 to 300 characters; kept in the activity log.")}>
+              <Textarea className={textareaCls} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
+            </FormField>
+          )}
+        </div>
       )}
       <FormField label={tr("Hotel name")} required error={errorFor(fe, "name")}>
         <Input className={inputCls} maxLength={200} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder={tr("e.g. Hanoi Emerald Hotel")} />

@@ -6,6 +6,8 @@
 // Contracts table (maker-checker), and the prices of the trip plans that use these items follow by themselves.
 // AA-1029: the Check result also lists the trip plans that use the sheet's items, whether each would have a rate for
 // every component once the draft is published, and how many would move to priced (Pricing → Price readiness).
+// AA-1153: optional Seasons and Hotel children sheets; hotels are matched by the supplier's own code for them too; the
+// Check lists the business checks (errors stop the import) and the diff against the supplier's previous contract.
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +19,7 @@ import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./RateSheetDrawer.messages";
+import { RateChecks, RateDiffSummary } from "./RateReview";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPACT_LISTED = 12;
@@ -181,6 +184,8 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
           {preview.ignored_sheets.length > 0 && <p className="text-muted">{t("Not read:")} {preview.ignored_sheets.join(", ")}</p>}
         </div>
       )}
+      {preview?.checks && <RateChecks checks={preview.checks} />}
+      {preview?.diff && <RateDiffSummary diff={preview.diff} />}
       {preview?.impact && <Impact impact={preview.impact} />}
     </FormDrawer>
   );

@@ -51,6 +51,7 @@ export const SECTIONS = [
   "retention",
   "security",
   "ops",
+  "hotels", // AA-1153 (bk-069): hotel matching, facts re-confirmation, rate-sheet price jumps
 ] as const;
 export type Section = (typeof SECTIONS)[number];
 /** draft / pending: not used yet; in_force: used today; scheduled: approved, from a later day; superseded: replaced. */
