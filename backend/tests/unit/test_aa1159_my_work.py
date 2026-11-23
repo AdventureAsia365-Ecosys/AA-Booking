@@ -24,6 +24,7 @@ from app.errors import Unavailable
 from app.main import create_app
 from app.ops import bill_filters, supplier_bills, trip_checks
 from app.settings import Settings
+from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
 from app.supply import restrictions
 from app.trip_cases import service as trip_cases
@@ -84,6 +85,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "stop_sales_to_review",
                 "suppliers_to_activate",
                 "billing_changes_to_approve",
+                "supplier_bank_to_approve",  # AA-1158 part 2
                 "owner_self_approvals",
             ],
         ),
@@ -210,6 +212,7 @@ def stubbed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
     # AA-1158: pending suppliers, billing entity changes, the month's business-owner self-approvals.
     monkeypatch.setattr(suppliers, "queue", _queue({"count": 7, "oldest_at": stamp}, calls, "suppliers"))
     monkeypatch.setattr(entity_changes, "queue", _queue({"count": 8, "oldest_at": stamp}, calls, "entity_changes"))
+    monkeypatch.setattr(bank_accounts, "queue", _queue({"count": 9, "oldest_at": stamp}, calls, "bank_accounts"))
     monkeypatch.setattr(
         audit,
         "owner_self_approvals_month",
@@ -244,6 +247,8 @@ def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None
     assert tiles["supplier_bills_to_approve"]["filter"] == {"bill_status": "received", "approvable": "me"}
     assert tiles["suppliers_to_activate"]["filter"] == {"status": "pending", "approvable": "me"}
     assert tiles["suppliers_to_activate"]["count"] == 7 and tiles["billing_changes_to_approve"]["count"] == 8
+    assert tiles["supplier_bank_to_approve"]["count"] == 9
+    assert tiles["supplier_bank_to_approve"]["filter"] == {"bank": "pending", "approvable": "me"}
     assert tiles["owner_self_approvals"]["filter"] == {"owner_self_approved": "true", "from": "2026-11-01"}
     assert tiles["stop_sales_to_review"] | {"oldest_at": None} == {
         "key": "stop_sales_to_review",

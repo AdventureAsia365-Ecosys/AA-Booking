@@ -24,6 +24,7 @@ import {
   SquareCheck,
   Stamp,
   UserCheck,
+  KeyRound,
 } from "lucide-react";
 import { CIS_MY_WORK_PATH } from "@/lib/config";
 import { myWorkApi, type MyWorkTile } from "@/lib/api/myWork";
@@ -49,6 +50,7 @@ const ICONS: Record<string, React.ReactNode> = {
   stop_sales_to_review: <OctagonX size={ICON} />,
   suppliers_to_activate: <Power size={ICON} />, // AA-1158
   billing_changes_to_approve: <Landmark size={ICON} />,
+  supplier_bank_to_approve: <KeyRound size={ICON} />, // AA-1158 part 2
   owner_self_approvals: <UserCheck size={ICON} />,
 };
 /** A count above zero on these tiles is late work (red hint); on the approval tiles it waits for the viewer (amber). */

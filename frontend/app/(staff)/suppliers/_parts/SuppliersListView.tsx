@@ -37,6 +37,7 @@ export function SuppliersListView() {
     country: get("country") || undefined,
     sort: get("sort") || undefined,
     approvable: approvableParam(get("approvable")),
+    bank: bankParam(get("bank")), // AA-1158 part 2: My work "Bank account changes to approve"
   };
   const list = useQuery({
     queryKey: ["suppliers", "list", filters, paging.limit, paging.offset],
@@ -229,4 +230,9 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
 /** AA-1158 My work "Suppliers to activate": `approvable=me` lists the pending ones the caller may activate now. */
 function approvableParam(value: string): "me" | undefined {
   return value === "me" ? "me" : undefined;
+}
+
+/** AA-1158 part 2 My work: `bank=pending` (with `approvable=me`) lists the suppliers whose bank account change waits. */
+function bankParam(value: string): "pending" | undefined {
+  return value === "pending" ? "pending" : undefined;
 }

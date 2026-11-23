@@ -30380,6 +30380,25 @@
             }
           },
           {
+            "description": "pending (with approvable=me): suppliers whose bank account change the caller may approve",
+            "in": "query",
+            "name": "bank",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "pending",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "pending (with approvable=me): suppliers whose bank account change the caller may approve",
+              "title": "Bank"
+            }
+          },
+          {
             "in": "query",
             "name": "category",
             "required": false,

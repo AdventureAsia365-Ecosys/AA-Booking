@@ -48,6 +48,7 @@ APPROVE_TILES = (
     "stop_sales_to_review",
     "suppliers_to_activate",  # AA-1158
     "billing_changes_to_approve",
+    "supplier_bank_to_approve",  # AA-1158 part 2
 )
 OVERSIGHT_TILES = ("owner_self_approvals",)  # AA-1158: every audit.read holder (group work, listed last)
 
@@ -234,6 +235,10 @@ async def _list_total(c: httpx.AsyncClient, headers: dict[str, str], key: str, t
         me = (await _ok(await c.get("/staff/me", headers=headers)))["cis_user_id"]
         entities = (await _ok(await c.get("/billing-entities", headers=headers)))["items"]
         return sum(1 for e in entities if e.get("pending_change") and e["pending_change"]["requested_by"] != me)
+    if key == "supplier_bank_to_approve":
+        assert f == {"bank": "pending", "approvable": "me"}
+        body = await _ok(await c.get("/suppliers", params={**f, "limit": 1}, headers=headers))
+        return body["total"]
     if key == "owner_self_approvals":
         assert f["owner_self_approved"] == "true" and f["from"].endswith("-01")
         body = await _ok(await c.get("/audit-logs", params={**f, "limit": 200}, headers=headers))

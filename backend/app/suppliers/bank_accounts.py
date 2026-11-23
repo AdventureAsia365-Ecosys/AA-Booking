@@ -225,6 +225,47 @@ async def check_payout(conn: asyncpg.Connection, supplier_id: str, *, now: datet
         )
 
 
+# ── Approval queue (My work, the supplier list filter) ──────────────────────
+
+# The supplier ({p} = the caller) has a pending bank account the caller did not enter (one pending per supplier).
+PENDING_NOT_MINE = (
+    "EXISTS (SELECT 1 FROM booking.supplier_bank_account a WHERE a.supplier_id = s.id AND a.status = 'pending'"
+    " AND a.entered_by <> {p})"
+)
+PENDING_ANY = (
+    "EXISTS (SELECT 1 FROM booking.supplier_bank_account a WHERE a.supplier_id = s.id AND a.status = 'pending')"
+)
+
+
+async def approvable_filter(conn: asyncpg.Connection, staff: Staff, where: list[str], add: Any) -> None:
+    """``bank=pending&approvable=me``: suppliers whose pending bank account the caller may approve now (not entered by
+    them unless they may self-approve; none without ``supplier_bank.approve``)."""
+    if not staff.can("supplier_bank.approve"):
+        where.append("false")
+    elif await self_approval.may_self_approve(conn, staff):
+        where.append(PENDING_ANY)
+    else:
+        add(PENDING_NOT_MINE, staff.cis_user_id)
+
+
+async def queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    """AA-1158 part 2 My work: the pending bank accounts ``staff`` may approve now (the list filter above) and the
+    oldest."""
+    args: list[Any] = []
+    where = "a.status = 'pending'"
+    if not staff.can("supplier_bank.approve"):
+        where += " AND false"
+    elif not await self_approval.may_self_approve(conn, staff):
+        args.append(staff.cis_user_id)
+        where += " AND a.entered_by <> $1"
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(a.entered_at) AS oldest_at FROM booking.supplier_bank_account a"  # noqa: S608
+        f" WHERE {where}",
+        *args,
+    )
+    return dict(row) if row else {"count": 0, "oldest_at": None}
+
+
 # ── Reads ────────────────────────────────────────────────────────────────────
 
 

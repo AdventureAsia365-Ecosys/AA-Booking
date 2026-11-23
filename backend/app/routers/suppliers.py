@@ -140,6 +140,10 @@ async def list_suppliers(
     approvable: Annotated[
         Literal["me"] | None, Query(description="me: pending suppliers the caller may activate now")
     ] = None,
+    bank: Annotated[
+        Literal["pending"] | None,
+        Query(description="pending (with approvable=me): suppliers whose bank account change the caller may approve"),
+    ] = None,
     category: Annotated[str | None, Query(max_length=20)] = None,
     country: Annotated[str | None, Query(max_length=2, min_length=2)] = None,
     sort: Annotated[
@@ -159,6 +163,7 @@ async def list_suppliers(
             limit=limit,
             offset=offset,
             approvable_by=staff if approvable == "me" else None,
+            approvable_bank=bank == "pending",
         )
 
 

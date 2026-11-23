@@ -178,6 +178,13 @@ async def test_entry_stays_pending_payouts_wait_for_approval_and_the_lock(
              403, "forbidden")  # fmt: skip
     _refused(await c.post(f"/suppliers/{sid}/bank-accounts", json=ACCOUNT, headers=lead), 409, "bank_change_pending")
     assert kms.contexts[-1] == {"purpose": "supplier_bank_account", "supplier_id": sid}
+    # My work: the approver's tile equals the supplier list filter; the enterer has no approval tile.
+    tile = {t["key"]: t for t in (await _ok(await c.get("/my-work/summary", headers=lead)))["tiles"]}
+    assert tile["supplier_bank_to_approve"]["count"] == 1
+    approvable = await _ok(await c.get("/suppliers", params={"bank": "pending", "approvable": "me"}, headers=lead))
+    assert [r["id"] for r in approvable["items"]] == [sid]
+    mine = await _ok(await c.get("/my-work/summary", headers=holder))
+    assert "supplier_bank_to_approve" not in {t["key"] for t in mine["tiles"]}
 
     # The stored row is ciphertext (counts only, the bytes never printed).
     leaks = await admin.fetchval(

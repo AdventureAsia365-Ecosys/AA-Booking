@@ -35,7 +35,7 @@ from app import audit, catalog, paging
 from app.auth import self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
-from app.suppliers import profile
+from app.suppliers import bank_accounts, profile
 
 CATEGORIES = ("hotel", "transport", "guide", "entrance", "activity", "meal")
 STATUSES = ("pending", "active", "inactive")
@@ -227,9 +227,11 @@ async def list_suppliers(
     limit: int = 25,
     offset: int = 0,
     approvable_by: Staff | None = None,
+    approvable_bank: bool = False,
 ) -> dict[str, Any]:
     """``approvable_by`` (``approvable=me``): pending suppliers that person may activate now (made by someone else,
-    or by them when they may self-approve; empty without ``supplier.activate``)."""
+    or by them when they may self-approve; empty without ``supplier.activate``). With ``approvable_bank``
+    (``bank=pending``, AA-1158 part 2): suppliers whose pending bank account that person may approve instead."""
     where: list[str] = []
     args: list[Any] = []
 
@@ -242,7 +244,7 @@ async def list_suppliers(
             raise Invalid("unknown_status", f"status must be one of {', '.join(STATUSES)}")
         add("s.status = {p}", status)
     if approvable_by is not None:
-        await _approvable(conn, approvable_by, where, add)
+        await _approvable(conn, approvable_by, where, add, bank=approvable_bank)
     if category:
         if category not in CATEGORIES:
             raise Invalid("unknown_category", f"category must be one of {', '.join(CATEGORIES)}")
@@ -282,8 +284,13 @@ def supplier_makers(supplier: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(k for k in keys if k))
 
 
-async def _approvable(conn: asyncpg.Connection, staff: Staff, where: list[str], add: Any) -> None:
-    """``approvable=me``: pending, and not made by the caller unless they may self-approve (none without the right)."""
+async def _approvable(
+    conn: asyncpg.Connection, staff: Staff, where: list[str], add: Any, *, bank: bool = False
+) -> None:
+    """``approvable=me``: pending, and not made by the caller unless they may self-approve (none without the right);
+    ``bank``: a pending bank account the caller may approve (:mod:`app.suppliers.bank_accounts`)."""
+    if bank:
+        return await bank_accounts.approvable_filter(conn, staff, where, add)
     where.append("s.status = 'pending'")
     if not staff.can("supplier.activate"):
         where.append("false")

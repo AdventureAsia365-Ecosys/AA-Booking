@@ -272,7 +272,7 @@ async function rateSheetTemplate(): Promise<Blob> {
 }
 
 export const suppliersApi = {
-  list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number; approvable?: "me" } = {}) =>
+  list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number; approvable?: "me"; bank?: "pending" } = {}) =>
     bkGet<SupplierList>("suppliers", q),
   summary: () => bkGet<SupplierSummary>("suppliers/summary"),
   get: (ref: string) => bkGet<SupplierDetail>(`suppliers/${enc(ref)}`),
