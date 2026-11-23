@@ -793,11 +793,11 @@ async def check_import(conn: asyncpg.Connection, writer_name: str, sheets: Any) 
 
 def check_activity_sheet(writer_name: str, sheet: Any) -> None:
     """A10e-4: the activity import route's check for an E2E session, before any preview or write (the path's supplier
-    is synthetic). 403 ``e2e_read_only`` unless every row's title starts with :data:`SYNTHETIC_SUPPLY_MARK` and it has
-    no inclusions (free text). ``sheet`` = ``app.supply.activity_import.parse`` of the upload. No DB access."""
-    for row in getattr(sheet, "rows", None) or ():
+    is synthetic). 403 ``e2e_read_only`` past 5 rows (each row queues a paid CIS draft job) or unless every row's title
+    starts with :data:`SYNTHETIC_SUPPLY_MARK` and has no inclusions. ``sheet`` = ``activity_import.parse(upload)``."""
+    for i, row in enumerate(getattr(sheet, "rows", None) or ()):
         title = getattr(row, "title", None)
-        marked = isinstance(title, str) and title.strip().startswith(SYNTHETIC_SUPPLY_MARK)
+        marked = i < 5 and isinstance(title, str) and title.strip().startswith(SYNTHETIC_SUPPLY_MARK)
         if not marked or (getattr(row, "service", None) or {}).get("inclusions"):
             log.info("booking_e2e_writer_refused identity=%s reason=activity_row", writer_name)
             raise HTTPException(status_code=403, detail=E2E_READ_ONLY)

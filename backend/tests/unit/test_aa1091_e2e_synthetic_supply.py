@@ -326,6 +326,17 @@ def test_check_activity_sheet_passes_marked_rows_only() -> None:
     assert err.value.detail == "e2e_read_only"
 
 
+def test_check_activity_sheet_caps_an_e2e_import_at_five_rows() -> None:
+    """Each imported activity queues one paid CIS draft job: the E2E maker imports at most 5 (the Done-when count)."""
+    five = [(f"SYNTHETIC Trail {i}", None) for i in range(5)]
+    sheet = activity_import.parse(base64.b64decode(_activities(*five)["data_base64"]))
+    e2e_staff.check_activity_sheet("pricing_maker", sheet)
+    six = activity_import.parse(base64.b64decode(_activities(*five, ("SYNTHETIC Trail 5", None))["data_base64"]))
+    with pytest.raises(HTTPException) as err:
+        e2e_staff.check_activity_sheet("pricing_maker", six)
+    assert err.value.detail == "e2e_read_only"
+
+
 def test_a_real_contracting_member_is_unaffected() -> None:
     """Control: a company contracting user writes supply with any name and no E2E check."""
     cis = LocalCis()
