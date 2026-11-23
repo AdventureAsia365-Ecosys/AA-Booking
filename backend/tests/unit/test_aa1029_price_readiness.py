@@ -211,6 +211,7 @@ def test_the_csv_has_a_fixed_header_and_neutralises_formulas() -> None:
         "from_price",
         "from_currency",
         "note",
+        "operable",  # AA-1149: the can-operate status
     )
     rows = list(csv.DictReader(io.StringIO(text)))
     assert rows[0]["title"] == "'=HYPERLINK(1)"

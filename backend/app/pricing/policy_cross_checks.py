@@ -55,3 +55,17 @@ def succeeded_not_longer(value: Any, current: Mapping[str, Any]) -> str | None:
     if isinstance(failed, int) and value > failed:
         return f"must not be longer than retention_job_failed_days ({failed})"
     return None
+
+
+def operable_default_within_max(value: Any, current: Mapping[str, Any]) -> str | None:
+    longest = current.get("operable_exception_max_days")
+    if isinstance(longest, int) and value > longest:
+        return f"must not be longer than operable_exception_max_days ({longest})"
+    return None
+
+
+def operable_max_covers_default(value: Any, current: Mapping[str, Any]) -> str | None:
+    default = current.get("operable_exception_default_days")
+    if isinstance(default, int) and value < default:
+        return f"must not be shorter than operable_exception_default_days ({default})"
+    return None

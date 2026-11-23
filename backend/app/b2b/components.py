@@ -100,6 +100,24 @@ class LineAsk:
         return self.adult + self.child
 
 
+@dataclass(frozen=True)
+class PartCost:
+    """One component of a ``tp:`` line as priced (AA-1149, bk-065 ``b2b_quote_line_parts``): the sold snapshot."""
+
+    part_no: int
+    day_no: int
+    service_date: date
+    room_type_id: str | None
+    service_id: str | None
+    supplier_id: str
+    quantity: int  # rooms of the room night, or the quantity of the service's rate unit
+    pax: int
+    rooms: list[dict[str, Any]] | None  # the room mix [{"occupancy", "count"}] of a room part
+    net: Decimal | None  # None (with currency) when the part's rates are in more than one currency
+    currency: str | None
+    rate_ids: list[str]
+
+
 @dataclass
 class LineCost:
     kind: str
@@ -107,6 +125,7 @@ class LineCost:
     rate_ids: list[str] = field(default_factory=list)
     child: dict[str, Any] | None = None  # B4: how a child of an sv: line was priced (the quote's price note)
     supply: list[SupplyAsk] = field(default_factory=list)  # the availability engine's asks (bk-060)
+    parts: list[PartCost] = field(default_factory=list)  # AA-1149: the components of a tp: line (bk-065)
 
 
 PLANS_SQL = "SELECT id::text AS id, sellable FROM booking.trip_plans WHERE id = ANY($1::uuid[])"
@@ -117,11 +136,14 @@ FROM booking.trip_plan_components WHERE trip_plan_id = ANY($1::uuid[])
 ORDER BY trip_plan_id, day_no, coalesce(hotel_room_type_id, service_id)
 """
 ROOMS_SQL = """
-SELECT rt.id::text AS id, rt.status, rt.max_occupancy, h.status AS hotel_status
+SELECT rt.id::text AS id, rt.status, rt.max_occupancy, h.status AS hotel_status, h.supplier_id::text AS supplier_id
 FROM booking.hotel_room_types rt JOIN booking.hotels h ON h.id = rt.hotel_id
 WHERE rt.id = ANY($1::uuid[])
 """
-SERVICES_SQL = "SELECT id::text AS id, status, service_type FROM booking.services WHERE id = ANY($1::uuid[])"
+SERVICES_SQL = (
+    "SELECT id::text AS id, status, service_type, supplier_id::text AS supplier_id FROM booking.services"
+    " WHERE id = ANY($1::uuid[])"
+)
 
 
 def _no_price(line_ref: str, why: str) -> B2BError:
@@ -192,6 +214,8 @@ class _Unit:
     rooms: int = 0  # room count (rooms only)
     days: int = 1  # days of a ``day`` service
     split: bool = False  # an sv: line with children or infants: their rates are looked up too (B4)
+    part: int = 0  # AA-1149: the part number of a tp: line's component (1-based; 0 = not a tp: component)
+    day_no: int = 0  # the component's day (tp: only)
 
 
 class _Budget:
@@ -252,7 +276,9 @@ async def price_lines(
     out: list[LineCost] = []
     units: list[_Unit] = []
 
-    def room_units(no: int, ask: LineAsk, room_type_id: str, *, start: date, nights: int) -> None:
+    def room_units(
+        no: int, ask: LineAsk, room_type_id: str, *, start: date, nights: int, part: tuple[int, ...] = ()
+    ) -> None:
         row = rooms.get(room_type_id)
         if row is None or row["status"] != "active" or row["hotel_status"] != "active":
             raise _no_price(ask.line_ref, "unknown or inactive room type")
@@ -260,14 +286,16 @@ async def price_lines(
         budget.take(nights * len(mix))
         for i in range(nights):
             for pax, count in mix:
-                units.append(_Unit(no, room_type_id, None, start + timedelta(days=i), pax, rooms=count))
+                units.append(_Unit(no, room_type_id, None, start + timedelta(days=i), pax, count, 1, False, *part))
 
-    def service_unit(no: int, ask: LineAsk, service_id: str, *, on: date, days: int, split: bool = False) -> str:
+    def service_unit(
+        no: int, ask: LineAsk, service_id: str, *, on: date, days: int, split: bool = False, part: tuple[int, ...] = ()
+    ) -> str:
         row = services.get(service_id)
         if row is None or row["status"] != "active" or row["service_type"] not in SERVICE_KINDS:
             raise _no_price(ask.line_ref, "unknown or inactive service")
         budget.take(1 + 2 * int(split))  # B4: a split unit also looks up the child and infant rates
-        units.append(_Unit(no, None, service_id, on, ask.party, days=days, split=split))
+        units.append(_Unit(no, None, service_id, on, ask.party, 0, days, split, *part))
         return str(row["service_type"])
 
     for no, (ask, (prefix, ident)) in enumerate(zip(asks, parsed, strict=True)):
@@ -288,14 +316,16 @@ async def price_lines(
                 raise _no_price(ask.line_ref, "the trip plan has no bookable components")
             check_room_types(ask, {r["room_type_id"] for r in parts[ident] if r["room_type_id"]})
             out.append(LineCost(kind=KIND_PLAN))
-            for part in parts[ident]:
+            for part_no, part in enumerate(parts[ident], start=1):
                 on = ask.service_date + timedelta(days=int(part["day_no"]) - 1)
+                tag = (part_no, int(part["day_no"]))
                 if part["room_type_id"]:
-                    room_units(no, ask, part["room_type_id"], start=on, nights=1)
+                    room_units(no, ask, part["room_type_id"], start=on, nights=1, part=tag)
                 else:
-                    service_unit(no, ask, part["service_id"], on=on, days=1)
+                    service_unit(no, ask, part["service_id"], on=on, days=1, part=tag)
 
     rates, by_split, contract_pct = await _lookup(conn, asks, units)
+    unit_costs: list[tuple[Decimal, str]] = []
     for unit, rate in zip(units, rates, strict=True):
         ask = asks[unit.line]
         if rate is None:
@@ -305,19 +335,74 @@ async def price_lines(
         line.rate_ids.append(rate["id"])
         line.supply.append(_supply_ask(unit, ask))
         policy_pct = (child_pct_by_type or {}).get(str(services.get(unit.service_id or "", {}).get("service_type")))
-        line.costs.append(
-            _unit_cost(
-                unit,
-                ask,
-                line,
-                rate,
-                by_split.get(id(unit)),
-                contract_pct=contract_pct.get(rate["contract_id"]),
-                policy_pct=policy_pct,
-                child_age_max=child_age_max,
+        cost = _unit_cost(
+            unit,
+            ask,
+            line,
+            rate,
+            by_split.get(id(unit)),
+            contract_pct=contract_pct.get(rate["contract_id"]),
+            policy_pct=policy_pct,
+            child_age_max=child_age_max,
+        )
+        line.costs.append(cost)
+        unit_costs.append(cost)
+    _attach_parts(out, asks, units, rates, unit_costs, {**rooms, **services})
+    return out
+
+
+def room_names(ask: LineAsk) -> list[dict[str, Any]]:
+    """The room mix of a line as the agency asked it (occupancy names kept: twin is not double), or the default mix
+    ``room_mix`` prices (``party // 2`` doubles plus one single when the party is odd)."""
+    if not ask.rooms:
+        default = [("double", ask.party // 2), ("single", ask.party % 2)]
+        return [{"occupancy": name, "count": n} for name, n in default if n]
+    counts: dict[str, int] = {}
+    for room in ask.rooms:
+        counts[room.occupancy] = counts.get(room.occupancy, 0) + room.count
+    return [{"occupancy": name, "count": n} for name, n in counts.items()]
+
+
+def _attach_parts(
+    out: list[LineCost],
+    asks: list[LineAsk],
+    units: list[_Unit],
+    rates: list[dict[str, Any] | None],
+    costs: list[tuple[Decimal, str]],
+    items: Mapping[str, Any],
+) -> None:
+    """AA-1149 (bk-065): one :class:`PartCost` per component of each tp: line, from the units it was priced on (a
+    room night = one unit per occupancy of the mix, a service = one unit). A part whose units' rates are in more than
+    one currency keeps no net (staff enter it on the booking); never a guessed net."""
+    grouped: dict[tuple[int, int], list[int]] = {}
+    for i, unit in enumerate(units):
+        if unit.part:
+            grouped.setdefault((unit.line, unit.part), []).append(i)
+    for (line_no, part_no), idx in grouped.items():
+        first, ask = units[idx[0]], asks[line_no]
+        currencies = {costs[i][1] for i in idx}
+        one = len(currencies) == 1
+        found = [rate for i in idx if (rate := rates[i]) is not None]  # every unit has a rate here (else 422 above)
+        if first.room_type_id:
+            quantity, mix = sum(units[i].rooms for i in idx), room_names(ask)
+        else:
+            quantity, mix = _service_quantity(str(found[0]["unit"]), ask, days=1), None
+        out[line_no].parts.append(
+            PartCost(
+                part_no=part_no,
+                day_no=first.day_no,
+                service_date=first.on,
+                room_type_id=first.room_type_id,
+                service_id=first.service_id,
+                supplier_id=str(items[first.room_type_id or first.service_id or ""]["supplier_id"]),
+                quantity=max(1, min(quantity, 999)),
+                pax=max(1, min(ask.party, 120)),
+                rooms=mix,
+                net=sum((costs[i][0] for i in idx), Decimal("0")) if one else None,
+                currency=next(iter(currencies)) if one else None,
+                rate_ids=list(dict.fromkeys(str(r["id"]) for r in found)),
             )
         )
-    return out
 
 
 def _unit_cost(

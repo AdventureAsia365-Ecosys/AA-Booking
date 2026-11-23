@@ -263,7 +263,7 @@ async def test_the_route_json_csv_and_permission(
     lines = got.text.splitlines()
     assert lines[0] == (
         "tour_key,title,country,duration_days,sellable,status,reason,components,components_without_rate,missing_fx,"
-        "computed_rows,hand_rows,from_price,from_currency,note"
+        "computed_rows,hand_rows,from_price,from_currency,note,operable"
     )
     rows = {r["tour_key"]: r for r in csv.DictReader(io.StringIO(got.text))}
     assert (rows[TOUR]["status"], rows[TOUR]["from_price"], rows[TOUR]["from_currency"]) == ("priced", "235.00", "USD")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -69,6 +70,9 @@ POLICY_SEED: dict[str, str] = {
     # AA-1171 (bk-063)
     "ops_jobs_stuck_after_s": "900",
     "ops_jobs_overdue_factor": '"2"',
+    # AA-1149 (bk-065)
+    "operable_exception_default_days": "14",
+    "operable_exception_max_days": "30",
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
 # The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure
@@ -177,4 +181,64 @@ def served_plan(conn: ScriptedConn, plan_id: str, source_id: str, **state: Any) 
     """Script the B2B served check for one ``tp:`` plan (default: in ``catalog.v_tour``, no tombstone)."""
     conn.on(PLAN_KEYS_FRAGMENT, [{"id": plan_id, "source_id": source_id}])
     conn.on(STATES_FRAGMENT, [state_row(source_id, **state)])
+    return conn
+
+
+# ── AA-1149: the can-operate check of a tp: plan (app.catalog.operability) ─────
+
+OPERABLE_PLANS_FRAGMENT = "no_hotel_nights FROM booking.trip_plans"
+OPERABLE_COMPONENTS_FRAGMENT = "su.status AS supplier_status"
+OPERABLE_EXCEPTIONS_FRAGMENT = "FROM booking.trip_plan_operable_overrides o"
+PLAN_DAYS_FRAGMENT = "coalesce(max(c.day_no), 1) AS days"
+TOUR_DAYS_FRAGMENT = "source_id, duration_days FROM catalog.v_tour"
+SPANS_FRAGMENT = "AS stop FROM booking.supplier_rates x JOIN booking.supplier_contracts k"
+
+
+def operable_plan(
+    conn: ScriptedConn,
+    plan_id: str,
+    source_id: str,
+    *,
+    days: int,
+    components: list[tuple[int, str | None, str | None, str | None]],
+    no_hotel_nights: tuple[int, ...] = (),
+    supplier_status: str = "active",
+    exception: dict[str, Any] | None = None,
+    rated: bool = True,
+) -> ScriptedConn:
+    """Script the can-operate check of one plan: ``components`` = ``(day, room type id, service id, service type)``,
+    every item active, of supplier ``SUP-000001`` (``supplier_status``), rated for ever unless ``rated`` is False."""
+    conn.on(OPERABLE_PLANS_FRAGMENT, [{"plan_id": plan_id, "source_id": source_id, "no_hotel_nights": no_hotel_nights}])
+    conn.on(PLAN_DAYS_FRAGMENT, [{"id": plan_id, "source_id": source_id, "days": 1}])
+    conn.on(TOUR_DAYS_FRAGMENT, [{"source_id": source_id, "duration_days": days}])
+    conn.on(OPERABLE_EXCEPTIONS_FRAGMENT, [exception] if exception else [])
+    rows = [
+        {
+            "plan_id": plan_id,
+            "day_no": day,
+            "room_type_id": room,
+            "service_id": service,
+            "status": "active",
+            "hotel_status": "active",
+            "code": "HTL-000001" if room else "SVC-000001",
+            "room_type": "Deluxe" if room else None,
+            "service_type": service_type,
+            "destination_id": None,
+            "supplier_code": "SUP-000001",
+            "supplier_status": supplier_status,
+        }
+        for day, room, service, service_type in components
+    ]
+    conn.on(OPERABLE_COMPONENTS_FRAGMENT, rows)
+    spans = [
+        {
+            "room_type_id": room,
+            "service_id": service,
+            "currency": "USD",
+            "start": date(2000, 1, 1),
+            "stop": date(9999, 12, 31),
+        }
+        for _, room, service, _ in components
+    ]
+    conn.on(SPANS_FRAGMENT, spans if rated else [])
     return conn

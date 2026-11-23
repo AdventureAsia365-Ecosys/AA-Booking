@@ -47,18 +47,18 @@ import csv
 import io
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import UTC, date, datetime
 from typing import Any
 
 import asyncpg
 
 from app.b2b.tariff import FORMULA_START
-from app.catalog import cost_sheet, liveness
+from app.catalog import cost_sheet, liveness, operability
 from app.catalog.destinations import CATALOG_ERRORS
+from app.catalog.rate_horizon import HORIZON_DAYS, horizon, rated_items  # noqa: F401 — HORIZON_DAYS re-exported
 from app.pricing import engine
 
 SOURCE_SYSTEM = "cis"
-HORIZON_DAYS = 365
 MAX_PROBES = 50
 BATCH = 500
 MAX_IMPACT_PLANS = 500
@@ -92,6 +92,7 @@ CSV_COLUMNS: tuple[str, ...] = (
     "from_price",
     "from_currency",
     "note",
+    "operable",
 )
 NOTE_NO_COMMON_WINDOW = "every component has a rate, but the rates do not cover one common start date and pax band"
 NOTE_NOT_CHECKED = "every component has a rate; not checked against the cost sheet in this read (too many such plans)"
@@ -211,22 +212,6 @@ class Verdict:
     missing_fx: tuple[str, ...]
 
 
-def horizon(on: date) -> date:
-    return on + timedelta(days=HORIZON_DAYS)
-
-
-def rated_items(spans: Iterable[Mapping[str, Any]], on: date) -> dict[str, set[str]]:
-    """``{item id: currencies}`` of the published rate spans (``cost_sheet.SPANS_SQL`` rows) that cover a day from
-    ``on`` to the horizon."""
-    end = horizon(on)
-    out: dict[str, set[str]] = {}
-    for span in spans:
-        if span["start"] <= end and span["stop"] >= on:
-            item = span["room_type_id"] or span["service_id"]
-            out.setdefault(item, set()).add(str(span["currency"]).strip())
-    return out
-
-
 def fx_ready(currencies: Iterable[str], fx: Iterable[str]) -> bool:
     """A component's rates can be priced in USD when one of their currencies is USD or has an approved FX rate."""
     have = set(fx)
@@ -324,6 +309,7 @@ def to_csv(report: Mapping[str, Any]) -> str:
                 price["amount"] if price else None,
                 price["currency"] if price else None,
                 item["note"],
+                (item.get("operable") or {}).get("status"),
             )
         )
     return out.getvalue()
@@ -479,6 +465,26 @@ async def resolve(conn: asyncpg.Connection, facts: Facts, rated: Mapping[str, se
     return out
 
 
+async def _attach_operable(conn: asyncpg.Connection, facts: Facts, rows: list[dict[str, Any]]) -> dict[str, int]:
+    """AA-1149 (B13): each row's can-operate check (``operable``: status, the first findings, the exception's end;
+    a separate field: the sellable gate reads price readiness only). Returns the counts per status."""
+    found = await operability.verdicts(
+        conn,
+        [p.plan_id for p in facts.plans],
+        on=facts.on,
+        now=datetime.now(UTC),
+        duration={p.plan_id: p.duration_days for p in facts.plans},
+        rated=facts.rated,
+    )
+    counts = dict.fromkeys(operability.STATUSES, 0)
+    for plan, row in zip(facts.plans, rows, strict=True):
+        verdict = found.get(plan.plan_id)
+        row["operable"] = verdict.out() if verdict else None
+        if verdict:
+            counts[verdict.status] += 1
+    return counts
+
+
 async def build(
     conn: asyncpg.Connection,
     *,
@@ -486,17 +492,23 @@ async def build(
     status: str | None = None,
     country: str | None = None,
     q: str | None = None,
+    operable: str | None = None,
 ) -> dict[str, Any]:
-    """The readiness report: the summary of every plan and the plans that match the filters."""
+    """The readiness report: the summary of every plan and the plans that match the filters (``operable``: the
+    can-operate status, AA-1149)."""
     facts = await load(conn, on)
     rows = await resolve(conn, facts, facts.rated)
+    by_operable = await _attach_operable(conn, facts, rows)
+    items = [r for r in rows if matches(r, status=status, country=country, q=q)]
+    if operable:
+        items = [r for r in items if (r.get("operable") or {}).get("status") == operable]
     return {
         "today": on,
         "horizon_to": horizon(on),
         "rules": sorted(c.value for c in facts.pricing.rules),
         "fx_currencies": sorted(facts.pricing.fx),
-        "summary": summary(rows),
-        "items": [r for r in rows if matches(r, status=status, country=country, q=q)],
+        "summary": {**summary(rows), "by_operable": by_operable},
+        "items": items,
         "degraded": facts.degraded,
     }
 

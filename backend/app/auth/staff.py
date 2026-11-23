@@ -168,6 +168,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "catalog.read": frozenset({"admin", "sales", "contracting", "content_creator", "finance"}),
     # Commercial row of a catalog tour (sellable, trip style, price hint, notes; bk-009): contracting + admin.
     "trip_plan.write": frozenset({"admin", "contracting"}),
+    # AA-1149 (bk-065, B13): allow agencies to buy a tour the can-operate check blocks (a night without a hotel, a
+    # supplier not active) for a while, with a reason. Administrator only; an approve-class name, so a custom role
+    # can never hold it (custom_roles.APPROVE_SUFFIX and the bk-062 CHECK).
+    "operable_exception.approve": frozenset({"admin"}),
     # Booking state of CIS countries and destinations (bk-029, AA-996): status, area, notes. Admin only (UI spec §3).
     "catalog.admin": frozenset({"admin"}),
     "staff.admin": frozenset({"admin"}),

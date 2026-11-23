@@ -71,7 +71,8 @@ SUPPLIER_REFS_SQL = """
 SELECT coalesce(sb.b2b_line_ref, ql.line_ref) AS line_ref, sb.confirmation_ref
 FROM booking.supplier_bookings sb
 LEFT JOIN booking.trip_case_version_itinerary it ON it.id = sb.version_item_id
-LEFT JOIN booking.b2b_quote_lines ql ON ql.quote_id = $2::uuid AND ql.line_no = it.position
+LEFT JOIN booking.b2b_quote_line_parts qp ON qp.id = sb.quote_part_id
+LEFT JOIN booking.b2b_quote_lines ql ON ql.quote_id = $2::uuid AND ql.line_no = coalesce(it.position, qp.line_no)
 WHERE sb.trip_case_id = $1::uuid AND sb.status = 'confirmed' AND sb.confirmation_ref IS NOT NULL
 ORDER BY sb.confirmed_at, sb.code
 """

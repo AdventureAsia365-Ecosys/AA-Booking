@@ -22,6 +22,7 @@ import {
 import { mergeComponents, type ItemRef } from "@/ui/booking/priceWorkbench";
 import { Button, Drawer, Pill, Select, useCan, useT, useToast } from "@/ui";
 import { M, type MessageKey } from "./messages";
+import { NoHotelNights } from "./NoHotelNights";
 import { PlanTabs } from "./VersionsDrawer";
 
 type Choice = { index: number; roomTypeId?: string };
@@ -255,6 +256,7 @@ export function ComponentsDrawer({
             })}
           </ul>
         </section>
+        <NoHotelNights sourceId={sourceId} canEdit={canEdit} />
         {suggestions.isLoading && <p className="text-[13px] text-muted">{t("compLoading")}</p>}
         {suggestions.isError && (
           <p className="text-[13px] text-body" role="alert">

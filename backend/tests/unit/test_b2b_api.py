@@ -5,6 +5,7 @@ Real SQL (bk-019, rates in force, append-only grants) is covered by tests/integr
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
@@ -20,13 +21,14 @@ from app.main import create_app
 from app.pricing import repository
 from app.pricing.engine import Channel, PricingRule
 from tests.staff_tokens import CRM_CLIENT, OTHER_M2M_CLIENT, LocalCis, LocalM2M
-from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, policy_rows, served_plan
+from tests.unit.fakes import POLICY_FRAGMENT, ScriptedConn, operable_plan, policy_rows, served_plan
 from tests.unit.test_pricing_api import ScriptedDatabase
 
 TENANT = "5b7d6f00-0000-4000-8000-0000000000aa"
 PARTNER_ID = "6c8e7a00-0000-4000-8000-0000000000bb"
 ROOM = "7d9f8b00-0000-4000-8000-0000000000c1"
 SERVICE = "7d9f8b00-0000-4000-8000-0000000000c2"
+SUP = "7d9f8b00-0000-4000-8000-0000000000c3"
 DEP = "7d9f8b00-0000-4000-8000-0000000000d1"
 TODAY = datetime.now(UTC).date()
 
@@ -73,7 +75,7 @@ def _rates(per_ask: Any) -> Any:
 def _rate_asks(conn: ScriptedConn) -> list[tuple[Any, ...]]:
     """The (room, service, day, pax) asks of the single batched rate query of a request (bk-060: the pax type list
     comes last)."""
-    [call] = conn.sql("FROM booking.supplier_rates x")
+    [call] = [c for c in conn.sql("FROM booking.supplier_rates x") if len(c) > 2]  # not the AA-1149 rate span read
     return list(zip(*call[:4], strict=True))
 
 
@@ -85,9 +87,12 @@ def _conn(partner: Any = PARTNER) -> ScriptedConn:
     conn.on("FROM booking.settings", "48")
     conn.on(
         "FROM booking.hotel_room_types rt JOIN booking.hotels",
-        [{"id": ROOM, "status": "active", "max_occupancy": None, "hotel_status": "active"}],
+        [{"id": ROOM, "status": "active", "max_occupancy": None, "hotel_status": "active", "supplier_id": SUP}],
     )
-    conn.on("FROM booking.services WHERE id", [{"id": SERVICE, "status": "active", "service_type": "transfer"}])
+    conn.on(
+        "FROM booking.services WHERE id",
+        [{"id": SERVICE, "status": "active", "service_type": "transfer", "supplier_id": SUP}],
+    )
     conn.on(
         "FROM booking.supplier_rates x",
         _rates(
@@ -336,6 +341,8 @@ def test_trip_plan_line_sums_its_components() -> None:
             {"trip_plan_id": plan, "day_no": 2, "room_type_id": None, "service_id": SERVICE},
         ],
     )
+    # AA-1149: a 2-day tour, its one night has the hotel
+    operable_plan(conn, plan, "src-1", days=2, components=[(1, ROOM, None, None), (2, None, SERVICE, "transfer")])
     line = {"line_ref": "T", "component_id": f"tp:{plan}", "service_date": "2027-03-01", "pax": {"adult": 2}}
     resp = _client(conn, m2m).post(
         "/booking/b2b/v1/quotes", json=_quote_body(lines=[line]), headers=_headers(m2m.token())
@@ -346,6 +353,35 @@ def test_trip_plan_line_sums_its_components() -> None:
     assert [a[2] for a in _rate_asks(conn)] == [date(2027, 3, 1), date(2027, 3, 2)]
     [row] = conn.sql("INSERT INTO booking.b2b_quote_lines")
     assert row[4] == "trip_plan"
+    assert row[20] is None  # no sale exception was needed
+    # AA-1149 (T15): the two components as priced, the sold snapshot (room 1,000,000 VND; transfer 2 x 10 USD).
+    parts = conn.sql("INSERT INTO booking.b2b_quote_line_parts")
+    assert [(p[2], p[3], p[5] is not None, p[7], p[8], p[11], p[12]) for p in parts] == [
+        (1, 1, True, SUP, 1, D("1000000.00"), "VND"),
+        (2, 2, False, SUP, 2, D("20.00"), "USD"),
+    ]
+    assert json.loads(parts[0][10]) == [{"occupancy": "double", "count": 1}]
+
+
+def test_a_tour_missing_a_night_hotel_is_refused_for_agencies() -> None:
+    """AA-1149 (B13, N1): a 3-day tour whose night 2 has no hotel is refused 422 naming the night and the rule."""
+    m2m = LocalM2M()
+    plan = "8e000000-0000-4000-8000-0000000000d2"
+    conn = _conn()
+    conn.on("FROM booking.trip_plans WHERE id", [{"id": plan, "sellable": True}])
+    served_plan(conn, plan, "src-2")
+    conn.on(
+        "FROM booking.trip_plan_components WHERE trip_plan_id",
+        [{"trip_plan_id": plan, "day_no": 1, "room_type_id": ROOM, "service_id": None}],
+    )
+    operable_plan(conn, plan, "src-2", days=3, components=[(1, ROOM, None, None)])
+    line = {"line_ref": "T", "component_id": f"tp:{plan}", "service_date": "2027-03-01", "pax": {"adult": 2}}
+    resp = _client(conn, m2m).post(
+        "/booking/b2b/v1/quotes", json=_quote_body(lines=[line]), headers=_headers(m2m.token())
+    )
+    _problem(resp, 422, "invalid")
+    assert resp.json()["message"] == "line T: this tour cannot be sold to agencies yet: night 2 has no hotel (N1)"
+    assert conn.sql("INSERT INTO booking.b2b_quotes") == []
 
 
 # ── Reads ────────────────────────────────────────────────────────────────────
@@ -681,7 +717,7 @@ def test_room_mix_refusals_name_the_line() -> None:
     m2m = LocalM2M()
     conn = _banded_conn().on(
         "FROM booking.hotel_room_types rt JOIN booking.hotels",
-        [{"id": ROOM, "status": "active", "max_occupancy": 2, "hotel_status": "active"}],
+        [{"id": ROOM, "status": "active", "max_occupancy": 2, "hotel_status": "active", "supplier_id": SUP}],
     )
     body = _quote_body(lines=[_room_line(3, [{"occupancy": "triple"}])])
     resp = _client(conn, m2m).post("/booking/b2b/v1/quotes", json=body, headers=_headers(m2m.token()))

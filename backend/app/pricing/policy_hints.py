@@ -31,6 +31,8 @@ CROSS_BOUNDS: dict[str, tuple[str, str]] = {
     "b2b_infant_age_max": ("lt", "b2b_child_age_max"),
     "retention_job_succeeded_days": ("lte", "retention_job_failed_days"),
     "retention_job_failed_days": ("gte", "retention_job_succeeded_days"),
+    "operable_exception_default_days": ("lte", "operable_exception_max_days"),  # AA-1149
+    "operable_exception_max_days": ("gte", "operable_exception_default_days"),
 }
 
 # English ``Param.pending`` text -> its Vietnamese text.

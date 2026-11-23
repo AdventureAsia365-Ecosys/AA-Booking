@@ -4122,6 +4122,50 @@
         "title": "EventPage",
         "type": "object"
       },
+      "ExceptionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "default and maximum: the pricing policy",
+            "title": "Days"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 20,
+            "title": "Reason",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "enum": [
+                "N1",
+                "N3"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules",
+          "reason"
+        ],
+        "title": "ExceptionIn",
+        "type": "object"
+      },
       "ExtendRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5518,6 +5562,18 @@
               }
             ],
             "title": "Pickup Point"
+          },
+          "quote_part_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Part Id"
           },
           "service_date": {
             "anyOf": [
@@ -6985,6 +7041,26 @@
           "date_to"
         ],
         "title": "NewTerm",
+        "type": "object"
+      },
+      "NoHotelNightsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "nights": {
+            "items": {
+              "maximum": 365.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 365,
+            "title": "Nights",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nights"
+        ],
+        "title": "NoHotelNightsIn",
         "type": "object"
       },
       "OpsContact": {
@@ -9303,6 +9379,22 @@
         "title": "RegistryThreshold",
         "type": "object"
       },
+      "RevokeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RevokeIn",
+        "type": "object"
+      },
       "RolePatch": {
         "additionalProperties": false,
         "properties": {
@@ -11509,6 +11601,22 @@
           "name"
         ],
         "title": "VoucherSupplier",
+        "type": "object"
+      },
+      "WaiveIn": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 20,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "WaiveIn",
         "type": "object"
       },
       "WeeklyPattern": {
@@ -18519,7 +18627,7 @@
     },
     "/booking/catalog/price-readiness": {
       "get": {
-        "description": "AA-1029: which trip plans price and why the others do not (see ``app/catalog/price_readiness.py``). The\nsummary counts every plan; ``items`` are the plans that match the filters.",
+        "description": "AA-1029: which trip plans price and why the others do not (see ``app/catalog/price_readiness.py``). The\nsummary counts every plan; ``items`` are the plans that match the filters. AA-1149: each item's ``operable``\n(the can-operate check, ``app/catalog/operability.py``), filter ``operable``.",
         "operationId": "price_readiness_report_booking_catalog_price_readiness_get",
         "parameters": [
           {
@@ -18597,6 +18705,28 @@
               ],
               "title": "Format",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "ready",
+                    "warnings",
+                    "blocked",
+                    "exception"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operable"
             }
           }
         ],
@@ -20044,6 +20174,120 @@
         ]
       }
     },
+    "/booking/catalog/trip-plans/{source_id}/no-hotel-nights": {
+      "put": {
+        "operationId": "put_no_hotel_nights_booking_catalog_trip_plans__source_id__no_hotel_nights_put",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoHotelNightsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put No Hotel Nights Booking Catalog Trip Plans  Source Id  No Hotel Nights Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put No Hotel Nights",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/operability": {
+      "get": {
+        "operationId": "get_operability_booking_catalog_trip_plans__source_id__operability_get",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Operability Booking Catalog Trip Plans  Source Id  Operability Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Operability",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
     "/booking/catalog/trip-plans/{source_id}/price-versions": {
       "get": {
         "operationId": "list_versions_booking_catalog_trip_plans__source_id__price_versions_get",
@@ -20637,6 +20881,130 @@
         "summary": "Decide Plan Calendar",
         "tags": [
           "price-versions"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/sell-exception": {
+      "post": {
+        "operationId": "create_sell_exception_booking_catalog_trip_plans__source_id__sell_exception_post",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExceptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Sell Exception Booking Catalog Trip Plans  Source Id  Sell Exception Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Sell Exception",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/booking/catalog/trip-plans/{source_id}/sell-exception/revoke": {
+      "post": {
+        "operationId": "revoke_sell_exception_booking_catalog_trip_plans__source_id__sell_exception_revoke_post",
+        "parameters": [
+          {
+            "description": "CIS catalog source_id (catalog.tour.v1)",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "description": "CIS catalog source_id (catalog.tour.v1)",
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Sell Exception Booking Catalog Trip Plans  Source Id  Sell Exception Revoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Sell Exception",
+        "tags": [
+          "catalog"
         ]
       }
     },
@@ -32430,6 +32798,84 @@
           }
         ],
         "summary": "Generate",
+        "tags": [
+          "operations"
+        ]
+      }
+    },
+    "/booking/trip-cases/{ref}/supplier-bookings/parts/{part_id}/waive": {
+      "post": {
+        "operationId": "waive_part_booking_trip_cases__ref__supplier_bookings_parts__part_id__waive_post",
+        "parameters": [
+          {
+            "description": "Trip case UUID or code (TC-000123)",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Trip case UUID or code (TC-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "sold tour component (quote part) UUID",
+            "in": "path",
+            "name": "part_id",
+            "required": true,
+            "schema": {
+              "description": "sold tour component (quote part) UUID",
+              "format": "uuid",
+              "title": "Part Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaiveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Waive Part Booking Trip Cases  Ref  Supplier Bookings Parts  Part Id  Waive Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "410": {
+            "description": "b2b_only: the B2C part is retired (root ADR 0019 d8); b2c records are read-only"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Waive Part",
         "tags": [
           "operations"
         ]

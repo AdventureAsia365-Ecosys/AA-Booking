@@ -15,6 +15,7 @@ import pytest
 from app.auth.staff import PERMISSIONS, PREVIEW_PERMISSIONS
 from app.errors import Conflict, Invalid
 from app.ops import files as ops_files
+from app.ops import item_bookings
 from app.ops import supplier_bookings as sb
 from app.settings import Settings, SettingsError
 from app.trip_cases import service as trip_cases
@@ -87,9 +88,9 @@ def test_service_items_have_no_nights_and_unknown_start_has_no_date() -> None:
 
 def test_mixed_cost_currencies_are_refused_and_no_costs_is_no_net() -> None:
     with pytest.raises(Conflict) as exc:
-        sb._net(_item(net_currencies=["USD", "VND"]))
+        item_bookings.net(_item(net_currencies=["USD", "VND"]))
     assert exc.value.code == "mixed_cost_currencies"
-    assert sb._net(_item(net_amounts=None, net_currencies=None)) == (None, None)
+    assert item_bookings.net(_item(net_amounts=None, net_currencies=None)) == (None, None)
 
 
 def test_b2b_links_only_on_request_lines() -> None:
