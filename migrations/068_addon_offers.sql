@@ -24,7 +24,8 @@
 --      cancellation tier override (cancellation_tiers, the bk-060 shape; the contract's tiers are the default);
 --      display order (sort_order, featured). Status draft -> published -> retired; a published offer is fixed (the
 --      guard refuses a rule change in place): staff reopen it to draft, which empties the writer list to the person
---      who reopened it, so a second person publishes it again. Maker-checker like bk-064 contracts: writers (kept by
+--      who reopened it, so a second person publishes it again (a draft retired before any publish keeps its writers
+--      on reopen: nobody approved its rules). Maker-checker like bk-064 contracts: writers (kept by
 --      trigger addon_offers_writers, the client value is ignored), addon_offers_maker_checker_chk,
 --      addon_offers_owner_self_chk and the owner_self_approval_guard trigger (mutable, recheck published_at: a
 --      reopened and republished offer is checked again). Inventory (on request by default, free sale up to N,
@@ -156,7 +157,7 @@ COMMENT ON COLUMN booking.addon_offers.child_pct IS
 COMMENT ON COLUMN booking.addon_offers.cancellation_tiers IS
     'conf:commercial; bk-068: [{min_days, fee_pct}] override of the contract''s cancellation tiers for this activity (bk-060 shape); NULL = the contract''s.';
 COMMENT ON COLUMN booking.addon_offers.writers IS
-    'bk-068: every staff key that wrote the draft (its creator, each updated_by while a draft, a place added; kept by trigger addon_offers_writers, the client value is ignored; reopening resets it to the person who reopened). The publisher is never one of them unless owner_self_approved.';
+    'bk-068: every staff key that wrote the draft (its creator, each updated_by while a draft, a place added; kept by trigger addon_offers_writers, the client value is ignored; reopening a published offer resets it to the person who reopened; a draft retired unpublished keeps its writers). The publisher is never one of them unless owner_self_approved.';
 COMMENT ON COLUMN booking.addon_offers.owner_self_approved IS
     'bk-068: the business owner published an offer she wrote (checked against the CIS marker by booking.owner_self_approval_guard). Cleared when the offer is reopened.';
 
@@ -170,8 +171,17 @@ BEGIN
         RETURN NEW;
     END IF;
     IF OLD.status <> 'draft' AND NEW.status = 'draft' THEN
-        -- Reopened: the published version was approved; the new draft starts with the person who reopened it.
-        NEW.writers := ARRAY[coalesce(NEW.updated_by, OLD.created_by)];
+        IF OLD.published_by IS NOT NULL THEN
+            -- Reopened after a publish: its rules were approved; the new draft starts with the person who reopened it.
+            NEW.writers := ARRAY[coalesce(NEW.updated_by, OLD.created_by)];
+        ELSE
+            -- A draft retired before anyone published it: nobody approved its rules, so its makers stay makers (else
+            -- a second person's reopen would let the only writer publish their own work) and the reopener joins them.
+            NEW.writers := OLD.writers;
+            IF NEW.updated_by IS NOT NULL AND NOT (NEW.updated_by = ANY (OLD.writers)) THEN
+                NEW.writers := OLD.writers || NEW.updated_by;
+            END IF;
+        END IF;
         RETURN NEW;
     END IF;
     NEW.writers := OLD.writers;
@@ -183,7 +193,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.addon_offers_writers() IS
-    'bk-068: writers = [created_by] on INSERT; while a draft, plus each new updated_by; reopening (published or retired -> draft) resets it to [updated_by].';
+    'bk-068: writers = [created_by] on INSERT; while a draft, plus each new updated_by; reopening an offer that was published (published, or retired after a publish -> draft) resets it to [updated_by]; reopening a draft retired before any publish keeps its writers and adds updated_by.';
 
 GRANT EXECUTE ON FUNCTION booking.addon_offers_writers() TO booking;
 

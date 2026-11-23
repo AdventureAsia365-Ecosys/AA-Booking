@@ -3,7 +3,8 @@ rules of add-on offers and the read model ``booking.v_place_addons``.
 
 - offers: start as a draft; the trigger keeps the writer list (the client value is ignored; adding a place makes its
   creator a writer); no writer publishes (CHECK), unless the business owner, flagged (a forged flag is refused); a
-  published offer keeps its rules; reopening resets the writers to the person who reopened; never deleted;
+  published offer keeps its rules; reopening a published offer resets the writers to the person who reopened, a
+  draft retired before any publish keeps its writers on reopen (no maker-checker bypass); never deleted;
 - places: written while the offer is a draft only;
 - the view: only published offers of active services and suppliers, only on the days the offer runs (weekday), with an
   adult rate in force under a published contract and no stop-sale in effect; inventory free_sale / allotment from the
@@ -41,6 +42,11 @@ REOPEN = (
     "UPDATE booking.addon_offers SET status = 'draft', published_by = NULL, published_at = NULL,"
     " owner_self_approved = false, retired_by = NULL, retired_at = NULL, updated_by = $2 WHERE id = $1::uuid"
 )
+RETIRE = (
+    "UPDATE booking.addon_offers SET status = 'retired', retired_by = $2, retired_at = now(), updated_by = $2"
+    " WHERE id = $1::uuid"
+)
+WRITERS = "SELECT writers FROM booking.addon_offers WHERE id = $1::uuid"
 
 
 async def _purge(admin: asyncpg.Connection) -> None:
@@ -281,6 +287,28 @@ async def test_a_published_offer_is_fixed_and_reopening_resets_the_makers(
         await admin.execute("DELETE FROM booking.addon_offers WHERE id = $1::uuid", offer)
     with pytest.raises(asyncpg.InsufficientPrivilegeError):
         await app_conn.execute("DELETE FROM booking.addon_offers WHERE id = $1::uuid", offer)
+
+
+async def test_a_draft_retired_unpublished_keeps_its_makers_when_another_person_reopens_it(
+    admin: asyncpg.Connection, app_conn: asyncpg.Connection
+) -> None:
+    """Review S289: retire then reopen by someone else must not hand the only writer an unapproved publish."""
+    s = await _supply(admin, "Pottery wheel hour")
+    offer = await _offer(app_conn, s["service"])  # MAKER wrote the rules
+    await _place(app_conn, offer, HANOI)
+    await app_conn.execute(RETIRE, offer, CHECKER)
+    assert await app_conn.fetchval(WRITERS, offer) == [MAKER]
+    await app_conn.execute(REOPEN, offer, EDITOR)
+    assert await app_conn.fetchval(WRITERS, offer) == [MAKER, EDITOR]
+    for who in (MAKER, EDITOR):
+        with pytest.raises(asyncpg.CheckViolationError):
+            await app_conn.execute(PUBLISH, offer, who, False)
+    await app_conn.execute(PUBLISH, offer, CHECKER, False)
+    # Published, then retired, then reopened: the rules were approved, so the reopener starts the new draft alone.
+    await app_conn.execute(RETIRE, offer, MAKER)
+    await app_conn.execute(REOPEN, offer, EDITOR)
+    assert await app_conn.fetchval(WRITERS, offer) == [EDITOR]
+    await app_conn.execute(PUBLISH, offer, MAKER, False)
 
 
 async def test_new_offers_start_as_drafts_and_keep_their_service(
