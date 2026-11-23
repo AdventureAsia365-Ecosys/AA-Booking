@@ -605,6 +605,14 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `cis-custom` + `booking-custom`): the custom-role maker creates and deactivates its own SYNTHETIC supplier; every
   approve-class write it sends (a route gate in the approve class, or supplier / hotel / service activate, contract
   publish, stop-sale review) is answered 403 `forbidden` from its capabilities before any record is read.
+- **Dev-only E2E owner (AA-1176, root ADR 0006a A10h; `app/auth/e2e_owner.check_session`).** The WORKFORCE
+  address `e2e-owner@e2e-mail.lumiguides.it.com` with exactly `cis-admin` + `booking-admin` is the agent's
+  administrator "like the tech lead": a plain `admin` session, NOT read-only and not an E2E writer (no allow-list, no
+  synthetic-record rule). Refused before any DB access outside `ENVIRONMENT` exactly `dev` (403 `e2e_not_allowed_here`,
+  reads too) and with any other group set or a look-alike address (403 `e2e_scope`). Exempt from the administrator MFA
+  switch (its code is readable only by the MFA admin role). Its owner marker comes from CIS like any owner's (sign in to
+  CIS first: the view lists linked rows only), so it may start a view-as; it never self-approves; its first-sign-in
+  staff row and audit row say "E2E owner (agent, Dev only)". Synthetic records only is an operating rule (ADR).
 - **View as a lower role (AA-1157, root ADR 0019 d5 as amended; `app/auth/view_as.py`, `app/routers/staff_view_as.py`).**
   An owner (the CIS `is_owner` marker, read uncached; the business-owner marker alone does not qualify) starts
   `POST /booking/view-as` (`{role, minutes 5-60, reason?}`) on a built-in role or an active custom role whose read

@@ -11,7 +11,8 @@ The business owner is the identity whose CIS record carries ``is_business_owner`
 :func:`app.auth.custom_roles.is_business_owner`, fail closed). It is decided here, server-side, on every write, never
 taken from a request field; the database checks the same marker again for any row whose flag is set
 (``booking.owner_self_approval_guard``). A Preview session, a Dev-only E2E writer and the E2E test user never
-self-approve. Self-approval only relaxes maker != checker: each approval still needs its own capability.
+self-approve, nor does the Dev-only E2E owner (A10h, AA-1176). Self-approval only relaxes maker != checker: each
+approval still needs its own capability.
 
 The switches are pricing policy parameters (Pricing > Policy, section security, approved by the administrator group):
 ``owner_self_approval_allowed`` for approvals and ``owner_payout_after_approval_allowed`` for a payout of a bill the
@@ -25,7 +26,7 @@ from collections.abc import Iterable
 
 import asyncpg
 
-from app.auth import custom_roles
+from app.auth import custom_roles, e2e_owner
 from app.auth.staff import E2E_TEST_STAFF_EMAIL, Staff
 from app.errors import Forbidden
 from app.pricing import policy_values
@@ -42,6 +43,8 @@ def eligible_session(staff: Staff) -> bool:
     """A session that may ever self-approve: active, signed in with a WORKFORCE identity, and none of the capped
     sessions (Preview, Dev-only E2E writer, the E2E test user)."""
     if not staff.active or not staff.cognito_sub or staff.preview or staff.e2e_writer or staff.e2e_grants:
+        return False
+    if e2e_owner.is_e2e_owner_like(staff.email):  # AA-1176 A10h: the E2E owner is never the business owner
         return False
     return not (isinstance(staff.email, str) and staff.email.strip().lower() == E2E_TEST_STAFF_EMAIL)
 
