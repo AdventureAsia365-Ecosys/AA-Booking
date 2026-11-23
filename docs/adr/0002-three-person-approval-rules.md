@@ -26,7 +26,8 @@ this repo only (CIS keeps the marker either way), so the ADR lives here.
    (`custom_roles.is_business_owner`, fail closed: no answer means strict maker-checker); the database checks it again
    for any flagged row (`booking.owner_self_approval_guard()`, reading the contract view as role `booking`). Preview,
    Dev-only E2E and the E2E test user never self-approve.
-3. **Suppliers start pending** whoever creates them; a second person activates them (`activated_by`).
+3. **Suppliers start pending** whoever creates them; a second person activates them (`activated_by`), never its
+   creator nor anyone who changed its data while pending (`suppliers.writers`).
 4. **Every writer of a contract draft is a maker** (`writers`); none of them publishes it.
 5. **The bill approver never records its payout**, except the business owner (Q4), flagged `same_approver_payer`;
    the bill's creator and facts editor never pay it (bk-030 rule, the business owner included). The tech lead is the

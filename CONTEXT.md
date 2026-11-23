@@ -723,7 +723,8 @@ With three staff, strict maker != checker blocked the business owner's own work.
 marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `docs/implementation-notes/AA-1158.md`):
 
 - **Suppliers (R5)**: every new supplier starts `pending`, whoever creates it; a second person with
-  `supplier.activate` activates it (`activated_by`, `activated_at`), never its creator (403 `maker_checker`; DB
+  `supplier.activate` activates it (`activated_by`, `activated_at`), never one of its makers: its creator or anyone who
+  changed its data while pending (`suppliers.writers`, kept by trigger `suppliers_writers`; 403 `maker_checker`; DB
   `suppliers_maker_checker_chk`, and `suppliers_activation_guard` takes the activator from `updated_by` when a
   statement names none). Deactivating a pending supplier rejects it (`supplier.rejected`; its creator: `withdrawn`).
   The detail answers `actions.activate` (`allowed`, `self_approval`, `blockers`); `GET /suppliers?approvable=me`.
@@ -750,7 +751,8 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
   details until then. The default issuer moves only by approving another entity as the default.
 - **Sellable needs an approved price (Q9)**: `sellable` false -> true (commercial save, workbench `make_sellable`,
   workbook import) needs a matrix row still valid today, computed by the cost sheet or from a published price version
-  (409 / skipped `no_approved_price`).
+  (409 / skipped `no_approved_price`). The workbook import recomputes the tours going sellable first (within its 50
+  plan budget); the dry run accepts a tour its own recompute prices only within that budget.
 - **Oversight**: every self-approval writes `owner_self_approved: true` in its audit row (a payout also
   `same_approver_payer`); `GET /audit-logs?owner_self_approved=true` and the audit log tab list them, and the My work
   tile `owner_self_approvals` (this calendar month) shows them to every `audit.read` holder, not only to the marker
@@ -2357,12 +2359,14 @@ A **contract** file (MIG-4; the code PR raises readiness to bk-061). Version 1 o
 ### `bk-064` (AA-1158 part 1, approval rules — needs `bk-041`, `bk-048`, `bk-054`, `bk-055`, `bk-062`)
 
 A **contract** file (MIG-4; the code PR raises readiness to bk-064). `suppliers` gains `pending`, `activated_by`,
-`activated_at`, `owner_self_approved` and `suppliers_activation_guard`; `supplier_contracts` gains `writers` (trigger
+`activated_at`, `owner_self_approved`, `writers` (trigger `suppliers_writers`: whoever changed the pending data) and
+`suppliers_activation_guard`; `supplier_contracts` gains `writers` (trigger
 `supplier_contracts_writers`, backfilled on drafts) and `owner_self_approved`; `supplier_payouts` gains
 `same_approver_payer` (`supplier_payouts_guard` replaced); `supplier_bills`, `price_list_versions`, `season_ranges`,
 `holiday_events`, `agency_payment`, `departure_price_adjustments` gain `owner_self_approved` with their maker-checker
 CHECKs relaxed only for a flagged approval (same constraint names) and `supplier_bills_guard` replaced; new
-`booking.billing_entity_change` (pending -> approved / rejected / withdrawn, decided once, dated now); one generic
+`booking.billing_entity_change` (pending -> approved / rejected / withdrawn, decided once, dated now; its reasons
+may be set to `[redacted]` alone on erasure, DM-6.7); one generic
 trigger function `booking.owner_self_approval_guard()` reads `shared.v_staff_booking_grant` (the migration guard
 allows that read only); two pricing policy switches (`seed:bk-064`, on); the partial index
 `audit_logs_owner_self_idx`. DM-7.1 row for `billing_entity_change` in the root data standards.

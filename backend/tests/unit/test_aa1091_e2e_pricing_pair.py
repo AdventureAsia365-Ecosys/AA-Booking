@@ -94,6 +94,10 @@ def test_the_pair_shares_only_the_decisions_and_holds_no_grant() -> None:
         e2e_staff.CONTRACT_STATUS,  # A10e-3: the service refuses the draft's maker (403 maker_checker)
     }
     assert not maker.grants and not checker.grants
+    # AA-1158: the checker (never the maker) activates the maker's synthetic supplier, which starts pending.
+    assert e2e_staff.SUPPLIER_ACTIVATE in checker.writes and e2e_staff.SUPPLIER_ACTIVATE not in maker.writes
+    assert e2e_staff.SYNTHETIC_SQL[e2e_staff.SUPPLIER_ACTIVATE[1]] == ("supplier_ref", e2e_staff.SUPPLIER_SYNTHETIC_SQL)
+    assert e2e_staff.SYNTHETIC_SQL_ARGS[e2e_staff.SUPPLIER_ACTIVATE[1]] == (MAKER,)
     # Every version route is held to the E2E maker's own versions (the address is bound as $2).
     for route, (param, sql) in e2e_staff.SYNTHETIC_SQL.items():
         if sql is e2e_staff.VERSION_SYNTHETIC_SQL:

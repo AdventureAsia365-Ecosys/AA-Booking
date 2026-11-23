@@ -5,7 +5,8 @@ Suppliers
     Never deleted: ``deactivate`` / ``activate`` only, and deactivate is refused (409 ``supplier_has_contracts``)
     while a published contract is in force or upcoming. AA-1158 (R5, bk-064): every new supplier starts
     ``pending``, whoever creates it; a second person with ``supplier.activate`` activates it (``activated_by`` /
-    ``activated_at``), never its creator (403 ``maker_checker`` + bk-064 CHECK), except the business owner, flagged
+    ``activated_at``), never one of its makers (403 ``maker_checker`` + bk-064 CHECK): its creator and everyone who
+    changed its data while pending (``writers``, kept by the bk-064 trigger), except the business owner, flagged
     ``owner_self_approved`` (:mod:`app.auth.self_approval`). Deactivating a pending supplier rejects it.
     ``destination_id`` is a CIS place checked against ``catalog.v_destination`` (``app.catalog``); when it maps to an
     ISO country the supplier's ``country_code`` must agree (it is filled in when empty).
@@ -83,7 +84,7 @@ SUPPLIER_COLUMNS = f"""
     s.address, s.region, s.postal_code, s.destination_id::text AS destination_id,
     s.country_code::text AS country_code, co.name AS country_name, s.status,
     s.created_by, s.updated_by, s.created_at, s.updated_at,
-    s.activated_by, s.activated_at, s.owner_self_approved,
+    s.activated_by, s.activated_at, s.owner_self_approved, s.writers,
     (SELECT count(*) FROM booking.supplier_contracts k WHERE k.supplier_id = s.id AND {IN_FORCE})
         AS contracts_in_force
 """  # noqa: S608 — constants only
@@ -268,13 +269,23 @@ async def list_suppliers(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+# The caller ({p}) is none of the supplier's makers: its creator and its pending-data writers (bk-064).
+NOT_A_MAKER = "NOT ({p} = ANY (array_remove(array_append(s.writers, s.created_by), NULL)))"
+
+
+def supplier_makers(supplier: dict[str, Any]) -> list[str]:
+    """Who decided a supplier's pending data: its creator and every writer (bk-064 trigger; ``'{}'`` before it)."""
+    keys = [*(supplier.get("writers") or []), supplier.get("created_by")]
+    return list(dict.fromkeys(k for k in keys if k))
+
+
 async def _approvable(conn: asyncpg.Connection, staff: Staff, where: list[str], add: Any) -> None:
     """``approvable=me``: pending, and not made by the caller unless they may self-approve (none without the right)."""
     where.append("s.status = 'pending'")
     if not staff.can("supplier.activate"):
         where.append("false")
     elif not await self_approval.may_self_approve(conn, staff):
-        add("s.created_by IS DISTINCT FROM {p}", staff.cis_user_id)
+        add(NOT_A_MAKER, staff.cis_user_id)
 
 
 async def queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
@@ -285,7 +296,7 @@ async def queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
         where += " AND false"
     elif not await self_approval.may_self_approve(conn, staff):
         args.append(staff.cis_user_id)
-        where += " AND s.created_by IS DISTINCT FROM $1"
+        where += " AND " + NOT_A_MAKER.replace("{p}", "$1")
     row = await conn.fetchrow(
         f"SELECT count(*)::int AS count, min(s.created_at) AS oldest_at FROM booking.suppliers s WHERE {where}",  # noqa: S608
         *args,
@@ -332,7 +343,7 @@ async def activation(conn: asyncpg.Connection, staff: Staff | None, supplier: di
         blockers.append("already_active")
     if staff is None or not staff.can("supplier.activate"):
         blockers.append("needs_supplier_activate")
-    elif staff.cis_user_id == supplier.get("created_by"):
+    elif staff.cis_user_id in supplier_makers(supplier):
         self_approval_needed = True
         if not await self_approval.may_self_approve(conn, staff):
             blockers.append("maker_checker")
@@ -472,7 +483,8 @@ async def set_status(
     """``active`` / ``inactive`` (``pending`` is only where a supplier starts). Deactivating is refused while a
     published contract is in force or upcoming; deactivating a pending supplier rejects it (its creator withdraws it).
     Activating is an approval (AA-1150, AA-1158 R5): it needs ``supplier.activate`` on top of the route's
-    ``supply.write``, and never by the supplier's creator (403 ``maker_checker``) unless the business owner, flagged."""
+    ``supply.write``, and never by one of its makers (creator or pending-data writer, 403 ``maker_checker``) unless
+    the business owner, flagged."""
     if target not in ("active", "inactive"):
         raise Invalid("unknown_status", "status must be active or inactive (a supplier starts pending)")
     if target == "active" and not staff.can("supplier.activate"):
@@ -485,8 +497,8 @@ async def set_status(
         flagged = await self_approval.check(
             conn,
             staff,
-            [current["created_by"]],
-            message="a supplier is activated by someone other than the person who created it",
+            supplier_makers(current),
+            message="a supplier is activated by someone other than the people who created or edited it",
         )
         sql = (
             "UPDATE booking.suppliers SET status = 'active', activated_by = $2, activated_at = now(),"

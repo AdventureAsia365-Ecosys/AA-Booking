@@ -164,6 +164,29 @@ async def test_the_creator_never_activates_except_the_business_owner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_whoever_edited_a_pending_supplier_never_activates_it() -> None:
+    """R5 like R4: a writer of the pending data (bk-064 ``writers``) is a maker, not only the creator."""
+    edited = supplier_row(writers=[MAKER.cis_user_id, CHECKER.cis_user_id])
+    assert suppliers.supplier_makers(edited) == [MAKER.cis_user_id, CHECKER.cis_user_id]
+    assert suppliers.supplier_makers(supplier_row(writers=None, created_by=None)) == []
+    conn = supplier_conn(edited)
+    with pytest.raises(Forbidden) as err:
+        await suppliers.set_status(conn, CHECKER, SUPPLIER, "active")
+    assert err.value.code == "maker_checker"
+    assert conn.sql("UPDATE booking.suppliers SET status = 'active'") == []
+    assert (await suppliers.activation(owner_conn(), CHECKER, edited))["blockers"] == ["maker_checker"]
+    third = supplier_conn(edited)
+    await suppliers.set_status(third, LEAD, SUPPLIER, "active")
+    assert third.sql("UPDATE booking.suppliers SET status = 'active'") == [(SUPPLIER, LEAD.cis_user_id, False)]
+    # The business owner who edited it activates it flagged.
+    mine = supplier_row(writers=[MAKER.cis_user_id, OWNER.cis_user_id])
+    assert (await suppliers.activation(owner_conn(), OWNER, mine))["self_approval"] is True
+    flagged = supplier_conn(mine)
+    await suppliers.set_status(flagged, OWNER, SUPPLIER, "active")
+    assert flagged.sql("UPDATE booking.suppliers SET status = 'active'") == [(SUPPLIER, OWNER.cis_user_id, True)]
+
+
+@pytest.mark.asyncio
 async def test_pending_is_never_a_target_and_deactivating_a_pending_one_rejects_it() -> None:
     with pytest.raises(Invalid):
         await suppliers.set_status(ScriptedConn(), CHECKER, SUPPLIER, "pending")

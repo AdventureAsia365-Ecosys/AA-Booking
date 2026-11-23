@@ -1,7 +1,7 @@
 """AA-1158 part 1 (bk-064) over HTTP on a real PostgreSQL, as role ``booking`` — the Done-when flows:
 
-- a supplier made by the content + ops custom role stays ``pending``; its creator cannot activate it; the business owner
-  activates it;
+- a supplier made by the content + ops custom role stays ``pending``; its creator cannot activate it, nor can the tech
+  lead after editing its pending data; the business owner activates it;
 - the business owner creates and activates her own supplier: ``owner_self_approved = true`` (and the audit filter
   lists it);
 - the tech lead (an administrator without the marker) approving his own supplier, contract or bill: 403;
@@ -137,6 +137,13 @@ async def test_suppliers_start_pending_and_a_second_person_activates_them(
     made = await _supplier(c, custom(cis), "Lagoon Boats")
     assert made["status"] == "pending"
     _refused(await c.post(f"/suppliers/{made['id']}/activate", headers=custom(cis)), "forbidden")
+    # Whoever changes the pending data is a maker too: the tech lead edits the contact, then may not activate it.
+    patch = {"contact_email": "desk@lagoon.example"}
+    edited = await _ok(await c.patch(f"/suppliers/{made['id']}", json=patch, headers=lead))
+    assert edited["writers"][-1] == LEAD and len(edited["writers"]) == 2
+    detail = await _ok(await c.get(f"/suppliers/{made['id']}", headers=lead))
+    assert detail["actions"]["activate"]["blockers"] == ["maker_checker"]
+    _refused(await c.post(f"/suppliers/{made['id']}/activate", headers=lead))
     on = await _ok(await c.post(f"/suppliers/{made['id']}/activate", headers=owner))
     assert on["status"] == "active" and on["activated_by"] == OWNER and on["owner_self_approved"] is False
 

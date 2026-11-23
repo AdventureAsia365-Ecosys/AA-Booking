@@ -710,7 +710,10 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
     facts = await price_readiness.load(conn, today, [p.id for p in plans.values()])
     before = {r["tour_key"]: r for r in await price_readiness.resolve(conn, facts, facts.rated)}
     after = await status_after(conn, plans, facts, today)
-    await sellable_gate.check_import(conn, sheets, plans, after, today, sheet=TOURS, refuse=_raise)
+    queue = sellable_gate.recompute_queue(plans, MAX_RECOMPUTE)  # the plans going sellable first
+    await sellable_gate.check_import(
+        conn, sheets, plans, after, today, {p.id for p in queue}, sheet=TOURS, refuse=_raise
+    )
     tours: list[dict[str, Any]] = []
     for plan in plans.values():
         existing = [dict(r) for r in await conn.fetch(trip_plan_prices.ROWS_SQL, plan.id)]
@@ -760,14 +763,10 @@ async def import_workbook(conn: asyncpg.Connection, staff: Staff, data: bytes, *
     drafts = await _apply(conn, staff, plans, hashlib.sha256(data).hexdigest())
     out["price_drafts"] = drafts
     recomputed = 0
-    for plan in list(plans.values()):
-        if recomputed >= MAX_RECOMPUTE:
-            break
-        parts = plan.components if plan.components is not None else plan.components_now
-        if parts:
-            async with conn.transaction():
-                await cost_sheet.recompute_plan(conn, plan.id, pricing)
-            recomputed += 1
+    for plan in queue:
+        async with conn.transaction():
+            await cost_sheet.recompute_plan(conn, plan.id, pricing)
+        recomputed += 1
     await sellable_gate.apply_import(conn, staff, plans, today, sheet=TOURS)
     await audit.record(
         conn,

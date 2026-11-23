@@ -3,14 +3,15 @@
 A tour made sellable by the workbook needs an approved price once the import is applied: a matrix row still valid
 today (:func:`app.catalog.trip_plan_prices.price_ready`: computed by the cost sheet, or from a published price
 version), or rates the cost sheet prices it from when the import's own recompute runs (readiness status ``priced``
-after the import). The draft price versions the import makes never count: nothing prices until a second person
-approves them. The check runs in the dry run (a problem on the Tours sheet) and again after the recompute, on the
-matrix it left, before the switch is written.
+after the import, and the plan within the import's recompute budget:
+:func:`recompute_queue` takes the plans going sellable first). The draft price versions the
+import makes never count: nothing prices until a second person approves them. The check runs in the dry run (a
+problem on the Tours sheet) and again after the recompute, on the matrix it left, before the switch is written.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import date
 from typing import Any
 
@@ -23,6 +24,15 @@ from app.supply.rate_sheet import Problem
 
 COLUMN = "Sellable"
 MESSAGE = "a sellable tour needs an approved price (an approved price version or supplier rates)"
+OVER_BUDGET = MESSAGE + "; one import computes the price of a limited number of tours: import it in a smaller workbook"
+
+
+def recompute_queue(plans: Mapping[str, Any], limit: int) -> list[Any]:
+    """The plans the workbook import recomputes, at most ``limit``: those going sellable first (this gate counts on
+    their recompute, in the dry run too), then the others in workbook order; a plan without components never."""
+    with_parts = [p for p in plans.values() if (p.components if p.components is not None else p.components_now)]
+    going = [p for p in with_parts if p.sellable_after and not p.sellable]
+    return [*going, *(p for p in with_parts if not (p.sellable_after and not p.sellable))][:limit]
 
 
 async def check_import(
@@ -31,20 +41,26 @@ async def check_import(
     plans: Mapping[str, Any],
     after: Mapping[str, str | None],
     today: date,
+    recomputed: Collection[str],
     *,
     sheet: str,
     refuse: Callable[[Any], None],
 ) -> None:
-    """Add ``no_approved_price`` for every tour going sellable without a price after the import, then ``refuse``."""
+    """Add ``no_approved_price`` for every tour going sellable without a price after the import, then ``refuse``.
+    A ``priced`` prediction counts only for a plan in ``recomputed`` (the ids the apply recomputes)."""
     going = {p.id for p in plans.values() if p.sellable_after and not p.sellable}
     if not going:
         return
     ready = await trip_plan_prices.price_ready(conn, sorted(going), today)
     for row in sheets.tours:
         plan = plans.get(row.get("tour_key") or "")
-        if plan is None or plan.id not in going or plan.id in ready or after.get(plan.key) == price_readiness.PRICED:
+        if plan is None or plan.id not in going or plan.id in ready:
             continue
-        sheets.problems.append(Problem(sheet, row.get("_row"), COLUMN, trip_plan_prices.NO_APPROVED_PRICE, MESSAGE))
+        priced = after.get(plan.key) == price_readiness.PRICED
+        if priced and plan.id in recomputed:
+            continue
+        message = OVER_BUDGET if priced else MESSAGE
+        sheets.problems.append(Problem(sheet, row.get("_row"), COLUMN, trip_plan_prices.NO_APPROVED_PRICE, message))
     if sheets.problems:
         refuse(sheets)
 
