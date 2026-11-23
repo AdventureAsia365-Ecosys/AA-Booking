@@ -227,6 +227,25 @@ async def test_the_business_owner_self_activates_flagged_and_keeps_editing(
     assert not await app_conn.fetchval("SELECT owner_self_approved FROM booking.suppliers WHERE id = $1::uuid", sid)
 
 
+async def test_a_flagged_reactivation_is_checked_against_the_marker_again(
+    app_conn: asyncpg.Connection, admin: asyncpg.Connection
+) -> None:
+    sid = await _supplier(app_conn, OWNER, "Owner Ridge")
+    await app_conn.execute(ACTIVATE, sid, OWNER, True)
+    await _marker(admin, OWNER_SUB, False)  # the marker moves in CIS
+    # A deactivation by someone else keeps the activation columns and stays possible after the marker moves.
+    await app_conn.execute(
+        "UPDATE booking.suppliers SET status = 'inactive', updated_by = $2 WHERE id = $1::uuid", sid, CHECKER
+    )
+    # Same activator, flag already set: the new activated_at makes the guard read the marker again.
+    with pytest.raises(asyncpg.CheckViolationError, match="not the business owner"):
+        await app_conn.execute(ACTIVATE, sid, OWNER, True)
+    assert await app_conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sid) == "inactive"
+    await _marker(admin, OWNER_SUB, True)
+    await app_conn.execute(ACTIVATE, sid, OWNER, True)
+    assert await app_conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sid) == "active"
+
+
 async def test_whoever_edits_a_pending_supplier_never_activates_it(
     app_conn: asyncpg.Connection, admin: asyncpg.Connection
 ) -> None:
@@ -271,7 +290,7 @@ async def test_whoever_edits_a_pending_supplier_never_activates_it(
         "SELECT status, activated_by, writers FROM booking.suppliers WHERE id = $1::uuid", sid
     )
     assert dict(row) == {"status": "active", "activated_by": PAYER, "writers": [MAKER, CHECKER]}
-    await app_conn.execute(  # edits of a supplier that is not pending add no writer
+    await app_conn.execute(  # edits of a supplier that stays active add no writer (it is live already)
         "UPDATE booking.suppliers SET website = 'https://y.example', updated_by = $2 WHERE id = $1::uuid", sid, LEAD
     )
     assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER]
@@ -286,6 +305,51 @@ async def test_whoever_edits_a_pending_supplier_never_activates_it(
         await app_conn.execute(ACTIVATE, other, OWNER, False)
     await app_conn.execute(ACTIVATE, other, OWNER, True)
     assert await app_conn.fetchval("SELECT owner_self_approved FROM booking.suppliers WHERE id = $1::uuid", other)
+
+
+async def test_whoever_edits_a_rejected_or_inactive_supplier_never_activates_it(
+    app_conn: asyncpg.Connection, admin: asyncpg.Connection
+) -> None:
+    """No way round R5 through the inactive state: a supplier rejected while pending, a legacy one never activated, or
+    one deactivated in the same statement that edits it holds data nobody approved; its editor is a writer."""
+    writers = "SELECT writers FROM booking.suppliers WHERE id = $1::uuid"
+    edit = "UPDATE booking.suppliers SET company_name = company_name || ' x', updated_by = $2 WHERE id = $1::uuid"
+    # Pending by the maker; the checker rejects it, rewrites it, then tries to activate it alone.
+    sid = await _supplier(app_conn, MAKER, "Rejected Lodge")
+    await app_conn.execute(
+        "UPDATE booking.suppliers SET status = 'inactive', updated_by = $2 WHERE id = $1::uuid", sid, CHECKER
+    )
+    assert await app_conn.fetchval(writers, sid) == [MAKER]  # the status move alone is not data
+    await app_conn.execute(edit, sid, CHECKER)
+    assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER]
+    with pytest.raises(asyncpg.CheckViolationError) as exc:
+        await app_conn.execute(ACTIVATE, sid, CHECKER, False)
+    assert exc.value.constraint_name == "suppliers_maker_checker_chk"
+    await app_conn.execute(ACTIVATE, sid, PAYER, False)  # a third person who wrote nothing
+    # Legacy inactive supplier (made before bk-064, never activated, writers '{}'): an edit records its editor.
+    legacy = await _supplier(admin, MAKER, "Legacy Inactive", status="inactive")
+    async with admin.transaction():  # the shape of a row made before bk-064 (the trigger keeps writers otherwise)
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute("ALTER TABLE booking.suppliers DISABLE TRIGGER suppliers_writers")
+        await admin.execute("UPDATE booking.suppliers SET writers = '{}' WHERE id = $1::uuid", legacy)
+        await admin.execute("ALTER TABLE booking.suppliers ENABLE TRIGGER suppliers_writers")
+    await app_conn.execute(edit, legacy, CHECKER)
+    assert await app_conn.fetchval(writers, legacy) == [CHECKER]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await app_conn.execute(ACTIVATE, legacy, CHECKER, False)
+    # Deactivating and editing in one statement counts too; a later edit of the active supplier stays free.
+    await app_conn.execute(
+        "UPDATE booking.suppliers SET status = 'inactive', website = 'https://z.example', updated_by = $2"
+        " WHERE id = $1::uuid",
+        sid,
+        LEAD,
+    )
+    assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER, LEAD]
+    with pytest.raises(asyncpg.CheckViolationError):
+        await app_conn.execute(ACTIVATE, sid, LEAD, False)
+    await app_conn.execute(ACTIVATE, sid, PAYER, False)
+    await app_conn.execute(edit, sid, OWNER)
+    assert await app_conn.fetchval(writers, sid) == [MAKER, CHECKER, LEAD]
 
 
 async def test_owner_connections_keep_the_legacy_insert(admin: asyncpg.Connection) -> None:

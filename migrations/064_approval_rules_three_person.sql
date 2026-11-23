@@ -14,24 +14,29 @@
 -- marker comes from the CIS contract view shared.v_staff_booking_grant (CIS 462, AA-1155, root ADR 0006a A14).
 --
 -- What:
---   0. booking.owner_self_approval_guard(approver_column, flag_column, final|mutable): a generic BEFORE INSERT OR
---      UPDATE trigger function. When the flag is set (on INSERT, or when the approver column or the flag changes on
---      UPDATE) the approver must be an active staff_users row whose cognito_sub carries is_business_owner in
---      shared.v_staff_booking_grant; else check_violation. "final": a set flag is never cleared. The DB refuses a
+--   0. booking.owner_self_approval_guard(approver_column, flag_column, final|mutable[, recheck_column ...]): a generic
+--      BEFORE INSERT OR UPDATE trigger function. When the flag is set (on INSERT, or when the approver column, the flag
+--      or one of the optional recheck columns changes on UPDATE; suppliers pass activated_at, so a flagged
+--      re-activation by the same former owner is checked again) the approver must be an active staff_users row whose
+--      cognito_sub carries is_business_owner in shared.v_staff_booking_grant; else check_violation. "final": a set flag is never cleared. The DB refuses a
 --      forged flag, not only the API. SECURITY INVOKER: it runs as role booking, which reads the view and staff_users.
 --      If the view is unreadable, a self-approval fails and a normal approval is untouched.
 --   1. suppliers: status pending, activated_by, activated_at, owner_self_approved, writers. writers (kept by trigger
 --      suppliers_writers, the client value is ignored): INSERT = [created_by]; an UPDATE that changes the supplier's
---      data while it is pending appends updated_by (also when the same statement activates it). suppliers_status_chk
---      (same name) adds pending; suppliers_activation_chk; suppliers_maker_checker_chk (the activator is neither the
---      creator nor a writer of the pending data, unless flagged); suppliers_owner_self_chk (NULL-safe: the flag =
---      the activator is the creator or a writer). Existing rows keep writers '{}' (no backfill: the CHECKs name
+--      data while it is not live (pending or inactive, before or after the statement: a rejected or deactivated
+--      supplier's data is not approved either) appends updated_by (also when the same statement activates or
+--      deactivates it); only an edit of a supplier that stays active is free. suppliers_status_chk (same name) adds
+--      pending; suppliers_activation_chk; suppliers_maker_checker_chk (the activator is neither the creator nor a
+--      writer of the not-live data, unless flagged); suppliers_owner_self_chk (NULL-safe: the flag = the activator
+--      is the creator or a writer). The list only grows (a person who once wrote the not-live data never activates
+--      it alone again). Existing rows keep writers '{}' (no backfill: the CHECKs name
 --      created_by too, so no row is touched). Trigger
 --      suppliers_activation_guard (for every role except members of bk_owner, i.e. the app): an INSERT has no
 --      activation; the creator never changes; a supplier never goes back to pending; becoming
 --      active records activated_by = updated_by (filled from updated_by when the statement names no activator, so the
 --      running code's activate is checked too) and activated_at = now(); the activation columns change only with an
---      activation. Owner trigger in mutable mode (a later re-activation by someone else clears the flag).
+--      activation. Owner trigger in mutable mode (a later re-activation by someone else clears the flag), with
+--      activated_at as recheck column (a flagged re-activation is checked against the marker again).
 --      Existing rows: active ones keep activated_by NULL (legacy), inactive ones stay inactive.
 --      MIG-4 compatibility (the running code must keep its integration tests green on this PR): the INSERT of an
 --      active supplier (the running code does it for a holder of supplier.activate), an INSERT without a creator
@@ -120,6 +125,8 @@ DECLARE
     v_old     jsonb;
     v_set     boolean := coalesce((to_jsonb(NEW) ->> TG_ARGV[1])::boolean, false);
     v_was     boolean := false;
+    v_same    boolean;
+    i         integer;
 BEGIN
     IF TG_OP = 'UPDATE' THEN
         v_old := to_jsonb(OLD);
@@ -128,8 +135,15 @@ BEGIN
             RAISE EXCEPTION '%: a business-owner self-approval stays recorded (% is final)', TG_TABLE_NAME, v_flag
                 USING ERRCODE = 'check_violation';
         END IF;
-        -- Checked when it was set: an unchanged approver keeps its flag even after the marker moves (critique 3).
-        IF NOT v_set OR (v_was AND (v_new ->> v_col) IS NOT DISTINCT FROM (v_old ->> v_col)) THEN
+        -- Checked when it was set: an unchanged approval keeps its flag even after the marker moves (critique 3). The
+        -- approval is the approver column plus the optional recheck columns (TG_ARGV[3..]): a supplier's flagged
+        -- re-activation by the same person moves activated_at, so it is checked again. Not status: a deactivation by
+        -- someone else keeps the activation columns and must stay possible after the marker moves.
+        v_same := (v_new ->> v_col) IS NOT DISTINCT FROM (v_old ->> v_col);
+        FOR i IN 3 .. TG_NARGS - 1 LOOP
+            v_same := v_same AND (v_new -> TG_ARGV[i]) IS NOT DISTINCT FROM (v_old -> TG_ARGV[i]);
+        END LOOP;
+        IF NOT v_set OR (v_was AND v_same) THEN
             RETURN NEW;
         END IF;
     ELSIF NOT v_set THEN
@@ -148,9 +162,9 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION booking.owner_self_approval_guard() IS
-    'bk-064 (AA-1158): TG_ARGV approver column, flag column, final|mutable. A set flag (on INSERT, or when the approver '
-    'or the flag changes) needs the approver to be an active staff user whose cognito_sub carries is_business_owner in '
-    'shared.v_staff_booking_grant (CIS 462); final: a set flag is never cleared. Security invoker (role booking reads '
+    'bk-064 (AA-1158): TG_ARGV approver column, flag column, final|mutable, then optional recheck columns. A set flag '
+    '(on INSERT, or when the approver, the flag or a recheck column changes) needs the approver to be an active staff '
+    'user whose cognito_sub carries is_business_owner in shared.v_staff_booking_grant (CIS 462); final: a set flag is never cleared. Security invoker (role booking reads '
     'the view); an unreadable view refuses the self-approval only.';
 
 GRANT EXECUTE ON FUNCTION booking.owner_self_approval_guard() TO booking;
@@ -183,13 +197,13 @@ COMMENT ON COLUMN booking.suppliers.activated_by IS
     'bk-064 (AA-1158 R5): the staff key of the person who last activated the supplier (never its creator nor one of '
     'its writers unless owner_self_approved). NULL on suppliers active before bk-064 (legacy) and on pending ones.';
 COMMENT ON COLUMN booking.suppliers.owner_self_approved IS
-    'bk-064 (AA-1158 Q5): the business owner activated a supplier she created or edited while pending (checked against '
-    'the CIS marker by booking.owner_self_approval_guard). Cleared by a later activation by someone else; the audit '
-    'keeps the history.';
+    'bk-064 (AA-1158 Q5): the business owner activated a supplier she created or edited while not live (checked '
+    'against the CIS marker by booking.owner_self_approval_guard at each activation). Cleared by a later activation by '
+    'someone else; the audit keeps the history.';
 COMMENT ON COLUMN booking.suppliers.writers IS
-    'bk-064 (AA-1158 R5): every staff key that decided the supplier''s pending data (its creator, then each updated_by '
-    'of an UPDATE that changed the data while pending; kept by trigger suppliers_writers, the client value is '
-    'ignored). The activator is never one of them unless owner_self_approved. ''{}'' on suppliers made before bk-064.';
+    'bk-064 (AA-1158 R5): every staff key that decided the supplier''s data while it was not live (its creator, then '
+    'each updated_by of an UPDATE that changed the data of a pending or inactive supplier, or in the statement that '
+    'activates or deactivates it; kept by trigger suppliers_writers, the client value is ignored). The activator is never one of them unless owner_self_approved. ''{}'' on suppliers made before bk-064.';
 
 CREATE OR REPLACE FUNCTION booking.suppliers_activation_guard() RETURNS trigger
     LANGUAGE plpgsql
@@ -252,7 +266,8 @@ CREATE OR REPLACE TRIGGER suppliers_activation_guard
 
 CREATE OR REPLACE TRIGGER suppliers_owner_self_approval
     BEFORE INSERT OR UPDATE ON booking.suppliers
-    FOR EACH ROW EXECUTE FUNCTION booking.owner_self_approval_guard('activated_by', 'owner_self_approved', 'mutable');
+    FOR EACH ROW
+    EXECUTE FUNCTION booking.owner_self_approval_guard('activated_by', 'owner_self_approved', 'mutable', 'activated_at');
 
 CREATE OR REPLACE FUNCTION booking.suppliers_writers() RETURNS trigger
     LANGUAGE plpgsql
@@ -268,9 +283,13 @@ BEGIN
         RETURN NEW;
     END IF;
     NEW.writers := OLD.writers;
-    -- Whoever changes the data of a pending supplier decided what goes live, so never activates it (R5, like the
-    -- contract writers of R4 and the bill facts editor of bk-045); an edit in the activating statement counts too.
-    IF OLD.status = 'pending' AND NEW.updated_by IS NOT NULL AND NOT (NEW.updated_by = ANY (OLD.writers))
+    -- Whoever changes the data of a supplier that is not live decided what goes live, so never activates it (R5, like
+    -- the contract writers of R4 and the bill facts editor of bk-045). Pending and inactive alike: a rejected supplier
+    -- (pending -> inactive) or a legacy one never activated holds data nobody approved, and an inactive one edited
+    -- after its approval holds new data. An edit in the statement that activates or deactivates it counts too; only
+    -- an edit of a supplier that stays active is free (it is live already, R5 governs going live).
+    IF (OLD.status <> 'active' OR NEW.status <> 'active')
+       AND NEW.updated_by IS NOT NULL AND NOT (NEW.updated_by = ANY (OLD.writers))
        AND (to_jsonb(NEW) - v_meta) IS DISTINCT FROM (to_jsonb(OLD) - v_meta) THEN
         NEW.writers := OLD.writers || NEW.updated_by;
     END IF;
@@ -279,7 +298,8 @@ END $$;
 
 COMMENT ON FUNCTION booking.suppliers_writers() IS
     'bk-064 (AA-1158 R5): writers = [created_by] on INSERT; on UPDATE the old list, plus updated_by when the update '
-    'changes the data of a pending supplier (status, activation and bookkeeping columns are not data).';
+    'changes the data of a supplier that is not active before or after it (status, activation and bookkeeping '
+    'columns are not data).';
 
 GRANT EXECUTE ON FUNCTION booking.suppliers_writers() TO booking;
 
@@ -817,11 +837,11 @@ CREATE OR REPLACE TRIGGER billing_entity_change_owner_self_approval
 INSERT INTO booking.pricing_policy (id, param_key, version_no, value, unit, effective_from, reason, created_by)
 VALUES
     ('00000000-0000-4000-8000-0000b6400000', 'owner_self_approval_allowed', 1, 'true'::jsonb, NULL, DATE '2026-01-01',
-     'AA-1158: tech lead Q5 (S285) - the business owner may approve her own work, flagged and audited.',
+     'Tech lead decision Q5: the business owner may approve her own work, flagged and audited.',
      'seed:bk-064'),
     ('00000000-0000-4000-8000-0000b6400010', 'owner_payout_after_approval_allowed', 1, 'true'::jsonb, NULL,
      DATE '2026-01-01',
-     'AA-1158: tech lead Q4 (S285) - the business owner may record the payout of a bill she approved, flagged.',
+     'Tech lead decision Q4: the business owner may record the payout of a bill she approved, flagged.',
      'seed:bk-064')
 ON CONFLICT DO NOTHING;
 
