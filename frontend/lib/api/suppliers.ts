@@ -13,6 +13,9 @@
 //   PATCH /booking/contracts/{id}   terms of a draft, or {status: published|expired} on its own
 //                                   (publish by a second person: 403 maker_checker)
 //   GET   /booking/catalog/destinations?q=&country=&limit=                        CIS places   (any staff)
+//   GET   /booking/supplier-profile-options                    contact roles, terms bases / methods (supply.read)
+//   POST  /booking/supplier-profile-options                    add a choice                        (staff.admin)
+//   PATCH /booking/supplier-profile-options/{kind}/{code}      labels, order, active               (staff.admin)
 
 import { BFF_BASE, bkGet, bkSend } from "./client";
 import type { ReadinessStatus, UnratedComponent } from "./priceReadiness";
@@ -65,9 +68,62 @@ export interface Supplier {
   activated_by?: string | null;
   activated_at?: IsoDateTime | null;
   owner_self_approved?: boolean;
+  /** AA-1158 part 2 (bk-067): the supplier profile. */
+  legal_entity?: string | null;
+  tax_code?: string | null;
+  role_contacts?: RoleContact[];
+  payment_terms?: PaymentTerms | null;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
 }
+
+/** A contact by role; `role` is a code of the admin-edited contact roles (GET /booking/supplier-profile-options). */
+export interface RoleContact {
+  role: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+}
+/** The supplier's standard payment terms (a contract may state its own); basis and method are admin-edited codes. */
+export interface PaymentTerms {
+  basis: string;
+  deposit_percent: string | number | null;
+  due_days: number | null;
+  method: string | null;
+  note: string | null;
+}
+/** The basis whose deposit percentage rule lives in the API (seeded by bk-067). */
+export const DEPOSIT_BASIS = "deposit_balance";
+
+/** AA-1158 part 2 (review S289): the choices of the supplier profile, edited by an administrator. */
+export type ProfileOptionKind = "contact_role" | "terms_basis" | "terms_method";
+export interface ProfileOption {
+  id: string;
+  kind: ProfileOptionKind;
+  code: string;
+  label_en: string;
+  label_vi: string;
+  position: number;
+  active: boolean;
+  updated_at: IsoDateTime | null;
+  updated_by: string | null;
+}
+export type ProfileOptions = Record<ProfileOptionKind, ProfileOption[]>;
+export interface NewProfileOption {
+  kind: ProfileOptionKind;
+  code: string;
+  label_en: string;
+  label_vi: string;
+  position?: number | null;
+}
+export type ProfileOptionChange = Partial<Pick<ProfileOption, "label_en" | "label_vi" | "position" | "active">>;
+
+export const profileOptionsApi = {
+  list: () => bkGet<{ kinds: ProfileOptions }>("supplier-profile-options"),
+  add: (body: NewProfileOption) => bkSend<ProfileOption>("supplier-profile-options", { body }),
+  change: (kind: ProfileOptionKind, code: string, body: ProfileOptionChange) =>
+    bkSend<ProfileOption>(`supplier-profile-options/${kind}/${enc(code)}`, { method: "PATCH", body }),
+};
 
 export interface SupplierActivity {
   id: string;
@@ -116,6 +172,10 @@ export interface SupplierBody {
   postal_code?: string | null;
   destination_id?: string | null;
   country_code?: string | null;
+  legal_entity?: string | null;
+  tax_code?: string | null;
+  role_contacts?: RoleContact[];
+  payment_terms?: PaymentTerms | null;
 }
 
 export type ContractStatus = "draft" | "published" | "expired";
@@ -244,7 +304,7 @@ async function rateSheetTemplate(): Promise<Blob> {
 }
 
 export const suppliersApi = {
-  list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number; approvable?: "me" } = {}) =>
+  list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number; approvable?: "me"; bank?: "pending" } = {}) =>
     bkGet<SupplierList>("suppliers", q),
   summary: () => bkGet<SupplierSummary>("suppliers/summary"),
   get: (ref: string) => bkGet<SupplierDetail>(`suppliers/${enc(ref)}`),

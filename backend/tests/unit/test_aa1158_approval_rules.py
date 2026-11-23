@@ -309,6 +309,7 @@ def bill(**over: Any) -> dict[str, Any]:
     return {
         "id": "b-1",
         "code": "BIL-001158",
+        "supplier_id": "5a000000-0000-4000-8000-000000001158",
         "status": "received",
         "created_by": OWNER.cis_user_id,
         "facts_edited_by": OWNER.cis_user_id,

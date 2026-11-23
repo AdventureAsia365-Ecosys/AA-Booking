@@ -71,6 +71,8 @@ POLICY_SEED: dict[str, str] = {
     "staff_admin_mfa_required": "false",
     "owner_self_approval_allowed": "true",  # AA-1158 (bk-064)
     "owner_payout_after_approval_allowed": "true",  # AA-1158 (bk-064)
+    "supplier_bank_payout_lock_hours": "24",  # AA-1158 part 2 (bk-067)
+    "supplier_bank_contact_change_days": "30",  # AA-1158 part 2 (bk-067)
     # AA-1171 (bk-063)
     "ops_jobs_stuck_after_s": "900",
     "ops_jobs_overdue_factor": '"2"',

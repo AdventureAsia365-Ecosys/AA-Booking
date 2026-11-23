@@ -2182,6 +2182,20 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
 
 
   if (p === "suppliers") return ok(page(range(ROWS).map(supplier), 132) satisfies SupplierList);
+  // AA-1158 part 2 (review S289): the admin-edited choices of the supplier profile (form selects, profile labels).
+  if (p === "supplier-profile-options") {
+    const opt = (kind: string, code: string, label: string, position: number) => ({
+      id: `5d000000-0000-4000-8000-${pad(position, 12)}`, kind, code, label_en: label, label_vi: label, position,
+      active: true, updated_at: null, updated_by: null,
+    });
+    return ok({
+      kinds: {
+        contact_role: [opt("contact_role", "reservations", "Reservations", 10), opt("contact_role", "accounts", "Accounts", 20)],
+        terms_basis: [opt("terms_basis", "deposit_balance", "Deposit, then the balance", 20)],
+        terms_method: [opt("terms_method", "bank_transfer", "Bank transfer", 10)],
+      },
+    });
+  }
   if (p === "suppliers/summary") return ok({ total: 132, active: 118, inactive: 14, countries: 6, contracts_ending_30d: 4 } satisfies SupplierSummary);
   if (at(0) === "suppliers" && at(2) === "contracts") return ok({ items: CONTRACTS });
   if (at(0) === "suppliers" && seg.length === 2) {

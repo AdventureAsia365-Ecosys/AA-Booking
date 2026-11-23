@@ -62,6 +62,7 @@ APPROVE_NAMED = frozenset(
         "payment.verify",
         "billing_config.write",
         "staff.admin",
+        "supplier_bank.read",  # bk-067 (AA-1158 part 2): it decrypts full account numbers
     }
 )
 
@@ -75,8 +76,9 @@ CACHE_SIZE = 1024  # technical-constant: entries per process cache (staff count 
 NO_BOOKING_ROLE = "no_booking_role"
 UNAVAILABLE = "custom_role_unavailable"
 
-# The seeded role (bk-062 section 5; root spec R2.3, tech lead S285 audit section 3.3 and Q3). The unit test
-# tests/unit/test_aa1155_role_editor.py keeps this set, the migration's seed array and PERMISSIONS in step.
+# The seeded role (bk-062 section 5; root spec R2.3, tech lead S285 audit section 3.3 and Q3), plus what later files
+# added (bk-067: supplier_bank.write, AA-1158 Q10). The unit test tests/unit/test_aa1155_role_editor.py keeps this
+# set, the migrations' seed rows and PERMISSIONS in step.
 SEED_CODE = "custom_product_ops_accounting"
 SEED_LABEL = "Product, ops & accounting"
 SEED_BASED_ON = "contracting"
@@ -106,6 +108,7 @@ SEED_CAPABILITIES = frozenset(
         "trip_case.write",
         "customer.read",
         "customer.write",
+        "supplier_bank.write",  # bk-067 (AA-1158 part 2, Q10): entry only, pending until approved
     }
 )
 

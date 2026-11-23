@@ -84,6 +84,9 @@ const FRIENDLY: Record<string, string> = {
   contract_not_draft: "Only a draft can be published.",
   contract_not_published: "Only a published contract can be expired.",
   supplier_not_found: "This supplier no longer exists.",
+  contacts_recently_changed: "The supplier's contacts were changed recently by the person who entered this account or by you. Ask another person to check the contacts against the contract, or wait.",
+  option_exists: "This choice exists already. Turn the retired one on again.",
+  invalid_code: "A code is 2 to 40 characters: a lower-case letter first, then letters, digits or _.",
 };
 
 export function supplierError(err: unknown, fallback = "Something went wrong."): string | null {

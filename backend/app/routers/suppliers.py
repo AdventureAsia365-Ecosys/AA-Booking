@@ -40,6 +40,30 @@ Country = Annotated[str, Field(pattern=r"^\s*([A-Za-z]{2})?\s*$")]
 Currency = Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")]
 
 
+# The codes are data (booking.supplier_profile_option, GET /booking/supplier-profile-options): the shape here, the
+# active codes in app.suppliers.profile_options.check_profile.
+OptionCode = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{1,39}$")]
+
+
+class SupplierRoleContact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: OptionCode
+    name: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=254)
+    phone: str | None = Field(default=None, max_length=40)
+
+
+class SupplierPaymentTerms(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    basis: OptionCode
+    deposit_percent: float | None = Field(default=None, ge=1, le=100)
+    due_days: int | None = Field(default=None, ge=0, le=365)
+    method: OptionCode | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
 class SupplierFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +80,11 @@ class SupplierFields(BaseModel):
     postal_code: str | None = Field(default=None, max_length=20)
     destination_id: UUID | None = None
     country_code: Country | None = None
+    # AA-1158 part 2 (bk-067): the supplier profile (app.suppliers.profile checks the rest).
+    legal_entity: str | None = Field(default=None, max_length=300)
+    tax_code: str | None = Field(default=None, max_length=64)
+    role_contacts: list[SupplierRoleContact] | None = Field(default=None, max_length=12)
+    payment_terms: SupplierPaymentTerms | None = None
 
 
 class NewSupplier(SupplierFields):
@@ -116,6 +145,10 @@ async def list_suppliers(
     approvable: Annotated[
         Literal["me"] | None, Query(description="me: pending suppliers the caller may activate now")
     ] = None,
+    bank: Annotated[
+        Literal["pending"] | None,
+        Query(description="pending (with approvable=me): suppliers whose bank account change the caller may approve"),
+    ] = None,
     category: Annotated[str | None, Query(max_length=20)] = None,
     country: Annotated[str | None, Query(max_length=2, min_length=2)] = None,
     sort: Annotated[
@@ -135,6 +168,7 @@ async def list_suppliers(
             limit=limit,
             offset=offset,
             approvable_by=staff if approvable == "me" else None,
+            approvable_bank=bank == "pending",
         )
 
 

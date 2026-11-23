@@ -130,6 +130,15 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     empty: "Nothing to approve",
   },
   {
+    key: "supplier_bank_to_approve",
+    capability: "supplier_bank.approve",
+    group: "approve",
+    path: "/suppliers",
+    label: "Bank account changes to approve",
+    aria: "Bank account changes to approve: open the suppliers with a pending bank account",
+    empty: "Nothing to approve",
+  },
+  {
     key: "owner_self_approvals",
     capability: "audit.read",
     group: "work",

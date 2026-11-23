@@ -6,17 +6,19 @@
 // AA-910: fits the 1084 px frame at 1440 px (location under the name, text cells with a max width); the row menu
 // column stays pinned to the right when a narrower window makes the table scroll inside its frame.
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Ban, Eye, Pencil, Plus, Power } from "lucide-react";
+import { Ban, Eye, ListChecks, Pencil, Plus, Power } from "lucide-react";
 import { SUPPLIER_CATEGORIES, suppliersApi, type Supplier } from "@/lib/api/suppliers";
 import { PAGE_SIZES, useOffsetPage } from "@/lib/useOffsetPage";
-import { Code, DataTable, DateText, FilterBar, KpiTile, PageFrame, PersonCell, Section, useUrlFilters, RowMenu, type RowMenuItem } from "@/ui";
+import { Button, Code, DataTable, DateText, FilterBar, KpiTile, PageFrame, PersonCell, Section, useCan, useUrlFilters, RowMenu, type RowMenuItem } from "@/ui";
 import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { CATEGORY_LABEL, CategoryChips, SupplierStatusBadge, locationText, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
+import { SupplierProfileChoices } from "./SupplierProfileChoices";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./SuppliersListView.messages";
@@ -37,6 +39,7 @@ export function SuppliersListView() {
     country: get("country") || undefined,
     sort: get("sort") || undefined,
     approvable: approvableParam(get("approvable")),
+    bank: bankParam(get("bank")), // AA-1158 part 2: My work "Bank account changes to approve"
   };
   const list = useQuery({
     queryKey: ["suppliers", "list", filters, paging.limit, paging.offset],
@@ -78,16 +81,7 @@ export function SuppliersListView() {
     <PageFrame
       title={t("Suppliers")}
       description={t("Hotels, transport, guides and other partners Booking buys from, with their contracts.")}
-      actions={
-        actions.canWrite && (
-          <Link
-            href="/suppliers/new"
-            className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"
-          >
-            <Plus size={15} /> {t("Add supplier")}
-          </Link>
-        )
-      }
+      actions={<ListActions canWrite={actions.canWrite} />}
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiTile label={t("Total suppliers")} value={s?.total} hint={s ? t("Across {0} {1}", s.countries, s.countries === 1 ? t("country") : t("countries")) : undefined} />
@@ -229,4 +223,35 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
 /** AA-1158 My work "Suppliers to activate": `approvable=me` lists the pending ones the caller may activate now. */
 function approvableParam(value: string): "me" | undefined {
   return value === "me" ? "me" : undefined;
+}
+
+/** AA-1158 part 2 My work: `bank=pending` (with `approvable=me`) lists the suppliers whose bank account change waits. */
+function bankParam(value: string): "pending" | undefined {
+  return value === "pending" ? "pending" : undefined;
+}
+
+/** The page actions: Add supplier (supply.write) and, for administrators, the supplier profile choices (AA-1158 part 2,
+ * review S289: contact roles and payment terms choices are an administrator's data). */
+function ListActions({ canWrite }: { canWrite: boolean }) {
+  const t = useT(MSG);
+  const canEditChoices = useCan("staff.admin");
+  const [choicesOpen, setChoicesOpen] = useState(false);
+  return (
+    <>
+      {canEditChoices && (
+        <Button variant="secondary" onClick={() => setChoicesOpen(true)}>
+          <ListChecks size={15} /> {t("Profile choices")}
+        </Button>
+      )}
+      {canWrite && (
+        <Link
+          href="/suppliers/new"
+          className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"
+        >
+          <Plus size={15} /> {t("Add supplier")}
+        </Link>
+      )}
+      {canEditChoices && <SupplierProfileChoices open={choicesOpen} onClose={() => setChoicesOpen(false)} />}
+    </>
+  );
 }

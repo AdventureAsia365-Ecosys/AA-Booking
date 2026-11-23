@@ -4,7 +4,8 @@
 // tabs Profile (basic information, contact, location, recent activity from the audit log) and Contracts (draft →
 // published by a second person → expired; "Import rate sheet" fills a draft from the Excel template, AA-1029) and Rates
 // (net rates per contract, AA-823 bk-010) and Bookings (AA-682 S1, supplier bookings of sold trips) and Bills (AA-682
-// S4, bk-030: this supplier's bills, the bill drawer and payouts; bill.read). Reads need supply.read.
+// S4, bk-030: this supplier's bills, the bill drawer and payouts; bill.read) and Bank accounts (AA-1158 part 2, bk-067:
+// masked list, entry pending a second person's call-back approval, the payout pause). Reads need supply.read.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -19,6 +20,8 @@ import { ContractDrawer } from "./ContractDrawer";
 import { RateSheetDrawer } from "./RateSheetDrawer";
 import { RatesTab } from "./RatesTab";
 import { SupplierBookingsTab } from "./SupplierBookingsTab";
+import { SupplierBankTab } from "./SupplierBankTab";
+import { LegalTermsFacts } from "./SupplierLegalTerms";
 import { SupplierBillsList } from "@/app/(staff)/billing/_parts/SupplierBills";
 import { CATEGORY_LABEL, ContractPhaseBadge, SupplierStatusBadge, locationText, supplierError, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
@@ -38,6 +41,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
     { key: "rates", label: t("Rates") },
     { key: "bookings", label: t("Bookings") },
     { key: "bills", label: t("Bills") },
+    { key: "bank", label: t("Bank accounts") },
   ];
   const [tab, setTab] = useDetailTab(tabs);
 
@@ -110,21 +114,38 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
             <Power size={15} /> {t("This supplier waits for approval: a second person activates it before contracts can be added.")}
           </div>
         )}
-        {tab === "profile" && <Profile s={s} />}
-        {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
-        {tab === "rates" && <RatesTab s={s} canWrite={actions.canWrite} />}
-        {tab === "bookings" && <SupplierBookingsTab s={s} />}
-        {tab === "bills" && (
-          <SupplierBillsList
-            supplier={{ id: s.id, name: s.company_name }}
-            title={t("Bills from this supplier")}
-            description={t("Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin.")}
-          />
-        )}
+        <TabPane tab={tab} s={s} canWrite={actions.canWrite} />
       </div>
       {actions.dialogs}
     </PageFrame>
   );
+}
+
+/** The body of the active tab (one switch, so the page itself stays simple). */
+function TabPane({ tab, s, canWrite }: { tab: string; s: SupplierDetail; canWrite: boolean }) {
+  const t = useT(MSG);
+  switch (tab) {
+    case "profile":
+      return <Profile s={s} />;
+    case "contracts":
+      return <Contracts s={s} canWrite={canWrite} />;
+    case "rates":
+      return <RatesTab s={s} canWrite={canWrite} />;
+    case "bookings":
+      return <SupplierBookingsTab s={s} />;
+    case "bank":
+      return <SupplierBankTab supplierRef={s.code} />;
+    case "bills":
+      return (
+        <SupplierBillsList
+          supplier={{ id: s.id, name: s.company_name }}
+          title={t("Bills from this supplier")}
+          description={t("Each bill is matched to confirmed bookings with this supplier, approved by a second person, then paid out by an admin.")}
+        />
+      );
+    default:
+      return null;
+  }
 }
 
 function Profile({ s }: { s: SupplierDetail }) {
@@ -173,6 +194,7 @@ function Profile({ s }: { s: SupplierDetail }) {
         </Section>
       </div>
       <div className="flex min-w-0 flex-col gap-5">
+        <LegalTermsFacts s={s} />
         <Section title={t("Contact details")}>
           <FactGrid>
             <Fact label={t("Primary contact")}>{s.contact_name ?? "—"}</Fact>

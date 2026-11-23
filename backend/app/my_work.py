@@ -18,6 +18,7 @@ due date among them (``earliest_due``), and the query string of the list page th
     stop_sales_to_review        stop_sale.approve       approve   /stop-sales?review=me
     suppliers_to_activate       supplier.activate       approve   /suppliers?status=pending&approvable=me
     billing_changes_to_approve  billing_config.approve  approve   /agency-billing?tab=settings&approvable=me
+    supplier_bank_to_approve    supplier_bank.approve   approve   /suppliers?bank=pending&approvable=me
     owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&from=<month start>
 
 AA-1158: ``owner_self_approvals`` counts the business-owner self-approvals of the current UTC calendar month (audit
@@ -62,6 +63,7 @@ from app.auth.staff import Staff
 from app.b2b import desk
 from app.errors import Forbidden, Unavailable
 from app.ops import bill_approvals, bill_filters, supplier_bills, trip_checks
+from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
 from app.supply import restrictions
 from app.trip_cases import service as trip_cases
@@ -135,6 +137,10 @@ async def _billing_changes_to_approve(conn: asyncpg.Connection, staff: Staff) ->
     return await entity_changes.queue(conn, staff)
 
 
+async def _supplier_bank_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await bank_accounts.queue(conn, staff)
+
+
 async def _owner_self_approvals(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
     return await audit.owner_self_approvals_month(conn)
 
@@ -202,6 +208,13 @@ TILES: tuple[Tile, ...] = (
         APPROVE,
         _billing_changes_to_approve,
         {"tab": "settings", "approvable": "me"},
+    ),
+    Tile(
+        "supplier_bank_to_approve",
+        "supplier_bank.approve",
+        APPROVE,
+        _supplier_bank_to_approve,
+        {"bank": "pending", "approvable": "me"},
     ),
     Tile("owner_self_approvals", "audit.read", WORK, _owner_self_approvals, {"owner_self_approved": "true"}),
 )

@@ -82,8 +82,10 @@ from app.routers import (
     staff,
     staff_roles,
     staff_view_as,
+    supplier_bank,
     supplier_bills,
     supplier_bookings,
+    supplier_profile_options,
     suppliers,
     supply,
     supply_model,
@@ -91,6 +93,7 @@ from app.routers import (
     trip_checks,
 )
 from app.settings import Settings, load_settings
+from app.suppliers import bank_crypto
 from app.supply import media
 
 # On shutdown a job in flight gets this long to finish; after that the worker task is cancelled and releases the
@@ -108,6 +111,7 @@ def create_app(
     media_store: media.MediaStore | None = None,
     ops_reader_verifier: MultiIssuerVerifier | None = None,
     ops_store: ops_files.OpsStore | None = None,
+    bank_key: bank_crypto.KeyProvider | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     db = db or Database(settings)
@@ -219,6 +223,8 @@ def create_app(
     app.state.media_store = media_store if media_store is not None else media.store_from_settings(settings)
     # AA-682 S1: the ops-docs bucket (None without OPS_DOCS_BUCKET: uploads / downloads answer 503). Tests pass a fake.
     app.state.ops_store = ops_store if ops_store is not None else ops_files.store_from_settings(settings)
+    # AA-1158 part 2: the supplier bank account KMS key (None without SUPPLIER_BANK_KMS_KEY_ID: entry / reveal 503).
+    app.state.bank_key = bank_key if bank_key is not None else bank_crypto.provider_from_settings(settings)
     app.add_exception_handler(ServiceError, service_error_handler)
     app.add_exception_handler(B2BError, b2b_error_handler)
     # B2B paths answer validation errors as the contract's Problem; every other path keeps FastAPI's default body.
@@ -241,6 +247,8 @@ def create_app(
     app.include_router(pricing.router)
     app.include_router(agency_pricing.router)  # AA-1030: agency price tiers and rate cards (bk-043)
     app.include_router(suppliers.router)
+    app.include_router(supplier_bank.router)  # AA-1158 part 2: supplier bank accounts (bk-067)
+    app.include_router(supplier_profile_options.router)  # AA-1158 part 2: supplier profile choices (bk-067)
     app.include_router(catalog.router)
     app.include_router(operability.router)  # AA-1149: can-operate check and sale exception (bk-065)
     app.include_router(price_versions.router)  # AA-1091: price list versions, seasons, holiday events (bk-054/055)

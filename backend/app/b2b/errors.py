@@ -2,7 +2,8 @@
 
 The staff API answers ``{"detail": …}`` (``app.errors``); the B2B API is a machine contract with its own error enum, so
 it has its own exception and handlers. Request validation errors on ``/booking/b2b/v1`` paths are answered as
-``invalid`` too (no field values echoed); every other path keeps FastAPI's default 422 body.
+``invalid`` too (no field values echoed); a route marked ``app.errors.redact_validation`` (supplier bank details,
+AA-1158) answers field names and error types only; every other path keeps FastAPI's default 422 body.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from fastapi import Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+from app.errors import redacted_validation, redacts_validation
 
 PREFIX = "/booking/b2b/v1"
 
@@ -65,8 +68,12 @@ def _where(error: dict[str, Any]) -> str:
 
 
 async def validation_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    """B2B paths: one ``invalid`` Problem naming the fields (never their values); elsewhere FastAPI's default."""
+    """B2B paths: one ``invalid`` Problem naming the fields (never their values); a route marked
+    :func:`app.errors.redact_validation` (bank details): field names and error types only; elsewhere FastAPI's
+    default."""
     assert isinstance(exc, RequestValidationError)  # noqa: S101 — registered for RequestValidationError only
+    if redacts_validation(request):
+        return redacted_validation(exc)
     if not request.url.path.startswith(PREFIX):
         return await request_validation_exception_handler(request, exc)
     fields = sorted({_where(e) for e in exc.errors()})

@@ -10,7 +10,7 @@ from app.settings import Settings
 
 SETTINGS = Settings(database_url=None, git_sha="0123abc", app_version="0.2.0")
 # AA-682: SETTINGS sets neither bucket env, so both stores are None.
-NO_STORAGE = {"supply_media": "not_configured", "ops_docs": "not_configured"}
+NO_STORAGE = {"supply_media": "not_configured", "ops_docs": "not_configured", "supplier_bank_key": "not_configured"}
 
 
 class ExplodingDatabase(Database):
@@ -71,7 +71,11 @@ def test_ready_reports_which_buckets_are_configured_never_their_names() -> None:
     with TestClient(create_app(settings, FixedDatabase(Readiness(True, body)))) as client:
         r = client.get("/booking/health/ready")
     assert r.status_code == 200
-    assert r.json()["storage"] == {"supply_media": "not_configured", "ops_docs": "configured"}
+    assert r.json()["storage"] == {
+        "supply_media": "not_configured",
+        "ops_docs": "configured",
+        "supplier_bank_key": "not_configured",
+    }
     assert bucket not in r.text
 
     with TestClient(create_app(SETTINGS, FixedDatabase(Readiness(False, {**body, "status": "not_ready"})))) as client:

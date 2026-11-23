@@ -2957,37 +2957,6 @@
         "title": "CreditStatus",
         "type": "object"
       },
-      "Decision": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "enum": [
-              "approve",
-              "reject",
-              "withdraw"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          }
-        },
-        "required": [
-          "action"
-        ],
-        "title": "Decision",
-        "type": "object"
-      },
       "DecisionBody": {
         "additionalProperties": false,
         "description": "A decision's reason: required to reject, withdraw, ask for a removal or reject one (checked in the service);\noptional to approve.",
@@ -5443,6 +5412,99 @@
         "title": "MonthlyPattern",
         "type": "object"
       },
+      "NewBankAccount": {
+        "additionalProperties": false,
+        "properties": {
+          "account_holder": {
+            "maxLength": 140,
+            "minLength": 1,
+            "title": "Account Holder",
+            "type": "string"
+          },
+          "account_number": {
+            "description": "account number or IBAN",
+            "maxLength": 64,
+            "minLength": 4,
+            "title": "Account Number",
+            "type": "string"
+          },
+          "bank_address": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Address"
+          },
+          "bank_code": {
+            "anyOf": [
+              {
+                "maxLength": 34,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Code"
+          },
+          "bank_country": {
+            "anyOf": [
+              {
+                "pattern": "^\\s*([A-Za-z]{2})?\\s*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bank Country"
+          },
+          "bank_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Bank Name",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Za-z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "reason": {
+            "description": "why the account is entered or changed",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "swift_bic": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swift Bic"
+          }
+        },
+        "required": [
+          "account_holder",
+          "account_number",
+          "bank_name",
+          "currency",
+          "reason"
+        ],
+        "title": "NewBankAccount",
+        "type": "object"
+      },
       "NewBill": {
         "additionalProperties": false,
         "properties": {
@@ -6315,6 +6377,60 @@
         "title": "NewMedia",
         "type": "object"
       },
+      "NewOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "stored value; never changes once created",
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "contact_role",
+              "terms_basis",
+              "terms_method"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label_en": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label En",
+            "type": "string"
+          },
+          "label_vi": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label Vi",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "page order; default: after the last one",
+            "title": "Position"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "label_en",
+          "label_vi"
+        ],
+        "title": "NewOption",
+        "type": "object"
+      },
       "NewPayout": {
         "additionalProperties": false,
         "properties": {
@@ -7006,6 +7122,28 @@
             ],
             "title": "Internal Notes"
           },
+          "legal_entity": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Entity"
+          },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupplierPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "postal_code": {
             "anyOf": [
               {
@@ -7029,6 +7167,33 @@
               }
             ],
             "title": "Region"
+          },
+          "role_contacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SupplierRoleContact"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Contacts"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
           },
           "website": {
             "anyOf": [
@@ -7225,6 +7390,64 @@
           }
         },
         "title": "OpsIn",
+        "type": "object"
+      },
+      "OptionChange": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "false retires the choice (suppliers holding it keep it)",
+            "title": "Active"
+          },
+          "label_en": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label En"
+          },
+          "label_vi": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Vi"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "title": "OptionChange",
         "type": "object"
       },
       "OrderScope": {
@@ -10492,6 +10715,28 @@
             ],
             "title": "Internal Notes"
           },
+          "legal_entity": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Entity"
+          },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SupplierPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "postal_code": {
             "anyOf": [
               {
@@ -10516,6 +10761,33 @@
             ],
             "title": "Region"
           },
+          "role_contacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SupplierRoleContact"
+                },
+                "maxItems": 12,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Contacts"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          },
           "website": {
             "anyOf": [
               {
@@ -10531,6 +10803,122 @@
           }
         },
         "title": "SupplierFields",
+        "type": "object"
+      },
+      "SupplierPaymentTerms": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Basis",
+            "type": "string"
+          },
+          "deposit_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deposit Percent"
+          },
+          "due_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Days"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]{1,39}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "basis"
+        ],
+        "title": "SupplierPaymentTerms",
+        "type": "object"
+      },
+      "SupplierRoleContact": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "role": {
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "SupplierRoleContact",
         "type": "object"
       },
       "Tariff": {
@@ -11850,6 +12238,69 @@
           "diff_sha256"
         ],
         "title": "ApproveBody",
+        "type": "object"
+      },
+      "app__routers__supplier_bank__Decision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "reject",
+              "withdraw"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "approve: the call-back (who confirmed, on which known number); reject / withdraw: the reason",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "Decision",
+        "type": "object"
+      },
+      "app__routers__supply_model__Decision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "reject",
+              "withdraw"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "Decision",
         "type": "object"
       },
       "app__routers__trip_cases__ApproveBody": {
@@ -27956,6 +28407,120 @@
         ]
       }
     },
+    "/booking/supplier-bank-accounts/{account_id}/decision": {
+      "post": {
+        "operationId": "decide_bank_account_booking_supplier_bank_accounts__account_id__decision_post",
+        "parameters": [
+          {
+            "description": "supplier bank account UUID",
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "description": "supplier bank account UUID",
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__routers__supplier_bank__Decision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Bank Account Booking Supplier Bank Accounts  Account Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Bank Account",
+        "tags": [
+          "supplier bank accounts"
+        ]
+      }
+    },
+    "/booking/supplier-bank-accounts/{account_id}/reveal": {
+      "post": {
+        "operationId": "reveal_bank_account_booking_supplier_bank_accounts__account_id__reveal_post",
+        "parameters": [
+          {
+            "description": "supplier bank account UUID",
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "description": "supplier bank account UUID",
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reveal Bank Account Booking Supplier Bank Accounts  Account Id  Reveal Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reveal Bank Account",
+        "tags": [
+          "supplier bank accounts"
+        ]
+      }
+    },
     "/booking/supplier-bills": {
       "get": {
         "operationId": "list_bills_booking_supplier_bills_get",
@@ -29847,6 +30412,154 @@
         ]
       }
     },
+    "/booking/supplier-profile-options": {
+      "get": {
+        "operationId": "list_profile_options_booking_supplier_profile_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Profile Options Booking Supplier Profile Options Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Profile Options",
+        "tags": [
+          "supplier profile choices"
+        ]
+      },
+      "post": {
+        "operationId": "add_profile_option_booking_supplier_profile_options_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOption"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Profile Option Booking Supplier Profile Options Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Profile Option",
+        "tags": [
+          "supplier profile choices"
+        ]
+      }
+    },
+    "/booking/supplier-profile-options/{kind}/{code}": {
+      "patch": {
+        "operationId": "change_profile_option_booking_supplier_profile_options__kind___code__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "contact_role",
+                "terms_basis",
+                "terms_method"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_]{1,39}$",
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Change Profile Option Booking Supplier Profile Options  Kind   Code  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change Profile Option",
+        "tags": [
+          "supplier profile choices"
+        ]
+      }
+    },
     "/booking/suppliers": {
       "get": {
         "operationId": "list_suppliers_booking_suppliers_get",
@@ -29906,6 +30619,25 @@
               ],
               "description": "me: pending suppliers the caller may activate now",
               "title": "Approvable"
+            }
+          },
+          {
+            "description": "pending (with approvable=me): suppliers whose bank account change the caller may approve",
+            "in": "query",
+            "name": "bank",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "pending",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "pending (with approvable=me): suppliers whose bank account change the caller may approve",
+              "title": "Bank"
             }
           },
           {
@@ -30276,6 +31008,120 @@
         "summary": "Activate Supplier",
         "tags": [
           "suppliers"
+        ]
+      }
+    },
+    "/booking/suppliers/{supplier_ref}/bank-accounts": {
+      "get": {
+        "operationId": "list_bank_accounts_booking_suppliers__supplier_ref__bank_accounts_get",
+        "parameters": [
+          {
+            "description": "Supplier UUID or code (SUP-000123)",
+            "in": "path",
+            "name": "supplier_ref",
+            "required": true,
+            "schema": {
+              "description": "Supplier UUID or code (SUP-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Supplier Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Bank Accounts Booking Suppliers  Supplier Ref  Bank Accounts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Bank Accounts",
+        "tags": [
+          "supplier bank accounts"
+        ]
+      },
+      "post": {
+        "operationId": "enter_bank_account_booking_suppliers__supplier_ref__bank_accounts_post",
+        "parameters": [
+          {
+            "description": "Supplier UUID or code (SUP-000123)",
+            "in": "path",
+            "name": "supplier_ref",
+            "required": true,
+            "schema": {
+              "description": "Supplier UUID or code (SUP-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Supplier Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewBankAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Enter Bank Account Booking Suppliers  Supplier Ref  Bank Accounts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Enter Bank Account",
+        "tags": [
+          "supplier bank accounts"
         ]
       }
     },
@@ -31186,7 +32032,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Decision"
+                "$ref": "#/components/schemas/app__routers__supply_model__Decision"
               }
             }
           },

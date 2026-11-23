@@ -119,6 +119,8 @@ export const MSG = phrasebook(
     "An admin who did not enter, change or approve this bill records the payout.": "An admin who did not enter, change or approve this bill records the payout.",
     "You entered or changed this bill: approving it is recorded as a business-owner self-approval.": "You entered or changed this bill: approving it is recorded as a business-owner self-approval.",
     "You approved this bill: this payout is flagged.": "You approved this bill: this payout is flagged.",
+    "Payouts to this supplier are paused: its bank account change waits for approval.": "Payouts to this supplier are paused: its bank account change waits for approval.",
+    "Payouts to this supplier are paused after a bank account change; they open at": "Payouts to this supplier are paused after a bank account change; they open at",
   },
   {
     " — not the bill amount {0} yet: it can be saved, but not approved.": (...a: unknown[]) => ` — chưa bằng số tiền hoá đơn ${a[0]}: có thể lưu nhưng chưa duyệt được.`,
@@ -233,6 +235,8 @@ export const MSG = phrasebook(
     "An admin who did not enter, change or approve this bill records the payout.": "Một quản trị viên không nhập, không sửa và không duyệt hoá đơn này ghi khoản chi.",
     "You entered or changed this bill: approving it is recorded as a business-owner self-approval.": "Bạn đã nhập hoặc sửa hoá đơn này: duyệt nó sẽ được ghi nhận là chủ doanh nghiệp tự duyệt.",
     "You approved this bill: this payout is flagged.": "Bạn đã duyệt hoá đơn này: khoản chi này được đánh dấu.",
+    "Payouts to this supplier are paused: its bank account change waits for approval.": "Việc chi trả cho nhà cung cấp này tạm dừng: thay đổi tài khoản ngân hàng của họ đang chờ duyệt.",
+    "Payouts to this supplier are paused after a bank account change; they open at": "Việc chi trả cho nhà cung cấp này tạm dừng sau một thay đổi tài khoản ngân hàng; mở lại lúc",
   },
   ),
 );

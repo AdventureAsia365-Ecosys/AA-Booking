@@ -233,6 +233,8 @@ def test_unknown_and_approve_class_capabilities_are_dropped(caplog: pytest.LogCa
         "payment.verify",
         "billing_config.write",
         "staff.admin",
+        "supplier_bank.approve",
+        "supplier_bank.read",  # AA-1158 part 2: it decrypts full account numbers
     ],
 )
 def test_the_approve_class(capability: str) -> None:
@@ -240,7 +242,9 @@ def test_the_approve_class(capability: str) -> None:
     assert capability not in custom_roles.assignable()
 
 
-@pytest.mark.parametrize("capability", ["pricing.write", "supply.write", "stop_sale.write", "bill.write", "approve.x"])
+@pytest.mark.parametrize(
+    "capability", ["pricing.write", "supply.write", "stop_sale.write", "bill.write", "approve.x", "supplier_bank.write"]
+)
 def test_not_the_approve_class(capability: str) -> None:
     assert not custom_roles.is_approve_class(capability)
 
@@ -284,6 +288,7 @@ def test_every_route_gate_is_a_known_permission_and_the_list_is_not_empty() -> N
         "/booking/supply/stop-sales/{restriction_id}/end",
         "/booking/supplier-bills/{bill}/payouts",
         "/booking/billing-entities",
+        "/booking/supplier-bank-accounts/{account_id}/reveal",  # AA-1158 part 2: supplier_bank.read
     ):
         assert expected in paths, expected
     for _, _, needs in rows:
@@ -347,6 +352,9 @@ SERVICE_GATED = [
     ("PATCH", f"/booking/contracts/{ROW}", {"status": "published"}),
     ("POST", f"/booking/supply/stop-sales/{ROW}/decision", {"action": "approve"}),
     ("POST", f"/booking/supply/stop-sales/{ROW}/decision", {"action": "reject", "reason": "Not agreed"}),
+    # AA-1158 part 2: the route gate is supply.read; the service checks supplier_bank.approve before any read.
+    ("POST", f"/booking/supplier-bank-accounts/{ROW}/decision", {"action": "approve", "note": "Called the known desk"}),
+    ("POST", f"/booking/supplier-bank-accounts/{ROW}/decision", {"action": "reject", "note": "Not confirmed"}),
 ]
 
 
@@ -368,6 +376,7 @@ def test_service_probes_name_the_capability_the_service_checks() -> None:
         e2e_staff.SERVICE_ACTIVATE: "supplier.activate",
         e2e_staff.CONTRACT_STATUS: "contract.publish",
         e2e_staff.STOP_SALE_DECISION: "stop_sale.approve",
+        e2e_staff.SUPPLIER_BANK_DECISION: "supplier_bank.approve",
     }
     real = {(m, r.path) for r in _routes() for m in r.methods}
     assert set(e2e_staff.SERVICE_PROBES) <= real

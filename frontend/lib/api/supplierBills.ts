@@ -16,6 +16,7 @@
 //
 // "Paid" is set by the database from the payouts only; a bill is never deleted (cancel with a reason).
 
+import type { PayoutLock } from "./supplierBank";
 import { bkGet, bkSend } from "./client";
 import type { OpsFile } from "./supplierBookings";
 import type { DecimalString, IsoDate, IsoDateTime } from "./types";
@@ -69,6 +70,8 @@ export interface SupplierBill {
   /** AA-1158: `approve_self` = approving is the business owner's self-approval; `pay_flagged` = she records the payout
    * of a bill she approved (both flagged in the audit log). */
   actions: { edit: boolean; attach: boolean; approve: boolean; cancel: boolean; pay: boolean; approve_self?: boolean; pay_flagged?: boolean };
+  /** AA-1158 part 2: the supplier's bank account payout pause (a change pending, or locked until `until`). */
+  payout_lock?: PayoutLock;
 }
 
 export interface SupplierBillLine {

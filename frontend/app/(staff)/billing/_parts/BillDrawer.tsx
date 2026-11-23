@@ -309,7 +309,7 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
           {b.status === "approved" && !b.actions.pay && (
             <p className="text-xs text-muted">{t("An admin who did not enter, change or approve this bill records the payout.")}</p>
           )}
-          <OwnerPathNotice actions={b.actions} />
+          <OwnerPathNotice actions={b.actions} lock={b.payout_lock} />
 
           <section className="flex flex-col gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t("Lines (confirmed supplier bookings)")}</h3>

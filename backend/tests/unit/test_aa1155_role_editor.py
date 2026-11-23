@@ -32,6 +32,7 @@ from app.settings import Settings
 from tests.unit.fakes import ScriptedConn
 
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "062_custom_staff_roles.sql"
+LATER_067 = Path(__file__).resolve().parents[3] / "migrations" / "067_supplier_bank_accounts.sql"
 GRANT = "FROM shared.v_staff_booking_grant"
 ONE = "WHERE r.code = $1 GROUP BY r.code"
 ALL = "GROUP BY r.code ORDER BY r.archived"
@@ -63,7 +64,14 @@ def test_the_migration_seed_is_the_code_allow_list() -> None:
     array = re.search(r"unnest\(ARRAY\[(.*?)\]\)", section, re.S)
     assert array is not None
     seeded = set(re.findall(r"'([a-z0-9_.]+)'", array.group(1)))
-    assert seeded == custom_roles.SEED_CAPABILITIES
+    # bk-067 (AA-1158 part 2, Q10) adds the entry of supplier bank accounts to the same role.
+    later = re.search(
+        r"SELECT r\.code, '([a-z_.]+)', 'migration:bk-067'.*?WHERE r\.code = '([a-z_]+)'",
+        LATER_067.read_text(encoding="utf-8"),
+        re.S,
+    )
+    assert later is not None and later.group(2) == custom_roles.SEED_CODE
+    assert seeded | {later.group(1)} == custom_roles.SEED_CAPABILITIES
     assert f"'{custom_roles.SEED_CODE}', '{custom_roles.SEED_LABEL}', '{custom_roles.SEED_BASED_ON}'" in section
 
 
@@ -72,12 +80,20 @@ def test_the_seed_is_known_to_the_code_and_holds_no_approval() -> None:
     assert not {c for c in custom_roles.SEED_CAPABILITIES if custom_roles.is_approve_class(c)}
     # The S285 audit and Q3: never these.
     assert not custom_roles.SEED_CAPABILITIES & {"customer.admin", "trip_case.assign", "version.write"}
-    assert not {c for c in custom_roles.SEED_CAPABILITIES if c.startswith("supplier_bank.")}
-    assert len(custom_roles.SEED_CAPABILITIES) == 24
+    # AA-1158 Q10: entry of supplier bank accounts only, never their read or approval.
+    assert {c for c in custom_roles.SEED_CAPABILITIES if c.startswith("supplier_bank.")} == {"supplier_bank.write"}
+    assert len(custom_roles.SEED_CAPABILITIES) == 25
+
+
+def _approve_check_sql() -> str:
+    """The newest migration that (re)defines the approve CHECK (bk-062, re-added by bk-067 with supplier_bank.read)."""
+    marker = "staff_role_capability_not_approve_chk CHECK ("
+    found = [p for p in sorted(MIGRATION.parent.glob("*.sql")) if marker in p.read_text(encoding="utf-8")]
+    return found[-1].read_text(encoding="utf-8").split(marker)[-1].split(");")[0]
 
 
 def test_the_migration_check_is_the_code_approve_class() -> None:
-    check = _sql().split("staff_role_capability_not_approve_chk CHECK (")[1].split(");")[0]
+    check = _approve_check_sql()
     named = set(re.findall(r"'([a-z0-9_.]+)'", check.split("NOT IN")[1]))
     assert named == set(custom_roles.APPROVE_NAMED)
     assert r"\.approve(_[a-z0-9_]+)?$" in check
@@ -108,7 +124,7 @@ def test_the_code_pattern_is_the_migration_pattern() -> None:
         (["staff.admin"], "approve_class_capability"),
         (["pricing_policy.approve_admin"], "approve_class_capability"),
         (["supply.read", "made.up"], "unknown_capability"),
-        (["supplier_bank.write"], "unknown_capability"),
+        (["supplier_bank.approve"], "approve_class_capability"),
         ("supply.read", "invalid_capabilities"),
         ([7], "invalid_capabilities"),
     ],
