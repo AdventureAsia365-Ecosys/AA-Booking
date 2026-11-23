@@ -16,9 +16,10 @@ PRICES_GUIDES: dict[str, dict[str, dict[str, str]]] = {
         (
             "The group sizes the computed price matrix of a tour is priced for. Each band gets its own price per "
             "person, worked out for the band's smallest group: fixed costs such as the car and the guide are shared by "
-            "the fewest travellers there, so that price covers the whole band. A quote or agency tariff for a group "
-            "uses the band that holds its size. Hand prices of a price version or the workbook may use any group "
-            "sizes and win over a computed row they cover.",
+            "the fewest travellers there, so that price covers the whole band. The agency tariff lists one price per "
+            "band. An agency quote does not read the bands: it prices the real group from the tour's costs, so it "
+            "can be lower than the tariff row of that group's band. Hand prices of a price version or the workbook "
+            "may use any group sizes and win over a computed row they cover.",
             "More or narrower bands: each group size gets a price closer to its real cost (4 travellers on their own "
             "pay less per person than in a 3-4 band priced for 3). The matrix holds more rows per date window, so "
             "fewer future date windows fit in its 200 rows (the latest are left out first).",
@@ -35,9 +36,10 @@ PRICES_GUIDES: dict[str, dict[str, dict[str, str]]] = {
         (
             "Các cỡ đoàn mà ma trận giá tính tự động của một tour được tính cho. Mỗi bậc có giá riêng cho mỗi khách, "
             "tính cho đoàn nhỏ nhất của bậc: chi phí cố định như xe và hướng dẫn viên được chia cho ít khách nhất ở "
-            "đó, nên giá ấy đủ cho cả bậc. Báo giá hoặc biểu giá đại lý cho một đoàn dùng bậc chứa cỡ đoàn đó. Giá "
-            "nhập tay trong phiên bản giá hoặc file Excel được dùng cỡ đoàn bất kỳ và thắng dòng tính tự động mà nó "
-            "phủ.",
+            "đó, nên giá ấy đủ cho cả bậc. Biểu giá đại lý ghi một giá cho mỗi bậc. Báo giá cho đại lý không đọc các "
+            "bậc: nó tính giá cho đúng số khách của đoàn từ chi phí của tour, nên có thể thấp hơn dòng biểu giá của "
+            "bậc chứa đoàn đó. Giá nhập tay trong phiên bản giá hoặc file Excel được dùng cỡ đoàn bất kỳ và thắng "
+            "dòng tính tự động mà nó phủ.",
             "Nhiều bậc hơn hoặc bậc hẹp hơn: mỗi cỡ đoàn có giá sát chi phí thật hơn (4 khách đứng riêng trả mỗi người "
             "ít hơn so với bậc 3-4 tính cho 3 khách). Ma trận có nhiều dòng hơn cho mỗi khoảng ngày, nên ít khoảng "
             "ngày tương lai vừa 200 dòng của nó hơn (khoảng xa nhất bị bỏ trước).",

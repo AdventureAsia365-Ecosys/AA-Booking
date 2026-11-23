@@ -679,7 +679,8 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   last band open, each value 1..60, at most 8 bands (`app/pricing/pax_bands.py`, `MAX_BANDS` bounded by the 200-row
   matrix). The cost sheet, the readiness probe and through them the agency tariff (its rows are the matrix rows) read
   it for the recompute day; the price setup workbook's README names the bands in force; hand prices keep any Pax min /
-  Pax max. The B2B quote prices the real party from components and never reads the bands. Approval is the same
+  Pax max. The B2B quote prices the real party from components and never reads the bands, so it can be lower than
+  the tariff row of the party's band. Approval is the same
   two-person flow as every pricing parameter (no business-owner self-approval: the table CHECK `actor <> maker`).
   **S279 thresholds (AA-1096, bk-056)**: every Booking threshold and policy value is a parameter too, grouped by
   `section` on the page: holds (`b2b_hold_hours`, `b2b_hold_extend_hours`, `b2b_hold_max_extensions`,
